@@ -563,7 +563,8 @@ export function ThreadScreen(props: ThreadScreenProps) {
       >
         {busy && activeAttempt === undefined ? <ActivityIndicator color={colors.accent} /> : null}
         {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
-        {props.selected.mode === "code" && codePolicy === "approval-gated" ? (
+        {props.selected.mode === "code" &&
+        (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
           <ApprovalDeferralSheet
             executionPolicy={codePolicy}
             mode="code"

@@ -141,13 +141,19 @@ function PolicyBadge(props: { readonly policy: string }) {
   const icon =
     props.policy === "plan" ? (
       <Shield aria-hidden="true" size={10} />
-    ) : props.policy === "approval-gated" ? (
+    ) : props.policy === "approval-gated" || props.policy === "auto-accept-edits" ? (
       <ShieldCheck aria-hidden="true" size={10} />
     ) : (
       <ShieldAlert aria-hidden="true" size={10} />
     );
   const label =
-    props.policy === "plan" ? "Plan" : props.policy === "approval-gated" ? "Approval" : "Full";
+    props.policy === "plan"
+      ? "Plan"
+      : props.policy === "approval-gated"
+        ? "Approval"
+        : props.policy === "auto-accept-edits"
+          ? "Auto edits"
+          : "Full";
   return (
     <span
       className={`execution-context-picker__policy execution-context-picker__policy--${props.policy}`}

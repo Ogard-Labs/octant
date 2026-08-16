@@ -57,6 +57,8 @@ import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 const CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"];
 const CLAUDE_PLAN_TOOLS = ["Read", "Glob", "Grep"] as const;
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
+/** The tools that write files inside the Project, and nothing else. */
+const CLAUDE_EDIT_TOOLS = new Set<string>(["Edit", "Write"]);
 const PROBE_MODEL = "sonnet";
 const DEFAULT_STARTUP_TIMEOUT_MS = 15_000;
 const DEFAULT_INTERRUPT_TIMEOUT_MS = 5_000;
@@ -82,7 +84,11 @@ export function claudeExecutionOptions(policy: ProviderExecutionPolicy): ClaudeE
         allowDangerouslySkipPermissions: true,
         tools: [...CLAUDE_TOOLS],
       };
+    case "auto-accept-edits":
     case "approval-gated":
+      // Both postures run Claude in its ordinary permission mode: Octant's own
+      // gate decides every call, so auto-accepting edits stays a decision the
+      // host records rather than one the provider makes for it.
       return {
         permissionMode: "default",
         allowDangerouslySkipPermissions: false,
@@ -101,7 +107,7 @@ function claudeSandboxSettings(
   policy: ProviderExecutionPolicy,
   projectRoot: string,
 ): ClaudeSandboxSettings | undefined {
-  if (policy !== "approval-gated") return undefined;
+  if (policy !== "approval-gated" && policy !== "auto-accept-edits") return undefined;
   return {
     enabled: true,
     failIfUnavailable: true,
@@ -1095,6 +1101,11 @@ function makeConnection(
           activeState.preToolRequests.delete(request.toolUseId);
           if (
             (input.executionPolicy === "full-access" && request.toolName !== "AskUserQuestion") ||
+            // Auto-accept edits covers exactly the file writes the gate above
+            // already proved to be inside the Project. Shell, network, and
+            // every other tool still ask.
+            (input.executionPolicy === "auto-accept-edits" &&
+              CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
             CLAUDE_READ_TOOLS.has(request.toolName)
           ) {
             activeState.settledToolUseIds.add(request.toolUseId);

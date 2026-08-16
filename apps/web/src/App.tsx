@@ -128,6 +128,8 @@ import "./styles/components.css";
 import { ShellSidebar } from "./shell/ShellSidebar";
 import { WindowChrome } from "./shell/WindowChrome";
 import type { CodeDeepLink, OctantHostBridge, ResolvedSidebarMaterial } from "./shell/hostBridge";
+import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
+import { useThreadAttentionNotifications } from "./notifications/useThreadAttentionNotifications";
 import { useShellController, type NativeShellHost } from "./shell/useShellController";
 import { useHostObservation } from "./shell/useHostObservation";
 import {
@@ -230,6 +232,7 @@ const EXECUTION_POLICY_LABEL: Record<
 > = {
   "full-access": "Full access",
   "approval-gated": "Approval gated",
+  "auto-accept-edits": "Auto-accept edits",
   plan: "Plan",
 };
 
@@ -1089,6 +1092,40 @@ function LaunchedShell(
   const codeController = useCodeController({
     ...(activeCodeThreadId === undefined ? {} : { activeThreadId: activeCodeThreadId }),
     client: codeClient,
+  });
+  const watchedThreadId =
+    activeMode === "code"
+      ? activeCodeThreadId === undefined
+        ? undefined
+        : String(activeCodeThreadId)
+      : activeMode === "work"
+        ? activeWorkThreadId === undefined
+          ? undefined
+          : String(activeWorkThreadId)
+        : activeChatThreadId === undefined
+          ? undefined
+          : String(activeChatThreadId);
+  const attentionSignals = useMemo(
+    () =>
+      collectThreadAttentionSignals({
+        ...(activeCodeThreadId === undefined
+          ? {}
+          : { activeCodeThreadId: String(activeCodeThreadId) }),
+        chatThreads: chatController.navigation,
+        codeProviderRequests: codeController.providerRequests,
+        codeThreads: codeController.navigation,
+      }),
+    [
+      activeCodeThreadId,
+      chatController.navigation,
+      codeController.navigation,
+      codeController.providerRequests,
+    ],
+  );
+  useThreadAttentionNotifications({
+    ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
+    signals: attentionSignals,
+    ...(watchedThreadId === undefined ? {} : { watchedThreadId }),
   });
   const activeProjectId =
     selectedProjectTabId ??

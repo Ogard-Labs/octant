@@ -254,7 +254,8 @@ mechanisms are:
   network access, external application observation or control, destructive
   actions, credential access, access outside the bound root, privilege or
   sandbox changes. Grants are scoped and journaled. Code starts approval-gated;
-  Plan mode is read-only; Full access is a remembered, per-Project decision.
+  Plan mode is read-only; auto-accept-edits waives only project file writes;
+  Full access is a remembered, per-Project decision.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch under `sandbox-exec` with deny-default Seatbelt profiles
   scoped to the bound root, allowlisted environments, and no broker

@@ -627,7 +627,8 @@ export class AgentRunOrchestrationService {
     const executionRank: Record<AgentRunAuthority["executionPolicy"], number> = {
       plan: 0,
       "approval-gated": 1,
-      "full-access": 2,
+      "auto-accept-edits": 2,
+      "full-access": 3,
     };
     if (executionRank[live.executionPolicy] > executionRank[parentCeiling.executionPolicy]) {
       throw new AgentRunOrchestrationError(
@@ -657,7 +658,8 @@ export class AgentRunOrchestrationService {
     const executionRank: Record<AgentRunAuthority["executionPolicy"], number> = {
       plan: 0,
       "approval-gated": 1,
-      "full-access": 2,
+      "auto-accept-edits": 2,
+      "full-access": 3,
     };
     if (executionRank[effective.executionPolicy] > executionRank[live.executionPolicy]) {
       throw new AgentRunOrchestrationError(

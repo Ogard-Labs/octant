@@ -84,6 +84,8 @@ function policyLabel(policy: CodeThreadNavigationItem["executionPolicy"]): strin
       return "Plan · read-only";
     case "approval-gated":
       return "Approval gated";
+    case "auto-accept-edits":
+      return "Auto-accept edits";
     case "full-access":
       return "Full access";
   }

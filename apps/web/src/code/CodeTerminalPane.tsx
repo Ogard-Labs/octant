@@ -1,6 +1,8 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
 import type { CodeOperationId, CodeOperationResult } from "@octant/contracts/code-operations";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { XtermTerminalAdapter, type XtermAdapterRuntime } from "./XtermTerminalAdapter";
@@ -10,7 +12,7 @@ type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-st
 export interface CodeTerminalPaneProps {
   readonly client: Pick<CodeClient, "executeOperation" | "operationContent" | "subscribeOperation">;
   readonly createOperationId: () => CodeOperationId;
-  readonly executionPolicy: "plan" | "approval-gated" | "full-access";
+  readonly executionPolicy: ProviderExecutionPolicy;
   readonly loadRuntime?: () => Promise<XtermAdapterRuntime>;
   readonly requestApproval?: (input: {
     readonly command: Parameters<CodeClient["executeOperation"]>[0];
@@ -195,7 +197,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
             } as const);
       if (
         action === "restart" &&
-        props.executionPolicy === "approval-gated" &&
+        decidesCodeEffectsByApproval(props.executionPolicy) &&
         (await props.requestApproval?.({ command })) !== true
       )
         return;

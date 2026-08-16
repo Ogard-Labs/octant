@@ -347,6 +347,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                 >
                   <option value="plan">Plan</option>
                   <option value="approval-gated">Approval</option>
+                  <option value="auto-accept-edits">Auto-accept edits</option>
                   <option value="full-access">Full access</option>
                 </OctantNativeSelect>
               </span>

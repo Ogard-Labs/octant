@@ -151,6 +151,7 @@ export function automationTriggerSummary(
 const executionPolicyLabels = {
   plan: "Plan (read-only)",
   "approval-gated": "Approval-gated",
+  "auto-accept-edits": "Auto-accept edits",
   "full-access": "Full access",
 } as const;
 

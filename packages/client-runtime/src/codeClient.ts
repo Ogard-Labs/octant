@@ -25,7 +25,13 @@ import {
   decodeCodeRepositoryTestListing,
   decodeCodeSettings,
   decodeCodeThread,
+  decodeCodeAttachmentId,
+  decodeCodeAttachmentMediaType,
+  decodeCodeAttachmentReference,
   decodeCodeThreadId,
+  type CodeAttachmentId,
+  type CodeAttachmentMediaType,
+  type CodeAttachmentReference,
   type CodeBoardQuery,
   type CodeBoardView,
   type CodeBootstrap,
@@ -53,10 +59,19 @@ import {
   type CodeThreadId,
   type CodeThreadView,
   MAX_CODE_OPERATION_EVIDENCE_BYTES,
+  MAX_CODE_ATTACHMENT_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
+
+/** The attachment route, addressed by thread and attachment. */
+function attachmentUrl(baseUrl: string, threadId: string, attachmentId: string): URL {
+  const url = new URL("/api/code/attachments", baseUrl);
+  url.searchParams.set("thread", String(threadId));
+  url.searchParams.set("attachment", String(attachmentId));
+  return url;
+}
 
 export const MAX_CODE_NDJSON_LINE_BYTES = 1_048_576;
 export const MAX_CODE_REPLAY_FRAMES = 100;
@@ -101,6 +116,25 @@ export interface CodeClient {
   readFollowUp(threadId: CodeThreadId): Promise<CodeThreadFollowUpView>;
   executeFollowUp(command: CodeFollowUpCommand): Promise<CodeThreadFollowUpUpdated>;
   putEvidence(threadId: CodeThreadId, text: string): Promise<CodeEvidenceReference>;
+  /**
+   * Hand the host one image for a thread's next turn. The host answers with
+   * the reference a `start-provider-turn` names by id; nothing about the
+   * bytes is decided here.
+   */
+  putAttachment(input: {
+    readonly threadId: CodeThreadId;
+    readonly attachmentId: CodeAttachmentId;
+    readonly displayName: string;
+    readonly mediaType: CodeAttachmentMediaType;
+    readonly bytes: Uint8Array;
+  }): Promise<CodeAttachmentReference>;
+  /** Drop a staged image the composer no longer carries. */
+  discardAttachment(threadId: CodeThreadId, attachmentId: CodeAttachmentId): Promise<void>;
+  /** The bytes of an image a turn sent, verified against its journalled digest. */
+  attachment(
+    threadId: CodeThreadId,
+    reference: CodeAttachmentReference,
+  ): Promise<{ readonly bytes: Uint8Array; readonly mediaType: CodeAttachmentMediaType }>;
   content(contentId: CodeEvidenceContentId): Promise<Uint8Array>;
   operationContent(
     threadId: CodeThreadId,
@@ -351,6 +385,53 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
       );
       if (!response.ok) await rejectFailure(response);
       return decodeCodeEvidenceReference(await response.json());
+    },
+    async putAttachment(input) {
+      try {
+        decodeCodeThreadId(input.threadId);
+        decodeCodeAttachmentId(input.attachmentId);
+        decodeCodeAttachmentMediaType(input.mediaType);
+      } catch {
+        throw invalidCommand();
+      }
+      if (input.bytes.byteLength === 0 || input.bytes.byteLength > MAX_CODE_ATTACHMENT_BYTES) {
+        throw invalidCommand();
+      }
+      if (input.displayName.trim().length === 0) throw invalidCommand();
+      const response = await requestRaw(
+        fetch,
+        new URL("/api/code/attachments", options.baseUrl).toString(),
+        {
+          method: "PUT",
+          headers: {
+            ...headers,
+            "content-type": input.mediaType,
+            "x-octant-code-thread-id": String(input.threadId),
+            "x-octant-code-attachment-id": String(input.attachmentId),
+            "x-octant-code-display-name": encodeURIComponent(input.displayName),
+          },
+          body: input.bytes as unknown as BodyInit,
+        },
+      );
+      if (!response.ok) await rejectFailure(response);
+      return decodeCodeAttachmentReference(await response.json());
+    },
+    async discardAttachment(threadId, attachmentId) {
+      const url = attachmentUrl(options.baseUrl, threadId, attachmentId);
+      const response = await requestRaw(fetch, url.toString(), { method: "DELETE", headers });
+      if (!response.ok) await rejectFailure(response);
+    },
+    async attachment(threadId, reference) {
+      const url = attachmentUrl(options.baseUrl, threadId, reference.attachmentId);
+      url.searchParams.set("mediaType", reference.mediaType);
+      url.searchParams.set("byteLength", String(reference.byteLength));
+      url.searchParams.set("digest", reference.digest);
+      const response = await requestRaw(fetch, url.toString(), { method: "GET", headers });
+      if (!response.ok) await rejectFailure(response);
+      return {
+        bytes: new Uint8Array(await response.arrayBuffer()),
+        mediaType: reference.mediaType,
+      };
     },
     async content(contentId) {
       try {

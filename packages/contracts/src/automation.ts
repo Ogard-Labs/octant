@@ -333,7 +333,8 @@ const automationAuthorityExecutionPolicyRank: Record<AgentRunAuthority["executio
   {
     plan: 0,
     "approval-gated": 1,
-    "full-access": 2,
+    "auto-accept-edits": 2,
+    "full-access": 3,
   };
 
 const automationAuthorityCapabilityKeys = [

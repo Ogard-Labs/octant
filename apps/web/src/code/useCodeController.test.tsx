@@ -347,6 +347,34 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("keeps one draft per thread while the user moves between them", async () => {
+    const nextThreadId = "10000000-0000-4000-8000-000000000002" as CodeThreadId;
+    const client = fakeClient({
+      thread: vi.fn(async (threadId) =>
+        threadId === ids.thread ? view(1) : { ...view(1), thread: { ...thread(1), id: threadId } },
+      ),
+    });
+    const { result, rerender, unmount } = renderHook(
+      ({ activeThreadId }) =>
+        useCodeController({ activeThreadId, client, reconnectDelayMs: 60_000 }),
+      { initialProps: { activeThreadId: ids.thread } },
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => result.current.setPendingDraft("Draft for the first thread"));
+
+    rerender({ activeThreadId: nextThreadId });
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(nextThreadId));
+    // A second thread starts empty rather than inheriting the first one's words.
+    expect(result.current.pendingDraft).toBe("");
+    act(() => result.current.setPendingDraft("Draft for the second thread"));
+
+    rerender({ activeThreadId: ids.thread });
+    await waitFor(() => expect(result.current.pendingDraft).toBe("Draft for the first thread"));
+    rerender({ activeThreadId: nextThreadId });
+    await waitFor(() => expect(result.current.pendingDraft).toBe("Draft for the second thread"));
+    unmount();
+  });
+
   it("stages prompt evidence and starts a provider turn for follow-ups", async () => {
     const operationId = "70000000-0000-4000-8000-000000000001";
     const contentId = "60000000-0000-4000-8000-000000000001";
@@ -499,6 +527,172 @@ describe("useCodeController", () => {
     expect(result.current.conversation.filter((message) => message.role === "user")[0]?.text).toBe(
       "does this still hold?",
     );
+  });
+
+  it("collects tool activity and reasoning from the turn stream for the transcript", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000061";
+    const contentId = "60000000-0000-4000-8000-000000000061";
+    async function* frames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: {
+          kind: "tool-activity",
+          toolCallId: "call-1",
+          toolName: "Bash",
+          state: "running",
+          summary: "bun run verify",
+        },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 2,
+        occurredAt: now,
+        event: {
+          kind: "provider-content",
+          channel: "reasoning",
+          content: { contentId, digest: "b".repeat(64), byteLength: 5 },
+        },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 3,
+        occurredAt: now,
+        event: {
+          kind: "tool-activity",
+          toolCallId: "call-1",
+          toolName: "Bash",
+          state: "completed",
+          summary: "bun run verify",
+        },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 4,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      };
+    }
+    const client = fakeClient({
+      putEvidence: vi.fn(async () => ({
+        contentId,
+        digest: "a".repeat(64),
+        byteLength: 4,
+      })) as never,
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId,
+        state: "running",
+      })) as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+      operationContent: vi.fn(async () => new TextEncoder().encode("plan.")),
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    await act(async () => {
+      await result.current.sendFollowUp("run it");
+    });
+
+    // The host is told which operation to run; activity is keyed by that same
+    // client-minted id, which is also what the live message carries.
+    const startedOperationId = result.current.conversation.find(
+      (message) => message.role === "assistant",
+    )?.operationId;
+    expect(startedOperationId).toBeDefined();
+    const activity = result.current.turnActivity.get(String(startedOperationId));
+    // The tool row reflects the last state the host reported, not one row per
+    // state change, and reasoning stays out of the assistant message text.
+    expect(activity?.rows).toEqual([
+      {
+        kind: "tool",
+        id: "call-1",
+        toolName: "Bash",
+        state: "completed",
+        summary: "bun run verify",
+      },
+    ]);
+    expect(activity?.reasoning).toBe("plan.");
+    expect(
+      result.current.conversation.find((message) => message.role === "assistant")?.text,
+    ).not.toContain("plan.");
+  });
+
+  it("sends a queued follow-up once the running turn settles, and forgets a cancelled one", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000041";
+    const putEvidence = vi.fn(async () => ({
+      contentId: "60000000-0000-4000-8000-000000000041",
+      digest: "a".repeat(64),
+      byteLength: 5,
+    }));
+    const executeOperation = vi.fn(async () => ({
+      kind: "provider-turn-state",
+      operationId,
+      state: "running",
+    }));
+    // The first turn stays open until the test releases it, which is what lets
+    // the queue be observed while a turn is genuinely running.
+    let settleFirstTurn = () => {};
+    const firstTurnSettled = new Promise<void>((resolve) => {
+      settleFirstTurn = resolve;
+    });
+    let subscriptions = 0;
+    async function* frames() {
+      subscriptions += 1;
+      if (subscriptions === 1) await firstTurnSettled;
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      };
+    }
+    const client = fakeClient({
+      putEvidence: putEvidence as never,
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    const running = result.current.sendFollowUp("running turn");
+    await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+
+    // Queue two follow-ups the way the composer does while a turn runs, then
+    // cancel the second: only the first must ever reach the host.
+    let cancelledId = "";
+    act(() => {
+      result.current.queueFollowUp("first queued");
+      cancelledId = result.current.queueFollowUp("second queued")?.id ?? "";
+    });
+    expect(result.current.queuedFollowUps.map((turn) => turn.prompt)).toEqual([
+      "first queued",
+      "second queued",
+    ]);
+    expect(executeOperation).toHaveBeenCalledTimes(1);
+    act(() => {
+      result.current.cancelQueuedFollowUp(cancelledId);
+    });
+
+    await act(async () => {
+      settleFirstTurn();
+      await running;
+    });
+
+    await waitFor(() => expect(result.current.queuedFollowUps).toEqual([]));
+    expect(putEvidence).toHaveBeenCalledWith(ids.thread, "first queued");
+    expect(putEvidence).not.toHaveBeenCalledWith(ids.thread, "second queued");
+    expect(executeOperation).toHaveBeenCalledTimes(2);
   });
 
   it("settles a waiting provider turn and keeps the prompt available for retry", async () => {
@@ -679,7 +873,7 @@ describe("useCodeController", () => {
     const replyId = "60000000-0000-4000-8000-000000000011";
     const operationId = "70000000-0000-4000-8000-000000000010";
     const conversation = vi.fn(async () => ({
-      version: 1 as const,
+      version: 2 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -722,6 +916,72 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("replays the steps a reopened turn recorded, not just its message", async () => {
+    const promptId = "60000000-0000-4000-8000-000000000012";
+    const replyId = "60000000-0000-4000-8000-000000000013";
+    const reasoningId = "60000000-0000-4000-8000-000000000014";
+    const operationId = "70000000-0000-4000-8000-000000000012";
+    const conversation = vi.fn(async () => ({
+      version: 2 as const,
+      threadId: ids.thread,
+      turns: [
+        {
+          operationId,
+          providerInstanceId: ids.provider,
+          modelId: "model-a",
+          sessionId: "80000000-0000-4000-8000-000000000012",
+          prompt: { contentId: promptId, digest: "a".repeat(64), byteLength: 11 },
+          assistant: [{ contentId: replyId, digest: "b".repeat(64), byteLength: 12 }],
+          steps: [
+            {
+              kind: "reasoning" as const,
+              content: { contentId: reasoningId, digest: "c".repeat(64), byteLength: 9 },
+            },
+            {
+              kind: "tool" as const,
+              toolCallId: "90000000-0000-4000-8000-000000000012",
+              toolName: "Read",
+              state: "completed" as const,
+              summary: "read 40 lines",
+            },
+          ],
+          stepsTruncated: true,
+          status: "completed" as const,
+          startedAt: now,
+          updatedAt: now,
+        },
+      ],
+      nextCursor: 43,
+      hasMore: false,
+    }));
+    const operationContent = vi.fn(async (_threadId, _operationId, contentId) =>
+      new TextEncoder().encode(
+        contentId === promptId ? "check tests" : contentId === replyId ? "done" : "weighing it",
+      ),
+    );
+    const client = fakeClient({ conversation: conversation as never, operationContent });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.turnActivity.get(operationId)).toMatchObject({
+        reasoning: "weighing it",
+        truncated: true,
+      }),
+    );
+    expect(result.current.turnActivity.get(operationId)?.rows).toEqual([
+      {
+        kind: "tool",
+        id: "90000000-0000-4000-8000-000000000012",
+        toolName: "Read",
+        state: "completed",
+        summary: "read 40 lines",
+      },
+    ]);
+    unmount();
+  });
+
   it("refreshes the active conversation when the first provider turn completes", async () => {
     const promptId = "60000000-0000-4000-8000-000000000020";
     const replyId = "60000000-0000-4000-8000-000000000021";
@@ -729,7 +989,7 @@ describe("useCodeController", () => {
     const conversation = vi
       .fn()
       .mockResolvedValueOnce({
-        version: 1,
+        version: 2,
         threadId: ids.thread,
         turns: [
           {
@@ -748,7 +1008,7 @@ describe("useCodeController", () => {
         hasMore: false,
       })
       .mockResolvedValueOnce({
-        version: 1,
+        version: 2,
         threadId: ids.thread,
         turns: [
           {
@@ -767,7 +1027,7 @@ describe("useCodeController", () => {
         hasMore: false,
       })
       .mockResolvedValue({
-        version: 1,
+        version: 2,
         threadId: ids.thread,
         turns: [
           {
@@ -828,7 +1088,7 @@ describe("useCodeController", () => {
     const liveId = "60000000-0000-4000-8000-000000000031";
     const operationId = "70000000-0000-4000-8000-000000000030";
     const conversation = vi.fn(async () => ({
-      version: 1 as const,
+      version: 2 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -978,7 +1238,7 @@ function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
     bootstrap: vi.fn(async () => bootstrap()),
     queryBoard: vi.fn(),
     conversation: vi.fn(async () => ({
-      version: 1 as const,
+      version: 2 as const,
       threadId: ids.thread,
       turns: [],
       nextCursor: 0,
@@ -986,6 +1246,9 @@ function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
     })),
     content: vi.fn(),
     operationContent: vi.fn(),
+    putAttachment: vi.fn(),
+    discardAttachment: vi.fn(),
+    attachment: vi.fn(),
     execute: vi.fn(async (command: CodeCommand) => command as unknown as CodeCommandResult),
     executeOperation: vi.fn(),
     inspectTerminal: vi.fn(),

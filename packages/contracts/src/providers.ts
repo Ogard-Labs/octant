@@ -170,7 +170,20 @@ function isBoundedProviderJsonRecord(input: unknown): input is Readonly<Record<s
 }
 
 const ProviderToolInputSchema = Schema.declare(isBoundedProviderJsonRecord);
-export const ProviderExecutionPolicy = Schema.Literal("full-access", "approval-gated", "plan");
+/**
+ * Thread access postures, ordered from most to least authority.
+ *
+ * `auto-accept-edits` sits between full access and approval-gated: file writes
+ * inside the bound project proceed without a prompt, while shell, network,
+ * outside-project reach, and every irreversible class stay gated exactly as
+ * they are under `approval-gated`.
+ */
+export const ProviderExecutionPolicy = Schema.Literal(
+  "full-access",
+  "auto-accept-edits",
+  "approval-gated",
+  "plan",
+);
 export type ProviderExecutionPolicy = typeof ProviderExecutionPolicy.Type;
 export const PermissionPersistence = Schema.Literal("current-session", "project-default");
 export type PermissionPersistence = typeof PermissionPersistence.Type;

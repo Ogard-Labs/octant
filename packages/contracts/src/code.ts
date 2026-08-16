@@ -40,6 +40,26 @@ export const CodeRuntimeWorkId = brandedUuid("CodeRuntimeWorkId");
 export type CodeRuntimeWorkId = typeof CodeRuntimeWorkId.Type;
 export const CodeApprovalId = brandedUuid("CodeApprovalId");
 export type CodeApprovalId = typeof CodeApprovalId.Type;
+export const CodeAttachmentId = brandedUuid("CodeAttachmentId");
+export type CodeAttachmentId = typeof CodeAttachmentId.Type;
+
+/**
+ * Code attachments are images only. Everything a repository holds already
+ * reaches a Code turn through the checkout the thread is bound to, so the one
+ * thing a path cannot carry is a picture the user is looking at — a screenshot,
+ * a mockup, a photographed whiteboard.
+ */
+export const CODE_ATTACHMENT_MEDIA_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+] as const;
+export const CodeAttachmentMediaType = Schema.Literal(...CODE_ATTACHMENT_MEDIA_TYPES);
+export type CodeAttachmentMediaType = typeof CodeAttachmentMediaType.Type;
+export const MAX_CODE_ATTACHMENT_BYTES = 10_485_760;
+export const MAX_CODE_TURN_ATTACHMENTS = 8;
+export const MAX_CODE_ATTACHMENT_DISPLAY_NAME_LENGTH = 255;
 
 export const CodeRepositoryId = Schema.String.pipe(
   Schema.pattern(/^repo_[a-f0-9]{64}$/),
@@ -401,6 +421,22 @@ export type CodeFailure = typeof CodeFailure.Type;
 export const CodeDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
 export type CodeDigest = typeof CodeDigest.Type;
 
+/**
+ * What the journal keeps about one attached image: enough to name it, to read
+ * its bytes back out of the managed attachment store, and to prove they are the
+ * bytes the turn was sent. The image itself never enters the event journal.
+ */
+export const CodeAttachmentReference = Schema.Struct({
+  attachmentId: CodeAttachmentId,
+  displayName: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(MAX_CODE_ATTACHMENT_DISPLAY_NAME_LENGTH),
+  ),
+  mediaType: CodeAttachmentMediaType,
+  byteLength: Schema.Int.pipe(Schema.between(1, MAX_CODE_ATTACHMENT_BYTES)),
+  digest: CodeDigest,
+}).annotations(strict);
+export type CodeAttachmentReference = typeof CodeAttachmentReference.Type;
+
 export const CodeFileMetadata = Schema.Struct({
   identity: Schema.Struct({
     device: Schema.NonEmptyTrimmedString,
@@ -664,6 +700,9 @@ export const decodeCodeCheckoutId = Schema.decodeUnknownSync(CodeCheckoutId);
 export const decodeCodeFileId = Schema.decodeUnknownSync(CodeFileId);
 export const decodeCodeReviewFindingId = Schema.decodeUnknownSync(CodeReviewFindingId);
 export const decodeCodeEvidenceContentId = Schema.decodeUnknownSync(CodeEvidenceContentId);
+export const decodeCodeAttachmentId = Schema.decodeUnknownSync(CodeAttachmentId);
+export const decodeCodeAttachmentMediaType = Schema.decodeUnknownSync(CodeAttachmentMediaType);
+export const decodeCodeAttachmentReference = Schema.decodeUnknownSync(CodeAttachmentReference);
 export const decodeCodeRuntimeWorkId = Schema.decodeUnknownSync(CodeRuntimeWorkId);
 export const decodeCodeRelativePath = Schema.decodeUnknownSync(CodeRelativePath);
 export const decodeCodeCheckoutHead = Schema.decodeUnknownSync(CodeCheckoutHead);

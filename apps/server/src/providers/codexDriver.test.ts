@@ -1302,6 +1302,36 @@ describe("Codex execution authority and approvals", () => {
     await acquired.close();
   });
 
+  it("answers project-confined file changes itself under auto-accept edits and still asks for commands", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await startSession(acquired.connection, sessionId, "auto-accept-edits");
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "edit", attachments: [], tools: [] }),
+    );
+    f.emit(fileApproval({ id: "file-1" }));
+    await vi.waitFor(() =>
+      expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(1),
+    );
+    expect(f.calls.find(({ method }) => method === "approval/respond")?.input).toMatchObject({
+      result: { decision: "accept" },
+    });
+    // A file change reaching outside the Project is still declined, not accepted.
+    f.emit(fileApproval({ id: "file-2", grantRoot: "/outside" }));
+    await vi.waitFor(() =>
+      expect(f.calls.filter(({ method }) => method === "approval/respond")).toHaveLength(2),
+    );
+    expect(f.calls.filter(({ method }) => method === "approval/respond")[1]?.input).toMatchObject({
+      result: { decision: "decline" },
+    });
+    // Commands are not edits: they surface as an approval for the user.
+    const event = takeEvents(acquired.connection, 1);
+    f.emit(commandApproval({ id: "cmd-1" }));
+    const [approval] = await event;
+    expect(approval?.kind).toBe("approval-request");
+    await acquired.close();
+  });
+
   it("treats a provider approval in Full access as a protocol failure", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));

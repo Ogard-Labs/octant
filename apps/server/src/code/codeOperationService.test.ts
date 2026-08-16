@@ -131,7 +131,13 @@ describe("CodeOperationService", () => {
       replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
       append: vi.fn(),
     };
-    const git = { observe: vi.fn(), stage: vi.fn(), commit: vi.fn(), push: vi.fn() };
+    const git = {
+      observe: vi.fn(),
+      stage: vi.fn(),
+      discard: vi.fn(),
+      commit: vi.fn(),
+      push: vi.fn(),
+    };
     const approvals = { validate: vi.fn(async () => approved) };
     const service = new CodeOperationService({
       authority,
@@ -781,6 +787,166 @@ describe("CodeOperationService", () => {
     expect(events.append).not.toHaveBeenCalled();
   });
 
+  it("never discards uncommitted work on an auto-accepting thread without an approval", async () => {
+    const discard = vi.fn(async () => ({ status: "applied" as const }));
+    let approved = false;
+    const activeThread = decodeCodeThread({
+      ...thread(),
+      executionPolicy: "auto-accept-edits",
+    });
+    const service = new CodeOperationService({
+      authority: {
+        readThread: vi.fn(() => activeThread),
+        readCheckout: vi.fn(() =>
+          decodeCodeCheckoutIdentity({
+            id: ids.checkout,
+            repositoryId: activeThread.repositoryId,
+            kind: "existing-worktree",
+            availability: "available",
+            head: { kind: "branch", name: "development", oid: "a".repeat(40) },
+            observedAt: "2026-07-21T10:00:00.000Z",
+          }),
+        ),
+        canAccessProject: vi.fn(async () => true),
+        approvalContextDigest: vi.fn(async () => "a".repeat(64)),
+        resolveCheckoutRoot: vi.fn(async () => ({
+          checkoutRoot: "/tmp/repo",
+          credentialReferences: [],
+        })),
+      } as never,
+      approvals: { validate: vi.fn(async () => approved) },
+      terminals: {
+        launch: vi.fn(),
+        attach: vi.fn(),
+        write: vi.fn(),
+        resize: vi.fn(),
+        terminate: vi.fn(),
+      } as never,
+      repositoryTests: { run: vi.fn(), cancel: vi.fn() } as never,
+      git: { observe: vi.fn(), stage: vi.fn(), discard, commit: vi.fn(), push: vi.fn() } as never,
+      pullRequests: {
+        createPullRequest: vi.fn(),
+        observePullRequest: vi.fn(),
+        mergePullRequest: vi.fn(),
+      } as never,
+      reviewFindings: { createFinding: vi.fn(), updateFinding: vi.fn() } as never,
+      turns: { start: vi.fn(), answerInput: vi.fn(), answerApproval: vi.fn(), cancel: vi.fn() },
+      evidence: { put: vi.fn(), read: vi.fn(async () => "prompt") } as never,
+      events: {
+        replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
+        append: vi.fn(),
+      } as never,
+    });
+    const command = {
+      kind: "discard-git-changes",
+      operationId: ids.operation,
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      gitOperationId: decodeCodeOperationId("53535353-5353-4535-8535-535353535353"),
+      paths: ["src/file.ts"],
+      expectedStateToken: "f".repeat(64),
+    } as const;
+
+    // The posture waives project file writes. Destroying uncommitted work is
+    // not one, so the host waits for a receipt rather than proceeding.
+    await expect(service.execute(ids.window, command)).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "waiting" },
+    });
+    expect(discard).not.toHaveBeenCalled();
+
+    approved = true;
+    await expect(service.execute(ids.window, command)).resolves.toMatchObject({
+      kind: "git-mutation-state",
+      mutation: "discard",
+      state: "completed",
+    });
+    expect(discard).toHaveBeenCalledWith({
+      checkoutId: ids.checkout,
+      checkoutRoot: "/tmp/repo",
+      paths: ["src/file.ts"],
+      expectedStateToken: "f".repeat(64),
+    });
+  });
+
+  it("sends the images the journal recorded, and refuses ones no turn may claim", async () => {
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000001",
+      displayName: "shot.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "b".repeat(64),
+    };
+    const bytes = new Uint8Array([1, 2, 3]);
+    const attachments = {
+      peek: (_threadId: unknown, requested: ReadonlyArray<string>) =>
+        requested.every((id) => String(id) === reference.attachmentId)
+          ? { status: "ok" as const, attachments: [reference] }
+          : { status: "unknown" as const, attachmentId: requested[0]! },
+      release: vi.fn(),
+      read: vi.fn(async () => bytes),
+    };
+    let supported = true;
+    const { service, turns, events } = providerTurnFixture({
+      attachments: attachments as never,
+      supportsAttachments: () => supported,
+    });
+    const turn = (attachmentIds: ReadonlyArray<string>, operationId: string) =>
+      ({
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId(operationId),
+        attachmentIds,
+      }) as never;
+    const journalled = () =>
+      events.append.mock.calls
+        .map(([entry]) => (entry as { readonly event: { readonly kind: string } }).event)
+        .filter((event) => event.kind === "conversation-turn-started");
+
+    // An id this host never staged is refused before anything reaches the
+    // provider, and before the turn's start is journalled.
+    await expect(
+      service.execute(
+        ids.window,
+        turn(["40000000-0000-4000-8000-000000000009"], "70000000-0000-4000-8000-000000000001"),
+      ),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "invalid" } });
+    expect(turns.start).not.toHaveBeenCalled();
+    expect(journalled()).toHaveLength(0);
+
+    // A provider that cannot take a picture is told so rather than sent the
+    // turn with its images silently removed.
+    supported = false;
+    await expect(
+      service.execute(
+        ids.window,
+        turn([reference.attachmentId], "70000000-0000-4000-8000-000000000002"),
+      ),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "invalid" } });
+    expect(turns.start).not.toHaveBeenCalled();
+
+    supported = true;
+    await expect(
+      service.execute(
+        ids.window,
+        turn([reference.attachmentId], "70000000-0000-4000-8000-000000000003"),
+      ),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          {
+            attachmentId: reference.attachmentId,
+            displayName: "shot.png",
+            mediaType: "image/png",
+            bytes,
+          },
+        ],
+      }),
+    );
+    // The journal names the image by what the host measured, never its bytes.
+    expect(journalled().at(-1)).toMatchObject({ attachments: [reference] });
+  });
+
   it("runs only a definition the server discovered for the checkout", async () => {
     const discovered = {
       id: "abcdabcd-abcd-4bcd-8bcd-abcdabcdabcd",
@@ -1009,7 +1175,12 @@ const startProviderTurn = {
  * what the provider saw and what the journal kept, separately.
  */
 function providerTurnFixture(
-  options: Pick<CodeOperationServiceOptions, "resolveThreadMentionContext">,
+  options: Partial<
+    Pick<
+      CodeOperationServiceOptions,
+      "resolveThreadMentionContext" | "attachments" | "supportsAttachments"
+    >
+  >,
 ) {
   const activeThread = thread();
   const turns = {

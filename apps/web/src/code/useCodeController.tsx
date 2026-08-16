@@ -20,9 +20,26 @@ import {
   type CodeOperationEvent,
   type CodeOperationId,
   type CodeThreadFollowUpView,
+  type CodeAttachmentId,
+  type CodeAttachmentReference,
   type MentionableThreadId,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  EMPTY_TURN_ACTIVITY,
+  appendReasoning,
+  applyActivityEvent,
+  type CodeActivityRow,
+  type CodeTurnActivity,
+} from "./transcriptActivity";
+import {
+  EMPTY_CODE_TURN_QUEUES,
+  enqueueCodeTurn,
+  queuedTurnsFor,
+  removeQueuedCodeTurn,
+  type CodeTurnQueues,
+  type QueuedCodeTurn,
+} from "./turnQueue";
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type CodeTurnStatus = "idle" | "sending" | "running" | "failed";
@@ -77,6 +94,8 @@ export interface CodeConversationMessage {
   readonly providerInstanceId?: CodeThread["providerInstanceId"];
   readonly modelId?: CodeThread["modelId"];
   readonly status?: "waiting" | "completed" | "interrupted" | "failed" | "incomplete";
+  /** Images this message carried, as the turn's start event recorded them. */
+  readonly attachments?: ReadonlyArray<CodeAttachmentReference>;
 }
 
 export interface CodeThreadNavigationItem {
@@ -119,7 +138,7 @@ export function useCodeController(options: CodeControllerOptions) {
   const [activeView, setActiveView] = useState<CodeThreadView>();
   const [errorCategory, setErrorCategory] = useState<CodeFailure["category"]>();
   const [errorMessage, setErrorMessage] = useState<string>();
-  const [pendingDraft, setPendingDraft] = useState("");
+  const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
   const [followUps, setFollowUps] = useState<ReadonlyMap<string, CodeThreadFollowUpView>>(
     () => new Map(),
@@ -127,9 +146,36 @@ export function useCodeController(options: CodeControllerOptions) {
   const [turnStatus, setTurnStatus] = useState<CodeTurnStatus>("idle");
   const [turnError, setTurnError] = useState<string>();
   const [providerRequests, setProviderRequests] = useState<ReadonlyArray<CodeProviderRequest>>([]);
+  const [turnQueues, setTurnQueues] = useState<CodeTurnQueues>(EMPTY_CODE_TURN_QUEUES);
+  const draining = useRef(false);
   const noteProviderRequest = useCallback((event: CodeOperationEvent) => {
     const request = providerRequestFromEvent(event);
     if (request !== undefined) setProviderRequests((current) => [...current, request]);
+  }, []);
+  const [turnActivity, setTurnActivity] = useState<ReadonlyMap<string, CodeTurnActivity>>(
+    () => new Map(),
+  );
+  const noteActivity = useCallback((operationId: CodeOperationId, event: CodeOperationEvent) => {
+    setTurnActivity((current) => {
+      const key = String(operationId);
+      const existing = current.get(key) ?? EMPTY_TURN_ACTIVITY;
+      const next = applyActivityEvent(existing, event);
+      if (next === existing) return current;
+      const updated = new Map(current);
+      updated.set(key, next);
+      return updated;
+    });
+  }, []);
+  const noteReasoning = useCallback((operationId: CodeOperationId, chunk: string) => {
+    setTurnActivity((current) => {
+      const key = String(operationId);
+      const existing = current.get(key) ?? EMPTY_TURN_ACTIVITY;
+      const next = appendReasoning(existing, chunk);
+      if (next === existing) return current;
+      const updated = new Map(current);
+      updated.set(key, next);
+      return updated;
+    });
   }, []);
   const editorDraftValues = useRef(new Map<string, string>());
   const firstTurnFailures = useRef(
@@ -153,6 +199,22 @@ export function useCodeController(options: CodeControllerOptions) {
   const lastExecuteError = useRef<
     { category: CodeFailure["category"]; message: string } | undefined
   >(undefined);
+
+  // Drafts are kept per thread so moving between threads never loses what was
+  // typed and never carries one thread's prompt into another's composer. A
+  // draft is renderer-local by design: it is not a message until the user
+  // sends it, so the journal records nothing here.
+  const pendingDraft = drafts.get(draftKey(options.activeThreadId)) ?? "";
+  const setPendingDraft = useCallback((value: string) => {
+    const key = draftKey(activeThreadId.current);
+    setDrafts((current) => {
+      if ((current.get(key) ?? "") === value) return current;
+      const next = new Map(current);
+      if (value === "") next.delete(key);
+      else next.set(key, value);
+      return next;
+    });
+  }, []);
 
   const clearFailure = useCallback(() => {
     setErrorCategory(undefined);
@@ -248,6 +310,7 @@ export function useCodeController(options: CodeControllerOptions) {
       }
 
       const messages: CodeConversationMessage[] = [];
+      const replayedActivity = new Map<string, CodeTurnActivity>();
       for (const turn of turns) {
         const prompt = await readOperationText(
           client,
@@ -264,6 +327,9 @@ export function useCodeController(options: CodeControllerOptions) {
           providerInstanceId: turn.providerInstanceId,
           modelId: turn.modelId,
           status: turn.status,
+          ...(turn.attachments === undefined || turn.attachments.length === 0
+            ? {}
+            : { attachments: turn.attachments }),
         });
         const parts: string[] = [];
         for (const reference of turn.assistant) {
@@ -285,8 +351,43 @@ export function useCodeController(options: CodeControllerOptions) {
           modelId: turn.modelId,
           status: turn.status,
         });
+        // The steps this turn recorded, folded into the same rows the live
+        // transcript builds, so a reopened thread reads like the turn did.
+        const steps = turn.steps ?? [];
+        if (steps.length > 0 || turn.stepsTruncated === true) {
+          const rows: CodeActivityRow[] = [];
+          let reasoning = "";
+          for (const step of steps) {
+            if (step.kind === "tool") {
+              rows.push({
+                kind: "tool",
+                id: String(step.toolCallId),
+                toolName: step.toolName,
+                state: step.state,
+                ...(step.summary === undefined ? {} : { summary: step.summary }),
+              });
+              continue;
+            }
+            const text = await readOperationText(
+              client,
+              threadId,
+              turn.operationId,
+              step.content.contentId,
+            );
+            if (text !== undefined) reasoning += text;
+          }
+          if (!isActive(request, threadGeneration, mounted)) return undefined;
+          replayedActivity.set(String(turn.operationId), {
+            rows,
+            reasoning,
+            ...(turn.stepsTruncated === true ? { truncated: true } : {}),
+          });
+        }
       }
       setConversation(messages);
+      if (replayedActivity.size > 0) {
+        setTurnActivity((current) => new Map([...current, ...replayedActivity]));
+      }
       const latestTurn = turns.at(-1);
       const incomplete = latestTurn?.status === "incomplete";
       if (incomplete && latestTurn !== undefined) {
@@ -360,6 +461,16 @@ export function useCodeController(options: CodeControllerOptions) {
                   }
                   const event = frame.event;
                   noteProviderRequest(event);
+                  noteActivity(operationId, event);
+                  if (event.kind === "provider-content" && event.channel === "reasoning") {
+                    const chunk = await readOperationText(
+                      client,
+                      threadId,
+                      operationId,
+                      event.content.contentId,
+                    );
+                    if (chunk !== undefined) noteReasoning(operationId, chunk);
+                  }
                   if (event.kind === "provider-content" && event.channel === "message") {
                     const chunk = await readOperationText(
                       client,
@@ -608,6 +719,7 @@ export function useCodeController(options: CodeControllerOptions) {
     turnAbort.current = undefined;
     setConversation([]);
     setProviderRequests([]);
+    setTurnActivity(new Map());
     setTurnStatus(
       options.activeThreadId !== undefined &&
         activeTurnOperations.current.has(String(options.activeThreadId))
@@ -694,6 +806,12 @@ export function useCodeController(options: CodeControllerOptions) {
        * the journal records as the message.
        */
       readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
+      /**
+       * Images this turn carries. Ids only: the host holds the bytes it
+       * accepted and reads them itself, so the renderer never re-sends an
+       * image and never decides what an id stands for.
+       */
+      readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
       readonly signal?: AbortSignal;
     }) => {
       const reference = await client.putEvidence(input.threadId, input.prompt);
@@ -712,6 +830,9 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
           ? {}
           : { threadMentionIds: [...input.threadMentionIds] }),
+        ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
+          ? {}
+          : { attachmentIds: [...input.attachmentIds] }),
       });
       return { operationId, started } as const;
     },
@@ -836,6 +957,8 @@ export function useCodeController(options: CodeControllerOptions) {
        * message.
        */
       threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
+      /** Images the host already staged for this thread. */
+      attachments: ReadonlyArray<CodeAttachmentReference> = [],
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -851,6 +974,7 @@ export function useCodeController(options: CodeControllerOptions) {
         text: trimmed,
         providerInstanceId: view.thread.providerInstanceId,
         modelId: view.thread.modelId,
+        ...(attachments.length === 0 ? {} : { attachments }),
       };
 
       turnAbort.current?.abort();
@@ -864,6 +988,7 @@ export function useCodeController(options: CodeControllerOptions) {
           checkoutId: view.checkout.id,
           prompt: trimmed,
           threadMentionIds,
+          attachmentIds: attachments.map((attachment) => attachment.attachmentId),
           signal: controller.signal,
         });
         if (controller.signal.aborted) return false;
@@ -883,11 +1008,16 @@ export function useCodeController(options: CodeControllerOptions) {
         setPendingDraft("");
         setConversation((current) => [
           ...current,
-          userMessage,
+          { ...userMessage, operationId },
           {
             id: assistantId,
             role: "assistant",
             text: "",
+            // The transcript reads this turn's tool and reasoning rows by
+            // operation, so a live message must name its operation the same way
+            // a replayed one does.
+            operationId,
+            status: "incomplete",
             providerInstanceId: view.thread.providerInstanceId,
             modelId: view.thread.modelId,
           },
@@ -920,6 +1050,16 @@ export function useCodeController(options: CodeControllerOptions) {
             cursor = Number(frame.cursor);
             const event = frame.event;
             noteProviderRequest(event);
+            noteActivity(operationId, event);
+            if (event.kind === "provider-content" && event.channel === "reasoning") {
+              const chunk = await readOperationText(
+                client,
+                view.thread.id,
+                operationId,
+                event.content.contentId,
+              );
+              if (chunk !== undefined) noteReasoning(operationId, chunk);
+            }
             if (event.kind === "provider-content" && event.channel === "message") {
               const chunk = await readOperationText(
                 client,
@@ -983,18 +1123,20 @@ export function useCodeController(options: CodeControllerOptions) {
         }
         setProviderRequests([]);
         if (controller.signal.aborted) return false;
-        if (assistantText.trim() === "") {
-          setConversation((current) =>
-            current.map((message) =>
-              message.id === assistantId
-                ? {
-                    ...message,
-                    text: "The provider turn finished without a visible reply.",
-                  }
-                : message,
-            ),
-          );
-        }
+        setConversation((current) =>
+          current.map((message) =>
+            message.id === assistantId
+              ? {
+                  ...message,
+                  status: "completed",
+                  text:
+                    assistantText.trim() === ""
+                      ? "The provider turn finished without a visible reply."
+                      : message.text,
+                }
+              : message,
+          ),
+        );
         setTurnStatus("idle");
         return true;
       } catch (error) {
@@ -1009,6 +1151,67 @@ export function useCodeController(options: CodeControllerOptions) {
     },
     [activeView, beginProviderTurn, clearFailure, client, fail, turnStatus],
   );
+
+  /**
+   * Park a follow-up written while a turn is running and send it once that turn
+   * settles. Sending immediately is impossible — the host admits one provider
+   * turn per thread — so the alternative is making the user wait at the
+   * keyboard and remember to press send.
+   */
+  const queueFollowUp = useCallback(
+    (
+      prompt: string,
+      threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
+      attachments: ReadonlyArray<CodeAttachmentReference> = [],
+    ): QueuedCodeTurn | undefined => {
+      const trimmed = prompt.trim();
+      const threadId = activeThreadId.current;
+      if (trimmed.length === 0 || threadId === undefined) return undefined;
+      const turn: QueuedCodeTurn = {
+        id: globalThis.crypto.randomUUID(),
+        prompt: trimmed,
+        threadMentionIds,
+        attachments,
+      };
+      setTurnQueues((current) => enqueueCodeTurn(current, String(threadId), turn));
+      return turn;
+    },
+    [],
+  );
+
+  const cancelQueuedFollowUp = useCallback((turnId: string): void => {
+    const threadId = activeThreadId.current;
+    if (threadId === undefined) return;
+    setTurnQueues((current) => removeQueuedCodeTurn(current, String(threadId), turnId));
+  }, []);
+
+  const queuedFollowUps = useMemo(
+    () =>
+      options.activeThreadId === undefined
+        ? []
+        : queuedTurnsFor(turnQueues, String(options.activeThreadId)),
+    [options.activeThreadId, turnQueues],
+  );
+
+  // A settled turn releases the next queued follow-up. A failed turn keeps the
+  // queue parked: the user decides whether the rest still applies.
+  useEffect(() => {
+    if (turnStatus !== "idle") return;
+    const threadId = options.activeThreadId;
+    if (threadId === undefined) return;
+    const next = queuedTurnsFor(turnQueues, String(threadId))[0];
+    if (next === undefined || draining.current) return;
+    draining.current = true;
+    void (async () => {
+      try {
+        const sent = await sendFollowUp(next.prompt, next.threadMentionIds, next.attachments);
+        if (!mounted.current || !sent) return;
+        setTurnQueues((current) => removeQueuedCodeTurn(current, String(threadId), next.id));
+      } finally {
+        draining.current = false;
+      }
+    })();
+  }, [options.activeThreadId, sendFollowUp, turnQueues, turnStatus]);
 
   const answerProviderRequest = useCallback(
     async (answer: CodeProviderAnswer): Promise<boolean> => {
@@ -1059,6 +1262,9 @@ export function useCodeController(options: CodeControllerOptions) {
   return {
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
     answerProviderRequest,
+    cancelQueuedFollowUp,
+    queueFollowUp,
+    queuedFollowUps,
     bootstrap,
     client,
     conversation,
@@ -1079,6 +1285,7 @@ export function useCodeController(options: CodeControllerOptions) {
     setPendingDraft,
     startThreadTurn,
     status,
+    turnActivity,
     turnError,
     turnStatus,
     updateSettings,
@@ -1103,6 +1310,11 @@ function conversationFallback(
 }
 
 export type CodeController = ReturnType<typeof useCodeController>;
+
+/** Draft bucket for one thread, or for the composer before a thread exists. */
+function draftKey(threadId: CodeThreadId | undefined): string {
+  return threadId === undefined ? "" : String(threadId);
+}
 
 function required(value: string | undefined): string {
   if (value === undefined) throw new Error("Code controller requires launch authority.");

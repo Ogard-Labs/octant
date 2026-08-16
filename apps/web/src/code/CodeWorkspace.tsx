@@ -6,6 +6,8 @@ import type {
   CodeReviewFinding,
 } from "@octant/contracts/code-operations";
 import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-definitions";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { LoaderCircle } from "lucide-react";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
@@ -57,6 +59,8 @@ export interface CodeWorkspaceProjections {
 }
 
 export interface CodeWorkspaceApprovals {
+  /** Native confirmation for raising a thread to Full access. */
+  readonly access?: React.ComponentProps<typeof CodeThreadWorkspace>["requestFullAccessApproval"];
   readonly git?: React.ComponentProps<typeof CodeGitPane>["requestApproval"];
   readonly pullRequest?: React.ComponentProps<typeof CodePullRequestPane>["requestApproval"];
   readonly review?: React.ComponentProps<typeof CodeReviewPane>["requestApproval"];
@@ -75,6 +79,8 @@ export interface CodeWorkspaceProps {
   readonly projections?: CodeWorkspaceProjections;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
+  /** Opens one changed repository file as a Code file tab, from the diff. */
+  readonly onOpenFile?: (relativePath: string) => void;
   /** Re-opens the file projection so the editor can leave a stale revision. */
   readonly onRequestFileRefresh?: () => void;
   readonly onOpenSurface?: (kind: CodeOverviewSurfaceKind) => void;
@@ -122,10 +128,14 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
+        {...(props.approvals?.access === undefined
+          ? {}
+          : { requestFullAccessApproval: props.approvals.access })}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         {...(props.windowCapability === undefined
           ? {}
           : { windowCapability: props.windowCapability })}
+        attachmentClient={props.client}
         threadId={props.tab.threadId}
       />
     );
@@ -188,7 +198,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           />
         );
       }
-      if (view.thread.executionPolicy === "approval-gated" && props.approvals?.test === undefined) {
+      if (
+        decidesCodeEffectsByApproval(view.thread.executionPolicy) &&
+        props.approvals?.test === undefined
+      ) {
         return <ApprovalUnavailable surface="Repository test" />;
       }
       return (
@@ -220,7 +233,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         );
       }
       if (
-        view.thread.executionPolicy === "approval-gated" &&
+        decidesCodeEffectsByApproval(view.thread.executionPolicy) &&
         props.approvals?.review === undefined
       ) {
         return <ApprovalUnavailable surface="Local review" />;
@@ -385,16 +398,21 @@ function GitWorkspaceSurface(
   if (observation === undefined) {
     return <GitObservationLoading />;
   }
+  const policy = props.controller.activeView!.thread.executionPolicy;
   if (props.tab.kind === "code-diff") {
     return (
       <CodeDiffPane
-        client={props.client}
+        client={refreshingClient}
+        createGitOperationId={() => props.nextUuid() as never}
+        createOperationId={() => props.nextUuid() as never}
         diff={{ state: "available", observation, ...props.scope }}
+        executionPolicy={policy}
+        {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
+        {...(props.approvals?.git === undefined ? {} : { requestApproval: props.approvals.git })}
       />
     );
   }
-  const policy = props.controller.activeView!.thread.executionPolicy;
-  if (policy === "approval-gated" && props.approvals?.git === undefined) {
+  if (decidesCodeEffectsByApproval(policy) && props.approvals?.git === undefined) {
     return <ApprovalUnavailable surface="Git mutation" />;
   }
   return (
@@ -462,7 +480,7 @@ function PullRequestWorkspaceSurface(
   const policy = props.controller.activeView!.thread.executionPolicy;
   if (
     review.state !== "observed" &&
-    policy === "approval-gated" &&
+    decidesCodeEffectsByApproval(policy) &&
     props.approvals?.pullRequest === undefined
   ) {
     return <ApprovalUnavailable surface="Pull request" />;
@@ -519,7 +537,7 @@ function TerminalWorkspaceSurface(
     readonly checkoutAvailability: "available" | "unavailable" | "waiting";
     readonly terminal?: TerminalResult;
     readonly terminalId: CodeTerminalId;
-    readonly threadPolicy: "plan" | "approval-gated" | "full-access";
+    readonly threadPolicy: ProviderExecutionPolicy;
   },
 ) {
   const terminalRefreshIntervalMs = 500;
@@ -660,7 +678,7 @@ function TerminalWorkspaceSurface(
       />
     );
   }
-  if (props.threadPolicy === "approval-gated" && props.approvals?.terminal === undefined) {
+  if (decidesCodeEffectsByApproval(props.threadPolicy) && props.approvals?.terminal === undefined) {
     return <ApprovalUnavailable surface="Terminal" />;
   }
   const start = async () => {
@@ -680,7 +698,7 @@ function TerminalWorkspaceSurface(
     setFailure(undefined);
     try {
       if (
-        props.threadPolicy === "approval-gated" &&
+        decidesCodeEffectsByApproval(props.threadPolicy) &&
         (await props.approvals?.terminal?.({ command })) !== true
       ) {
         setFailure("Terminal approval was not granted. Review the checkout state and try again.");

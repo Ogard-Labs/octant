@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { ProviderExecutionPolicy, ProviderFailure } from "@octant/contracts";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { Effect, type Scope } from "effect";
 import type { AcpProviderProfile, AcpSessionMode } from "./acpProfiles";
 import { AcpFailure, makeAcpClient, type AcpClient, type AcpInitializeResult } from "./acpProtocol";
@@ -355,7 +356,8 @@ export function makeAcpConfinementLive(options: AcpConfinementOptions = {}): Acp
             ]),
           ];
           const fullAccess = input.executionPolicy === "full-access";
-          const sideEffects = input.executionPolicy === "approval-gated" && input.mode !== "chat";
+          const sideEffects =
+            decidesCodeEffectsByApproval(input.executionPolicy) && input.mode !== "chat";
           const binaryPath = realpathSync(input.binaryPath);
           const runtimeReadPaths = [
             "/System",

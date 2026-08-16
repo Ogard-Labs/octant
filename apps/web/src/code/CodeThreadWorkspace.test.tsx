@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -45,7 +45,7 @@ describe("CodeThreadWorkspace", () => {
 
     await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("check tests too", []);
+    expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], []);
   });
 
   it("opens the `#` picker in the Code composer and sends the chip as an id", async () => {
@@ -100,9 +100,218 @@ describe("CodeThreadWorkspace", () => {
     // The chip travels as an id. The message the host journals — and the
     // conversation and every later turn read back — is the user's own words,
     // so nothing the mention contributed can be replayed.
-    expect(sendFollowUp).toHaveBeenCalledWith("#[Release notes] does this still hold?", [
-      mentionedThreadId,
-    ]);
+    expect(sendFollowUp).toHaveBeenCalledWith(
+      "#[Release notes] does this still hold?",
+      [mentionedThreadId],
+      [],
+    );
+  });
+
+  it("completes an `@` path from the checkout listing the host returned", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const list = vi.fn(async () => ({
+      status: "listed" as const,
+      listing: {
+        kind: "code-file-listing" as const,
+        threadId,
+        checkoutId: "20000000-0000-4000-8000-000000000002" as never,
+        entries: [
+          { kind: "directory" as const, path: "src" as never },
+          {
+            kind: "file" as const,
+            fileId: "file_" + "a".repeat(59),
+            path: "src/index.ts" as never,
+            byteLength: 12,
+            availability: { status: "available" as const },
+          },
+        ],
+        truncated: false,
+        observedAt: "2026-08-16T09:00:00.000Z" as never,
+      },
+    }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp })}
+        fileListingClient={{ list } as never}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    // Nothing is listed until a mention is actually opened.
+    expect(list).not.toHaveBeenCalled();
+    await user.type(composer, "explain @ind");
+
+    const hit = await screen.findByRole("option", { name: /src\/index\.ts/ });
+    await user.click(hit);
+    expect(composer).toHaveValue("explain @src/index.ts ");
+
+    await user.type(composer, "please");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    // The path travels as ordinary prompt text; naming a file reaches nothing.
+    expect(sendFollowUp).toHaveBeenCalledWith("explain @src/index.ts please", [], []);
+  });
+
+  it("uploads a pasted image before the turn and sends it by the host's own reference", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000001",
+      // The host decides the name it kept; the composer shows that one back.
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "b".repeat(64),
+    };
+    const putAttachment = vi.fn(async () => reference);
+    const discardAttachment = vi.fn(async () => undefined);
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={{ putAttachment, discardAttachment, attachment: vi.fn() } as never}
+        controller={controller({ sendFollowUp })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "match this mockup");
+    pasteImage(composer);
+
+    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
+    expect(putAttachment).toHaveBeenCalledOnce();
+
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    // The turn names what the host answered with, never bytes the composer held.
+    expect(sendFollowUp).toHaveBeenCalledWith("match this mockup", [], [reference]);
+    // Sending is not a discard: the image belongs to the turn that carried it.
+    expect(discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it("keeps the image chips when the host refuses the send so the turn can be retried", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => false);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000003",
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "c".repeat(64),
+    };
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          {
+            putAttachment: vi.fn(async () => reference),
+            discardAttachment: vi.fn(),
+            attachment: vi.fn(),
+          } as never
+        }
+        controller={controller({ sendFollowUp })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "match this mockup");
+    pasteImage(composer);
+    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(sendFollowUp).toHaveBeenCalledWith("match this mockup", [], [reference]);
+    // The refused turn leaves both the text and its image in the composer.
+    expect(screen.getByAltText("pasted.png")).toBeInTheDocument();
+    expect(composer).toHaveValue("match this mockup");
+  });
+
+  it("says a text-only model cannot take the image instead of uploading it", async () => {
+    const user = userEvent.setup();
+    const putAttachment = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          { putAttachment, discardAttachment: vi.fn(), attachment: vi.fn() } as never
+        }
+        controller={controller({ sendFollowUp: vi.fn(async () => true) })}
+        providerGroups={[textOnlyProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    pasteImage(screen.getByLabelText("Follow-up message"));
+
+    const attached = await screen.findByLabelText("Attached images");
+    expect(within(attached).getByRole("status")).toHaveTextContent(
+      "Local OpenCode — Model One does not support images. Choose a vision model to attach one.",
+    );
+    // Nothing is uploaded for a turn the host would refuse anyway.
+    expect(putAttachment).not.toHaveBeenCalled();
+  });
+
+  it("takes back a removed image on the host as well as in the composer", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000002",
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "c".repeat(64),
+    };
+    const discardAttachment = vi.fn(async () => undefined);
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          {
+            putAttachment: vi.fn(async () => reference),
+            discardAttachment,
+            attachment: vi.fn(),
+          } as never
+        }
+        controller={controller({ sendFollowUp })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "never mind the picture");
+    pasteImage(composer);
+    await user.click(await screen.findByRole("button", { name: "Remove pasted.png" }));
+
+    expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId),
+    );
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(sendFollowUp).toHaveBeenCalledWith("never mind the picture", [], []);
+  });
+
+  it("leaves an `@` that matches no file in this checkout as ordinary text", async () => {
+    const user = userEvent.setup();
+    const list = vi.fn(async () => ({
+      status: "listed" as const,
+      listing: {
+        kind: "code-file-listing" as const,
+        threadId,
+        checkoutId: "20000000-0000-4000-8000-000000000002" as never,
+        entries: [],
+        truncated: false,
+        observedAt: "2026-08-16T09:00:00.000Z" as never,
+      },
+    }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        fileListingClient={{ list } as never}
+        threadId={threadId}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("Follow-up message"), "mail henrik@ogard.no");
+    expect(
+      screen.queryByRole("listbox", { name: "Files you can mention" }),
+    ).not.toBeInTheDocument();
+    expect(list).not.toHaveBeenCalled();
   });
 
   it("keeps a failed follow-up in the composer so it can be retried", async () => {
@@ -114,7 +323,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "keep this prompt");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
 
-    expect(sendFollowUp).toHaveBeenCalledWith("keep this prompt", []);
+    expect(sendFollowUp).toHaveBeenCalledWith("keep this prompt", [], []);
     expect(composer).toHaveValue("keep this prompt");
   });
 
@@ -160,6 +369,114 @@ describe("CodeThreadWorkspace", () => {
       providerInstanceId: alternateProviderId,
       modelId: alternateModelId,
     });
+  });
+
+  it("lowers thread access from the composer through the authoritative command", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    render(<CodeThreadWorkspace controller={controller({ execute })} threadId={threadId} />);
+
+    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    await user.click(await screen.findByRole("option", { name: "Plan · read-only" }));
+
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-code-thread-access",
+      threadId,
+      expectedVersion: 1,
+      executionPolicy: "plan",
+      permissionPersistence: "current-session",
+    });
+  });
+
+  it("switches to auto-accept edits without asking for native confirmation", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    const requestFullAccessApproval = vi.fn(async () => undefined);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ execute })}
+        requestFullAccessApproval={requestFullAccessApproval}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    await user.click(await screen.findByRole("option", { name: "Auto-accept edits" }));
+
+    expect(requestFullAccessApproval).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-code-thread-access",
+      threadId,
+      expectedVersion: 1,
+      executionPolicy: "auto-accept-edits",
+      permissionPersistence: "current-session",
+    });
+  });
+
+  it("raises a thread to Full access only with the host's native confirmation", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    const approvalId = "40000000-0000-4000-8000-000000000004";
+    const requestFullAccessApproval = vi.fn(async () => approvalId as never);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ execute })}
+        requestFullAccessApproval={requestFullAccessApproval}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    await user.click(await screen.findByRole("option", { name: "Full access" }));
+
+    expect(requestFullAccessApproval).toHaveBeenCalledWith({
+      kind: "change-thread-full-access",
+      threadId,
+      expectedVersion: 1,
+      permissionPersistence: "current-session",
+    });
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-code-thread-access",
+      threadId,
+      expectedVersion: 1,
+      executionPolicy: "full-access",
+      permissionPersistence: "current-session",
+      approvalId,
+    });
+  });
+
+  it("keeps the current access when native confirmation is declined", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ execute })}
+        requestFullAccessApproval={vi.fn(async () => undefined)}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    await user.click(await screen.findByRole("option", { name: "Full access" }));
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        "Full access was not confirmed. This thread keeps its current access.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("does not offer Full access on a host that cannot confirm it natively", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    render(<CodeThreadWorkspace controller={controller({ execute })} threadId={threadId} />);
+
+    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    const option = await screen.findByRole("option", { name: "Full access" });
+    expect(option).toHaveAttribute("aria-disabled", "true");
+    await user.click(option);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("answers agent-initiated approvals and questions through the controller", async () => {
@@ -329,6 +646,172 @@ describe("CodeThreadWorkspace", () => {
     );
     expect(screen.getByLabelText("Follow-up message")).toHaveValue("Opening A");
     expect(sendFollowUp).not.toHaveBeenCalled();
+  });
+
+  it("says so when a replayed turn kept only its earliest steps", () => {
+    const operationId = "70000000-0000-4000-8000-000000000052";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: `${operationId}:assistant`,
+              role: "assistant",
+              text: "Done.",
+              operationId: operationId as never,
+              status: "completed",
+            },
+          ],
+          turnActivity: new Map([
+            [
+              operationId,
+              {
+                reasoning: "",
+                truncated: true,
+                rows: [{ kind: "tool", id: "call-1", toolName: "Read", state: "completed" }],
+              },
+            ],
+          ]),
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    // The transcript never implies it is showing the whole turn when it is not.
+    expect(screen.getByText("1 step · earliest kept")).toBeVisible();
+  });
+
+  it("collapses a turn's tool steps and reasoning until the user opens them", async () => {
+    const user = userEvent.setup();
+    const operationId = "70000000-0000-4000-8000-000000000051";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: `${operationId}:assistant`,
+              role: "assistant",
+              text: "Verified the change.",
+              operationId: operationId as never,
+              status: "completed",
+            },
+          ],
+          turnActivity: new Map([
+            [
+              operationId,
+              {
+                reasoning: "Check the failing suite first.",
+                rows: [
+                  {
+                    kind: "tool",
+                    id: "call-1",
+                    toolName: "Bash",
+                    state: "completed",
+                    summary: "bun run verify",
+                  },
+                  { kind: "task", id: "task-1", state: "running", summary: "Rewrite the pane" },
+                ],
+              },
+            ],
+          ]),
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    // Closed by default: the summary counts the work without printing it.
+    expect(screen.getByText("2 steps")).toBeVisible();
+    expect(screen.queryByText("bun run verify")).not.toBeVisible();
+    expect(screen.queryByText("Check the failing suite first.")).not.toBeVisible();
+
+    await user.click(screen.getByText("2 steps"));
+    expect(screen.getByText("bun run verify")).toBeVisible();
+    expect(screen.getByText("Bash")).toBeVisible();
+
+    await user.click(screen.getByText("Thinking"));
+    expect(screen.getByText("Check the failing suite first.")).toBeVisible();
+  });
+
+  it("renders no activity disclosure for a turn that reported none", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "assistant-plain",
+              role: "assistant",
+              text: "Done.",
+              operationId: "70000000-0000-4000-8000-000000000052" as never,
+              status: "completed",
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
+    expect(screen.queryByText(/steps?$/)).not.toBeInTheDocument();
+  });
+
+  it("lets the engine skip layout for transcript rows scrolled out of view", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(styles).toMatch(/\.code-thread-workspace__row\s*\{[^}]*content-visibility:\s*auto;/);
+    expect(styles).toMatch(/\.code-thread-workspace__row\s*\{[^}]*contain-intrinsic-size:/);
+  });
+
+  it("queues a follow-up written while a turn runs instead of blocking the composer", async () => {
+    const user = userEvent.setup();
+    const queueFollowUp = vi.fn(() => ({
+      id: "queued-1",
+      prompt: "and then push",
+      threadMentionIds: [],
+      attachments: [],
+    }));
+    const sendFollowUp = vi.fn(async () => true);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ queueFollowUp, sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    expect(composer).toBeEnabled();
+    await user.type(composer, "and then push");
+    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+
+    expect(queueFollowUp).toHaveBeenCalledWith("and then push", [], []);
+    expect(sendFollowUp).not.toHaveBeenCalled();
+    await waitFor(() => expect(composer).toHaveValue(""));
+  });
+
+  it("lists queued follow-ups in order and cancels one through the controller", async () => {
+    const user = userEvent.setup();
+    const cancelQueuedFollowUp = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          cancelQueuedFollowUp,
+          queuedFollowUps: [
+            { id: "queued-1", prompt: "run the tests", threadMentionIds: [], attachments: [] },
+            { id: "queued-2", prompt: "then open a PR", threadMentionIds: [], attachments: [] },
+          ],
+          turnStatus: "running",
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    const queue = screen.getByRole("list", { name: "Queued follow-ups" });
+    const entries = within(queue).getAllByRole("listitem");
+    expect(entries.map((entry) => entry.textContent)).toEqual([
+      "1run the tests",
+      "2then open a PR",
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Cancel queued follow-up 2" }));
+    expect(cancelQueuedFollowUp).toHaveBeenCalledWith("queued-2");
   });
 
   it("keeps loading and disconnected states honest", () => {
@@ -545,6 +1028,7 @@ function controller(
         title: "find bugs in this repo",
         lifecycle: "active",
         executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
         checkoutId: "20000000-0000-4000-8000-000000000002",
         providerInstanceId: providerId,
         modelId,
@@ -559,11 +1043,43 @@ function controller(
     pendingDraft: "",
     providerRequests: [],
     answerProviderRequest: vi.fn(async () => true),
+    cancelQueuedFollowUp: vi.fn(),
+    queueFollowUp: vi.fn(),
+    queuedFollowUps: [],
+    turnActivity: new Map(),
     sendFollowUp: vi.fn(async () => true),
     setPendingDraft: vi.fn(),
     status: "ready",
     turnStatus: "idle",
     retry: vi.fn(),
     ...overrides,
+  } as never;
+}
+
+/**
+ * Paste one PNG into the composer. jsdom has no real clipboard files, so the
+ * event carries the same shape a browser hands React.
+ */
+function pasteImage(composer: HTMLElement): void {
+  const file = new File([new Uint8Array([137, 80, 78])], "pasted.png", { type: "image/png" });
+  fireEvent.paste(composer, { clipboardData: { files: [file], items: [] } });
+}
+
+/** The bound provider group, with a model that reads text and nothing else. */
+function textOnlyProviderGroup(): PickerGroup {
+  const group = providerGroup();
+  return {
+    ...group,
+    sections: [
+      {
+        ...group.sections[0]!,
+        models: [
+          {
+            ...group.sections[0]!.models[0]!,
+            model: { ...group.sections[0]!.models[0]!.model, inputModalities: ["text"] },
+          },
+        ],
+      },
+    ],
   } as never;
 }

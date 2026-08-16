@@ -513,7 +513,7 @@ function codes(): CodeClient {
       async () => ({ version: 1, query: { version: 1 }, cards: [], generatedAt: now }) as never,
     ),
     conversation: vi.fn(async (threadId) => ({
-      version: 1 as const,
+      version: 2 as const,
       threadId,
       turns: [],
       nextCursor: 0,
@@ -524,6 +524,9 @@ function codes(): CodeClient {
     execute: vi.fn(),
     executeOperation: vi.fn(),
     inspectTerminal: vi.fn(),
+    putAttachment: vi.fn(),
+    discardAttachment: vi.fn(),
+    attachment: vi.fn(),
     putEvidence: vi.fn(),
     save: vi.fn(),
     openFile: vi.fn(),

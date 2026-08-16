@@ -5,6 +5,7 @@ import {
   CodeOperationEventFrame,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
   MAX_CODE_CONVERSATION_ASSISTANT_PARTS,
+  MAX_CODE_CONVERSATION_TURN_STEPS,
   CorrelationId,
   EventActor,
   EventId,
@@ -16,6 +17,7 @@ import {
   decodeCodeThreadId,
   type CodeOperationEvent,
   type CodeConversationPage,
+  type CodeConversationStep,
   type CodeConversationTurn,
   type CodeOperationId,
   type CodeThreadId,
@@ -379,6 +381,8 @@ export class CodeOperationEventStore {
             sessionId: frame.event.sessionId,
             prompt: frame.event.prompt,
             assistant: [],
+            steps: [],
+            stepsTruncated: false,
             status: "incomplete",
             startedAt: frame.occurredAt,
             updatedAt: frame.occurredAt,
@@ -394,6 +398,25 @@ export class CodeOperationEventStore {
           if (builder.assistant.length < MAX_CODE_CONVERSATION_ASSISTANT_PARTS) {
             builder.assistant.push(frame.event.content);
           }
+        } else if (frame.event.kind === "provider-content") {
+          appendStep(builder, { kind: "reasoning", content: frame.event.content });
+        } else if (frame.event.kind === "tool-activity") {
+          // One row per tool call: a later state for the same call replaces the
+          // earlier one instead of adding a step, exactly as the live
+          // transcript folds it.
+          const toolCallId = String(frame.event.toolCallId);
+          const existing = builder.steps.findIndex(
+            (step) => step.kind === "tool" && String(step.toolCallId) === toolCallId,
+          );
+          const step = {
+            kind: "tool" as const,
+            toolCallId: frame.event.toolCallId,
+            toolName: frame.event.toolName,
+            state: frame.event.state,
+            ...(frame.event.summary === undefined ? {} : { summary: frame.event.summary }),
+          };
+          if (existing === -1) appendStep(builder, step);
+          else builder.steps[existing] = step;
         } else if (frame.event.kind === "operation-state") {
           builder.status = conversationStatus(frame.event.state);
         } else if (frame.event.kind === "operation-result") {
@@ -408,9 +431,13 @@ export class CodeOperationEventStore {
     }
 
     return decodeCodeConversationPage({
-      version: 1,
+      version: 2,
       threadId,
-      turns: turns.map(({ startCursor: _startCursor, ...turn }) => turn),
+      turns: turns.map(({ startCursor: _startCursor, steps, stepsTruncated, ...turn }) => ({
+        ...turn,
+        ...(steps.length === 0 ? {} : { steps }),
+        ...(stepsTruncated ? { stepsTruncated: true } : {}),
+      })),
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,
     });
@@ -425,10 +452,20 @@ type CodeConversationBuilder = {
   sessionId: CodeConversationTurn["sessionId"];
   prompt: CodeConversationTurn["prompt"];
   assistant: Array<CodeConversationTurn["assistant"][number]>;
+  steps: Array<CodeConversationStep>;
+  stepsTruncated: boolean;
   status: CodeConversationTurn["status"];
   startedAt: CodeConversationTurn["startedAt"];
   updatedAt: CodeConversationTurn["updatedAt"];
 };
+
+function appendStep(builder: CodeConversationBuilder, step: CodeConversationStep): void {
+  if (builder.steps.length >= MAX_CODE_CONVERSATION_TURN_STEPS) {
+    builder.stepsTruncated = true;
+    return;
+  }
+  builder.steps.push(step);
+}
 
 function conversationStatus(
   state: "running" | "waiting" | "completed" | "interrupted" | "failed",

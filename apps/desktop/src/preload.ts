@@ -4,6 +4,8 @@ import type { CodeApprovalId, CodeOperationApprovalRequest } from "@octant/contr
 export const HOST_BRIDGE_KEY = "octantHost";
 
 export const IPC_CHANNELS = {
+  attentionBadge: "octant:attention:badge",
+  attentionNotify: "octant:attention:notify",
   browserSurfaceAttach: "octant:browser-surface:attach",
   browserSurfaceBounds: "octant:browser-surface:bounds",
   browserSurfaceCommand: "octant:browser-surface:command",
@@ -227,7 +229,17 @@ export interface ContextBridgePort {
   readonly exposeInMainWorld: (key: string, value: unknown) => void;
 }
 
+export type AttentionReason = "turn-finished" | "approval-required" | "question-asked";
+
+export interface AttentionNotificationBridgeRequest {
+  readonly reason: AttentionReason;
+  readonly threadTitle: string;
+  readonly detail?: string;
+}
+
 export interface OctantHostBridge {
+  readonly notifyAttention: (request: AttentionNotificationBridgeRequest) => Promise<void>;
+  readonly setAttentionBadge: (count: number) => Promise<void>;
   readonly attachBrowserSurface: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
@@ -323,6 +335,20 @@ export function createHostBridge(
             threadId: initialProjectTarget.threadId,
           });
   return Object.freeze({
+    notifyAttention: (request: AttentionNotificationBridgeRequest) => {
+      try {
+        validateAttentionNotificationRequest(request);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      return invoke(IPC_CHANNELS.attentionNotify, request);
+    },
+    setAttentionBadge: (count: number) => {
+      if (typeof count !== "number" || !Number.isFinite(count)) {
+        return Promise.reject(new TypeError("Invalid attention badge count."));
+      }
+      return invoke(IPC_CHANNELS.attentionBadge, count);
+    },
     attachBrowserSurface: async (request: BrowserSurfaceRequest) => {
       validateBrowserSurfaceRequest(request);
       return decodeBrowserSurfaceState(
@@ -971,6 +997,20 @@ function decodeLocalPluginFolderPickerResult(value: unknown): LocalPluginFolderP
     });
   }
   throw new TypeError("Invalid local plugin folder picker result.");
+}
+
+function validateAttentionNotificationRequest(value: unknown): void {
+  if (!isRecord(value)) throw new TypeError("Invalid attention notification request.");
+  if (
+    (value.reason !== "turn-finished" &&
+      value.reason !== "approval-required" &&
+      value.reason !== "question-asked") ||
+    typeof value.threadTitle !== "string" ||
+    value.threadTitle.trim() === "" ||
+    (value.detail !== undefined && typeof value.detail !== "string")
+  ) {
+    throw new TypeError("Invalid attention notification request.");
+  }
 }
 
 function validateBrowserSurfaceIdentity(value: unknown): asserts value is {

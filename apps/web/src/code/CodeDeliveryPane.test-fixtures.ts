@@ -22,7 +22,7 @@ export function codeClient(options: { readonly evidence?: string } = {}): CodeCl
     bootstrap: vi.fn(),
     queryBoard: vi.fn(),
     conversation: vi.fn(async (threadId) => ({
-      version: 1 as const,
+      version: 2 as const,
       threadId,
       turns: [],
       nextCursor: 0,
@@ -41,6 +41,9 @@ export function codeClient(options: { readonly evidence?: string } = {}): CodeCl
     operationContent: vi.fn(async () =>
       new TextEncoder().encode(options.evidence ?? "authoritative evidence"),
     ),
+    putAttachment: vi.fn(),
+    discardAttachment: vi.fn(),
+    attachment: vi.fn(),
     putEvidence: vi.fn(async () => ({
       contentId: ids.content as never,
       digest: "a".repeat(64),

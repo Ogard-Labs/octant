@@ -498,6 +498,15 @@ function renderTab(
           onOpenSurface={(kind) =>
             props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))
           }
+          {...(props.onOpenCodeFile === undefined
+            ? {}
+            : {
+                onOpenFile: (relativePath: string) =>
+                  props.onOpenCodeFile?.({
+                    threadId: tab.threadId,
+                    relativePath: relativePath as never,
+                  }),
+              })}
           tab={tab}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
           {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined

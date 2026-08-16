@@ -281,7 +281,7 @@ describe("Code routes", () => {
 
   it("reads a versioned paginated conversation through authenticated thread authority", async () => {
     const conversation = vi.fn(async () => ({
-      version: 1,
+      version: 2,
       threadId,
       turns: [],
       nextCursor: 41,
@@ -295,7 +295,7 @@ describe("Code routes", () => {
 
     expect(response?.status).toBe(200);
     await expect(response?.json()).resolves.toEqual({
-      version: 1,
+      version: 2,
       threadId,
       turns: [],
       nextCursor: 41,
@@ -377,6 +377,33 @@ describe("Code routes", () => {
     );
     expect(new Uint8Array(await response!.arrayBuffer())).toEqual(bytes);
     expect(readContent).toHaveBeenCalledWith(windowId, contentId);
+  });
+
+  it("discards a pending attachment by thread and attachment identity alone", async () => {
+    const discardAttachment = vi.fn(async () => undefined);
+    const route = routeFixture({
+      discardAttachment,
+      readAttachment: vi.fn(),
+      stageAttachment: vi.fn(),
+    });
+    const attachmentId = "00000000-0000-4000-8000-000000000910";
+
+    const response = await route(
+      request(`/api/code/attachments?thread=${threadId}&attachment=${attachmentId}`, {
+        method: "DELETE",
+        headers: { origin: "http://127.0.0.1:5181" },
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(discardAttachment).toHaveBeenCalledWith(windowId, threadId, attachmentId);
+    // Reads still require the digest-pinned identity.
+    const read = await route(
+      request(`/api/code/attachments?thread=${threadId}&attachment=${attachmentId}`, {
+        headers: { origin: "http://127.0.0.1:5181" },
+      }),
+    );
+    expect(read?.status).toBe(400);
   });
 
   it("returns operation evidence only through its thread and operation authority scope", async () => {
