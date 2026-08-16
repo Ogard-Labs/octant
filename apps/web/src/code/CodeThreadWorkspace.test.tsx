@@ -188,6 +188,42 @@ describe("CodeThreadWorkspace", () => {
     expect(discardAttachment).not.toHaveBeenCalled();
   });
 
+  it("keeps the image chips when the host refuses the send so the turn can be retried", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => false);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000003",
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "c".repeat(64),
+    };
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          {
+            putAttachment: vi.fn(async () => reference),
+            discardAttachment: vi.fn(),
+            attachment: vi.fn(),
+          } as never
+        }
+        controller={controller({ sendFollowUp })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "match this mockup");
+    pasteImage(composer);
+    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(sendFollowUp).toHaveBeenCalledWith("match this mockup", [], [reference]);
+    // The refused turn leaves both the text and its image in the composer.
+    expect(screen.getByAltText("pasted.png")).toBeInTheDocument();
+    expect(composer).toHaveValue("match this mockup");
+  });
+
   it("says a text-only model cannot take the image instead of uploading it", async () => {
     const user = userEvent.setup();
     const putAttachment = vi.fn();

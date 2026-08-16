@@ -27,6 +27,8 @@ export interface CodeAttachments {
   /** Refuse an attachment the composer itself knows this turn cannot carry. */
   readonly refuse: (message: string) => void;
   readonly remove: (attachmentId: CodeAttachmentId) => void;
+  /** The references a send would carry right now, without clearing the chips. */
+  readonly peekForSend: () => ReadonlyArray<CodeAttachmentReference>;
   /** Hand this turn's images over and clear the chips. */
   readonly takeForSend: () => ReadonlyArray<CodeAttachmentReference>;
 }
@@ -152,6 +154,11 @@ export function useCodeAttachments(input: {
     [apply, client, forget, threadId],
   );
 
+  const peekForSend = useCallback(
+    (): ReadonlyArray<CodeAttachmentReference> => current.current.map((entry) => entry.reference),
+    [],
+  );
+
   const takeForSend = useCallback((): ReadonlyArray<CodeAttachmentReference> => {
     const taken = current.current.map((entry) => entry.reference);
     apply((list) => {
@@ -162,5 +169,5 @@ export function useCodeAttachments(input: {
     return taken;
   }, [apply, forget]);
 
-  return { staged, message, busy, attach, refuse: setMessage, remove, takeForSend };
+  return { staged, message, busy, attach, refuse: setMessage, remove, peekForSend, takeForSend };
 }

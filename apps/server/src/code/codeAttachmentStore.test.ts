@@ -4,12 +4,17 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   MAX_CODE_ATTACHMENT_BYTES,
+  MAX_CODE_TURN_ATTACHMENTS,
   decodeCodeAttachmentId,
   decodeCodeThreadId,
   type CodeAttachmentId,
   type CodeThreadId,
 } from "@octant/contracts";
-import { CodeAttachmentStore, CodeAttachmentTooLarge } from "./codeAttachmentStore";
+import {
+  CodeAttachmentInvalid,
+  CodeAttachmentStore,
+  CodeAttachmentTooLarge,
+} from "./codeAttachmentStore";
 
 let root: string;
 let store: CodeAttachmentStore;
@@ -97,5 +102,26 @@ describe("CodeAttachmentStore", () => {
     await store.discard(thread, id);
     expect(store.peek(thread, [id])).toEqual({ status: "unknown", attachmentId: id });
     await expect(store.read(thread, reference)).rejects.toThrow();
+  });
+
+  it("holds the per-thread staging bound against concurrent uploads", async () => {
+    const thread = threadId(5);
+    const limit = MAX_CODE_TURN_ATTACHMENTS * 2;
+    const uploads = Array.from({ length: limit + 3 }, (_, index) =>
+      store.stage({
+        threadId: thread,
+        attachmentId: attachmentId(100 + index),
+        displayName: `shot-${index}.png`,
+        mediaType: "image/png",
+        bytes: new Uint8Array([index]),
+      }),
+    );
+    const settled = await Promise.allSettled(uploads);
+    const accepted = settled.filter((result) => result.status === "fulfilled");
+    const refused = settled.filter(
+      (result) => result.status === "rejected" && result.reason instanceof CodeAttachmentInvalid,
+    );
+    expect(accepted).toHaveLength(limit);
+    expect(refused).toHaveLength(3);
   });
 });
