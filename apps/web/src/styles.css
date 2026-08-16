@@ -5243,6 +5243,42 @@ dialog.project-dialog {
   gap: 8px;
 }
 
+.code-thread-workspace__queue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.code-thread-workspace__queue-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 8px;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 6px;
+  background: var(--octant-surface-raised);
+  font-size: 12px;
+}
+
+.code-thread-workspace__queue-position {
+  flex: none;
+  min-width: 16px;
+  color: var(--octant-text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.code-thread-workspace__queue-prompt {
+  flex: 1;
+  overflow: hidden;
+  color: var(--octant-text-primary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .code-thread-workspace__input {
   flex: 1;
   width: auto;
