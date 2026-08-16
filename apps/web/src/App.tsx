@@ -2173,6 +2173,16 @@ function LaunchedShell(
     await controller.openDraftThread(project.type, project.id);
   }
 
+  // The sidebar's "New thread" starts in the highlighted Project when there
+  // is one; the composer still lets the user switch to no folder.
+  function openDraftInActiveProject(mode: "work" | "code") {
+    const project = projectController.activeProject;
+    void controller.openDraftThread(
+      mode,
+      project?.type === mode && project.lifecycle === "active" ? project.id : undefined,
+    );
+  }
+
   function createChat(prompt?: string) {
     if (prompt === undefined || prompt.trim() === "") {
       void controller.openDraftThread("chat");
@@ -3164,7 +3174,7 @@ function LaunchedShell(
               ? {
                   codeNavigation: {
                     actions: {
-                      "new-code-thread": () => void controller.openDraftThread("code"),
+                      "new-code-thread": () => openDraftInActiveProject("code"),
                       automations: openAutomationCenter,
                       plugins: openSkillsSettings,
                       "thread-board": () => {
@@ -3185,7 +3195,7 @@ function LaunchedShell(
               ? {
                   workNavigation: {
                     actions: {
-                      "new-work-thread": () => void controller.openDraftThread("work"),
+                      "new-work-thread": () => openDraftInActiveProject("work"),
                       automations: openAutomationCenter,
                       plugins: openSkillsSettings,
                       "thread-board": () =>
@@ -3257,6 +3267,7 @@ function LaunchedShell(
                         onAddProject: () => setCreateOpen(true),
                         rootlessLabel: "Recents" as const,
                       })}
+                  onArchive={(projectId) => void projectController.setArchived(projectId, true)}
                   onMove={(projectId, pinned) => void projectController.move(projectId, pinned)}
                   {...(activeMode === "chat"
                     ? {
