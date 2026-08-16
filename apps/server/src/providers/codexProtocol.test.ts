@@ -310,6 +310,70 @@ describe("Codex stable 0.144.4 protocol", () => {
     });
   });
 
+  it("decodes web search lifecycle items and keeps only the query", () => {
+    expect(
+      decodeCodexServerMessage({
+        method: "item/completed",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "webSearch",
+            id: "exec-1",
+            query: "Stavanger weather tomorrow",
+            action: { type: "search", query: "Stavanger weather tomorrow" },
+            results: [{ title: "Forecast", url: "https://example.invalid" }],
+          },
+          completedAtMs: 30,
+        },
+      }),
+    ).toEqual({
+      kind: "notification",
+      method: "item/completed",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "webSearch", id: "exec-1", query: "Stavanger weather tomorrow" },
+        completedAtMs: 30,
+      },
+    });
+  });
+
+  it("decodes item types Octant does not model as opaque items instead of failing the connection", () => {
+    expect(
+      decodeCodexServerMessage({
+        method: "item/started",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { type: "imageView", id: "item-9", path: "/private/shot.png" },
+          startedAtMs: 10,
+        },
+      }),
+    ).toEqual({
+      kind: "notification",
+      method: "item/started",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "imageView", id: "item-9" },
+        startedAtMs: 10,
+      },
+    });
+    // Known item types keep their strict shape.
+    expect(() =>
+      decodeCodexServerMessage({
+        method: "item/started",
+        params: {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: { type: "commandExecution", id: "item-2" },
+          startedAtMs: 10,
+        },
+      }),
+    ).toThrow();
+  });
+
   it("decodes stable user-message and compaction lifecycle metadata without content", () => {
     const items = [
       {

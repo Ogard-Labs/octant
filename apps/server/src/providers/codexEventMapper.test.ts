@@ -413,6 +413,70 @@ describe("mapCodexMessage", () => {
     expect(JSON.stringify(results)).not.toMatch(/raw command|raw output|provider-command/);
   });
 
+  it("maps a web search item as a visible tool step and completes it with the query", () => {
+    const ctx = context();
+    const started = map(
+      ctx,
+      notification("item/started", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "webSearch" as const, id: "exec-1", query: "" },
+        startedAtMs: 10,
+      }),
+    );
+    expect(started).toMatchObject([
+      {
+        kind: "event",
+        event: { kind: "tool-start", toolCallId: "tool-1", toolName: "Web search" },
+      },
+      { kind: "event", event: { kind: "tool-progress", toolCallId: "tool-1" } },
+    ]);
+
+    const completed = map(
+      ctx,
+      notification("item/completed", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "webSearch" as const, id: "exec-1", query: "Stavanger weather tomorrow" },
+        completedAtMs: 20,
+      }),
+    );
+    expect(completed).toMatchObject([
+      {
+        kind: "event",
+        event: {
+          kind: "tool-success",
+          toolCallId: "tool-1",
+          summary: "Searched: Stavanger weather tomorrow",
+        },
+      },
+    ]);
+
+    // The turn may then complete normally: the search is no longer an active tool.
+    expect(
+      map(
+        ctx,
+        notification("turn/completed", {
+          threadId: "thread-1",
+          turn: { id: "turn-1", status: "completed" as const },
+        }),
+      ),
+    ).toMatchObject([{ kind: "event", event: { kind: "completed" } }]);
+  });
+
+  it("ignores item types Octant does not model instead of failing the turn", () => {
+    const results = map(
+      context(),
+      notification("item/started", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        item: { type: "imageView", id: "item-9" } as never,
+        startedAtMs: 10,
+      }),
+    );
+    expect(results).toEqual([{ kind: "ignored" }]);
+  });
+
   it.each([
     {
       item: {
