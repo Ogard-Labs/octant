@@ -31,6 +31,7 @@ const ROLES: ReadonlyArray<AgentRunRole> = ["research"];
 const EXECUTION_POLICIES: ReadonlyArray<ProviderExecutionPolicy> = [
   "plan",
   "approval-gated",
+  "auto-accept-edits",
   "full-access",
 ];
 

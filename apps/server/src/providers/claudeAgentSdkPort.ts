@@ -425,7 +425,12 @@ function isExactPathTuple(value: unknown, expected: string): boolean {
 
 function hasValidSandbox(input: ClaudeOpenQueryInput): boolean {
   try {
-    if (input.executionPolicy !== "approval-gated") return input.sandbox === undefined;
+    if (
+      input.executionPolicy !== "approval-gated" &&
+      input.executionPolicy !== "auto-accept-edits"
+    ) {
+      return input.sandbox === undefined;
+    }
     if (!hasExactKeys(input.sandbox, SANDBOX_KEYS)) return false;
     if (
       input.sandbox.enabled !== true ||

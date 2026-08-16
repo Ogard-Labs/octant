@@ -411,6 +411,7 @@ import {
   assertHostRoutable,
   authorizeCanvasInventoryAccess,
   chatAttemptAnswered,
+  decidesCodeEffectsByApproval,
   defaultAgentRunAuthorityCeilingForMode,
   defaultShellSettings,
   formatThreadMentionContext,
@@ -2616,7 +2617,7 @@ export function startOctantServer(
           ? true
           : effectiveThread.executionPolicy === "full-access"
             ? true
-            : effectiveThread.executionPolicy === "approval-gated"
+            : decidesCodeEffectsByApproval(effectiveThread.executionPolicy)
               ? ((await codeOperationRuntime?.validateAppleApproval(windowId, envelope.request)) ??
                 false)
               : false;

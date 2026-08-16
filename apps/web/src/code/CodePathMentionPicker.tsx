@@ -47,9 +47,7 @@ export interface CodePathMentionsController {
  * from the host's own confined listing for this checkout, so the picker names
  * files the thread is already bound to and grants nothing by naming them.
  */
-export function useCodePathMentions(
-  options: CodePathMentionsOptions,
-): CodePathMentionsController {
+export function useCodePathMentions(options: CodePathMentionsOptions): CodePathMentionsController {
   const [mention, setMention] = useState<PathMentionQuery | undefined>(undefined);
   const [activeIndex, setActiveIndex] = useState(0);
   // Latched rather than tracking `mention`, so closing and reopening the

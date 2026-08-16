@@ -33,15 +33,21 @@ describe("CodeDiffPane", () => {
     expect(code.content).not.toHaveBeenCalled();
 
     // Both sides come from the host's own diff evidence; nothing is refetched.
-    await waitFor(() => expect(fixture.options?.original).toBe("const answer = 41;\nexport { answer };"));
+    await waitFor(() =>
+      expect(fixture.options?.original).toBe("const answer = 41;\nexport { answer };"),
+    );
     expect(fixture.options?.modified).toBe("const answer = 42;\nexport { answer };");
-    expect(fixture.options?.modelUriBase).toContain(`octant-code://${ids.checkout}/diff/${ids.content}`);
+    expect(fixture.options?.modelUriBase).toContain(
+      `octant-code://${ids.checkout}/diff/${ids.content}`,
+    );
     expect(fixture.options?.modelUriBase).not.toContain("/Users/");
     expect(screen.queryByText(/incomplete/i)).not.toBeInTheDocument();
   });
 
   it("lists every changed file with its change kind and line counts", async () => {
-    render(<CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />);
+    render(
+      <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
+    );
 
     const files = await screen.findByRole("navigation", { name: "Changed files" });
     const entries = within(files).getAllByRole("button");
@@ -91,7 +97,9 @@ describe("CodeDiffPane", () => {
   });
 
   it("offers no editor handoff when no editor is bound", async () => {
-    render(<CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />);
+    render(
+      <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
+    );
     expect(await screen.findByRole("heading", { name: "Checkout changes" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open in editor" })).not.toBeInTheDocument();
   });

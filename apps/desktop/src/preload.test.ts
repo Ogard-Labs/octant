@@ -260,9 +260,9 @@ describe("desktop preload bridge", () => {
     await expect(
       bridge.notifyAttention({ reason: "shipped" as never, threadTitle: "Diff pane" }),
     ).rejects.toThrow(TypeError);
-    await expect(bridge.notifyAttention({ reason: "turn-finished", threadTitle: " " })).rejects.toThrow(
-      TypeError,
-    );
+    await expect(
+      bridge.notifyAttention({ reason: "turn-finished", threadTitle: " " }),
+    ).rejects.toThrow(TypeError);
     await expect(bridge.setAttentionBadge(Number.NaN)).rejects.toThrow(TypeError);
     expect(invoke).not.toHaveBeenCalled();
   });

@@ -10,10 +10,7 @@ export interface ThreadAttentionSources {
   readonly activeCodeThreadId?: string;
 }
 
-function codeThreadTitle(
-  sources: ThreadAttentionSources,
-  threadId: string,
-): string | undefined {
+function codeThreadTitle(sources: ThreadAttentionSources, threadId: string): string | undefined {
   return sources.codeThreads.find((thread) => String(thread.threadId) === threadId)?.title;
 }
 

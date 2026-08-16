@@ -47,6 +47,24 @@ describe("Code authority policy", () => {
     }
   });
 
+  it("auto-accepts only edits and still prompts for every other mutation", () => {
+    for (const actor of actors) {
+      expect(decision(actor, "auto-accept-edits", "read")).toBe("allow");
+      expect(decision(actor, "auto-accept-edits", "edit")).toBe("allow");
+      for (const operation of [
+        "terminal",
+        "test",
+        "stage",
+        "commit",
+        "push",
+        "create-pr",
+        "merge-pr",
+      ] as const) {
+        expect(decision(actor, "auto-accept-edits", operation)).toBe("prompt");
+      }
+    }
+  });
+
   it("prompts for ordinary approval-gated mutations and allows them in Full access", () => {
     for (const actor of actors) {
       for (const operation of [

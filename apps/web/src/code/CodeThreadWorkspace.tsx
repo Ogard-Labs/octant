@@ -1,4 +1,5 @@
-import type { CodeThreadId } from "@octant/contracts/code";
+import type { CodeApprovalId, CodeThreadId } from "@octant/contracts/code";
+import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import type { PickerGroup } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
@@ -24,6 +25,7 @@ import {
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
+import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 
 export interface CodeThreadWorkspaceProps {
@@ -45,6 +47,17 @@ export interface CodeThreadWorkspaceProps {
   readonly threadMentionClient?: ThreadMentionClient;
   /** Lists this checkout's files for `@path` mentions. */
   readonly fileListingClient?: CodeFileListingClient;
+  /**
+   * Raises the host's native Full access confirmation. Absent on a host that
+   * cannot raise one, which keeps Full access out of reach rather than letting
+   * the composer ask for a change the host would refuse.
+   */
+  readonly requestFullAccessApproval?: (effect: {
+    readonly kind: "change-thread-full-access";
+    readonly threadId: CodeThreadId;
+    readonly expectedVersion: number;
+    readonly permissionPersistence: "current-session" | "project-default";
+  }) => Promise<CodeApprovalId | undefined>;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -60,6 +73,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       : undefined;
   const [draft, setDraft] = useState(props.controller.pendingDraft);
   const [providerChanging, setProviderChanging] = useState(false);
+  const [accessChanging, setAccessChanging] = useState(false);
+  const [accessMessage, setAccessMessage] = useState<string>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [auxiliarySurface, setAuxiliarySurface] = useState<"agents">();
 
@@ -190,6 +205,46 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     void submitFollowUp();
   }
 
+  /**
+   * Move the thread to another access posture mid-thread.
+   *
+   * Lowering access is the user's word alone; raising it to Full access is
+   * not. The host demands a native confirmation for that effect, so the
+   * composer collects one first and hands the receipt to the same
+   * authoritative command — it never elevates on the renderer's say-so, and a
+   * declined confirmation leaves the thread exactly where it was.
+   */
+  async function changeAccess(next: ProviderExecutionPolicy) {
+    if (next === thread.executionPolicy) return;
+    setAccessMessage(undefined);
+    let approvalId: CodeApprovalId | undefined;
+    if (next === "full-access") {
+      approvalId = await props.requestFullAccessApproval?.({
+        kind: "change-thread-full-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        permissionPersistence: thread.permissionPersistence,
+      });
+      if (approvalId === undefined) {
+        setAccessMessage("Full access was not confirmed. This thread keeps its current access.");
+        return;
+      }
+    }
+    setAccessChanging(true);
+    try {
+      await props.controller.execute({
+        kind: "change-code-thread-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        executionPolicy: next,
+        permissionPersistence: thread.permissionPersistence,
+        ...(approvalId === undefined ? {} : { approvalId }),
+      });
+    } finally {
+      setAccessChanging(false);
+    }
+  }
+
   async function changeProvider(selection: {
     readonly providerInstanceId: typeof thread.providerInstanceId;
     readonly modelId: typeof thread.modelId;
@@ -224,7 +279,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {lifecycleLabel(thread.lifecycle)}
             </span>
             <span>{headLabel(checkout.head)}</span>
-            <span>{policyLabel(thread.executionPolicy)}</span>
           </div>
           <div
             aria-label="Follow-up"
@@ -567,6 +621,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               selectedModelId={thread.modelId}
               selectedProviderInstanceId={thread.providerInstanceId}
             />
+            <CodeAccessPicker
+              disabled={accessChanging}
+              executionPolicy={thread.executionPolicy}
+              nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
+              onSelect={(next) => void changeAccess(next)}
+            />
             <span className="code-thread-workspace__hint">
               {providerChanging
                 ? "Checking the selected provider…"
@@ -574,6 +634,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   ? "Waiting for the provider · Enter queues the next message"
                   : "Enter to send · Shift+Enter for a new line"}
             </span>
+            {accessMessage === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="status">
+                {accessMessage}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -647,17 +712,6 @@ function lifecycleLabel(lifecycle: string): string {
       return "Archived";
     default:
       return lifecycle;
-  }
-}
-
-function policyLabel(policy: string): string {
-  switch (policy) {
-    case "plan":
-      return "Plan · read-only";
-    case "full-access":
-      return "Full access";
-    default:
-      return "Approval gated";
   }
 }
 

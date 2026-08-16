@@ -579,7 +579,11 @@ describe("useCodeController", () => {
       };
     }
     const client = fakeClient({
-      putEvidence: vi.fn(async () => ({ contentId, digest: "a".repeat(64), byteLength: 4 })) as never,
+      putEvidence: vi.fn(async () => ({
+        contentId,
+        digest: "a".repeat(64),
+        byteLength: 4,
+      })) as never,
       executeOperation: vi.fn(async () => ({
         kind: "provider-turn-state",
         operationId,
@@ -607,7 +611,13 @@ describe("useCodeController", () => {
     // The tool row reflects the last state the host reported, not one row per
     // state change, and reasoning stays out of the assistant message text.
     expect(activity?.rows).toEqual([
-      { kind: "tool", id: "call-1", toolName: "Bash", state: "completed", summary: "bun run verify" },
+      {
+        kind: "tool",
+        id: "call-1",
+        toolName: "Bash",
+        state: "completed",
+        summary: "bun run verify",
+      },
     ]);
     expect(activity?.reasoning).toBe("plan.");
     expect(

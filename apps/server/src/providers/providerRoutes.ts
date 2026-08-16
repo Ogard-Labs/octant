@@ -248,6 +248,7 @@ function decodePackagedSmokeTurn(value: unknown) {
     (value.executionPolicy !== undefined &&
       value.executionPolicy !== "plan" &&
       value.executionPolicy !== "approval-gated" &&
+      value.executionPolicy !== "auto-accept-edits" &&
       value.executionPolicy !== "full-access")
   ) {
     throw new Error("invalid");

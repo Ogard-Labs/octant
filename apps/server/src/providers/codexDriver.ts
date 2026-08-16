@@ -191,7 +191,9 @@ export function codexExecutionSettings(
   if (policy === "full-access") {
     return { approvalPolicy: "never", sandbox: "danger-full-access" };
   }
-  if (policy === "approval-gated") {
+  if (policy === "approval-gated" || policy === "auto-accept-edits") {
+    // Codex confines writes to the workspace either way; which of those writes
+    // Octant asks about is decided by Octant's own gate, not by this mapping.
     return { approvalPolicy: "on-request", sandbox: "workspace-write" };
   }
   return { approvalPolicy: "never", sandbox: "read-only" };

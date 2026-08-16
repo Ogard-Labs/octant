@@ -11,6 +11,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSessionId,
 } from "@octant/contracts";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
   rejectUnsupportedChatTurn,
@@ -391,7 +392,7 @@ function makeConnection(
           void state.client.respondToUi(uiId, { confirmed: false });
           return protocolFailure(state, "Pi approval correlation was invalid.");
         }
-        if (state.executionPolicy !== "approval-gated") {
+        if (!decidesCodeEffectsByApproval(state.executionPolicy)) {
           void state.client.respondToUi(uiId, { confirmed: false });
           return;
         }
@@ -604,7 +605,7 @@ function makeConnection(
               return Effect.fail(failure("protocol", "Pi approval request is not pending."));
             }
             state.approvals.delete(input.requestId);
-            if (state.executionPolicy !== "approval-gated" && input.approved) {
+            if (!decidesCodeEffectsByApproval(state.executionPolicy) && input.approved) {
               return request(() =>
                 state.client.respondToUi(pending.uiId, { confirmed: false }),
               ).pipe(

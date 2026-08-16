@@ -8,6 +8,8 @@ import type {
   CodePullRequestReviewSection,
 } from "@octant/contracts/code-operations";
 import type { CodeApprovalId } from "@octant/contracts/code";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -35,7 +37,7 @@ const CHECK_STATE_LABELS: Record<CodePullRequestReviewObserved["checks"][number]
 export interface CodePullRequestPaneProps {
   readonly client: Pick<CodeClient, "executeOperation" | "operationContent">;
   readonly createOperationId: () => CodeOperationId;
-  readonly executionPolicy: "plan" | "approval-gated" | "full-access";
+  readonly executionPolicy: ProviderExecutionPolicy;
   readonly idempotencyKey: string;
   readonly requestApproval?: (
     command: Parameters<CodeClient["executeOperation"]>[0],
@@ -353,11 +355,10 @@ function CreatePullRequest(
         authorization: { kind: "full-access" },
         ...props.scope,
       } as const;
-      const approvalId =
-        props.executionPolicy === "approval-gated"
-          ? await props.requestApproval?.(command)
-          : undefined;
-      if (props.executionPolicy === "approval-gated" && approvalId === undefined) return;
+      const approvalId = decidesCodeEffectsByApproval(props.executionPolicy)
+        ? await props.requestApproval?.(command)
+        : undefined;
+      if (decidesCodeEffectsByApproval(props.executionPolicy) && approvalId === undefined) return;
       const next = await props.client.executeOperation({
         ...command,
         authorization:

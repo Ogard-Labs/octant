@@ -36,6 +36,7 @@ import { GitMutationPort } from "./gitMutationPort";
 import { GitObservationPort, type GitObservationResult } from "./gitObservationPort";
 import { GitService } from "./gitService";
 import { CodeOperationEventStore } from "./codeOperationEventStore";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import {
   approvalContextDigest,
   CodeOperationApprovalStore,
@@ -328,7 +329,7 @@ export function createCodeOperationRuntime(
           thread.checkoutId !== checkout.id ||
           thread.repositoryId !== checkout.repositoryId ||
           thread.lifecycle !== "active" ||
-          thread.executionPolicy !== "approval-gated" ||
+          !decidesCodeEffectsByApproval(thread.executionPolicy) ||
           checkout.availability !== "available" ||
           !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
         ) {
@@ -540,7 +541,7 @@ async function resolveAppleApprovalScope(
     thread.projectId !== request.authority.projectId ||
     thread.providerInstanceId !== request.authority.providerInstanceId ||
     thread.lifecycle !== "active" ||
-    thread.executionPolicy !== "approval-gated" ||
+    !decidesCodeEffectsByApproval(thread.executionPolicy) ||
     checkout.availability !== "available" ||
     request.authority.mode !== "code" ||
     request.authority.extension.kind !== "core" ||

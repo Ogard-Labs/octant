@@ -71,6 +71,7 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
           value={executionPolicy}
         >
           <option value="approval-gated">Ask for approvals</option>
+          <option value="auto-accept-edits">Auto-accept edits</option>
           <option value="plan">Plan mode (read-only)</option>
           <option value="full-access">Full access</option>
         </OctantNativeSelect>

@@ -79,9 +79,22 @@ export function approvalClassForCodeOperation(
   }
 }
 
+/**
+ * Whether this posture decides gated Code effects by explicit approval.
+ *
+ * Auto-accept edits changes how one class is decided — project file writes —
+ * and nothing else, so every surface that asks "does this effect need an
+ * approval receipt?" must treat it exactly as it treats approval-gated. Asking
+ * that question by equality against `"approval-gated"` is what would silently
+ * let the new posture through an approval gate.
+ */
+export function decidesCodeEffectsByApproval(posture: ProviderExecutionPolicy): boolean {
+  return posture === "approval-gated" || posture === "auto-accept-edits";
+}
+
 function standingGrantForPosture(posture: ProviderExecutionPolicy): StandingApprovalGrant {
   if (posture === "full-access") return "remembered-full-access";
-  if (posture === "approval-gated") return "session";
+  if (posture === "approval-gated" || posture === "auto-accept-edits") return "session";
   return "none";
 }
 
@@ -138,7 +151,12 @@ function authorizeCodeOperationBase(input: CodePolicyInput): CodePolicyDecision 
   if (input.operation === "read") return { decision: "allow" };
   if (input.posture === "plan") return { decision: "deny" };
   if (input.initiator === "user" && input.operation === "edit") return { decision: "allow" };
-  return { decision: input.posture === "approval-gated" ? "prompt" : "allow" };
+  // Auto-accept edits covers project file writes and nothing else: shell,
+  // tests, and every Git effect keep prompting exactly as approval-gated does.
+  if (input.posture === "auto-accept-edits" && input.operation === "edit") {
+    return { decision: "allow" };
+  }
+  return { decision: input.posture === "full-access" ? "allow" : "prompt" };
 }
 
 /**

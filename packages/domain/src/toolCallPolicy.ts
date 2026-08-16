@@ -224,9 +224,9 @@ export function resolveToolCall(input: ToolCallPolicyInput): ToolCallPolicyDecis
 
 /**
  * Approved egress defaults (2026-08-12): Work/Plan → none; Code approval-gated
- * → provider-endpoints-only; Code full-access → unrestricted. Seatbelt materialization
- * is owned by the shared Seatbelt builder; this resolution is the policy
- * choke-point export.
+ * and auto-accept-edits → provider-endpoints-only; Code full-access →
+ * unrestricted. Seatbelt materialization is owned by the shared Seatbelt
+ * builder; this resolution is the policy choke-point export.
  */
 export function resolveNetworkEgressPolicy(input: {
   readonly mode: ToolActionAuthority["mode"];
@@ -234,7 +234,11 @@ export function resolveNetworkEgressPolicy(input: {
 }): ToolNetworkEgressPolicy {
   if (input.mode !== "code") return "none";
   if (input.executionPolicy === "plan") return "none";
-  if (input.executionPolicy === "approval-gated") return "provider-endpoints-only";
+  // Auto-accepting edits says nothing about the network, so it keeps exactly
+  // the egress approval-gated Code already has.
+  if (input.executionPolicy === "approval-gated" || input.executionPolicy === "auto-accept-edits") {
+    return "provider-endpoints-only";
+  }
   return "unrestricted";
 }
 
@@ -285,7 +289,20 @@ function resolveThreadElevation(input: {
     return { kind: "prompt", reason: "taint-requires-fresh-confirmation" };
   }
 
-  if (input.executionPolicy === "approval-gated" && !input.approvalSatisfied) {
+  if (
+    input.executionPolicy === "auto-accept-edits" &&
+    !input.approvalSatisfied &&
+    input.entry.approvalClass === "project-file-writes"
+  ) {
+    // The one class this posture decides without asking. Every other class
+    // below is decided exactly as it would be under approval-gated.
+    return { kind: "allow" };
+  }
+
+  if (
+    (input.executionPolicy === "approval-gated" || input.executionPolicy === "auto-accept-edits") &&
+    !input.approvalSatisfied
+  ) {
     if (input.entry.approvalClass === "network-access") {
       // Browser network under approval-gated Code may proceed when the surface
       // already treated the action as not-required; still prompt for external apps.

@@ -22,7 +22,13 @@ describe("transcript activity", () => {
     const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("started"));
     const finished = applyActivityEvent(started, tool("completed"));
     expect(finished.rows).toEqual([
-      { kind: "tool", id: "call-1", toolName: "Bash", state: "completed", summary: "bun run verify" },
+      {
+        kind: "tool",
+        id: "call-1",
+        toolName: "Bash",
+        state: "completed",
+        summary: "bun run verify",
+      },
     ]);
   });
 

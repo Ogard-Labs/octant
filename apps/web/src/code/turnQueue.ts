@@ -17,9 +17,15 @@ export interface QueuedCodeTurn {
 
 export type CodeTurnQueues = ReadonlyMap<string, ReadonlyArray<QueuedCodeTurn>>;
 
-export const EMPTY_CODE_TURN_QUEUES: CodeTurnQueues = new Map<string, ReadonlyArray<QueuedCodeTurn>>();
+export const EMPTY_CODE_TURN_QUEUES: CodeTurnQueues = new Map<
+  string,
+  ReadonlyArray<QueuedCodeTurn>
+>();
 
-export function queuedTurnsFor(queues: CodeTurnQueues, threadId: string): ReadonlyArray<QueuedCodeTurn> {
+export function queuedTurnsFor(
+  queues: CodeTurnQueues,
+  threadId: string,
+): ReadonlyArray<QueuedCodeTurn> {
   return queues.get(threadId) ?? [];
 }
 

@@ -1,3 +1,5 @@
+import type { ProviderExecutionPolicy } from "@octant/contracts";
+
 /**
  * Per-thread network egress policy for tool/provider Seatbelt launches.
  *
@@ -8,7 +10,7 @@
  *
  * Defaults:
  * - Work / Plan / Chat → `none`
- * - Code approval-gated → `provider-endpoints-only`
+ * - Code approval-gated / auto-accept-edits → `provider-endpoints-only`
  * - Full access / explicit network approval → `unrestricted`
  */
 
@@ -18,7 +20,7 @@ export type ThreadEgressPolicy = "none" | "provider-endpoints-only" | "unrestric
 export type OsNetworkEgress = "none" | "allow";
 
 export type ThreadEgressMode = "chat" | "work" | "code";
-export type ThreadExecutionPolicy = "plan" | "approval-gated" | "full-access";
+export type ThreadExecutionPolicy = ProviderExecutionPolicy;
 
 export interface ResolveDefaultThreadEgressPolicyInput {
   readonly mode: ThreadEgressMode;
@@ -45,7 +47,12 @@ export function resolveDefaultThreadEgressPolicy(
     return "unrestricted";
   }
   if (input.executionPolicy === "plan") return "none";
-  if (input.mode === "code" && input.executionPolicy === "approval-gated") {
+  if (
+    input.mode === "code" &&
+    (input.executionPolicy === "approval-gated" || input.executionPolicy === "auto-accept-edits")
+  ) {
+    // Auto-accepting edits inside the checkout says nothing about the network,
+    // so it keeps exactly the egress approval-gated Code already has.
     return "provider-endpoints-only";
   }
   return "none";

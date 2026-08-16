@@ -35,7 +35,9 @@ function upsert(
   rows: ReadonlyArray<CodeActivityRow>,
   row: CodeActivityRow,
 ): ReadonlyArray<CodeActivityRow> {
-  const index = rows.findIndex((candidate) => candidate.kind === row.kind && candidate.id === row.id);
+  const index = rows.findIndex(
+    (candidate) => candidate.kind === row.kind && candidate.id === row.id,
+  );
   if (index === -1) return [...rows, row];
   return rows.map((candidate, candidateIndex) => (candidateIndex === index ? row : candidate));
 }

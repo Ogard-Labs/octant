@@ -51,7 +51,9 @@ describe("attention notifications", () => {
 
   it("rejects a request the renderer did not shape correctly", () => {
     expect(() => decodeAttentionNotificationRequest(undefined)).toThrow();
-    expect(() => decodeAttentionNotificationRequest({ reason: "nope", threadTitle: "a" })).toThrow();
+    expect(() =>
+      decodeAttentionNotificationRequest({ reason: "nope", threadTitle: "a" }),
+    ).toThrow();
     expect(() =>
       decodeAttentionNotificationRequest({ reason: "turn-finished", threadTitle: "   " }),
     ).toThrow();
