@@ -151,6 +151,12 @@ describe("WorkspaceView Code tab registration", () => {
   });
 });
 
+async function expandLocalServers(): Promise<void> {
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Local servers/ }, { timeout: 5_000 }),
+  );
+}
+
 describe("WorkspaceView Local servers wiring", () => {
   it("opens a prepared local server as a restricted Browser tab for exactly one origin", async () => {
     const wired = localServersWiring();
@@ -162,6 +168,10 @@ describe("WorkspaceView Local servers wiring", () => {
         onOpenSurface={onOpenSurface}
       />,
     );
+    // Collapsed by default: no listener enumeration until the user opens it.
+    await screen.findByRole("button", { name: /^Local servers/ }, { timeout: 5_000 });
+    expect(wired.props.localServerClient?.execute).not.toHaveBeenCalled();
+    await expandLocalServers();
 
     fireEvent.click(
       await screen.findByRole(
@@ -206,6 +216,7 @@ describe("WorkspaceView Local servers wiring", () => {
         onOpenSurface={onOpenSurface}
       />,
     );
+    await expandLocalServers();
 
     fireEvent.click(
       await screen.findByRole(
@@ -245,6 +256,7 @@ describe("WorkspaceView Local servers wiring", () => {
         onOpenSurface={onOpenSurface}
       />,
     );
+    await expandLocalServers();
 
     fireEvent.click(
       await screen.findByRole(
@@ -280,6 +292,7 @@ describe("WorkspaceView Local servers wiring", () => {
         onOpenSurface={onOpenSurface}
       />,
     );
+    await expandLocalServers();
 
     fireEvent.click(
       await screen.findByRole(
@@ -307,6 +320,7 @@ describe("WorkspaceView Local servers wiring", () => {
         onOpenSurface={onOpenSurface}
       />,
     );
+    await expandLocalServers();
 
     fireEvent.click(
       await screen.findByRole(
@@ -349,6 +363,7 @@ describe("WorkspaceView Local servers wiring", () => {
         onOpenSurface={vi.fn(async () => true)}
       />,
     );
+    await expandLocalServers();
 
     fireEvent.click(
       await screen.findByRole(
@@ -379,6 +394,7 @@ describe("WorkspaceView Local servers wiring", () => {
     try {
       const wired = localServersWiring();
       render(<WorkspaceView {...wired.props} />);
+      await expandLocalServers();
 
       fireEvent.click(
         await screen.findByRole(
@@ -399,6 +415,7 @@ describe("WorkspaceView Local servers wiring", () => {
     const wired = localServersWiring();
     // No browserAutomationClient and no onOpenSurface: nowhere to put the tab.
     render(<WorkspaceView {...wired.props} />);
+    await expandLocalServers();
 
     expect(await screen.findByText("node · vite", undefined, { timeout: 5_000 })).toBeVisible();
     expect(screen.queryByRole("button", { name: /Open http/ })).toBeNull();
@@ -630,6 +647,15 @@ describe("WorkspaceView split Code file explorer", () => {
         }
       />,
     );
+
+    // Files is collapsed until asked for; expand it in both panes.
+    const filesButtons = await screen.findAllByRole(
+      "button",
+      { name: "Files" },
+      { timeout: 5_000 },
+    );
+    expect(filesButtons).toHaveLength(2);
+    for (const button of filesButtons) fireEvent.click(button);
 
     await waitFor(() => expect(listingRequests).toHaveLength(2), { timeout: 5_000 });
     const byThread = new Map(

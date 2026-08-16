@@ -236,6 +236,7 @@ describe("ShellSidebar", () => {
           <ProjectSidebarSection
             archivedProjects={[]}
             availabilityByProject={new Map()}
+            onArchive={vi.fn()}
             onMove={vi.fn()}
             onProjectOpen={vi.fn()}
             onReorder={vi.fn()}

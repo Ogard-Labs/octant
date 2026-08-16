@@ -9,7 +9,7 @@ import type {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserAutomationService } from "./browserAutomationService";
-import type { BrowserRuntimePort } from "./browserRuntimePort";
+import { BrowserNavigationBlockedError, type BrowserRuntimePort } from "./browserRuntimePort";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as WindowId;
 const otherWindowId = "10000000-0000-4000-8000-000000000002" as WindowId;
@@ -726,6 +726,20 @@ describe("BrowserAutomationService", () => {
     expect(refused.failure).toEqual({
       category: "policy-denied",
       message: "Browser context policy exceeds host limits.",
+    });
+  });
+
+  it("names the refused origin when a navigation redirects outside the allowlist", async () => {
+    const { runtime, service } = harness();
+    vi.mocked(runtime.act).mockRejectedValueOnce(
+      new BrowserNavigationBlockedError("https://www.example.com/"),
+    );
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const failed = await service.act({ windowId, request: request() });
+    expect(failed.failure).toEqual({
+      category: "policy-denied",
+      message:
+        "The page moved to https://www.example.com, which is outside this session's allowed origin. Open https://www.example.com/ directly to browse it there.",
     });
   });
 

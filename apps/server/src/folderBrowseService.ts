@@ -136,7 +136,6 @@ export class FolderBrowseService {
       }
 
       const isGitRepo = await this.#checkGitRepository(canonicalEntry);
-      const isSelectable = request.mode === "work" || isGitRepo;
       const candidateId = randomUUID() as FolderCandidateId;
 
       this.#candidates.set(candidateId, {
@@ -153,13 +152,8 @@ export class FolderBrowseService {
         candidateId,
         displayName: entry,
         isGitRepository: isGitRepo,
-        isSelectable,
-        ...(isSelectable
-          ? {}
-          : {
-              unselectableReason:
-                "Not a Git repository. Code Projects require a Git repository root.",
-            }),
+        // Both Work and Code bind any directory; Git status is informational.
+        isSelectable: true,
       });
     }
 

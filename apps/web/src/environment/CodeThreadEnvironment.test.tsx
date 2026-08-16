@@ -184,6 +184,7 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
+    fireEvent.click(await screen.findByRole("button", { name: "Working folder" }));
     await screen.findByDisplayValue(".");
     const workingFolder = screen.getByLabelText("Working folder");
     await user.clear(workingFolder);
@@ -221,6 +222,7 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
+    fireEvent.click(await screen.findByRole("button", { name: "Working folder" }));
     await screen.findByDisplayValue(".");
     fireEvent.change(screen.getByLabelText("Working folder"), {
       target: { value: "missing" },

@@ -21,7 +21,7 @@ import {
   evaluateBrowserAction,
   evaluateProfileMode,
 } from "@octant/domain";
-import type { BrowserRuntimePort } from "./browserRuntimePort";
+import { BrowserNavigationBlockedError, type BrowserRuntimePort } from "./browserRuntimePort";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 
 export interface BrowserAuthorityResolver {
@@ -405,8 +405,18 @@ export class BrowserAutomationService {
       owned.failure = undefined;
       owned.status = "running";
       return snapshot(owned);
-    } catch {
+    } catch (error) {
       const interrupted = owned.abort.signal.aborted;
+      if (!interrupted && error instanceof BrowserNavigationBlockedError) {
+        return this.#failure(
+          owned,
+          {
+            category: "policy-denied",
+            message: `The page moved to ${new URL(error.url).origin}, which is outside this session's allowed origin. Open ${error.url} directly to browse it there.`,
+          },
+          "failed",
+        );
+      }
       return this.#failure(
         owned,
         {
