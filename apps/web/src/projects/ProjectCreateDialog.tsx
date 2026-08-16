@@ -215,9 +215,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
       <OctantDialog
         className="project-dialog"
         label="Add folder"
-        onClose={() => {
-          if (!submitting) props.onClose();
-        }}
+        onClose={props.onClose}
         open
         popupId="create-project-dialog"
       >
@@ -227,10 +225,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           </div>
           <OctantButton
             aria-label="Close new Project"
-            disabled={submitting}
-            onClick={() => {
-              if (!submitting) props.onClose();
-            }}
+            onClick={props.onClose}
             size="icon"
             type="button"
             variant="ghost"
@@ -238,18 +233,11 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             ×
           </OctantButton>
         </div>
-        <p>
-          {mode === "work"
-            ? "Choose one directory. Octant records the binding."
-            : "Choose one Git repository root. Octant records the binding."}
-        </p>
+        <p>Choose one directory. Octant records the binding.</p>
         <div className="project-dialog__actions">
           <OctantButton
             className="project-button project-button--quiet"
-            disabled={submitting}
-            onClick={() => {
-              if (!submitting) props.onClose();
-            }}
+            onClick={props.onClose}
             type="button"
             variant="ghost"
           >
@@ -257,12 +245,11 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           </OctantButton>
           <OctantButton
             className="project-button"
-            disabled={submitting}
             onClick={() => void beginNativeSelection()}
             type="button"
             variant="secondary"
           >
-            {submitting ? "Working…" : "Choose folder"}
+            {submitting ? "Retry" : "Choose folder"}
           </OctantButton>
         </div>
         <p aria-live="polite" className="project-dialog__status">
