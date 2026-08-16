@@ -8,29 +8,20 @@ import { FolderPicker } from "./FolderPicker";
 const hostId = "00000000-0000-4000-8000-000000000001";
 
 describe("FolderPicker", () => {
-  it("lets the user open non-git folders while keeping Select only for git roots", async () => {
+  it("lets the user select a plain (non-git) folder as a Code root", async () => {
     const user = userEvent.setup();
     const home = browseResult([
       candidate({
         candidateId: "80000000-0000-4000-8000-000000000020" as never,
         displayName: "Dev",
         isGitRepository: false,
-        isSelectable: false,
-        unselectableReason: "Not a Git repository. Code Projects require a Git repository root.",
-      }),
-    ]);
-    const nested = browseResult([
-      candidate({
-        candidateId: "80000000-0000-4000-8000-000000000021" as never,
-        displayName: "octant",
-        isGitRepository: true,
         isSelectable: true,
       }),
     ]);
-    const browse = vi.fn().mockResolvedValueOnce(home).mockResolvedValueOnce(nested);
+    const browse = vi.fn().mockResolvedValueOnce(home);
     const select = vi.fn(async () => ({
       receiptId: "receipt-1",
-      displayName: "octant",
+      displayName: "Dev",
       selectedAt: "2026-07-27T12:00:00.000Z",
     }));
     const onSelect = vi.fn();
@@ -47,23 +38,17 @@ describe("FolderPicker", () => {
 
     expect(await screen.findByRole("dialog", { name: "Add folder" })).toBeVisible();
     expect(
-      screen.getByText("Navigate into a folder, then Select a Git repository root."),
+      screen.getByText("Navigate into a folder, then Select the directory to bind."),
     ).toBeVisible();
     expect(screen.getByText("Dev")).toBeVisible();
     expect(screen.getByText("Not a git repo")).toBeVisible();
-    expect(screen.queryByText(/Code Projects require/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Select" })).not.toBeInTheDocument();
     expect(screen.getByRole("option")).toHaveAttribute("aria-disabled", "false");
-    expect(screen.getByRole("button", { name: "Open" })).toBeEnabled();
 
-    await user.click(screen.getByRole("button", { name: "Open" }));
-    await waitFor(() => expect(browse).toHaveBeenCalledTimes(2));
-    expect(browse.mock.calls[1]?.[0]).toMatchObject({
-      parentCandidateId: "80000000-0000-4000-8000-000000000020",
+    await user.click(screen.getByRole("button", { name: "Select" }));
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith("receipt-1", "Dev"));
+    expect(select.mock.calls[0]?.[0]).toMatchObject({
+      candidateId: "80000000-0000-4000-8000-000000000020",
     });
-
-    await user.click(await screen.findByRole("button", { name: "Select" }));
-    await waitFor(() => expect(onSelect).toHaveBeenCalledWith("receipt-1", "octant"));
   });
 });
 
