@@ -9,8 +9,9 @@ import type {
   WorkspaceTab,
 } from "@octant/contracts";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
+import { EnvironmentGroup } from "./EnvironmentGroup";
 import { resolveTabPresentation } from "./EnvironmentPresentationModel";
 import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
@@ -29,6 +30,10 @@ export interface CodeThreadEnvironmentProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly children: ReactNode;
+  /** Repository file explorer, mounted inside the collapsible Files group. */
+  readonly files?: ReactNode;
+  /** Opens the thread's Changes (diff) surface. Absent hides the control. */
+  readonly onOpenChanges?: () => void;
   readonly onExecute?: (
     command: CodeCommand,
     signal?: AbortSignal,
@@ -70,10 +75,12 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   });
   const resolved = resolveTabPresentation(props.presentation, "code", props.tab.id);
   const localServersSection = projection.sections.find((section) => section.id === "local-servers");
-  // Scan only while the section can actually be seen: a hidden panel must not
-  // ask the host to enumerate listeners on a timer.
-  const localServersVisible =
+  const [localServersOpen, setLocalServersOpen] = useState(false);
+  // Scan only while the section can actually be seen: a hidden panel or a
+  // collapsed group must not ask the host to enumerate listeners on a timer.
+  const localServersAvailable =
     resolved.presentation !== "hidden" && localServersSection?.available === true;
+  const localServersVisible = localServersAvailable && localServersOpen;
   const localServers = useLocalServersController({
     enabled: localServersVisible,
     ...(props.localServerClient === undefined ? {} : { client: props.localServerClient }),
@@ -93,34 +100,51 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         tabId={props.tab.id}
         onChangePresentation={props.onChangePresentation}
       >
-        {controller.observation?.workingDirectory === undefined ||
-        controller.observation.threadVersion === undefined ||
-        props.onExecute === undefined ? null : (
-          <WorkingDirectoryControl
-            value={controller.observation.workingDirectory}
-            onApply={async (workingDirectory) => {
-              const result = await props.onExecute?.({
-                kind: "change-code-thread-working-directory",
-                threadId: props.tab.threadId,
-                expectedVersion: controller.observation!.threadVersion!,
-                workingDirectory,
-              });
-              if (result === undefined || !("kind" in result) || result.kind !== "thread-updated") {
-                throw new Error("Code working directory was not updated.");
-              }
-              await controller.refresh();
-            }}
+        <EnvironmentGroup
+          defaultOpen
+          summary={
+            controller.observation?.status === "ready"
+              ? controller.observation.changes === "dirty"
+                ? "Dirty"
+                : "Clean"
+              : undefined
+          }
+          title="Changes"
+        >
+          <EnvironmentGitGroup
+            {...(controller.errorMessage === undefined
+              ? {}
+              : { errorMessage: controller.errorMessage })}
+            {...(controller.observation === undefined
+              ? {}
+              : { observation: controller.observation })}
+            status={controller.status}
           />
+          {props.onOpenChanges === undefined ||
+          controller.observation?.status !== "ready" ? null : (
+            <button
+              className="environment-group__action window-no-drag"
+              onClick={props.onOpenChanges}
+              type="button"
+            >
+              View diff
+            </button>
+          )}
+        </EnvironmentGroup>
+        {props.files === undefined ? null : (
+          <EnvironmentGroup title="Files">{props.files}</EnvironmentGroup>
         )}
-        <EnvironmentGitGroup
-          {...(controller.errorMessage === undefined
+        <EnvironmentGroup
+          onOpenChange={setLocalServersOpen}
+          {...(localServers.snapshot === undefined
             ? {}
-            : { errorMessage: controller.errorMessage })}
-          {...(controller.observation === undefined ? {} : { observation: controller.observation })}
-          status={controller.status}
-        />
-        <section aria-label="Local servers" className="code-thread-environment__local-servers">
-          <h2 className="code-thread-environment__section-heading">Local servers</h2>
+            : {
+                summary: `${
+                  localServers.snapshot.currentCheckout.length + localServers.snapshot.other.length
+                } running`,
+              })}
+          title="Local servers"
+        >
           <LocalServersGroup
             controller={localServers}
             {...(props.onOpenLocalServer === undefined
@@ -129,7 +153,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             {...(props.onCopyLocalServerUrl === undefined
               ? {}
               : { onCopyUrl: props.onCopyLocalServerUrl })}
-            {...(localServersVisible
+            {...(localServersAvailable
               ? {}
               : {
                   unavailableReason:
@@ -137,7 +161,32 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                     "Open a repository Project to view local servers.",
                 })}
           />
-        </section>
+        </EnvironmentGroup>
+        {controller.observation?.workingDirectory === undefined ||
+        controller.observation.threadVersion === undefined ||
+        props.onExecute === undefined ? null : (
+          <EnvironmentGroup title="Working folder">
+            <WorkingDirectoryControl
+              value={controller.observation.workingDirectory}
+              onApply={async (workingDirectory) => {
+                const result = await props.onExecute?.({
+                  kind: "change-code-thread-working-directory",
+                  threadId: props.tab.threadId,
+                  expectedVersion: controller.observation!.threadVersion!,
+                  workingDirectory,
+                });
+                if (
+                  result === undefined ||
+                  !("kind" in result) ||
+                  result.kind !== "thread-updated"
+                ) {
+                  throw new Error("Code working directory was not updated.");
+                }
+                await controller.refresh();
+              }}
+            />
+          </EnvironmentGroup>
+        )}
       </ThreadEnvironmentPanel>
     </div>
   );

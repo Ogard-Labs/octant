@@ -3474,6 +3474,207 @@ dialog.project-dialog {
   font-size: 11px;
 }
 
+/* Collapsible groups of the thread Environment rail. Only the open group
+   mounts its body, so collapsed groups cost nothing. */
+.environment-group + .environment-group {
+  border-top: 1px solid var(--octant-border);
+}
+
+.environment-group__header {
+  display: flex;
+  width: 100%;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: var(--octant-text-secondary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.environment-group__header:hover {
+  color: var(--octant-text-primary);
+}
+
+.environment-group__chevron {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+  transition: transform 120ms ease;
+}
+
+.environment-group--open .environment-group__chevron {
+  transform: rotate(90deg);
+}
+
+.environment-group__title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.environment-group__summary {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.environment-group__body {
+  display: grid;
+  gap: 8px;
+  padding: 2px 0 10px;
+}
+
+.environment-group__action {
+  justify-self: start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--octant-accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.environment-group__action:hover {
+  text-decoration: underline;
+}
+
+.environment-group .code-file-explorer {
+  max-height: 46vh;
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--octant-control);
+}
+
+.environment-group .code-file-explorer__search {
+  padding: 8px;
+}
+
+.environment-group .code-file-explorer__tree {
+  overflow-y: auto;
+}
+
+.environment-group .working-directory-control {
+  padding: 0;
+  border-bottom: none;
+}
+
+/* Local servers: one compact card per listener. */
+.local-servers {
+  display: grid;
+  gap: 10px;
+}
+
+.local-servers__state,
+.local-servers__error {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.local-servers__error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--octant-warning-text, var(--octant-text-secondary));
+}
+
+.local-servers__group {
+  display: grid;
+  gap: 6px;
+}
+
+.local-servers__group-heading {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.local-servers__row {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+  background: var(--octant-control);
+}
+
+.local-servers__identity {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.local-servers__name {
+  color: var(--octant-text-primary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.local-servers__url {
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-family: var(--octant-editor-font-family);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-servers__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: var(--octant-text-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.local-servers__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.local-servers__actions button {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.local-servers__action-feedback,
+.local-servers__stop-unavailable {
+  color: var(--octant-text-muted);
+  font-size: 10px;
+}
+
+.local-servers__confirm {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--octant-border-strong);
+  border-radius: 6px;
+  background: var(--octant-surface-inset);
+  font-size: 11px;
+}
+
+.local-servers__confirm p {
+  margin: 0;
+  color: var(--octant-text-secondary);
+}
+
 .thread-environment-panel__resizer {
   position: absolute;
   top: 0;
