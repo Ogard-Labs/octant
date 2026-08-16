@@ -30,7 +30,10 @@ export default function CodeWorkspaceTab(props: {
   readonly onOpenBrowser?: () => void;
   /** Opens one changed repository file as a Code file tab, from the diff. */
   readonly onOpenFile?: (relativePath: string) => void;
-  readonly onOpenSurface?: (kind: CodeOverviewSurfaceKind) => void;
+  readonly onOpenSurface?: (
+    kind: CodeOverviewSurfaceKind,
+    options?: { readonly terminalId?: import("@octant/contracts/code").CodeTerminalId },
+  ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly canvasClient?: CanvasClient;
   readonly hostId?: HostId;

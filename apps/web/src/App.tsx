@@ -3559,8 +3559,17 @@ function LaunchedShell(
                   onToggleCanvasPin={(groupId, tab) => {
                     if (tab.kind === "canvas") void controller.toggleCanvasTabPin(groupId, tab);
                   }}
-                  onOpenCodeSurface={(kind, threadId, title) =>
-                    void controller.openCodeSurface({ kind, threadId, title })
+                  onOpenCodeSurface={(kind, threadId, title, terminalId) =>
+                    void controller.openCodeSurface(
+                      kind === "code-terminal"
+                        ? {
+                            kind,
+                            threadId,
+                            title,
+                            ...(terminalId === undefined ? {} : { terminalId }),
+                          }
+                        : { kind, threadId, title },
+                    )
                   }
                   onPreviewResize={controller.previewSplitResize}
                   onReorder={controller.reorderTab}

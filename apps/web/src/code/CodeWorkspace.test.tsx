@@ -1,7 +1,7 @@
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { CodeWorkspace } from "./CodeWorkspace";
+import { appendTerminalSelection, CodeWorkspace } from "./CodeWorkspace";
 import { codeClient, gitObservation, ids, terminalResult } from "./CodeDeliveryPane.test-fixtures";
 
 describe("CodeWorkspace", () => {
@@ -327,3 +327,17 @@ function uuidFactory() {
 function terminalUnavailable() {
   return Object.assign(new Error("Terminal is unavailable."), { category: "unavailable" });
 }
+
+describe("appendTerminalSelection", () => {
+  it("fences the selection so terminal output cannot read as instructions", () => {
+    expect(appendTerminalSelection("", "error: missing token\n")).toBe(
+      "```\nerror: missing token\n```\n",
+    );
+  });
+
+  it("keeps what was already typed and adds the selection below it", () => {
+    expect(appendTerminalSelection("why does this fail?", "exit 1")).toBe(
+      "why does this fail?\n\n```\nexit 1\n```\n",
+    );
+  });
+});

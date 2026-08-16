@@ -14,6 +14,14 @@ export interface CodeTerminalPaneProps {
   readonly createOperationId: () => CodeOperationId;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly loadRuntime?: () => Promise<XtermAdapterRuntime>;
+  /**
+   * Puts the text selected in this terminal into the thread's composer. Absent
+   * when no composer is reachable, which hides the affordance rather than
+   * offering a button that would drop what the user selected.
+   */
+  readonly onAddSelectionToChat?: (selection: string) => void;
+  /** Opens a second terminal for this thread. Absent when tabs cannot open. */
+  readonly onOpenAnotherTerminal?: () => void;
   readonly requestApproval?: (input: {
     readonly command: Parameters<CodeClient["executeOperation"]>[0];
   }) => Promise<boolean>;
@@ -36,6 +44,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     props.result.transcript === undefined ? terminalReplayKey(props.result) : undefined,
   );
   const [failure, setFailure] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const readSelection = useRef<(() => string) | undefined>(undefined);
   const operationQueue = useRef(Promise.resolve());
   const interactive = props.executionPolicy !== "plan" && result.state === "running";
   const replayReady = loadedReplayKey === replayKey;
@@ -219,6 +229,32 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         </div>
         <div className="code-delivery-pane__actions">
           <p>{terminalState(result)}</p>
+          {props.onAddSelectionToChat === undefined ? null : (
+            <OctantButton
+              onClick={() => {
+                const selected = readSelection.current?.() ?? "";
+                if (selected.trim() === "") {
+                  setNotice("Select terminal output first, then add it to the chat.");
+                  return;
+                }
+                setNotice(undefined);
+                props.onAddSelectionToChat?.(selected);
+              }}
+              type="button"
+              variant="secondary"
+            >
+              Add selection to chat
+            </OctantButton>
+          )}
+          {props.onOpenAnotherTerminal === undefined ? null : (
+            <OctantButton
+              onClick={() => props.onOpenAnotherTerminal?.()}
+              type="button"
+              variant="secondary"
+            >
+              New terminal
+            </OctantButton>
+          )}
           {props.executionPolicy !== "plan" && result.state === "running" ? (
             <OctantButton onClick={() => void control("stop")} type="button" variant="secondary">
               Stop terminal
@@ -239,6 +275,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
         </p>
       ) : null}
       {failure === undefined ? null : <p role="alert">{failure}</p>}
+      {notice === undefined ? null : <p role="status">{notice}</p>}
       {props.executionPolicy === "plan" ? (
         <p className="code-delivery-pane__notice">Plan mode keeps terminal replay read-only.</p>
       ) : null}
@@ -249,6 +286,9 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
           {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
           onData={(data) => enqueue("write", data)}
           onResize={(columns, rows) => enqueue("resize", [columns, rows])}
+          onSelectionReader={(read) => {
+            readSelection.current = read;
+          }}
           output={output}
         />
       ) : (

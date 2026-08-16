@@ -83,7 +83,10 @@ export interface CodeWorkspaceProps {
   readonly onOpenFile?: (relativePath: string) => void;
   /** Re-opens the file projection so the editor can leave a stale revision. */
   readonly onRequestFileRefresh?: () => void;
-  readonly onOpenSurface?: (kind: CodeOverviewSurfaceKind) => void;
+  readonly onOpenSurface?: (
+    kind: CodeOverviewSurfaceKind,
+    options?: { readonly terminalId?: CodeTerminalId },
+  ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly tab: CodeTab;
   readonly canvasClient?: CanvasClient;
@@ -180,7 +183,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           {...props}
           nextUuid={nextUuid}
           scope={scope}
-          terminalId={scope.threadId as unknown as CodeTerminalId}
+          // A tab journaled before terminals carried identities of their own
+          // stays bound to the thread's original terminal, so an existing
+          // session reattaches to the same process it had.
+          terminalId={props.tab.terminalId ?? (scope.threadId as unknown as CodeTerminalId)}
           {...(props.projections?.terminal === undefined
             ? {}
             : { terminal: props.projections.terminal })}
@@ -527,6 +533,19 @@ function GitObservationLoading() {
   );
 }
 
+/**
+ * The composer draft with terminal output appended as a fenced block.
+ *
+ * The selection is quoted rather than pasted in as prose: terminal output is
+ * full of characters a model would otherwise read as instructions, and the
+ * fence keeps what the user is asking about separate from what they are asking.
+ */
+export function appendTerminalSelection(draft: string, selection: string): string {
+  const block = ["```", selection.replace(/\s+$/, ""), "```", ""].join("\n");
+  const existing = draft.replace(/\s+$/, "");
+  return existing === "" ? block : `${existing}\n\n${block}`;
+}
+
 function TerminalWorkspaceSurface(
   props: CodeWorkspaceProps & {
     readonly nextUuid: () => string;
@@ -664,6 +683,19 @@ function TerminalWorkspaceSurface(
         client={props.client}
         createOperationId={() => props.nextUuid() as never}
         executionPolicy={props.threadPolicy}
+        onAddSelectionToChat={(selection) =>
+          props.controller.setPendingDraft(
+            appendTerminalSelection(props.controller.pendingDraft, selection),
+          )
+        }
+        {...(props.onOpenSurface === undefined
+          ? {}
+          : {
+              onOpenAnotherTerminal: () =>
+                props.onOpenSurface?.("code-terminal", {
+                  terminalId: props.nextUuid() as unknown as CodeTerminalId,
+                }),
+            })}
         {...(props.approvals?.terminal === undefined
           ? {}
           : { requestApproval: props.approvals.terminal })}
