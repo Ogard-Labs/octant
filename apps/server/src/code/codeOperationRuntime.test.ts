@@ -499,6 +499,28 @@ describe("CodeOperationRuntime", () => {
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
     fixture.close();
   });
+
+  it("reports pull request lifecycle unavailable when the github plugin is disabled", async () => {
+    const fixture = runtimeFixture({
+      ghExecutable: "gh",
+      githubPluginEffective: () => false,
+    });
+    fixture.setThread({ ...thread(), executionPolicy: "full-access" });
+
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "create-pull-request",
+      operationId: operationId(33),
+      threadId,
+      checkoutId,
+      title: "Disabled plugin",
+      body: "Should be unavailable.",
+      idempotencyKey: "github-plugin-disabled",
+      authorization: { kind: "full-access" },
+    });
+
+    expect(result).toMatchObject({ kind: "pull-request-state", state: "unavailable" });
+    fixture.close();
+  });
 });
 
 function runtimeFixture(options: {
@@ -511,6 +533,8 @@ function runtimeFixture(options: {
     content: string,
     metadata?: { readonly truncated?: boolean },
   ) => ReturnType<typeof storedEvidence>;
+  ghExecutable?: string;
+  githubPluginEffective?: () => boolean;
 }) {
   const directory = mkdtempSync(join(tmpdir(), "octant-code-runtime-"));
   directories.push(directory);
@@ -603,6 +627,10 @@ function runtimeFixture(options: {
       push: async () => ({ status: "failed" as const }),
       revertCommit: async () => ({ status: "failed" as const }),
     },
+    ...(options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable }),
+    ...(options.githubPluginEffective === undefined
+      ? {}
+      : { githubPluginEffective: options.githubPluginEffective }),
   });
   return {
     runtime,

@@ -134,6 +134,34 @@ describe("GitHub clone routes", () => {
     expect((await handler(preflight))?.status).toBe(204);
   });
 
+  it("blocks new clone commands when the github plugin is disabled", async () => {
+    const handler = createGithubCloneRouteHandler({
+      service,
+      windowAuthorityStore: store,
+      githubPluginEffective: () => false,
+    });
+    const value = commandRequest(requestCommand);
+    bindLocalWindow(value);
+
+    expect((await handler(value))?.status).toBe(503);
+    expect(service.execute).not.toHaveBeenCalled();
+  });
+
+  it("keeps reading in-flight and completed clone operations available when the github plugin is disabled", async () => {
+    const handler = createGithubCloneRouteHandler({
+      service,
+      windowAuthorityStore: store,
+      githubPluginEffective: () => false,
+    });
+    const value = operationsRequest();
+    bindLocalWindow(value);
+
+    const response = await handler(value);
+
+    expect(response?.status).toBe(200);
+    expect(service.list).toHaveBeenCalledOnce();
+  });
+
   it("maps service throws to an unavailable failure without details", async () => {
     service.execute.mockRejectedValueOnce(new Error("boom ghp_0123456789abcdefghij"));
     const handler = createHandler();

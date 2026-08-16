@@ -106,6 +106,8 @@ export interface CodeOperationRuntimeOptions {
   readonly clock: () => string;
   readonly uuid: () => string;
   readonly ghExecutable?: string;
+  /** Gates pull request lifecycle on the @octant/github first-party plugin (ADR 0001). Absent means always effective. */
+  readonly githubPluginEffective?: () => boolean;
   readonly pullRequestPort?: CodeOperationPullRequestPort;
   readonly inheritedEnvironment?: Readonly<Record<string, string | undefined>>;
   readonly terminalProcessPort?: Pick<TerminalProcessPort, "start"> & {
@@ -1164,7 +1166,9 @@ function createPullRequestPort(options: CodeOperationRuntimeOptions): CodeOperat
     observeReview: async () => ({ status: "unavailable" as const }),
     merge: async () => ({ status: "unavailable" as const }),
   };
-  if (options.ghExecutable === undefined) return unavailable;
+  if (options.ghExecutable === undefined || options.githubPluginEffective?.() === false) {
+    return unavailable;
+  }
   try {
     return new GhPullRequestPort({
       command: createGhCommandPort({ ghPath: options.ghExecutable }),

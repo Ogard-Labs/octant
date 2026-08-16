@@ -26,6 +26,13 @@ export function createGithubCloneRouteHandler(dependencies: {
   readonly service: GithubCloneRoutePort;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
+  /**
+   * Gates new clone commands on the @octant/github first-party plugin (ADR
+   * 0001). Absent means always effective. Reading operations stays available
+   * while disabled: a disabled plugin blocks new commands, it does not force
+   * -cancel or hide clones already in flight.
+   */
+  readonly githubPluginEffective?: () => boolean;
 }) {
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
@@ -37,6 +44,9 @@ export function createGithubCloneRouteHandler(dependencies: {
     if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: cors(origin) });
     const operationsRoute = url.pathname === OPERATIONS_ROUTE;
+    if (!operationsRoute && dependencies.githubPluginEffective?.() === false) {
+      return failure("unavailable", 503, origin);
+    }
     if (
       (operationsRoute && request.method !== "GET" && request.method !== "HEAD") ||
       (!operationsRoute && request.method !== "POST") ||

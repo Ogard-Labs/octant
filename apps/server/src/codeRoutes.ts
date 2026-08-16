@@ -226,6 +226,8 @@ export interface CodeRouteDependencies {
   readonly maxJsonBodySize?: number;
   readonly maxFileBodySize?: number;
   readonly now?: () => number;
+  /** Gates the "board" route on the @octant/board first-party plugin (ADR 0001). Absent means always effective. */
+  readonly boardPluginEffective?: () => boolean;
 }
 
 export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
@@ -492,7 +494,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
         case "board": {
           requireMethodAndEmptyQuery(request, url, "POST");
           requireJsonContentType(request);
-          if (dependencies.service.queryBoard === undefined) {
+          if (
+            dependencies.service.queryBoard === undefined ||
+            dependencies.boardPluginEffective?.() === false
+          ) {
             return failureResponse(
               { category: "unavailable", message: "Code Thread Board is unavailable." },
               503,

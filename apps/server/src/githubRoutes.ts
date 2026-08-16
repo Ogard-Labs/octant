@@ -36,6 +36,8 @@ export function createGithubRouteHandler(dependencies: {
   readonly catalogue: GithubCatalogueRoutePort;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly now?: () => number;
+  /** Gates every route in this file on the @octant/github first-party plugin (ADR 0001). Absent means always effective. */
+  readonly githubPluginEffective?: () => boolean;
 }) {
   const now = dependencies.now ?? Date.now;
   return async (request: Request): Promise<Response | undefined> => {
@@ -46,6 +48,8 @@ export function createGithubRouteHandler(dependencies: {
       return failure("invalid", 400, origin);
     if (request.method === "OPTIONS")
       return new Response(null, { status: 204, headers: cors(origin) });
+    if (dependencies.githubPluginEffective?.() === false)
+      return failure("unavailable", 503, origin);
     const snapshotRoute = url.pathname === "/api/github/authentication";
     if (
       (snapshotRoute && request.method !== "GET" && request.method !== "HEAD") ||

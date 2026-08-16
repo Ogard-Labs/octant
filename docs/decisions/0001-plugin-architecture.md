@@ -204,6 +204,67 @@ replaces the hard-coded thread-board/pull-requests availability check;
 `settings.section` and the remaining contribution points (panes, preview
 viewers, appearance) are not yet built.
 
+Step 4 landed the board half. `apps/server/src/extensions/firstPartyPlugins.ts`
+seeds a real `@octant/board` package (component kind `board`, zero declared
+capabilities, `entryPoint: "builtin:board"`, an opaque marker never handed to
+the Agent Plugins loader — the board stays statically wired in `server.ts`)
+idempotently into the projection at startup by appending the same
+install-committed / source-trust-changed / plugin-desired-state-changed /
+component-desired-state-changed events the real lifecycle commands produce.
+It is a real row in the existing Settings > Plugins UI, toggleable through the
+existing generic commands — no new toggle UI was built.
+`apps/server/src/extensions/firstPartyPluginGate.ts` resolves board's
+effective state by reusing the server's existing `ExtensionActivationService`
+instance and the unmodified activation ladder — the same ladder third-party
+plugins go through, not an analogy. `apps/server/src/codeRoutes.ts`'s `board`
+route case gates on it, returning the existing `unavailable` failure shape;
+`CodeThreadBoard`'s already-existing `loadBoard` error handling (not new code)
+surfaces that as an inline "board is unavailable" state with the server's
+message. The board's sidebar entry visibility was **not** wired to this live
+state: `apps/web/src/shell/ShellSidebar.tsx`'s `FIRST_PARTY_PLUGINS_EFFECTIVE`
+stays a stub. The board's manifest declares Code-only compatibility but its
+sidebar contribution spans Work and Code (matching pre-existing behavior), so
+a single per-component boolean can't represent a mode-scoped effective state
+correctly; making the sidebar row itself reactive needs a small design of its
+own (likely a live per-mode query, not a static bootstrap field) and is
+deferred to a focused follow-up shared with the GitHub half of this step.
+
+Step 4's GitHub half landed the same way, reusing every piece above rather
+than inventing parallel ones. `seedFirstPartyPlugins` now seeds `@octant/github`
+alongside `@octant/board` (component kind `integration`, capabilities
+`network`/`credentials`/`external-application`, `entryPoint: "builtin:github"`).
+`firstPartyPluginGate.ts`'s `isFirstPartyPluginEffective` is unchanged and
+generic; it is called once per plugin. Gating covers all four
+`GhAuthenticationPort.observe()`-derived consumers (`GithubCapabilityService`,
+`GithubCatalogueService`, `ManagedCloneService`, `GithubReadToolService`)
+through a single new choke point, `apps/server/src/github/gatedGithubAuthenticationPort.ts`:
+a structural `GhAuthenticationPortLike` wrapper that returns
+`{kind: "unavailable"}` (and throws on `execute`) without ever spawning the
+`gh` subprocess once disabled, requiring zero changes to any of those four
+services. `apps/server/src/githubRoutes.ts` and `githubCloneRoutes.ts` each
+gate on the same boolean at the route layer; the clone routes gate new
+commands only; reading in-flight and completed clone operations stays
+available while disabled, matching drain-not-force-cancel semantics.
+
+Pull request lifecycle (`GhPullRequestPort`) is a deliberate, explicitly
+scoped exception: it stays host-embedded rather than moving into the plugin,
+because it is wired deep into Code's approval-gated command pipeline as a
+consumer of GitHub's authentication, not a peer, self-contained surface like
+auth/catalogue/clone. `codeOperationRuntime.ts`'s `createPullRequestPort` gets
+one added condition mirroring its existing `options.ghExecutable === undefined`
+fallback; this is a boot-time-only gate, matching that existing pattern's own
+boot-time nature, not a live per-request check. After this step, "GitHub
+integration is a plugin" is true for auth/catalogue/clone; PR lifecycle is a
+Code-runtime capability _powered by_ that plugin's effective state, not itself
+relocated. The Settings `github` section's availability is wired through the
+same shared `FIRST_PARTY_PLUGINS_EFFECTIVE`/`isPluginSettingsSectionAvailable`
+path used by the sidebar stub above — `resolveSettingsSectionContributions`
+was already mode-agnostic from step 2, so the section's host-scoped placement
+against a Code-only manifest needed no special-casing, only the wiring into
+`SettingsView.tsx`. The `pull-requests` sidebar row's presence is not yet
+gated live, for the same reason the board's row is not: it is covered by the
+same deferred live-query follow-up.
+
 ## Consequences
 
 - Product surfaces become explainable: every sidebar entry, pane, and settings

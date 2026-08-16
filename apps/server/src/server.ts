@@ -168,6 +168,7 @@ import { createContextRouteHandler } from "./contextRoutes";
 import { GitEnvironmentPort } from "./gitEnvironmentPort";
 import { GitObservationPort } from "./code/gitObservationPort";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
+import { createGatedGithubAuthenticationPort } from "./github/gatedGithubAuthenticationPort";
 import { GhRepositoryCataloguePort } from "./github/ghRepositoryCataloguePort";
 import { GhRepositoryObservationPort } from "./github/ghRepositoryObservationPort";
 import { GithubCapabilityService } from "./github/githubCapabilityService";
@@ -335,6 +336,12 @@ import {
 } from "./extensions/extensionSupervisor";
 import { createNodeExtensionProcessPort } from "./extensions/nodeExtensionProcessPort";
 import { ExtensionPackageStore } from "./extensions/extensionPackageStore";
+import {
+  BOARD_EXTENSION_ID,
+  GITHUB_EXTENSION_ID,
+  seedFirstPartyPlugins,
+} from "./extensions/firstPartyPlugins";
+import { isFirstPartyPluginEffective } from "./extensions/firstPartyPluginGate";
 import {
   createExtensionChatResolver,
   createStoredExtensionMaterialLoader,
@@ -1417,11 +1424,26 @@ export function startOctantServer(
       windowAuthorityStore,
       store: agentRunSettingsStore,
     });
-    const githubAuthenticationPort =
+    // Referenced by closure only, invoked no earlier than the first GitHub
+    // request/turn — long after extensionActivationService (below) exists.
+    const githubPluginEffectiveInCode = () =>
+      isFirstPartyPluginEffective({
+        connection: persistence.connection,
+        activationService: extensionActivationService,
+        clock: () => new Date().toISOString(),
+        extensionId: GITHUB_EXTENSION_ID,
+        componentId: "integration",
+        mode: "code",
+      });
+    const realGithubAuthenticationPort =
       options.githubAuthenticationPort ??
       new GhAuthenticationPort(
         options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable },
       );
+    const githubAuthenticationPort = createGatedGithubAuthenticationPort({
+      port: realGithubAuthenticationPort,
+      effective: githubPluginEffectiveInCode,
+    });
     const githubCataloguePort = new GhRepositoryCataloguePort(
       options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable },
     );
@@ -1440,6 +1462,7 @@ export function startOctantServer(
       windowAuthorityStore,
       service: githubCapabilityService,
       catalogue: githubCatalogueService,
+      githubPluginEffective: githubPluginEffectiveInCode,
     });
     const zenEventStore = new ZenEventStore({
       journal: persistence.journal,
@@ -1562,6 +1585,7 @@ export function startOctantServer(
     const githubCloneRoutes = createGithubCloneRouteHandler({
       windowAuthorityStore,
       service: managedCloneService,
+      githubPluginEffective: githubPluginEffectiveInCode,
     });
     const contextHarness = new ContextHarnessService({
       persistence,
@@ -1903,6 +1927,12 @@ export function startOctantServer(
         await agentRunProcessSupervisor.reconcile?.();
         await extensionSupervisor.reconcile?.();
         await extensionLifecycleService.reconcileStartup();
+        seedFirstPartyPlugins({
+          journal: persistence.journal,
+          connection: persistence.connection,
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        });
         await standaloneSkillService.reconcile();
       },
       catch: () =>
@@ -2442,6 +2472,7 @@ export function startOctantServer(
         approvalStore: codeApprovalStore,
         sessionAuthority: codeSessionAuthority,
         ...(options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable }),
+        githubPluginEffective: githubPluginEffectiveInCode,
       });
     }
     yield* Effect.promise(() => codeOperationRuntime?.reconcile?.() ?? Promise.resolve());
@@ -2654,6 +2685,15 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       maxFileBodySize: MAX_CODE_FILE_BODY_SIZE,
+      boardPluginEffective: () =>
+        isFirstPartyPluginEffective({
+          connection: persistence.connection,
+          activationService: extensionActivationService,
+          clock: () => new Date().toISOString(),
+          extensionId: BOARD_EXTENSION_ID,
+          componentId: "board",
+          mode: "code",
+        }),
     });
     // Local servers. The scope resolver is what decides who may stop a
     // process, so it is bound to the same authoritative thread, checkout, and

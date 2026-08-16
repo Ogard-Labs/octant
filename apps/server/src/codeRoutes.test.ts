@@ -699,6 +699,37 @@ describe("Code board route", () => {
 
     expect(response?.status).toBe(503);
   });
+
+  it("reports the board unavailable when the board plugin is disabled", async () => {
+    const queryBoard = vi.fn(() => boardView);
+    const store = new WindowAuthorityStore();
+    store.register({ windowId, capability, now: 0 });
+    const route = createCodeRouteHandler({
+      service: {
+        bootstrap: vi.fn(),
+        read: vi.fn(),
+        execute: vi.fn(),
+        subscribe: vi.fn(async function* () {}),
+        readContent: vi.fn(),
+        saveFile: vi.fn(),
+        queryBoard,
+      } as never,
+      windowAuthorityStore: store,
+      now: () => 1,
+      boardPluginEffective: () => false,
+    });
+
+    const response = await route(
+      request("/api/code/board", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1 }),
+      }),
+    );
+
+    expect(response?.status).toBe(503);
+    expect(queryBoard).not.toHaveBeenCalled();
+  });
 });
 
 function settings() {

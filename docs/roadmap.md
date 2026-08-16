@@ -68,11 +68,20 @@ Hardening in progress for the preview:
     `@octant/contracts/extensions` (manifest, component kinds, capabilities),
     plus new `board`/`integration` component kinds and `sidebar.destination`/
     `settings.section` contribution schemas. A minimal renderer contribution
-    registry now resolves sidebar destination availability; settings-section
-    contributions, panes, preview viewers, and appearance contribution points
+    registry now resolves both sidebar destination and settings-section
+    availability; panes, preview viewers, and appearance contribution points
     remain open.
-  - First bundled plugins: appearance packs and preview viewers, then the
-    thread board and GitHub integration behind typed server ports.
+  - The Code thread board and the GitHub integration (auth, catalogue,
+    clone) are now real, seeded `@octant/board` and `@octant/github`
+    plugins: real rows in Settings > Plugins, gated by the same unmodified
+    activation ladder, enforced on their server routes and (for GitHub) at
+    the single `GhAuthenticationPort` choke point every consumer resolves
+    through. PR lifecycle is gated too but stays host-embedded, a consumer
+    of the GitHub plugin rather than a relocated peer surface. Both plugins'
+    sidebar entry visibility isn't yet live-wired to their toggle — a
+    deferred follow-up, since a single per-component boolean can't yet
+    represent their mode-scoped effective state. Appearance packs and
+    preview viewers remain open.
 - **Linear integration** — the first bundled-off integration plugin: issue
   intake and delivery-target sync from a Work or Code thread, with the same
   read/write authority model as GitHub.
