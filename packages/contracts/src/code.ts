@@ -190,6 +190,13 @@ export const PersistedCodeDeliveryTarget = Schema.Struct({
 }).annotations(strict);
 export type PersistedCodeDeliveryTarget = typeof PersistedCodeDeliveryTarget.Type;
 
+/**
+ * Bound on a thread title the user types. A title is a sidebar row, not a
+ * document; anything longer would be truncated on screen anyway, and bounding
+ * it here keeps the journal from carrying a paragraph as an identity.
+ */
+export const MAX_CODE_THREAD_TITLE_LENGTH = 200;
+
 export const CodeThreadLifecycle = Schema.Literal("active", "archived", "waiting", "interrupted");
 export type CodeThreadLifecycle = typeof CodeThreadLifecycle.Type;
 
@@ -200,6 +207,12 @@ export const CodeThread = Schema.Struct({
   repositoryId: CodeRepositoryId,
   checkoutId: CodeCheckoutId,
   title: Schema.NonEmptyTrimmedString,
+  /**
+   * Whether the user has pinned this thread to the top of the sidebar. Optional
+   * so a journal written before pinning existed replays as "not pinned" rather
+   * than being rejected; absent and `false` mean the same thing.
+   */
+  pinned: Schema.optional(Schema.Boolean),
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
@@ -367,6 +380,16 @@ export const CodeCommand = Schema.Union(
     kind: Schema.Literal("change-code-thread-lifecycle"),
     ...CodeThreadCommandFields,
     lifecycle: Schema.Literal("active", "archived"),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("rename-code-thread"),
+    ...CodeThreadCommandFields,
+    title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_CODE_THREAD_TITLE_LENGTH)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("pin-code-thread"),
+    ...CodeThreadCommandFields,
+    pinned: Schema.Boolean,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-code-thread-access"),

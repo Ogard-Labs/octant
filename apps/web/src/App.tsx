@@ -2061,6 +2061,8 @@ function LaunchedShell(
           projectId: String(thread.projectId),
           meta: thread.lifecycle,
           ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
+          ...(thread.unread === undefined ? {} : { unread: thread.unread }),
+          ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
           ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
         }))
       : [];

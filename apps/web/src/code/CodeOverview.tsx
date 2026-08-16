@@ -334,6 +334,12 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
         boardState={boardState}
         cards={cards}
         navigationThreads={navigationThreads}
+        onRenameThread={(threadId, title) =>
+          void props.controller.renameThread(threadId as CodeThreadId, title)
+        }
+        onPinThread={(threadId, pinned) =>
+          void props.controller.pinThread(threadId as CodeThreadId, pinned)
+        }
         onOpenThread={props.onOpenThread}
         onRetry={() => setReload((current) => current + 1)}
       />
@@ -379,6 +385,8 @@ function CodeProjectSessions(props: {
   readonly boardState: ProjectBoardState;
   readonly cards: ReadonlyArray<CodeBoardCard>;
   readonly navigationThreads: CodeController["navigation"];
+  readonly onRenameThread?: (threadId: string, title: string) => void;
+  readonly onPinThread?: (threadId: string, pinned: boolean) => void;
   readonly onOpenThread: (threadId: CodeThreadId) => void;
   readonly onRetry: () => void;
 }) {
@@ -428,6 +436,8 @@ function CodeProjectSessions(props: {
         // follow-up filter so a Project with many threads stays scannable.
         <CodeSidebarSection
           onSelectThread={(threadId) => props.onOpenThread(threadId as CodeThreadId)}
+          {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
+          {...(props.onPinThread === undefined ? {} : { onPinThread: props.onPinThread })}
           threads={props.navigationThreads.slice(0, MAX_PROJECT_OVERVIEW_CARDS)}
         />
       )}

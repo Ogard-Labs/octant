@@ -694,6 +694,52 @@ describe("CodeService commands", () => {
     expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
+  it("renames a thread and reports the renamed thread", async () => {
+    const fixture = serviceFixture();
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "rename-code-thread",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        title: "Rewrite the importer",
+      }),
+    ).resolves.toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({ title: "Rewrite the importer", version: 2 }),
+    });
+  });
+
+  it("pins a thread and erases the pin again rather than storing a false", async () => {
+    const fixture = serviceFixture();
+
+    const pinned = await fixture.service.execute(ids.window, {
+      kind: "pin-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      pinned: true,
+    });
+    expect(pinned).toEqual({
+      kind: "thread-updated",
+      thread: expect.objectContaining({ pinned: true, version: 2 }),
+    });
+
+    const appended = fixture.persistence.journal.append.mock.calls.at(-1)?.[0];
+    const stored = appended.events[0].payload.thread;
+    fixture.persistence.readCodeThread.mockReturnValue(stored);
+
+    const unpinned = await fixture.service.execute(ids.window, {
+      kind: "pin-code-thread",
+      threadId: ids.thread,
+      expectedVersion: 2,
+      pinned: false,
+    });
+    expect(unpinned).toEqual({ kind: "thread-updated", thread: expect.any(Object) });
+    const after =
+      fixture.persistence.journal.append.mock.calls.at(-1)?.[0].events[0].payload.thread;
+    expect("pinned" in after).toBe(false);
+  });
+
   it("updates lifecycle and access with optimistic versions and public results", async () => {
     const fixture = serviceFixture();
 

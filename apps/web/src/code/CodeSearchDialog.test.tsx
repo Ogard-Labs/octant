@@ -24,8 +24,10 @@ function searched(matches: ReadonlyArray<unknown>, truncated = false): CodeSearc
   } as unknown as CodeSearchResult;
 }
 
+type SearchClient = Pick<import("@octant/client-runtime").CodeFileListingClient, "search">;
+
 function client(result: CodeSearchResult) {
-  return { search: vi.fn(async () => result) };
+  return { search: vi.fn<SearchClient["search"]>(async () => result) };
 }
 
 function chord(key: string, shiftKey = false): void {
@@ -127,9 +129,9 @@ describe("CodeSearchDialog", () => {
       <CodeSearchDialog
         checkoutId={checkoutId}
         client={{
-          search: vi.fn(async () => ({
-            status: "failed" as const,
-            failure: { category: "unavailable" as const, message: "Code search is unavailable." },
+          search: vi.fn<SearchClient["search"]>(async () => ({
+            status: "failed",
+            failure: { category: "unavailable", message: "Code search is unavailable." },
           })),
         }}
         onOpenFile={vi.fn()}

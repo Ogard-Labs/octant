@@ -413,6 +413,12 @@ export interface CodeListFilesInput {
   readonly signal?: AbortSignal | undefined;
 }
 
+/** One thread with its pin removed, so unpinning erases the field entirely. */
+function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
+  const { pinned: _pinned, ...rest } = thread;
+  return rest;
+}
+
 export interface CodeSearchFilesInput {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
@@ -1139,72 +1145,83 @@ export class CodeService {
         }
       }
       const requestedNext = decodeCodeThread(
-        command.kind === "change-code-thread-lifecycle"
-          ? {
-              ...current,
-              lifecycle: command.lifecycle,
-              version: command.expectedVersion + 1,
-              updatedAt,
-            }
-          : command.kind === "change-code-thread-access"
-            ? {
-                ...current,
-                executionPolicy: command.executionPolicy,
-                permissionPersistence: command.permissionPersistence,
+        command.kind === "rename-code-thread"
+          ? { ...current, title: command.title, version: command.expectedVersion + 1, updatedAt }
+          : command.kind === "pin-code-thread"
+            ? // Unpinning drops the field rather than storing `false`, so a
+              // never-pinned thread and an unpinned one are the same record.
+              {
+                ...withoutPinned(current),
+                ...(command.pinned ? { pinned: true } : {}),
                 version: command.expectedVersion + 1,
                 updatedAt,
               }
-            : command.kind === "change-code-thread-provider"
+            : command.kind === "change-code-thread-lifecycle"
               ? {
                   ...current,
-                  providerInstanceId: command.providerInstanceId,
-                  modelId: command.modelId,
-                  providerHandoff: {
-                    previousProviderInstanceId: current.providerInstanceId,
-                    previousModelId: current.modelId,
-                    nextProviderInstanceId: command.providerInstanceId,
-                    nextModelId: command.modelId,
-                    changedAt: updatedAt,
-                  },
+                  lifecycle: command.lifecycle,
                   version: command.expectedVersion + 1,
                   updatedAt,
                 }
-              : command.kind === "propose-code-delivery-outcome"
+              : command.kind === "change-code-thread-access"
                 ? {
                     ...current,
-                    deliveryTarget: {
-                      ...current.deliveryTarget,
-                      proposedOutcome: {
-                        outcomeKind: command.outcomeKind,
-                        ...(command.rationale === undefined
-                          ? {}
-                          : { rationale: command.rationale }),
-                        proposedAt: updatedAt,
-                      },
-                    },
+                    executionPolicy: command.executionPolicy,
+                    permissionPersistence: command.permissionPersistence,
                     version: command.expectedVersion + 1,
                     updatedAt,
                   }
-                : command.kind === "confirm-code-delivery-outcome"
+                : command.kind === "change-code-thread-provider"
                   ? {
                       ...current,
-                      // The user confirms the outcome kind: the Git-level
-                      // delivery fields stay immutable and any pending agent
-                      // proposal is cleared once resolved.
-                      deliveryTarget: {
-                        ...stripProposedOutcome(current.deliveryTarget),
-                        outcomeKind: command.outcomeKind,
-                        confirmedAt: updatedAt,
+                      providerInstanceId: command.providerInstanceId,
+                      modelId: command.modelId,
+                      providerHandoff: {
+                        previousProviderInstanceId: current.providerInstanceId,
+                        previousModelId: current.modelId,
+                        nextProviderInstanceId: command.providerInstanceId,
+                        nextModelId: command.modelId,
+                        changedAt: updatedAt,
                       },
                       version: command.expectedVersion + 1,
                       updatedAt,
                     }
-                  : {
-                      ...current,
-                      workingDirectory: command.workingDirectory,
-                      version: command.expectedVersion + 1,
-                      updatedAt,
-                    },
+                  : command.kind === "propose-code-delivery-outcome"
+                    ? {
+                        ...current,
+                        deliveryTarget: {
+                          ...current.deliveryTarget,
+                          proposedOutcome: {
+                            outcomeKind: command.outcomeKind,
+                            ...(command.rationale === undefined
+                              ? {}
+                              : { rationale: command.rationale }),
+                            proposedAt: updatedAt,
+                          },
+                        },
+                        version: command.expectedVersion + 1,
+                        updatedAt,
+                      }
+                    : command.kind === "confirm-code-delivery-outcome"
+                      ? {
+                          ...current,
+                          // The user confirms the outcome kind: the Git-level
+                          // delivery fields stay immutable and any pending agent
+                          // proposal is cleared once resolved.
+                          deliveryTarget: {
+                            ...stripProposedOutcome(current.deliveryTarget),
+                            outcomeKind: command.outcomeKind,
+                            confirmedAt: updatedAt,
+                          },
+                          version: command.expectedVersion + 1,
+                          updatedAt,
+                        }
+                      : {
+                          ...current,
+                          workingDirectory: command.workingDirectory,
+                          version: command.expectedVersion + 1,
+                          updatedAt,
+                        },
       );
       const next =
         command.kind === "change-code-thread-access" &&

@@ -24,7 +24,7 @@ import {
   type CodeAttachmentReference,
   type MentionableThreadId,
 } from "@octant/contracts";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   EMPTY_TURN_ACTIVITY,
   appendReasoning,
@@ -111,11 +111,59 @@ export interface CodeThreadNavigationItem {
    * completion clears it.
    */
   readonly followUp?: boolean;
+  /**
+   * Whether the thread advanced since the user last had it open. Session-scoped
+   * like Chat's: an unread mark is about this sitting, and carrying it across
+   * restarts would resurface work the user already dealt with.
+   */
+  readonly unread?: boolean;
+  /** Whether the user pinned this thread to the top of the list. */
+  readonly pinned?: boolean;
+}
+
+/**
+ * Per-thread record of the version the user has actually seen.
+ *
+ * Deliberately in memory and deliberately shaped like Chat's: unread is a
+ * property of this sitting at the app, so a durable one would tell the user
+ * about work they closed the laptop on last week.
+ */
+export interface CodeReadCursorStore {
+  readonly getSnapshot: () => ReadonlyMap<string, number>;
+  readonly mark: (threadId: CodeThreadId, version: number) => void;
+  readonly subscribe: (listener: () => void) => () => void;
+}
+
+export function createCodeReadCursorStore(): CodeReadCursorStore {
+  let snapshot: ReadonlyMap<string, number> = new Map();
+  const listeners = new Set<() => void>();
+  return {
+    getSnapshot: () => snapshot,
+    mark: (threadId, version) => {
+      const key = String(threadId);
+      if (version <= (snapshot.get(key) ?? 0)) return;
+      const next = new Map(snapshot);
+      next.set(key, version);
+      snapshot = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
 }
 
 export interface CodeControllerOptions {
   readonly activeThreadId?: CodeThreadId;
   readonly client?: CodeClient;
+  readonly readCursorStore?: CodeReadCursorStore;
+  /**
+   * How often the sidebar re-reads the thread list. Only the thread in view
+   * streams its own events, so without this a thread finishing in the
+   * background would show no unread mark until something else reloaded.
+   */
+  readonly navigationRefreshMs?: number;
   readonly reconnectDelayMs?: number;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -123,6 +171,16 @@ export interface CodeControllerOptions {
 
 export function useCodeController(options: CodeControllerOptions) {
   const reconnectDelayMs = options.reconnectDelayMs ?? 250;
+  const navigationRefreshMs = options.navigationRefreshMs ?? 2_000;
+  const readCursorStore = useMemo(
+    () => options.readCursorStore ?? createCodeReadCursorStore(),
+    [options.readCursorStore],
+  );
+  const readCursors = useSyncExternalStore(
+    readCursorStore.subscribe,
+    readCursorStore.getSnapshot,
+    readCursorStore.getSnapshot,
+  );
   const client = useMemo(
     () =>
       options.client ??
@@ -275,6 +333,8 @@ export function useCodeController(options: CodeControllerOptions) {
   const installView = useCallback(
     (view: CodeThreadView) => {
       setActiveView(view);
+      // The thread is on screen, so everything it has reached is seen.
+      readCursorStore.mark(view.thread.id, Number(view.thread.version));
       setBootstrap((current) =>
         current === undefined
           ? current
@@ -287,7 +347,7 @@ export function useCodeController(options: CodeControllerOptions) {
       setStatus("ready");
       clearFailure();
     },
-    [clearFailure],
+    [clearFailure, readCursorStore],
   );
 
   const hydrateConversation = useCallback(
@@ -742,6 +802,11 @@ export function useCodeController(options: CodeControllerOptions) {
     void activateThread(options.activeThreadId);
   }, [activateThread, options.activeThreadId]);
 
+  // The current thread list, read inside callbacks that must not re-create
+  // themselves every time a thread's version changes.
+  const bootstrapRef = useRef(bootstrap);
+  bootstrapRef.current = bootstrap;
+
   const navigation = useMemo(
     (): ReadonlyArray<CodeThreadNavigationItem> =>
       (bootstrap?.threads ?? [])
@@ -753,10 +818,41 @@ export function useCodeController(options: CodeControllerOptions) {
           threadId: thread.id,
           title: thread.title,
           followUp: followUps.get(String(thread.id))?.followUp?.state === "open",
+          unread: Number(thread.version) > (readCursors.get(String(thread.id)) ?? 0),
+          ...(thread.pinned === true ? { pinned: true } : {}),
           updatedAt: thread.updatedAt,
-        })),
-    [bootstrap, followUps],
+        }))
+        // Pinned threads lead, and the order inside each group is the host's.
+        // Sorting the whole list by recency instead would move a pinned thread
+        // the moment anything else ran, which is the opposite of pinning it.
+        .sort((left, right) => Number(right.pinned ?? false) - Number(left.pinned ?? false)),
+    [bootstrap, followUps, readCursors],
   );
+
+  // Only the thread in view streams. Re-reading the list is what lets a thread
+  // that finished in the background show an unread mark at all.
+  useEffect(() => {
+    if (navigationRefreshMs <= 0) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      void (async () => {
+        try {
+          const next = await client.bootstrap();
+          if (cancelled || !mounted.current) return;
+          setBootstrap((current) =>
+            current === undefined ? next : { ...current, threads: next.threads },
+          );
+        } catch {
+          // A refresh that fails leaves the last list on screen; the stream and
+          // the retry path are what report a host that has actually gone away.
+        }
+      })();
+    }, navigationRefreshMs);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [client, navigationRefreshMs]);
 
   const execute = useCallback(
     async (command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult | undefined> => {
@@ -878,6 +974,47 @@ export function useCodeController(options: CodeControllerOptions) {
       }
     },
     [beginProviderTurn, clearFailure, fail],
+  );
+
+  /**
+   * Rename or pin one thread through the ordinary command path.
+   *
+   * Both carry the version the renderer last saw, so two windows renaming the
+   * same thread produce a stale failure the reload path already handles rather
+   * than one silently overwriting the other.
+   */
+  const renameThread = useCallback(
+    async (threadId: CodeThreadId, title: string): Promise<boolean> => {
+      const thread = bootstrapRef.current?.threads.find(
+        (candidate) => String(candidate.id) === String(threadId),
+      );
+      if (thread === undefined) return false;
+      const result = await execute({
+        kind: "rename-code-thread",
+        threadId,
+        expectedVersion: thread.version,
+        title: title as never,
+      });
+      return result !== undefined;
+    },
+    [execute],
+  );
+
+  const pinThread = useCallback(
+    async (threadId: CodeThreadId, pinned: boolean): Promise<boolean> => {
+      const thread = bootstrapRef.current?.threads.find(
+        (candidate) => String(candidate.id) === String(threadId),
+      );
+      if (thread === undefined) return false;
+      const result = await execute({
+        kind: "pin-code-thread",
+        threadId,
+        expectedVersion: thread.version,
+        pinned,
+      });
+      return result !== undefined;
+    },
+    [execute],
   );
 
   const markFollowUp = useCallback(
@@ -1278,6 +1415,8 @@ export function useCodeController(options: CodeControllerOptions) {
     markFollowUp,
     navigation,
     pendingDraft,
+    pinThread,
+    renameThread,
     providerRequests,
     refreshFollowUp,
     retry: () => loadBootstrap("retry"),
