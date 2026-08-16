@@ -6,6 +6,8 @@ export interface EnvironmentGroupProps {
   /** Short trailing summary shown on the header row (e.g. "+102 −0"). */
   readonly summary?: ReactNode;
   readonly defaultOpen?: boolean;
+  /** Lets a parent react to open/close, e.g. to pause polling while collapsed. */
+  readonly onOpenChange?: (open: boolean) => void;
   readonly children: ReactNode;
 }
 
@@ -16,12 +18,18 @@ export interface EnvironmentGroupProps {
  */
 export function EnvironmentGroup(props: EnvironmentGroupProps) {
   const [open, setOpen] = useState(props.defaultOpen === true);
+  const onOpenChange = props.onOpenChange;
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    onOpenChange?.(next);
+  };
   return (
     <section className={`environment-group${open ? " environment-group--open" : ""}`}>
       <button
         aria-expanded={open}
         className="environment-group__header window-no-drag"
-        onClick={() => setOpen((current) => !current)}
+        onClick={toggle}
         type="button"
       >
         <ChevronRight

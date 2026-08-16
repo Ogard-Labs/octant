@@ -9,7 +9,7 @@ import type {
   WorkspaceTab,
 } from "@octant/contracts";
 import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { resolveTabPresentation } from "./EnvironmentPresentationModel";
@@ -75,10 +75,12 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   });
   const resolved = resolveTabPresentation(props.presentation, "code", props.tab.id);
   const localServersSection = projection.sections.find((section) => section.id === "local-servers");
-  // Scan only while the section can actually be seen: a hidden panel must not
-  // ask the host to enumerate listeners on a timer.
-  const localServersVisible =
+  const [localServersOpen, setLocalServersOpen] = useState(false);
+  // Scan only while the section can actually be seen: a hidden panel or a
+  // collapsed group must not ask the host to enumerate listeners on a timer.
+  const localServersAvailable =
     resolved.presentation !== "hidden" && localServersSection?.available === true;
+  const localServersVisible = localServersAvailable && localServersOpen;
   const localServers = useLocalServersController({
     enabled: localServersVisible,
     ...(props.localServerClient === undefined ? {} : { client: props.localServerClient }),
@@ -133,6 +135,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           <EnvironmentGroup title="Files">{props.files}</EnvironmentGroup>
         )}
         <EnvironmentGroup
+          onOpenChange={setLocalServersOpen}
           {...(localServers.snapshot === undefined
             ? {}
             : {
@@ -150,7 +153,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             {...(props.onCopyLocalServerUrl === undefined
               ? {}
               : { onCopyUrl: props.onCopyLocalServerUrl })}
-            {...(localServersVisible
+            {...(localServersAvailable
               ? {}
               : {
                   unavailableReason:
