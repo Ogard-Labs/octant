@@ -135,6 +135,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.windowCapability === undefined
           ? {}
           : { windowCapability: props.windowCapability })}
+        attachmentClient={props.client}
         threadId={props.tab.threadId}
       />
     );

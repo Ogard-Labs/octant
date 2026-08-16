@@ -16,17 +16,34 @@ import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
-import type { ThreadMentionClient } from "@octant/client-runtime";
+import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
+import { useCodeAttachments } from "./useCodeAttachments";
 import {
   ThreadMentionChips,
   ThreadMentionTypeahead,
   useThreadMentionTypeahead,
 } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
+import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
 import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
+
+export type CodeAttachmentClient = Pick<
+  CodeClient,
+  "putAttachment" | "discardAttachment" | "attachment"
+>;
+
+/**
+ * Stands in when the host serves no attachment route. Its methods are never
+ * called: the composer only offers attaching when a real client is present.
+ */
+const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
+  putAttachment: () => Promise.reject(new Error("Code attachments are unavailable.")),
+  discardAttachment: () => Promise.reject(new Error("Code attachments are unavailable.")),
+  attachment: () => Promise.reject(new Error("Code attachments are unavailable.")),
+};
 
 export interface CodeThreadWorkspaceProps {
   readonly agentRunClient?: AgentRunClient;
@@ -47,6 +64,12 @@ export interface CodeThreadWorkspaceProps {
   readonly threadMentionClient?: ThreadMentionClient;
   /** Lists this checkout's files for `@path` mentions. */
   readonly fileListingClient?: CodeFileListingClient;
+  /**
+   * Stages pasted or dropped images with the host. Absent on a host that
+   * serves no attachment route, which keeps the composer from offering an
+   * attachment it could never send.
+   */
+  readonly attachmentClient?: CodeAttachmentClient;
   /**
    * Raises the host's native Full access confirmation. Absent on a host that
    * cannot raise one, which keeps Full access out of reach rather than letting
@@ -121,6 +144,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
 
+  // Pasting or dropping a picture uploads it now and keeps only its id. The
+  // turn names ids, so the host sends the provider bytes it accepted itself.
+  const attachments = useCodeAttachments({
+    client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
+    threadId: props.attachmentClient === undefined ? undefined : props.threadId,
+  });
+
   function syncMentions(value: string, caret: number | null) {
     mention.sync(value, caret);
     pathMentions.sync(value, caret);
@@ -166,7 +196,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.controller.turnStatus === "sending" || props.controller.turnStatus === "running";
   // A running turn queues rather than blocks: the host admits one turn per
   // thread, so the composer parks the next one instead of making the user wait.
-  const canSend = trimmed.length > 0;
+  const canSend = trimmed.length > 0 && !attachments.busy;
   const queued = props.controller.queuedFollowUps;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
@@ -183,18 +213,29 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     // pointed at once. This check is the composer's own report: a chip the
     // host refuses is shown as unavailable rather than silently dropped.
     const threadMentionIds = await threadMentions.resolveForSend();
+    const attached = attachments.takeForSend();
     if (busy) {
-      if (props.controller.queueFollowUp(trimmed, threadMentionIds) === undefined) return;
+      if (props.controller.queueFollowUp(trimmed, threadMentionIds, attached) === undefined) {
+        return;
+      }
       setDraft("");
       props.controller.setPendingDraft?.("");
       threadMentions.clear();
       return;
     }
-    const sent = await props.controller.sendFollowUp(trimmed, threadMentionIds);
+    const sent = await props.controller.sendFollowUp(trimmed, threadMentionIds, attached);
     if (sent) {
       setDraft("");
       threadMentions.clear();
     }
+  }
+
+  function attachFromTransfer(items: DataTransfer | null): boolean {
+    if (props.attachmentClient === undefined || items === null) return false;
+    const files = [...items.files];
+    if (files.length === 0) return false;
+    void attachments.attach(files);
+    return true;
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -492,6 +533,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       )}
                     </header>
                   ) : null}
+                  {message.attachments === undefined ? null : (
+                    <CodeAttachmentGallery
+                      attachments={message.attachments}
+                      {...(props.attachmentClient === undefined
+                        ? {}
+                        : { client: props.attachmentClient })}
+                      threadId={props.threadId}
+                    />
+                  )}
                   {activity === undefined ? null : (
                     <CodeTranscriptRow
                       activity={activity}
@@ -560,6 +610,35 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               ))}
             </ul>
           )}
+          {attachments.staged.length === 0 && attachments.message === undefined ? null : (
+            <div className="code-thread-workspace__attachments" aria-label="Attached images">
+              {attachments.staged.map(({ previewUrl, reference }) => (
+                <span className="code-thread-workspace__attachment" key={reference.attachmentId}>
+                  <img
+                    alt={reference.displayName}
+                    className="code-thread-workspace__attachment-thumb"
+                    src={previewUrl}
+                  />
+                  <span className="code-thread-workspace__attachment-name">
+                    {reference.displayName}
+                  </span>
+                  <button
+                    aria-label={`Remove ${reference.displayName}`}
+                    className="code-thread-workspace__attachment-remove window-no-drag"
+                    onClick={() => attachments.remove(reference.attachmentId)}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {attachments.message === undefined ? null : (
+                <span className="code-thread-workspace__hint" role="status">
+                  {attachments.message}
+                </span>
+              )}
+            </div>
+          )}
           <div className="code-thread-workspace__input-row">
             <label
               className="visually-hidden"
@@ -590,10 +669,20 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               onClick={(event) =>
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart)
               }
+              onDragOver={(event) => {
+                if (props.attachmentClient === undefined) return;
+                event.preventDefault();
+              }}
+              onDrop={(event) => {
+                if (attachFromTransfer(event.dataTransfer)) event.preventDefault();
+              }}
               onKeyDown={onKeyDown}
               onKeyUp={(event) => {
                 if (event.key === "Escape") return;
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
+              onPaste={(event) => {
+                if (attachFromTransfer(event.clipboardData)) event.preventDefault();
               }}
               placeholder={busy ? "Queue the next message…" : "Ask for follow-up changes…"}
               ref={textareaRef}

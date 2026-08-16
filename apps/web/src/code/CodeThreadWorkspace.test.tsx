@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -45,7 +45,7 @@ describe("CodeThreadWorkspace", () => {
 
     await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("check tests too", []);
+    expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], []);
   });
 
   it("opens the `#` picker in the Code composer and sends the chip as an id", async () => {
@@ -100,9 +100,11 @@ describe("CodeThreadWorkspace", () => {
     // The chip travels as an id. The message the host journals — and the
     // conversation and every later turn read back — is the user's own words,
     // so nothing the mention contributed can be replayed.
-    expect(sendFollowUp).toHaveBeenCalledWith("#[Release notes] does this still hold?", [
-      mentionedThreadId,
-    ]);
+    expect(sendFollowUp).toHaveBeenCalledWith(
+      "#[Release notes] does this still hold?",
+      [mentionedThreadId],
+      [],
+    );
   });
 
   it("completes an `@` path from the checkout listing the host returned", async () => {
@@ -148,7 +150,80 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "please");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     // The path travels as ordinary prompt text; naming a file reaches nothing.
-    expect(sendFollowUp).toHaveBeenCalledWith("explain @src/index.ts please", []);
+    expect(sendFollowUp).toHaveBeenCalledWith("explain @src/index.ts please", [], []);
+  });
+
+  it("uploads a pasted image before the turn and sends it by the host's own reference", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000001",
+      // The host decides the name it kept; the composer shows that one back.
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "b".repeat(64),
+    };
+    const putAttachment = vi.fn(async () => reference);
+    const discardAttachment = vi.fn(async () => undefined);
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={{ putAttachment, discardAttachment, attachment: vi.fn() } as never}
+        controller={controller({ sendFollowUp })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "match this mockup");
+    pasteImage(composer);
+
+    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
+    expect(putAttachment).toHaveBeenCalledOnce();
+
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    // The turn names what the host answered with, never bytes the composer held.
+    expect(sendFollowUp).toHaveBeenCalledWith("match this mockup", [], [reference]);
+    // Sending is not a discard: the image belongs to the turn that carried it.
+    expect(discardAttachment).not.toHaveBeenCalled();
+  });
+
+  it("takes back a removed image on the host as well as in the composer", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000002",
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "c".repeat(64),
+    };
+    const discardAttachment = vi.fn(async () => undefined);
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          {
+            putAttachment: vi.fn(async () => reference),
+            discardAttachment,
+            attachment: vi.fn(),
+          } as never
+        }
+        controller={controller({ sendFollowUp })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "never mind the picture");
+    pasteImage(composer);
+    await user.click(await screen.findByRole("button", { name: "Remove pasted.png" }));
+
+    expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId),
+    );
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(sendFollowUp).toHaveBeenCalledWith("never mind the picture", [], []);
   });
 
   it("leaves an `@` that matches no file in this checkout as ordinary text", async () => {
@@ -188,7 +263,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "keep this prompt");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
 
-    expect(sendFollowUp).toHaveBeenCalledWith("keep this prompt", []);
+    expect(sendFollowUp).toHaveBeenCalledWith("keep this prompt", [], []);
     expect(composer).toHaveValue("keep this prompt");
   });
 
@@ -631,6 +706,7 @@ describe("CodeThreadWorkspace", () => {
       id: "queued-1",
       prompt: "and then push",
       threadMentionIds: [],
+      attachments: [],
     }));
     const sendFollowUp = vi.fn(async () => true);
     render(
@@ -645,7 +721,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "and then push");
     await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
 
-    expect(queueFollowUp).toHaveBeenCalledWith("and then push", []);
+    expect(queueFollowUp).toHaveBeenCalledWith("and then push", [], []);
     expect(sendFollowUp).not.toHaveBeenCalled();
     await waitFor(() => expect(composer).toHaveValue(""));
   });
@@ -658,8 +734,8 @@ describe("CodeThreadWorkspace", () => {
         controller={controller({
           cancelQueuedFollowUp,
           queuedFollowUps: [
-            { id: "queued-1", prompt: "run the tests", threadMentionIds: [] },
-            { id: "queued-2", prompt: "then open a PR", threadMentionIds: [] },
+            { id: "queued-1", prompt: "run the tests", threadMentionIds: [], attachments: [] },
+            { id: "queued-2", prompt: "then open a PR", threadMentionIds: [], attachments: [] },
           ],
           turnStatus: "running",
         })}
@@ -918,4 +994,13 @@ function controller(
     retry: vi.fn(),
     ...overrides,
   } as never;
+}
+
+/**
+ * Paste one PNG into the composer. jsdom has no real clipboard files, so the
+ * event carries the same shape a browser hands React.
+ */
+function pasteImage(composer: HTMLElement): void {
+  const file = new File([new Uint8Array([137, 80, 78])], "pasted.png", { type: "image/png" });
+  fireEvent.paste(composer, { clipboardData: { files: [file], items: [] } });
 }

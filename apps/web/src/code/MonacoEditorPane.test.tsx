@@ -317,6 +317,9 @@ function client(
     executeOperation: vi.fn(),
     inspectTerminal: vi.fn(),
     operationContent: vi.fn(),
+    putAttachment: vi.fn(),
+    discardAttachment: vi.fn(),
+    attachment: vi.fn(),
     putEvidence: vi.fn(),
     save: vi.fn(
       async () =>

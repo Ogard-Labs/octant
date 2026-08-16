@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import { AppleActionRequest } from "./appleToolchain";
 import {
+  CodeAttachmentId,
+  CodeAttachmentReference,
   CodeCheckoutId,
   CodeApprovalId,
   CodeCheckoutHead,
@@ -19,6 +21,7 @@ import {
   CodeTestRunId,
   CodeThread,
   CodeThreadId,
+  MAX_CODE_TURN_ATTACHMENTS,
   WorktreeReceiptId,
 } from "./code";
 import { CodeRepositoryTestDefinition, CodeRepositoryTestConcern } from "./codeTestDefinitions";
@@ -446,6 +449,15 @@ const StartProviderTurn = Schema.Struct({
    * journal records as the user's message. A transcript the browser resolved
    * is never trusted, and never sent.
    */
+  /**
+   * Images already staged for this thread. Ids only: the host reads the bytes
+   * it staged itself, so a renderer cannot send the provider an image the host
+   * never accepted, and the journal records the attachment by name and digest
+   * rather than by content.
+   */
+  attachmentIds: Schema.optional(
+    Schema.Array(CodeAttachmentId).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+  ),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
@@ -818,6 +830,10 @@ const ConversationTurnStartedEvent = Schema.Struct({
   modelId: ProviderModelId,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  /** Images sent with this turn. Absent when the turn attached none. */
+  attachments: Schema.optional(
+    Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+  ),
 }).annotations(strict);
 const ContentEvent = Schema.Struct({
   kind: Schema.Literal("provider-content"),
@@ -967,6 +983,10 @@ export const CodeConversationTurn = Schema.Struct({
   modelId: ProviderModelId,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  /** Images the user attached to this turn. Absent when it attached none. */
+  attachments: Schema.optional(
+    Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+  ),
   assistant: Schema.Array(CodeEvidenceReference).pipe(
     Schema.filter((parts) => parts.length <= MAX_CODE_CONVERSATION_ASSISTANT_PARTS),
   ),

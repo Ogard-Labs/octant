@@ -869,6 +869,84 @@ describe("CodeOperationService", () => {
     });
   });
 
+  it("sends the images the journal recorded, and refuses ones no turn may claim", async () => {
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000001",
+      displayName: "shot.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "b".repeat(64),
+    };
+    const bytes = new Uint8Array([1, 2, 3]);
+    const attachments = {
+      peek: (_threadId: unknown, requested: ReadonlyArray<string>) =>
+        requested.every((id) => String(id) === reference.attachmentId)
+          ? { status: "ok" as const, attachments: [reference] }
+          : { status: "unknown" as const, attachmentId: requested[0]! },
+      release: vi.fn(),
+      read: vi.fn(async () => bytes),
+    };
+    let supported = true;
+    const { service, turns, events } = providerTurnFixture({
+      attachments: attachments as never,
+      supportsAttachments: () => supported,
+    });
+    const turn = (attachmentIds: ReadonlyArray<string>, operationId: string) =>
+      ({
+        ...startProviderTurn,
+        operationId: decodeCodeOperationId(operationId),
+        attachmentIds,
+      }) as never;
+    const journalled = () =>
+      events.append.mock.calls
+        .map(([entry]) => (entry as { readonly event: { readonly kind: string } }).event)
+        .filter((event) => event.kind === "conversation-turn-started");
+
+    // An id this host never staged is refused before anything reaches the
+    // provider, and before the turn's start is journalled.
+    await expect(
+      service.execute(
+        ids.window,
+        turn(["40000000-0000-4000-8000-000000000009"], "70000000-0000-4000-8000-000000000001"),
+      ),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "invalid" } });
+    expect(turns.start).not.toHaveBeenCalled();
+    expect(journalled()).toHaveLength(0);
+
+    // A provider that cannot take a picture is told so rather than sent the
+    // turn with its images silently removed.
+    supported = false;
+    await expect(
+      service.execute(
+        ids.window,
+        turn([reference.attachmentId], "70000000-0000-4000-8000-000000000002"),
+      ),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "invalid" } });
+    expect(turns.start).not.toHaveBeenCalled();
+
+    supported = true;
+    await expect(
+      service.execute(
+        ids.window,
+        turn([reference.attachmentId], "70000000-0000-4000-8000-000000000003"),
+      ),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [
+          {
+            attachmentId: reference.attachmentId,
+            displayName: "shot.png",
+            mediaType: "image/png",
+            bytes,
+          },
+        ],
+      }),
+    );
+    // The journal names the image by what the host measured, never its bytes.
+    expect(journalled().at(-1)).toMatchObject({ attachments: [reference] });
+  });
+
   it("runs only a definition the server discovered for the checkout", async () => {
     const discovered = {
       id: "abcdabcd-abcd-4bcd-8bcd-abcdabcdabcd",
@@ -1097,7 +1175,12 @@ const startProviderTurn = {
  * what the provider saw and what the journal kept, separately.
  */
 function providerTurnFixture(
-  options: Pick<CodeOperationServiceOptions, "resolveThreadMentionContext">,
+  options: Partial<
+    Pick<
+      CodeOperationServiceOptions,
+      "resolveThreadMentionContext" | "attachments" | "supportsAttachments"
+    >
+  >,
 ) {
   const activeThread = thread();
   const turns = {

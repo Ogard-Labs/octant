@@ -5,7 +5,11 @@ import {
   GlobalSequence,
   MAX_CODE_OPERATION_EVIDENCE_BYTES,
   MAX_CODE_OPERATION_TEXT_BYTES,
+  MAX_CODE_ATTACHMENT_BYTES,
   MAX_CODE_CONVERSATION_PAGE_SIZE,
+  decodeCodeAttachmentId,
+  decodeCodeAttachmentMediaType,
+  decodeCodeAttachmentReference,
   decodeCodeBoardQuery,
   decodeCodeBoardView,
   decodeCodeCommand,
@@ -30,6 +34,9 @@ import {
   decodeCodeThreadId,
   type CodeBoardQuery,
   type CodeBoardView,
+  type CodeAttachmentId,
+  type CodeAttachmentMediaType,
+  type CodeAttachmentReference,
   type CodeBootstrap,
   type CodeCommand,
   type CodeCommandResult,
@@ -67,7 +74,8 @@ export const MAX_CODE_FILE_BODY_SIZE = MAX_EDITABLE_CODE_FILE_BYTES;
 export const MAX_CODE_NDJSON_LINE_BYTES = 1_048_576;
 export const MAX_CODE_REPLAY_FRAMES = 100;
 
-const METHODS = "GET, POST, PUT, OPTIONS";
+// DELETE is here for taking a staged attachment back before it is sent.
+const METHODS = "GET, POST, PUT, DELETE, OPTIONS";
 const HEADERS = [
   "content-type",
   "x-octant-window-capability",
@@ -77,6 +85,8 @@ const HEADERS = [
   "x-octant-code-file-device",
   "x-octant-code-file-inode",
   "x-octant-code-expected-digest",
+  "x-octant-code-attachment-id",
+  "x-octant-code-display-name",
 ].join(", ");
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const decodeGlobalSequence = Schema.decodeUnknownSync(GlobalSequence);
@@ -218,6 +228,31 @@ export interface CodeRouteService {
     threadId: CodeThreadId,
     text: string,
   ) => Promise<CodeEvidenceReference> | CodeEvidenceReference;
+  readonly stageAttachment?: (
+    authenticatedWindowId: WindowId,
+    input: {
+      readonly threadId: CodeThreadId;
+      readonly attachmentId: CodeAttachmentId;
+      readonly displayName: string;
+      readonly mediaType: CodeAttachmentMediaType;
+      readonly bytes: Uint8Array;
+      readonly signal?: AbortSignal;
+    },
+  ) => Promise<CodeAttachmentReference>;
+  readonly readAttachment?: (
+    authenticatedWindowId: WindowId,
+    threadId: CodeThreadId,
+    input: {
+      readonly attachmentId: CodeAttachmentId;
+      readonly byteLength: number;
+      readonly digest: string;
+    },
+  ) => Promise<Uint8Array>;
+  readonly discardAttachment?: (
+    authenticatedWindowId: WindowId,
+    threadId: CodeThreadId,
+    attachmentId: CodeAttachmentId,
+  ) => Promise<void>;
 }
 
 export interface CodeRouteDependencies {
@@ -653,6 +688,62 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "attachment": {
+          const service = dependencies.service;
+          if (
+            service.stageAttachment === undefined ||
+            service.readAttachment === undefined ||
+            service.discardAttachment === undefined
+          ) {
+            return failureResponse(
+              { category: "unavailable", message: "Code attachments are unavailable." },
+              503,
+              origin,
+            );
+          }
+          if (request.method === "PUT") {
+            const upload = readAttachmentUpload(request);
+            const bytes = await readBoundedBytes(request, MAX_CODE_ATTACHMENT_BYTES);
+            return jsonResponse(
+              decodeCodeAttachmentReference(
+                await service.stageAttachment(authenticatedWindowId, {
+                  ...upload,
+                  bytes,
+                  signal: request.signal,
+                }),
+              ),
+              200,
+              origin,
+            );
+          }
+          const identity = readAttachmentIdentity(url);
+          if (request.method === "DELETE") {
+            await service.discardAttachment(
+              authenticatedWindowId,
+              identity.threadId,
+              identity.attachmentId,
+            );
+            return jsonResponse({ status: "discarded" }, 200, origin);
+          }
+          if (request.method !== "GET") {
+            throw new CodeRouteRejected("Code request is invalid.", 400);
+          }
+          const bytes = await service.readAttachment(authenticatedWindowId, identity.threadId, {
+            attachmentId: identity.attachmentId,
+            byteLength: identity.byteLength,
+            digest: identity.digest,
+          });
+          return new Response(Buffer.from(bytes), {
+            status: 200,
+            headers: {
+              ...Object.fromEntries(corsHeaders(origin).entries()),
+              "content-type": identity.mediaType,
+              "content-length": String(bytes.byteLength),
+              // The bytes are pinned by digest, so a cache can keep them.
+              "cache-control": "private, max-age=31536000, immutable",
+            },
+          });
+        }
       }
     } catch (error) {
       if (error instanceof CodeRouteRejected) {
@@ -688,6 +779,7 @@ type MatchedRoute =
         | "file-listing"
         | "test-listing"
         | "stage-evidence"
+        | "attachment"
         | "board";
     }>
   | Readonly<{ kind: "thread" | "events" | "conversation" | "follow-up"; threadId: string }>
@@ -700,6 +792,83 @@ type MatchedRoute =
     }>
   | Readonly<{ kind: "content"; contentId: string }>;
 
+/**
+ * The identity headers one attachment upload carries. The body is the image;
+ * everything that names it travels beside the body so the request never has to
+ * be parsed as a document before its bytes are bounded.
+ */
+function readAttachmentUpload(request: Request): {
+  readonly threadId: CodeThreadId;
+  readonly attachmentId: CodeAttachmentId;
+  readonly displayName: string;
+  readonly mediaType: CodeAttachmentMediaType;
+} {
+  const threadHeader = request.headers.get("x-octant-code-thread-id");
+  if (threadHeader === null || threadHeader.trim() === "") {
+    throw new CodeRouteRejected("Code attachment requires a thread identity.", 400);
+  }
+  const attachmentHeader = request.headers.get("x-octant-code-attachment-id");
+  if (attachmentHeader === null || attachmentHeader.trim() === "") {
+    throw new CodeRouteRejected("Code attachment requires an attachment identity.", 400);
+  }
+  const encodedDisplayName = request.headers.get("x-octant-code-display-name");
+  if (encodedDisplayName === null || encodedDisplayName.trim() === "") {
+    throw new CodeRouteRejected("Code attachment requires a display name.", 400);
+  }
+  const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  let displayName: string;
+  try {
+    displayName = decodeURIComponent(encodedDisplayName);
+  } catch {
+    throw new CodeRouteRejected("Code attachment display name is invalid.", 400);
+  }
+  try {
+    return {
+      threadId: decodeCodeThreadId(threadHeader),
+      attachmentId: decodeCodeAttachmentId(attachmentHeader),
+      displayName,
+      mediaType: decodeCodeAttachmentMediaType(mediaType),
+    };
+  } catch {
+    throw new CodeRouteRejected("Code attachment metadata is invalid.", 400);
+  }
+}
+
+/**
+ * Reading or discarding names the attachment, and reading also states the size
+ * and digest the journal recorded for it. Nothing about the file is trusted
+ * from disk alone.
+ */
+function readAttachmentIdentity(url: URL): {
+  readonly threadId: CodeThreadId;
+  readonly attachmentId: CodeAttachmentId;
+  readonly mediaType: CodeAttachmentMediaType;
+  readonly byteLength: number;
+  readonly digest: string;
+} {
+  const byteLength = Number(url.searchParams.get("byteLength") ?? "");
+  const digest = url.searchParams.get("digest") ?? "";
+  if (
+    !Number.isSafeInteger(byteLength) ||
+    byteLength <= 0 ||
+    byteLength > MAX_CODE_ATTACHMENT_BYTES ||
+    !/^[a-f0-9]{64}$/.test(digest)
+  ) {
+    throw new CodeRouteRejected("Code attachment reference is invalid.", 400);
+  }
+  try {
+    return {
+      threadId: decodeCodeThreadId(url.searchParams.get("thread") ?? ""),
+      attachmentId: decodeCodeAttachmentId(url.searchParams.get("attachment") ?? ""),
+      mediaType: decodeCodeAttachmentMediaType(url.searchParams.get("mediaType") ?? ""),
+      byteLength,
+      digest,
+    };
+  } catch {
+    throw new CodeRouteRejected("Code attachment reference is invalid.", 400);
+  }
+}
+
 function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/bootstrap") return { kind: "bootstrap" };
   if (pathname === "/api/code/commands") return { kind: "commands" };
@@ -710,6 +879,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/files/listing") return { kind: "file-listing" };
   if (pathname === "/api/code/tests/listing") return { kind: "test-listing" };
   if (pathname === "/api/code/evidence") return { kind: "stage-evidence" };
+  if (pathname === "/api/code/attachments") return { kind: "attachment" };
   const thread = /^\/api\/code\/threads\/([^/]+)$/.exec(pathname);
   if (thread !== null) return { kind: "thread", threadId: thread[1]! };
   const events = /^\/api\/code\/threads\/([^/]+)\/events$/.exec(pathname);
