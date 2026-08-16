@@ -9,12 +9,13 @@ import type { CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
 import { CODE_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/code-policy";
 import { ChevronDown, Filter, GitBranch, GitPullRequest, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   codeBoardStatusLabel,
   groupCodeBoardCards,
+  type CodeBoardColumn,
   type CodeBoardGrouping,
   type CodeBoardProjectRef,
 } from "./codeBoardGrouping";
@@ -22,6 +23,7 @@ import {
 const GROUPING_STORAGE_KEY = "octant.code.board.grouping";
 const SHOW_EMPTY_GROUPS_STORAGE_KEY = "octant.code.board.show-empty-groups";
 const ALL_STATUSES: readonly CodeBoardStatus[] = CODE_BOARD_STATUS_COLUMN_ORDER;
+const FILTERS_PANEL_ID = "code-board-advanced-filters";
 
 export interface CodeThreadBoardProps {
   readonly loadBoard: (query: CodeBoardQuery) => Promise<CodeBoardView>;
@@ -72,10 +74,13 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   );
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // The Status board is a column view: every status column is visible by
+  // default so an empty column reads as "nothing here" rather than vanishing.
   const [showEmptyGroups, setShowEmptyGroups] = useState(
-    () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? false,
+    () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? true,
   );
   const [board, setBoard] = useState<BoardState>({ status: "loading" });
+  const filtersRootRef = useRef<HTMLDivElement>(null);
 
   const query = useMemo(() => buildQuery(filters), [filters]);
   const queryKey = JSON.stringify(query);
@@ -107,6 +112,24 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
     // mutate any authoritative state.
   }, [queryKey, loadBoard, query]);
 
+  useEffect(() => {
+    if (!filtersOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      if (filtersRootRef.current === null) return;
+      if (event.target instanceof Node && filtersRootRef.current.contains(event.target)) return;
+      setFiltersOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setFiltersOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [filtersOpen]);
+
   function changeGrouping(next: CodeBoardGrouping) {
     setGrouping(next);
     writeStoredGrouping(storage, next);
@@ -127,13 +150,13 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
     <section aria-label="Code Thread Board" className="code-board">
       <header className="code-board__header">
         <div className="code-board__identity">
-          <h2 className="code-board__title">Code Thread Board</h2>
+          <h1 className="code-board__title">Threads</h1>
           <p className="code-board__subtitle">
             One runtime-derived view of your Code threads and coding agents.
           </p>
         </div>
         {props.onClose === undefined ? null : (
-          <OctantButton onClick={props.onClose} type="button" variant="secondary">
+          <OctantButton onClick={props.onClose} size="sm" type="button" variant="ghost">
             Back to workspace
           </OctantButton>
         )}
@@ -142,7 +165,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
       <div aria-label="Board controls" className="code-board__toolbar" role="group">
         <div className="code-board__primary-controls">
           <fieldset className="code-board__grouping">
-            <legend>Group by</legend>
+            <legend className="sr-only">Group by</legend>
             <div className="code-board__grouping-options">
               {(["status", "project"] as const).map((option) => (
                 <label className="code-board__grouping-option" key={option}>
@@ -170,27 +193,162 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             />
           </label>
 
-          <OctantButton
-            aria-controls="code-board-advanced-filters"
-            aria-expanded={filtersOpen}
-            aria-label={
-              activeAdvancedFilterCount === 0
-                ? "Filters"
-                : `Filters, ${activeAdvancedFilterCount} active`
-            }
-            className="code-board__filters-toggle"
-            onClick={() => setFiltersOpen((open) => !open)}
-            type="button"
-            variant="ghost"
-          >
-            <Filter aria-hidden="true" size={14} strokeWidth={1.8} />
-            <span>Filters</span>
-            {activeAdvancedFilterCount === 0 ? null : (
-              <span aria-hidden="true" className="code-board__filter-count">
-                {activeAdvancedFilterCount}
-              </span>
-            )}
-          </OctantButton>
+          <div className="code-board__filters" ref={filtersRootRef}>
+            <OctantButton
+              aria-controls={FILTERS_PANEL_ID}
+              aria-expanded={filtersOpen}
+              aria-haspopup="dialog"
+              aria-label={
+                activeAdvancedFilterCount === 0
+                  ? "Filters"
+                  : `Filters, ${activeAdvancedFilterCount} active`
+              }
+              className="code-board__filters-toggle"
+              data-active={activeAdvancedFilterCount > 0 ? "true" : "false"}
+              onClick={() => setFiltersOpen((open) => !open)}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <Filter aria-hidden="true" size={14} strokeWidth={1.8} />
+              <span>Filters</span>
+              {activeAdvancedFilterCount === 0 ? null : (
+                <span aria-hidden="true" className="code-board__filter-count">
+                  {activeAdvancedFilterCount}
+                </span>
+              )}
+            </OctantButton>
+
+            {filtersOpen ? (
+              <div
+                aria-label="Filters"
+                className="code-board__filters-panel"
+                id={FILTERS_PANEL_ID}
+                role="dialog"
+              >
+                <fieldset className="code-board__status-filter">
+                  <legend>Status</legend>
+                  <div className="code-board__status-options">
+                    {ALL_STATUSES.map((status) => (
+                      <label className="code-board__status-option" key={status}>
+                        <input
+                          checked={filters.statuses.has(status)}
+                          onChange={(event) =>
+                            setFilters((prev) => toggleStatus(prev, status, event.target.checked))
+                          }
+                          type="checkbox"
+                        />
+                        <span>
+                          <span
+                            aria-hidden="true"
+                            className="code-board__status-dot"
+                            data-status={status}
+                          />
+                          {codeBoardStatusLabel(status)}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <div className="code-board__filter-fields">
+                  {props.projects.length === 0 ? null : (
+                    <label>
+                      <span>Project</span>
+                      <select
+                        onChange={(event) =>
+                          setFilters((prev) => ({
+                            ...prev,
+                            projectIds:
+                              event.target.value === ""
+                                ? new Set<string>()
+                                : new Set<string>([event.target.value]),
+                          }))
+                        }
+                        value={firstOrEmpty(filters.projectIds)}
+                      >
+                        <option value="">All Projects</option>
+                        {props.projects.map((project) => (
+                          <option key={String(project.id)} value={String(project.id)}>
+                            {project.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+
+                  <label>
+                    <span>Pull request</span>
+                    <select
+                      onChange={(event) =>
+                        setFilters((prev) => ({
+                          ...prev,
+                          pullRequest: event.target.value as FilterState["pullRequest"],
+                        }))
+                      }
+                      value={filters.pullRequest}
+                    >
+                      <option value="any">Any</option>
+                      <option value="linked">Linked</option>
+                      <option value="none">No PR</option>
+                      <option value="open">Open</option>
+                      <option value="merged">Merged</option>
+                      <option value="closed">Closed</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>Checks</span>
+                    <select
+                      onChange={(event) =>
+                        setFilters((prev) => ({
+                          ...prev,
+                          checks: event.target.value as FilterState["checks"],
+                        }))
+                      }
+                      value={filters.checks}
+                    >
+                      <option value="any">Any</option>
+                      <option value="passing">Passing</option>
+                      <option value="failing">Failing</option>
+                      <option value="pending">Pending</option>
+                      <option value="unknown">Unknown</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>Follow-up</span>
+                    <select
+                      onChange={(event) =>
+                        setFilters((prev) => ({
+                          ...prev,
+                          followUp: event.target.value as FilterState["followUp"],
+                        }))
+                      }
+                      value={filters.followUp}
+                    >
+                      <option value="any">Any</option>
+                      <option value="only">Only follow-up</option>
+                      <option value="excluded">Exclude follow-up</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div className="code-board__filters-footer">
+                  <OctantButton
+                    className="code-board__reset-filters"
+                    disabled={activeAdvancedFilterCount === 0 && filters.text.trim() === ""}
+                    onClick={() => setFilters(DEFAULT_FILTERS)}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Reset filters
+                  </OctantButton>
+                </div>
+              </div>
+            ) : null}
+          </div>
 
           <details className="code-board__view-options">
             <summary>
@@ -224,119 +382,8 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                 {filter.label}
               </span>
             ))}
-            <OctantButton
-              className="code-board__reset-filters"
-              onClick={() => setFilters(DEFAULT_FILTERS)}
-              type="button"
-              variant="ghost"
-            >
-              Reset filters
-            </OctantButton>
           </div>
         )}
-
-        {filtersOpen ? (
-          <div className="code-board__advanced-filters" id="code-board-advanced-filters">
-            <fieldset className="code-board__status-filter">
-              <legend>Status</legend>
-              <div className="code-board__status-options">
-                {ALL_STATUSES.map((status) => (
-                  <label className="code-board__status-option" key={status}>
-                    <input
-                      checked={filters.statuses.has(status)}
-                      onChange={(event) =>
-                        setFilters((prev) => toggleStatus(prev, status, event.target.checked))
-                      }
-                      type="checkbox"
-                    />
-                    <span>{codeBoardStatusLabel(status)}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-
-            {props.projects.length === 0 ? null : (
-              <label className="code-board__project-filter">
-                <span>Project</span>
-                <select
-                  onChange={(event) =>
-                    setFilters((prev) => ({
-                      ...prev,
-                      projectIds:
-                        event.target.value === ""
-                          ? new Set<string>()
-                          : new Set<string>([event.target.value]),
-                    }))
-                  }
-                  value={firstOrEmpty(filters.projectIds)}
-                >
-                  <option value="">All Projects</option>
-                  {props.projects.map((project) => (
-                    <option key={String(project.id)} value={String(project.id)}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-
-            <label className="code-board__pr-filter">
-              <span>Pull request</span>
-              <select
-                onChange={(event) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    pullRequest: event.target.value as FilterState["pullRequest"],
-                  }))
-                }
-                value={filters.pullRequest}
-              >
-                <option value="any">Any</option>
-                <option value="linked">Linked</option>
-                <option value="none">No PR</option>
-                <option value="open">Open</option>
-                <option value="merged">Merged</option>
-                <option value="closed">Closed</option>
-              </select>
-            </label>
-
-            <label className="code-board__check-filter">
-              <span>Checks</span>
-              <select
-                onChange={(event) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    checks: event.target.value as FilterState["checks"],
-                  }))
-                }
-                value={filters.checks}
-              >
-                <option value="any">Any</option>
-                <option value="passing">Passing</option>
-                <option value="failing">Failing</option>
-                <option value="pending">Pending</option>
-                <option value="unknown">Unknown</option>
-              </select>
-            </label>
-
-            <label className="code-board__followup-filter">
-              <span>Follow-up</span>
-              <select
-                onChange={(event) =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    followUp: event.target.value as FilterState["followUp"],
-                  }))
-                }
-                value={filters.followUp}
-              >
-                <option value="any">Any</option>
-                <option value="only">Only follow-up</option>
-                <option value="excluded">Exclude follow-up</option>
-              </select>
-            </label>
-          </div>
-        ) : null}
       </div>
 
       <CodeBoardBody
@@ -363,32 +410,38 @@ function CodeBoardBody(props: {
 }) {
   if (props.board.status === "loading") {
     return (
-      <ShellState
-        eyebrow="Code Thread Board"
-        message="Loading the board."
-        state="loading"
-        title="Loading"
-      />
+      <div className="code-board__body">
+        <ShellState
+          eyebrow="Code Thread Board"
+          message="Loading the board."
+          state="loading"
+          title="Loading"
+        />
+      </div>
     );
   }
   if (props.board.status === "error") {
     return (
-      <ShellState
-        eyebrow="Code Thread Board"
-        message={props.board.message}
-        role="alert"
-        state="disconnected"
-        title="The board is unavailable"
-      />
+      <div className="code-board__body">
+        <ShellState
+          eyebrow="Code Thread Board"
+          message={props.board.message}
+          role="alert"
+          state="disconnected"
+          title="The board is unavailable"
+        />
+      </div>
     );
   }
   const cards = props.board.view.cards;
   if (cards.length === 0) {
     return (
-      <div className="code-board__empty" role="status">
-        <p>No Code threads match the current filters.</p>
-        <p>{activeFilterSummary(props.filters)}</p>
-        <p>No threads were deleted or completed; adjust the filters to see more.</p>
+      <div className="code-board__body">
+        <div className="code-board__empty" role="status">
+          <p>No Code threads match the current filters.</p>
+          <p>{activeFilterSummary(props.filters)}</p>
+          <p>No threads were deleted or completed; adjust the filters to see more.</p>
+        </div>
       </div>
     );
   }
@@ -397,41 +450,61 @@ function CodeBoardBody(props: {
     ? columns
     : columns.filter((column) => column.cards.length > 0);
   return (
-    <div className="code-board__columns" data-grouping={props.grouping}>
-      {visibleColumns.map((column) => (
-        <section
-          aria-label={`${column.label} (${column.cards.length})`}
-          className="code-board__column"
-          data-column-kind={column.kind}
-          key={column.key}
-        >
-          <header className="code-board__column-header">
-            <h3>{column.label}</h3>
-            <span aria-hidden="true" className="code-board__column-count">
-              {column.cards.length}
-            </span>
-          </header>
-          {column.cards.length === 0 ? (
-            <p className="code-board__column-empty">No threads.</p>
-          ) : (
-            <ul className="code-board__cards">
-              {column.cards.map((card) => (
-                <li key={String(card.threadId)}>
-                  <CodeBoardCardView
-                    card={card}
-                    {...(() => {
-                      const projectName = props.projectNames.get(String(card.projectId));
-                      return projectName === undefined ? {} : { projectName };
-                    })()}
-                    {...(props.onOpenThread === undefined ? {} : { onOpen: props.onOpenThread })}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      ))}
+    <div className="code-board__body" data-grouping={props.grouping}>
+      <div className="code-board__columns" data-grouping={props.grouping}>
+        {visibleColumns.map((column) => (
+          <CodeBoardColumnView
+            column={column}
+            key={column.key}
+            projectNames={props.projectNames}
+            {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
+          />
+        ))}
+      </div>
     </div>
+  );
+}
+
+function CodeBoardColumnView(props: {
+  readonly column: CodeBoardColumn;
+  readonly projectNames: ReadonlyMap<string, string>;
+  readonly onOpenThread?: (threadId: CodeThreadId) => void;
+}) {
+  const { column } = props;
+  return (
+    <section
+      aria-label={`${column.label} (${column.cards.length})`}
+      className="code-board__column"
+      data-column-kind={column.kind}
+    >
+      <header className="code-board__column-header">
+        {column.status === undefined ? null : (
+          <span aria-hidden="true" className="code-board__status-dot" data-status={column.status} />
+        )}
+        <h2>{column.label}</h2>
+        <span aria-hidden="true" className="code-board__column-count">
+          {column.cards.length}
+        </span>
+      </header>
+      {column.cards.length === 0 ? (
+        <p className="code-board__column-empty">No threads</p>
+      ) : (
+        <ul className="code-board__cards">
+          {column.cards.map((card) => (
+            <li key={String(card.threadId)}>
+              <CodeBoardCardView
+                card={card}
+                {...(() => {
+                  const projectName = props.projectNames.get(String(card.projectId));
+                  return projectName === undefined ? {} : { projectName };
+                })()}
+                {...(props.onOpenThread === undefined ? {} : { onOpen: props.onOpenThread })}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -445,22 +518,32 @@ function CodeBoardCardView(props: {
     card.githubFreshness === "stale" ||
     card.changedFiles.kind === "unavailable" ||
     card.worktree.kind === "unavailable";
+  const changedFileCount =
+    card.changedFiles.kind === "observed" ? card.changedFiles.changedPathCount : 0;
   return (
     <article
       className="code-board__card"
       data-follow-up={card.followUp ? "true" : "false"}
       data-status={card.status}
     >
-      <button
-        className="code-board__card-open"
-        onClick={() => props.onOpen?.(card.threadId as CodeThreadId)}
-        type="button"
-      >
-        <span className="code-board__card-title">{card.title}</span>
-      </button>
-      <p className="code-board__card-status">
-        <span aria-hidden="true" className="code-board__status-dot" data-status={card.status} />
-        <span>{codeBoardStatusLabel(card.status)}</span>
+      <div className="code-board__card-head">
+        <span
+          aria-hidden="true"
+          className="code-board__status-dot"
+          data-status={card.status}
+          title={codeBoardStatusLabel(card.status)}
+        />
+        <button
+          className="code-board__card-open"
+          onClick={() => props.onOpen?.(card.threadId as CodeThreadId)}
+          type="button"
+        >
+          <span className="code-board__card-title">{card.title}</span>
+        </button>
+      </div>
+      <p className="code-board__card-meta-line">
+        {props.projectName === undefined ? null : <span>{props.projectName}</span>}
+        <span>{card.modelId}</span>
       </p>
       <p className="code-board__card-flags">
         {card.recovery.kind === "recovering" ? (
@@ -471,28 +554,44 @@ function CodeBoardCardView(props: {
         {card.blockingReason === undefined ? null : (
           <span className="code-board__flag code-board__flag--blocked">{card.blockingReason}</span>
         )}
-        {stale ? (
-          <span className="code-board__flag code-board__flag--stale">Stale metadata</span>
+        {card.checks.state === "failing" ? (
+          <span className="code-board__flag code-board__flag--blocked">Checks failing</span>
         ) : null}
-        {card.unread ? <span className="code-board__flag">Unread</span> : null}
         {card.followUp ? (
           <span className="code-board__flag code-board__flag--follow-up" data-indicator="follow-up">
             <span aria-hidden="true">◆</span> Follow-up
           </span>
         ) : null}
-        {card.checks.state === "failing" ? (
-          <span className="code-board__flag code-board__flag--blocked">Checks failing</span>
-        ) : null}
+        {card.unread ? <span className="code-board__flag">Unread</span> : null}
         {card.childAgents.active === 0 ? null : (
           <span className="code-board__flag">
             {card.childAgents.active} active {card.childAgents.active === 1 ? "agent" : "agents"}
           </span>
         )}
+        {changedFileCount === 0 ? null : (
+          <span className="code-board__flag">
+            {changedFileCount} {changedFileCount === 1 ? "file" : "files"}
+          </span>
+        )}
+        {card.linkedPullRequest.kind === "linked" ? (
+          <span className="code-board__flag">
+            <GitPullRequest aria-hidden="true" size={11} strokeWidth={1.8} /> #
+            {card.linkedPullRequest.number}
+          </span>
+        ) : null}
+        {stale ? (
+          <span
+            className="code-board__flag code-board__flag--stale"
+            title="Some metadata could not be refreshed"
+          >
+            Stale metadata
+          </span>
+        ) : null}
       </p>
       <details className="code-board__card-details">
         <summary aria-label={`Details for ${card.title}`}>
           <span>Details</span>
-          <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
+          <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
         </summary>
         <dl className="code-board__card-meta">
           {props.projectName === undefined ? null : (
@@ -501,6 +600,10 @@ function CodeBoardCardView(props: {
               <dd>{props.projectName}</dd>
             </div>
           )}
+          <div>
+            <dt>Status</dt>
+            <dd>{codeBoardStatusLabel(card.status)}</dd>
+          </div>
           <div>
             <dt>Delivery target</dt>
             <dd>{deliveryTargetLabel(card.outcomeKind)}</dd>
