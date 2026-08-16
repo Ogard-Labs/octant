@@ -1,20 +1,20 @@
 ---
-description: Code mode binds one Git repository root for engineering work with approval-gated authority, worktrees, and Git tools.
+description: Code mode binds one folder for engineering work with approval-gated authority, worktrees, and Git tools.
 ---
 
 # Code
 
-Code is the repository workspace. Each Code Project binds exactly one Git repository root validated through the native picker. Code is always available; disabling it in Settings never deletes existing Code data.
+Code is the repository workspace. Each Code Project binds exactly one folder chosen through the native picker; when that folder is a Git repository, worktrees, branches, and pull-request tools become available. Code is always available; disabling it in Settings never deletes existing Code data.
 
 ## Code Projects
 
 Create a Code Project from the sidebar:
 
 1. Select **Code** as the mode.
-2. Use the native picker to choose a Git repository root.
+2. Use the native picker to choose a folder. A Git repository root is recommended but not required.
 3. Name the Project.
 
-Invalid roots (non-Git directories) are denied. The server validates the repository and the renderer receives an opaque receipt.
+The server validates that the folder exists and the renderer receives an opaque receipt. If the folder is not a Git repository, Git-dependent features report _unavailable_ until you initialise one.
 
 ## Authority modes
 

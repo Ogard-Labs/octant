@@ -28,16 +28,16 @@ Projects organize your work and determine the authority available to threads. Th
 
 - **Chat Projects** are virtual containers with scoped memory and no filesystem authority.
 - **Work Projects** bind one OS-confined folder for local knowledge work.
-- **Code Projects** bind one Git repository root for engineering work.
+- **Code Projects** bind one folder for engineering work; Git tools activate when it is a repository.
 
 To create a Project:
 
 1. Click the **New Project** button in the sidebar.
 2. Select the mode (Chat, Work, or Code).
-3. For Work, use the native picker to select a directory. For Code, select a Git repository root.
+3. For Work and Code, use the native picker to select a directory.
 4. Name the Project.
 
-The selected root is validated. Invalid Code roots (non-Git directories) are denied. The renderer receives an opaque, single-use receipt rather than the raw path.
+The selected root is validated to exist. The renderer receives an opaque, single-use receipt rather than the raw path.
 
 ## Start a thread
 
