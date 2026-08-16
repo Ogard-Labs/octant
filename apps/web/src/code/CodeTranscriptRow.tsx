@@ -48,6 +48,7 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
           <summary>
             {activity.rows.length === 1 ? "1 step" : `${String(activity.rows.length)} steps`}
             {open > 0 && running ? ` · ${String(open)} running` : ""}
+            {activity.truncated === true ? " · earliest kept" : ""}
           </summary>
           <ul className="code-transcript-row__steps">
             {activity.rows.map((row) => (

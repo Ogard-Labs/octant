@@ -929,6 +929,37 @@ export type CodeOperationEventFrame = typeof CodeOperationEventFrame.Type;
 
 export const MAX_CODE_CONVERSATION_PAGE_SIZE = 100;
 export const MAX_CODE_CONVERSATION_ASSISTANT_PARTS = 256;
+/**
+ * How much of a turn's work the durable conversation carries back.
+ *
+ * A single turn can journal thousands of tool events; replaying all of them
+ * would make reopening a thread as expensive as running it. The projection
+ * keeps the first steps in arrival order and stops, so the transcript is
+ * honest about the shape of the turn without pretending to be its journal —
+ * the full record stays in the operation event stream.
+ */
+export const MAX_CODE_CONVERSATION_TURN_STEPS = 64;
+
+/**
+ * One thing a turn did besides writing its message: a tool call, or a stretch
+ * of reasoning-channel output. Steps are what the live transcript already
+ * shows; recording them on the turn is what lets a reopened thread show the
+ * same rows instead of a bare message.
+ */
+export const CodeConversationStep = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("tool"),
+    toolCallId: ProviderRequestId,
+    toolName: boundedNonEmptyText(255),
+    state: Schema.Literal("started", "running", "completed", "failed"),
+    summary: Schema.optional(boundedNonEmptyText(2_048)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("reasoning"),
+    content: CodeEvidenceReference,
+  }).annotations(strict),
+);
+export type CodeConversationStep = typeof CodeConversationStep.Type;
 
 export const CodeConversationTurn = Schema.Struct({
   operationId: CodeOperationId,
@@ -939,6 +970,14 @@ export const CodeConversationTurn = Schema.Struct({
   assistant: Schema.Array(CodeEvidenceReference).pipe(
     Schema.filter((parts) => parts.length <= MAX_CODE_CONVERSATION_ASSISTANT_PARTS),
   ),
+  /** Bounded, in arrival order. Absent on a turn that recorded no steps. */
+  steps: Schema.optional(
+    Schema.Array(CodeConversationStep).pipe(
+      Schema.filter((steps) => steps.length <= MAX_CODE_CONVERSATION_TURN_STEPS),
+    ),
+  ),
+  /** Whether the turn journaled more steps than `steps` carries. */
+  stepsTruncated: Schema.optional(Schema.Boolean),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
   startedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,

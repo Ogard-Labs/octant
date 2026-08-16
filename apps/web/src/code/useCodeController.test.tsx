@@ -916,6 +916,72 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("replays the steps a reopened turn recorded, not just its message", async () => {
+    const promptId = "60000000-0000-4000-8000-000000000012";
+    const replyId = "60000000-0000-4000-8000-000000000013";
+    const reasoningId = "60000000-0000-4000-8000-000000000014";
+    const operationId = "70000000-0000-4000-8000-000000000012";
+    const conversation = vi.fn(async () => ({
+      version: 1 as const,
+      threadId: ids.thread,
+      turns: [
+        {
+          operationId,
+          providerInstanceId: ids.provider,
+          modelId: "model-a",
+          sessionId: "80000000-0000-4000-8000-000000000012",
+          prompt: { contentId: promptId, digest: "a".repeat(64), byteLength: 11 },
+          assistant: [{ contentId: replyId, digest: "b".repeat(64), byteLength: 12 }],
+          steps: [
+            {
+              kind: "reasoning" as const,
+              content: { contentId: reasoningId, digest: "c".repeat(64), byteLength: 9 },
+            },
+            {
+              kind: "tool" as const,
+              toolCallId: "90000000-0000-4000-8000-000000000012",
+              toolName: "Read",
+              state: "completed" as const,
+              summary: "read 40 lines",
+            },
+          ],
+          stepsTruncated: true,
+          status: "completed" as const,
+          startedAt: now,
+          updatedAt: now,
+        },
+      ],
+      nextCursor: 43,
+      hasMore: false,
+    }));
+    const operationContent = vi.fn(async (_threadId, _operationId, contentId) =>
+      new TextEncoder().encode(
+        contentId === promptId ? "check tests" : contentId === replyId ? "done" : "weighing it",
+      ),
+    );
+    const client = fakeClient({ conversation: conversation as never, operationContent });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.turnActivity.get(operationId)).toMatchObject({
+        reasoning: "weighing it",
+        truncated: true,
+      }),
+    );
+    expect(result.current.turnActivity.get(operationId)?.rows).toEqual([
+      {
+        kind: "tool",
+        id: "90000000-0000-4000-8000-000000000012",
+        toolName: "Read",
+        state: "completed",
+        summary: "read 40 lines",
+      },
+    ]);
+    unmount();
+  });
+
   it("refreshes the active conversation when the first provider turn completes", async () => {
     const promptId = "60000000-0000-4000-8000-000000000020";
     const replyId = "60000000-0000-4000-8000-000000000021";

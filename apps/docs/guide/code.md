@@ -45,7 +45,7 @@ Code can create managed git worktrees for isolated feature branches. New managed
 
 Code exposes repository-valid engineering surfaces:
 
-- Thread conversations
+- Thread conversations, including the tool steps and thinking a turn recorded — a reopened thread replays a bounded number of them and says when it kept only the earliest
 - Terminal (confined to the Project root)
 - Files/Explorer
 - Diff viewer, including discarding a tracked file's uncommitted changes (asked about every time outside Full access, because nothing can restore them)

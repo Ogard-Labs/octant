@@ -27,6 +27,12 @@ export interface CodeTurnActivity {
   readonly rows: ReadonlyArray<CodeActivityRow>;
   /** Accumulated reasoning-channel text, in arrival order. */
   readonly reasoning: string;
+  /**
+   * Whether the durable turn journaled more steps than the conversation page
+   * carries back. Only replayed history can set this; a live turn is watched
+   * event by event and misses nothing.
+   */
+  readonly truncated?: boolean;
 }
 
 export const EMPTY_TURN_ACTIVITY: CodeTurnActivity = { rows: [], reasoning: "" };
