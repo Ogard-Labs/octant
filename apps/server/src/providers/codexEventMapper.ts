@@ -8,7 +8,13 @@ import type {
 } from "@octant/contracts";
 import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import type { CodexRpcId, CodexServerMessage, CodexServerRequest } from "./codexProtocol";
+import {
+  isUnmodeledThreadItem,
+  type CodexRpcId,
+  type CodexServerMessage,
+  type CodexServerRequest,
+  type UnmodeledThreadItem,
+} from "./codexProtocol";
 
 const STREAM_CHUNK_CHARACTERS = 65_536;
 const DIFF_MAX_CHARACTERS = 65_536;
@@ -91,7 +97,7 @@ type ItemLifecycleMessage = Extract<
   CodexServerMessage,
   { readonly kind: "notification"; readonly method: "item/started" | "item/completed" }
 >;
-type ThreadItem = ItemLifecycleMessage["params"]["item"];
+type ThreadItem = Exclude<ItemLifecycleMessage["params"]["item"], UnmodeledThreadItem>;
 type ToolItem = Extract<
   ThreadItem,
   { readonly type: "commandExecution" | "fileChange" | "mcpToolCall" | "dynamicToolCall" }
@@ -323,6 +329,12 @@ function mapLifecycle(
 ): ReadonlyArray<CodexMappedMessage> {
   const { threadId, turnId, item } = message.params;
   if (!matchesCorrelation(context, threadId, turnId)) return correlationFailure();
+  if (isUnmodeledThreadItem(item)) {
+    // An item kind Octant does not model. Authority is enforced through the
+    // separate approval requests, not through item rendering, so an unknown
+    // item is safe to skip rather than failing the turn.
+    return [{ kind: "ignored" }];
+  }
   switch (item.type) {
     case "commandExecution":
     case "fileChange":
@@ -355,6 +367,37 @@ function mapLifecycle(
       const mapped = mapToolCompletion(context, item);
       state.lifecycle = "terminal";
       return mapped;
+    }
+    case "webSearch": {
+      const state = context.toolStates.get(item.id);
+      if (message.method === "item/started") {
+        if (state !== undefined) {
+          return protocolFailure("Provider started a tool item more than once.");
+        }
+        const id = toolCallId(context, item.id);
+        return [
+          event(context, { kind: "tool-start", toolCallId: id, toolName: "Web search" }),
+          event(context, { kind: "tool-progress", toolCallId: id, message: "Searching the web." }),
+        ];
+      }
+      if (state === undefined) {
+        return protocolFailure("Provider completed a tool item that was not started.");
+      }
+      if (state.lifecycle === "terminal") {
+        return protocolFailure("Provider completed a terminal tool item.");
+      }
+      state.lifecycle = "terminal";
+      const query = item.query.trim();
+      return [
+        event(context, {
+          kind: "tool-success",
+          toolCallId: state.toolCallId,
+          summary:
+            query === ""
+              ? "Web search completed."
+              : truncate(`Searched: ${query}`, LABEL_MAX_CHARACTERS),
+        }),
+      ];
     }
     case "userMessage":
     case "contextCompaction":
