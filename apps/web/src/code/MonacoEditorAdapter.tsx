@@ -24,6 +24,27 @@ export interface MonacoAdapterRuntime {
   ) => MonacoAdapterSession;
 }
 
+export interface MonacoDiffSession {
+  readonly dispose: () => void;
+  readonly setRenderSideBySide: (sideBySide: boolean) => void;
+  readonly setTypography?: (typography: EditorTypographyProjection) => void;
+  readonly setValues: (values: { readonly original: string; readonly modified: string }) => void;
+}
+
+export interface MonacoDiffRuntime {
+  readonly mountDiff: (
+    element: HTMLElement,
+    options: {
+      readonly language: string;
+      readonly modelUriBase: string;
+      readonly original: string;
+      readonly modified: string;
+      readonly renderSideBySide: boolean;
+      readonly typography?: EditorTypographyProjection;
+    },
+  ) => MonacoDiffSession;
+}
+
 export interface MonacoEditorAdapterProps {
   readonly ariaLabel: string;
   readonly language: string;

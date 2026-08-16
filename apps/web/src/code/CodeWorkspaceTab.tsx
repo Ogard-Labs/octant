@@ -27,6 +27,8 @@ export default function CodeWorkspaceTab(props: {
   readonly tab: CodeWorkspaceTab;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
+  /** Opens one changed repository file as a Code file tab, from the diff. */
+  readonly onOpenFile?: (relativePath: string) => void;
   readonly onOpenSurface?: (kind: CodeOverviewSurfaceKind) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly canvasClient?: CanvasClient;
@@ -86,6 +88,7 @@ export default function CodeWorkspaceTab(props: {
         client={props.controller.client}
         controller={props.controller}
         {...(props.onOpenBrowser === undefined ? {} : { onOpenBrowser: props.onOpenBrowser })}
+        {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
         {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}

@@ -1,12 +1,29 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { MonacoAdapterRuntime } from "./MonacoEditorAdapter";
+import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { CodeDiffPane, type CodeDiffProjection } from "./CodeDiffPane";
 
+const DIFF = [
+  "diff --git a/src/index.ts b/src/index.ts",
+  "--- a/src/index.ts",
+  "+++ b/src/index.ts",
+  "@@ -12,2 +12,2 @@",
+  "-const answer = 41;",
+  "+const answer = 42;",
+  " export { answer };",
+  "diff --git a/README.md b/README.md",
+  "--- /dev/null",
+  "+++ b/README.md",
+  "@@ -0,0 +1 @@",
+  "+Octant",
+  "",
+].join("\n");
+
 describe("CodeDiffPane", () => {
-  it("loads exact Git evidence into a read-only opaque Monaco model", async () => {
+  it("loads exact Git evidence and compares one changed file at a time", async () => {
     const code = client();
     const fixture = runtime();
     render(<CodeDiffPane client={code} diff={available()} loadRuntime={fixture.loadRuntime} />);
@@ -14,11 +31,69 @@ describe("CodeDiffPane", () => {
     expect(await screen.findByRole("heading", { name: "Checkout changes" })).toBeVisible();
     expect(code.operationContent).toHaveBeenCalledWith(ids.thread, ids.operation, ids.content);
     expect(code.content).not.toHaveBeenCalled();
-    await waitFor(() => expect(fixture.options?.value).toContain("diff --git"));
-    expect(fixture.options?.readOnly).toBe(true);
-    expect(fixture.options?.modelUri).toBe(`octant-code://${ids.checkout}/diff/${ids.content}`);
-    expect(fixture.options?.modelUri).not.toContain("/Users/");
+
+    // Both sides come from the host's own diff evidence; nothing is refetched.
+    await waitFor(() => expect(fixture.options?.original).toBe("const answer = 41;\nexport { answer };"));
+    expect(fixture.options?.modified).toBe("const answer = 42;\nexport { answer };");
+    expect(fixture.options?.modelUriBase).toContain(`octant-code://${ids.checkout}/diff/${ids.content}`);
+    expect(fixture.options?.modelUriBase).not.toContain("/Users/");
     expect(screen.queryByText(/incomplete/i)).not.toBeInTheDocument();
+  });
+
+  it("lists every changed file with its change kind and line counts", async () => {
+    render(<CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />);
+
+    const files = await screen.findByRole("navigation", { name: "Changed files" });
+    const entries = within(files).getAllByRole("button");
+    expect(entries.map((entry) => entry.textContent)).toEqual([
+      "src/index.tsmodified+1−1",
+      "README.mdadded+1−0",
+    ]);
+    expect(entries[0]).toHaveAttribute("aria-current", "true");
+  });
+
+  it("switches the comparison to the file the user selects", async () => {
+    const user = userEvent.setup();
+    const fixture = runtime();
+    render(<CodeDiffPane client={client()} diff={available()} loadRuntime={fixture.loadRuntime} />);
+
+    await user.click(await screen.findByRole("button", { name: /README\.md/ }));
+    await waitFor(() => expect(fixture.options?.modified).toBe("Octant"));
+    expect(fixture.options?.original).toBe("");
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent("README.md");
+  });
+
+  it("toggles between side-by-side and inline layout", async () => {
+    const user = userEvent.setup();
+    const fixture = runtime();
+    render(<CodeDiffPane client={client()} diff={available()} loadRuntime={fixture.loadRuntime} />);
+
+    await waitFor(() => expect(fixture.options?.renderSideBySide).toBe(true));
+    await user.click(screen.getByRole("button", { name: "Inline" }));
+    expect(fixture.session?.setRenderSideBySide).toHaveBeenCalledWith(false);
+    expect(screen.getByRole("button", { name: "Inline" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("hands the selected file to the editor", async () => {
+    const user = userEvent.setup();
+    const onOpenFile = vi.fn();
+    render(
+      <CodeDiffPane
+        client={client()}
+        diff={available()}
+        loadRuntime={runtime().loadRuntime}
+        onOpenFile={onOpenFile}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Open in editor" }));
+    expect(onOpenFile).toHaveBeenCalledWith("src/index.ts");
+  });
+
+  it("offers no editor handoff when no editor is bound", async () => {
+    render(<CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />);
+    expect(await screen.findByRole("heading", { name: "Checkout changes" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Open in editor" })).not.toBeInTheDocument();
   });
 
   it("marks truncated diff evidence as visibly incomplete", async () => {
@@ -102,16 +177,8 @@ function client(options: { readonly bytes?: Uint8Array } = {}): CodeClient {
       nextCursor: 0,
       hasMore: false,
     })),
-    content: vi.fn(
-      async () =>
-        options.bytes ??
-        new TextEncoder().encode("diff --git a/src/index.ts b/src/index.ts\n+changed\n"),
-    ),
-    operationContent: vi.fn(
-      async () =>
-        options.bytes ??
-        new TextEncoder().encode("diff --git a/src/index.ts b/src/index.ts\n+changed\n"),
-    ),
+    content: vi.fn(async () => options.bytes ?? new TextEncoder().encode(DIFF)),
+    operationContent: vi.fn(async () => options.bytes ?? new TextEncoder().encode(DIFF)),
     execute: vi.fn(),
     executeOperation: vi.fn(),
     inspectTerminal: vi.fn(),
@@ -127,17 +194,19 @@ function client(options: { readonly bytes?: Uint8Array } = {}): CodeClient {
 }
 
 function runtime() {
-  let options: Parameters<MonacoAdapterRuntime["mount"]>[1] | undefined;
+  let options: Parameters<MonacoDiffRuntime["mountDiff"]>[1] | undefined;
+  let session: ReturnType<MonacoDiffRuntime["mountDiff"]> | undefined;
   const loadRuntime = vi.fn(
-    async (): Promise<MonacoAdapterRuntime> => ({
-      mount: (_element, value) => {
+    async (): Promise<MonacoDiffRuntime> => ({
+      mountDiff: (_element, value) => {
         options = value;
-        return {
+        session = {
           dispose: vi.fn(),
-          focus: vi.fn(),
-          setReadOnly: vi.fn(),
-          setValue: vi.fn(),
+          setRenderSideBySide: vi.fn(),
+          setTypography: vi.fn(),
+          setValues: vi.fn(),
         };
+        return session;
       },
     }),
   );
@@ -145,6 +214,9 @@ function runtime() {
     loadRuntime,
     get options() {
       return options;
+    },
+    get session() {
+      return session;
     },
   };
 }
