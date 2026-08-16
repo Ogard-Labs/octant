@@ -232,6 +232,7 @@ const EXECUTION_POLICY_LABEL: Record<
 > = {
   "full-access": "Full access",
   "approval-gated": "Approval gated",
+  "auto-accept-edits": "Auto-accept edits",
   plan: "Plan",
 };
 

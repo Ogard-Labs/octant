@@ -23,7 +23,8 @@ const snapshotId = (value: string) => value as unknown as LinkedThreadContextSna
 const EXECUTION_RANK: Record<AgentRunAuthority["executionPolicy"], number> = {
   plan: 0,
   "approval-gated": 1,
-  "full-access": 2,
+  "auto-accept-edits": 2,
+  "full-access": 3,
 };
 
 const CAPABILITY_KEYS = ["filesystem", "shell", "git", "network", "tools", "subagents"] as const;

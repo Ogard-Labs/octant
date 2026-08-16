@@ -9,6 +9,7 @@ import type {
 } from "@octant/contracts";
 import type { CodeCheckoutId, CodeThreadId, ProviderExecutionPolicy } from "@octant/contracts";
 import { sameToolActionAuthority } from "@octant/contracts";
+import { decidesCodeEffectsByApproval } from "./codePolicy";
 
 export type AppleToolchainPolicyDecision =
   | { readonly kind: "allowed" }
@@ -99,7 +100,7 @@ function evaluateScope(
   }
   if (
     sideEffect &&
-    scope.executionPolicy === "approval-gated" &&
+    decidesCodeEffectsByApproval(scope.executionPolicy) &&
     (request.approval.kind !== "approved" || !scope.approvalValid)
   ) {
     return { kind: "denied", reason: "approval-required" };

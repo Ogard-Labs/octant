@@ -683,10 +683,19 @@ function mapAndOffer(
   }
 }
 
-function permissionRules(policy: "full-access" | "approval-gated" | "plan"): PermissionRuleset {
+function permissionRules(policy: ProviderExecutionPolicy): PermissionRuleset {
   if (policy === "full-access") {
     return [
       { permission: "*", pattern: "*", action: "allow" },
+      { permission: "external_directory", pattern: "*", action: "deny" },
+    ];
+  }
+  if (policy === "auto-accept-edits") {
+    // Edits inside the bound directory proceed; everything else still asks,
+    // and reach outside the directory stays denied outright.
+    return [
+      { permission: "*", pattern: "*", action: "ask" },
+      { permission: "edit", pattern: "*", action: "allow" },
       { permission: "external_directory", pattern: "*", action: "deny" },
     ];
   }

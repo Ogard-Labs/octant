@@ -107,7 +107,8 @@ export function clampAgentRunAuthority(input: {
   const executionRank: Record<AgentRunAuthority["executionPolicy"], number> = {
     plan: 0,
     "approval-gated": 1,
-    "full-access": 2,
+    "auto-accept-edits": 2,
+    "full-access": 3,
   };
   const minPolicy = ceilings.reduce<AgentRunAuthority["executionPolicy"]>((current, ceiling) => {
     return executionRank[ceiling.executionPolicy] < executionRank[current]
@@ -202,7 +203,8 @@ function assertLiveParentGrantWithinModeCeiling(
   const executionRank: Record<AgentRunAuthority["executionPolicy"], number> = {
     plan: 0,
     "approval-gated": 1,
-    "full-access": 2,
+    "auto-accept-edits": 2,
+    "full-access": 3,
   };
   if (executionRank[liveParentGrant.executionPolicy] > executionRank[modeCeiling.executionPolicy]) {
     reject(

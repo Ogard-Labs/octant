@@ -2,6 +2,8 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeCheckoutId, CodeGitOperationId, CodeThreadId } from "@octant/contracts/code";
 import type { CodeOperationId, CodeOperationResult } from "@octant/contracts/code-operations";
 import type { CodeApprovalId } from "@octant/contracts/code";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -14,7 +16,7 @@ export interface CodeGitPaneProps {
   readonly client: Pick<CodeClient, "executeOperation">;
   readonly createGitOperationId: () => CodeGitOperationId;
   readonly createOperationId: () => CodeOperationId;
-  readonly executionPolicy: "plan" | "approval-gated" | "full-access";
+  readonly executionPolicy: ProviderExecutionPolicy;
   readonly observation: GitObservation;
   readonly onReviewPullRequest?: () => void;
   readonly requestApproval?: (
@@ -37,7 +39,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
 
   const authorization = async (command: Parameters<CodeClient["executeOperation"]>[0]) => {
     if (props.executionPolicy === "full-access") return { kind: "full-access" } as const;
-    if (props.executionPolicy !== "approval-gated") return undefined;
+    if (!decidesCodeEffectsByApproval(props.executionPolicy)) return undefined;
     const approvalId = await props.requestApproval?.(command);
     return approvalId === undefined ? undefined : ({ kind: "approved", approvalId } as const);
   };

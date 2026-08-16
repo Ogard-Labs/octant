@@ -5396,6 +5396,12 @@ dialog.project-dialog {
   gap: 8px 12px;
 }
 
+.code-thread-workspace__access {
+  display: inline-flex;
+  align-items: center;
+  min-width: 168px;
+}
+
 .code-thread-workspace__hint {
   color: var(--octant-text-muted);
   font-size: 11px;

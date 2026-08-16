@@ -12,6 +12,8 @@ import type {
   CodePullRequestReviewOpinion,
   CodeReviewFinding,
 } from "@octant/contracts/code-operations";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -104,7 +106,7 @@ export interface CodeReviewPaneProps {
   readonly client: Pick<CodeClient, "executeOperation">;
   readonly createFindingId: () => CodeReviewFindingId;
   readonly createOperationId: () => CodeOperationId;
-  readonly executionPolicy: "plan" | "approval-gated" | "full-access";
+  readonly executionPolicy: ProviderExecutionPolicy;
   readonly findings: ReadonlyArray<CodeReviewFinding>;
   readonly requestApproval?: (input: {
     readonly command: Parameters<CodeClient["executeOperation"]>[0];
@@ -133,7 +135,7 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
 
   const mayMutate = async (command: Parameters<CodeClient["executeOperation"]>[0]) =>
     props.executionPolicy === "full-access" ||
-    (props.executionPolicy === "approval-gated" &&
+    (decidesCodeEffectsByApproval(props.executionPolicy) &&
       (await props.requestApproval?.({ command })) === true);
 
   const add = async () => {

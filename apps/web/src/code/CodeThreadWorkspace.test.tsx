@@ -173,7 +173,9 @@ describe("CodeThreadWorkspace", () => {
     );
 
     await user.type(screen.getByLabelText("Follow-up message"), "mail henrik@ogard.no");
-    expect(screen.queryByRole("listbox", { name: "Files you can mention" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("listbox", { name: "Files you can mention" }),
+    ).not.toBeInTheDocument();
     expect(list).not.toHaveBeenCalled();
   });
 
@@ -232,6 +234,114 @@ describe("CodeThreadWorkspace", () => {
       providerInstanceId: alternateProviderId,
       modelId: alternateModelId,
     });
+  });
+
+  it("lowers thread access from the composer through the authoritative command", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    render(<CodeThreadWorkspace controller={controller({ execute })} threadId={threadId} />);
+
+    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    await user.click(await screen.findByRole("option", { name: "Plan · read-only" }));
+
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-code-thread-access",
+      threadId,
+      expectedVersion: 1,
+      executionPolicy: "plan",
+      permissionPersistence: "current-session",
+    });
+  });
+
+  it("switches to auto-accept edits without asking for native confirmation", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    const requestFullAccessApproval = vi.fn(async () => undefined);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ execute })}
+        requestFullAccessApproval={requestFullAccessApproval}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    await user.click(await screen.findByRole("option", { name: "Auto-accept edits" }));
+
+    expect(requestFullAccessApproval).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-code-thread-access",
+      threadId,
+      expectedVersion: 1,
+      executionPolicy: "auto-accept-edits",
+      permissionPersistence: "current-session",
+    });
+  });
+
+  it("raises a thread to Full access only with the host's native confirmation", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    const approvalId = "40000000-0000-4000-8000-000000000004";
+    const requestFullAccessApproval = vi.fn(async () => approvalId as never);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ execute })}
+        requestFullAccessApproval={requestFullAccessApproval}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    await user.click(await screen.findByRole("option", { name: "Full access" }));
+
+    expect(requestFullAccessApproval).toHaveBeenCalledWith({
+      kind: "change-thread-full-access",
+      threadId,
+      expectedVersion: 1,
+      permissionPersistence: "current-session",
+    });
+    expect(execute).toHaveBeenCalledWith({
+      kind: "change-code-thread-access",
+      threadId,
+      expectedVersion: 1,
+      executionPolicy: "full-access",
+      permissionPersistence: "current-session",
+      approvalId,
+    });
+  });
+
+  it("keeps the current access when native confirmation is declined", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ execute })}
+        requestFullAccessApproval={vi.fn(async () => undefined)}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    await user.click(await screen.findByRole("option", { name: "Full access" }));
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        "Full access was not confirmed. This thread keeps its current access.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("does not offer Full access on a host that cannot confirm it natively", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    render(<CodeThreadWorkspace controller={controller({ execute })} threadId={threadId} />);
+
+    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    const option = await screen.findByRole("option", { name: "Full access" });
+    expect(option).toHaveAttribute("aria-disabled", "true");
+    await user.click(option);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it("answers agent-initiated approvals and questions through the controller", async () => {
@@ -484,7 +594,11 @@ describe("CodeThreadWorkspace", () => {
 
   it("queues a follow-up written while a turn runs instead of blocking the composer", async () => {
     const user = userEvent.setup();
-    const queueFollowUp = vi.fn(() => ({ id: "queued-1", prompt: "and then push", threadMentionIds: [] }));
+    const queueFollowUp = vi.fn(() => ({
+      id: "queued-1",
+      prompt: "and then push",
+      threadMentionIds: [],
+    }));
     const sendFollowUp = vi.fn(async () => true);
     render(
       <CodeThreadWorkspace
@@ -745,6 +859,7 @@ function controller(
         title: "find bugs in this repo",
         lifecycle: "active",
         executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
         checkoutId: "20000000-0000-4000-8000-000000000002",
         providerInstanceId: providerId,
         modelId,

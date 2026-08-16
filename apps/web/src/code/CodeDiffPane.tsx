@@ -105,18 +105,10 @@ function AvailableDiff(
         </div>
         <p>{props.diff.observation.changedPaths.length.toLocaleString()} changed paths</p>
         <div className="code-diff-pane__view-toggle" role="group" aria-label="Diff layout">
-          <button
-            aria-pressed={sideBySide}
-            onClick={() => setSideBySide(true)}
-            type="button"
-          >
+          <button aria-pressed={sideBySide} onClick={() => setSideBySide(true)} type="button">
             Side by side
           </button>
-          <button
-            aria-pressed={!sideBySide}
-            onClick={() => setSideBySide(false)}
-            type="button"
-          >
+          <button aria-pressed={!sideBySide} onClick={() => setSideBySide(false)} type="button">
             Inline
           </button>
         </div>
@@ -174,10 +166,7 @@ function AvailableDiff(
                 <p className="code-diff-pane__renamed-from">Renamed from {selected.previousPath}</p>
               )}
               {props.onOpenFile === undefined || selected.change === "deleted" ? null : (
-                <button
-                  onClick={() => props.onOpenFile?.(selected.path)}
-                  type="button"
-                >
+                <button onClick={() => props.onOpenFile?.(selected.path)} type="button">
                   Open in editor
                 </button>
               )}
@@ -191,11 +180,7 @@ function AvailableDiff(
                 ariaLabel={`Diff for ${selected.path}`}
                 language="plaintext"
                 {...(props.loadRuntime === undefined ? {} : { loadRuntime: props.loadRuntime })}
-                modelUriBase={modelUriBase(
-                  props.diff.checkoutId,
-                  evidence.contentId,
-                  selected.id,
-                )}
+                modelUriBase={modelUriBase(props.diff.checkoutId, evidence.contentId, selected.id)}
                 modified={selected.modified}
                 original={selected.original}
                 renderSideBySide={sideBySide}

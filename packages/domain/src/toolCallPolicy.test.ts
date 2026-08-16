@@ -281,6 +281,43 @@ describe("resolveToolCall fail-closed order", () => {
     });
   });
 
+  it("7b. auto-accept edits waives only project file writes", () => {
+    const validation = (executionPolicy: "approval-gated" | "auto-accept-edits") =>
+      resolveToolCall(
+        baseInput({
+          capability: decodeToolActionCapability({ id: "repository-validation", version: 1 }),
+          arguments: {},
+          thread: { executionPolicy, approvalSatisfied: false, externalContentIngested: false },
+        }),
+      );
+    expect(validation("approval-gated").kind).toBe("prompt");
+    expect(validation("auto-accept-edits").kind).toBe("allow");
+
+    // An external application is not an edit, so it still asks.
+    const computerUse = resolveToolCall(
+      baseInput({
+        capability: decodeToolActionCapability({ id: "computer-use", version: 1 }),
+        arguments: {
+          allowlist: [],
+          sensitiveFieldProtection: true,
+          visibleStopControl: true,
+          maxSessionDurationMs: 60_000,
+          processOwnershipRequired: true,
+        },
+        thread: {
+          executionPolicy: "auto-accept-edits",
+          approvalSatisfied: false,
+          externalContentIngested: false,
+        },
+      }),
+    );
+    expect(computerUse).toMatchObject({ kind: "prompt", reason: "approval-required" });
+    // And the posture never widens the network.
+    expect(resolveNetworkEgressPolicy({ mode: "code", executionPolicy: "auto-accept-edits" })).toBe(
+      "provider-endpoints-only",
+    );
+  });
+
   it("allows a fully authorized core browser tool and emits an allow receipt", () => {
     const decision = resolveToolCall(baseInput());
     expect(decision.kind).toBe("allow");
