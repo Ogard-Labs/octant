@@ -472,6 +472,63 @@ function renderTab(
     const browserAutomationClient = props.browserAutomationClient;
     const onOpenSurface = props.onOpenSurface;
     const checkoutId = resolveCodeTabCheckoutId(tab, props.codeController);
+    const content = (
+      <Suspense
+        fallback={
+          <ShellState
+            eyebrow="Code workspace"
+            message="Loading the selected Code surface."
+            state="loading"
+            title={tab.title}
+          />
+        }
+      >
+        <CodeWorkspaceTab
+          {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+          {...(props.agentRunSettingsClient === undefined
+            ? {}
+            : { agentRunSettingsClient: props.agentRunSettingsClient })}
+          {...(props.appleToolchainClient === undefined
+            ? {}
+            : { appleToolchainClient: props.appleToolchainClient })}
+          controller={props.codeController}
+          {...(props.onOpenSurface === undefined
+            ? {}
+            : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
+          onOpenSurface={(kind) =>
+            props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))
+          }
+          tab={tab}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
+            ? {}
+            : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}
+          {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+          {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
+          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+          {...(props.projectWindowCapability === undefined
+            ? {}
+            : { windowCapability: props.projectWindowCapability })}
+          {...(props.onOpenCanvasReference === undefined
+            ? {}
+            : { onOpenCanvas: props.onOpenCanvasReference })}
+          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+        />
+      </Suspense>
+    );
+    // Auxiliary Code surfaces (terminal, file, diff, tests, …) share the
+    // thread rail, child-run chrome, and Browser/Computer Use preview with the
+    // thread tab; mounting them per split pane just repeats the same rail and
+    // "Browser is active" card beside every surface of one thread.
+    if (tab.kind !== "code-overview") {
+      return (
+        <CodeWorkspaceErrorBoundary key={tab.id}>
+          <div className="code-thread-environment code-thread-environment--surface">
+            <div className="code-thread-environment__content">{content}</div>
+          </div>
+        </CodeWorkspaceErrorBoundary>
+      );
+    }
     const surface = (
       <ThreadActivityPictureInPicture
         {...(props.browserAutomationClient === undefined
@@ -488,75 +545,13 @@ function renderTab(
           : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
         threadId={tab.threadId as never}
       >
-        {/* The compact child-run chrome mounts on the thread workspace
-                  auxiliary Code tool tabs of the same thread do not each
-                  repeat it. The full hierarchy stays the Code detail view. */}
-        {tab.kind === "code-overview" ? (
-          <ThreadChildRunStatusSlot
-            {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
-            threadId={String(tab.threadId)}
-          />
-        ) : null}
-        <Suspense
-          fallback={
-            <ShellState
-              eyebrow="Code workspace"
-              message="Loading the selected Code surface."
-              state="loading"
-              title={tab.title}
-            />
-          }
-        >
-          <CodeWorkspaceTab
-            {...(props.agentRunClient === undefined
-              ? {}
-              : { agentRunClient: props.agentRunClient })}
-            {...(props.agentRunSettingsClient === undefined
-              ? {}
-              : { agentRunSettingsClient: props.agentRunSettingsClient })}
-            {...(props.appleToolchainClient === undefined
-              ? {}
-              : { appleToolchainClient: props.appleToolchainClient })}
-            controller={props.codeController}
-            {...(props.onOpenSurface === undefined
-              ? {}
-              : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
-            onOpenSurface={(kind) =>
-              props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))
-            }
-            tab={tab}
-            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-            {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
-              ? {}
-              : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}
-            {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
-            {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
-            {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-            {...(props.projectWindowCapability === undefined
-              ? {}
-              : { windowCapability: props.projectWindowCapability })}
-            {...(props.onOpenCanvasReference === undefined
-              ? {}
-              : { onOpenCanvas: props.onOpenCanvasReference })}
-            {...(props.onOpenSettings === undefined
-              ? {}
-              : { onOpenSettings: props.onOpenSettings })}
-          />
-        </Suspense>
+        <ThreadChildRunStatusSlot
+          {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
+          threadId={String(tab.threadId)}
+        />
+        {content}
       </ThreadActivityPictureInPicture>
     );
-    // Auxiliary Code surfaces (terminal, file, diff, tests, …) share the
-    // thread rail with the thread tab; mounting a rail per split pane just
-    // repeats the same explorer and environment beside each surface.
-    if (tab.kind !== "code-overview") {
-      return (
-        <CodeWorkspaceErrorBoundary key={tab.id}>
-          <div className="code-thread-environment code-thread-environment--surface">
-            <div className="code-thread-environment__content">{surface}</div>
-          </div>
-        </CodeWorkspaceErrorBoundary>
-      );
-    }
     const files = (
       <CodeFileExplorerPanel
         threadId={tab.threadId}
