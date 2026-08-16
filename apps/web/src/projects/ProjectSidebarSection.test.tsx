@@ -30,6 +30,7 @@ describe("ProjectSidebarSection chat thread nesting", () => {
         activeThreadId="thread-unfiled"
         archivedProjects={[]}
         availabilityByProject={new Map()}
+        onArchive={vi.fn()}
         onMove={vi.fn()}
         onNewChatInProject={onNewChatInProject}
         onProjectOpen={onProjectOpen}
@@ -112,6 +113,7 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     const props = {
       archivedProjects: [],
       availabilityByProject: new Map(),
+      onArchive: vi.fn(),
       onMove: vi.fn(),
       onProjectOpen: vi.fn(),
       onReorder: vi.fn(),
@@ -156,6 +158,7 @@ describe("ProjectSidebarSection chat thread nesting", () => {
       <ProjectSidebarSection
         archivedProjects={[]}
         availabilityByProject={new Map()}
+        onArchive={vi.fn()}
         onMove={vi.fn()}
         onProjectOpen={vi.fn()}
         onReorder={vi.fn()}
@@ -216,6 +219,7 @@ describe("ProjectSidebarSection chat thread nesting", () => {
       <ProjectSidebarSection
         archivedProjects={[]}
         availabilityByProject={new Map()}
+        onArchive={vi.fn()}
         onMove={vi.fn()}
         onProjectOpen={vi.fn()}
         onReorder={vi.fn()}
@@ -256,6 +260,7 @@ describe("ProjectSidebarSection pinned ordering", () => {
       <ProjectSidebarSection
         archivedProjects={[]}
         availabilityByProject={new Map()}
+        onArchive={vi.fn()}
         onMove={vi.fn()}
         onProjectOpen={vi.fn()}
         onReorder={vi.fn()}
@@ -299,6 +304,30 @@ describe("ProjectSidebarSection pinned ordering", () => {
   });
 });
 
+describe("ProjectSidebarSection archive", () => {
+  it("archives a Project from its row menu", async () => {
+    const user = userEvent.setup();
+    const onArchive = vi.fn();
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={onArchive}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projects={[chatProjectA]}
+      />,
+    );
+
+    screen.getByRole("button", { name: `Project actions for ${chatProjectA.name}` }).focus();
+    await user.keyboard("{ArrowDown}");
+    await user.click(await screen.findByRole("menuitem", { name: "Archive Project" }));
+    expect(onArchive).toHaveBeenCalledWith(chatProjectA.id);
+  });
+});
+
 describe("ProjectSidebarSection activity view", () => {
   it("toggles a recency inbox that keeps Project attribution and attention glyphs", async () => {
     const user = userEvent.setup();
@@ -312,6 +341,7 @@ describe("ProjectSidebarSection activity view", () => {
           archivedProjects={[]}
           availabilityByProject={new Map()}
           now={new Date(now)}
+          onArchive={vi.fn()}
           onMove={vi.fn()}
           onProjectOpen={vi.fn()}
           onReorder={vi.fn()}
@@ -397,6 +427,7 @@ describe("ProjectSidebarSection activity view", () => {
           archivedProjects={[]}
           availabilityByProject={new Map()}
           now={new Date("2026-08-14T15:00:00.000Z")}
+          onArchive={vi.fn()}
           onMove={vi.fn()}
           onProjectOpen={vi.fn()}
           onReorder={vi.fn()}
@@ -423,6 +454,7 @@ describe("ProjectSidebarSection activity view", () => {
           archivedProjects={[]}
           availabilityByProject={new Map()}
           now={new Date("2026-08-14T15:00:00.000Z")}
+          onArchive={vi.fn()}
           onMove={vi.fn()}
           onProjectOpen={vi.fn()}
           onReorder={vi.fn()}
@@ -471,6 +503,7 @@ describe("ProjectSidebarSection code project views", () => {
       <ProjectSidebarSection
         archivedProjects={[]}
         availabilityByProject={new Map()}
+        onArchive={vi.fn()}
         onMove={vi.fn()}
         onProjectOpen={vi.fn()}
         onReorder={vi.fn()}
@@ -491,6 +524,7 @@ describe("ProjectSidebarSection code project views", () => {
       <ProjectSidebarSection
         archivedProjects={[]}
         availabilityByProject={new Map()}
+        onArchive={vi.fn()}
         onMove={vi.fn()}
         onProjectOpen={vi.fn()}
         onReorder={vi.fn()}
@@ -520,6 +554,7 @@ describe("ProjectSidebarSection code project views", () => {
       <ProjectSidebarSection
         archivedProjects={[]}
         availabilityByProject={new Map()}
+        onArchive={vi.fn()}
         onMove={vi.fn()}
         onProjectOpen={vi.fn()}
         onReorder={vi.fn()}
@@ -534,6 +569,7 @@ describe("ProjectSidebarSection code project views", () => {
       <ProjectSidebarSection
         archivedProjects={[]}
         availabilityByProject={new Map()}
+        onArchive={vi.fn()}
         onMove={vi.fn()}
         onProjectOpen={vi.fn()}
         onReorder={vi.fn()}
@@ -559,6 +595,7 @@ describe("ProjectSidebarSection Code and Work recents", () => {
         archivedProjects={[]}
         availabilityByProject={new Map()}
         onAddProject={onAddProject}
+        onArchive={vi.fn()}
         onMove={vi.fn()}
         onProjectOpen={vi.fn()}
         onReorder={vi.fn()}
@@ -603,6 +640,7 @@ describe("ProjectSidebarSection Code and Work recents", () => {
         archivedProjects={[]}
         availabilityByProject={new Map()}
         onAddProject={onAddProject}
+        onArchive={vi.fn()}
         onMove={vi.fn()}
         onProjectOpen={vi.fn()}
         onReorder={vi.fn()}
