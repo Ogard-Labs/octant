@@ -41,6 +41,8 @@ import {
   type CodeFailure,
   type CodeFileId,
   type CodeFileChangeNotice,
+  type CodeSearchResult,
+  type CodeSearchScope,
   type CodeFileListingResult,
   type CodeFileOpenResultEnvelope,
   type CodeFileReference,
@@ -78,6 +80,7 @@ import {
 } from "./codeAttachmentStore";
 import type { CodeFileService, CodeFileOpenResult, CodeFileSaveResult } from "./codeFileService";
 import type { CodeFileWatchService } from "./codeFileWatchService";
+import type { CodeSearchService } from "./codeSearchService";
 import type { FileIdentity } from "./fileOperationPort";
 import {
   approvalContextDigest,
@@ -337,6 +340,12 @@ export interface CodeServiceOptions {
    * will never come.
    */
   readonly watcher?: Pick<CodeFileWatchService, "watch">;
+  /**
+   * Bounded search of the bound checkout. Optional for the same reason as
+   * `files.list`: a host that wired no searcher answers `unavailable` rather
+   * than an empty result, which would read as "the repository has no match".
+   */
+  readonly searcher?: Pick<CodeSearchService, "search">;
   readonly content: CodeContentStore;
   readonly evidence?: {
     readonly put: (
@@ -404,6 +413,14 @@ export interface CodeListFilesInput {
   readonly signal?: AbortSignal | undefined;
 }
 
+export interface CodeSearchFilesInput {
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: CodeCheckoutId;
+  readonly scope: CodeSearchScope;
+  readonly query: string;
+  readonly signal?: AbortSignal | undefined;
+}
+
 export interface CodeWatchFilesInput {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
@@ -447,6 +464,7 @@ export class CodeService {
   readonly #files: Pick<CodeFileService, "open" | "save"> & Partial<Pick<CodeFileService, "list">>;
   readonly #tests: CodeRepositoryTestDiscoveryPort | undefined;
   readonly #watcher: Pick<CodeFileWatchService, "watch"> | undefined;
+  readonly #searcher: Pick<CodeSearchService, "search"> | undefined;
   readonly #content: CodeContentStore;
   readonly #evidence: CodeServiceOptions["evidence"];
   readonly #attachments: CodeServiceOptions["attachments"];
@@ -484,6 +502,7 @@ export class CodeService {
     this.#files = options.files;
     this.#tests = options.tests;
     this.#watcher = options.watcher;
+    this.#searcher = options.searcher;
     this.#content = options.content;
     this.#evidence = options.evidence;
     this.#attachments = options.attachments;
@@ -1472,6 +1491,52 @@ export class CodeService {
       checkoutId: checkout.id,
       rootPath: root.rootPath,
       ...(input.directory === undefined ? {} : { directory: input.directory }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+  }
+
+  /**
+   * Search the checkout bound to a Code thread by path or by content.
+   *
+   * Search is a read under the same checkout authority the listing uses, so
+   * every posture including Plan may run one. The searcher owns confinement
+   * and every bound; this method owns only the authority and the root.
+   */
+  async searchFiles(
+    authenticatedWindowId: WindowId,
+    input: CodeSearchFilesInput,
+  ): Promise<CodeSearchResult> {
+    const authorized = await this.#authorizeCheckoutRead(
+      authenticatedWindowId,
+      input.threadId,
+      input.checkoutId,
+      "Code search is unauthorized.",
+    );
+    const searcher = this.#searcher;
+    if (searcher === undefined) {
+      return {
+        status: "failed",
+        failure: { category: "unavailable", message: "Code search is unavailable." },
+      };
+    }
+    const root = await this.#roots.resolve(
+      authenticatedWindowId,
+      authorized.effectiveThread,
+      authorized.checkout,
+      CODE_LISTING_ROOT_PROBE_PATH,
+    );
+    if (root === undefined) {
+      return {
+        status: "failed",
+        failure: { category: "unavailable", message: "Code file authority is unavailable." },
+      };
+    }
+    return await searcher.search({
+      threadId: authorized.thread.id,
+      checkoutId: authorized.checkout.id,
+      rootPath: root.rootPath,
+      scope: input.scope,
+      query: input.query,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
   }

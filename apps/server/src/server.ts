@@ -108,6 +108,7 @@ import { CodeAttachmentStore } from "./code/codeAttachmentStore";
 import { CodeFileService } from "./code/codeFileService";
 import { CodeFileListingService } from "./code/codeFileListingService";
 import { CodeFileWatchService } from "./code/codeFileWatchService";
+import { CodeSearchService } from "./code/codeSearchService";
 import { RepositoryTestDiscoveryService } from "./code/repositoryTestDiscoveryService";
 import {
   CodeService,
@@ -1018,6 +1019,9 @@ function withCodeOperationRuntime(
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
     ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
+    ...(service.searchFiles === undefined
+      ? {}
+      : { searchFiles: service.searchFiles.bind(service) }),
     ...(service.stageEvidence === undefined
       ? {}
       : { stageEvidence: service.stageEvidence.bind(service) }),
@@ -1049,6 +1053,9 @@ function withCodeBoard(
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
     ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
+    ...(service.searchFiles === undefined
+      ? {}
+      : { searchFiles: service.searchFiles.bind(service) }),
     queryBoard,
     ...(service.executeOperation === undefined
       ? {}
@@ -1669,6 +1676,9 @@ export function startOctantServer(
     // Watching needs no file helper either: it reports which paths changed and
     // never reads one, so the explorer stays live even when mutations cannot.
     const codeFileWatch = new CodeFileWatchService();
+    // Search reads directory entries and file bytes under the bound checkout
+    // through the confined ports, so it needs no file helper either.
+    const codeFileSearch = new CodeSearchService();
     // Discovery reads only the checkout's package.json and .octant/tests.json,
     // so it needs no file helper either. The same instance authorizes a run.
     const codeTestDiscovery = new RepositoryTestDiscoveryService();
@@ -1796,6 +1806,7 @@ export function startOctantServer(
         files: codeFiles,
         tests: codeTestDiscovery,
         watcher: codeFileWatch,
+        searcher: codeFileSearch,
         content: codeContent,
         evidence: codeEvidence,
         attachments: codeAttachments,

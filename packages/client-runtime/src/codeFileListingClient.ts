@@ -1,9 +1,12 @@
 import {
   decodeCodeFileChangeNotice,
   decodeCodeFileListingResult,
+  decodeCodeSearchResult,
   type CodeCheckoutId,
   type CodeFileChangeNotice,
   type CodeFileListingResult,
+  type CodeSearchResult,
+  type CodeSearchScope,
   type CodeRelativePath,
   type CodeThreadId,
 } from "@octant/contracts";
@@ -22,6 +25,13 @@ export interface CodeFileListingQuery {
   readonly directory?: CodeRelativePath | undefined;
 }
 
+export interface CodeSearchRequestQuery {
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: CodeCheckoutId;
+  readonly scope: CodeSearchScope;
+  readonly query: string;
+}
+
 export interface CodeFileWatchQuery {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
@@ -36,6 +46,8 @@ export interface CodeFileListingClient {
    * another one; it never means the checkout is empty.
    */
   watch(query: CodeFileWatchQuery, signal: AbortSignal): AsyncGenerator<CodeFileChangeNotice>;
+  /** Bounded search of the checkout by path or by content. */
+  search(query: CodeSearchRequestQuery, signal?: AbortSignal): Promise<CodeSearchResult>;
 }
 
 export class CodeFileListingClientFailure extends Error {
@@ -88,6 +100,32 @@ export function createCodeFileListingClient(
         );
       }
       return decodeCodeFileListingResult(body);
+    },
+
+    async search(query, signal) {
+      const url = new URL("/api/code/files/search", options.baseUrl);
+      url.searchParams.set("threadId", String(query.threadId));
+      url.searchParams.set("checkoutId", String(query.checkoutId));
+      url.searchParams.set("scope", query.scope);
+      url.searchParams.set("query", query.query);
+      let response: Response;
+      try {
+        response = await fetch(url.toString(), {
+          method: "GET",
+          headers: { "x-octant-window-capability": options.windowCapability },
+          ...(signal === undefined ? {} : { signal }),
+        });
+      } catch {
+        throw new CodeFileListingClientFailure("Code search is unavailable.", 0);
+      }
+      const body: unknown = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new CodeFileListingClientFailure(
+          messageFrom(body, "Code search is unavailable."),
+          response.status,
+        );
+      }
+      return decodeCodeSearchResult(body);
     },
 
     watch(query, signal) {

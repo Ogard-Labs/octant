@@ -23,8 +23,10 @@ import {
   decodeCodeTerminalInspection,
   decodeCodeTerminalInspectionRequest,
   decodeCodeConversationPage,
+  MAX_CODE_SEARCH_QUERY_LENGTH,
   decodeCodeFileChangeNotice,
   decodeCodeFileListingResult,
+  decodeCodeSearchResult,
   decodeCodeFileOpenResultEnvelope,
   decodeCodeFileSaveResultEnvelope,
   decodeCodeFollowUpCommand,
@@ -53,6 +55,8 @@ import {
   type CodeTerminalInspectionRequest,
   type CodeConversationPage,
   type CodeFileChangeNotice,
+  type CodeSearchResult,
+  type CodeSearchScope,
   type CodeFileListingResult,
   type CodeFileOpenResultEnvelope,
   type CodeFileSaveResultEnvelope,
@@ -117,6 +121,14 @@ export interface CodeFileListingInput {
   readonly checkoutId: typeof CodeCheckoutId.Type;
   /** Subdirectory relative to the checkout root. Absent lists the root. */
   readonly directory?: CodeRelativePath | undefined;
+  readonly signal?: AbortSignal | undefined;
+}
+
+export interface CodeSearchFilesInput {
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: typeof CodeCheckoutId.Type;
+  readonly scope: CodeSearchScope;
+  readonly query: string;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -221,6 +233,14 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     input: CodeFileListingInput,
   ) => Promise<CodeFileListingResult> | CodeFileListingResult;
+  /**
+   * Bounded search of the thread's checkout by path or by content. Optional
+   * for the same reason as `listFiles`.
+   */
+  readonly searchFiles?: (
+    authenticatedWindowId: WindowId,
+    input: CodeSearchFilesInput,
+  ) => Promise<CodeSearchResult> | CodeSearchResult;
   /**
    * Live notices that files under the thread's checkout changed. Optional for
    * the same reason as `listFiles`: a host with no watcher answers
@@ -650,6 +670,29 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "file-search": {
+          if (request.method !== "GET") {
+            throw new CodeRouteRejected("Code request is invalid.", 400);
+          }
+          if (dependencies.service.searchFiles === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code search is unavailable." },
+              503,
+              origin,
+            );
+          }
+          const searchInput = decodeFileSearchQuery(url);
+          return jsonResponse(
+            decodeCodeSearchResult(
+              await dependencies.service.searchFiles(authenticatedWindowId, {
+                ...searchInput,
+                signal: request.signal,
+              }),
+            ),
+            200,
+            origin,
+          );
+        }
         case "file-watch": {
           if (request.method !== "GET") {
             throw new CodeRouteRejected("Code request is invalid.", 400);
@@ -818,6 +861,7 @@ type MatchedRoute =
         | "file-save"
         | "file-open"
         | "file-listing"
+        | "file-search"
         | "file-watch"
         | "test-listing"
         | "stage-evidence"
@@ -933,6 +977,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/files/content") return { kind: "file-save" };
   if (pathname === "/api/code/files/open") return { kind: "file-open" };
   if (pathname === "/api/code/files/listing") return { kind: "file-listing" };
+  if (pathname === "/api/code/files/search") return { kind: "file-search" };
   if (pathname === "/api/code/files/watch") return { kind: "file-watch" };
   if (pathname === "/api/code/tests/listing") return { kind: "test-listing" };
   if (pathname === "/api/code/evidence") return { kind: "stage-evidence" };
@@ -1095,6 +1140,38 @@ function decodeFileListingQuery(url: URL): Omit<CodeFileListingInput, "signal"> 
     };
   } catch {
     throw new CodeRouteRejected("Code file listing query is invalid.", 400);
+  }
+}
+
+/**
+ * Decode a search query. The scope is explicit rather than inferred from the
+ * text, so "look for a file called x" and "look for x inside files" can never
+ * be confused for one another by a client that guessed.
+ */
+function decodeFileSearchQuery(url: URL): Omit<CodeSearchFilesInput, "signal"> {
+  const threadId = url.searchParams.get("threadId");
+  const checkoutId = url.searchParams.get("checkoutId");
+  const scope = url.searchParams.get("scope");
+  const query = url.searchParams.get("query");
+  if (
+    threadId === null ||
+    checkoutId === null ||
+    query === null ||
+    (scope !== "path" && scope !== "content") ||
+    query.length > MAX_CODE_SEARCH_QUERY_LENGTH ||
+    url.searchParams.size > 4
+  ) {
+    throw new CodeRouteRejected("Code search query is invalid.", 400);
+  }
+  try {
+    return {
+      threadId: decodeCodeThreadId(threadId),
+      checkoutId: decodeCheckoutId(checkoutId),
+      scope,
+      query,
+    };
+  } catch {
+    throw new CodeRouteRejected("Code search query is invalid.", 400);
   }
 }
 

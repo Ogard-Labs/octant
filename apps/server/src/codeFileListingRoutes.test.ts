@@ -119,6 +119,67 @@ describe("Code file listing route", () => {
   });
 });
 
+describe("Code file search route", () => {
+  const searchUrl = `http://127.0.0.1/api/code/files/search?threadId=${threadId}&checkoutId=${checkoutId}&scope=path&query=main`;
+
+  function searchedResult() {
+    return {
+      status: "searched",
+      search: {
+        kind: "code-search",
+        threadId,
+        checkoutId,
+        scope: "path",
+        query: "main",
+        matches: [],
+        truncated: false,
+        observedAt: "2026-08-14T08:00:00.000Z",
+      },
+    };
+  }
+
+  it("returns the host's typed search", async () => {
+    const searchFiles = vi.fn().mockResolvedValue(searchedResult());
+    const { handler } = createRoute({ searchFiles });
+    const response = await handler(get(searchUrl));
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual(searchedResult());
+    expect(searchFiles.mock.calls[0]?.[1]).toMatchObject({ scope: "path", query: "main" });
+  });
+
+  it("refuses a scope the contract does not name", async () => {
+    const searchFiles = vi.fn();
+    const { handler } = createRoute({ searchFiles });
+    const url = searchUrl.replace("scope=path", "scope=regex");
+    expect((await handler(get(url)))?.status).toBe(400);
+    expect(searchFiles).not.toHaveBeenCalled();
+  });
+
+  it("refuses a query longer than the contract allows", async () => {
+    const searchFiles = vi.fn();
+    const { handler } = createRoute({ searchFiles });
+    const url = `${searchUrl.replace("query=main", "")}query=${"x".repeat(201)}`;
+    expect((await handler(get(url)))?.status).toBe(400);
+    expect(searchFiles).not.toHaveBeenCalled();
+  });
+
+  it("answers unavailable when the host wired no searcher", async () => {
+    const { handler } = createRoute({ searchFiles: undefined });
+    const response = await handler(get(searchUrl));
+    expect(response?.status).toBe(503);
+    expect(await response?.json()).toMatchObject({ category: "unavailable" });
+  });
+
+  it("refuses an unauthenticated search", async () => {
+    const searchFiles = vi.fn();
+    const { handler } = createRoute({ searchFiles });
+    const response = await handler(new Request(searchUrl, { method: "GET" }));
+    expect(response?.status).toBe(401);
+    expect(searchFiles).not.toHaveBeenCalled();
+  });
+});
+
 describe("Code file watch route", () => {
   it("streams the host's change notices as NDJSON", async () => {
     const { handler } = createRoute({
