@@ -54,6 +54,8 @@ export class CodeAttachmentInvalid extends Error {
 export class CodeAttachmentStore {
   readonly #store: ManagedAttachmentStore;
   readonly #pending = new Map<string, Map<string, CodeAttachmentReference>>();
+  /** Uploads that have reserved a staging slot but not yet finalized. */
+  readonly #inFlight = new Map<string, Set<string>>();
 
   constructor(dataDirectory: string) {
     this.#store = new ManagedAttachmentStore(dataDirectory, {
@@ -83,33 +85,41 @@ export class CodeAttachmentStore {
     readonly signal?: AbortSignal;
   }): Promise<CodeAttachmentReference> {
     const threadKey = String(input.threadId);
+    const attachmentKey = String(input.attachmentId);
+    // Reserve the slot before the first await: concurrent uploads must count
+    // against the same per-thread budget, not each read the pre-upload size.
     const pending = this.#pending.get(threadKey);
-    if (
-      pending !== undefined &&
-      pending.size >= MAX_PENDING_ATTACHMENTS_PER_THREAD &&
-      !pending.has(String(input.attachmentId))
-    ) {
+    const inFlight = this.#inFlight.get(threadKey) ?? new Set<string>();
+    const occupied = new Set([...(pending?.keys() ?? []), ...inFlight]);
+    if (occupied.size >= MAX_PENDING_ATTACHMENTS_PER_THREAD && !occupied.has(attachmentKey)) {
       throw new CodeAttachmentInvalid("Too many attachments are staged for this thread.");
     }
-    const staged = await this.#store.stage({
-      scopeId: threadKey,
-      attachmentId: String(input.attachmentId),
-      displayName: input.displayName,
-      bytes: input.bytes,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
-    const finalized = await this.#store.finalize(staged);
-    const reference: CodeAttachmentReference = {
-      attachmentId: input.attachmentId,
-      displayName: finalized.displayName,
-      mediaType: input.mediaType,
-      byteLength: finalized.size,
-      digest: finalized.hash,
-    };
-    const scope = this.#pending.get(threadKey) ?? new Map<string, CodeAttachmentReference>();
-    scope.set(String(input.attachmentId), reference);
-    this.#pending.set(threadKey, scope);
-    return reference;
+    inFlight.add(attachmentKey);
+    this.#inFlight.set(threadKey, inFlight);
+    try {
+      const staged = await this.#store.stage({
+        scopeId: threadKey,
+        attachmentId: attachmentKey,
+        displayName: input.displayName,
+        bytes: input.bytes,
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+      });
+      const finalized = await this.#store.finalize(staged);
+      const reference: CodeAttachmentReference = {
+        attachmentId: input.attachmentId,
+        displayName: finalized.displayName,
+        mediaType: input.mediaType,
+        byteLength: finalized.size,
+        digest: finalized.hash,
+      };
+      const scope = this.#pending.get(threadKey) ?? new Map<string, CodeAttachmentReference>();
+      scope.set(attachmentKey, reference);
+      this.#pending.set(threadKey, scope);
+      return reference;
+    } finally {
+      inFlight.delete(attachmentKey);
+      if (inFlight.size === 0) this.#inFlight.delete(threadKey);
+    }
   }
 
   /**

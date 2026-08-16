@@ -193,7 +193,8 @@ export function codexExecutionSettings(
   }
   if (policy === "approval-gated" || policy === "auto-accept-edits") {
     // Codex confines writes to the workspace either way; which of those writes
-    // Octant asks about is decided by Octant's own gate, not by this mapping.
+    // Octant asks about is decided by the driver's approval handler (auto-accept
+    // edits answers project-confined file changes itself), not by this mapping.
     return { approvalPolicy: "on-request", sandbox: "workspace-write" };
   }
   return { approvalPolicy: "never", sandbox: "read-only" };
@@ -538,6 +539,28 @@ function makeConnection(
                 client.respondApproval({
                   providerRequestId: item.approval.providerRequestId,
                   result: declinedApprovalResult(item.approval),
+                }),
+              ).pipe(
+                Effect.catchAll((providerFailure) =>
+                  Effect.sync(() =>
+                    terminalEvent(state, { kind: "failed", failure: providerFailure }),
+                  ),
+                ),
+              ),
+            );
+            continue;
+          }
+          if (
+            state.executionPolicy === "auto-accept-edits" &&
+            item.approval.kind === "file-change"
+          ) {
+            // Auto-accept edits waives exactly the project-confined file writes
+            // proven above; commands and permission grants still ask.
+            Effect.runFork(
+              request(() =>
+                client.respondApproval({
+                  providerRequestId: item.approval.providerRequestId,
+                  result: { decision: "accept" },
                 }),
               ).pipe(
                 Effect.catchAll((providerFailure) =>

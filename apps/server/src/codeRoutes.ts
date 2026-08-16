@@ -716,18 +716,21 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
               origin,
             );
           }
-          const identity = readAttachmentIdentity(url);
           if (request.method === "DELETE") {
+            // A discard names the pending attachment only; the digest, media
+            // type, and length pin reads of journalled bytes, not staging.
+            const target = readAttachmentTarget(url);
             await service.discardAttachment(
               authenticatedWindowId,
-              identity.threadId,
-              identity.attachmentId,
+              target.threadId,
+              target.attachmentId,
             );
             return jsonResponse({ status: "discarded" }, 200, origin);
           }
           if (request.method !== "GET") {
             throw new CodeRouteRejected("Code request is invalid.", 400);
           }
+          const identity = readAttachmentIdentity(url);
           const bytes = await service.readAttachment(authenticatedWindowId, identity.threadId, {
             attachmentId: identity.attachmentId,
             byteLength: identity.byteLength,
@@ -839,6 +842,20 @@ function readAttachmentUpload(request: Request): {
  * and digest the journal recorded for it. Nothing about the file is trusted
  * from disk alone.
  */
+function readAttachmentTarget(url: URL): {
+  readonly threadId: CodeThreadId;
+  readonly attachmentId: CodeAttachmentId;
+} {
+  try {
+    return {
+      threadId: decodeCodeThreadId(url.searchParams.get("thread") ?? ""),
+      attachmentId: decodeCodeAttachmentId(url.searchParams.get("attachment") ?? ""),
+    };
+  } catch {
+    throw new CodeRouteRejected("Code attachment reference is invalid.", 400);
+  }
+}
+
 function readAttachmentIdentity(url: URL): {
   readonly threadId: CodeThreadId;
   readonly attachmentId: CodeAttachmentId;
@@ -856,10 +873,10 @@ function readAttachmentIdentity(url: URL): {
   ) {
     throw new CodeRouteRejected("Code attachment reference is invalid.", 400);
   }
+  const target = readAttachmentTarget(url);
   try {
     return {
-      threadId: decodeCodeThreadId(url.searchParams.get("thread") ?? ""),
-      attachmentId: decodeCodeAttachmentId(url.searchParams.get("attachment") ?? ""),
+      ...target,
       mediaType: decodeCodeAttachmentMediaType(url.searchParams.get("mediaType") ?? ""),
       byteLength,
       digest,
