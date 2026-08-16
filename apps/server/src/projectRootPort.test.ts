@@ -1,14 +1,12 @@
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { ProjectRootError, ProjectRootPort } from "./projectRootPort";
 
 const directories: string[] = [];
 
 afterEach(() => {
-  vi.unstubAllEnvs();
   for (const directory of directories.splice(0))
     rmSync(directory, { recursive: true, force: true });
 });
@@ -34,57 +32,18 @@ describe("ProjectRootPort", () => {
     }
   });
 
-  it("accepts Git repository and linked-worktree roots but rejects nested Code paths", async () => {
+  it("accepts any directory as a Code root, including plain folders and nested paths", async () => {
     const root = temporaryDirectory();
-    const repository = join(root, "repository");
-    const nested = join(repository, "nested");
-    const worktree = join(root, "worktree");
-    mkdirSync(repository);
-    execFileSync("git", ["-C", repository, "init", "--initial-branch=main"]);
-    execFileSync("git", ["-C", repository, "config", "user.name", "Octant Test"]);
-    execFileSync("git", ["-C", repository, "config", "user.email", "test@octant.local"]);
-    writeFileSync(join(repository, "README.md"), "test");
-    execFileSync("git", ["-C", repository, "add", "README.md"]);
-    execFileSync("git", ["-C", repository, "commit", "-m", "initial"]);
-    mkdirSync(nested);
-    execFileSync("git", ["-C", repository, "worktree", "add", "-b", "linked", worktree]);
+    const plain = join(root, "plain");
+    const nested = join(plain, "nested");
+    mkdirSync(nested, { recursive: true });
     const port = new ProjectRootPort();
 
-    expect(await port.validate("code", repository)).toEqual({
-      canonicalRoot: realpathSync(repository),
-    });
-    expect(await port.validate("code", worktree)).toEqual({
-      canonicalRoot: realpathSync(worktree),
-    });
-    await expect(port.validate("code", nested)).rejects.toBeInstanceOf(ProjectRootError);
-  });
-
-  it("invokes Git with an argument array and no shell", async () => {
-    vi.stubEnv("OCTANT_CREDENTIAL_BROKER_URL", "http://127.0.0.1:41000/");
-    vi.stubEnv("OCTANT_CREDENTIAL_BROKER_TOKEN", "broker-secret");
-    vi.stubEnv("OCTANT_DESKTOP_BRIDGE_SECRET", "desktop-secret");
-    vi.stubEnv("OCTANT_TEST_ALLOWED_ENV", "allowed-value");
-    const execFile = vi.fn(
-      async (_file: string, _args: readonly string[], _environment: NodeJS.ProcessEnv) => ({
-        stdout: "/canonical\n",
-      }),
+    expect(await port.validate("code", plain)).toEqual({ canonicalRoot: realpathSync(plain) });
+    expect(await port.validate("code", nested)).toEqual({ canonicalRoot: realpathSync(nested) });
+    await expect(port.validate("code", join(root, "missing"))).rejects.toBeInstanceOf(
+      ProjectRootError,
     );
-    const port = new ProjectRootPort({
-      realpath: async () => "/canonical",
-      stat: async () => ({ isDirectory: () => true }),
-      execFile,
-    });
-
-    await port.validate("code", "/candidate");
-    expect(execFile).toHaveBeenCalledOnce();
-    const [file, args, environment] = execFile.mock.calls[0]!;
-    expect(file).toBe("git");
-    expect(args).toEqual(["-C", "/canonical", "rev-parse", "--show-toplevel"]);
-    expect(environment).toMatchObject({ OCTANT_TEST_ALLOWED_ENV: "allowed-value" });
-    expect(environment).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_URL");
-    expect(environment).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_TOKEN");
-    expect(environment).not.toHaveProperty("OCTANT_DESKTOP_BRIDGE_SECRET");
-    expect(process.env.OCTANT_CREDENTIAL_BROKER_TOKEN).toBe("broker-secret");
   });
 });
 

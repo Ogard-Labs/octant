@@ -24,6 +24,7 @@ distilled successor of the earlier long-form design specifications.
 | [0014](0014-apple-development-capability.md)            | Apple development and validation as an app-managed capability     | Accepted |
 | [0015](0015-workspace-shell-model.md)                   | Workspace shell model                                             | Accepted |
 | [0016](0016-component-foundation-and-theme.md)          | Component foundation and theme                                    | Accepted |
+| [0017](0017-code-projects-bind-any-folder.md)           | Code Projects bind any folder                                     | Accepted |
 
 ## Adding an ADR
 
