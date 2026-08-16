@@ -9,6 +9,7 @@ import {
   type CodeBoardCard,
   type CodeBoardQuery,
   type CodeDeliveryOutcomeKind,
+  type CodeRuntimeWork,
   type CodeThread,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
@@ -19,6 +20,7 @@ import {
   type CodeThreadOperationHistory,
 } from "./codeThreadMetadataService";
 import {
+  boardRuntimeActivityFromWorks,
   CodeThreadBoardService,
   type CodeBoardRuntimeActivity,
   type CodeBoardThread,
@@ -328,5 +330,48 @@ describe("CodeThreadBoardService filters", () => {
     expect(only.cards.map((card) => card.threadId)).toEqual([ids.done]);
     const excluded = await board.query(decodeCodeBoardQuery({ version: 1, followUp: "excluded" }));
     expect(excluded.cards.map((card) => card.threadId)).toEqual([ids.ready]);
+  });
+});
+
+describe("boardRuntimeActivityFromWorks", () => {
+  const work = (
+    kind: CodeRuntimeWork["kind"],
+    state: CodeRuntimeWork["state"],
+    updatedAt: string,
+  ): CodeRuntimeWork =>
+    ({
+      id: `${kind}-${updatedAt}`,
+      threadId: ids.done,
+      kind,
+      state,
+      updatedAt,
+    }) as never;
+
+  it("puts a thread in Waiting only for its most recent provider turn, never for leftover terminals", () => {
+    // A restart froze an old terminal and an old test run as interrupted, and
+    // the previous turn as waiting; the newest turn completed. Nothing here
+    // still needs the person.
+    expect(
+      boardRuntimeActivityFromWorks([
+        work("terminal", "interrupted", "2026-07-22T09:00:00.000Z"),
+        work("test", "interrupted", "2026-07-22T09:01:00.000Z"),
+        work("provider-turn", "waiting", "2026-07-22T09:02:00.000Z"),
+        work("provider-turn", "completed", "2026-07-22T09:30:00.000Z"),
+      ]),
+    ).toEqual({ executing: false, waiting: false });
+
+    expect(
+      boardRuntimeActivityFromWorks([
+        work("provider-turn", "completed", "2026-07-22T09:00:00.000Z"),
+        work("provider-turn", "waiting", "2026-07-22T09:30:00.000Z"),
+      ]),
+    ).toMatchObject({ executing: false, waiting: true });
+
+    expect(
+      boardRuntimeActivityFromWorks([
+        work("provider-turn", "interrupted", "2026-07-22T09:00:00.000Z"),
+        work("terminal", "running", "2026-07-22T09:30:00.000Z"),
+      ]),
+    ).toEqual({ executing: true, waiting: true });
   });
 });

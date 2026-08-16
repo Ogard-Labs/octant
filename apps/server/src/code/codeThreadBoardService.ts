@@ -4,6 +4,7 @@ import {
   type CodeBoardQuery,
   type CodeBoardStatus,
   type CodeBoardView,
+  type CodeRuntimeWork,
   type CodeThread,
   type CodeThreadId,
   type CodeThreadOperationalMetadata,
@@ -52,6 +53,41 @@ export interface CodeBoardRuntimeActivity {
 
 export interface CodeBoardRuntimeSource {
   observe(threadId: CodeThreadId): CodeBoardRuntimeActivity | Promise<CodeBoardRuntimeActivity>;
+}
+
+/**
+ * Derive a thread's board activity from its runtime work records.
+ *
+ * `executing` is any work still running. `waiting` is narrower than "some
+ * record is not finished": only the thread's most recent provider turn can put
+ * it in Waiting, and only while that turn is waiting for approval or input,
+ * ambiguous, or interrupted. Terminals, tests, Git, and delivery work that a
+ * restart left interrupted are runtime housekeeping, not something the person
+ * owes the thread — a board that kept every such record in Waiting would never
+ * let a thread return to Ready. Older provider turns are superseded by the
+ * newer one, whatever state the restart froze them in.
+ */
+export function boardRuntimeActivityFromWorks(
+  works: ReadonlyArray<CodeRuntimeWork>,
+): CodeBoardRuntimeActivity {
+  const executing = works.some((work) => work.state === "running");
+  let latestTurn: CodeRuntimeWork | undefined;
+  for (const work of works) {
+    if (work.kind !== "provider-turn") continue;
+    if (latestTurn === undefined || work.updatedAt >= latestTurn.updatedAt) latestTurn = work;
+  }
+  const waiting =
+    latestTurn !== undefined &&
+    (latestTurn.state === "waiting" ||
+      latestTurn.state === "ambiguous" ||
+      latestTurn.state === "interrupted");
+  return {
+    executing,
+    waiting,
+    ...(waiting && !executing
+      ? { blockingReason: "The last agent turn is waiting or was interrupted." }
+      : {}),
+  };
 }
 
 export interface CodeThreadBoardServiceDependencies {
