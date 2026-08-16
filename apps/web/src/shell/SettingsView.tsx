@@ -58,6 +58,10 @@ import { SettingRow } from "../settings/primitives";
 import { SettingsSearchResults } from "../settings/SettingsSearchResults";
 import { useSettingsRoute } from "../settings/useSettingsRoute";
 import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
+import {
+  FIRST_PARTY_PLUGINS_EFFECTIVE,
+  isPluginSettingsSectionAvailable,
+} from "./contributionRegistry";
 import type { ThemeController } from "../theme/useThemeController";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
@@ -137,7 +141,9 @@ export function SettingsView(props: SettingsViewProps) {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
     sidebarVibrancySupported: props.sidebarVibrancySupported,
   };
-  const availableSections = listAvailableSections(octantSettingsRegistry, capabilities);
+  const availableSections = listAvailableSections(octantSettingsRegistry, capabilities).filter(
+    (section) => isPluginSettingsSectionAvailable(section.id, FIRST_PARTY_PLUGINS_EFFECTIVE),
+  );
   const route = useSettingsRoute({
     availableSections,
     capabilities,

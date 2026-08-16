@@ -19,7 +19,9 @@ import {
 } from "./extensionActivationService";
 import {
   BOARD_EXTENSION_ID,
+  GITHUB_EXTENSION_ID,
   boardPluginManifest,
+  githubPluginManifest,
   seedFirstPartyPluginIfAbsent,
 } from "./firstPartyPlugins";
 import { isFirstPartyPluginEffective } from "./firstPartyPluginGate";
@@ -51,6 +53,13 @@ async function setup() {
     uuid: randomUUID,
     clock: () => now,
     manifest: boardPluginManifest(),
+  });
+  seedFirstPartyPluginIfAbsent({
+    journal,
+    connection,
+    uuid: randomUUID,
+    clock: () => now,
+    manifest: githubPluginManifest(),
   });
   const activationService = new ExtensionActivationService({
     policy: LOCAL_EXTENSION_ACTIVATION_POLICY,
@@ -125,5 +134,19 @@ describe("isFirstPartyPluginEffective", () => {
         mode: "code",
       }),
     ).toBe(false);
+  });
+
+  it("is effective for the github integration component in Code mode once seeded", async () => {
+    const { connection, activationService } = await setup();
+    expect(
+      isFirstPartyPluginEffective({
+        connection,
+        activationService,
+        clock: () => now,
+        extensionId: GITHUB_EXTENSION_ID,
+        componentId: "integration",
+        mode: "code",
+      }),
+    ).toBe(true);
   });
 });

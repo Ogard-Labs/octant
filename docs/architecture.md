@@ -239,11 +239,18 @@ The path from this extensions model to a general plugin host — first-party
 features as toggleable plugins, renderer contribution points, integration and
 board plugin kinds — is recorded in
 [decisions/0001-plugin-architecture.md](decisions/0001-plugin-architecture.md).
-The Code thread board is the first of these: `apps/server/src/extensions/firstPartyPlugins.ts`
-seeds a real `@octant/board` package at startup, and
-`apps/server/src/extensions/firstPartyPluginGate.ts` gates the board route on
-its effective state through the same unmodified activation ladder every other
-plugin uses.
+The Code thread board and the GitHub integration are the first of these:
+`apps/server/src/extensions/firstPartyPlugins.ts` seeds real `@octant/board`
+and `@octant/github` packages at startup, and
+`apps/server/src/extensions/firstPartyPluginGate.ts` gates the board route and
+every GitHub consumer on their effective state through the same unmodified
+activation ladder every other plugin uses. For GitHub this is one choke point,
+`apps/server/src/github/gatedGithubAuthenticationPort.ts`, wrapping
+authentication so every dependent service (catalogue, managed clone, the
+GitHub read tool) is gated with it; pull request lifecycle is gated the same
+way but stays host-embedded rather than moving into the plugin, since it is a
+consumer of GitHub's authentication wired into Code's approval-gated command
+pipeline, not a peer surface.
 
 ## Security and authority
 
