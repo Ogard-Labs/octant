@@ -1,6 +1,6 @@
 import type { ExtensionCatalogEntry, ExtensionCommand } from "@octant/contracts/extension-rpc";
 import type { ExtensionSource } from "@octant/contracts/extensions";
-import { isAgentPluginsManifest } from "@octant/extensions/agent-plugins";
+import { isAgentPluginsManifest } from "@octant/plugin-host/agent-plugins";
 import {
   agentPluginExtensionId,
   agentPluginPackageId,

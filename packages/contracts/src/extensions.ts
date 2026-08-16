@@ -259,6 +259,8 @@ export const ExtensionComponentKind = Schema.Literal(
   "app",
   "agent",
   "apple-development-adapter",
+  "board",
+  "integration",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
@@ -287,8 +289,39 @@ const executableKinds = new Set<ExtensionComponentKind>([
   "app",
   "agent",
   "apple-development-adapter",
+  "board",
+  "integration",
 ]);
 const mcpChildKinds = new Set<ExtensionComponentKind>(["mcp-tool", "mcp-prompt", "mcp-resource"]);
+
+export const ExtensionContributionPoint = Schema.Literal("sidebar.destination", "settings.section");
+export type ExtensionContributionPoint = typeof ExtensionContributionPoint.Type;
+
+export const ExtensionSidebarDestinationContribution = Schema.Struct({
+  point: Schema.Literal("sidebar.destination"),
+  componentId: ExtensionComponentId,
+  destinationId: boundedToken(64),
+  label: boundedText(64),
+  modes: Schema.Array(OctantMode).pipe(Schema.minItems(1), Schema.maxItems(3)),
+}).annotations(strict);
+export type ExtensionSidebarDestinationContribution =
+  typeof ExtensionSidebarDestinationContribution.Type;
+
+export const ExtensionSettingsSectionContribution = Schema.Struct({
+  point: Schema.Literal("settings.section"),
+  componentId: ExtensionComponentId,
+  sectionId: boundedToken(64),
+  label: boundedText(64),
+  scope: Schema.Literal("app", "host", "mode", "project", "thread"),
+  keywords: boundedText(512),
+}).annotations(strict);
+export type ExtensionSettingsSectionContribution = typeof ExtensionSettingsSectionContribution.Type;
+
+export const ExtensionContribution = Schema.Union(
+  ExtensionSidebarDestinationContribution,
+  ExtensionSettingsSectionContribution,
+);
+export type ExtensionContribution = typeof ExtensionContribution.Type;
 
 export const ExtensionPackageManifest = Schema.Struct({
   manifestVersion: ExtensionManifestVersion,
@@ -306,6 +339,7 @@ export const ExtensionPackageManifest = Schema.Struct({
   declaredCapabilities: Schema.Array(ExtensionCapability).pipe(Schema.maxItems(32)),
   primaryComponentId: Schema.optional(ExtensionComponentId),
   components: Schema.Array(ExtensionComponent).pipe(Schema.minItems(1), Schema.maxItems(256)),
+  contributions: Schema.optional(Schema.Array(ExtensionContribution).pipe(Schema.maxItems(32))),
 })
   .annotations(strict)
   .pipe(
@@ -315,6 +349,12 @@ export const ExtensionPackageManifest = Schema.Struct({
       if (
         manifest.primaryComponentId !== undefined &&
         !components.has(manifest.primaryComponentId)
+      ) {
+        return false;
+      }
+      if (
+        manifest.contributions !== undefined &&
+        !manifest.contributions.every((contribution) => components.has(contribution.componentId))
       ) {
         return false;
       }

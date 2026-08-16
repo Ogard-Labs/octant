@@ -10,7 +10,7 @@ import {
   revalidateExtensionSelection,
   type ExtensionAddressingCatalog,
   type ExtensionSelectionPhase,
-} from "@octant/extensions";
+} from "@octant/plugin-host";
 import type {
   CapabilityCatalog,
   CapabilityCatalogEntry,

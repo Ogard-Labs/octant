@@ -6,7 +6,11 @@ import {
   type SkillMarketplaceEntry,
 } from "@octant/contracts/extension-rpc";
 import type { ExtensionPackageManifest, StandaloneSkillRecord } from "@octant/contracts/extensions";
-import { buildSkillCatalog, sourceQualifiedSkillId, bundledSkillRecords } from "@octant/extensions";
+import {
+  buildSkillCatalog,
+  sourceQualifiedSkillId,
+  bundledSkillRecords,
+} from "@octant/plugin-host";
 import type { ExtensionLifecycleService } from "./extensionLifecycleService";
 import {
   inspectExtensionPackage,

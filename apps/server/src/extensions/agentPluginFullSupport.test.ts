@@ -18,7 +18,7 @@ import { MAX_PROVIDER_TOOLS } from "@octant/contracts";
 import {
   AGENT_PLUGINS_MCP_SCHEMA,
   AGENT_PLUGINS_PLUGIN_SCHEMA,
-} from "@octant/extensions/agent-plugins";
+} from "@octant/plugin-host/agent-plugins";
 import { loadAgentPluginDirectory, readVerifiedPluginFile } from "./agentPluginFilesystem";
 import { connectAgentPluginMcpSession } from "./agentPluginMcpClient";
 import { AgentPluginMcpSessionManager } from "./agentPluginMcpSessionManager";

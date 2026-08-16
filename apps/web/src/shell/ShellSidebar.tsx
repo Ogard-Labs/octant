@@ -6,10 +6,26 @@ import { Search, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
+import {
+  resolveSidebarContributions,
+  type FirstPartyPluginComponentId,
+} from "./contributionRegistry";
 import { IconButton } from "./IconButton";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
+
+/**
+ * Stand-in for the server's first-party plugin activation state. Both
+ * components are seeded and enabled by default with no toggle UI yet, so
+ * this is a constant, not a live query; ADR 0001 step 4 replaces it with a
+ * value sourced from the server's plugin gate once the board and GitHub
+ * plugins are seeded (see docs/decisions/0001-plugin-architecture.md).
+ */
+const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponentId, boolean> = new Map([
+  ["board", true],
+  ["github-integration", true],
+]);
 
 export interface ShellSidebarProps {
   /**
@@ -51,6 +67,10 @@ export function ShellSidebar(props: ShellSidebarProps) {
   const workReady = activeMode === "work" && props.workNavigation !== undefined;
   const codeActions = codeReady ? props.codeNavigation.actions : {};
   const workActions = workReady ? props.workNavigation.actions : {};
+  const sidebarContributions = resolveSidebarContributions(
+    activeMode,
+    FIRST_PARTY_PLUGINS_EFFECTIVE,
+  );
   const chatStatusMessage =
     activeMode !== "chat"
       ? undefined
@@ -115,9 +135,15 @@ export function ShellSidebar(props: ShellSidebarProps) {
                 : "unavailable",
             plugins: "available",
             projects: "available",
-            pullRequests: codeActions["pull-requests"] === undefined ? "unavailable" : "available",
+            pullRequests:
+              codeActions["pull-requests"] === undefined ||
+              !sidebarContributions.has("pull-requests")
+                ? "unavailable"
+                : "available",
             threadBoard:
-              codeActions["thread-board"] !== undefined || workActions["thread-board"] !== undefined
+              (codeActions["thread-board"] !== undefined ||
+                workActions["thread-board"] !== undefined) &&
+              sidebarContributions.has("thread-board")
                 ? "available"
                 : "unavailable",
           }}

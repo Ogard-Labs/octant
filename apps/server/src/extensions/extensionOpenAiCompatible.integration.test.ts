@@ -7,7 +7,7 @@ import {
 import {
   resolveDraftExtensionReference,
   type ExtensionAddressingCatalog,
-} from "@octant/extensions";
+} from "@octant/plugin-host";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import {

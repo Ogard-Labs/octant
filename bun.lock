@@ -75,8 +75,8 @@
         "@anthropic-ai/claude-agent-sdk": "catalog:",
         "@octant/contracts": "workspace:*",
         "@octant/domain": "workspace:*",
-        "@octant/extensions": "workspace:*",
         "@octant/host-runtime": "workspace:*",
+        "@octant/plugin-host": "workspace:*",
         "@octant/provider-sdk": "workspace:*",
         "@octant/theme": "workspace:*",
         "@opencode-ai/sdk": "catalog:",
@@ -103,7 +103,7 @@
         "@octant/client-runtime": "workspace:*",
         "@octant/contracts": "workspace:*",
         "@octant/domain": "workspace:*",
-        "@octant/extensions": "workspace:*",
+        "@octant/plugin-host": "workspace:*",
         "@octant/theme": "workspace:*",
         "@xterm/addon-fit": "catalog:",
         "@xterm/xterm": "catalog:",
@@ -181,11 +181,18 @@
         "vitest": "catalog:",
       },
     },
-    "packages/extensions": {
-      "name": "@octant/extensions",
+    "packages/host-runtime": {
+      "name": "@octant/host-runtime",
+      "devDependencies": {
+        "tsdown": "0.22.5",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
+    "packages/plugin-api": {
+      "name": "@octant/plugin-api",
       "dependencies": {
         "@octant/contracts": "workspace:*",
-        "yaml": "catalog:",
       },
       "devDependencies": {
         "tsdown": "0.22.5",
@@ -193,8 +200,12 @@
         "vitest": "catalog:",
       },
     },
-    "packages/host-runtime": {
-      "name": "@octant/host-runtime",
+    "packages/plugin-host": {
+      "name": "@octant/plugin-host",
+      "dependencies": {
+        "@octant/contracts": "workspace:*",
+        "yaml": "catalog:",
+      },
       "devDependencies": {
         "tsdown": "0.22.5",
         "typescript": "catalog:",
@@ -676,11 +687,13 @@
 
     "@octant/domain": ["@octant/domain@workspace:packages/domain"],
 
-    "@octant/extensions": ["@octant/extensions@workspace:packages/extensions"],
-
     "@octant/host-runtime": ["@octant/host-runtime@workspace:packages/host-runtime"],
 
     "@octant/mobile": ["@octant/mobile@workspace:apps/mobile"],
+
+    "@octant/plugin-api": ["@octant/plugin-api@workspace:packages/plugin-api"],
+
+    "@octant/plugin-host": ["@octant/plugin-host@workspace:packages/plugin-host"],
 
     "@octant/provider-sdk": ["@octant/provider-sdk@workspace:packages/provider-sdk"],
 

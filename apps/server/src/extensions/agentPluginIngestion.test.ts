@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGENT_PLUGINS_MCP_SCHEMA,
   AGENT_PLUGINS_PLUGIN_SCHEMA,
-} from "@octant/extensions/agent-plugins";
+} from "@octant/plugin-host/agent-plugins";
 import { normalizeAgentPluginPackage, type AgentPluginPackageInput } from "./agentPluginIngestion";
 import { prepareAgentPluginMcpRuntime } from "./agentPluginMcpRuntime";
 import { inspectExtensionPackage } from "./packageInspector";

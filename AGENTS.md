@@ -127,7 +127,8 @@ test count.
 | `packages/provider-sdk`   | Driver interfaces, normalized runtime events, discovery, and conformance harness         |
 | `packages/client-runtime` | Authenticated transport, reconnect/replay, and query synchronization                     |
 | `packages/host-runtime`   | Host identity, paths, ownership, service and artifact lifecycle                          |
-| `packages/extensions`     | Manifests, normalized components, trust types, and pure effective-activation policy      |
+| `packages/plugin-host`    | Manifests, normalized components, trust types, and pure effective-activation policy      |
+| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties            |
 | `packages/theme`          | Semantic theme schema, built-ins, importer, and editor/terminal projections              |
 | `packages/cli`            | `octant` server and browser launcher                                                     |
 | `scripts`                 | Dev loop, packaging, smokes, and repository checks                                       |

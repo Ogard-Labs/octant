@@ -27,6 +27,10 @@ describe("effective extension activation", () => {
     ["work", "mcp-tool", ["mcp", "shell"], false],
     ["code", "hook", ["hooks", "shell"], true],
     ["code", "apple-development-adapter", ["apple-development"], true],
+    ["code", "board", [], true],
+    ["work", "board", [], false],
+    ["chat", "integration", ["network", "credentials"], false],
+    ["code", "integration", ["network", "credentials"], true],
   ] as const)(
     "maps %s %s mode safety from component kind and capabilities",
     (mode, kind, declaredCapabilities, expected) => {
