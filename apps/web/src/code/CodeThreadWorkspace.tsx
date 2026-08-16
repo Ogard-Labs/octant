@@ -234,6 +234,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (props.attachmentClient === undefined || items === null) return false;
     const files = [...items.files];
     if (files.length === 0) return false;
+    // The host refuses this turn anyway. Saying so at the paste is kinder than
+    // letting the user write the message first and lose it at send.
+    if (boundModelReadsImages(providerGroups, thread) === false) {
+      attachments.refuse(
+        `${boundProviderModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`,
+      );
+      return true;
+    }
     void attachments.attach(files);
     return true;
   }
@@ -777,6 +785,25 @@ function boundProviderModelLabel(
   const providerLabel = group?.instance.displayName ?? String(thread.providerInstanceId);
   const modelLabel = model?.model.displayName ?? String(thread.modelId);
   return `${providerLabel} — ${modelLabel}`;
+}
+
+/**
+ * Whether the model a thread is bound to reads images.
+ *
+ * `undefined` when this renderer cannot tell — an unlisted provider, a model
+ * the picker never described. The host decides in that case; the composer does
+ * not refuse an attachment on a guess.
+ */
+function boundModelReadsImages(
+  groups: ReadonlyArray<PickerGroup>,
+  thread: { readonly providerInstanceId: unknown; readonly modelId: unknown },
+): boolean | undefined {
+  const model = groups
+    .find((candidate) => String(candidate.instance.id) === String(thread.providerInstanceId))
+    ?.sections.flatMap((section) => section.models)
+    .find((candidate) => String(candidate.model.id) === String(thread.modelId));
+  const modalities = model?.model.inputModalities;
+  return modalities === undefined ? undefined : modalities.includes("image");
 }
 
 function headLabel(head: { readonly kind: string; readonly name?: string; readonly oid?: string }) {

@@ -216,7 +216,7 @@ describe("CodeOperationEventStore", () => {
     const restarted = createStore(reopened.journal);
     const firstPage = restarted.conversation({ threadId, afterCursor: 0, limit: 1 });
     expect(firstPage).toMatchObject({
-      version: 1,
+      version: 2,
       threadId,
       hasMore: true,
       turns: [

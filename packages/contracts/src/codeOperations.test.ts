@@ -617,7 +617,7 @@ describe("Code operation contracts", () => {
     expect(decodeCodeOperationEventFrame(started)).toEqual(started);
 
     const page = {
-      version: 1,
+      version: 2,
       threadId: ids.thread,
       turns: [
         {
@@ -639,7 +639,11 @@ describe("Code operation contracts", () => {
     expect(() =>
       decodeCodeConversationPage({ ...page, turns: [{ ...page.turns[0], providerPayload: {} }] }),
     ).toThrow();
-    expect(() => decodeCodeConversationPage({ ...page, version: 2 })).toThrow();
+    // A page is read at exactly the version this build knows. Version 1 had no
+    // attachments, so accepting one would render a turn while dropping the
+    // images the user attached to it.
+    expect(() => decodeCodeConversationPage({ ...page, version: 1 })).toThrow();
+    expect(() => decodeCodeConversationPage({ ...page, version: 3 })).toThrow();
   });
 
   it("owns the strict durable review-finding entity and journal event", () => {

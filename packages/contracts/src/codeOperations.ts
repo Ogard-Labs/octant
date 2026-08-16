@@ -1005,7 +1005,12 @@ export const CodeConversationTurn = Schema.Struct({
 export type CodeConversationTurn = typeof CodeConversationTurn.Type;
 
 export const CodeConversationPage = Schema.Struct({
-  version: Schema.Literal(1),
+  /**
+   * Version 2 added the images a turn carried. A client that only knows
+   * version 1 refuses the page outright rather than rendering a message
+   * while silently dropping the pictures the user attached to it.
+   */
+  version: Schema.Literal(2),
   threadId: CodeThreadId,
   turns: Schema.Array(CodeConversationTurn).pipe(
     Schema.filter((turns) => turns.length <= MAX_CODE_CONVERSATION_PAGE_SIZE),

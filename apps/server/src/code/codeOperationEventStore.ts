@@ -431,7 +431,7 @@ export class CodeOperationEventStore {
     }
 
     return decodeCodeConversationPage({
-      version: 1,
+      version: 2,
       threadId,
       turns: turns.map(({ startCursor: _startCursor, steps, stepsTruncated, ...turn }) => ({
         ...turn,
