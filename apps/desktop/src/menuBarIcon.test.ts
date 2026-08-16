@@ -10,7 +10,7 @@ describe("macOS menu-bar icon", () => {
     expect(shouldPresentHostTray("linux", "running")).toBe(false);
   });
 
-  it("creates an 18px Octant image from a non-empty source", () => {
+  it("creates an 18px monochrome template glyph from a non-empty source", () => {
     const setTemplateImage = vi.fn();
     const resized = {
       isEmpty: () => false,
@@ -30,7 +30,7 @@ describe("macOS menu-bar icon", () => {
       quality: "best",
       width: HOST_TRAY_ICON_SIZE,
     });
-    expect(setTemplateImage).toHaveBeenCalledWith(false);
+    expect(setTemplateImage).toHaveBeenCalledWith(true);
   });
 
   it("ships the supplied transparent 1x and 2x PNG representations for Electron", async () => {
