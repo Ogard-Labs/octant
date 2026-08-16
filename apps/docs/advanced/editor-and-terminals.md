@@ -76,12 +76,18 @@ concurrently.
 
 Terminal settings are independent of editor typography: font family, size,
 line height, ligatures, cursor style, scrollback, shell, and theme-derived
-colors.
+colors. The default terminal font stack falls back to installed Nerd Fonts
+(Symbols Nerd Font Mono, MesloLGS NF, Hack Nerd Font Mono) so prompt glyphs
+render when you have one; set your own family in Settings to prefer another.
 
 ### Authority
 
-Plan mode cannot start or stop terminals. Approval-gated mode prompts before
-starting or stopping; Full access allows them. Local process monitoring
+Plan mode cannot start or stop terminals. Opening the Terminal tab yourself
+starts a shell without a prompt in every other posture — your click is the
+approval. Approval-gated mode still prompts before an agent starts or stops a
+terminal; Full access allows it. The shell keeps its history and prompt caches
+in an Octant-owned directory, since the sandbox never lets it write inside
+your home. Local process monitoring
 covers only processes Octant launches and owns; arbitrary host-process
 discovery and control are deferred.
 

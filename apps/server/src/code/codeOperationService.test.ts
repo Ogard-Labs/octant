@@ -559,6 +559,31 @@ describe("CodeOperationService", () => {
       event: { kind: "operation-state", state: "waiting" },
     });
 
+    // The same terminal opened by the person at the window is their own act:
+    // it starts without a prompt while the agent's request above stays gated.
+    const userTerminalOperation = decodeCodeOperationId("48484848-4848-4484-8484-484848484848");
+    const userTerminal = "58585858-5858-4585-8585-585858585858" as CodeTerminalId;
+    const launchesBeforeUser = terminals.launch.mock.calls.length;
+    const approvalChecksBeforeUser = approvals.validate.mock.calls.length;
+    await expect(
+      service.execute(
+        ids.window,
+        {
+          kind: "start-terminal",
+          operationId: userTerminalOperation,
+          threadId: ids.thread,
+          checkoutId: ids.checkout,
+          terminalId: userTerminal,
+          columns: 120,
+          rows: 40,
+          credentialRefs: [],
+        },
+        { initiator: "user" },
+      ),
+    ).resolves.toMatchObject({ kind: "terminal-state", state: "running" });
+    expect(terminals.launch).toHaveBeenCalledTimes(launchesBeforeUser + 1);
+    expect(approvals.validate).toHaveBeenCalledTimes(approvalChecksBeforeUser);
+
     approved = true;
     events.replay.mockReturnValue({
       status: "ok",
@@ -589,7 +614,7 @@ describe("CodeOperationService", () => {
       expectedCursor: 1,
       event: { kind: "operation-result", result: resumed },
     });
-    expect(terminals.launch).toHaveBeenCalledTimes(2);
+    expect(terminals.launch).toHaveBeenCalledTimes(3);
 
     approved = false;
     terminals.attach.mockReturnValue({
@@ -647,7 +672,7 @@ describe("CodeOperationService", () => {
         credentialRefs: ["TOKEN"],
       }),
     ).resolves.toEqual(resumed);
-    expect(terminals.launch).toHaveBeenCalledTimes(2);
+    expect(terminals.launch).toHaveBeenCalledTimes(3);
 
     events.append.mockImplementationOnce(() => {
       throw new Error("event journal unavailable");

@@ -16,7 +16,6 @@ import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";
 import { CodePullRequestPane } from "./CodePullRequestPane";
 import { CodeReviewPane, type CodeReviewTarget } from "./CodeReviewPane";
-import type { CodeTerminalPaneProps } from "./CodeTerminalPane";
 import { CodeTestPane } from "./CodeTestPane";
 import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
@@ -64,7 +63,6 @@ export interface CodeWorkspaceApprovals {
   readonly git?: React.ComponentProps<typeof CodeGitPane>["requestApproval"];
   readonly pullRequest?: React.ComponentProps<typeof CodePullRequestPane>["requestApproval"];
   readonly review?: React.ComponentProps<typeof CodeReviewPane>["requestApproval"];
-  readonly terminal?: CodeTerminalPaneProps["requestApproval"];
   readonly test?: React.ComponentProps<typeof CodeTestPane>["requestApproval"];
 }
 
@@ -548,6 +546,11 @@ function TerminalWorkspaceSurface(
   );
   const [starting, setStarting] = useState(false);
   const startInFlight = useRef(false);
+  // A tab that has never had a process opens one on first view; the person
+  // opening the tab asked for a terminal. A process that later exited is not
+  // restarted behind their back.
+  const autoStarted = useRef(false);
+  const startRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     if (props.terminal !== undefined) {
       setTerminal(props.terminal);
@@ -566,6 +569,7 @@ function TerminalWorkspaceSurface(
         refreshTimer = setTimeout(() => void reattach(false), terminalRefreshIntervalMs);
         return;
       }
+      let absent = false;
       try {
         const inspection = await props.client.inspectTerminal({
           terminalId: props.terminalId,
@@ -595,6 +599,7 @@ function TerminalWorkspaceSurface(
           setFailure(result.failure.message);
           return;
         }
+        absent = result.kind === "operation-failed";
       } catch (error) {
         if (active && terminalInspectionFailureCategory(error) !== "unavailable") {
           setFailure(
@@ -602,8 +607,13 @@ function TerminalWorkspaceSurface(
           );
           return;
         }
+        absent = true;
       } finally {
         if (active && initial) setReattaching(false);
+      }
+      if (active && initial && absent && !autoStarted.current && props.threadPolicy !== "plan") {
+        autoStarted.current = true;
+        void startRef.current();
       }
       if (active) {
         refreshTimer = setTimeout(() => void reattach(false), terminalRefreshIntervalMs);
@@ -622,7 +632,38 @@ function TerminalWorkspaceSurface(
     props.scope.threadId,
     props.terminal,
     props.terminalId,
+    props.threadPolicy,
   ]);
+
+  const start = async () => {
+    if (startInFlight.current) return;
+    startInFlight.current = true;
+    setStarting(true);
+    const operationId = props.nextUuid() as never;
+    const command = {
+      kind: "start-terminal",
+      operationId,
+      terminalId: props.terminalId,
+      columns: 100,
+      rows: 30,
+      credentialRefs: [],
+      ...props.scope,
+    } as const;
+    setFailure(undefined);
+    try {
+      // Opening a terminal is the user's own act; the host authorizes it as
+      // user-initiated without a prompt (Plan mode still refuses).
+      const result = await props.client.executeOperation(command);
+      if (result.kind === "terminal-state") setTerminal(result);
+      else if (result.kind === "operation-failed") setFailure(result.failure.message);
+    } catch {
+      setFailure("Terminal start or approval failed. Reconnect, verify the checkout, and retry.");
+    } finally {
+      startInFlight.current = false;
+      setStarting(false);
+    }
+  };
+  startRef.current = start;
 
   if (props.checkoutAvailability === "waiting") {
     return (
@@ -664,9 +705,6 @@ function TerminalWorkspaceSurface(
         client={props.client}
         createOperationId={() => props.nextUuid() as never}
         executionPolicy={props.threadPolicy}
-        {...(props.approvals?.terminal === undefined
-          ? {}
-          : { requestApproval: props.approvals.terminal })}
         restart={{
           columns: 100,
           createTerminalId: () => props.terminalId,
@@ -678,42 +716,6 @@ function TerminalWorkspaceSurface(
       />
     );
   }
-  if (decidesCodeEffectsByApproval(props.threadPolicy) && props.approvals?.terminal === undefined) {
-    return <ApprovalUnavailable surface="Terminal" />;
-  }
-  const start = async () => {
-    if (startInFlight.current) return;
-    startInFlight.current = true;
-    setStarting(true);
-    const operationId = props.nextUuid() as never;
-    const command = {
-      kind: "start-terminal",
-      operationId,
-      terminalId: props.terminalId,
-      columns: 100,
-      rows: 30,
-      credentialRefs: [],
-      ...props.scope,
-    } as const;
-    setFailure(undefined);
-    try {
-      if (
-        decidesCodeEffectsByApproval(props.threadPolicy) &&
-        (await props.approvals?.terminal?.({ command })) !== true
-      ) {
-        setFailure("Terminal approval was not granted. Review the checkout state and try again.");
-        return;
-      }
-      const result = await props.client.executeOperation(command);
-      if (result.kind === "terminal-state") setTerminal(result);
-      else if (result.kind === "operation-failed") setFailure(result.failure.message);
-    } catch {
-      setFailure("Terminal start or approval failed. Reconnect, verify the checkout, and retry.");
-    } finally {
-      startInFlight.current = false;
-      setStarting(false);
-    }
-  };
   return (
     <ShellState
       {...(props.threadPolicy === "plan"

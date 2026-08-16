@@ -2,10 +2,14 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { rmSync } from "node:fs";
+import { existsSync, realpathSync, rmSync } from "node:fs";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { SeatbeltConfinementError } from "../process/seatbeltProfile";
-import { ensureNodePtySpawnHelperExecutable, TerminalProcessPort } from "./terminalProcessPort";
+import {
+  ensureNodePtySpawnHelperExecutable,
+  shellStateEnvironment,
+  TerminalProcessPort,
+} from "./terminalProcessPort";
 
 const directories: string[] = [];
 
@@ -80,11 +84,13 @@ describe("TerminalProcessPort", () => {
     const spawn = vi.fn(() => pty);
     const fake = createFakeSandboxConfinement();
     directories.push(fake.root);
+    const shellStateDirectory = join(fake.root, "terminal-shell");
     const port = new TerminalProcessPort({
       spawn,
       killProcessGroup: vi.fn(),
       confinement: fake.confinement,
       temporaryDirectory: fake.temporaryDirectory,
+      shellStateDirectory,
       networkEgress: "none",
     });
 
@@ -96,20 +102,30 @@ describe("TerminalProcessPort", () => {
       rows: 40,
     });
 
+    // The shell keeps its history and prompt caches in the Octant-owned state
+    // directory instead of failing against the read-only home.
     expect(spawn).toHaveBeenCalledWith(
       fake.sandboxPath,
       expect.arrayContaining(["-p", "--", "/bin/zsh"]),
       {
         name: "xterm-256color",
         cwd: "/private/repo",
-        env: { PATH: "/usr/bin", OCTANT_TOKEN: "secret" },
+        env: {
+          ...shellStateEnvironment(shellStateDirectory),
+          PATH: "/usr/bin",
+          OCTANT_TOKEN: "secret",
+        },
         cols: 120,
         rows: 40,
       },
     );
+    expect(existsSync(shellStateDirectory)).toBe(true);
     const firstCall = spawn.mock.calls[0] as unknown as [string, string[], unknown?];
     const profile = String(firstCall[1][1]);
     expect(profile).toContain("(deny default)");
+    expect(profile).toContain(
+      `(allow file-write* (subpath "${realpathSync(shellStateDirectory)}"))`,
+    );
     expect(profile).not.toContain("(allow network*)");
   });
 

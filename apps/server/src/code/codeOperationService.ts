@@ -487,6 +487,18 @@ export type CodeThreadMentionContext =
     }
   | { readonly kind: "unreadable"; readonly threadId: MentionableThreadId };
 
+/**
+ * Who asked for the operation. `agent` is the default and is what approval
+ * gating exists for; `user` marks the local person acting through their own
+ * window (e.g. clicking Start terminal), which the policy treats as its own
+ * approval for the classes it lists.
+ */
+export type CodeOperationInitiator = "user" | "agent";
+
+export interface CodeOperationExecuteOptions {
+  readonly initiator?: CodeOperationInitiator;
+}
+
 export interface CodeOperationServiceOptions {
   readonly authority: CodeOperationAuthorityPort;
   readonly approvals?: CodeApprovalValidationPort;
@@ -529,8 +541,13 @@ export class CodeOperationService {
     this.#options = options;
   }
 
-  async execute(windowId: WindowId, rawCommand: unknown): Promise<CodeOperationResult> {
+  async execute(
+    windowId: WindowId,
+    rawCommand: unknown,
+    options: CodeOperationExecuteOptions = {},
+  ): Promise<CodeOperationResult> {
     const command = decodeCodeOperationCommand(rawCommand);
+    const initiator = options.initiator ?? "agent";
     const scope = await this.#scope(windowId, command);
     if ("failure" in scope) return this.#failed(command.operationId, scope.failure, scope.message);
     const replay = this.#replay(command.threadId, command.operationId, 0, 256);
@@ -559,7 +576,7 @@ export class CodeOperationService {
 
     let result: CodeOperationResult;
     let resultCursor = replay.nextCursor;
-    const gate = await this.#authorize(windowId, command, scope.thread, scope.checkout);
+    const gate = await this.#authorize(windowId, command, scope.thread, scope.checkout, initiator);
     if (gate !== "allow") {
       result = this.#failed(
         command.operationId,
@@ -900,12 +917,14 @@ export class CodeOperationService {
     command: CodeOperationCommand,
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
+    initiator: CodeOperationInitiator = "agent",
   ): Promise<"allow" | "waiting" | "unauthorized"> {
     const operation = operationFor(command.kind);
     const policy = authorizeCodeOperation({
       actor: "local-user",
       posture: thread.executionPolicy,
       operation,
+      initiator,
     });
     if (policy.decision === "deny") return "unauthorized";
     if (

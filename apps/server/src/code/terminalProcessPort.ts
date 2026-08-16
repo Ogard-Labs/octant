@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as nodePty from "node-pty";
@@ -15,6 +15,21 @@ import {
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
 
 export const MAX_TERMINAL_INPUT_BYTES = 64 * 1024;
+
+/**
+ * Points the shell's own bookkeeping at the Octant-owned state directory so
+ * an interactive zsh (and common prompts such as starship) never try to write
+ * inside the real home the profile keeps read-only. Caller-supplied
+ * environment wins over these defaults.
+ */
+export function shellStateEnvironment(directory: string): Record<string, string> {
+  return {
+    HISTFILE: join(directory, "zsh_history"),
+    XDG_CACHE_HOME: join(directory, "cache"),
+    XDG_STATE_HOME: join(directory, "state"),
+    STARSHIP_CACHE: join(directory, "cache", "starship"),
+  };
+}
 export const MAX_TERMINAL_COLUMNS = 500;
 export const MAX_TERMINAL_ROWS = 500;
 
@@ -68,6 +83,13 @@ interface TerminalProcessDependencies {
   readonly platform?: NodeJS.Platform;
   readonly sandboxPath?: string;
   readonly temporaryDirectory?: string;
+  /**
+   * Octant-owned directory the confined shell may keep its own state in
+   * (history, prompt caches). The profile denies writes to the real home, so
+   * without this an interactive zsh spends its first seconds printing
+   * permission errors for `~/.zsh_history` and `~/.cache`.
+   */
+  readonly shellStateDirectory?: string;
   readonly networkEgress?: OsNetworkEgress;
   readonly seatbeltHomeDirectory?: string;
   readonly seatbeltUsersDirectory?: string;
@@ -122,6 +144,7 @@ export class TerminalProcessPort {
     readonly ensurePtyHelperExecutable: () => void;
     readonly confinement: SeatbeltConfinementPort;
     readonly temporaryDirectory: string;
+    readonly shellStateDirectory: string;
     readonly networkEgress: OsNetworkEgress;
   };
 
@@ -156,6 +179,16 @@ export class TerminalProcessPort {
         process.env.TEMP ??
         "/tmp",
       networkEgress: dependencies.networkEgress ?? "allow",
+      shellStateDirectory:
+        dependencies.shellStateDirectory ??
+        join(
+          dependencies.temporaryDirectory ??
+            process.env.TMPDIR ??
+            process.env.TMP ??
+            process.env.TEMP ??
+            "/tmp",
+          "octant-terminal-shell",
+        ),
       confinement:
         dependencies.confinement ??
         makeSeatbeltConfinementLive({
@@ -176,6 +209,8 @@ export class TerminalProcessPort {
   start(input: TerminalLaunchInput): TerminalProcessHandle {
     validateLaunch(input);
     this.#dependencies.ensurePtyHelperExecutable();
+    const shellState = this.#dependencies.shellStateDirectory;
+    mkdirSync(shellState, { recursive: true, mode: 0o700 });
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
       const shellDirectory = dirname(input.shell);
@@ -184,11 +219,13 @@ export class TerminalProcessPort {
         args: [],
         boundRoot: input.cwd,
         temporaryDirectory: this.#dependencies.temporaryDirectory,
+        additionalWriteRoots: [shellState],
         networkEgress: this.#dependencies.networkEgress,
         allowFileReadStar: true,
         readRoots: [
           input.cwd,
           this.#dependencies.temporaryDirectory,
+          shellState,
           shellDirectory,
           dirname(shellDirectory),
         ],
@@ -203,7 +240,7 @@ export class TerminalProcessPort {
     const pty = this.#dependencies.spawn(launch.command, launch.args, {
       name: "xterm-256color",
       cwd: input.cwd,
-      env: { ...input.environment },
+      env: { ...shellStateEnvironment(shellState), ...input.environment },
       cols: input.columns,
       rows: input.rows,
     });

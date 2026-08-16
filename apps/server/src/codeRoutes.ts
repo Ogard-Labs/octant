@@ -144,6 +144,7 @@ export interface CodeRouteService {
   readonly executeOperation?: (
     authenticatedWindowId: WindowId,
     command: CodeOperationCommand,
+    options?: { readonly initiator?: "user" | "agent" },
   ) => Promise<CodeOperationResult> | CodeOperationResult;
   readonly inspectTerminal?: (
     authenticatedWindowId: WindowId,
@@ -371,7 +372,11 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             );
           }
           const operationResult = decodeCodeOperationResult(
-            await dependencies.service.executeOperation(authenticatedWindowId, operation),
+            // The route only ever carries the person at the window; agents and
+            // automations reach the runtime directly and stay gated as agents.
+            await dependencies.service.executeOperation(authenticatedWindowId, operation, {
+              initiator: "user",
+            }),
           );
           if (operationResult.operationId !== operation.operationId) {
             throw new CodeRouteRejected("Code operation response is unavailable.", 503);

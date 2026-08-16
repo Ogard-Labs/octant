@@ -147,7 +147,8 @@ describe("Code routes", () => {
       kind: "operation-accepted",
       operationId: operation.operationId,
     });
-    expect(executeOperation).toHaveBeenCalledWith(windowId, operation);
+    // The route speaks for the person at the window, never for an agent.
+    expect(executeOperation).toHaveBeenCalledWith(windowId, operation, { initiator: "user" });
     expect(execute).not.toHaveBeenCalled();
 
     const forged = await route(

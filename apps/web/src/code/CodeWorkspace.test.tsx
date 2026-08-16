@@ -47,23 +47,22 @@ describe("CodeWorkspace", () => {
     );
   });
 
-  it("starts a terminal only after an explicit Full access action", async () => {
+  it("opens a terminal the first time the tab is viewed, without an approval prompt", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
     (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce(terminalResult);
 
+    // Approval-gated and no approval bridge: the person opening the tab is the
+    // approval, and the host authorizes their own terminal without a prompt.
     render(
       <CodeWorkspace
         client={client}
-        controller={controller("full-access")}
+        controller={controller("approval-gated")}
         createUuid={uuidFactory()}
         tab={tab("code-terminal", "Terminal")}
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Start terminal" })).toBeVisible();
-    expect(client.executeOperation).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Start terminal" }));
     await waitFor(() =>
       expect(client.executeOperation).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -92,9 +91,9 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    const start = await screen.findByRole("button", { name: "Start terminal" });
-    fireEvent.click(start);
-    fireEvent.click(start);
+    await waitFor(() => expect(client.executeOperation).toHaveBeenCalledOnce());
+    // The reattach poll keeps running underneath; it must not start a second one.
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
     expect(client.executeOperation).toHaveBeenCalledOnce();
     expect(
       (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.filter(
@@ -165,7 +164,15 @@ describe("CodeWorkspace", () => {
     (client.inspectTerminal as ReturnType<typeof vi.fn>)
       .mockRejectedValueOnce(terminalUnavailable())
       .mockResolvedValueOnce({ terminalId: ids.thread, state: "running" });
-    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce(terminalResult);
+    (client.executeOperation as ReturnType<typeof vi.fn>)
+      // The tab's own automatic open cannot start one right now...
+      .mockResolvedValueOnce({
+        kind: "operation-failed",
+        operationId: "30000000-0000-4000-8000-000000000001",
+        failure: { category: "unavailable", message: "Terminal runtime is unavailable." },
+      })
+      // ...but the poll underneath finds and attaches the one the agent started.
+      .mockResolvedValueOnce(terminalResult);
 
     render(
       <CodeWorkspace
@@ -180,18 +187,22 @@ describe("CodeWorkspace", () => {
       await screen.findByRole("heading", { name: "Repository terminal" }, { timeout: 2_000 }),
     ).toBeVisible();
     expect(client.inspectTerminal).toHaveBeenCalledTimes(2);
-    expect(client.executeOperation).toHaveBeenCalledOnce();
     expect(
-      (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.every(
-        ([command]) => command.kind === "attach-terminal",
+      (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.map(
+        ([command]) => command.kind,
       ),
-    ).toBe(true);
+    ).toEqual(["start-terminal", "attach-terminal"]);
   });
 
-  it("fails closed when an approval-gated mutation surface has no approval bridge", async () => {
+  it("offers an explicit Start when the automatic open fails, and never auto-starts in Plan", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
-    render(
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      kind: "operation-failed",
+      operationId: "30000000-0000-4000-8000-000000000001",
+      failure: { category: "unavailable", message: "Terminal runtime is unavailable." },
+    });
+    const { unmount } = render(
       <CodeWorkspace
         client={client}
         controller={controller("approval-gated")}
@@ -200,10 +211,25 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(
-      await screen.findByRole("heading", { name: "Terminal approval unavailable" }),
-    ).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Start terminal" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Start terminal" })).toBeVisible();
+    expect(await screen.findByText("Terminal runtime is unavailable.")).toBeVisible();
+    unmount();
+
+    const planClient = codeClient();
+    (planClient.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(
+      terminalUnavailable(),
+    );
+    render(
+      <CodeWorkspace
+        client={planClient}
+        controller={controller("plan")}
+        createUuid={uuidFactory()}
+        tab={tab("code-terminal", "Terminal")}
+      />,
+    );
+    expect(await screen.findByRole("heading", { name: "No terminal attached" })).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(planClient.executeOperation).not.toHaveBeenCalled();
   });
 
   it("explains stale checkout recovery instead of offering a dead terminal action", () => {
