@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import {
@@ -65,14 +65,25 @@ function developerGitExecutable(): string {
   return developerGit;
 }
 
+export interface GitGlobalConfigReadRootsOptions {
+  readonly home?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  /** Reads a config file for include resolution; undefined when unreadable. */
+  readonly readConfig?: (path: string) => string | undefined;
+}
+
 // Git treats a permission error on its global config as fatal, so the
 // confinement must let it read the user's own Git config even though the
-// rest of the home directory stays private.
+// rest of the home directory stays private. Files pulled in through
+// `[include]`/`[includeIf]` are part of that config and denied the same way,
+// so they are followed to a bounded depth.
 export function gitGlobalConfigReadRoots(
-  home: string = homedir(),
-  xdgConfigHome: string | undefined = process.env.XDG_CONFIG_HOME,
+  options: GitGlobalConfigReadRootsOptions = {},
 ): ReadonlyArray<string> {
-  return [
+  const home = options.home ?? homedir();
+  const xdgConfigHome = (options.env ?? process.env).XDG_CONFIG_HOME;
+  const readConfig = options.readConfig ?? readConfigFile;
+  const roots = [
     join(home, ".gitconfig"),
     join(
       xdgConfigHome !== undefined && isAbsolute(xdgConfigHome)
@@ -81,6 +92,56 @@ export function gitGlobalConfigReadRoots(
       "git",
     ),
   ];
+  const visited = new Set<string>();
+  const included: string[] = [];
+  const visit = (file: string, depth: number) => {
+    if (depth > MAX_GIT_CONFIG_INCLUDE_DEPTH || visited.has(file)) return;
+    visited.add(file);
+    const text = readConfig(file);
+    if (text === undefined) return;
+    for (const path of gitConfigIncludePaths(text, dirname(file), home)) {
+      if (!roots.includes(path) && !included.includes(path)) included.push(path);
+      visit(path, depth + 1);
+    }
+  };
+  visit(roots[0]!, 0);
+  visit(join(roots[1]!, "config"), 0);
+  return [...roots, ...included];
+}
+
+const MAX_GIT_CONFIG_INCLUDE_DEPTH = 4;
+
+function readConfigFile(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+/** `path` values under `[include]` / `[includeIf "..."]`, resolved like Git does. */
+export function gitConfigIncludePaths(
+  text: string,
+  configDirectory: string,
+  home: string,
+): ReadonlyArray<string> {
+  const paths: string[] = [];
+  let inInclude = false;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.replace(/^\s+/, "");
+    if (line.startsWith("[")) {
+      inInclude = /^\[\s*include(?:if\b|\s*\])/i.test(line);
+      continue;
+    }
+    if (!inInclude) continue;
+    const match = /^path\s*=\s*(.+?)\s*$/i.exec(line);
+    if (match === null) continue;
+    const value = match[1]!.replace(/^"(.*)"$/, "$1");
+    if (value === "") continue;
+    const expanded = value.startsWith("~/") ? join(home, value.slice(2)) : value;
+    paths.push(isAbsolute(expanded) ? expanded : join(configDirectory, expanded));
+  }
+  return paths;
 }
 
 export function createGitSeatbeltConfinement(options: GitSeatbeltPortOptions = {}): {

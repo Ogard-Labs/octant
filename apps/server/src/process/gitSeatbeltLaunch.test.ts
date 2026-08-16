@@ -30,13 +30,45 @@ describe("git Seatbelt launch", () => {
   });
 
   it("derives global config roots from the home and XDG config directories", () => {
-    expect(gitGlobalConfigReadRoots("/Users/example", undefined)).toEqual([
+    const readConfig = () => undefined;
+    expect(gitGlobalConfigReadRoots({ home: "/Users/example", env: {}, readConfig })).toEqual([
       "/Users/example/.gitconfig",
       "/Users/example/.config/git",
     ]);
-    expect(gitGlobalConfigReadRoots("/Users/example", "/Users/example/xdg")).toEqual([
+    expect(
+      gitGlobalConfigReadRoots({
+        home: "/Users/example",
+        env: { XDG_CONFIG_HOME: "/Users/example/xdg" },
+        readConfig,
+      }),
+    ).toEqual(["/Users/example/.gitconfig", "/Users/example/xdg/git"]);
+  });
+
+  it("follows include and includeIf paths from the global config to a bounded depth", () => {
+    const files = new Map<string, string>([
+      [
+        "/Users/example/.gitconfig",
+        '[user]\n\tname = Example\n[include]\n\tpath = ~/.gitconfig.local\n\tpath = "relative/extra"\n[includeIf "gitdir:~/Dev/"]\n\tpath = /Users/example/Dev/.gitconfig-dev\n[alias]\n\tpath = not-an-include\n',
+      ],
+      [
+        "/Users/example/.gitconfig.local",
+        "[include]\n\tpath = ~/.gitconfig\n\tpath = ~/.gitconfig.work\n",
+      ],
+      ["/Users/example/.gitconfig.work", "[include]\n\tpath = ~/.gitconfig.local\n"],
+    ]);
+    expect(
+      gitGlobalConfigReadRoots({
+        home: "/Users/example",
+        env: {},
+        readConfig: (path) => files.get(path),
+      }),
+    ).toEqual([
       "/Users/example/.gitconfig",
-      "/Users/example/xdg/git",
+      "/Users/example/.config/git",
+      "/Users/example/.gitconfig.local",
+      "/Users/example/.gitconfig.work",
+      "/Users/example/relative/extra",
+      "/Users/example/Dev/.gitconfig-dev",
     ]);
   });
 
