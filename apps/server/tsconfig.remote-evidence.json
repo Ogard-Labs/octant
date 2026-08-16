@@ -1,0 +1,13 @@
+{
+  // Remote exit evidence A driver typecheck program. The driver is bundled
+  // for Chromium (browser globals: window, indexedDB, crypto.subtle) and is
+  // deliberately excluded from the main apps/server program so the DOM lib
+  // does not leak into server code. Run via the `remote:exit-evidence-a`
+  // package script before the smoke test executes.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": ["src/remote/remoteExitEvidenceADriver.ts"]
+}

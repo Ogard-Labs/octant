@@ -1,0 +1,40 @@
+{
+  "fixture": "injected-readme",
+  "abuseCase": "AC1",
+  "rows": [
+    {
+      "id": "injected-readme.path-traversal",
+      "kind": "work-path",
+      "relativePath": "../etc/passwd",
+      "expectedDenial": "traversal-rejected",
+      "policySurface": "work-confinement",
+      "resolutionStep": "confinement",
+      "auditEvent": "tool-call-denied"
+    },
+    {
+      "id": "injected-readme.absolute-path",
+      "kind": "work-path",
+      "relativePath": "/Users/example/.ssh/id_rsa",
+      "expectedDenial": "invalid-relative-path",
+      "policySurface": "work-confinement",
+      "resolutionStep": "confinement",
+      "auditEvent": "tool-call-denied"
+    },
+    {
+      "id": "injected-readme.fake-approval-authority",
+      "kind": "tool-action-authority",
+      "expectedDenial": "extension-mismatch",
+      "policySurface": "tool-action",
+      "resolutionStep": "extension-capability",
+      "auditEvent": "tool-call-denied"
+    },
+    {
+      "id": "injected-readme.instruction-shaped-result",
+      "kind": "policy-decision",
+      "expectedDenial": "untrusted-content-not-authority",
+      "policySurface": "tool-action",
+      "resolutionStep": "taint",
+      "auditEvent": "policy-decision-recorded"
+    }
+  ]
+}

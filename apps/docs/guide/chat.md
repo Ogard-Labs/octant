@@ -1,0 +1,42 @@
+---
+description: Chat mode provides conversation threads in virtual Projects with scoped memory and no implicit filesystem authority.
+---
+
+# Chat
+
+Chat is the conversation surface. Chat Projects are virtual containers with shared scoped memory and no implicit filesystem or shell access. Chat is always available; disabling it in Settings never deletes existing Chat data.
+
+## Chat Projects
+
+A Chat Project is a virtual, memory-scoped container. Unlike Work and Code Projects, it binds no OS directory or repository root. Threads within a Chat Project share the Project's scoped memory but cannot access the filesystem, shell, or Git tools.
+
+Create a Chat Project from the sidebar by selecting Chat as the mode. No native picker is required.
+
+## Thread authority
+
+Chat threads receive no filesystem, shell, or repository authority. The composer and thread controls reflect only Chat-valid surfaces:
+
+- Conversation and streaming responses
+- Attachments and sources
+- Scoped memory entries
+- Child agents within the same Chat context
+
+Chat does not expose Terminal, Files, Diff, or Git surfaces. The server enforces this boundary; renderer focus cannot grant authority.
+
+## Scoped memory
+
+Chat Projects support shared scoped memory that persists across threads within the same Project. Memory entries include decisions, facts, preferences, summaries, and outcomes. See [Shared Memory](/guide/memory) for details on managing and transferring memory entries.
+
+## Unfiled threads
+
+A Chat thread not assigned to a Project uses an explicit unfiled Chat context. It does not inherit a filesystem, repository, or another Project's authority.
+
+## Cross-Project boundaries
+
+When you drag or drop a Chat thread into another workspace, the server resolves the action against the context key (host, mode, Project, bound root). A cross-Project drop does not silently change authority; it offers to open the thread in a new window instead.
+
+## Next steps
+
+- [Work](/guide/work) for local knowledge work with a bound folder
+- [Code](/guide/code) for repository engineering with Git authority
+- [Projects](/guide/projects) for managing Projects across modes

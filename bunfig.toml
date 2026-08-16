@@ -1,0 +1,4 @@
+[install]
+exact = true
+linker = "hoisted"
+saveTextLockfile = true

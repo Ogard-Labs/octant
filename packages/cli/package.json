@@ -1,0 +1,28 @@
+{
+  "name": "@octant/cli",
+  "private": true,
+  "bin": {
+    "octant": "./src/bin.ts"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./web": "./src/web.ts",
+    "./status": "./src/status.ts"
+  },
+  "scripts": {
+    "build": "tsdown src/bin.ts --format esm --target es2024",
+    "test": "vitest run --testTimeout=15000",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@octant/contracts": "workspace:*",
+    "@octant/host-runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "tsdown": "0.22.5",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

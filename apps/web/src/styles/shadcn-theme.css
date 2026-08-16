@@ -1,0 +1,54 @@
+/*
+ * Octant → shadcn CSS variable projection.
+ * Authoritative tokens remain `--octant-*` (`packages/theme`).
+ * shadcn/Tailwind controls consume `--background`, `--foreground`, etc. only.
+ */
+
+:root,
+.dark {
+  color-scheme: dark;
+  --radius: 0.5rem;
+  --background: var(--octant-workspace);
+  --foreground: var(--octant-text-primary);
+  --card: var(--octant-surface-raised);
+  --card-foreground: var(--octant-text-primary);
+  --popover: var(--octant-floating);
+  --popover-foreground: var(--octant-text-primary);
+  --primary: var(--octant-accent);
+  --primary-foreground: var(--octant-primary-foreground);
+  --secondary: var(--octant-control);
+  --secondary-foreground: var(--octant-text-secondary);
+  --muted: var(--octant-control);
+  --muted-foreground: var(--octant-text-muted);
+  --accent: var(--octant-control-hover);
+  --accent-foreground: var(--octant-text-primary);
+  --destructive: var(--octant-danger-text);
+  --border: var(--octant-border);
+  --input: var(--octant-border-strong);
+  --ring: var(--octant-focus-ring);
+}
+
+html[data-octant-theme-mode="light"],
+html[data-appearance="light"],
+html[data-appearance="light"] :root,
+.light {
+  color-scheme: light;
+  --background: var(--octant-workspace);
+  --foreground: var(--octant-text-primary);
+  --card: var(--octant-surface-raised);
+  --card-foreground: var(--octant-text-primary);
+  --popover: var(--octant-floating);
+  --popover-foreground: var(--octant-text-primary);
+  --primary: var(--octant-accent);
+  --primary-foreground: var(--octant-primary-foreground);
+  --secondary: var(--octant-control);
+  --secondary-foreground: var(--octant-text-secondary);
+  --muted: var(--octant-control);
+  --muted-foreground: var(--octant-text-muted);
+  --accent: var(--octant-control-hover);
+  --accent-foreground: var(--octant-text-primary);
+  --destructive: var(--octant-danger-text);
+  --border: var(--octant-border);
+  --input: var(--octant-border-strong);
+  --ring: var(--octant-focus-ring);
+}

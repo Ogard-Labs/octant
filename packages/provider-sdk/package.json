@@ -1,0 +1,30 @@
+{
+  "name": "@octant/provider-sdk",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./conformance": "./src/conformance.ts",
+    "./context-facts": "./src/contextFacts.ts",
+    "./context-facts-conformance": "./src/contextFactsConformance.ts",
+    "./chat-conformance": "./src/chatConformance.ts",
+    "./discovery": "./src/discovery.ts",
+    "./driver": "./src/driver.ts",
+    "./child-agent-adapter": "./src/childAgentAdapter.ts",
+    "./child-agent-conformance": "./src/childAgentConformance.ts"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@octant/contracts": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "tsdown": "0.22.5",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

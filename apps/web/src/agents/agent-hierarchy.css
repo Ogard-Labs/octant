@@ -1,0 +1,262 @@
+.agent-hierarchy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
+}
+
+.agent-hierarchy--reconnecting {
+  outline: 1px dashed color-mix(in srgb, CanvasText 35%, transparent);
+}
+
+.agent-hierarchy__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.agent-hierarchy__eyebrow {
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.agent-hierarchy__header h2 {
+  margin: 0.15rem 0;
+  font-size: 1rem;
+}
+
+.agent-hierarchy__header p,
+.agent-hierarchy__row-meta,
+.agent-hierarchy__empty,
+.agent-hierarchy__banner {
+  margin: 0;
+  font-size: 0.875rem;
+  opacity: 0.9;
+}
+
+.agent-hierarchy__counts {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+
+.agent-hierarchy__controls {
+  display: grid;
+  grid-template-columns: minmax(7rem, 10rem) minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.agent-hierarchy__controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.agent-hierarchy__controls select,
+.agent-hierarchy__controls input,
+.agent-hierarchy__row-meta button {
+  min-height: 2rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  background: Canvas;
+  color: CanvasText;
+  padding: 0.35rem 0.5rem;
+}
+
+.agent-hierarchy__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.agent-hierarchy__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+}
+
+.agent-hierarchy__row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.agent-hierarchy__row-main span {
+  font-size: 0.8125rem;
+  opacity: 0.8;
+}
+
+.agent-hierarchy__row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+}
+
+@media (max-width: 40rem) {
+  .agent-hierarchy__header {
+    flex-direction: column;
+  }
+  .agent-hierarchy__controls {
+    grid-template-columns: 1fr;
+  }
+}
+
+.agent-run-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, Canvas 92%, CanvasText 8%);
+}
+
+.agent-run-create-form h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.agent-run-create-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+.agent-run-create-form select,
+.agent-run-create-form input,
+.agent-run-create-form textarea {
+  min-height: 2rem;
+  border-radius: 0.5rem;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  background: Canvas;
+  color: CanvasText;
+  padding: 0.35rem 0.5rem;
+}
+
+.agent-run-create-form fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.agent-run-create-form fieldset label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.agent-run-create-form__hint,
+.agent-run-create-form__disabled {
+  margin: 0;
+  font-size: 0.8125rem;
+  opacity: 0.85;
+}
+
+.agent-run-create-form__error {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: color-mix(in srgb, Canvas 15%, red 85%);
+}
+
+.agent-run-settings-panel__option {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  padding: 0.5rem 0;
+  font-size: 0.875rem;
+}
+
+.agent-run-settings-panel__message,
+.agent-run-settings-panel__error {
+  font-size: 0.8125rem;
+  opacity: 0.9;
+}
+
+/*
+ * Compact current-thread child-run chrome. Stays a single quiet strip
+ * on Chat, Work, and Code; the detail list is the existing hierarchy panel.
+ */
+.child-run-status {
+  display: grid;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+  background: var(--octant-surface-raised, transparent);
+  font-size: 12px;
+}
+
+.child-run-status__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.child-run-status__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-weight: 600;
+}
+
+.child-run-status__detail {
+  margin: 0;
+  color: var(--octant-text-muted);
+}
+
+.child-run-status__actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.child-run-status__notice {
+  margin: 0;
+  color: var(--octant-text-muted);
+}
+
+.child-run-status__confirm {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--octant-border-strong, var(--octant-border));
+  border-radius: 8px;
+}
+
+.child-run-status__confirm p {
+  margin: 0;
+}
+
+.child-run-status__confirm-scope {
+  color: var(--octant-text-muted);
+}
+
+.child-run-status__confirm > div {
+  display: flex;
+  gap: 6px;
+}

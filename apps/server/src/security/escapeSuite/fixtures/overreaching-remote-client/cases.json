@@ -1,0 +1,76 @@
+{
+  "fixture": "overreaching-remote-client",
+  "abuseCase": "AC4",
+  "rows": [
+    {
+      "id": "remote.expired-session",
+      "kind": "remote-session",
+      "expectedDenial": "absolute-expiry",
+      "policySurface": "remote-access",
+      "resolutionStep": "remote-principal",
+      "auditEvent": "policy-decision-recorded"
+    },
+    {
+      "id": "remote.extension-trust",
+      "kind": "remote-action",
+      "action": "extension.trust",
+      "expectedDenial": "local-host-required",
+      "policySurface": "remote-access",
+      "resolutionStep": "remote-principal",
+      "auditEvent": "tool-call-denied"
+    },
+    {
+      "id": "remote.credential-write",
+      "kind": "remote-action",
+      "action": "provider.credentials.write",
+      "expectedDenial": "local-host-required",
+      "policySurface": "remote-access",
+      "resolutionStep": "remote-principal",
+      "auditEvent": "tool-call-denied"
+    },
+    {
+      "id": "remote.project-bind",
+      "kind": "remote-action",
+      "action": "project.root.bind",
+      "expectedDenial": "local-host-required",
+      "policySurface": "remote-access",
+      "resolutionStep": "remote-principal",
+      "auditEvent": "tool-call-denied"
+    },
+    {
+      "id": "remote.device-approval",
+      "kind": "remote-action",
+      "action": "desktop.approve-device",
+      "expectedDenial": "local-host-required",
+      "policySurface": "remote-access",
+      "resolutionStep": "remote-principal",
+      "auditEvent": "tool-call-denied"
+    },
+    {
+      "id": "remote.principal-laundering",
+      "kind": "remote-laundering",
+      "expectedDenial": "principal-laundering",
+      "policySurface": "remote-access",
+      "resolutionStep": "remote-principal",
+      "auditEvent": "policy-decision-recorded"
+    },
+    {
+      "id": "remote.mint-local-approval",
+      "kind": "remote-action",
+      "action": "desktop.issue-local-approval",
+      "expectedDenial": "remote-cannot-mint-local-receipt",
+      "policySurface": "remote-access",
+      "resolutionStep": "remote-principal",
+      "auditEvent": "approval-denied"
+    },
+    {
+      "id": "remote.push-without-clamp",
+      "kind": "code-operation",
+      "operation": "push",
+      "expectedDenial": "host-thread-credential-clamped",
+      "policySurface": "code-policy",
+      "resolutionStep": "remote-principal",
+      "auditEvent": "policy-decision-recorded"
+    }
+  ]
+}

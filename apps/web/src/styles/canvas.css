@@ -1,0 +1,745 @@
+/* Safe first-party Canvas renderer styling. */
+
+.canvas-view {
+  color: var(--octant-text-primary);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 24px 28px;
+}
+
+.canvas-view__header h1 {
+  margin: 0 0 20px;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+
+.canvas-block {
+  margin: 0 0 18px;
+}
+
+.canvas-block__heading {
+  margin: 24px 0 8px;
+}
+
+.canvas-block__rich-text {
+  margin: 6px 0;
+}
+
+.canvas-block__callout {
+  border-radius: 10px;
+  border: 1px solid var(--octant-border);
+  background: var(--octant-sidebar-opaque);
+  padding: 12px 14px;
+}
+
+.canvas-block__callout-title {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.canvas-block__callout--info {
+  border-color: color-mix(in srgb, #8ab4f8 50%, transparent);
+}
+
+.canvas-block__callout--warning {
+  border-color: color-mix(in srgb, #f2b26b 60%, transparent);
+}
+
+.canvas-block__callout--error {
+  border-color: color-mix(in srgb, #e07b6f 60%, transparent);
+}
+
+.canvas-block__callout--success {
+  border-color: color-mix(in srgb, #7bc47f 60%, transparent);
+}
+
+.canvas-block__link {
+  color: #8ab4f8;
+  text-decoration: none;
+}
+
+.canvas-block__link:hover {
+  text-decoration: underline;
+}
+
+.canvas-block__link--unsafe {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.canvas-block__divider {
+  border: none;
+  border-top: 1px solid var(--octant-border);
+  margin: 20px 0;
+}
+
+.canvas-block__citation {
+  border-left: 3px solid var(--octant-border-strong);
+  padding-left: 14px;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-block__citation figcaption {
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.canvas-block__metric {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.canvas-block__metric-value {
+  font-size: 20px;
+}
+
+.canvas-block__metric-delta {
+  color: #7bc47f;
+  font-size: 12px;
+}
+
+.canvas-block__progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: #8ab4f8;
+}
+
+.canvas-block__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  padding: 4px 12px;
+  border: 1px solid var(--octant-border);
+}
+
+.canvas-block__status--success {
+  color: #7bc47f;
+}
+
+.canvas-block__status--warning {
+  color: #f2b26b;
+}
+
+.canvas-block__status--error {
+  color: #e07b6f;
+}
+
+.canvas-block__key-value dl,
+.canvas-block__key-value dt,
+.canvas-block__key-value dd {
+  margin: 0;
+}
+
+.canvas-block__key-value {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.canvas-block__key-value dt {
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-block__table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.canvas-block__table th,
+.canvas-block__table td {
+  border: 1px solid var(--octant-border);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.canvas-block__chart-fallback,
+.canvas-block__diagram-fallback {
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-block__timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 2px solid var(--octant-border-strong);
+}
+
+.canvas-block__timeline-item {
+  margin: 0 0 14px 16px;
+  position: relative;
+}
+
+.canvas-block__timeline-item time {
+  display: block;
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-block__timeline-status {
+  margin-left: 8px;
+  font-size: 12px;
+  color: #7bc47f;
+}
+
+.canvas-block__diagram-edge {
+  stroke: var(--octant-border-strong);
+  stroke-width: 1.5;
+}
+
+.canvas-block__diagram-node circle {
+  fill: #8ab4f8;
+  opacity: 0.85;
+}
+
+.canvas-block__code-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+  margin-bottom: 6px;
+}
+
+.canvas-block__code pre,
+.canvas-block__pseudocode pre {
+  background: var(--octant-workspace);
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+  padding: 12px;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.canvas-block__diff-header {
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+  margin: 10px 0 4px;
+}
+
+.canvas-block__diff-line {
+  display: block;
+  white-space: pre;
+}
+
+.canvas-block__diff-line--add {
+  color: #7bc47f;
+  background: color-mix(in srgb, #7bc47f 12%, transparent);
+}
+
+.canvas-block__diff-line--remove {
+  color: #e07b6f;
+  background: color-mix(in srgb, #e07b6f 12%, transparent);
+}
+
+.canvas-block__image-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  border: 1px dashed var(--octant-border-strong);
+  border-radius: 10px;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-block__image figcaption {
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+  margin-top: 6px;
+}
+
+.canvas-block__reference {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.canvas-block__reference-kind {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-block__reference-note {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-block__summary ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.canvas-block__summary-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.canvas-block__summary-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--octant-border-strong);
+}
+
+.canvas-block__summary-item--success .canvas-block__summary-dot {
+  background: #7bc47f;
+}
+
+.canvas-block__summary-item--warning .canvas-block__summary-dot {
+  background: #f2b26b;
+}
+
+.canvas-view__denied {
+  border: 1px solid color-mix(in srgb, #e07b6f 60%, transparent);
+  border-radius: 10px;
+  padding: 16px 18px;
+  margin: 24px;
+}
+
+.canvas-workspace-tab {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.canvas-workspace-tab__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.canvas-workspace-tab__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 16px;
+  min-height: 0;
+  flex: 1;
+}
+
+.canvas-workspace-tab__sidebar {
+  border-left: 1px solid var(--octant-border);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.canvas-revise-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.canvas-revise-form textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.canvas-version-history__title {
+  font-size: 13px;
+  margin: 0 0 8px;
+}
+
+.canvas-version-history__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.canvas-version-history__item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+  background: var(--octant-sidebar-opaque);
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.canvas-version-history__item[aria-current="true"] {
+  border-color: color-mix(in srgb, #8ab4f8 50%, transparent);
+}
+
+.canvas-version-history__sequence {
+  display: block;
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-version-history__summary {
+  display: block;
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+}
+
+/* Canvas typed actions (D3). Availability and state are conveyed with text and
+   icons, never color alone, and every disabled control still reads a safe
+   reason to assistive technology. */
+.canvas-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.canvas-actions__title {
+  font-size: 13px;
+  margin: 0;
+}
+
+.canvas-actions__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.canvas-action {
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.canvas-action[data-availability="unavailable"],
+.canvas-action[data-availability="unauthorized"] {
+  border-style: dashed;
+}
+
+.canvas-action__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.canvas-action__effect,
+.canvas-action__approval,
+.canvas-action__reason,
+.canvas-action__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 0;
+}
+
+.canvas-action__effect,
+.canvas-action__approval {
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-action__description {
+  font-size: 12px;
+  margin: 0;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-action__reason {
+  color: var(--octant-text-primary);
+  font-weight: 500;
+}
+
+.canvas-action__status[data-run="completed"],
+.canvas-action__status[data-run="requested"] {
+  color: var(--octant-text-primary);
+}
+
+.canvas-action__status[data-run="denied"],
+.canvas-action__status[data-run="failed"] {
+  color: var(--octant-text-primary);
+  font-weight: 500;
+}
+
+.canvas-action__spinner {
+  animation: canvas-action-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-action__spinner {
+    animation: none;
+  }
+}
+
+@keyframes canvas-action-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Canvas refresh (C2) and skill provenance. Status is carried by an icon and
+   words together, never color alone, and provenance is inert read-only text. */
+.canvas-refresh {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.canvas-refresh__title {
+  font-size: 13px;
+  margin: 0;
+}
+
+.canvas-refresh__description {
+  font-size: 12px;
+  margin: 0;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-refresh__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.canvas-refresh__skill {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-refresh__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 0;
+}
+
+.canvas-refresh__status[data-run="denied"],
+.canvas-refresh__status[data-run="failed"],
+.canvas-refresh__status[data-run="partial"] {
+  color: var(--octant-text-primary);
+  font-weight: 500;
+}
+
+.canvas-refresh__spinner {
+  animation: canvas-action-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-refresh__spinner {
+    animation: none;
+  }
+}
+
+.canvas-skill-provenance {
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.canvas-skill-provenance__title {
+  font-size: 12px;
+  margin: 0;
+}
+
+.canvas-skill-provenance__facts {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 2px 8px;
+  margin: 0;
+}
+
+.canvas-skill-provenance__facts > div {
+  display: contents;
+}
+
+.canvas-skill-provenance__facts dt {
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-skill-provenance__facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.canvas-skill-provenance__label {
+  display: block;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-skill-provenance ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.canvas-skill-provenance__note {
+  margin: 0;
+  color: var(--octant-text-primary-muted);
+}
+
+/* Canvas sharing. A share row states its lifecycle in words next to an icon,
+   never by color alone, and the access log is inert read-only text. */
+.canvas-share {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.canvas-share__title {
+  font-size: 13px;
+  margin: 0;
+}
+
+.canvas-share__description,
+.canvas-share__note {
+  font-size: 12px;
+  margin: 0;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-share__form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.canvas-share__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-share__consent {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-share__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin: 0;
+}
+
+.canvas-share__status[data-run="failed"] {
+  color: var(--octant-text-primary);
+  font-weight: 500;
+}
+
+/* Opened shared snapshot: a clearly labeled read-only copy, framed apart from
+   the live canvas and the share controls. */
+.canvas-share__snapshot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.canvas-share__snapshot-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.canvas-share__snapshot-title {
+  font-size: 12px;
+  margin: 0;
+}
+
+.canvas-share__snapshot-document {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.canvas-share__snapshot-document-title {
+  font-size: 13px;
+  margin: 0;
+}
+
+.canvas-share__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.canvas-share__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.canvas-share__row-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-share__row-audience {
+  color: var(--octant-text-primary-muted);
+}
+
+.canvas-share__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.canvas-share__log {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.canvas-share__log-title {
+  font-size: 12px;
+  margin: 0;
+}
+
+.canvas-share__log ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.canvas-share__log-meta {
+  color: var(--octant-text-primary-muted);
+}

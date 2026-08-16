@@ -1,0 +1,708 @@
+import { defaultShellSettings } from "@octant/domain/shell-policy";
+import { decodeChatBootstrap } from "@octant/contracts/chat";
+import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { SettingsView, type SettingsViewProps } from "./SettingsView";
+import type { ChatController } from "../chat/useChatController";
+import type { CodeController } from "../code/useCodeController";
+import type { DiscoveryController } from "../providers/useDiscoveryController";
+import type { ProviderController } from "../providers/useProviderController";
+
+const now = "2026-07-20T08:00:00.000Z";
+
+function chatControllerFixture(): ChatController {
+  return {
+    bootstrap: decodeChatBootstrap({
+      settings: {
+        defaultProviderInstanceId: "10000000-0000-4000-8000-000000000001",
+        defaultModelId: "model-a",
+        defaultResearchEnabled: false,
+        defaultResearchRouting: "automatic",
+        defaultPersonalityInstructions: "Be calm, direct, and useful.",
+        version: 1,
+        updatedAt: now,
+      },
+      threads: [],
+    }),
+    updateSettings: vi.fn(async () => true),
+  } as unknown as ChatController;
+}
+
+function providerControllerFixture(): ProviderController {
+  return {
+    status: "ready",
+    snapshot: undefined,
+    instances: [],
+    defaults: { permissionPersistence: "current-session", version: 0 as never },
+    observedByInstance: new Map(),
+    busy: false,
+    probingIds: new Set(),
+    credentialManagementAvailable: false,
+    retry: vi.fn(async () => true),
+  } as unknown as ProviderController;
+}
+
+function discoveryControllerFixture(): DiscoveryController {
+  return {
+    snapshot: undefined,
+    scanning: false,
+    connectingPaths: new Set(),
+    scan: vi.fn(async () => {}),
+    connect: vi.fn(async () => true),
+  } as unknown as DiscoveryController;
+}
+
+function renderSettings(overrides: Partial<SettingsViewProps> = {}) {
+  const props: SettingsViewProps = {
+    nativeBoundsAvailable: true,
+    onResetLayout: vi.fn(),
+    onResetNativeBounds: vi.fn(),
+    onSearchChange: vi.fn(),
+    onSettingsChange: vi.fn(),
+    search: "",
+    settings: defaultShellSettings(),
+    sidebarVibrancySupported: true,
+    visibleSettings: [
+      "enable-chat",
+      "enable-work",
+      "sidebar-width",
+      "sidebar-material",
+      "sidebar-background",
+      "mode-switcher",
+      "reset-layout",
+      "reset-window-bounds",
+    ],
+    ...overrides,
+  };
+  return { props, ...render(<SettingsView {...props} />) };
+}
+
+function navigateTo(label: string) {
+  fireEvent.click(screen.getByRole("button", { name: label }));
+}
+
+/**
+ * Render SettingsView with a controlled `search` prop so the search results
+ * panel can be exercised (the real App controls the search string).
+ */
+function renderSettingsWithSearch(initial: string, overrides: Partial<SettingsViewProps> = {}) {
+  const onSearchChange = vi.fn();
+  function Harness() {
+    const [search, setSearch] = useState(initial);
+    return (
+      <SettingsView
+        {...defaultProps()}
+        {...overrides}
+        onSearchChange={(value) => {
+          onSearchChange(value);
+          setSearch(value);
+        }}
+        search={search}
+      />
+    );
+  }
+  return { onSearchChange, ...render(<Harness />) };
+}
+
+function defaultProps(): SettingsViewProps {
+  return {
+    nativeBoundsAvailable: true,
+    onResetLayout: vi.fn(),
+    onResetNativeBounds: vi.fn(),
+    onSearchChange: vi.fn(),
+    onSettingsChange: vi.fn(),
+    search: "",
+    settings: defaultShellSettings(),
+    sidebarVibrancySupported: true,
+    visibleSettings: [
+      "enable-chat",
+      "enable-work",
+      "sidebar-width",
+      "sidebar-material",
+      "sidebar-background",
+      "mode-switcher",
+      "reset-layout",
+      "reset-window-bounds",
+    ],
+  };
+}
+
+describe("SettingsView", () => {
+  it("mounts execution-profile management in its own Profiles settings destination", async () => {
+    renderSettings({
+      executionProfiles: <div data-testid="execution-profile-settings">Profile settings</div>,
+      initialDeepLink: { section: "profiles" },
+    });
+    expect(await screen.findByTestId("execution-profile-settings")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Profiles" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.queryByText("Providers", { selector: "h1" })).not.toBeInTheDocument();
+  });
+
+  it("mounts the Agents settings panel when an AgentRunSettingsClient is supplied", async () => {
+    const agentRunSettingsClient = {
+      current: vi.fn(async () => ({
+        creationPosture: "ask" as const,
+        version: 1 as never,
+        updatedAt: now as never,
+      })),
+      update: vi.fn(),
+    };
+    renderSettings({
+      agentRunSettingsClient,
+      initialDeepLink: { section: "agents" },
+    });
+    expect(await screen.findByRole("radio", { name: /Ask/ })).toBeChecked();
+    expect(screen.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("does not render the Agents panel without an AgentRunSettingsClient", () => {
+    renderSettings({ initialDeepLink: { section: "agents" } });
+    expect(screen.queryByRole("radio", { name: /Ask/ })).not.toBeInTheDocument();
+  });
+
+  it("presents one section at a time, defaulting to General", () => {
+    renderSettings();
+
+    expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Settings sidebar" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "General" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
+    // Appearance is in the navigator but its content is not rendered.
+    expect(screen.getByRole("button", { name: "Appearance" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Appearance" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("slider", { name: "Sidebar width" })).not.toBeInTheDocument();
+  });
+
+  it("returns to the app from the dedicated Settings sidebar", async () => {
+    const user = userEvent.setup();
+    const onBack = vi.fn();
+    renderSettings({ onBack });
+
+    await user.click(screen.getByRole("button", { name: "Back to app" }));
+
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("marks the active section in the navigator and switches on click", () => {
+    renderSettings();
+
+    expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "true");
+    navigateTo("Appearance");
+    expect(screen.getByRole("button", { name: "Appearance" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();
+  });
+
+  it("shows a scope indicator on each relevant control", () => {
+    renderSettings();
+
+    const general = screen.getByRole("heading", { name: "General" }).closest("section")!;
+    const firstRow = within(general).getAllByTestId("setting-row")[0]!;
+    expect(within(firstRow).getByText("This app")).toBeInTheDocument();
+  });
+
+  it("scans once when the Providers section opens", async () => {
+    const providerController = providerControllerFixture();
+    const discoveryController = discoveryControllerFixture();
+    const { rerender } = renderSettings({ providerController, discoveryController });
+
+    navigateTo("Providers & Models");
+
+    await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <SettingsView
+        {...defaultProps()}
+        discoveryController={{
+          ...discoveryController,
+        }}
+        providerController={providerController}
+      />,
+    );
+
+    await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledTimes(1));
+  });
+
+  it("integrates authoritative Chat defaults as a searchable section", () => {
+    const chatController = {
+      ...chatControllerFixture(),
+      settingsMessage:
+        "Chat defaults changed elsewhere. Current authoritative values were loaded; review them and save again.",
+    } as ChatController;
+    renderSettings({ chatController });
+
+    navigateTo("Chat");
+    expect(screen.getByRole("heading", { name: "Chat defaults" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Default research backend" })).toHaveValue(
+      "automatic",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("changed elsewhere");
+  });
+
+  it("integrates authoritative Code defaults as a searchable section", () => {
+    const codeController = {
+      bootstrap: {
+        settings: {
+          defaultExecutionPolicy: "approval-gated",
+          defaultPermissionPersistence: "current-session",
+          version: 1,
+          updatedAt: now,
+        },
+        threads: [],
+        checkouts: [],
+      },
+      updateSettings: vi.fn(async () => true),
+    } as unknown as CodeController;
+    renderSettings({ codeController });
+
+    navigateTo("Code");
+    expect(screen.getByRole("heading", { name: "Code defaults" })).toBeVisible();
+  });
+
+  it("maps the saved sidebar material to the direct translucency switch", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+    const { rerender } = renderSettings({ onSettingsChange });
+    navigateTo("Appearance");
+
+    const control = screen.getByRole("switch", { name: "Translucent sidebar" });
+    expect(control).toHaveAttribute("aria-checked", "true");
+    expect(control).toHaveAttribute("aria-describedby", "sidebar-material-description");
+    expect(document.getElementById("sidebar-material-description")).toHaveTextContent(
+      "Use the system sidebar material when available.",
+    );
+    await user.click(control);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMaterial: "opaque" });
+
+    rerender(
+      <SettingsView
+        nativeBoundsAvailable
+        onResetLayout={vi.fn()}
+        onResetNativeBounds={vi.fn()}
+        onSearchChange={vi.fn()}
+        onSettingsChange={onSettingsChange}
+        search=""
+        settings={{ ...defaultShellSettings(), sidebarMaterial: "opaque" }}
+        sidebarVibrancySupported={false}
+        visibleSettings={["sidebar-material"]}
+      />,
+    );
+    const disabledTranslucency = screen.getByRole("switch", { name: "Translucent sidebar" });
+    expect(disabledTranslucency).toHaveAttribute("aria-checked", "false");
+    disabledTranslucency.focus();
+    await user.keyboard(" ");
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ sidebarMaterial: "system" });
+  });
+
+  it("selects subtle native vibrancy when translucency is enabled", async () => {
+    const user = userEvent.setup();
+    const updateDraft = vi.fn();
+    renderSettings({
+      settings: { ...defaultShellSettings(), sidebarMaterial: "opaque" },
+      themeController: {
+        draft: {
+          ...DEFAULT_THEME_SETTINGS,
+          sidebarBackground: {
+            ...DEFAULT_THEME_SETTINGS.sidebarBackground,
+            vibrancyMode: "off",
+          },
+        },
+        updateDraft,
+      } as never,
+    });
+    navigateTo("Appearance");
+
+    await user.click(screen.getByRole("switch", { name: "Translucent sidebar" }));
+
+    expect(updateDraft).toHaveBeenCalledWith({
+      sidebarBackground: {
+        ...DEFAULT_THEME_SETTINGS.sidebarBackground,
+        vibrancyMode: "subtle",
+      },
+    });
+  });
+
+  it("keeps saved On while exposing the generic effective opaque fallback note", () => {
+    const { container, rerender } = renderSettings({ visibleSettings: ["sidebar-material"] });
+    navigateTo("Appearance");
+
+    expect(screen.getByRole("switch", { name: "Translucent sidebar" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    const note = screen.getByText(
+      "Translucency is unavailable, so Octant is using an opaque sidebar.",
+    );
+    expect(note).toHaveClass("settings-view__effective-note");
+    expect(note).toHaveAttribute("data-visible-when-material", "opaque");
+
+    rerender(
+      <SettingsView
+        nativeBoundsAvailable
+        onResetLayout={vi.fn()}
+        onResetNativeBounds={vi.fn()}
+        onSearchChange={vi.fn()}
+        onSettingsChange={vi.fn()}
+        search=""
+        settings={{ ...defaultShellSettings(), sidebarMaterial: "opaque" }}
+        sidebarVibrancySupported={false}
+        visibleSettings={["sidebar-material"]}
+      />,
+    );
+    expect(
+      screen.queryByText("Translucency is unavailable, so Octant is using an opaque sidebar."),
+    ).not.toBeInTheDocument();
+    void container;
+  });
+
+  it("shows the effective fallback note for reduced transparency and unsupported backdrop", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    expect(styles).toContain(".shell--material-translucent .settings-view__effective-note");
+    expect(styles).toContain("@media (prefers-reduced-transparency: reduce)");
+    expect(styles).toContain("@supports");
+    expect(styles).toContain("not (backdrop-filter: blur(1px))");
+    expect(styles).toContain("not (-webkit-backdrop-filter: blur(1px))");
+    expect(styles).toMatch(
+      /\.shell--material-translucent \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-sidebar-translucent\);[^}]*backdrop-filter:/s,
+    );
+    expect(styles).toMatch(
+      /@media \(prefers-reduced-transparency: reduce\)[\s\S]*\.shell--material-translucent \.settings-view__sidebar,\s*\.shell--material-translucent\[data-octant-sidebar-vibrancy="subtle"\] \.settings-view__sidebar,\s*\.shell--material-translucent\[data-octant-sidebar-vibrancy="strong"\] \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-sidebar-opaque\);[^}]*backdrop-filter:\s*none;/,
+    );
+  });
+
+  it("owns its full-height shell without a stale root style collision", () => {
+    const dedicatedStyles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+    const legacyStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+
+    expect(dedicatedStyles).toMatch(/\.settings-view\s*\{[^}]*height: 100vh;/s);
+    expect(legacyStyles).not.toMatch(/(?:^|\n)\.settings-view\s*\{/);
+    expect(legacyStyles).not.toMatch(/(?:^|\n)\.settings-view h1\s*\{/);
+  });
+
+  it("gives sidebar background presets a visible, keyboard-targetable grid", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
+
+    expect(styles).toContain(".settings-view__preset-grid");
+    expect(styles).toContain("grid-template-columns: repeat(5, 28px)");
+    expect(styles).toContain(".settings-view__preset-swatch");
+    expect(styles).toContain("min-width: 28px");
+    expect(styles).toContain("min-height: 28px");
+  });
+
+  it("keeps search and the existing mode-switcher mutation wired", () => {
+    const { onSearchChange } = renderSettingsWithSearch("");
+    navigateTo("Appearance");
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
+      target: { value: "translucent" },
+    });
+    expect(onSearchChange).toHaveBeenCalledWith("translucent");
+    // With a query active, the search results panel replaces section content.
+    expect(screen.getByRole("listbox", { name: "Settings search results" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "Mode switcher" })).not.toBeInTheDocument();
+  });
+
+  it("search returns precise settings and deep-links to the focused control", async () => {
+    const user = userEvent.setup();
+    const { onSearchChange } = renderSettingsWithSearch("");
+    navigateTo("Appearance");
+
+    const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+    await user.type(searchbox, "mode switcher");
+    const listbox = screen.getByRole("listbox", { name: "Settings search results" });
+    listbox.focus();
+    fireEvent.keyDown(listbox, { key: "ArrowDown" });
+    fireEvent.keyDown(listbox, { key: "Enter" });
+    // Selecting the result clears the search and focuses the control.
+    expect(onSearchChange).toHaveBeenLastCalledWith("");
+    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveFocus();
+  });
+
+  it("applies an initial deep link on mount to open a section and focus a setting", () => {
+    renderSettings({ initialDeepLink: { section: "appearance", setting: "mode-switcher" } });
+
+    expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveFocus();
+  });
+
+  it("applies a pending deep link from another app surface and reports it consumed", () => {
+    const onDeepLinkApplied = vi.fn();
+    const { rerender } = renderSettings({ onDeepLinkApplied });
+
+    rerender(
+      <SettingsView
+        nativeBoundsAvailable
+        onResetLayout={vi.fn()}
+        onResetNativeBounds={vi.fn()}
+        onSearchChange={vi.fn()}
+        onSettingsChange={vi.fn()}
+        onDeepLinkApplied={onDeepLinkApplied}
+        pendingDeepLink={{ section: "advanced", setting: "reset-layout" }}
+        search=""
+        settings={defaultShellSettings()}
+        sidebarVibrancySupported
+        visibleSettings={["reset-layout"]}
+      />,
+    );
+    expect(screen.getByRole("heading", { name: "Advanced" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveFocus();
+    expect(onDeepLinkApplied).toHaveBeenCalledOnce();
+  });
+
+  it("hides native-only controls in browser mode and shows them in native mode", () => {
+    const { rerender } = renderSettings({ nativeBoundsAvailable: false });
+    navigateTo("Advanced");
+    expect(screen.getByRole("button", { name: "Reset active mode layout" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Reset native window bounds" }),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <SettingsView
+        nativeBoundsAvailable
+        onResetLayout={vi.fn()}
+        onResetNativeBounds={vi.fn()}
+        onSearchChange={vi.fn()}
+        onSettingsChange={vi.fn()}
+        search=""
+        settings={defaultShellSettings()}
+        sidebarVibrancySupported
+        visibleSettings={["reset-layout", "reset-window-bounds"]}
+      />,
+    );
+    navigateTo("Advanced");
+    expect(screen.getByRole("button", { name: "Reset native window bounds" })).toBeInTheDocument();
+  });
+
+  it("announces no results when a search matches nothing", () => {
+    renderSettingsWithSearch("zzz-nothing");
+    const statuses = screen.getAllByRole("status");
+    const noResults = statuses.find((el) => /no settings match/i.test(el.textContent ?? ""));
+    expect(noResults).toBeDefined();
+  });
+
+  it("forwards isNarrow to the Usage dashboard activity table", async () => {
+    const usageClient = {
+      query: vi.fn(async () => ({
+        records: [
+          {
+            reconciliationId: "rec-1",
+            subject: { aggregateType: "chat-thread", aggregateId: "thread-1" },
+            providerInstanceId: "provider-1",
+            modelId: "gpt-4o",
+            requestShape: "chat-turn",
+            quality: "exact",
+            inputTokens: 100,
+            outputTokens: 50,
+            plannedInputTokens: 95,
+            varianceTokens: 5,
+            attribution: [{ category: "conversation", plannedTokens: 95, quality: "exact" }],
+            observedAt: "2026-07-24T12:00:00.000Z",
+          },
+        ],
+        totals: {
+          totalInputTokens: 100,
+          totalOutputTokens: 50,
+          totalRequests: 1,
+          exactCount: 1,
+          estimatedCount: 0,
+          reconciledCount: 0,
+          staleCount: 0,
+          unavailableCount: 0,
+        },
+        byProvider: [],
+        byCategory: [],
+        byDay: [
+          {
+            bucketStart: "2026-07-24T12:00:00.000Z",
+            inputTokens: 100,
+            outputTokens: 50,
+            requestCount: 1,
+            exactCount: 1,
+            estimatedCount: 0,
+            reconciledCount: 0,
+            staleCount: 0,
+            unavailableCount: 0,
+          },
+        ],
+        byWeek: [],
+        cumulative: [],
+        topConsumers: [],
+        hasMore: false,
+        queryAt: "2026-07-24T12:00:00.000Z",
+      })),
+      export: vi.fn(),
+      reset: vi.fn(),
+      retain: vi.fn(),
+    };
+    renderSettings({ usageClient: usageClient as never, isNarrow: true });
+    navigateTo("Usage");
+    const table = await screen.findByRole("table", { name: "daily activity" });
+    expect(table.className).toContain("usage-dashboard__table--narrow");
+    expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);
+  });
+
+  it("hides the diagnostics export control in Advanced when no client is provided", () => {
+    renderSettings();
+    navigateTo("Advanced");
+    expect(screen.queryByRole("button", { name: /export diagnostics/i })).not.toBeInTheDocument();
+  });
+
+  it("exports diagnostics from the Advanced section when a client is provided", async () => {
+    const diagnosticsExportClient = {
+      exportEvidence: vi.fn(async () => ({
+        kind: "exported" as const,
+        packet: {
+          packetVersion: 1 as const,
+          packetId: "00000000-0000-4000-8000-0000000000aa",
+          domain: "provider" as const,
+          failureCode: "provider-support-export",
+          summary: "Provider timed out.",
+          hostVersions: [{ component: "runtime", version: "v22.1.0" }],
+          candidateVersions: [{ component: "runtime", version: "v22.1.0" }],
+          correlations: [
+            {
+              correlationId: "00000000-0000-4000-8000-000000000001",
+              observedAt: "2026-07-24T12:00:00.000Z",
+            },
+          ],
+          recovery: [{ action: "Verify provider credentials.", automated: false }],
+          redactions: [],
+          redacted: true as const,
+          generatedAt: "2026-07-24T12:00:00.000Z",
+        },
+        receipt: {
+          packetId: "00000000-0000-4000-8000-0000000000aa",
+          domain: "provider" as const,
+          failureCode: "provider-support-export",
+          redactions: [],
+          contentDigest: "a".repeat(64),
+          generatedAt: "2026-07-24T12:00:00.000Z",
+          createdAt: "2026-07-24T12:00:01.000Z",
+        },
+      })),
+    };
+    renderSettings({ diagnosticsExportClient: diagnosticsExportClient as never });
+    navigateTo("Advanced");
+    const exportButton = screen.getByRole("button", { name: /export diagnostics/i });
+    expect(exportButton).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/describe what happened/i), {
+      target: { value: "Provider timed out." },
+    });
+    fireEvent.change(screen.getByLabelText(/failure correlation id/i), {
+      target: { value: "00000000-0000-4000-8000-000000000001" },
+    });
+    fireEvent.click(exportButton);
+    await waitFor(() => expect(diagnosticsExportClient.exportEvidence).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/00000000-0000-4000-8000-0000000000aa/)).toBeInTheDocument();
+  });
+
+  it("mounts the Skills & Extensions settings view when an extension client is provided", async () => {
+    const extensionClient = {
+      snapshot: vi.fn(async () => ({
+        sequence: 1,
+        snapshotAt: now,
+        packages: [],
+        collisions: [],
+      })),
+      effectiveState: vi.fn(async () => ({
+        sequence: 1,
+        snapshotAt: now,
+        scope: {
+          hostId: "local",
+          mode: "code",
+          projectId: null,
+          threadId: null,
+          providerFamily: "openai-compatible",
+        },
+        catalogEpoch: `sha256:${"a".repeat(64)}`,
+        catalogStatus: "available",
+        stale: false,
+        packages: [],
+        collisions: [],
+      })),
+      execute: vi.fn(),
+      importLocalPluginReceipt: vi.fn(),
+    };
+    renderSettings({ extensionClient: extensionClient as never });
+    navigateTo("Skills & Extensions");
+    expect(await screen.findAllByRole("heading", { name: "Skills & Extensions" })).toHaveLength(1);
+    expect(await screen.findByRole("tab", { name: /installed/i })).toBeVisible();
+  });
+
+  it("mounts the Host section when a host control client is provided", async () => {
+    const hostControlClient = {
+      status: vi.fn(async () => ({
+        identity: { hostId: "host-1", instanceId: "instance-1", serviceMode: "service" },
+        versions: { server: "1.2.3", wire: "9" },
+        policy: { kind: "known", enabled: true, updatedAt: now },
+        readiness: {
+          store: { state: "ready", integrity: "verified" },
+          replay: { journalHead: 42, projections: 42 },
+          clientsConnected: 2,
+          uptimeSeconds: 3600,
+        },
+        capabilities: ["platform:systemd-user-units"],
+        work: { active: 0, attentionRequired: false },
+        lifecycle: {
+          stop: { kind: "available" },
+          restart: { kind: "available" },
+          enable: { kind: "available" },
+          disable: { kind: "available" },
+        },
+      })),
+      lifecycle: vi.fn(),
+      backup: vi.fn(),
+      restore: vi.fn(),
+    };
+    renderSettings({ hostControlClient: hostControlClient as never });
+    navigateTo("Host");
+    expect(await screen.findByText("host-1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Stop host" })).toBeEnabled();
+  });
+
+  it("explains that host controls stay on the host when no client is available", () => {
+    renderSettings();
+    navigateTo("Host");
+    expect(screen.getByText(/available on the host machine only/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop host" })).not.toBeInTheDocument();
+  });
+
+  it("mounts the GitHub section when a GitHub client is provided", async () => {
+    const githubClient = {
+      authenticationSnapshot: vi.fn(async () => ({
+        state: "ready",
+        account: { login: "octocat", gitProtocol: "https", scopes: ["repo"] },
+        capabilities: [{ kind: "repository-catalogue", available: true }],
+      })),
+      executeAuthenticationCommand: vi.fn(),
+      readCatalogue: vi.fn(),
+      recordRecentRepository: vi.fn(),
+    };
+    renderSettings({ githubClient: githubClient as never });
+    navigateTo("GitHub");
+    expect(await screen.findByText("octocat")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh status" })).toBeEnabled();
+  });
+
+  it("explains that the GitHub connection stays on the host when no client is available", () => {
+    renderSettings();
+    navigateTo("GitHub");
+    expect(screen.getByText(/managed on the owning host/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Refresh status" })).not.toBeInTheDocument();
+  });
+});

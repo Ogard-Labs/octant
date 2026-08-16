@@ -1,0 +1,112 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { ModeSwitcher } from "./ModeSwitcher";
+
+describe("ModeSwitcher", () => {
+  it("renders ordered compact buttons, omits unavailable modes, and avoids redundant commands", async () => {
+    const user = userEvent.setup();
+    const onSelectMode = vi.fn();
+    render(
+      <ModeSwitcher
+        activeMode="code"
+        modes={["code", "chat"]}
+        onSelectMode={onSelectMode}
+        presentation="buttons"
+      />,
+    );
+
+    const group = screen.getByRole("group", { name: "Workspace mode" });
+    const buttons = screen.getAllByRole("button");
+    expect(group).toHaveClass("mode-switcher", "window-no-drag");
+    expect(buttons.map((button) => button.textContent)).toEqual(["Chat", "Code"]);
+    expect(screen.queryByRole("button", { name: "Work" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(screen.getByRole("button", { name: "Code" }));
+    expect(onSelectMode).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Chat" }));
+    expect(onSelectMode).toHaveBeenCalledOnce();
+    expect(onSelectMode).toHaveBeenCalledWith("chat");
+  });
+
+  it("renders the active mode trigger and truthful ordered radio items", async () => {
+    const user = userEvent.setup();
+    const onSelectMode = vi.fn();
+    render(
+      <ModeSwitcher
+        activeMode="code"
+        modes={["code", "chat", "work"]}
+        onSelectMode={onSelectMode}
+        presentation="dropdown"
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Workspace mode, Code" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveClass("octant-menu__trigger", "window-no-drag");
+    trigger.focus();
+    await user.keyboard("{Enter}");
+
+    const items = screen.getAllByRole("menuitemradio");
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringMatching(/Chat.*Conversation with shared virtual context/),
+      expect.stringMatching(/Work.*Work with local files and documents/),
+      expect.stringMatching(/Code.*Build, debug, and ship software/),
+    ]);
+    expect(screen.getByRole("menuitemradio", { name: /Code.*software/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    expect(
+      screen
+        .getByRole("menuitemradio", { name: /Code.*software/i })
+        .querySelector(".octant-menu__indicator"),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("menuitemradio", { name: /Code.*software/i }));
+    expect(onSelectMode).not.toHaveBeenCalled();
+    await waitFor(() => expect(trigger).toHaveFocus());
+
+    await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("menuitemradio", { name: /Chat.*virtual context/i }));
+    expect(onSelectMode).toHaveBeenCalledOnce();
+    expect(onSelectMode).toHaveBeenCalledWith("chat");
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it("omits unavailable modes from the dropdown", async () => {
+    const user = userEvent.setup();
+    render(
+      <ModeSwitcher
+        activeMode="code"
+        modes={["code"]}
+        onSelectMode={vi.fn()}
+        presentation="dropdown"
+      />,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Workspace mode, Code" });
+    trigger.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.queryByRole("menuitemradio", { name: /Chat/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitemradio", { name: /Work/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: /Code.*software/i })).toBeVisible();
+  });
+
+  it("places optional chrome actions beside the mode switcher", () => {
+    render(
+      <ModeSwitcher
+        actions={<button type="button">Search</button>}
+        activeMode="code"
+        modes={["code", "chat"]}
+        onSelectMode={vi.fn()}
+        presentation="buttons"
+      />,
+    );
+
+    const chrome = screen.getByRole("group", { name: "Workspace mode" }).parentElement;
+    expect(chrome).toHaveClass("sidebar__chrome");
+    expect(chrome).toContainElement(screen.getByRole("button", { name: "Search" }));
+  });
+});

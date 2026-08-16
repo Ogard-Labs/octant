@@ -1,0 +1,139 @@
+import type { AgentProfile, ExecutionResolutionReceipt } from "@octant/contracts/agent-profile";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { ExecutionProfileWorkflow } from "./ExecutionProfileWorkflow";
+import type { ExecutionProfileController } from "./useExecutionProfileController";
+
+const profile: AgentProfile = {
+  id: "00000000-0000-4000-8000-000000000002" as never,
+  displayName: "Code reviewer",
+  description: "Read-only review defaults",
+  approvedSkillIds: [],
+  toolConstraints: [],
+  modelConstraints: [],
+  defaultExecutionPolicy: "plan",
+  defaultPermissionPersistence: "current-session",
+  compatibleModes: ["code"],
+  version: 1 as never,
+  createdAt: "2026-07-28T12:00:00.000Z" as never,
+  updatedAt: "2026-07-28T12:00:00.000Z" as never,
+};
+
+const receipt: ExecutionResolutionReceipt = {
+  providerInstanceId: "00000000-0000-4000-8000-000000000001" as never,
+  modelId: "gpt-5" as never,
+  profileId: profile.id,
+  hostId: "local" as never,
+  executionPolicy: "plan",
+  permissionPersistence: "current-session",
+  effectivePermissions: {
+    filesystem: false,
+    shell: false,
+    git: false,
+    network: false,
+    tools: false,
+    subagents: false,
+  },
+  source: "one-off-override",
+  fallbackChain: ["one-off-override", "project-default", "mode-default", "user-default"],
+  downgradeReasons: [],
+};
+
+function controller(
+  overrides: Partial<ExecutionProfileController> = {},
+): ExecutionProfileController {
+  return {
+    profiles: [profile],
+    entries: [
+      {
+        providerInstanceId: receipt.providerInstanceId,
+        providerDisplayName: "OpenAI",
+        modelId: receipt.modelId,
+        modelDisplayName: "GPT-5",
+        profileId: profile.id,
+        profileDisplayName: profile.displayName,
+        hostId: receipt.hostId,
+        hostLabel: "This Mac",
+        executionPolicy: "plan",
+        effectivePermissions: receipt.effectivePermissions,
+      },
+    ],
+    selectedEntry: undefined,
+    selectedProfile: profile,
+    receipt,
+    mode: "code",
+    scope: { scopeKind: "mode", scopeRef: "code" },
+    status: "resolved",
+    busy: false,
+    message: undefined,
+    selectEntry: vi.fn(),
+    selectProfile: vi.fn(),
+    createProfile: vi.fn(async () => undefined),
+    updateProfile: vi.fn(async () => undefined),
+    deleteProfile: vi.fn(async () => undefined),
+    reload: vi.fn(async () => undefined),
+    ...overrides,
+  } as ExecutionProfileController;
+}
+
+describe("ExecutionProfileWorkflow", () => {
+  it("shows provider, model, profile, host, permissions, and resolution receipt", async () => {
+    const user = userEvent.setup();
+    render(<ExecutionProfileWorkflow controller={controller()} variant="composer" />);
+
+    expect(screen.getByRole("button", { name: "Execution profile: Code reviewer" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Execution profile: Code reviewer" }));
+    expect(screen.getAllByText("OpenAI").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("GPT-5").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("This Mac").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Read-only").length).toBeGreaterThan(0);
+    expect(screen.getByText("One-off override")).toBeVisible();
+    expect(
+      screen.getByText(/one-off override → Project default → mode default → user default/i),
+    ).toBeVisible();
+  });
+
+  it("shows actionable unsupported resolution reasons", () => {
+    render(
+      <ExecutionProfileWorkflow
+        controller={controller({
+          status: "unsupported",
+          message:
+            "Model is not allowed by the profile's model constraints. Choose another provider, model, or profile.",
+        })}
+        variant="settings"
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("Model is not allowed");
+    expect(screen.getByRole("alert")).toHaveTextContent("Choose another provider");
+  });
+
+  it("exposes create, edit, and guarded delete actions in settings", async () => {
+    const user = userEvent.setup();
+    const value = controller();
+    render(<ExecutionProfileWorkflow controller={value} variant="settings" />);
+
+    await user.click(screen.getByRole("button", { name: "Create profile" }));
+    expect(screen.getByRole("dialog", { name: "Create execution profile" })).toBeVisible();
+    await user.type(screen.getByRole("textbox", { name: "Profile name" }), "Researcher");
+    await user.click(screen.getByRole("button", { name: "Save new profile" }));
+    expect(value.createProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: "Researcher" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Edit Code reviewer" }));
+    const name = screen.getByRole("textbox", { name: "Profile name" });
+    await user.clear(name);
+    await user.type(name, "Focused reviewer");
+    await user.click(screen.getByRole("button", { name: "Save profile changes" }));
+    expect(value.updateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: "Focused reviewer" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete Code reviewer" }));
+    expect(screen.getByText("Delete this profile? This cannot be undone.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Confirm delete Code reviewer" }));
+    expect(value.deleteProfile).toHaveBeenCalledWith(profile);
+  });
+});

@@ -1,0 +1,256 @@
+.remote-shell {
+  display: grid;
+  width: min(100%, 720px);
+  gap: 18px;
+  padding: 28px;
+  color: var(--octant-text-primary);
+}
+
+.remote-shell__header {
+  display: grid;
+  gap: 12px;
+}
+
+.remote-shell__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.remote-shell__composer {
+  display: grid;
+  gap: 8px;
+}
+
+.remote-shell__label {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.remote-shell__input {
+  width: 100%;
+}
+
+.remote-shell__hint {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.remote-shell__mode-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  background: var(--octant-surface-raised);
+  border: 1px solid var(--octant-border);
+  border-radius: 10px;
+}
+
+.remote-shell__mode-description {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.remote-shell__mode-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.remote-shell__surface-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.remote-shell__surface-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--octant-surface-raised);
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+}
+
+.remote-shell__surface-card--local-only {
+  opacity: 0.72;
+}
+
+.remote-shell__surface-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.remote-shell__surface-description {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.remote-shell__surface-badge {
+  justify-self: start;
+  padding: 2px 8px;
+  color: var(--octant-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgb(255 255 255 / 4%);
+  border: 1px solid var(--octant-border);
+  border-radius: 999px;
+}
+
+.remote-shell__section-title {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.remote-shell__local-only {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.remote-shell__status {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: 12px;
+}
+
+.remote-shell__status svg {
+  flex: none;
+  translate: 0 2px;
+}
+
+.remote-shell__overview {
+  display: grid;
+  gap: 12px;
+}
+
+.remote-shell__stale-banner {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  color: var(--octant-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  background: rgb(251 191 36 / 8%);
+  border: 1px solid rgb(251 191 36 / 28%);
+  border-radius: 8px;
+}
+
+.remote-shell__device-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  background: var(--octant-surface-raised);
+  border: 1px solid var(--octant-border);
+  border-radius: 10px;
+}
+
+.remote-shell__device-copy,
+.remote-shell__device-muted {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.remote-shell__device-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.remote-shell__device-fact {
+  display: grid;
+  gap: 2px;
+}
+
+.remote-shell__device-fact dt {
+  color: var(--octant-text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.remote-shell__device-fact dd {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: 13px;
+}
+
+.remote-shell__device-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.remote-shell__device-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  color: var(--octant-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--octant-surface-inset);
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+}
+
+.remote-shell__device-confirm p {
+  margin: 0;
+}
+
+@media (max-width: 680px) {
+  .remote-shell {
+    width: 100%;
+    padding: 16px;
+  }
+
+  .remote-shell__device-actions {
+    flex-direction: column;
+  }
+
+  .remote-shell__device-actions .window-no-drag {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .remote-shell *,
+  .remote-pairing * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .remote-shell__stale-banner {
+    border-color: var(--octant-text-primary);
+  }
+
+  .remote-shell__surface-card,
+  .remote-shell__mode-panel,
+  .remote-shell__device-panel {
+    border-color: var(--octant-text-secondary);
+  }
+}

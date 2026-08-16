@@ -1,0 +1,50 @@
+/*
+ * The Project Overview's threads and recent activity section.
+ *
+ * The rows are the sidebar's rows, so only the container differs: the sidebar
+ * indents a nested list under its Project, while the Overview already has the
+ * Project as its subject and lists at full width.
+ */
+
+.project-overview__threads {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.project-overview__threads-header h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.project-overview__threads-header p {
+  margin: 4px 0 0;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.project-overview__threads .project-threads {
+  margin: 0;
+  padding-left: 0;
+}
+
+.project-overview__threads .project-threads:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
+}
+
+.project-overview__threads .project-nav__status {
+  padding: 0;
+}
+
+.project-threads__empty {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}

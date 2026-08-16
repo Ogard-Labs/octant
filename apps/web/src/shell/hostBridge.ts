@@ -1,0 +1,135 @@
+export type ResolvedSidebarMaterial = "opaque" | "translucent";
+export type BoundProjectType = "work" | "code";
+export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
+export type ProjectRootPickerResult =
+  | Readonly<{ kind: "cancelled" }>
+  | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
+export type LocalPluginFolderPickerResult =
+  | Readonly<{ kind: "cancelled" }>
+  | Readonly<{ kind: "selected"; receiptId: string; displayName: string }>;
+export interface CodeExternalEditorRequest {
+  readonly threadId: string;
+  readonly checkoutId: string;
+  readonly fileId: string;
+  readonly line: number;
+  readonly column: number;
+}
+export type CodeDeepLink =
+  | Readonly<{ kind: "project"; projectId: string }>
+  | Readonly<{ kind: "thread"; threadId: string }>
+  | Readonly<{ kind: "diff"; threadId: string; checkoutId: string }>
+  | Readonly<{ kind: "test"; threadId: string; testRunId: string }>
+  | Readonly<{
+      kind: "file";
+      threadId: string;
+      checkoutId: string;
+      fileId: string;
+      relativePath: string;
+      line: number;
+      column: number;
+    }>
+  | Readonly<{ kind: "new-thread"; projectId: string; checkoutId: string }>;
+
+export interface HostCapabilities {
+  readonly sidebarVibrancySupported: boolean;
+  readonly liveBrowserSupported?: boolean;
+}
+
+export interface BrowserSurfaceState {
+  readonly contextId: string;
+  readonly url: string;
+  readonly title: string;
+  readonly loading: boolean;
+  readonly canGoBack: boolean;
+  readonly canGoForward: boolean;
+  readonly control: "idle" | "user" | "agent";
+}
+
+export interface BrowserSurfaceRequest {
+  readonly contextId: string;
+  readonly threadId: string;
+  readonly bounds: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
+}
+
+export type ProjectWindowTarget =
+  | Readonly<{ kind: "project"; projectId: string }>
+  | Readonly<{
+      kind: "project-thread";
+      projectId: string;
+      mode: "code" | "work";
+      threadId: string;
+    }>;
+
+export interface OctantHostBridge {
+  readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
+  readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;
+  readonly detachBrowserSurface?: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
+  readonly commandBrowserSurface?: (
+    request: Omit<BrowserSurfaceRequest, "bounds"> & {
+      readonly command: "back" | "forward" | "reload" | "stop";
+    },
+  ) => Promise<void>;
+  readonly openBrowserExternal?: (url: string) => Promise<void>;
+  readonly subscribeBrowserSurfaceState?: (
+    listener: (state: BrowserSurfaceState) => void,
+  ) => () => void;
+  readonly clearProviderCredential: (providerInstanceId: string) => Promise<void>;
+  readonly close: () => Promise<void> | void;
+  readonly getHostCapabilities?: () => HostCapabilities | Promise<HostCapabilities>;
+  readonly initialProjectTarget?: ProjectWindowTarget;
+  readonly maximizeOrRestore: () => Promise<void> | void;
+  readonly minimize: () => Promise<void> | void;
+  readonly openCodeExternalEditor?: (request: CodeExternalEditorRequest) => Promise<void>;
+  readonly openInNewWindow?: (target: ProjectWindowTarget) => Promise<void> | void;
+  readonly requestCodeOperationApproval?: (
+    request: CodeOperationApprovalRequest,
+  ) => Promise<string | undefined>;
+  readonly projectWindowCapability: string;
+  readonly providerCredentialStatus: (
+    providerInstanceId: string,
+  ) => Promise<ProviderCredentialStatus>;
+  readonly resetBounds: () => Promise<void> | void;
+  readonly selectProjectRoot: (projectType: BoundProjectType) => Promise<ProjectRootPickerResult>;
+  readonly selectLocalPluginFolder?: () => Promise<LocalPluginFolderPickerResult>;
+  readonly setProviderCredential: (providerInstanceId: string, credential: string) => Promise<void>;
+  readonly setSidebarMaterialPreference: (preference: "opaque" | "system") => Promise<void> | void;
+  readonly setSidebarVibrancyMode?: (mode: "off" | "subtle" | "strong") => Promise<void> | void;
+  readonly subscribeResolvedMaterial: (
+    listener: (material: ResolvedSidebarMaterial) => void,
+  ) => () => void;
+  readonly subscribeCodeDeepLinks?: (listener: (target: CodeDeepLink) => void) => () => void;
+  readonly subscribeStartNewAgent?: (listener: () => void) => () => void;
+}
+
+declare global {
+  interface Window {
+    readonly octantHost?: OctantHostBridge;
+  }
+}
+
+export interface HostBridgeGlobal {
+  readonly octantHost?: unknown;
+}
+
+export function getInjectedHostBridge(
+  host: HostBridgeGlobal = window,
+): OctantHostBridge | undefined {
+  const bridge = host.octantHost;
+  if (bridge === undefined) return undefined;
+  if (
+    typeof bridge !== "object" ||
+    bridge === null ||
+    typeof (bridge as Record<string, unknown>).setProviderCredential !== "function" ||
+    typeof (bridge as Record<string, unknown>).providerCredentialStatus !== "function" ||
+    typeof (bridge as Record<string, unknown>).clearProviderCredential !== "function"
+  ) {
+    throw new TypeError("Invalid Octant host bridge.");
+  }
+  return bridge as OctantHostBridge;
+}
+import type { CodeOperationApprovalRequest } from "@octant/contracts/code-operations";
