@@ -501,6 +501,76 @@ describe("useCodeController", () => {
     );
   });
 
+  it("sends a queued follow-up once the running turn settles, and forgets a cancelled one", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000041";
+    const putEvidence = vi.fn(async () => ({
+      contentId: "60000000-0000-4000-8000-000000000041",
+      digest: "a".repeat(64),
+      byteLength: 5,
+    }));
+    const executeOperation = vi.fn(async () => ({
+      kind: "provider-turn-state",
+      operationId,
+      state: "running",
+    }));
+    // The first turn stays open until the test releases it, which is what lets
+    // the queue be observed while a turn is genuinely running.
+    let settleFirstTurn = () => {};
+    const firstTurnSettled = new Promise<void>((resolve) => {
+      settleFirstTurn = resolve;
+    });
+    let subscriptions = 0;
+    async function* frames() {
+      subscriptions += 1;
+      if (subscriptions === 1) await firstTurnSettled;
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      };
+    }
+    const client = fakeClient({
+      putEvidence: putEvidence as never,
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    const running = result.current.sendFollowUp("running turn");
+    await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+
+    // Queue two follow-ups the way the composer does while a turn runs, then
+    // cancel the second: only the first must ever reach the host.
+    let cancelledId = "";
+    act(() => {
+      result.current.queueFollowUp("first queued");
+      cancelledId = result.current.queueFollowUp("second queued")?.id ?? "";
+    });
+    expect(result.current.queuedFollowUps.map((turn) => turn.prompt)).toEqual([
+      "first queued",
+      "second queued",
+    ]);
+    expect(executeOperation).toHaveBeenCalledTimes(1);
+    act(() => {
+      result.current.cancelQueuedFollowUp(cancelledId);
+    });
+
+    await act(async () => {
+      settleFirstTurn();
+      await running;
+    });
+
+    await waitFor(() => expect(result.current.queuedFollowUps).toEqual([]));
+    expect(putEvidence).toHaveBeenCalledWith(ids.thread, "first queued");
+    expect(putEvidence).not.toHaveBeenCalledWith(ids.thread, "second queued");
+    expect(executeOperation).toHaveBeenCalledTimes(2);
+  });
+
   it("settles a waiting provider turn and keeps the prompt available for retry", async () => {
     const operationId = "70000000-0000-4000-8000-000000000031";
     async function* waitingFrames() {

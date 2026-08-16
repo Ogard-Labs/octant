@@ -3,7 +3,7 @@ import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import type { PickerGroup } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
-import { ArrowUp, Bot, GitCompare, Globe2, ListChecks, Terminal } from "lucide-react";
+import { ArrowUp, Bot, GitCompare, Globe2, ListChecks, Terminal, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -120,7 +120,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const trimmed = draft.trim();
   const busy =
     props.controller.turnStatus === "sending" || props.controller.turnStatus === "running";
-  const canSend = trimmed.length > 0 && !busy;
+  // A running turn queues rather than blocks: the host admits one turn per
+  // thread, so the composer parks the next one instead of making the user wait.
+  const canSend = trimmed.length > 0;
+  const queued = props.controller.queuedFollowUps;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
   const showEmptyConversation = messages.length === 0;
@@ -136,6 +139,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     // pointed at once. This check is the composer's own report: a chip the
     // host refuses is shown as unavailable rather than silently dropped.
     const threadMentionIds = await threadMentions.resolveForSend();
+    if (busy) {
+      if (props.controller.queueFollowUp(trimmed, threadMentionIds) === undefined) return;
+      setDraft("");
+      props.controller.setPendingDraft?.("");
+      threadMentions.clear();
+      return;
+    }
     const sent = await props.controller.sendFollowUp(trimmed, threadMentionIds);
     if (sent) {
       setDraft("");
@@ -420,11 +430,29 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
            */}
           <ThreadMentionChips
             chips={threadMentions.chips}
-            disabled={busy}
             onRemove={(mentionedThreadId) =>
               threadMentions.composer?.onRemoveChip(mentionedThreadId)
             }
           />
+          {queued.length === 0 ? null : (
+            <ul aria-label="Queued follow-ups" className="code-thread-workspace__queue">
+              {queued.map((turn, index) => (
+                <li className="code-thread-workspace__queue-chip" key={turn.id}>
+                  <span className="code-thread-workspace__queue-position">{index + 1}</span>
+                  <span className="code-thread-workspace__queue-prompt">{turn.prompt}</span>
+                  <OctantButton
+                    aria-label={`Cancel queued follow-up ${String(index + 1)}`}
+                    onClick={() => props.controller.cancelQueuedFollowUp(turn.id)}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <X aria-hidden="true" size={14} strokeWidth={2} />
+                  </OctantButton>
+                </li>
+              ))}
+            </ul>
+          )}
           <div className="code-thread-workspace__input-row">
             <label
               className="visually-hidden"
@@ -442,7 +470,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               aria-controls={mention.open ? mentionListId : undefined}
               aria-expanded={threadMentions.composer === undefined ? undefined : mention.open}
               className="code-thread-workspace__input window-no-drag"
-              disabled={busy}
               id={`code-thread-composer-${String(thread.id)}`}
               onChange={(event) => {
                 setDraft(event.currentTarget.value);
@@ -457,13 +484,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 if (event.key === "Escape") return;
                 mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
-              placeholder="Ask for follow-up changes…"
+              placeholder={busy ? "Queue the next message…" : "Ask for follow-up changes…"}
               ref={textareaRef}
               rows={2}
               value={draft}
             />
             <OctantButton
-              aria-label="Send follow-up"
+              aria-label={busy ? "Queue follow-up" : "Send follow-up"}
               className="code-thread-workspace__send window-no-drag"
               disabled={!canSend}
               onClick={() => void submitFollowUp()}
@@ -487,7 +514,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {providerChanging
                 ? "Checking the selected provider…"
                 : busy
-                  ? "Waiting for the provider…"
+                  ? "Waiting for the provider · Enter queues the next message"
                   : "Enter to send · Shift+Enter for a new line"}
             </span>
           </div>

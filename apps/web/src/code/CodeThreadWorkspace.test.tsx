@@ -331,6 +331,55 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).not.toHaveBeenCalled();
   });
 
+  it("queues a follow-up written while a turn runs instead of blocking the composer", async () => {
+    const user = userEvent.setup();
+    const queueFollowUp = vi.fn(() => ({ id: "queued-1", prompt: "and then push", threadMentionIds: [] }));
+    const sendFollowUp = vi.fn(async () => true);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ queueFollowUp, sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    expect(composer).toBeEnabled();
+    await user.type(composer, "and then push");
+    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+
+    expect(queueFollowUp).toHaveBeenCalledWith("and then push", []);
+    expect(sendFollowUp).not.toHaveBeenCalled();
+    await waitFor(() => expect(composer).toHaveValue(""));
+  });
+
+  it("lists queued follow-ups in order and cancels one through the controller", async () => {
+    const user = userEvent.setup();
+    const cancelQueuedFollowUp = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          cancelQueuedFollowUp,
+          queuedFollowUps: [
+            { id: "queued-1", prompt: "run the tests", threadMentionIds: [] },
+            { id: "queued-2", prompt: "then open a PR", threadMentionIds: [] },
+          ],
+          turnStatus: "running",
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    const queue = screen.getByRole("list", { name: "Queued follow-ups" });
+    const entries = within(queue).getAllByRole("listitem");
+    expect(entries.map((entry) => entry.textContent)).toEqual([
+      "1run the tests",
+      "2then open a PR",
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Cancel queued follow-up 2" }));
+    expect(cancelQueuedFollowUp).toHaveBeenCalledWith("queued-2");
+  });
+
   it("keeps loading and disconnected states honest", () => {
     const { rerender } = render(
       <CodeThreadWorkspace
@@ -559,6 +608,9 @@ function controller(
     pendingDraft: "",
     providerRequests: [],
     answerProviderRequest: vi.fn(async () => true),
+    cancelQueuedFollowUp: vi.fn(),
+    queueFollowUp: vi.fn(),
+    queuedFollowUps: [],
     sendFollowUp: vi.fn(async () => true),
     setPendingDraft: vi.fn(),
     status: "ready",

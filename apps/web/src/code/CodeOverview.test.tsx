@@ -308,6 +308,9 @@ function controller(): CodeController {
   return {
     activeView: { checkout, lastSequence: 1, thread } as never,
     answerProviderRequest: vi.fn(async () => true),
+    cancelQueuedFollowUp: vi.fn(),
+    queueFollowUp: vi.fn(),
+    queuedFollowUps: [],
     providerRequests: [],
     bootstrap: { checkouts: [checkout], settings: {} as never, threads: [thread] } as never,
     client: { queryBoard: vi.fn(async () => boardView([])) } as never,
