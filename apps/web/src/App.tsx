@@ -385,6 +385,14 @@ export function resolveDraftProject<TProject extends { readonly id: ProjectId }>
 const UNRESOLVED_DRAFT_PROJECT_MESSAGE =
   "The folder this draft was started in is no longer available. Choose another folder before starting the thread.";
 
+/**
+ * Any directory can be bound as a Code Project, but a Code thread still needs a
+ * repository checkout. Say what to do instead of a generic preparation error.
+ */
+function checkoutNotPreparedMessage(projectName: string): string {
+  return `Code threads need a Git repository, and "${projectName}" could not be opened as one. Run git init in that folder and retry, or add the same folder as a Work Project to work there without Git.`;
+}
+
 export function resolveWorkProviderChoice(
   choices: ReadonlyArray<CodeThreadProviderChoice>,
   selectedProviderInstanceId?: CodeThreadProviderChoice["instanceId"],
@@ -2169,8 +2177,14 @@ function LaunchedShell(
   async function openDraftInProject(projectId: ProjectId) {
     const project = projectController.allProjects.find((candidate) => candidate.id === projectId);
     if (project === undefined || project.lifecycle !== "active") return;
-    await controller.openProject(project.id, project.type, project.name);
-    await controller.openDraftThread(project.type, project.id);
+    await openDraftInKnownProject(project.id, project.type, project.name);
+  }
+
+  // Used right after creation, when the Project is not yet in this render's
+  // snapshot; the dialog already knows the mode and name.
+  async function openDraftInKnownProject(projectId: ProjectId, mode: OctantMode, name: string) {
+    await controller.openProject(projectId, mode, name);
+    await controller.openDraftThread(mode, projectId);
   }
 
   // The sidebar's "New thread" starts in the highlighted Project when there
@@ -2376,7 +2390,7 @@ function LaunchedShell(
         projectId: project.id,
       });
       if (prepared?.kind !== "checkout-prepared") {
-        setDraftError("The bound repository checkout could not be prepared.");
+        setDraftError(checkoutNotPreparedMessage(project.name));
         return;
       }
       const codeSelection = resolveDraftProviderSelection(
@@ -2549,7 +2563,7 @@ function LaunchedShell(
           projectId: project.id,
         });
         if (prepared?.kind !== "checkout-prepared") {
-          setDraftError("The bound repository checkout could not be prepared.");
+          setDraftError(checkoutNotPreparedMessage(project.name));
           return;
         }
         if (prepared.checkout.head.kind !== "branch") {
@@ -3764,7 +3778,9 @@ function LaunchedShell(
             onCreate={(mode, name, receiptId) =>
               projectController.create(mode, name, receiptId, createHostId)
             }
-            onCreated={(projectId) => void openDraftInProject(projectId)}
+            onCreated={(projectId, mode, name) =>
+              void openDraftInKnownProject(projectId, mode, name)
+            }
           />
         ) : null}
         {attachDialogThread !== undefined ? (
