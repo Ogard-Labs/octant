@@ -76,6 +76,7 @@ export interface ProjectSidebarSectionProps {
     readonly projectId: ProjectId;
     readonly sequence: number;
   }>;
+  readonly onArchive: (projectId: ProjectId) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly onNewChatInProject?: (projectId: ProjectId) => void;
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
@@ -284,6 +285,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             availabilityByProject={props.availabilityByProject}
             collapsedProjects={collapsedProjects}
             label="Pinned"
+            onArchive={props.onArchive}
             onMove={props.onMove}
             {...(onNewThread === undefined
               ? {}
@@ -310,6 +312,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             availabilityByProject={props.availabilityByProject}
             collapsedProjects={collapsedProjects}
             label="Projects"
+            onArchive={props.onArchive}
             onMove={props.onMove}
             {...(onNewThread === undefined
               ? {}
@@ -385,6 +388,7 @@ function ProjectGroup(props: {
   readonly label: string;
   readonly onAddProject?: () => void;
   readonly addProjectLabel?: "chat-project" | "folder";
+  readonly onArchive: (projectId: ProjectId) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly newThreadVerb?: "chat" | "thread";
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
@@ -488,6 +492,7 @@ function ProjectGroup(props: {
                   index < props.projects.length - 1
                 }
                 canMoveUp={(props.sort === undefined || props.sort === "manual") && index > 0}
+                onArchive={props.onArchive}
                 onMove={props.onMove}
                 onOpen={props.onProjectOpen}
                 onReorder={props.onReorder}
@@ -539,6 +544,7 @@ function ProjectActionsMenu(props: {
   readonly canMoveDown: boolean;
   readonly canMoveUp: boolean;
   readonly nextProjectId?: ProjectId;
+  readonly onArchive: (projectId: ProjectId) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
   readonly onOpen: (project: ProjectSummary) => void;
   readonly onReorder: (
@@ -610,6 +616,14 @@ function ProjectActionsMenu(props: {
               }
             >
               Move down
+            </MenuPrimitive.Item>
+            <MenuPrimitive.Item
+              className={itemClass}
+              closeOnClick
+              label="Archive Project"
+              onClick={() => props.onArchive(props.project.id)}
+            >
+              Archive Project
             </MenuPrimitive.Item>
           </MenuPrimitive.Popup>
         </MenuPrimitive.Positioner>
