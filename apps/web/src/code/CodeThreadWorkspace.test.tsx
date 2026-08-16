@@ -105,6 +105,78 @@ describe("CodeThreadWorkspace", () => {
     ]);
   });
 
+  it("completes an `@` path from the checkout listing the host returned", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const list = vi.fn(async () => ({
+      status: "listed" as const,
+      listing: {
+        kind: "code-file-listing" as const,
+        threadId,
+        checkoutId: "20000000-0000-4000-8000-000000000002" as never,
+        entries: [
+          { kind: "directory" as const, path: "src" as never },
+          {
+            kind: "file" as const,
+            fileId: "file_" + "a".repeat(59),
+            path: "src/index.ts" as never,
+            byteLength: 12,
+            availability: { status: "available" as const },
+          },
+        ],
+        truncated: false,
+        observedAt: "2026-08-16T09:00:00.000Z" as never,
+      },
+    }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp })}
+        fileListingClient={{ list } as never}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    // Nothing is listed until a mention is actually opened.
+    expect(list).not.toHaveBeenCalled();
+    await user.type(composer, "explain @ind");
+
+    const hit = await screen.findByRole("option", { name: /src\/index\.ts/ });
+    await user.click(hit);
+    expect(composer).toHaveValue("explain @src/index.ts ");
+
+    await user.type(composer, "please");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    // The path travels as ordinary prompt text; naming a file reaches nothing.
+    expect(sendFollowUp).toHaveBeenCalledWith("explain @src/index.ts please", []);
+  });
+
+  it("leaves an `@` that matches no file in this checkout as ordinary text", async () => {
+    const user = userEvent.setup();
+    const list = vi.fn(async () => ({
+      status: "listed" as const,
+      listing: {
+        kind: "code-file-listing" as const,
+        threadId,
+        checkoutId: "20000000-0000-4000-8000-000000000002" as never,
+        entries: [],
+        truncated: false,
+        observedAt: "2026-08-16T09:00:00.000Z" as never,
+      },
+    }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        fileListingClient={{ list } as never}
+        threadId={threadId}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("Follow-up message"), "mail henrik@ogard.no");
+    expect(screen.queryByRole("listbox", { name: "Files you can mention" })).not.toBeInTheDocument();
+    expect(list).not.toHaveBeenCalled();
+  });
+
   it("keeps a failed follow-up in the composer so it can be retried", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => false);
