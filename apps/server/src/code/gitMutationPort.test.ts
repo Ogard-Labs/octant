@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -128,6 +136,8 @@ describe("GitMutationPort", () => {
       {
         execFile,
         pathExists: async () => false,
+        copyFile: async () => undefined,
+        removeFile: async () => undefined,
       },
       options,
     );
@@ -206,6 +216,54 @@ describe("GitMutationPort", () => {
       status: "rejected",
       reason: "invalid-paths",
     });
+  });
+
+  it("checkpoints the working tree and puts every kind of change back on restore", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "doomed.txt"), "doomed\n");
+    git(repository, "add", "--", "doomed.txt");
+    git(repository, "commit", "-m", "add doomed");
+    writeFileSync(join(repository, "README.md"), "checkpointed\n");
+    writeFileSync(join(repository, "untracked.txt"), "untracked\n");
+    writeFileSync(join(repository, ".gitignore"), "ignored.txt\n");
+    writeFileSync(join(repository, "ignored.txt"), "ignored\n");
+    git(repository, "add", "--", "README.md");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository });
+    expect(captured).toMatchObject({ status: "captured" });
+    if (captured.status !== "captured") return;
+    // Taking a checkpoint must leave the checkout exactly as the user had it,
+    // staged set included.
+    expect(gitOutput(repository, "status", "--porcelain").trim().split("\n")).toEqual([
+      "M  README.md",
+      "?? .gitignore",
+      "?? untracked.txt",
+    ]);
+
+    // Every way an agent can change a checkout, then a restore.
+    writeFileSync(join(repository, "README.md"), "clobbered\n");
+    writeFileSync(join(repository, "untracked.txt"), "clobbered\n");
+    writeFileSync(join(repository, "added.txt"), "added after\n");
+    writeFileSync(join(repository, "ignored.txt"), "still mine\n");
+    rmSync(join(repository, "doomed.txt"));
+
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: repository, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "applied" });
+
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("checkpointed\n");
+    expect(readFileSync(join(repository, "untracked.txt"), "utf8")).toBe("untracked\n");
+    expect(readFileSync(join(repository, "doomed.txt"), "utf8")).toBe("doomed\n");
+    expect(existsSync(join(repository, "added.txt"))).toBe(false);
+    // An ignored file is in no checkpoint, so a restore never touches it.
+    expect(readFileSync(join(repository, "ignored.txt"), "utf8")).toBe("still mine\n");
+    // The staged/unstaged split comes back too, not a flattened approximation.
+    expect(gitOutput(repository, "status", "--porcelain").trim().split("\n")).toEqual([
+      "M  README.md",
+      "?? .gitignore",
+      "?? untracked.txt",
+    ]);
   });
 
   it("fails closed when Seatbelt confinement is unavailable", async () => {

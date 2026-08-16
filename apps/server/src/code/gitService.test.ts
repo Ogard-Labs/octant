@@ -151,20 +151,36 @@ describe("GitService", () => {
     expect(maximumActive).toBe(1);
   });
 
-  it("uses commits for checkpoints and only reverts an explicit commit from a clean expected state", async () => {
+  it("checkpoints the working tree without committing, and records what a restore replaced", async () => {
+    const observation = readyObservation();
+    const mutation = mutationPort();
+    const service = new GitService({ observe: vi.fn(async () => observation) }, mutation);
+    const base = { checkoutId: "checkout-1", checkoutRoot: "/repo" } as const;
+    const snapshot = { worktree: "f".repeat(40), index: "0".repeat(40) };
+
+    const captured = await service.checkpoint(base);
+    expect(captured).toMatchObject({ status: "captured" });
+    // A checkpoint records content and nothing else: it must not produce a
+    // commit, which would put a turn's undo point into the branch history.
+    expect(mutation.commit).not.toHaveBeenCalled();
+
+    // The state a restore overwrites is checkpointed first and handed back, so
+    // the user can undo the restore itself.
+    await expect(service.restoreCheckpoint({ ...base, snapshot })).resolves.toEqual({
+      status: "applied",
+      undo: { worktree: "d".repeat(40), index: "e".repeat(40), head: "a".repeat(40) },
+    });
+    expect(mutation.restoreWorkingTree).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", snapshot },
+      undefined,
+    );
+  });
+
+  it("only reverts an explicit commit from a clean expected state", async () => {
     const dirty = readyObservation();
     const mutation = mutationPort();
     const service = new GitService({ observe: vi.fn(async () => dirty) }, mutation);
 
-    await expect(
-      service.checkpoint({
-        checkoutId: "checkout-1",
-        checkoutRoot: "/repo",
-        message: "Checkpoint",
-        expectedStateToken: dirty.stateToken,
-        stagedSummary: dirty.stagedSummary,
-      }),
-    ).resolves.toMatchObject({ status: "applied" });
     await expect(
       service.revert({
         checkoutId: "checkout-1",
@@ -225,5 +241,10 @@ function mutationPort() {
     push: vi.fn(async () => ({ status: "applied" as const })),
     discard: vi.fn(async () => ({ status: "applied" as const })),
     revertCommit: vi.fn(async () => ({ status: "applied" as const, oid: "c".repeat(40) })),
+    snapshotWorkingTree: vi.fn(async () => ({
+      status: "captured" as const,
+      snapshot: { worktree: "d".repeat(40), index: "e".repeat(40), head: "a".repeat(40) },
+    })),
+    restoreWorkingTree: vi.fn(async () => ({ status: "applied" as const })),
   };
 }

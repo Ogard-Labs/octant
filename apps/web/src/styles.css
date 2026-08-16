@@ -5652,6 +5652,16 @@ dialog.project-dialog {
   font-size: 11px;
 }
 
+.code-thread-workspace__restore {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
 .code-thread-workspace__provider-binding {
   color: var(--octant-text-secondary);
   font-size: 11px;

@@ -48,6 +48,86 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], []);
   });
 
+  it("restores the checkout to a message's checkpoint only after a confirmation and an approval", async () => {
+    const user = userEvent.setup();
+    const executeOperation = vi.fn(async () => ({
+      kind: "git-mutation-state" as const,
+      state: "completed" as const,
+    }));
+    const requestApproval = vi.fn(async () => undefined);
+    const conversation = [
+      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+      { id: "turn-1:assistant", role: "assistant" as const, text: "done" },
+    ];
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ conversation } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={requestApproval}
+        threadId={threadId}
+      />,
+    );
+
+    // The assistant reply carries no checkpoint, so only the message that
+    // started the turn offers to put the files back.
+    expect(screen.getAllByRole("button", { name: "Restore files to this point" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Restore files to this point" }));
+    await user.click(screen.getByRole("button", { name: "Restore files" }));
+
+    // This thread decides effects by approval, and the approval was declined:
+    // nothing may reach the checkout.
+    expect(requestApproval).toHaveBeenCalledOnce();
+    expect(executeOperation).not.toHaveBeenCalled();
+    expect(screen.getByText("The files were not restored. Nothing changed.")).toBeVisible();
+
+    requestApproval.mockResolvedValue("40000000-0000-4000-8000-000000000001" as never);
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ conversation } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={requestApproval}
+        threadId={threadId}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Restore files to this point" }));
+    await user.click(screen.getByRole("button", { name: "Restore files" }));
+
+    await waitFor(() =>
+      expect(executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "restore-git-checkpoint", checkpoint }),
+      ),
+    );
+    expect(screen.getByText("Files restored to this point.")).toBeVisible();
+  });
+
+  it("keeps the restore control off a thread that cannot change the checkout", () => {
+    const conversation = [
+      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+    ];
+    const plan = controller({ conversation } as never);
+    render(
+      <CodeThreadWorkspace
+        controller={
+          {
+            ...plan,
+            activeView: {
+              ...plan.activeView,
+              thread: { ...plan.activeView!.thread, executionPolicy: "plan" },
+            },
+          } as never
+        }
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation: vi.fn() } as never}
+        requestApproval={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Restore files to this point" })).toBeNull();
+  });
+
   it("opens the `#` picker in the Code composer and sends the chip as an id", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async (_prompt: string) => true);
@@ -1007,6 +1087,8 @@ function alternateProviderGroup(): PickerGroup {
     ],
   } as never;
 }
+
+const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) } as never;
 
 function controller(
   overrides: Partial<CodeController> = {},

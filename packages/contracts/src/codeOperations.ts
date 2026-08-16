@@ -368,6 +368,42 @@ const PushGit = Schema.Struct({
         command.confirmation.refspec === `${command.localRef}:${command.remoteRef}`,
     ),
   );
+/**
+ * The state of a checkout at one moment, recorded as ordinary Git objects so
+ * nothing outside the repository has to hold the content.
+ *
+ * `worktree` is every tracked and untracked-but-not-ignored file as it stood;
+ * `index` is what was staged at the same moment, so restoring puts back the
+ * same staged/unstaged split the user had. Ignored files are not captured and
+ * are never touched by a restore.
+ */
+export const CodeCheckpoint = Schema.Struct({
+  worktree: GitObjectId,
+  index: GitObjectId,
+  /** The commit the checkout was on. Absent in a repository with no commits. */
+  head: Schema.optional(GitObjectId),
+}).annotations(strict);
+export type CodeCheckpoint = typeof CodeCheckpoint.Type;
+/**
+ * Put the checkout's files back the way a checkpoint recorded them.
+ *
+ * This overwrites uncommitted work with older content, so it is an
+ * approval-class `destructive-or-irreversible` operation like discarding. What
+ * it replaces is not lost: the host records a checkpoint of the current state
+ * first, and reports it back, so the restore is itself undoable.
+ *
+ * Unlike the other Git mutations this carries no state token. It does not
+ * apply a change to the state the caller was looking at; it names an exact
+ * recorded state to return to, which stays well defined however far the
+ * checkout has moved since — and moving on is precisely when a restore is
+ * wanted.
+ */
+const RestoreGitCheckpoint = Schema.Struct({
+  kind: Schema.Literal("restore-git-checkpoint"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  checkpoint: CodeCheckpoint,
+}).annotations(strict);
 const CreatePullRequest = Schema.Struct({
   kind: Schema.Literal("create-pull-request"),
   ...OperationScope,
@@ -514,6 +550,7 @@ export const CodeOperationCommand = Schema.Union(
   DiscardGitChanges,
   CommitGit,
   PushGit,
+  RestoreGitCheckpoint,
   CreatePullRequest,
   ObservePullRequest,
   MergePullRequest,
@@ -624,9 +661,14 @@ const GitMutationResult = Schema.Struct({
   kind: Schema.Literal("git-mutation-state"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
-  mutation: Schema.Literal("stage", "discard", "commit", "push", "revert"),
+  mutation: Schema.Literal("stage", "discard", "commit", "push", "revert", "restore-checkpoint"),
   state: Schema.Literal("completed", "rejected", "failed"),
   headOid: Schema.optional(GitObjectId),
+  /**
+   * The state this mutation replaced, recorded before it ran. Present on a
+   * completed restore, which is what makes undoing one possible.
+   */
+  undo: Schema.optional(CodeCheckpoint),
 }).annotations(strict);
 const PullRequestUrl = Schema.String.pipe(
   Schema.maxLength(2_048),
@@ -834,6 +876,13 @@ const ConversationTurnStartedEvent = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
+  /**
+   * The checkout as it stood just before the provider was asked, so the user
+   * can put the files back the way they were at any message. Absent when the
+   * checkout could not be read, and on turns journaled before checkpoints
+   * existed.
+   */
+  checkpoint: Schema.optional(CodeCheckpoint),
 }).annotations(strict);
 const ContentEvent = Schema.Struct({
   kind: Schema.Literal("provider-content"),
@@ -987,6 +1036,8 @@ export const CodeConversationTurn = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
+  /** The checkout as it stood before this turn ran, when the host caught it. */
+  checkpoint: Schema.optional(CodeCheckpoint),
   assistant: Schema.Array(CodeEvidenceReference).pipe(
     Schema.filter((parts) => parts.length <= MAX_CODE_CONVERSATION_ASSISTANT_PARTS),
   ),

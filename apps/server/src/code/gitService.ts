@@ -1,4 +1,4 @@
-import type { GitMutationPort, GitMutationResult } from "./gitMutationPort";
+import type { GitMutationPort, GitMutationResult, GitTreeSnapshot } from "./gitMutationPort";
 import type {
   GitObservation,
   GitObservationPort,
@@ -31,6 +31,14 @@ interface MutationPort {
     input: Parameters<GitMutationPort["revertCommit"]>[0],
     signal?: AbortSignal,
   ): Promise<GitMutationResult>;
+  snapshotWorkingTree(
+    input: Parameters<GitMutationPort["snapshotWorkingTree"]>[0],
+    signal?: AbortSignal,
+  ): Promise<Awaited<ReturnType<GitMutationPort["snapshotWorkingTree"]>>>;
+  restoreWorkingTree(
+    input: Parameters<GitMutationPort["restoreWorkingTree"]>[0],
+    signal?: AbortSignal,
+  ): Promise<GitMutationResult>;
 }
 
 export type GitServiceResult =
@@ -48,6 +56,10 @@ export type GitServiceResult =
         | "remote-unavailable"
         | "dirty-checkout";
     }
+  | { readonly status: "unavailable" };
+
+export type GitCheckpointResult =
+  | { readonly status: "captured"; readonly snapshot: GitTreeSnapshot }
   | { readonly status: "unavailable" };
 
 export class GitService {
@@ -156,17 +168,57 @@ export class GitService {
     });
   }
 
+  /**
+   * Record the checkout's current content so it can be put back later.
+   *
+   * This writes Git objects and nothing else: no commit, no branch, no change
+   * the user can see. Taking a checkpoint therefore never needs a state token
+   * and never fails a turn — a checkout that cannot be read simply produces no
+   * checkpoint, and the turn runs without one.
+   */
   checkpoint(
+    input: { readonly checkoutId: string; readonly checkoutRoot: string },
+    signal?: AbortSignal,
+  ): Promise<GitCheckpointResult> {
+    return this.#serialized(input.checkoutId, async () => {
+      const snapshot = await this.#mutation.snapshotWorkingTree(
+        { checkoutRoot: input.checkoutRoot },
+        signal,
+      );
+      return snapshot.status === "captured" ? snapshot : { status: "unavailable" };
+    });
+  }
+
+  /**
+   * Put the checkout's files back the way a checkpoint recorded them.
+   *
+   * The state the restore replaces is checkpointed first and returned, so the
+   * overwrite is itself undoable. No state token is required: the caller names
+   * an exact recorded state to return to rather than a change to apply on top
+   * of the one it last saw.
+   */
+  restoreCheckpoint(
     input: {
       readonly checkoutId: string;
       readonly checkoutRoot: string;
-      readonly message: string;
-      readonly expectedStateToken: string;
-      readonly stagedSummary: readonly GitStatusEntry[];
+      readonly snapshot: GitTreeSnapshot;
     },
     signal?: AbortSignal,
-  ): Promise<GitServiceResult> {
-    return this.commit(input, signal);
+  ): Promise<GitServiceResult & { readonly undo?: GitTreeSnapshot }> {
+    return this.#serialized(input.checkoutId, async () => {
+      const current = await this.#ready(input.checkoutRoot, signal);
+      if (!current) return { status: "unavailable" };
+      const undo = await this.#mutation.snapshotWorkingTree(
+        { checkoutRoot: current.checkoutRoot },
+        signal,
+      );
+      if (undo.status !== "captured") return { status: "unavailable" };
+      const restored = await this.#mutation.restoreWorkingTree(
+        { checkoutRoot: current.checkoutRoot, snapshot: input.snapshot },
+        signal,
+      );
+      return restored.status === "applied" ? { ...restored, undo: undo.snapshot } : restored;
+    });
   }
 
   revert(

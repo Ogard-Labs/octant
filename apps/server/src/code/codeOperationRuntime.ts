@@ -125,7 +125,13 @@ export interface CodeOperationRuntimeOptions {
   readonly gitObservationPort?: Pick<GitObservationPort, "observe">;
   readonly gitMutationPort?: Pick<
     GitMutationPort,
-    "stage" | "discard" | "commit" | "push" | "revertCommit"
+    | "stage"
+    | "discard"
+    | "commit"
+    | "push"
+    | "revertCommit"
+    | "snapshotWorkingTree"
+    | "restoreWorkingTree"
   >;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   /**
@@ -1218,6 +1224,8 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
         })),
       }),
     push: (input) => git.push(input),
+    checkpoint: (input) => git.checkpoint(input),
+    restoreCheckpoint: (input) => git.restoreCheckpoint(input),
   } as CodeOperationGitPort;
 }
 

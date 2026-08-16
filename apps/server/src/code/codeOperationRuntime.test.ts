@@ -603,6 +603,8 @@ function runtimeFixture(options: {
       push: async () => ({ status: "failed" as const }),
       discard: async () => ({ status: "failed" as const }),
       revertCommit: async () => ({ status: "failed" as const }),
+      snapshotWorkingTree: async () => ({ status: "failed" as const }),
+      restoreWorkingTree: async () => ({ status: "failed" as const }),
     },
   });
   return {

@@ -380,6 +380,7 @@ export class CodeOperationEventStore {
             modelId: frame.event.modelId,
             sessionId: frame.event.sessionId,
             prompt: frame.event.prompt,
+            ...(frame.event.checkpoint === undefined ? {} : { checkpoint: frame.event.checkpoint }),
             assistant: [],
             steps: [],
             stepsTruncated: false,
@@ -451,6 +452,7 @@ type CodeConversationBuilder = {
   modelId: CodeConversationTurn["modelId"];
   sessionId: CodeConversationTurn["sessionId"];
   prompt: CodeConversationTurn["prompt"];
+  checkpoint?: CodeConversationTurn["checkpoint"];
   assistant: Array<CodeConversationTurn["assistant"][number]>;
   steps: Array<CodeConversationStep>;
   stepsTruncated: boolean;

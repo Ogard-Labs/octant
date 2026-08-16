@@ -4,6 +4,7 @@ import {
   type CodeApprovalEffect,
   type CodeAttachmentId,
   type CodeAttachmentReference,
+  type CodeCheckpoint,
   type CodeCheckoutIdentity,
   type CodeEvidenceReference,
   type CodeOperationEvent,
@@ -277,6 +278,22 @@ export interface CodeOperationGitPort {
     readonly expectedStateToken: string;
     readonly authority: "approved" | "full-access";
   }) => Promise<GitMutationOutcome>;
+  /**
+   * Record the checkout's content without changing it. Optional so a host
+   * assembled without checkpoint support simply runs turns that carry none.
+   */
+  readonly checkpoint?: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+  }) => Promise<
+    | { readonly status: "captured"; readonly snapshot: CodeCheckpoint }
+    | { readonly status: "unavailable" }
+  >;
+  readonly restoreCheckpoint?: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+    readonly snapshot: CodeCheckpoint;
+  }) => Promise<GitMutationOutcome & { readonly undo?: CodeCheckpoint }>;
 }
 
 type GitMutationOutcome =
@@ -630,6 +647,7 @@ export class CodeOperationService {
             );
           } else {
             if (command.kind === "start-provider-turn" && recordedStart === undefined) {
+              const checkpoint = await this.#checkpoint(scope.checkout.id, root.checkoutRoot);
               this.#options.events.append({
                 threadId: command.threadId,
                 operationId: command.operationId,
@@ -643,6 +661,7 @@ export class CodeOperationService {
                   ...(starting.attachments.length === 0
                     ? {}
                     : { attachments: starting.attachments }),
+                  ...(checkpoint === undefined ? {} : { checkpoint }),
                 },
               });
               resultCursor += 1;
@@ -1164,6 +1183,25 @@ export class CodeOperationService {
             authority: command.authorization.kind === "approved" ? "approved" : "full-access",
           }),
         );
+      case "restore-git-checkpoint": {
+        const restore = this.#options.git.restoreCheckpoint;
+        if (restore === undefined)
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "Restoring a checkpoint is unavailable.",
+          );
+        return this.#gitMutation(
+          command.operationId,
+          command.gitOperationId,
+          "restore-checkpoint",
+          await restore({
+            checkoutId: checkout.id,
+            checkoutRoot: root.checkoutRoot,
+            snapshot: command.checkpoint,
+          }),
+        );
+      }
       case "create-pull-request":
         return this.#pullRequest(command);
       case "observe-pull-request":
@@ -1398,8 +1436,8 @@ export class CodeOperationService {
   #gitMutation(
     operationId: CodeOperationCommand["operationId"],
     gitOperationId: string,
-    mutation: "stage" | "discard" | "commit" | "push",
-    result: GitMutationOutcome,
+    mutation: "stage" | "discard" | "commit" | "push" | "restore-checkpoint",
+    result: GitMutationOutcome & { readonly undo?: CodeCheckpoint },
   ): CodeOperationResult {
     if (result.status === "unavailable")
       return this.#failed(operationId, "unavailable", "Git mutation is unavailable.");
@@ -1415,7 +1453,24 @@ export class CodeOperationService {
             ? "rejected"
             : "failed",
       ...(result.status === "applied" && result.oid !== undefined ? { headOid: result.oid } : {}),
+      ...(result.status === "applied" && result.undo !== undefined ? { undo: result.undo } : {}),
     });
+  }
+
+  /**
+   * Record the checkout just before a turn runs, so the user can put the files
+   * back at this message. Best effort by design: a checkout that cannot be
+   * read costs the turn its restore point, never the turn itself.
+   */
+  async #checkpoint(checkoutId: string, checkoutRoot: string): Promise<CodeCheckpoint | undefined> {
+    const capture = this.#options.git.checkpoint;
+    if (capture === undefined) return undefined;
+    try {
+      const result = await capture({ checkoutId, checkoutRoot });
+      return result.status === "captured" ? result.snapshot : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async #pullRequest(
@@ -1849,6 +1904,8 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
       return "stage";
     case "discard-git-changes":
       return "discard";
+    case "restore-git-checkpoint":
+      return "restore-checkpoint";
     case "commit-git":
       return "commit";
     case "push-git":

@@ -15,6 +15,7 @@ import {
   decodeCodeOperationId,
   decodeProviderSessionId,
   type CodeApprovalId,
+  type CodeCheckpoint,
   type CodeConversationTurn,
   type CodeEvidenceContentId,
   type CodeOperationEvent,
@@ -96,6 +97,12 @@ export interface CodeConversationMessage {
   readonly status?: "waiting" | "completed" | "interrupted" | "failed" | "incomplete";
   /** Images this message carried, as the turn's start event recorded them. */
   readonly attachments?: ReadonlyArray<CodeAttachmentReference>;
+  /**
+   * The checkout as it stood before this turn ran. Present on a user message
+   * whose turn the host managed to checkpoint, and what the transcript's
+   * restore control acts on.
+   */
+  readonly checkpoint?: CodeCheckpoint;
 }
 
 export interface CodeThreadNavigationItem {
@@ -401,6 +408,7 @@ export function useCodeController(options: CodeControllerOptions) {
           ...(turn.attachments === undefined || turn.attachments.length === 0
             ? {}
             : { attachments: turn.attachments }),
+          ...(turn.checkpoint === undefined ? {} : { checkpoint: turn.checkpoint }),
         });
         const parts: string[] = [];
         for (const reference of turn.assistant) {
@@ -1241,6 +1249,17 @@ export function useCodeController(options: CodeControllerOptions) {
             const event = frame.event;
             noteProviderRequest(event);
             noteActivity(operationId, event);
+            // The checkpoint is only known once the host has taken it, so the
+            // message the user already sees gains its restore point here
+            // rather than waiting for the thread to be reopened.
+            if (event.kind === "conversation-turn-started" && event.checkpoint !== undefined) {
+              const checkpoint = event.checkpoint;
+              setConversation((current) =>
+                current.map((entry) =>
+                  entry.id === userMessage.id ? { ...entry, checkpoint } : entry,
+                ),
+              );
+            }
             if (event.kind === "provider-content" && event.channel === "reasoning") {
               const chunk = await readOperationText(
                 client,

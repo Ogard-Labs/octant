@@ -14,6 +14,7 @@ export type CodeOperation =
   | "test"
   | "stage"
   | "discard"
+  | "restore-checkpoint"
   | "commit"
   | "push"
   | "create-pr"
@@ -71,6 +72,10 @@ export function approvalClassForCodeOperation(
     // Discarding uncommitted work destroys content no commit can restore, so
     // it sits with push and merge rather than with the writes it undoes.
     case "discard":
+    // Restoring a checkpoint overwrites current files with older ones. The
+    // host records what it replaced, but the replacement itself is a wholesale
+    // overwrite of the checkout and is gated as one.
+    case "restore-checkpoint":
     case "push":
     case "create-pr":
     case "merge-pr":

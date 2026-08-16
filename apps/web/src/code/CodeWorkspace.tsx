@@ -138,7 +138,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.windowCapability === undefined
           ? {}
           : { windowCapability: props.windowCapability })}
+        {...(props.approvals?.git === undefined ? {} : { requestApproval: props.approvals.git })}
         attachmentClient={props.client}
+        nextUuid={nextUuid}
+        operationClient={props.client}
         threadId={props.tab.threadId}
       />
     );

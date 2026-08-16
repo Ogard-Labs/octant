@@ -1,7 +1,7 @@
 import type { CodeApprovalId, CodeThreadId } from "@octant/contracts/code";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
-import type { PickerGroup } from "@octant/domain";
+import { decidesCodeEffectsByApproval, type PickerGroup } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { ArrowUp, Bot, GitCompare, Globe2, ListChecks, Terminal, X } from "lucide-react";
@@ -11,7 +11,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeOverviewSurfaceKind } from "./CodeOverview";
-import type { CodeController } from "./useCodeController";
+import type { CodeConversationMessage, CodeController } from "./useCodeController";
 import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -81,6 +81,22 @@ export interface CodeThreadWorkspaceProps {
     readonly expectedVersion: number;
     readonly permissionPersistence: "current-session" | "project-default";
   }) => Promise<CodeApprovalId | undefined>;
+  /**
+   * Runs the checkpoint restore. Absent on a host that serves no operation
+   * route, which keeps the control off the transcript rather than offering an
+   * undo nothing could carry out.
+   */
+  readonly operationClient?: Pick<CodeClient, "executeOperation">;
+  /** Mints the operation identities a restore needs. */
+  readonly nextUuid?: () => string;
+  /**
+   * Raises the approval a destructive Code operation needs under an
+   * approval-deciding posture. Absent when the host cannot raise one, which
+   * keeps the restore control hidden on those threads.
+   */
+  readonly requestApproval?: (
+    command: Parameters<CodeClient["executeOperation"]>[0],
+  ) => Promise<CodeApprovalId | undefined>;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -100,6 +116,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [accessMessage, setAccessMessage] = useState<string>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [auxiliarySurface, setAuxiliarySurface] = useState<"agents">();
+  const [confirmingRestore, setConfirmingRestore] = useState<string>();
+  const [restoring, setRestoring] = useState(false);
+  const [restoreMessage, setRestoreMessage] = useState<string>();
 
   useEffect(() => {
     setDraft(props.controller.pendingDraft);
@@ -201,6 +220,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
   const showEmptyConversation = messages.length === 0;
+  // Restoring rewrites files on disk, so the control appears only where this
+  // thread may change the checkout and the renderer can raise whatever
+  // approval the posture demands.
+  const mayRestore =
+    thread.executionPolicy !== "plan" &&
+    props.operationClient !== undefined &&
+    props.nextUuid !== undefined &&
+    (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
   const followUp = props.controller.followUps.get(String(thread.id))?.followUp;
   const followUpOpen = followUp?.state === "open";
 
@@ -273,6 +300,52 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
    * authoritative command — it never elevates on the renderer's say-so, and a
    * declined confirmation leaves the thread exactly where it was.
    */
+  /**
+   * Put the checkout's files back the way they were just before this message
+   * was sent.
+   *
+   * The host records what it replaced, so this is reversible; it still asks
+   * first, because the files on disk are what the user has been reading.
+   */
+  async function restoreCheckpoint(message: CodeConversationMessage) {
+    const checkpoint = message.checkpoint;
+    const client = props.operationClient;
+    const nextUuid = props.nextUuid;
+    setConfirmingRestore(undefined);
+    if (checkpoint === undefined || client === undefined || nextUuid === undefined) return;
+    if (view === undefined) return;
+    setRestoreMessage(undefined);
+    setRestoring(true);
+    try {
+      const command = {
+        kind: "restore-git-checkpoint",
+        operationId: nextUuid() as never,
+        gitOperationId: nextUuid() as never,
+        threadId: view.thread.id,
+        checkoutId: view.checkout.id,
+        checkpoint,
+      } as const;
+      if (
+        decidesCodeEffectsByApproval(thread.executionPolicy) &&
+        (await props.requestApproval?.(command)) === undefined
+      ) {
+        setRestoreMessage("The files were not restored. Nothing changed.");
+        return;
+      }
+      const result = await client.executeOperation(command);
+      if (result.kind === "operation-failed") setRestoreMessage(result.failure.message);
+      else if (result.kind === "git-mutation-state" && result.state === "completed")
+        setRestoreMessage("Files restored to this point.");
+      else if (result.kind === "git-mutation-state")
+        setRestoreMessage(`The restore was ${result.state}. The checkout is untouched.`);
+      else setRestoreMessage("The restore did not report a result.");
+    } catch {
+      setRestoreMessage("The restore failed. The checkout is untouched.");
+    } finally {
+      setRestoring(false);
+    }
+  }
+
   async function changeAccess(next: ProviderExecutionPolicy) {
     if (next === thread.executionPolicy) return;
     setAccessMessage(undefined);
@@ -567,6 +640,43 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     />
                   )}
                   <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
+                  {message.role === "user" && message.checkpoint !== undefined && mayRestore ? (
+                    <footer className="code-thread-workspace__restore">
+                      {confirmingRestore === message.id ? (
+                        <>
+                          <span>Put the files back the way they were before this message?</span>
+                          <OctantButton
+                            disabled={restoring}
+                            onClick={() => void restoreCheckpoint(message)}
+                            size="sm"
+                            variant="destructive"
+                          >
+                            Restore files
+                          </OctantButton>
+                          <OctantButton
+                            disabled={restoring}
+                            onClick={() => setConfirmingRestore(undefined)}
+                            size="sm"
+                            variant="ghost"
+                          >
+                            Keep current files
+                          </OctantButton>
+                        </>
+                      ) : (
+                        <OctantButton
+                          disabled={restoring}
+                          onClick={() => {
+                            setRestoreMessage(undefined);
+                            setConfirmingRestore(message.id);
+                          }}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          Restore files to this point
+                        </OctantButton>
+                      )}
+                    </footer>
+                  ) : null}
                 </article>
               </div>
             );
@@ -744,6 +854,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             {accessMessage === undefined ? null : (
               <span className="code-thread-workspace__hint" role="status">
                 {accessMessage}
+              </span>
+            )}
+            {restoreMessage === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="status">
+                {restoreMessage}
               </span>
             )}
           </div>
