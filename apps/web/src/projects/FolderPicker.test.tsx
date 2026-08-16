@@ -19,7 +19,7 @@ describe("FolderPicker", () => {
       }),
     ]);
     const browse = vi.fn().mockResolvedValueOnce(home);
-    const select = vi.fn(async () => ({
+    const select = vi.fn(async (_input: unknown) => ({
       receiptId: "receipt-1",
       displayName: "Dev",
       selectedAt: "2026-07-27T12:00:00.000Z",
