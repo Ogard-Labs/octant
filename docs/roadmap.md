@@ -46,9 +46,11 @@ Hardening in progress for the preview:
 
 - Run the end-to-end acceptance scenarios on real macOS hardware; CI cannot
   substitute for platform- and credential-gated checks.
-- Remote reconnect replay: a paired browser that sleeps through events should
-  catch up instead of silently missing them (the replay path was never built;
-  its scaffolding was removed rather than kept as dead code).
+- Remote reconnect replay is in: a client that sleeps through events catches up
+  from the authoritative snapshot, keeps retrying when the host is unreachable
+  rather than freezing the thread, renews a session whose window closed while
+  the machine slept, and stays paired through a moment of no network. What is
+  still open is proving it on real hardware across a genuine sleep/wake cycle.
 - Standing security follow-ups: identity-bound confined writes, consistent
   journal-hydration limits across projections, a gate that compares the remote
   forward list against the route classifier, and scoping of the remaining

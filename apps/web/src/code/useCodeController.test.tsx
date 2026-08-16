@@ -291,6 +291,27 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("keeps catching up after a failed snapshot instead of freezing the thread", async () => {
+    const gap = deferred<void>();
+    const thread = vi
+      .fn()
+      .mockResolvedValueOnce(view(1))
+      .mockRejectedValueOnce({ category: "unavailable", message: "Octant Code is unavailable." })
+      .mockResolvedValue(view(4));
+    const client = fakeClient({ subscribe: vi.fn(() => gapStream(gap.promise)), thread });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 0 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.lastSequence).toBe(1));
+
+    await act(async () => gap.resolve());
+
+    await waitFor(() => expect(result.current.activeView?.lastSequence).toBe(4));
+    expect(result.current.status).toBe("ready");
+    expect(thread.mock.calls.length).toBeGreaterThanOrEqual(3);
+    unmount();
+  });
+
   it("reloads authoritative state after a stale command and preserves the draft", async () => {
     const client = fakeClient({
       bootstrap: vi.fn().mockResolvedValueOnce(bootstrap()).mockResolvedValue(bootstrap(2)),

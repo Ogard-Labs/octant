@@ -23,6 +23,17 @@ import { buildChatThreadNavigation, type ChatThreadNavigationItem } from "../she
 
 export type ChatControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 
+/**
+ * The longest a dropped stream waits before trying the host again. Long enough
+ * that a machine asleep for hours is not asking every quarter second, short
+ * enough that waking it up catches the thread back up while the user is still
+ * looking at it.
+ */
+const MAX_RECONNECT_DELAY_MS = 10_000;
+
+/** The first wait after a failed catch-up, before the delay starts doubling. */
+const MIN_RECONNECT_BACKOFF_MS = 100;
+
 export interface ChatControllerOptions {
   readonly activeThreadId?: ChatThreadId;
   readonly client?: ChatClient;
@@ -193,6 +204,52 @@ export function useChatController(options: ChatControllerOptions) {
         const signal = controller.signal;
         streamAbort.current = controller;
         let cursor = view.lastSequence;
+        let reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
+        let reconnectFailed = false;
+
+        /**
+         * Catch up from the authoritative snapshot after the event stream
+         * dropped, and wait before opening it again.
+         *
+         * A snapshot the client cannot fetch is exactly what a machine that
+         * slept through the host's answer sees, so it is a reason to ask again
+         * more slowly — never a reason to stop. Giving up here would freeze the
+         * thread at whatever event happened to arrive last, with nothing on
+         * screen saying so. The stream is only reopened once a snapshot has
+         * actually been read, because the events after a gap mean nothing
+         * without the state they continue from.
+         */
+        const resume = async (): Promise<"stop" | "again"> => {
+          for (;;) {
+            try {
+              const recovered = await client.thread(threadId);
+              if (!mounted.current || request !== threadGeneration.current) return "stop";
+              applyAuthoritativeView(recovered, true);
+              cursor = recovered.lastSequence;
+              reconnectBackoffMs = MIN_RECONNECT_BACKOFF_MS;
+              if (reconnectFailed) {
+                reconnectFailed = false;
+                setStatus("ready");
+                setErrorMessage(undefined);
+              }
+              await waitForReconnect(signal, reconnectDelayMs);
+              return "again";
+            } catch (error) {
+              if (!mounted.current || request !== threadGeneration.current || signal.aborted) {
+                return "stop";
+              }
+              reconnectFailed = true;
+              setStatus("disconnected");
+              setErrorMessage(failureMessage(error));
+              await waitForReconnect(signal, reconnectBackoffMs);
+              if (!mounted.current || request !== threadGeneration.current || signal.aborted) {
+                return "stop";
+              }
+              reconnectBackoffMs = Math.min(reconnectBackoffMs * 2, MAX_RECONNECT_DELAY_MS);
+            }
+          }
+        };
+
         for (;;) {
           if (!mounted.current || request !== threadGeneration.current || signal.aborted) {
             return;
@@ -227,11 +284,7 @@ export function useChatController(options: ChatControllerOptions) {
               await frames.return?.();
             }
             if (!endedCleanly) {
-              const recovered = await client.thread(threadId);
-              if (!mounted.current || request !== threadGeneration.current) return;
-              applyAuthoritativeView(recovered, true);
-              cursor = recovered.lastSequence;
-              await waitForReconnect(signal, reconnectDelayMs);
+              if ((await resume()) === "stop") return;
               continue;
             }
             await waitForReconnect(signal, reconnectDelayMs);
@@ -239,11 +292,7 @@ export function useChatController(options: ChatControllerOptions) {
             if (!mounted.current || request !== threadGeneration.current || signal.aborted) {
               return;
             }
-            const recovered = await client.thread(threadId);
-            if (!mounted.current || request !== threadGeneration.current) return;
-            applyAuthoritativeView(recovered, true);
-            cursor = recovered.lastSequence;
-            await waitForReconnect(signal, reconnectDelayMs);
+            if ((await resume()) === "stop") return;
           }
         }
       } catch (error) {

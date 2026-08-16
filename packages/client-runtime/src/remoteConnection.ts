@@ -35,6 +35,7 @@ import {
   canonicalizeRemotePathQuery,
   negotiateRemoteProtocol,
   sessionExpiry,
+  shouldRotateSession,
 } from "@octant/domain";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -227,6 +228,7 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
   let state: RemoteConnectionState = "disconnected";
   let session: RemoteSessionFacts | undefined;
   let deviceIdentity: DeviceIdentity | undefined = config.knownDevice;
+  let renewal: Promise<void> | undefined;
   const listeners = new Set<(state: RemoteConnectionState) => void>();
 
   const setState = (next: RemoteConnectionState): void => {
@@ -529,7 +531,30 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
     }
   };
 
+  /**
+   * Renew the session before it is used, when its own clock says it is spent.
+   *
+   * A machine that sleeps past the idle window wakes holding a session the host
+   * will refuse. Without this, every request after waking is rejected and the
+   * client sits at "unavailable" until the user reloads — which is exactly how
+   * a paired browser silently stops receiving a thread's events. Renewal proves
+   * possession of the same non-exportable device key that paired it, so it
+   * grants nothing a fresh sign-in would not.
+   *
+   * Concurrent requests share one renewal; the first to notice renews and the
+   * rest wait for it, so waking up does not re-authenticate once per pending
+   * request.
+   */
+  const renewIfSpent = async (): Promise<void> => {
+    if (session === undefined || !sessionNeedsRenewal(session, now())) return;
+    renewal ??= refresh().finally(() => {
+      renewal = undefined;
+    });
+    await renewal;
+  };
+
   const authenticatedFetch = async (input: AuthenticatedRequestInput): Promise<Response> => {
+    await renewIfSpent();
     if (session === undefined || deviceIdentity === undefined) {
       throw new RemoteConnectionError("unauthorized", "No authenticated session is available.");
     }
@@ -617,6 +642,19 @@ export function createRemoteConnection(config: RemoteConnectionConfig): RemoteCo
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+/**
+ * Whether this session must be replaced before it is used again: either window
+ * it was issued with has closed, or it has been alive long enough that the
+ * proof policy wants it rotated.
+ */
+function sessionNeedsRenewal(session: RemoteSessionFacts, nowMs: number): boolean {
+  const idleExpiresAt = Date.parse(session.idleExpiresAt);
+  const absoluteExpiresAt = Date.parse(session.absoluteExpiresAt);
+  if (Number.isFinite(idleExpiresAt) && idleExpiresAt <= nowMs) return true;
+  if (Number.isFinite(absoluteExpiresAt) && absoluteExpiresAt <= nowMs) return true;
+  return shouldRotateSession(session.issuedAt, nowMs);
+}
+
 class RemoteProtocolStatusError extends Error {
   readonly status: number;
   readonly reasonCode: RemoteReauthReason | undefined;
@@ -656,8 +694,11 @@ function mapConnectionError(error: unknown, clearAuthority: () => void): RemoteC
     }
     return new RemoteConnectionError("unavailable", "Remote protocol request failed.");
   }
-  // Network failure (fetch threw) or unexpected error.
-  clearAuthority();
+  // Network failure (fetch threw) or unexpected error. A host that could not be
+  // reached has said nothing about this device's credential, so the pairing is
+  // kept and the connection can simply be retried. Dropping it here would turn
+  // one unreachable moment — waking from sleep before the network is back —
+  // into a demand to pair the device again.
   return new RemoteConnectionError("unavailable", "Remote host is unavailable.");
 }
 

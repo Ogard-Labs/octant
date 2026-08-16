@@ -154,6 +154,17 @@ export function createCodeReadCursorStore(): CodeReadCursorStore {
   };
 }
 
+/**
+ * The longest a dropped stream waits before trying the host again. Long enough
+ * that a machine asleep for hours is not asking every quarter second, short
+ * enough that waking it up catches the thread back up while the user is still
+ * looking at it.
+ */
+const MAX_CODE_RECONNECT_DELAY_MS = 10_000;
+
+/** The first wait after a failed catch-up, before the delay starts doubling. */
+const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
+
 export interface CodeControllerOptions {
   readonly activeThreadId?: CodeThreadId;
   readonly client?: CodeClient;
@@ -658,6 +669,52 @@ export function useCodeController(options: CodeControllerOptions) {
           });
         };
         if (conversationIncomplete) startConversationPoll();
+
+        let reconnectBackoffMs = MIN_CODE_RECONNECT_BACKOFF_MS;
+        let reconnectFailed = false;
+        /**
+         * Catch up from the authoritative thread view after the event stream
+         * dropped, and wait before opening it again.
+         *
+         * A snapshot the client cannot fetch is exactly what a machine that
+         * slept through the host's answer sees, so it is a reason to ask again
+         * more slowly — never a reason to stop. Giving up here would freeze the
+         * thread at whatever event happened to arrive last. The stream is only
+         * reopened once a snapshot has actually been read, because the events
+         * after a gap mean nothing without the state they continue from.
+         */
+        const resume = async (): Promise<"stop" | "again"> => {
+          for (;;) {
+            try {
+              const recovered = await client.thread(threadId);
+              if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) {
+                return "stop";
+              }
+              installView(recovered);
+              cursor = Number(recovered.lastSequence);
+              reconnectBackoffMs = MIN_CODE_RECONNECT_BACKOFF_MS;
+              if (reconnectFailed) {
+                reconnectFailed = false;
+                clearFailure();
+                setStatus("ready");
+              }
+              await waitForReconnect(controller.signal, reconnectDelayMs);
+              return "again";
+            } catch (error) {
+              if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) {
+                return "stop";
+              }
+              reconnectFailed = true;
+              fail(error);
+              await waitForReconnect(controller.signal, reconnectBackoffMs);
+              if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) {
+                return "stop";
+              }
+              reconnectBackoffMs = Math.min(reconnectBackoffMs * 2, MAX_CODE_RECONNECT_DELAY_MS);
+            }
+          }
+        };
+
         for (;;) {
           if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) return;
           let snapshotRequired = false;
@@ -703,11 +760,7 @@ export function useCodeController(options: CodeControllerOptions) {
           } catch {
             if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) return;
           }
-          const recovered = await client.thread(threadId);
-          if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted) return;
-          installView(recovered);
-          cursor = Number(recovered.lastSequence);
-          await waitForReconnect(controller.signal, reconnectDelayMs);
+          if ((await resume()) === "stop") return;
         }
       } catch (error) {
         if (!isActive(request, threadGeneration, mounted)) return;

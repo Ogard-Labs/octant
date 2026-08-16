@@ -155,7 +155,11 @@ flowchart LR
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a
   migration runs. Restart integration tests prove replay per feature.
-- **Recovery.** Sequence-based reconnect replay for local clients, crash-safe
+- **Recovery.** Sequence-based reconnect replay for local and remote clients —
+  a dropped stream catches up from the authoritative snapshot before it reopens,
+  keeps retrying while the host is unreachable, and a remote session whose window
+  closed during sleep is renewed from the device key rather than re-paired —
+  crash-safe
   append, explicit terminal reasons for turns, tools, terminals, and subagents,
   preservation of partial provider output, and recovery of outstanding
   approvals and user-input requests after restart.
