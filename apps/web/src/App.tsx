@@ -4031,13 +4031,35 @@ function activeDraftTabKey(
     : undefined;
 }
 
-function activeCodeThreadTabId(
+/**
+ * The local Code thread the focused group is showing. When the focused group
+ * shows a utility surface (Browser, Files, Side Chat, Preview) instead, the
+ * Code thread visible in a sibling split pane stays active so its transcript
+ * is not unloaded just because the user clicked into the other pane.
+ */
+export function activeCodeThreadTabId(
   layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
   activeGroupId: import("@octant/contracts/shell").TabGroupId,
 ): CodeThreadId | undefined {
   const group = findWorkspaceGroup(layout, activeGroupId);
   if (group === undefined) return undefined;
   const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
+  const focused = localCodeThreadTabId(tab);
+  if (focused !== undefined) return focused;
+  switch (tab?.kind) {
+    case "browser":
+    case "files":
+    case "side-chat":
+    case "preview":
+      return visibleLocalCodeThreadTabId(layout);
+    default:
+      return undefined;
+  }
+}
+
+function localCodeThreadTabId(
+  tab: import("@octant/contracts/shell").WorkspaceTab | undefined,
+): CodeThreadId | undefined {
   if (tab !== undefined && "hostId" in tab && tab.hostId !== undefined) return undefined;
   switch (tab?.kind) {
     case "code-overview":
@@ -4052,6 +4074,15 @@ function activeCodeThreadTabId(
     default:
       return undefined;
   }
+}
+
+function visibleLocalCodeThreadTabId(
+  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
+): CodeThreadId | undefined {
+  if (layout.kind === "group") {
+    return localCodeThreadTabId(layout.tabs.find((tab) => tab.id === layout.activeTabId));
+  }
+  return visibleLocalCodeThreadTabId(layout.first) ?? visibleLocalCodeThreadTabId(layout.second);
 }
 
 function activeWorkThreadTabId(
