@@ -22,6 +22,7 @@ import {
   useThreadMentionTypeahead,
 } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
+import { CodeTranscriptRow } from "./CodeTranscriptRow";
 
 export interface CodeThreadWorkspaceProps {
   readonly agentRunClient?: AgentRunClient;
@@ -366,8 +367,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               message.role === "assistant" &&
               previousAssistant !== undefined &&
               providerIdentityChanged(previousAssistant, message);
+            const activity =
+              message.role === "assistant" && message.operationId !== undefined
+                ? props.controller.turnActivity.get(String(message.operationId))
+                : undefined;
             return (
-              <div key={message.id}>
+              // Long threads stay cheap without a windowing library: the engine
+              // skips laying out rows that are scrolled out of view, and the
+              // reserved size keeps the scrollbar honest.
+              <div className="code-thread-workspace__row" key={message.id}>
                 {handoff ? (
                   <div
                     aria-label="Provider handoff"
@@ -401,6 +409,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       )}
                     </header>
                   ) : null}
+                  {activity === undefined ? null : (
+                    <CodeTranscriptRow
+                      activity={activity}
+                      running={message.status === "incomplete"}
+                    />
+                  )}
                   <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
                 </article>
               </div>

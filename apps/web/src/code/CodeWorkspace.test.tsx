@@ -298,6 +298,7 @@ function controller(
     cancelQueuedFollowUp: vi.fn(),
     queueFollowUp: vi.fn(),
     queuedFollowUps: [],
+    turnActivity: new Map(),
     followUps: new Map(),
     markFollowUp: vi.fn(async () => true),
     completeFollowUp: vi.fn(async () => true),
