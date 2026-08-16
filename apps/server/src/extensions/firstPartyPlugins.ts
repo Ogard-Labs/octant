@@ -15,6 +15,8 @@ import {
 
 export const BOARD_EXTENSION_ID = "10000000-0000-4000-8000-000000000001";
 const BOARD_PACKAGE_ID = "10000000-0000-4000-8000-000000000002";
+export const GITHUB_EXTENSION_ID = "10000000-0000-4000-8000-000000000003";
+const GITHUB_PACKAGE_ID = "10000000-0000-4000-8000-000000000004";
 
 function digestFor(seed: string): string {
   return `sha256:${createHash("sha256").update(seed).digest("hex")}`;
@@ -46,6 +48,40 @@ export function boardPluginManifest(): ExtensionPackageManifest {
         displayName: "Thread board",
         declaredCapabilities: [],
         entryPoint: "builtin:board",
+      },
+    ],
+  });
+}
+
+/**
+ * Bundled first-party plugin covering GitHub authentication, the repository
+ * catalogue, and managed clone — all three are peer, self-contained,
+ * route-fronted surfaces. Pull request lifecycle stays host-embedded (it is
+ * a consumer of this plugin's authentication, wired deep into Code's
+ * approval-gated command pipeline) but is gated on this plugin's effective
+ * state too; it is not relocated behind this manifest.
+ */
+export function githubPluginManifest(): ExtensionPackageManifest {
+  return decodeExtensionPackageManifest({
+    manifestVersion: 1,
+    extensionId: GITHUB_EXTENSION_ID,
+    packageId: GITHUB_PACKAGE_ID,
+    slug: "github",
+    displayName: "GitHub",
+    version: "1.0.0",
+    digest: digestFor("octant:github:1.0.0"),
+    source: { kind: "bundled", sourceRef: "app:github" },
+    provenance: { reviewed: true },
+    license: { kind: "unreported" },
+    compatibility: { platforms: ["macos"], modes: ["code"], providerFamilies: [] },
+    declaredCapabilities: ["network", "credentials", "external-application"],
+    components: [
+      {
+        id: "integration",
+        kind: "integration",
+        displayName: "GitHub",
+        declaredCapabilities: ["network", "credentials", "external-application"],
+        entryPoint: "builtin:github",
       },
     ],
   });
@@ -112,4 +148,5 @@ export function seedFirstPartyPlugins(options: {
   readonly clock: () => string;
 }): void {
   seedFirstPartyPluginIfAbsent({ ...options, manifest: boardPluginManifest() });
+  seedFirstPartyPluginIfAbsent({ ...options, manifest: githubPluginManifest() });
 }

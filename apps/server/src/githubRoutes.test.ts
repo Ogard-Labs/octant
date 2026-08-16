@@ -87,6 +87,23 @@ describe("GitHub authentication routes", () => {
     expect(service.snapshot).toHaveBeenCalledOnce();
   });
 
+  it("returns unavailable when the github plugin is disabled", async () => {
+    const handler = createGithubRouteHandler({
+      service,
+      catalogue,
+      windowAuthorityStore: store,
+      githubPluginEffective: () => false,
+    });
+    const value = request();
+    bindPrincipalRouteContext(value, {
+      principal: { kind: "local-window", windowId: "window", capabilityGeneration: 1 },
+      scopeId: "window" as any,
+    });
+
+    expect((await handler(value))?.status).toBe(503);
+    expect(service.snapshot).not.toHaveBeenCalled();
+  });
+
   it("returns invalid rather than unavailable for malformed authentication commands", async () => {
     const handler = createHandler();
     const value = new Request("http://127.0.0.1/api/github/authentication/commands", {

@@ -6,29 +6,11 @@ import { Search, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
-import {
-  resolveSidebarContributions,
-  type FirstPartyPluginComponentId,
-} from "./contributionRegistry";
+import { FIRST_PARTY_PLUGINS_EFFECTIVE, resolveSidebarContributions } from "./contributionRegistry";
 import { IconButton } from "./IconButton";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
-
-/**
- * Stand-in for the server's first-party plugin activation state. The board
- * plugin is now seeded and gated server-side (ADR 0001 step 4) and toggling
- * it off is enforced on the board route and reflected in the existing
- * Settings > Plugins UI; this sidebar entry stays a constant rather than a
- * live per-mode query because the board's own compatibility is Code-only
- * while its sidebar contribution spans Work and Code, so a single boolean
- * can't represent both modes correctly. Deferred to a focused follow-up
- * (see docs/decisions/0001-plugin-architecture.md).
- */
-const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponentId, boolean> = new Map([
-  ["board", true],
-  ["github-integration", true],
-]);
 
 export interface ShellSidebarProps {
   /**

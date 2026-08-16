@@ -81,6 +81,20 @@ export interface GhSecureStoragePort {
   isAvailable(signal: AbortSignal, environment: NodeJS.ProcessEnv): boolean | Promise<boolean>;
 }
 
+/**
+ * Structural surface of {@link GhAuthenticationPort} consumed by callers.
+ * Lets a gate wrap the real port without extending a class that has private
+ * fields (see gatedGithubAuthenticationPort.ts).
+ */
+export interface GhAuthenticationPortLike {
+  observe(signal: AbortSignal): Promise<GhAuthenticationObservation>;
+  execute(
+    command: GithubAuthenticationCommand,
+    signal: AbortSignal,
+  ): Promise<GhAuthenticationExecution>;
+  close(): void;
+}
+
 export type GhAuthenticationObservation =
   | {
       readonly kind: "observed";
@@ -93,7 +107,7 @@ export type GhAuthenticationObservation =
     }
   | { readonly kind: "external-token" | "unauthorized" | "rate-limited" | "unavailable" };
 
-export class GhAuthenticationPort {
+export class GhAuthenticationPort implements GhAuthenticationPortLike {
   readonly #command: GhAuthenticationCommandPort;
   readonly #inheritedEnvironment: NodeJS.ProcessEnv;
   readonly #secureStorage: GhSecureStoragePort;

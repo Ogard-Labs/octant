@@ -10,8 +10,11 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { readExtensionRecord } from "../persistence/extensionProjection";
 import {
   BOARD_EXTENSION_ID,
+  GITHUB_EXTENSION_ID,
   boardPluginManifest,
+  githubPluginManifest,
   seedFirstPartyPluginIfAbsent,
+  seedFirstPartyPlugins,
 } from "./firstPartyPlugins";
 
 const directories: Array<string> = [];
@@ -80,5 +83,38 @@ describe("seedFirstPartyPluginIfAbsent", () => {
 
     expect(journal.headSequence()).toBe(head);
     expect(readExtensionRecord(connection, BOARD_EXTENSION_ID)).toEqual(firstRecord);
+  });
+
+  it("seeds the github manifest as a real, enabled, trusted projected extension", async () => {
+    const { connection, journal } = await setup();
+    seedFirstPartyPluginIfAbsent({
+      journal,
+      connection,
+      uuid: randomUUID,
+      clock: () => now,
+      manifest: githubPluginManifest(),
+    });
+
+    const record = readExtensionRecord(connection, GITHUB_EXTENSION_ID);
+    expect(record?.lifecycleState).toBe("installed");
+    expect(record?.trusted).toBe(true);
+    expect(record?.pluginDesired).toBe(true);
+    expect(record?.componentDesired["integration"]).toBe(true);
+    expect(record?.current?.slug).toBe("github");
+    expect(record?.current?.declaredCapabilities).toEqual([
+      "network",
+      "credentials",
+      "external-application",
+    ]);
+  });
+});
+
+describe("seedFirstPartyPlugins", () => {
+  it("seeds both the board and github manifests in one call", async () => {
+    const { connection, journal } = await setup();
+    seedFirstPartyPlugins({ journal, connection, uuid: randomUUID, clock: () => now });
+
+    expect(readExtensionRecord(connection, BOARD_EXTENSION_ID)?.current?.slug).toBe("board");
+    expect(readExtensionRecord(connection, GITHUB_EXTENSION_ID)?.current?.slug).toBe("github");
   });
 });

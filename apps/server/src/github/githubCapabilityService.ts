@@ -1,19 +1,19 @@
 import type { GithubAuthenticationCommand, GithubAuthenticationSnapshot } from "@octant/contracts";
 import { decodeGithubAuthenticationSnapshot } from "@octant/contracts";
 import { classifyGithubAuthentication } from "@octant/domain";
-import type { GhAuthenticationPort } from "./ghAuthenticationPort";
+import type { GhAuthenticationPortLike } from "./ghAuthenticationPort";
 import type { GhOperationProbePort, GhOperationProbeResults } from "./ghRepositoryCataloguePort";
 
 const DEFAULT_PROBE_TTL_MS = 30_000;
 
 export class GithubCapabilityService {
-  readonly #port: GhAuthenticationPort;
+  readonly #port: GhAuthenticationPortLike;
   readonly #probes: GhOperationProbePort | undefined;
   readonly #now: () => number;
   readonly #probeTtlMs: number;
   #cachedProbes: { readonly results: GhOperationProbeResults; readonly at: number } | undefined;
   constructor(
-    port: GhAuthenticationPort,
+    port: GhAuthenticationPortLike,
     options: {
       readonly probes?: GhOperationProbePort;
       readonly now?: () => number;

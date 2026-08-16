@@ -29,6 +29,27 @@ const SETTINGS_SECTION_CONTRIBUTIONS: ReadonlyArray<PluginSettingsSectionContrib
   { componentId: "github-integration", sectionId: "github" },
 ];
 
+const PLUGIN_OWNED_SETTINGS_SECTION_IDS: ReadonlySet<string> = new Set(
+  SETTINGS_SECTION_CONTRIBUTIONS.map((contribution) => contribution.sectionId),
+);
+
+/**
+ * Stand-in for the server's first-party plugin activation state, shared by
+ * the sidebar and Settings so both trace through the same source. Both
+ * plugins are seeded and gated server-side (ADR 0001 step 4), but this stays
+ * a constant rather than a live query: the board's sidebar contribution
+ * spans Work and Code while its compatibility is Code-only, and GitHub's
+ * settings section is host-scoped while its compatibility is Code-only, so a
+ * single boolean per component can't represent a mode-scoped effective state
+ * correctly. Live wiring needs a small per-mode query design of its own and
+ * is deferred (see docs/decisions/0001-plugin-architecture.md).
+ */
+export const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponentId, boolean> =
+  new Map([
+    ["board", true],
+    ["github-integration", true],
+  ]);
+
 /**
  * Which sidebar destinations the effective first-party plugins contribute
  * for the given mode. Pure and mode-scoped so it composes with whatever else
@@ -56,4 +77,17 @@ export function resolveSettingsSectionContributions(
       (contribution) => effective.get(contribution.componentId) ?? false,
     ).map((contribution) => contribution.sectionId),
   );
+}
+
+/**
+ * Whether a Settings section should be listed. Sections no plugin owns are
+ * always available; a plugin-owned section (e.g. `github`) is available only
+ * when its contributing component is effective.
+ */
+export function isPluginSettingsSectionAvailable(
+  sectionId: string,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
+): boolean {
+  if (!PLUGIN_OWNED_SETTINGS_SECTION_IDS.has(sectionId)) return true;
+  return resolveSettingsSectionContributions(effective).has(sectionId);
 }
