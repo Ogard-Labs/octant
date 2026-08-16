@@ -188,6 +188,30 @@ describe("CodeThreadWorkspace", () => {
     expect(discardAttachment).not.toHaveBeenCalled();
   });
 
+  it("says a text-only model cannot take the image instead of uploading it", async () => {
+    const user = userEvent.setup();
+    const putAttachment = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          { putAttachment, discardAttachment: vi.fn(), attachment: vi.fn() } as never
+        }
+        controller={controller({ sendFollowUp: vi.fn(async () => true) })}
+        providerGroups={[textOnlyProviderGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    pasteImage(screen.getByLabelText("Follow-up message"));
+
+    const attached = await screen.findByLabelText("Attached images");
+    expect(within(attached).getByRole("status")).toHaveTextContent(
+      "Local OpenCode — Model One does not support images. Choose a vision model to attach one.",
+    );
+    // Nothing is uploaded for a turn the host would refuse anyway.
+    expect(putAttachment).not.toHaveBeenCalled();
+  });
+
   it("takes back a removed image on the host as well as in the composer", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);
@@ -1003,4 +1027,23 @@ function controller(
 function pasteImage(composer: HTMLElement): void {
   const file = new File([new Uint8Array([137, 80, 78])], "pasted.png", { type: "image/png" });
   fireEvent.paste(composer, { clipboardData: { files: [file], items: [] } });
+}
+
+/** The bound provider group, with a model that reads text and nothing else. */
+function textOnlyProviderGroup(): PickerGroup {
+  const group = providerGroup();
+  return {
+    ...group,
+    sections: [
+      {
+        ...group.sections[0]!,
+        models: [
+          {
+            ...group.sections[0]!.models[0]!,
+            model: { ...group.sections[0]!.models[0]!.model, inputModalities: ["text"] },
+          },
+        ],
+      },
+    ],
+  } as never;
 }

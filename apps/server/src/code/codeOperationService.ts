@@ -502,7 +502,7 @@ export interface CodeOperationServiceOptions {
    * turn that names an attachment rather than silently sending it without.
    */
   readonly attachments?: CodeAttachmentStore;
-  /** Whether a thread's provider can take an image at all. */
+  /** Whether the thread's own provider and model can read an image. */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
   readonly events: CodeOperationEventPort;
   /**
@@ -1544,13 +1544,13 @@ export class CodeOperationService {
         "Provider prompt evidence is unavailable.",
       );
     const context = await this.#resolveThreadMentions(command.threadMentionIds, windowId);
-    // A provider that cannot take a picture is told so here rather than sent
+    // A model that cannot read a picture is told so plainly rather than sent
     // the turn with its images quietly removed.
     if (references.length > 0 && this.#options.supportsAttachments?.(thread) !== true) {
       return this.#failed(
         command.operationId,
         "invalid",
-        "This provider and model cannot accept images.",
+        "The selected model does not support images. Choose a vision model, or remove the attachments.",
       );
     }
     const attachments = await this.#attachmentInputs(command.threadId, references);

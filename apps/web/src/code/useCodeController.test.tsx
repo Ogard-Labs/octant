@@ -873,7 +873,7 @@ describe("useCodeController", () => {
     const replyId = "60000000-0000-4000-8000-000000000011";
     const operationId = "70000000-0000-4000-8000-000000000010";
     const conversation = vi.fn(async () => ({
-      version: 1 as const,
+      version: 2 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -922,7 +922,7 @@ describe("useCodeController", () => {
     const reasoningId = "60000000-0000-4000-8000-000000000014";
     const operationId = "70000000-0000-4000-8000-000000000012";
     const conversation = vi.fn(async () => ({
-      version: 1 as const,
+      version: 2 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -989,7 +989,7 @@ describe("useCodeController", () => {
     const conversation = vi
       .fn()
       .mockResolvedValueOnce({
-        version: 1,
+        version: 2,
         threadId: ids.thread,
         turns: [
           {
@@ -1008,7 +1008,7 @@ describe("useCodeController", () => {
         hasMore: false,
       })
       .mockResolvedValueOnce({
-        version: 1,
+        version: 2,
         threadId: ids.thread,
         turns: [
           {
@@ -1027,7 +1027,7 @@ describe("useCodeController", () => {
         hasMore: false,
       })
       .mockResolvedValue({
-        version: 1,
+        version: 2,
         threadId: ids.thread,
         turns: [
           {
@@ -1088,7 +1088,7 @@ describe("useCodeController", () => {
     const liveId = "60000000-0000-4000-8000-000000000031";
     const operationId = "70000000-0000-4000-8000-000000000030";
     const conversation = vi.fn(async () => ({
-      version: 1 as const,
+      version: 2 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1238,7 +1238,7 @@ function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
     bootstrap: vi.fn(async () => bootstrap()),
     queryBoard: vi.fn(),
     conversation: vi.fn(async () => ({
-      version: 1 as const,
+      version: 2 as const,
       threadId: ids.thread,
       turns: [],
       nextCursor: 0,

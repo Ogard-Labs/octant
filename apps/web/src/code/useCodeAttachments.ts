@@ -24,6 +24,8 @@ export interface CodeAttachments {
   /** Whether an upload is still in flight. Sending waits for it. */
   readonly busy: boolean;
   readonly attach: (files: ReadonlyArray<File>) => Promise<void>;
+  /** Refuse an attachment the composer itself knows this turn cannot carry. */
+  readonly refuse: (message: string) => void;
   readonly remove: (attachmentId: CodeAttachmentId) => void;
   /** Hand this turn's images over and clear the chips. */
   readonly takeForSend: () => ReadonlyArray<CodeAttachmentReference>;
@@ -160,5 +162,5 @@ export function useCodeAttachments(input: {
     return taken;
   }, [apply, forget]);
 
-  return { staged, message, busy, attach, remove, takeForSend };
+  return { staged, message, busy, attach, refuse: setMessage, remove, takeForSend };
 }

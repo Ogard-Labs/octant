@@ -31,7 +31,7 @@ Code starts approval-gated unless the user explicitly remembers Full access. A W
 
 Paste or drop a PNG, JPEG, WebP, or GIF into the thread composer to send it with your next message. Each image uploads to the host as you attach it, and the turn sends only the identifier the host answered with, so the provider receives bytes the host itself accepted.
 
-A turn carries at most eight images, each up to 10 MB, alongside a written message. Repository files do not need attaching — name them with `@path` instead. If the thread's provider and model cannot read images, the turn fails and says so rather than sending your message with the pictures quietly dropped.
+A turn carries at most eight images, each up to 10 MB, alongside a written message. Repository files do not need attaching — name them with `@path` instead. If the thread's model does not read images, the composer says so at the paste — _"Local OpenCode — Model One does not support images. Choose a vision model to attach one."_ — instead of taking the upload. The host checks the thread's own model again at send, so a turn never reaches a model with its pictures quietly dropped.
 
 Images stay readable in the transcript after a restart. Removing a chip before sending discards the image on the host too.
 

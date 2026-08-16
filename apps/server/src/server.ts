@@ -2410,9 +2410,17 @@ export function startOctantServer(
             ) === true
           );
         },
-        supportsAttachments: (thread) =>
-          providerRuntimeRegistry.observedState(thread.providerInstanceId)?.capabilities
-            .nativeAttachments === "supported",
+        supportsAttachments: (thread) => {
+          const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+          if (observed?.capabilities.nativeAttachments !== "supported") return false;
+          // Provider-level support only says some model reads images. A turn
+          // goes to one model, so the thread's own model has to be that one.
+          return observed.models.some(
+            (model) =>
+              String(model.id) === String(thread.modelId) &&
+              model.inputModalities.includes("image"),
+          );
+        },
         browserAutomation: {
           resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
           inspectThread: (windowId, threadId) =>

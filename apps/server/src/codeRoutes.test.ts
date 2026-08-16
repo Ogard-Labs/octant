@@ -281,7 +281,7 @@ describe("Code routes", () => {
 
   it("reads a versioned paginated conversation through authenticated thread authority", async () => {
     const conversation = vi.fn(async () => ({
-      version: 1,
+      version: 2,
       threadId,
       turns: [],
       nextCursor: 41,
@@ -295,7 +295,7 @@ describe("Code routes", () => {
 
     expect(response?.status).toBe(200);
     await expect(response?.json()).resolves.toEqual({
-      version: 1,
+      version: 2,
       threadId,
       turns: [],
       nextCursor: 41,
