@@ -69,6 +69,7 @@ describe("desktop preload bridge", () => {
       "listRemotePairingRequests",
       "maximizeOrRestore",
       "minimize",
+      "notifyAttention",
       "openBrowserExternal",
       "openCodeExternalEditor",
       "openInNewWindow",
@@ -86,6 +87,7 @@ describe("desktop preload bridge", () => {
       "rotateRemoteHostIdentity",
       "selectLocalPluginFolder",
       "selectProjectRoot",
+      "setAttentionBadge",
       "setProviderCredential",
       "setSidebarMaterialPreference",
       "setSidebarVibrancyMode",
@@ -237,6 +239,32 @@ describe("desktop preload bridge", () => {
         },
       ],
     ]);
+  });
+
+  it("maps attention notifications and the badge, rejecting malformed ones before IPC", async () => {
+    const invoke = vi.fn(async () => undefined);
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+    );
+
+    await bridge.notifyAttention({ reason: "turn-finished", threadTitle: "Diff pane" });
+    await bridge.setAttentionBadge(3);
+
+    expect(invoke.mock.calls).toEqual([
+      [IPC_CHANNELS.attentionNotify, { reason: "turn-finished", threadTitle: "Diff pane" }],
+      [IPC_CHANNELS.attentionBadge, 3],
+    ]);
+
+    invoke.mockClear();
+    await expect(
+      bridge.notifyAttention({ reason: "shipped" as never, threadTitle: "Diff pane" }),
+    ).rejects.toThrow(TypeError);
+    await expect(bridge.notifyAttention({ reason: "turn-finished", threadTitle: " " })).rejects.toThrow(
+      TypeError,
+    );
+    await expect(bridge.setAttentionBadge(Number.NaN)).rejects.toThrow(TypeError);
+    expect(invoke).not.toHaveBeenCalled();
   });
 
   it("rejects malformed Project window targets before IPC", async () => {
