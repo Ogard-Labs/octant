@@ -75,6 +75,8 @@ export interface CodeWorkspaceProps {
   readonly projections?: CodeWorkspaceProjections;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
+  /** Opens one changed repository file as a Code file tab, from the diff. */
+  readonly onOpenFile?: (relativePath: string) => void;
   /** Re-opens the file projection so the editor can leave a stale revision. */
   readonly onRequestFileRefresh?: () => void;
   readonly onOpenSurface?: (kind: CodeOverviewSurfaceKind) => void;
@@ -390,6 +392,7 @@ function GitWorkspaceSurface(
       <CodeDiffPane
         client={props.client}
         diff={{ state: "available", observation, ...props.scope }}
+        {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
       />
     );
   }
