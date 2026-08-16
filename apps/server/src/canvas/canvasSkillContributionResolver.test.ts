@@ -6,7 +6,7 @@ import {
 } from "@octant/contracts";
 import type { CanvasRefreshRequest, CanvasRefreshSkill } from "@octant/contracts/canvas-refresh";
 import type { CanvasSkillContribution } from "@octant/contracts/canvas-skill";
-import type { CanvasSkillTrustFacts } from "@octant/extensions";
+import type { CanvasSkillTrustFacts } from "@octant/plugin-host";
 import { createCanvasSkillContributionResolver } from "./canvasSkillContributionResolver";
 
 const digest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";

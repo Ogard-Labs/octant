@@ -9,7 +9,7 @@ import {
   looksLikeAgentPlugin,
   type AgentPluginsPackageEntry,
   type LoadedAgentPlugin,
-} from "@octant/extensions/agent-plugins";
+} from "@octant/plugin-host/agent-plugins";
 
 const DEFAULT_MAX_ENTRIES = 4_096;
 const DEFAULT_MAX_FILE_BYTES = 16 * 1_024 * 1_024;

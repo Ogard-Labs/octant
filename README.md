@@ -158,7 +158,7 @@ scripts (`bun run smoke:*`) and are not part of `verify`.
 | `packages/provider-sdk`   | Provider driver interface, normalized runtime events, discovery, conformance |
 | `packages/client-runtime` | Authenticated transport and replay synchronization                           |
 | `packages/host-runtime`   | Host identity, paths, ownership, service and artifact lifecycle              |
-| `packages/extensions`     | Extension and skill packages, trust, and activation policy                   |
+| `packages/plugin-host`    | Extension and skill packages, trust, and activation policy                   |
 | `packages/theme`          | Semantic theme schema and projections                                        |
 | `packages/cli`            | `octant` server and browser launcher                                         |
 | `scripts`                 | Dev loop, packaging, smokes, and repository checks                           |

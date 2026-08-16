@@ -189,6 +189,21 @@ Each step keeps `git diff --check`, existing extension conformance tests, and
 the activation ladder tests green; a step that requires weakening an invariant
 is out of scope.
 
+Step 1 landed with one deviation from the text above: `packages/extensions`
+renamed to `packages/plugin-host` as described, but `packages/plugin-api` is a
+curated re-export of `@octant/contracts/extensions` rather than a physical
+schema relocation. The manifest composes core primitives (`OctantMode`,
+`ToolExtensionId`) that `packages/contracts` already owns and that
+`packages/plugin-api` cannot depend on without inverting `packages/contracts`'
+zero-first-party-dependency invariant (0004). Re-export preserves that
+invariant and still gives third parties a narrow, named import surface;
+physical extraction would require first factoring those shared primitives
+into a package below both, which is out of scope here. Step 2 landed narrowly:
+a `sidebar.destination` contribution registry (`apps/web/src/shell/contributionRegistry.ts`)
+replaces the hard-coded thread-board/pull-requests availability check;
+`settings.section` and the remaining contribution points (panes, preview
+viewers, appearance) are not yet built.
+
 ## Consequences
 
 - Product surfaces become explainable: every sidebar entry, pane, and settings

@@ -2,7 +2,7 @@ import type { ProviderInstanceId } from "@octant/contracts";
 import {
   resolveDraftExtensionReference,
   type ExtensionAddressingCatalog,
-} from "@octant/extensions";
+} from "@octant/plugin-host";
 import { describe, expect, it, vi } from "vitest";
 import {
   deriveCatalogEpoch,
