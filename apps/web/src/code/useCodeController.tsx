@@ -27,6 +27,7 @@ import {
   EMPTY_TURN_ACTIVITY,
   appendReasoning,
   applyActivityEvent,
+  type CodeActivityRow,
   type CodeTurnActivity,
 } from "./transcriptActivity";
 import {
@@ -305,6 +306,7 @@ export function useCodeController(options: CodeControllerOptions) {
       }
 
       const messages: CodeConversationMessage[] = [];
+      const replayedActivity = new Map<string, CodeTurnActivity>();
       for (const turn of turns) {
         const prompt = await readOperationText(
           client,
@@ -342,8 +344,43 @@ export function useCodeController(options: CodeControllerOptions) {
           modelId: turn.modelId,
           status: turn.status,
         });
+        // The steps this turn recorded, folded into the same rows the live
+        // transcript builds, so a reopened thread reads like the turn did.
+        const steps = turn.steps ?? [];
+        if (steps.length > 0 || turn.stepsTruncated === true) {
+          const rows: CodeActivityRow[] = [];
+          let reasoning = "";
+          for (const step of steps) {
+            if (step.kind === "tool") {
+              rows.push({
+                kind: "tool",
+                id: String(step.toolCallId),
+                toolName: step.toolName,
+                state: step.state,
+                ...(step.summary === undefined ? {} : { summary: step.summary }),
+              });
+              continue;
+            }
+            const text = await readOperationText(
+              client,
+              threadId,
+              turn.operationId,
+              step.content.contentId,
+            );
+            if (text !== undefined) reasoning += text;
+          }
+          if (!isActive(request, threadGeneration, mounted)) return undefined;
+          replayedActivity.set(String(turn.operationId), {
+            rows,
+            reasoning,
+            ...(turn.stepsTruncated === true ? { truncated: true } : {}),
+          });
+        }
       }
       setConversation(messages);
+      if (replayedActivity.size > 0) {
+        setTurnActivity((current) => new Map([...current, ...replayedActivity]));
+      }
       const latestTurn = turns.at(-1);
       const incomplete = latestTurn?.status === "incomplete";
       if (incomplete && latestTurn !== undefined) {

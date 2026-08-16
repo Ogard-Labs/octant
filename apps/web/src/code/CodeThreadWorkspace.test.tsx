@@ -513,6 +513,39 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).not.toHaveBeenCalled();
   });
 
+  it("says so when a replayed turn kept only its earliest steps", () => {
+    const operationId = "70000000-0000-4000-8000-000000000052";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: `${operationId}:assistant`,
+              role: "assistant",
+              text: "Done.",
+              operationId: operationId as never,
+              status: "completed",
+            },
+          ],
+          turnActivity: new Map([
+            [
+              operationId,
+              {
+                reasoning: "",
+                truncated: true,
+                rows: [{ kind: "tool", id: "call-1", toolName: "Read", state: "completed" }],
+              },
+            ],
+          ]),
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    // The transcript never implies it is showing the whole turn when it is not.
+    expect(screen.getByText("1 step · earliest kept")).toBeVisible();
+  });
+
   it("collapses a turn's tool steps and reasoning until the user opens them", async () => {
     const user = userEvent.setup();
     const operationId = "70000000-0000-4000-8000-000000000051";

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   ActorId,
   CodeOperationEventFrame,
+  MAX_CODE_CONVERSATION_TURN_STEPS,
   ReplayCursor,
   decodeCodeEvidenceReference,
   decodeCodeOperationEvent,
@@ -241,6 +242,98 @@ describe("CodeOperationEventStore", () => {
       restarted.conversation({ threadId: otherThreadId, afterCursor: 0, limit: 10 }).turns,
     ).toEqual([]);
     reopened.connection.close();
+  });
+
+  it("replays a turn's tool calls and reasoning in order, folded and bounded", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000032",
+      digest: "f".repeat(64),
+      byteLength: 9,
+    });
+    const reasoning = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000033",
+      digest: "a".repeat(64),
+      byteLength: 5,
+    });
+    const toolCallId = "89000000-0000-4000-8000-000000000060";
+    let cursor = 0;
+    const append = (event: Parameters<typeof store.append>[0]["event"]) =>
+      store.append({ threadId, operationId, expectedCursor: cursor++, event });
+
+    append(
+      decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt,
+      }),
+    );
+    append({ kind: "provider-content", channel: "reasoning", content: reasoning });
+    append({ kind: "tool-activity", toolCallId, toolName: "Read", state: "started" });
+    append({
+      kind: "tool-activity",
+      toolCallId,
+      toolName: "Read",
+      state: "completed",
+      summary: "read 40 lines",
+    });
+    append({ kind: "provider-content", channel: "message", content: prompt });
+    append(stateEvent("completed"));
+
+    const [turn] = store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns;
+    // The message stays the message; the work around it is separate, in the
+    // order it happened, with one row per tool call rather than one per event.
+    expect(turn?.assistant).toEqual([prompt]);
+    expect(turn?.steps).toEqual([
+      { kind: "reasoning", content: reasoning },
+      {
+        kind: "tool",
+        toolCallId,
+        toolName: "Read",
+        state: "completed",
+        summary: "read 40 lines",
+      },
+    ]);
+    expect(turn?.stepsTruncated).toBeUndefined();
+    fixture.connection.close();
+  });
+
+  it("stops recording steps at the bound and says the turn had more", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000034",
+      digest: "b".repeat(64),
+      byteLength: 3,
+    });
+    let cursor = 0;
+    const append = (event: Parameters<typeof store.append>[0]["event"]) =>
+      store.append({ threadId, operationId, expectedCursor: cursor++, event });
+    append(
+      decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt,
+      }),
+    );
+    for (let index = 0; index < MAX_CODE_CONVERSATION_TURN_STEPS + 5; index += 1) {
+      append({
+        kind: "tool-activity",
+        toolCallId: `89000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+        toolName: "Read",
+        state: "completed",
+      });
+    }
+
+    const [turn] = store.conversation({ threadId, afterCursor: 0, limit: 10 }).turns;
+    expect(turn?.steps).toHaveLength(MAX_CODE_CONVERSATION_TURN_STEPS);
+    expect(turn?.stepsTruncated).toBe(true);
+    fixture.connection.close();
   });
 
   it("preserves failed and incomplete provider-turn outcomes honestly", () => {
