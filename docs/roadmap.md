@@ -49,8 +49,6 @@ Hardening in progress for the preview:
 - Remote reconnect replay: a paired browser that sleeps through events should
   catch up instead of silently missing them (the replay path was never built;
   its scaffolding was removed rather than kept as dead code).
-- Refresh the Code editor and explorer when files change outside the app; the
-  earlier unowned watcher was removed and needs a real lifecycle owner.
 - Standing security follow-ups: identity-bound confined writes, consistent
   journal-hydration limits across projections, a gate that compares the remote
   forward list against the route classifier, and scoping of the remaining

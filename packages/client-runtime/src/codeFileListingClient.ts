@@ -1,6 +1,8 @@
 import {
+  decodeCodeFileChangeNotice,
   decodeCodeFileListingResult,
   type CodeCheckoutId,
+  type CodeFileChangeNotice,
   type CodeFileListingResult,
   type CodeRelativePath,
   type CodeThreadId,
@@ -20,8 +22,20 @@ export interface CodeFileListingQuery {
   readonly directory?: CodeRelativePath | undefined;
 }
 
+export interface CodeFileWatchQuery {
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: CodeCheckoutId;
+}
+
 export interface CodeFileListingClient {
   list(query: CodeFileListingQuery, signal?: AbortSignal): Promise<CodeFileListingResult>;
+  /**
+   * Notices that files under the checkout changed, for as long as the caller
+   * keeps the signal open. The stream ends rather than erroring when the host
+   * cannot watch, so a caller treats its end as "no longer live" and may open
+   * another one; it never means the checkout is empty.
+   */
+  watch(query: CodeFileWatchQuery, signal: AbortSignal): AsyncGenerator<CodeFileChangeNotice>;
 }
 
 export class CodeFileListingClientFailure extends Error {
@@ -75,7 +89,75 @@ export function createCodeFileListingClient(
       }
       return decodeCodeFileListingResult(body);
     },
+
+    watch(query, signal) {
+      const url = new URL("/api/code/files/watch", options.baseUrl);
+      url.searchParams.set("threadId", String(query.threadId));
+      url.searchParams.set("checkoutId", String(query.checkoutId));
+      return readNoticeStream(
+        fetch(url.toString(), {
+          method: "GET",
+          headers: { "x-octant-window-capability": options.windowCapability },
+          signal,
+        }),
+        signal,
+      );
+    },
   };
+}
+
+/**
+ * Read one NDJSON notice per line until the host or the caller stops.
+ *
+ * A malformed line ends the stream instead of being skipped: the notice is the
+ * only signal that the surface is stale, so a body this client cannot parse is
+ * a reason to stop trusting the connection, not to keep reading it.
+ */
+async function* readNoticeStream(
+  responsePromise: Promise<Response>,
+  signal: AbortSignal,
+): AsyncGenerator<CodeFileChangeNotice> {
+  let response: Response;
+  try {
+    response = await responsePromise;
+  } catch {
+    return;
+  }
+  if (!response.ok || response.body === null) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      if (signal.aborted) return;
+      const next = await reader.read();
+      if (next.done) break;
+      buffer += decoder.decode(next.value, { stream: true });
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line.trim().length > 0) {
+          let notice: CodeFileChangeNotice;
+          try {
+            notice = decodeCodeFileChangeNotice(JSON.parse(line));
+          } catch {
+            return;
+          }
+          yield notice;
+        }
+        newlineIndex = buffer.indexOf("\n");
+      }
+    }
+  } catch {
+    // A dropped connection is an ordinary end of a live stream.
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Ignore cancellation races while tearing down the stream.
+    }
+  }
 }
 
 function messageFrom(body: unknown, fallback: string): string {

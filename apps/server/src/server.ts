@@ -107,6 +107,7 @@ import { CodeEvidenceStore } from "./code/codeEvidenceStore";
 import { CodeAttachmentStore } from "./code/codeAttachmentStore";
 import { CodeFileService } from "./code/codeFileService";
 import { CodeFileListingService } from "./code/codeFileListingService";
+import { CodeFileWatchService } from "./code/codeFileWatchService";
 import { RepositoryTestDiscoveryService } from "./code/repositoryTestDiscoveryService";
 import {
   CodeService,
@@ -1016,6 +1017,7 @@ function withCodeOperationRuntime(
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
+    ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
     ...(service.stageEvidence === undefined
       ? {}
       : { stageEvidence: service.stageEvidence.bind(service) }),
@@ -1046,6 +1048,7 @@ function withCodeBoard(
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
+    ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
     queryBoard,
     ...(service.executeOperation === undefined
       ? {}
@@ -1663,6 +1666,9 @@ export function startOctantServer(
     // Listing reads directory entries under the bound checkout and needs no
     // file helper, so it is available even when the helper transport is not.
     const codeFileListing = new CodeFileListingService();
+    // Watching needs no file helper either: it reports which paths changed and
+    // never reads one, so the explorer stays live even when mutations cannot.
+    const codeFileWatch = new CodeFileWatchService();
     // Discovery reads only the checkout's package.json and .octant/tests.json,
     // so it needs no file helper either. The same instance authorizes a run.
     const codeTestDiscovery = new RepositoryTestDiscoveryService();
@@ -1789,6 +1795,7 @@ export function startOctantServer(
         roots,
         files: codeFiles,
         tests: codeTestDiscovery,
+        watcher: codeFileWatch,
         content: codeContent,
         evidence: codeEvidence,
         attachments: codeAttachments,

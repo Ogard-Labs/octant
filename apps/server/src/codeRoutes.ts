@@ -23,6 +23,7 @@ import {
   decodeCodeTerminalInspection,
   decodeCodeTerminalInspectionRequest,
   decodeCodeConversationPage,
+  decodeCodeFileChangeNotice,
   decodeCodeFileListingResult,
   decodeCodeFileOpenResultEnvelope,
   decodeCodeFileSaveResultEnvelope,
@@ -51,6 +52,7 @@ import {
   type CodeTerminalInspection,
   type CodeTerminalInspectionRequest,
   type CodeConversationPage,
+  type CodeFileChangeNotice,
   type CodeFileListingResult,
   type CodeFileOpenResultEnvelope,
   type CodeFileSaveResultEnvelope,
@@ -115,6 +117,12 @@ export interface CodeFileListingInput {
   readonly checkoutId: typeof CodeCheckoutId.Type;
   /** Subdirectory relative to the checkout root. Absent lists the root. */
   readonly directory?: CodeRelativePath | undefined;
+  readonly signal?: AbortSignal | undefined;
+}
+
+export interface CodeFileWatchInput {
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: typeof CodeCheckoutId.Type;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -213,6 +221,15 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     input: CodeFileListingInput,
   ) => Promise<CodeFileListingResult> | CodeFileListingResult;
+  /**
+   * Live notices that files under the thread's checkout changed. Optional for
+   * the same reason as `listFiles`: a host with no watcher answers
+   * `unavailable` rather than 404, and the renderer keeps manual refresh.
+   */
+  readonly watchFiles?: (
+    authenticatedWindowId: WindowId,
+    input: CodeFileWatchInput,
+  ) => AsyncIterable<CodeFileChangeNotice>;
   /**
    * The repository tests the thread's checkout offers. Optional for the same
    * reason as `listFiles`: a host with no discovery answers `unavailable`
@@ -633,6 +650,27 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "file-watch": {
+          if (request.method !== "GET") {
+            throw new CodeRouteRejected("Code request is invalid.", 400);
+          }
+          if (dependencies.service.watchFiles === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code file watching is unavailable." },
+              503,
+              origin,
+            );
+          }
+          const watchInput = decodeFileWatchQuery(url);
+          return noticeStreamResponse(
+            dependencies.service.watchFiles(authenticatedWindowId, {
+              ...watchInput,
+              signal: request.signal,
+            }),
+            request.signal,
+            origin,
+          );
+        }
         case "test-listing": {
           if (request.method !== "GET") {
             throw new CodeRouteRejected("Code request is invalid.", 400);
@@ -780,6 +818,7 @@ type MatchedRoute =
         | "file-save"
         | "file-open"
         | "file-listing"
+        | "file-watch"
         | "test-listing"
         | "stage-evidence"
         | "attachment"
@@ -894,6 +933,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/files/content") return { kind: "file-save" };
   if (pathname === "/api/code/files/open") return { kind: "file-open" };
   if (pathname === "/api/code/files/listing") return { kind: "file-listing" };
+  if (pathname === "/api/code/files/watch") return { kind: "file-watch" };
   if (pathname === "/api/code/tests/listing") return { kind: "test-listing" };
   if (pathname === "/api/code/evidence") return { kind: "stage-evidence" };
   if (pathname === "/api/code/attachments") return { kind: "attachment" };
@@ -1058,6 +1098,24 @@ function decodeFileListingQuery(url: URL): Omit<CodeFileListingInput, "signal"> 
   }
 }
 
+/** Decode a watch query. A watch is scoped to the whole checkout, so it names
+ * only the thread and its checkout — there is no directory to narrow. */
+function decodeFileWatchQuery(url: URL): Omit<CodeFileWatchInput, "signal"> {
+  const threadId = url.searchParams.get("threadId");
+  const checkoutId = url.searchParams.get("checkoutId");
+  if (threadId === null || checkoutId === null || url.searchParams.size > 2) {
+    throw new CodeRouteRejected("Code file watch query is invalid.", 400);
+  }
+  try {
+    return {
+      threadId: decodeCodeThreadId(threadId),
+      checkoutId: decodeCheckoutId(checkoutId),
+    };
+  } catch {
+    throw new CodeRouteRejected("Code file watch query is invalid.", 400);
+  }
+}
+
 /**
  * Decode an open query. The path is required and, exactly like the listing's
  * directory, must survive the strict relative-path contract: the path the
@@ -1192,6 +1250,73 @@ function ndjsonResponse(
       "content-type": "application/x-ndjson",
     },
   });
+}
+
+/**
+ * Stream change notices as NDJSON for as long as the client stays connected.
+ *
+ * Unlike replay, a watch has no last frame, so the body is produced lazily
+ * rather than collected first. That also means a failure after the first byte
+ * can no longer become a status code: the stream simply ends, and the client
+ * reconnects into a fresh authorization rather than being told a half-truth.
+ */
+function noticeStreamResponse(
+  notices: AsyncIterable<CodeFileChangeNotice>,
+  signal: AbortSignal,
+  origin: string | null,
+): Response {
+  const encoder = new TextEncoder();
+  const iterator = notices[Symbol.asyncIterator]();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        for (;;) {
+          if (signal.aborted) {
+            controller.close();
+            return;
+          }
+          const next = await iterator.next();
+          if (next.done === true) {
+            controller.close();
+            return;
+          }
+          const line = serializeNoticeLine(next.value);
+          if (line === undefined) continue;
+          controller.enqueue(encoder.encode(line));
+          return;
+        }
+      } catch {
+        controller.close();
+      }
+    },
+    async cancel() {
+      await iterator.return?.(undefined);
+    },
+  });
+  return new Response(body, {
+    status: 200,
+    headers: {
+      ...Object.fromEntries(corsHeaders(origin).entries()),
+      "content-type": "application/x-ndjson",
+      "cache-control": "no-store",
+    },
+  });
+}
+
+/**
+ * One notice as a line, or the same notice reduced to "everything changed"
+ * when naming the paths would exceed the line budget. A notice is never
+ * dropped for being large: losing it would leave the surface silently stale.
+ */
+function serializeNoticeLine(notice: CodeFileChangeNotice): string | undefined {
+  try {
+    const line = `${JSON.stringify(decodeCodeFileChangeNotice(notice))}\n`;
+    if (Buffer.byteLength(line, "utf8") <= MAX_CODE_NDJSON_LINE_BYTES) return line;
+    const reduced = decodeCodeFileChangeNotice({ ...notice, paths: [], truncated: true });
+    return `${JSON.stringify(reduced)}\n`;
+  } catch {
+    return undefined;
+  }
 }
 
 function serializeNdjsonFrame(frame: CodeEventFrame | CodeOperationEventFrame): string {

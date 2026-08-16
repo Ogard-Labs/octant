@@ -15,6 +15,18 @@ const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 const threadId = "00000000-0000-4000-8000-000000000902";
 const checkoutId = "00000000-0000-4000-8000-000000000903";
 const listingUrl = `http://127.0.0.1/api/code/files/listing?threadId=${threadId}&checkoutId=${checkoutId}`;
+const watchUrl = `http://127.0.0.1/api/code/files/watch?threadId=${threadId}&checkoutId=${checkoutId}`;
+
+function notice(paths: ReadonlyArray<string>, truncated = false) {
+  return {
+    kind: "code-file-change",
+    threadId,
+    checkoutId,
+    paths,
+    truncated,
+    observedAt: "2026-08-14T08:00:01.000Z",
+  };
+}
 
 function listedResult() {
   return {
@@ -104,5 +116,58 @@ describe("Code file listing route", () => {
     const response = await handler(get());
     expect(response?.status).toBe(503);
     expect(await response?.json()).toMatchObject({ category: "unavailable" });
+  });
+});
+
+describe("Code file watch route", () => {
+  it("streams the host's change notices as NDJSON", async () => {
+    const { handler } = createRoute({
+      watchFiles: () =>
+        (async function* () {
+          yield notice(["src/main.ts"]);
+          yield notice([], true);
+        })(),
+    });
+    const response = await handler(get(watchUrl));
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("content-type")).toBe("application/x-ndjson");
+    const lines = (await response!.text()).trim().split("\n");
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      notice(["src/main.ts"]),
+      notice([], true),
+    ]);
+  });
+
+  it("answers unavailable when the host wired no watcher", async () => {
+    const { handler } = createRoute({ watchFiles: undefined });
+    const response = await handler(get(watchUrl));
+    expect(response?.status).toBe(503);
+    expect(await response?.json()).toMatchObject({ category: "unavailable" });
+  });
+
+  it("rejects an unknown query parameter and a mutating method", async () => {
+    const watchFiles = vi.fn();
+    const { handler } = createRoute({ watchFiles });
+    expect((await handler(get(`${watchUrl}&directory=src`)))?.status).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request(watchUrl, {
+            method: "PUT",
+            headers: { "x-octant-window-capability": capability },
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(watchFiles).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unauthenticated watch", async () => {
+    const watchFiles = vi.fn();
+    const { handler } = createRoute({ watchFiles });
+    const response = await handler(new Request(watchUrl, { method: "GET" }));
+    expect(response?.status).toBe(401);
+    expect(watchFiles).not.toHaveBeenCalled();
   });
 });

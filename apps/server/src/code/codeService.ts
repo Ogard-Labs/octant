@@ -40,6 +40,7 @@ import {
   type CodeEventFrame,
   type CodeFailure,
   type CodeFileId,
+  type CodeFileChangeNotice,
   type CodeFileListingResult,
   type CodeFileOpenResultEnvelope,
   type CodeFileReference,
@@ -76,6 +77,7 @@ import {
   CodeAttachmentTooLarge,
 } from "./codeAttachmentStore";
 import type { CodeFileService, CodeFileOpenResult, CodeFileSaveResult } from "./codeFileService";
+import type { CodeFileWatchService } from "./codeFileWatchService";
 import type { FileIdentity } from "./fileOperationPort";
 import {
   approvalContextDigest,
@@ -328,6 +330,13 @@ export interface CodeServiceOptions {
    * empty list instead of pretending the repository has tests it cannot name.
    */
   readonly tests?: CodeRepositoryTestDiscoveryPort;
+  /**
+   * Live observation of the bound checkout. Optional for the same reason as
+   * `files.list`: a host that wired no watcher ends the stream immediately, so
+   * the renderer keeps its manual refresh instead of waiting on notices that
+   * will never come.
+   */
+  readonly watcher?: Pick<CodeFileWatchService, "watch">;
   readonly content: CodeContentStore;
   readonly evidence?: {
     readonly put: (
@@ -395,6 +404,12 @@ export interface CodeListFilesInput {
   readonly signal?: AbortSignal | undefined;
 }
 
+export interface CodeWatchFilesInput {
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: CodeCheckoutId;
+  readonly signal?: AbortSignal | undefined;
+}
+
 export interface CodeListTestsInput {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
@@ -431,6 +446,7 @@ export class CodeService {
   readonly #roots: CodeFileRootAuthorityPort;
   readonly #files: Pick<CodeFileService, "open" | "save"> & Partial<Pick<CodeFileService, "list">>;
   readonly #tests: CodeRepositoryTestDiscoveryPort | undefined;
+  readonly #watcher: Pick<CodeFileWatchService, "watch"> | undefined;
   readonly #content: CodeContentStore;
   readonly #evidence: CodeServiceOptions["evidence"];
   readonly #attachments: CodeServiceOptions["attachments"];
@@ -467,6 +483,7 @@ export class CodeService {
     this.#roots = options.roots;
     this.#files = options.files;
     this.#tests = options.tests;
+    this.#watcher = options.watcher;
     this.#content = options.content;
     this.#evidence = options.evidence;
     this.#attachments = options.attachments;
@@ -1455,6 +1472,42 @@ export class CodeService {
       checkoutId: checkout.id,
       rootPath: root.rootPath,
       ...(input.directory === undefined ? {} : { directory: input.directory }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+  }
+
+  /**
+   * Watch the checkout bound to a Code thread for changes.
+   *
+   * Authority is resolved once, before the subscription exists, through the
+   * same checkout read the listing uses — so a watch can never outlive the
+   * grant that opened it by more than the connection itself, and a client that
+   * loses access reconnects into a refusal rather than a live stream. The
+   * notices carry paths only; every refetch they provoke is authorized again.
+   */
+  async *watchFiles(
+    authenticatedWindowId: WindowId,
+    input: CodeWatchFilesInput,
+  ): AsyncGenerator<CodeFileChangeNotice> {
+    const authorized = await this.#authorizeCheckoutRead(
+      authenticatedWindowId,
+      input.threadId,
+      input.checkoutId,
+      "Code file watching is unauthorized.",
+    );
+    const watcher = this.#watcher;
+    if (watcher === undefined) return;
+    const root = await this.#roots.resolve(
+      authenticatedWindowId,
+      authorized.effectiveThread,
+      authorized.checkout,
+      CODE_LISTING_ROOT_PROBE_PATH,
+    );
+    if (root === undefined) return;
+    yield* watcher.watch({
+      threadId: authorized.thread.id,
+      checkoutId: authorized.checkout.id,
+      rootPath: root.rootPath,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
   }
