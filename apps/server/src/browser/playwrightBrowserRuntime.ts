@@ -9,10 +9,11 @@ import type {
 } from "@octant/contracts/browser-automation";
 import { MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS } from "@octant/contracts/browser-automation";
 import { chromium } from "playwright-core";
-import type {
-  BrowserRuntimeObservation,
-  BrowserRuntimePort,
-  BrowserTargetInspection,
+import {
+  BrowserNavigationBlockedError,
+  type BrowserRuntimeObservation,
+  type BrowserRuntimePort,
+  type BrowserTargetInspection,
 } from "./browserRuntimePort";
 import {
   persistProcessReceipt,
@@ -68,7 +69,7 @@ export interface PlaywrightContextPort {
     handler: (route: {
       abort(): Promise<unknown>;
       continue(): Promise<unknown>;
-      request(): { url(): string };
+      request(): { url(): string; isNavigationRequest(): boolean };
     }) => Promise<void>,
   ): Promise<unknown>;
   routeWebSocket(
@@ -107,8 +108,11 @@ export interface PlaywrightBrowserRuntimeOptions {
 
 interface OwnedRuntimeContext {
   readonly context: PlaywrightContextPort;
+  readonly allowedOrigins: ReadonlyArray<string>;
   readonly protectCredentials: boolean;
   page: PlaywrightPagePort | undefined;
+  /** Last top-level navigation the allowlist refused during the current action. */
+  blockedNavigationUrl: string | undefined;
 }
 
 export const DEFAULT_BROWSER_EXECUTABLE_CANDIDATES = [
@@ -166,12 +170,23 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
       policy.acceptsLocalCertificate === true
         ? await browser.newContext({ ignoreHTTPSErrors: true })
         : await browser.newContext();
+    const owned: OwnedRuntimeContext = {
+      context,
+      allowedOrigins: policy.allowedOrigins,
+      protectCredentials: policy.credentialFieldProtection,
+      page: undefined,
+      blockedNavigationUrl: undefined,
+    };
     try {
       // Every request, not only navigations: a subresource reaches the network
       // exactly as a navigation does, and the allowlist is this context's whole
       // authority.
       await context.route("**/*", async (route) => {
-        if (!originAllowed(route.request().url(), policy.allowedOrigins)) {
+        const request = route.request();
+        if (!originAllowed(request.url(), policy.allowedOrigins)) {
+          // Only a refused top-level navigation explains a failed action to the
+          // user; blocked subresources are the allowlist working as intended.
+          if (request.isNavigationRequest()) owned.blockedNavigationUrl = request.url();
           await route.abort();
           return;
         }
@@ -195,12 +210,7 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         }
         route.connectToServer();
       });
-      const page = await context.newPage();
-      const owned: OwnedRuntimeContext = {
-        context,
-        protectCredentials: policy.credentialFieldProtection,
-        page,
-      };
+      owned.page = await context.newPage();
       context.on("page", (candidate) => {
         if (owned.page === undefined) {
           owned.page = candidate;
@@ -234,9 +244,16 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
     signal: AbortSignal,
   ): Promise<BrowserRuntimeObservation> {
     const page = await this.#page(contextId, signal);
+    const owned = this.#contexts.get(contextId);
+    if (owned !== undefined) owned.blockedNavigationUrl = undefined;
     switch (request.kind) {
       case "navigate":
-        await page.goto(required(request.target, "Navigate actions require a URL."));
+        try {
+          await page.goto(required(request.target, "Navigate actions require a URL."));
+        } catch (error) {
+          const blocked = this.#contexts.get(contextId)?.blockedNavigationUrl;
+          throw blocked === undefined ? error : new BrowserNavigationBlockedError(blocked);
+        }
         break;
       case "click":
         if (request.point === undefined) {
@@ -276,6 +293,19 @@ export class PlaywrightBrowserRuntime implements BrowserRuntimePort {
         await page.close();
         this.#contexts.get(contextId)!.page = undefined;
         return {};
+    }
+    // Chromium follows a redirect inside the routed request, so a top-level
+    // document can land on an origin the request guard never saw. The
+    // allowlist is this context's whole authority: leave the page rather than
+    // observe, script, or screenshot an origin outside it.
+    const landed = page.url();
+    if (
+      owned !== undefined &&
+      /^https?:/i.test(landed) &&
+      !originAllowed(landed, owned.allowedOrigins)
+    ) {
+      await page.goto("about:blank").catch(() => undefined);
+      throw new BrowserNavigationBlockedError(landed);
     }
     throwIfAborted(signal);
     return this.#observe(

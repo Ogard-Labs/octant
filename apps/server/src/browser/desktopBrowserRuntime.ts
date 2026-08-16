@@ -5,10 +5,11 @@ import type {
   BrowserThreadId,
 } from "@octant/contracts/browser-automation";
 import type { WindowId } from "@octant/contracts/shell";
-import type {
-  BrowserRuntimeObservation,
-  BrowserRuntimePort,
-  BrowserTargetInspection,
+import {
+  BrowserNavigationBlockedError,
+  type BrowserRuntimeObservation,
+  type BrowserRuntimePort,
+  type BrowserTargetInspection,
 } from "./browserRuntimePort";
 
 const TOKEN_HEADER = "x-octant-browser-broker-token";
@@ -150,6 +151,10 @@ export class DesktopBrowserRuntime implements BrowserRuntimePort {
       ...(signal === undefined ? {} : { signal }),
     });
     if (response.status === 409) throw new DesktopBrowserOwnerUnavailable();
+    if (response.status === 422) {
+      const blocked = await navigationBlockedUrl(response);
+      if (blocked !== undefined) throw new BrowserNavigationBlockedError(blocked);
+    }
     if (!response.ok) throw new Error("Octant desktop Browser broker rejected the request.");
     return (await response.json()) as T;
   }
@@ -162,4 +167,23 @@ export function createDesktopBrowserRuntimeFromEnvironment(
   const token = env.OCTANT_BROWSER_BROKER_TOKEN;
   if (brokerUrl === undefined || token === undefined) return undefined;
   return new DesktopBrowserRuntime({ brokerUrl, token });
+}
+
+async function navigationBlockedUrl(response: Response): Promise<string | undefined> {
+  try {
+    const payload: unknown = await response.json();
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "error" in payload &&
+      payload.error === "navigation-blocked" &&
+      "url" in payload &&
+      typeof payload.url === "string"
+    ) {
+      return payload.url;
+    }
+  } catch {
+    // Not the structured refusal; fall through to the generic broker error.
+  }
+  return undefined;
 }

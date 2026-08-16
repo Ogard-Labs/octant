@@ -20,6 +20,21 @@ export interface BrowserTargetInspection {
   readonly sensitive: boolean;
 }
 
+/**
+ * A navigation was refused because the page tried to move to an origin outside
+ * the context allowlist (typically a redirect such as example.com →
+ * www.example.com). Carries the blocked URL so the failure can tell the user
+ * which origin to open instead of reporting a generic action failure.
+ */
+export class BrowserNavigationBlockedError extends Error {
+  readonly url: string;
+  constructor(url: string) {
+    super(`Navigation to ${url} is outside the browser context allowlist.`);
+    this.name = "BrowserNavigationBlockedError";
+    this.url = url;
+  }
+}
+
 export interface BrowserRuntimePort {
   readonly available: () => Promise<boolean>;
   readonly createContext: (
