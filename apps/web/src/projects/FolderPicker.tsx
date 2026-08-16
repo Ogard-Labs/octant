@@ -20,9 +20,8 @@ export interface FolderPickerProps {
 type PickerStatus = "loading" | "ready" | "error";
 
 /**
- * Host folder browser for Code/Work Project binding.
- * Non-git folders are not selectable for Code, but remain navigable so the
- * user can drill into a Git repository root.
+ * Host folder browser for Code/Work Project binding. Any directory can be
+ * selected in either mode; Git status is shown as information only.
  */
 export function FolderPicker(props: FolderPickerProps) {
   const [status, setStatus] = useState<PickerStatus>("loading");
@@ -135,7 +134,7 @@ export function FolderPicker(props: FolderPickerProps) {
   const title = props.mode === "work" ? "Add Work folder" : "Add Code folder";
   const hint =
     props.mode === "code"
-      ? "Navigate into a folder, then Select a Git repository root."
+      ? "Navigate into a folder, then Select the directory to bind."
       : "Navigate into a folder, then Select the confined project root.";
 
   return (
@@ -218,9 +217,9 @@ export function FolderPicker(props: FolderPickerProps) {
                   <FolderOpen aria-hidden="true" size={14} strokeWidth={1.8} />
                 )}
                 <span className="folder-picker__item-name">{candidate.displayName}</span>
-                {candidate.isSelectable || candidate.unselectableReason === undefined ? null : (
+                {props.mode === "code" && !candidate.isGitRepository ? (
                   <span className="folder-picker__item-badge">Not a git repo</span>
-                )}
+                ) : null}
               </button>
               {candidate.isSelectable ? (
                 <button

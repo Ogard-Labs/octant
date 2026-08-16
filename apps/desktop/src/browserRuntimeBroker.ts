@@ -2,7 +2,10 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserContextPolicy } from "@octant/contracts";
-import type { ReturnTypeOfBrowserSurfaceHost } from "./browserSurfaceHost";
+import {
+  BrowserNavigationBlockedError,
+  type ReturnTypeOfBrowserSurfaceHost,
+} from "./browserSurfaceHost";
 
 const BODY_LIMIT = 96 * 1_024;
 const TOKEN_HEADER = "x-octant-browser-broker-token";
@@ -167,6 +170,9 @@ async function handleBrokerRequest(
   } catch (error) {
     if (error instanceof Error && error.message.includes("not a native Project window")) {
       return failure("owner-unavailable", 409);
+    }
+    if (error instanceof BrowserNavigationBlockedError) {
+      return Response.json({ error: "navigation-blocked", url: error.url }, { status: 422 });
     }
     return failure("browser-operation-failed", 503);
   }

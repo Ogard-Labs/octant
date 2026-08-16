@@ -33,8 +33,8 @@ export function createHostTrayImage<TImage extends HostTrayImage<TImage>>(
     width: HOST_TRAY_ICON_SIZE,
   });
   if (image.isEmpty()) throw new Error("Octant menu-bar icon could not be resized.");
-  // The supplied Octant artwork carries its own contrasting background and is
-  // intentionally presented as artwork rather than a monochrome template.
-  image.setTemplateImage(false);
+  // The menu-bar asset is the bare Octant aperture glyph drawn black on
+  // transparent, so macOS recolors it for light, dark, and selected states.
+  image.setTemplateImage(true);
   return image;
 }

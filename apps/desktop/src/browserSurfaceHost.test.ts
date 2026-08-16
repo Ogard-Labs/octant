@@ -249,6 +249,42 @@ describe("BrowserSurfaceHost", () => {
     await expect(host.act(contextId, { kind: "screenshot" })).rejects.toThrow("unknown");
   });
 
+  it("names the refused redirect target when an allowed navigation moves off-origin", async () => {
+    const created = view();
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const redirectGuard = vi
+      .mocked(created.webContents.on)
+      .mock.calls.find(([event]) => event === "will-redirect")?.[1];
+    // Chromium cancels the load when the guard refuses the redirect, so
+    // loadURL rejects with an opaque ERR_ABORTED after the guard has run.
+    vi.mocked(created.webContents.loadURL).mockImplementationOnce(async () => {
+      redirectGuard?.({ preventDefault: vi.fn() }, { url: "https://www.example.com/" });
+      throw new Error("ERR_ABORTED (-3) loading 'https://example.com/'");
+    });
+    await expect(
+      host.act(contextId, { kind: "navigate", target: "https://example.com/" }),
+    ).rejects.toMatchObject({
+      name: "BrowserNavigationBlockedError",
+      url: "https://www.example.com/",
+    });
+    // The refusal is per action: an unrelated later failure keeps its own cause.
+    vi.mocked(created.webContents.loadURL).mockRejectedValueOnce(new Error("ERR_TIMED_OUT"));
+    await expect(
+      host.act(contextId, { kind: "navigate", target: "https://example.com/" }),
+    ).rejects.toThrow("ERR_TIMED_OUT");
+  });
+
   it("serializes user chrome commands behind an in-flight agent action", async () => {
     const created = view();
     let releaseAction!: () => void;

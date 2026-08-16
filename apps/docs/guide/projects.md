@@ -23,7 +23,7 @@ Chat Projects are virtual, memory-scoped containers with no implicit filesystem 
 3. For Work and Code, use the native picker to select a directory.
 4. Name the Project.
 
-The native selection stays in Electron main. The renderer receives an opaque, single-use receipt rather than the selected path. Invalid Code roots are denied before creation.
+The native selection stays in Electron main. The renderer receives an opaque, single-use receipt rather than the selected path. Paths that are not directories are denied before creation.
 
 ## Project operations
 

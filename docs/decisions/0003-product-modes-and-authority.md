@@ -22,7 +22,8 @@ users start quickly without a setup modal.
   - Chat Projects are virtual and carry no implicit filesystem or shell
     authority; tools needing temporary files use an isolated scratch area.
   - Work Projects bind exactly one existing, OS-confined local folder.
-  - Code Projects bind exactly one existing repository root; each Code thread
+  - Code Projects bind exactly one existing directory (amended by 0017: the
+    directory need not be a repository root at bind time); each Code thread
     additionally selects one checkout (existing checkout, existing worktree,
     or Octant-managed worktree), an execution posture, and a delivery target.
 - Threads may start unfiled. Until a saved Project is explicitly attached, a

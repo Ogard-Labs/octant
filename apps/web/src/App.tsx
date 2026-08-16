@@ -388,6 +388,14 @@ export function resolveDraftProject<TProject extends { readonly id: ProjectId }>
 const UNRESOLVED_DRAFT_PROJECT_MESSAGE =
   "The folder this draft was started in is no longer available. Choose another folder before starting the thread.";
 
+/**
+ * Any directory can be bound as a Code Project, but a Code thread still needs a
+ * repository checkout. Say what to do instead of a generic preparation error.
+ */
+function checkoutNotPreparedMessage(projectName: string): string {
+  return `Code threads need a Git repository, and "${projectName}" could not be opened as one. Run git init in that folder and retry, or add the same folder as a Work Project to work there without Git.`;
+}
+
 export function resolveWorkProviderChoice(
   choices: ReadonlyArray<CodeThreadProviderChoice>,
   selectedProviderInstanceId?: CodeThreadProviderChoice["instanceId"],
@@ -2206,8 +2214,24 @@ function LaunchedShell(
   async function openDraftInProject(projectId: ProjectId) {
     const project = projectController.allProjects.find((candidate) => candidate.id === projectId);
     if (project === undefined || project.lifecycle !== "active") return;
-    await controller.openProject(project.id, project.type, project.name);
-    await controller.openDraftThread(project.type, project.id);
+    await openDraftInKnownProject(project.id, project.type, project.name);
+  }
+
+  // Used right after creation, when the Project is not yet in this render's
+  // snapshot; the dialog already knows the mode and name.
+  async function openDraftInKnownProject(projectId: ProjectId, mode: OctantMode, name: string) {
+    await controller.openProject(projectId, mode, name);
+    await controller.openDraftThread(mode, projectId);
+  }
+
+  // The sidebar's "New thread" starts in the highlighted Project when there
+  // is one; the composer still lets the user switch to no folder.
+  function openDraftInActiveProject(mode: "work" | "code") {
+    const project = projectController.activeProject;
+    void controller.openDraftThread(
+      mode,
+      project?.type === mode && project.lifecycle === "active" ? project.id : undefined,
+    );
   }
 
   function createChat(prompt?: string) {
@@ -2403,7 +2427,7 @@ function LaunchedShell(
         projectId: project.id,
       });
       if (prepared?.kind !== "checkout-prepared") {
-        setDraftError("The bound repository checkout could not be prepared.");
+        setDraftError(checkoutNotPreparedMessage(project.name));
         return;
       }
       const codeSelection = resolveDraftProviderSelection(
@@ -2576,7 +2600,7 @@ function LaunchedShell(
           projectId: project.id,
         });
         if (prepared?.kind !== "checkout-prepared") {
-          setDraftError("The bound repository checkout could not be prepared.");
+          setDraftError(checkoutNotPreparedMessage(project.name));
           return;
         }
         if (prepared.checkout.head.kind !== "branch") {
@@ -3201,7 +3225,7 @@ function LaunchedShell(
               ? {
                   codeNavigation: {
                     actions: {
-                      "new-code-thread": () => void controller.openDraftThread("code"),
+                      "new-code-thread": () => openDraftInActiveProject("code"),
                       automations: openAutomationCenter,
                       plugins: openSkillsSettings,
                       "thread-board": () => {
@@ -3222,7 +3246,7 @@ function LaunchedShell(
               ? {
                   workNavigation: {
                     actions: {
-                      "new-work-thread": () => void controller.openDraftThread("work"),
+                      "new-work-thread": () => openDraftInActiveProject("work"),
                       automations: openAutomationCenter,
                       plugins: openSkillsSettings,
                       "thread-board": () =>
@@ -3294,6 +3318,7 @@ function LaunchedShell(
                         onAddProject: () => setCreateOpen(true),
                         rootlessLabel: "Recents" as const,
                       })}
+                  onArchive={(projectId) => void projectController.setArchived(projectId, true)}
                   onMove={(projectId, pinned) => void projectController.move(projectId, pinned)}
                   {...(activeMode === "chat"
                     ? {
@@ -3790,7 +3815,9 @@ function LaunchedShell(
             onCreate={(mode, name, receiptId) =>
               projectController.create(mode, name, receiptId, createHostId)
             }
-            onCreated={(projectId) => void openDraftInProject(projectId)}
+            onCreated={(projectId, mode, name) =>
+              void openDraftInKnownProject(projectId, mode, name)
+            }
           />
         ) : null}
         {attachDialogThread !== undefined ? (
@@ -4068,13 +4095,35 @@ function activeDraftTabKey(
     : undefined;
 }
 
-function activeCodeThreadTabId(
+/**
+ * The local Code thread the focused group is showing. When the focused group
+ * shows a utility surface (Browser, Files, Side Chat, Preview) instead, the
+ * Code thread visible in a sibling split pane stays active so its transcript
+ * is not unloaded just because the user clicked into the other pane.
+ */
+export function activeCodeThreadTabId(
   layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
   activeGroupId: import("@octant/contracts/shell").TabGroupId,
 ): CodeThreadId | undefined {
   const group = findWorkspaceGroup(layout, activeGroupId);
   if (group === undefined) return undefined;
   const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
+  const focused = localCodeThreadTabId(tab);
+  if (focused !== undefined) return focused;
+  switch (tab?.kind) {
+    case "browser":
+    case "files":
+    case "side-chat":
+    case "preview":
+      return visibleLocalCodeThreadTabId(layout);
+    default:
+      return undefined;
+  }
+}
+
+function localCodeThreadTabId(
+  tab: import("@octant/contracts/shell").WorkspaceTab | undefined,
+): CodeThreadId | undefined {
   if (tab !== undefined && "hostId" in tab && tab.hostId !== undefined) return undefined;
   switch (tab?.kind) {
     case "code-overview":
@@ -4089,6 +4138,15 @@ function activeCodeThreadTabId(
     default:
       return undefined;
   }
+}
+
+function visibleLocalCodeThreadTabId(
+  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
+): CodeThreadId | undefined {
+  if (layout.kind === "group") {
+    return localCodeThreadTabId(layout.tabs.find((tab) => tab.id === layout.activeTabId));
+  }
+  return visibleLocalCodeThreadTabId(layout.first) ?? visibleLocalCodeThreadTabId(layout.second);
 }
 
 function activeWorkThreadTabId(

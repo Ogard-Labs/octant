@@ -66,7 +66,7 @@ function fakePage(name: string): PlaywrightPagePort {
       viewport = next;
     }),
     title: vi.fn(async () => title),
-    url: () => url,
+    url: vi.fn(() => url),
     viewportSize: () => viewport,
     textContent: vi.fn(async () => title),
     close: vi.fn(async () => undefined),
@@ -294,6 +294,62 @@ describe("PlaywrightBrowserRuntime", () => {
     });
     expect(abort).toHaveBeenCalledOnce();
     expect(continueRequest).not.toHaveBeenCalled();
+  });
+
+  it("reports the blocked redirect target when a navigation leaves the allowlist", async () => {
+    const { pages, routeHandlers, runtime } = harness();
+    await runtime.createContext(firstId, policy, new AbortController().signal);
+    // Playwright reports the refused redirect through the route guard while
+    // goto is still pending, then rejects goto with an opaque network error.
+    vi.mocked(pages[0]!.goto).mockImplementationOnce(async () => {
+      await routeHandlers[0]!({
+        abort: async () => undefined,
+        continue: async () => undefined,
+        request: () => ({ isNavigationRequest: () => true, url: () => "https://www.example.com/" }),
+      });
+      throw new Error("net::ERR_FAILED");
+    });
+    await expect(
+      runtime.act(
+        firstId,
+        action("navigate", "https://example.com/"),
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      name: "BrowserNavigationBlockedError",
+      url: "https://www.example.com/",
+    });
+    // A later action starts clean: the old refusal must not relabel an
+    // unrelated failure.
+    vi.mocked(pages[0]!.goto).mockRejectedValueOnce(new Error("net::ERR_TIMED_OUT"));
+    await expect(
+      runtime.act(
+        firstId,
+        action("navigate", "https://example.com/"),
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow("net::ERR_TIMED_OUT");
+  });
+
+  it("leaves a page that a followed redirect landed outside the allowlist", async () => {
+    const { pages, runtime } = harness();
+    await runtime.createContext(firstId, policy, new AbortController().signal);
+    // The route guard never sees a redirect Chromium follows inside the
+    // routed request; the page simply reports the new URL after goto.
+    vi.mocked(pages[0]!.goto).mockImplementationOnce(async () => {
+      vi.mocked(pages[0]!.url).mockReturnValue("https://www.example.com/");
+    });
+    await expect(
+      runtime.act(
+        firstId,
+        action("navigate", "https://example.com/"),
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      name: "BrowserNavigationBlockedError",
+      url: "https://www.example.com/",
+    });
+    expect(pages[0]!.goto).toHaveBeenLastCalledWith("about:blank");
   });
 
   it("aborts a subresource request to an origin outside the context allowlist", async () => {
