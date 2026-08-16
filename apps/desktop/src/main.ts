@@ -13,6 +13,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  Notification,
   powerMonitor,
   screen,
   shell,
@@ -93,6 +94,12 @@ import {
 import { buildMenuBarItems, formatRedactedHostDiagnostics } from "./menuBar";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
 import {
+  attentionBadgeLabel,
+  attentionNotificationPresentation,
+  decodeAttentionBadgeCount,
+  decodeAttentionNotificationRequest,
+} from "./attentionNotifications";
+import {
   CODE_FILE_HELPER_FILENAME,
   DESKTOP_PRELOAD_FILENAME,
   KEYCHAIN_HELPER_FILENAME,
@@ -123,6 +130,8 @@ import {
 } from "./remoteDeviceControls";
 
 const IPC_CHANNELS = {
+  attentionBadge: "octant:attention:badge",
+  attentionNotify: "octant:attention:notify",
   clearProviderCredential: "octant:provider-credential:clear",
   browserSurfaceAttach: "octant:browser-surface:attach",
   browserSurfaceBounds: "octant:browser-surface:bounds",
@@ -1231,6 +1240,7 @@ async function createWindow(): Promise<void> {
       window.once("closed", () => {
         void browserSurfaceHost?.closeOwnerContexts(state.windowId).catch(() => undefined);
         desktopWindows.remove(window);
+        forgetAttentionBadge(window.id);
         projectRootPicker = undefined;
         void closeAuthority();
         disposePreparation();
@@ -1384,6 +1394,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         window.once("closed", () => {
           void browserSurfaceHost?.closeOwnerContexts(windowId).catch(() => undefined);
           desktopWindows.remove(window);
+          forgetAttentionBadge(window.id);
           preparationCleanup.dispose();
           void closeAuthority().finally(() => secondaryWindowLifecycles.delete(lifecycle));
         });
@@ -1684,6 +1695,23 @@ async function readPersistedHostIdentityFingerprint(): Promise<string | undefine
   return fingerprint;
 }
 
+/**
+ * Each Octant window reports the threads waiting on the user; the dock badge is
+ * per-application, so the counts are summed and cleared when a window closes.
+ */
+const attentionBadgeCounts = new Map<number, number>();
+
+function applyAttentionBadge(): void {
+  let total = 0;
+  for (const count of attentionBadgeCounts.values()) total += count;
+  app.dock?.setBadge(attentionBadgeLabel(total));
+}
+
+function forgetAttentionBadge(windowId: number): void {
+  if (!attentionBadgeCounts.delete(windowId)) return;
+  applyAttentionBadge();
+}
+
 function installIpcHandlers(): void {
   if (handlersInstalled) return;
   handlersInstalled = true;
@@ -1719,6 +1747,34 @@ function installIpcHandlers(): void {
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
     service: getHostIdentitySigningService(),
+  });
+  ipcMain.handle(IPC_CHANNELS.attentionNotify, (event, request: unknown) => {
+    const window = ownedWindow(event);
+    // A focused window is already showing the thread, so a banner would only
+    // repeat what the user is looking at.
+    if (window.isFocused() || !Notification.isSupported()) return;
+    const presentation = attentionNotificationPresentation(
+      decodeAttentionNotificationRequest(request),
+    );
+    const notification = new Notification({
+      title: presentation.title,
+      body: presentation.body,
+      silent: presentation.silent,
+    });
+    notification.on("click", () => {
+      if (window.isDestroyed()) return;
+      if (window.isMinimized()) window.restore();
+      window.show();
+      window.focus();
+    });
+    notification.show();
+  });
+  ipcMain.handle(IPC_CHANNELS.attentionBadge, (event, value: unknown) => {
+    const window = ownedWindow(event);
+    const count = decodeAttentionBadgeCount(value);
+    if (count === 0) attentionBadgeCounts.delete(window.id);
+    else attentionBadgeCounts.set(window.id, count);
+    applyAttentionBadge();
   });
   ipcMain.handle(IPC_CHANNELS.minimize, (event) => ownedWindow(event).minimize());
   ipcMain.handle(IPC_CHANNELS.openCodeExternalEditor, async (event, request: unknown) => {

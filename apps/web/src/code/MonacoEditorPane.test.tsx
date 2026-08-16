@@ -306,7 +306,7 @@ function client(
     bootstrap: vi.fn(),
     queryBoard: vi.fn(),
     conversation: vi.fn(async (threadId) => ({
-      version: 1 as const,
+      version: 2 as const,
       threadId,
       turns: [],
       nextCursor: 0,
@@ -317,6 +317,9 @@ function client(
     executeOperation: vi.fn(),
     inspectTerminal: vi.fn(),
     operationContent: vi.fn(),
+    putAttachment: vi.fn(),
+    discardAttachment: vi.fn(),
+    attachment: vi.fn(),
     putEvidence: vi.fn(),
     save: vi.fn(
       async () =>

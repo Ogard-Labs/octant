@@ -601,6 +601,7 @@ function runtimeFixture(options: {
       stage: async () => ({ status: "failed" as const }),
       commit: async () => ({ status: "failed" as const }),
       push: async () => ({ status: "failed" as const }),
+      discard: async () => ({ status: "failed" as const }),
       revertCommit: async () => ({ status: "failed" as const }),
     },
   });

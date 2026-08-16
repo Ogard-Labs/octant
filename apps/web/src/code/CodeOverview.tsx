@@ -1,3 +1,4 @@
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import type { CodeBoardCard, CodeBoardView } from "@octant/contracts";
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { HostIdentity } from "@octant/contracts/host";
@@ -880,12 +881,14 @@ function lifecycleSummary(lifecycle: "active" | "archived" | "waiting" | "interr
   }
 }
 
-function policyLabel(policy: "plan" | "approval-gated" | "full-access"): string {
+function policyLabel(policy: ProviderExecutionPolicy): string {
   switch (policy) {
     case "plan":
       return "Plan · read-only";
     case "approval-gated":
       return "Approval gated";
+    case "auto-accept-edits":
+      return "Auto-accept edits";
     case "full-access":
       return "Full access";
     default:

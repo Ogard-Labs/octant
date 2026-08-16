@@ -18,13 +18,22 @@ The server validates that the folder exists and the renderer receives an opaque 
 
 ## Authority modes
 
-Code threads run in one of three server-enforced authority modes:
+Code threads run in one of four server-enforced authority modes:
 
 - **Plan**: strictly read-only. No write-approval path exists. Plan mode remains read-only even when Full access is remembered for the Project.
 - **Approval-gated**: confines work to the bound Project root. Each mutation or command surfaces an approval request. This is the default for new Code threads.
+- **Auto-accept edits**: the same confinement as approval-gated, except file writes inside the bound root proceed without a prompt. Shell commands, network access, destructive actions, credential access, and anything outside the root still ask.
 - **Full access**: unsandboxed execution within the Project root. Starts only when explicitly selected. Use the permission-persistence control to apply to the current session or remember for the Project.
 
-Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority.
+Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The access control sits in the thread composer and applies from the next turn; raising a thread to Full access still needs the native confirmation.
+
+## Attaching images
+
+Paste or drop a PNG, JPEG, WebP, or GIF into the thread composer to send it with your next message. Each image uploads to the host as you attach it, and the turn sends only the identifier the host answered with, so the provider receives bytes the host itself accepted.
+
+A turn carries at most eight images, each up to 10 MB, alongside a written message. Repository files do not need attaching — name them with `@path` instead. If the thread's model does not read images, the composer says so at the paste — _"Local OpenCode — Model One does not support images. Choose a vision model to attach one."_ — instead of taking the upload. The host checks the thread's own model again at send, so a turn never reaches a model with its pictures quietly dropped.
+
+Images stay readable in the transcript after a restart. Removing a chip before sending discards the image on the host too.
 
 ## Thread environment
 
@@ -44,10 +53,10 @@ Code can create managed git worktrees for isolated feature branches. New managed
 
 Code exposes repository-valid engineering surfaces:
 
-- Thread conversations
+- Thread conversations, including the tool steps and thinking a turn recorded — a reopened thread replays a bounded number of them and says when it kept only the earliest
 - Terminal (confined to the Project root)
 - Files/Explorer
-- Diff viewer
+- Diff viewer, including discarding a tracked file's uncommitted changes (asked about every time outside Full access, because nothing can restore them)
 - Git/Review surfaces
 - Side Chat
 - Browser tabs

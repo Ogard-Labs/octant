@@ -104,6 +104,7 @@ import { ThemeService } from "./theme/themeService";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { CodeContentStore } from "./code/codeContentStore";
 import { CodeEvidenceStore } from "./code/codeEvidenceStore";
+import { CodeAttachmentStore } from "./code/codeAttachmentStore";
 import { CodeFileService } from "./code/codeFileService";
 import { CodeFileListingService } from "./code/codeFileListingService";
 import { RepositoryTestDiscoveryService } from "./code/repositoryTestDiscoveryService";
@@ -411,6 +412,7 @@ import {
   assertHostRoutable,
   authorizeCanvasInventoryAccess,
   chatAttemptAnswered,
+  decidesCodeEffectsByApproval,
   defaultAgentRunAuthorityCeilingForMode,
   defaultShellSettings,
   formatThreadMentionContext,
@@ -1017,6 +1019,15 @@ function withCodeOperationRuntime(
     ...(service.stageEvidence === undefined
       ? {}
       : { stageEvidence: service.stageEvidence.bind(service) }),
+    ...(service.stageAttachment === undefined
+      ? {}
+      : { stageAttachment: service.stageAttachment.bind(service) }),
+    ...(service.readAttachment === undefined
+      ? {}
+      : { readAttachment: service.readAttachment.bind(service) }),
+    ...(service.discardAttachment === undefined
+      ? {}
+      : { discardAttachment: service.discardAttachment.bind(service) }),
   };
 }
 
@@ -1054,6 +1065,15 @@ function withCodeBoard(
     ...(service.stageEvidence === undefined
       ? {}
       : { stageEvidence: service.stageEvidence.bind(service) }),
+    ...(service.stageAttachment === undefined
+      ? {}
+      : { stageAttachment: service.stageAttachment.bind(service) }),
+    ...(service.readAttachment === undefined
+      ? {}
+      : { readAttachment: service.readAttachment.bind(service) }),
+    ...(service.discardAttachment === undefined
+      ? {}
+      : { discardAttachment: service.discardAttachment.bind(service) }),
   };
 }
 
@@ -1639,6 +1659,7 @@ export function startOctantServer(
     const gitObservationPort = new GitObservationPort();
     const codeContent = new CodeContentStore();
     const codeEvidence = new CodeEvidenceStore({ connection: persistence.connection });
+    const codeAttachments = new CodeAttachmentStore(persistence.dataDirectory);
     // Listing reads directory entries under the bound checkout and needs no
     // file helper, so it is available even when the helper transport is not.
     const codeFileListing = new CodeFileListingService();
@@ -1770,6 +1791,7 @@ export function startOctantServer(
         tests: codeTestDiscovery,
         content: codeContent,
         evidence: codeEvidence,
+        attachments: codeAttachments,
         uuid: randomUUID,
         clock: () => new Date().toISOString(),
         approvals: codeApprovalStore,
@@ -2340,6 +2362,7 @@ export function startOctantServer(
         terminalProcessPort,
         repositoryTestProcessPort,
         repositoryTestDiscovery: codeTestDiscovery,
+        attachments: codeAttachments,
         persistence: {
           journal: persistence.journal,
           readCodeThread: persistence.readCodeThread,
@@ -2385,6 +2408,17 @@ export function startOctantServer(
             observed?.verifiedToolModelIds?.some(
               (candidate) => String(candidate) === String(thread.modelId),
             ) === true
+          );
+        },
+        supportsAttachments: (thread) => {
+          const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+          if (observed?.capabilities.nativeAttachments !== "supported") return false;
+          // Provider-level support only says some model reads images. A turn
+          // goes to one model, so the thread's own model has to be that one.
+          return observed.models.some(
+            (model) =>
+              String(model.id) === String(thread.modelId) &&
+              model.inputModalities.includes("image"),
           );
         },
         browserAutomation: {
@@ -2616,7 +2650,7 @@ export function startOctantServer(
           ? true
           : effectiveThread.executionPolicy === "full-access"
             ? true
-            : effectiveThread.executionPolicy === "approval-gated"
+            : decidesCodeEffectsByApproval(effectiveThread.executionPolicy)
               ? ((await codeOperationRuntime?.validateAppleApproval(windowId, envelope.request)) ??
                 false)
               : false;
@@ -2890,6 +2924,7 @@ export function startOctantServer(
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     yield* Effect.promise(() => chatService.recoverManagedAttachments());
+    yield* Effect.promise(() => codeAttachments.recover());
     yield* Effect.promise(() => chatService.recoverPendingDeletions());
     const linkedThreadService = createLinkedThreadRuntime({
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },

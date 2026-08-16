@@ -5,6 +5,8 @@ import type {
   CodeRepositoryTestConcern,
   CodeRepositoryTestDefinition,
 } from "@octant/contracts/code-test-definitions";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
@@ -16,7 +18,7 @@ export interface CodeTestPaneProps {
   readonly createOperationId: () => CodeOperationId;
   readonly createTestRunId: () => CodeTestRunId;
   readonly definitions: ReadonlyArray<CodeRepositoryTestDefinition>;
-  readonly executionPolicy: "plan" | "approval-gated" | "full-access";
+  readonly executionPolicy: ProviderExecutionPolicy;
   readonly requestApproval?: (input: {
     readonly command: Parameters<CodeClient["executeOperation"]>[0];
   }) => Promise<boolean>;
@@ -60,7 +62,7 @@ export function CodeTestPane(props: CodeTestPaneProps) {
         ...props.scope,
       } as const;
       if (
-        props.executionPolicy === "approval-gated" &&
+        decidesCodeEffectsByApproval(props.executionPolicy) &&
         (await props.requestApproval?.({ command })) !== true
       )
         return;
@@ -84,7 +86,7 @@ export function CodeTestPane(props: CodeTestPaneProps) {
         ...props.scope,
       } as const;
       if (
-        props.executionPolicy === "approval-gated" &&
+        decidesCodeEffectsByApproval(props.executionPolicy) &&
         (selected === undefined || (await props.requestApproval?.({ command })) !== true)
       )
         return;

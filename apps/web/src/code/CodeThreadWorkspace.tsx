@@ -1,9 +1,10 @@
-import type { CodeThreadId } from "@octant/contracts/code";
+import type { CodeApprovalId, CodeThreadId } from "@octant/contracts/code";
+import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import type { PickerGroup } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
-import { ArrowUp, Bot, GitCompare, Globe2, ListChecks, Terminal } from "lucide-react";
+import { ArrowUp, Bot, GitCompare, Globe2, ListChecks, Terminal, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -15,13 +16,34 @@ import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
-import type { ThreadMentionClient } from "@octant/client-runtime";
+import type { CodeClient, ThreadMentionClient } from "@octant/client-runtime";
+import { useCodeAttachments } from "./useCodeAttachments";
 import {
   ThreadMentionChips,
   ThreadMentionTypeahead,
   useThreadMentionTypeahead,
 } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
+import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
+import { CodeTranscriptRow } from "./CodeTranscriptRow";
+import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
+import { CodeAccessPicker } from "./CodeAccessPicker";
+import type { CodeFileListingClient } from "@octant/client-runtime";
+
+export type CodeAttachmentClient = Pick<
+  CodeClient,
+  "putAttachment" | "discardAttachment" | "attachment"
+>;
+
+/**
+ * Stands in when the host serves no attachment route. Its methods are never
+ * called: the composer only offers attaching when a real client is present.
+ */
+const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
+  putAttachment: () => Promise.reject(new Error("Code attachments are unavailable.")),
+  discardAttachment: () => Promise.reject(new Error("Code attachments are unavailable.")),
+  attachment: () => Promise.reject(new Error("Code attachments are unavailable.")),
+};
 
 export interface CodeThreadWorkspaceProps {
   readonly agentRunClient?: AgentRunClient;
@@ -40,6 +62,25 @@ export interface CodeThreadWorkspaceProps {
    * nothing can resolve.
    */
   readonly threadMentionClient?: ThreadMentionClient;
+  /** Lists this checkout's files for `@path` mentions. */
+  readonly fileListingClient?: CodeFileListingClient;
+  /**
+   * Stages pasted or dropped images with the host. Absent on a host that
+   * serves no attachment route, which keeps the composer from offering an
+   * attachment it could never send.
+   */
+  readonly attachmentClient?: CodeAttachmentClient;
+  /**
+   * Raises the host's native Full access confirmation. Absent on a host that
+   * cannot raise one, which keeps Full access out of reach rather than letting
+   * the composer ask for a change the host would refuse.
+   */
+  readonly requestFullAccessApproval?: (effect: {
+    readonly kind: "change-thread-full-access";
+    readonly threadId: CodeThreadId;
+    readonly expectedVersion: number;
+    readonly permissionPersistence: "current-session" | "project-default";
+  }) => Promise<CodeApprovalId | undefined>;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -55,6 +96,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       : undefined;
   const [draft, setDraft] = useState(props.controller.pendingDraft);
   const [providerChanging, setProviderChanging] = useState(false);
+  const [accessChanging, setAccessChanging] = useState(false);
+  const [accessMessage, setAccessMessage] = useState<string>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [auxiliarySurface, setAuxiliarySurface] = useState<"agents">();
 
@@ -81,6 +124,37 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     textarea: () => textareaRef.current,
   });
   const mentionListId = `code-thread-mentions-${String(props.threadId)}`;
+
+  // `@` names a file or folder in the checkout this thread is already bound to.
+  // The path travels as ordinary prompt text; the host still decides what the
+  // turn may read, so naming a file here reaches nothing on its own.
+  const pathMentions = useCodePathMentions({
+    ...(props.fileListingClient === undefined ? {} : { client: props.fileListingClient }),
+    threadId: props.threadId,
+    checkoutId: view?.checkout.id,
+    draft,
+    onDraftChange: (next) => {
+      setDraft(next);
+      props.controller.setPendingDraft?.(next);
+    },
+    textarea: () => textareaRef.current,
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
+  const pathMentionOpen = pathMentions.open && !mention.open;
+
+  // Pasting or dropping a picture uploads it now and keeps only its id. The
+  // turn names ids, so the host sends the provider bytes it accepted itself.
+  const attachments = useCodeAttachments({
+    client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
+    threadId: props.attachmentClient === undefined ? undefined : props.threadId,
+  });
+
+  function syncMentions(value: string, caret: number | null) {
+    mention.sync(value, caret);
+    pathMentions.sync(value, caret);
+  }
 
   if (props.controller.status === "disconnected") {
     return (
@@ -120,7 +194,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const trimmed = draft.trim();
   const busy =
     props.controller.turnStatus === "sending" || props.controller.turnStatus === "running";
-  const canSend = trimmed.length > 0 && !busy;
+  // A running turn queues rather than blocks: the host admits one turn per
+  // thread, so the composer parks the next one instead of making the user wait.
+  const canSend = trimmed.length > 0 && !attachments.busy;
+  const queued = props.controller.queuedFollowUps;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
   const showEmptyConversation = messages.length === 0;
@@ -136,18 +213,95 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     // pointed at once. This check is the composer's own report: a chip the
     // host refuses is shown as unavailable rather than silently dropped.
     const threadMentionIds = await threadMentions.resolveForSend();
-    const sent = await props.controller.sendFollowUp(trimmed, threadMentionIds);
+    if (busy) {
+      const queuedAttachments = attachments.peekForSend();
+      if (
+        props.controller.queueFollowUp(trimmed, threadMentionIds, queuedAttachments) === undefined
+      ) {
+        return;
+      }
+      attachments.takeForSend();
+      setDraft("");
+      props.controller.setPendingDraft?.("");
+      threadMentions.clear();
+      return;
+    }
+    // The chips stay until the host accepts the turn: a refused or dropped send
+    // must leave the message retryable with the same images, not just its text.
+    const sent = await props.controller.sendFollowUp(
+      trimmed,
+      threadMentionIds,
+      attachments.peekForSend(),
+    );
     if (sent) {
+      attachments.takeForSend();
       setDraft("");
       threadMentions.clear();
     }
   }
 
+  function attachFromTransfer(items: DataTransfer | null): boolean {
+    if (props.attachmentClient === undefined || items === null) return false;
+    const files = [...items.files];
+    if (files.length === 0) return false;
+    // The host refuses this turn anyway. Saying so at the paste is kinder than
+    // letting the user write the message first and lose it at send.
+    if (boundModelReadsImages(providerGroups, thread) === false) {
+      attachments.refuse(
+        `${boundProviderModelLabel(providerGroups, thread)} does not support images. Choose a vision model to attach one.`,
+      );
+      return true;
+    }
+    void attachments.attach(files);
+    return true;
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (mention.handleKeyDown(event)) return;
+    if (pathMentions.handleKeyDown(event)) return;
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     void submitFollowUp();
+  }
+
+  /**
+   * Move the thread to another access posture mid-thread.
+   *
+   * Lowering access is the user's word alone; raising it to Full access is
+   * not. The host demands a native confirmation for that effect, so the
+   * composer collects one first and hands the receipt to the same
+   * authoritative command — it never elevates on the renderer's say-so, and a
+   * declined confirmation leaves the thread exactly where it was.
+   */
+  async function changeAccess(next: ProviderExecutionPolicy) {
+    if (next === thread.executionPolicy) return;
+    setAccessMessage(undefined);
+    let approvalId: CodeApprovalId | undefined;
+    if (next === "full-access") {
+      approvalId = await props.requestFullAccessApproval?.({
+        kind: "change-thread-full-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        permissionPersistence: thread.permissionPersistence,
+      });
+      if (approvalId === undefined) {
+        setAccessMessage("Full access was not confirmed. This thread keeps its current access.");
+        return;
+      }
+    }
+    setAccessChanging(true);
+    try {
+      await props.controller.execute({
+        kind: "change-code-thread-access",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        executionPolicy: next,
+        permissionPersistence: thread.permissionPersistence,
+        ...(approvalId === undefined ? {} : { approvalId }),
+      });
+    } finally {
+      setAccessChanging(false);
+    }
   }
 
   async function changeProvider(selection: {
@@ -184,7 +338,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {lifecycleLabel(thread.lifecycle)}
             </span>
             <span>{headLabel(checkout.head)}</span>
-            <span>{policyLabel(thread.executionPolicy)}</span>
           </div>
           <div
             aria-label="Follow-up"
@@ -356,8 +509,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               message.role === "assistant" &&
               previousAssistant !== undefined &&
               providerIdentityChanged(previousAssistant, message);
+            const activity =
+              message.role === "assistant" && message.operationId !== undefined
+                ? props.controller.turnActivity.get(String(message.operationId))
+                : undefined;
             return (
-              <div key={message.id}>
+              // Long threads stay cheap without a windowing library: the engine
+              // skips laying out rows that are scrolled out of view, and the
+              // reserved size keeps the scrollbar honest.
+              <div className="code-thread-workspace__row" key={message.id}>
                 {handoff ? (
                   <div
                     aria-label="Provider handoff"
@@ -391,6 +551,21 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       )}
                     </header>
                   ) : null}
+                  {message.attachments === undefined ? null : (
+                    <CodeAttachmentGallery
+                      attachments={message.attachments}
+                      {...(props.attachmentClient === undefined
+                        ? {}
+                        : { client: props.attachmentClient })}
+                      threadId={props.threadId}
+                    />
+                  )}
+                  {activity === undefined ? null : (
+                    <CodeTranscriptRow
+                      activity={activity}
+                      running={message.status === "incomplete"}
+                    />
+                  )}
                   <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
                 </article>
               </div>
@@ -413,6 +588,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               onHover={mention.setActiveIndex}
             />
           ) : null}
+          {pathMentionOpen ? (
+            <PathMentionTypeahead
+              activeIndex={pathMentions.activeIndex}
+              busy={pathMentions.busy}
+              candidates={pathMentions.candidates}
+              listId={pathMentionListId}
+              onChoose={pathMentions.choose}
+              onHover={pathMentions.setActiveIndex}
+            />
+          ) : null}
           {/*
            * Side Chat has no surface in a Code tab, so the chip offers only
            * removal here: rendering a control whose sidecar this workspace
@@ -420,11 +605,58 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
            */}
           <ThreadMentionChips
             chips={threadMentions.chips}
-            disabled={busy}
             onRemove={(mentionedThreadId) =>
               threadMentions.composer?.onRemoveChip(mentionedThreadId)
             }
           />
+          {queued.length === 0 ? null : (
+            <ul aria-label="Queued follow-ups" className="code-thread-workspace__queue">
+              {queued.map((turn, index) => (
+                <li className="code-thread-workspace__queue-chip" key={turn.id}>
+                  <span className="code-thread-workspace__queue-position">{index + 1}</span>
+                  <span className="code-thread-workspace__queue-prompt">{turn.prompt}</span>
+                  <OctantButton
+                    aria-label={`Cancel queued follow-up ${String(index + 1)}`}
+                    onClick={() => props.controller.cancelQueuedFollowUp(turn.id)}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <X aria-hidden="true" size={14} strokeWidth={2} />
+                  </OctantButton>
+                </li>
+              ))}
+            </ul>
+          )}
+          {attachments.staged.length === 0 && attachments.message === undefined ? null : (
+            <div className="code-thread-workspace__attachments" aria-label="Attached images">
+              {attachments.staged.map(({ previewUrl, reference }) => (
+                <span className="code-thread-workspace__attachment" key={reference.attachmentId}>
+                  <img
+                    alt={reference.displayName}
+                    className="code-thread-workspace__attachment-thumb"
+                    src={previewUrl}
+                  />
+                  <span className="code-thread-workspace__attachment-name">
+                    {reference.displayName}
+                  </span>
+                  <button
+                    aria-label={`Remove ${reference.displayName}`}
+                    className="code-thread-workspace__attachment-remove window-no-drag"
+                    onClick={() => attachments.remove(reference.attachmentId)}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {attachments.message === undefined ? null : (
+                <span className="code-thread-workspace__hint" role="status">
+                  {attachments.message}
+                </span>
+              )}
+            </div>
+          )}
           <div className="code-thread-workspace__input-row">
             <label
               className="visually-hidden"
@@ -434,36 +666,49 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             </label>
             <OctantTextarea
               aria-activedescendant={
-                mention.activeCandidate === undefined
-                  ? undefined
-                  : `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                mention.activeCandidate !== undefined
+                  ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                  : pathMentionOpen && pathMentions.activeCandidate !== undefined
+                    ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
+                    : undefined
               }
-              aria-autocomplete={threadMentions.composer === undefined ? undefined : "list"}
-              aria-controls={mention.open ? mentionListId : undefined}
-              aria-expanded={threadMentions.composer === undefined ? undefined : mention.open}
+              aria-autocomplete="list"
+              aria-controls={
+                mention.open ? mentionListId : pathMentionOpen ? pathMentionListId : undefined
+              }
+              aria-expanded={mention.open || pathMentionOpen}
               className="code-thread-workspace__input window-no-drag"
-              disabled={busy}
               id={`code-thread-composer-${String(thread.id)}`}
               onChange={(event) => {
                 setDraft(event.currentTarget.value);
                 props.controller.setPendingDraft?.(event.currentTarget.value);
-                mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
               onClick={(event) =>
-                mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart)
               }
+              onDragOver={(event) => {
+                if (props.attachmentClient === undefined) return;
+                event.preventDefault();
+              }}
+              onDrop={(event) => {
+                if (attachFromTransfer(event.dataTransfer)) event.preventDefault();
+              }}
               onKeyDown={onKeyDown}
               onKeyUp={(event) => {
                 if (event.key === "Escape") return;
-                mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
-              placeholder="Ask for follow-up changes…"
+              onPaste={(event) => {
+                if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+              }}
+              placeholder={busy ? "Queue the next message…" : "Ask for follow-up changes…"}
               ref={textareaRef}
               rows={2}
               value={draft}
             />
             <OctantButton
-              aria-label="Send follow-up"
+              aria-label={busy ? "Queue follow-up" : "Send follow-up"}
               className="code-thread-workspace__send window-no-drag"
               disabled={!canSend}
               onClick={() => void submitFollowUp()}
@@ -483,13 +728,24 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               selectedModelId={thread.modelId}
               selectedProviderInstanceId={thread.providerInstanceId}
             />
+            <CodeAccessPicker
+              disabled={accessChanging}
+              executionPolicy={thread.executionPolicy}
+              nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
+              onSelect={(next) => void changeAccess(next)}
+            />
             <span className="code-thread-workspace__hint">
               {providerChanging
                 ? "Checking the selected provider…"
                 : busy
-                  ? "Waiting for the provider…"
+                  ? "Waiting for the provider · Enter queues the next message"
                   : "Enter to send · Shift+Enter for a new line"}
             </span>
+            {accessMessage === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="status">
+                {accessMessage}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -541,6 +797,25 @@ function boundProviderModelLabel(
   return `${providerLabel} — ${modelLabel}`;
 }
 
+/**
+ * Whether the model a thread is bound to reads images.
+ *
+ * `undefined` when this renderer cannot tell — an unlisted provider, a model
+ * the picker never described. The host decides in that case; the composer does
+ * not refuse an attachment on a guess.
+ */
+function boundModelReadsImages(
+  groups: ReadonlyArray<PickerGroup>,
+  thread: { readonly providerInstanceId: unknown; readonly modelId: unknown },
+): boolean | undefined {
+  const model = groups
+    .find((candidate) => String(candidate.instance.id) === String(thread.providerInstanceId))
+    ?.sections.flatMap((section) => section.models)
+    .find((candidate) => String(candidate.model.id) === String(thread.modelId));
+  const modalities = model?.model.inputModalities;
+  return modalities === undefined ? undefined : modalities.includes("image");
+}
+
 function headLabel(head: { readonly kind: string; readonly name?: string; readonly oid?: string }) {
   if (head.kind === "branch" && head.name !== undefined) return head.name;
   if (head.oid !== undefined) return head.oid.slice(0, 7);
@@ -563,17 +838,6 @@ function lifecycleLabel(lifecycle: string): string {
       return "Archived";
     default:
       return lifecycle;
-  }
-}
-
-function policyLabel(policy: string): string {
-  switch (policy) {
-    case "plan":
-      return "Plan · read-only";
-    case "full-access":
-      return "Full access";
-    default:
-      return "Approval gated";
   }
 }
 

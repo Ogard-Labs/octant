@@ -25,6 +25,7 @@ distilled successor of the earlier long-form design specifications.
 | [0015](0015-workspace-shell-model.md)                   | Workspace shell model                                             | Accepted |
 | [0016](0016-component-foundation-and-theme.md)          | Component foundation and theme                                    | Accepted |
 | [0017](0017-code-projects-bind-any-folder.md)           | Code Projects bind any folder                                     | Accepted |
+| [0018](0018-auto-accept-edits-posture.md)               | Auto-accept edits as a fourth access posture                      | Accepted |
 
 ## Adding an ADR
 

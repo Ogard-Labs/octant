@@ -1,4 +1,8 @@
-import type { LocalServerAttribution, LocalServerStartSource } from "@octant/contracts";
+import type {
+  LocalServerAttribution,
+  LocalServerStartSource,
+  ProviderExecutionPolicy,
+} from "@octant/contracts";
 
 /**
  * Pure classification and authority for Code Environment "Local servers" (#936).
@@ -167,7 +171,7 @@ export function classifyLocalListener(
 export type LocalServerActor = "local-user" | "agent" | "remote-client";
 
 /** The requesting Code thread's execution posture. */
-export type LocalServerPosture = "plan" | "approval-gated" | "full-access";
+export type LocalServerPosture = ProviderExecutionPolicy;
 
 export type LocalServerAction = "list" | "open" | "stop";
 

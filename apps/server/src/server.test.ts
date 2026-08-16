@@ -754,7 +754,7 @@ describe("startOctantServer", () => {
       inspectTerminal: vi.fn(),
       subscribe: vi.fn(async () => []),
       conversation: vi.fn(async (_windowId, threadId, _afterCursor, _limit) => ({
-        version: 1 as const,
+        version: 2 as const,
         threadId,
         turns: [],
         nextCursor: 0,

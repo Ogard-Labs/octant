@@ -40,6 +40,45 @@ describe("GitService", () => {
     expect(mutation.commit).not.toHaveBeenCalled();
   });
 
+  it("refuses to discard anything the observation did not report as a tracked change", async () => {
+    const observation = {
+      ...readyObservation(),
+      statusEntries: [
+        { path: "file.txt", index: "M", worktree: " " },
+        { path: "new.txt", index: "?", worktree: "?" },
+      ],
+      changedPaths: ["file.txt", "new.txt"],
+    };
+    const mutation = mutationPort();
+    const service = new GitService({ observe: vi.fn(async () => observation) }, mutation);
+    const base = { checkoutId: "checkout-1", checkoutRoot: "/repo" } as const;
+
+    await expect(
+      service.discard({ ...base, paths: ["file.txt"], expectedStateToken: "stale" }),
+    ).resolves.toEqual({ status: "rejected", reason: "stale-state" });
+    await expect(
+      service.discard({
+        ...base,
+        paths: ["absent.txt"],
+        expectedStateToken: observation.stateToken,
+      }),
+    ).resolves.toEqual({ status: "rejected", reason: "unlisted-path" });
+    // An untracked file has nothing in HEAD to restore, so discarding it could
+    // only mean deleting it. That is not what this command does.
+    await expect(
+      service.discard({ ...base, paths: ["new.txt"], expectedStateToken: observation.stateToken }),
+    ).resolves.toEqual({ status: "rejected", reason: "untracked-path" });
+    expect(mutation.discard).not.toHaveBeenCalled();
+
+    await expect(
+      service.discard({ ...base, paths: ["file.txt"], expectedStateToken: observation.stateToken }),
+    ).resolves.toEqual({ status: "applied" });
+    expect(mutation.discard).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", paths: ["file.txt"] },
+      undefined,
+    );
+  });
+
   it("requires approval or Full access and a named branch with an observed confirmed remote", async () => {
     const observation = readyObservation();
     const mutation = mutationPort();
@@ -184,6 +223,7 @@ function mutationPort() {
       oid: "b".repeat(40),
     })),
     push: vi.fn(async () => ({ status: "applied" as const })),
+    discard: vi.fn(async () => ({ status: "applied" as const })),
     revertCommit: vi.fn(async () => ({ status: "applied" as const, oid: "c".repeat(40) })),
   };
 }

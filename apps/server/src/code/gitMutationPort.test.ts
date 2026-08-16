@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -164,6 +164,48 @@ describe("GitMutationPort", () => {
 
     expect(gitOutput(repository, "show", "HEAD:README.md")).toBe("initial\n");
     expect(gitOutput(repository, "rev-list", "--count", "HEAD").trim()).toBe("3");
+  });
+
+  it("restores listed paths from HEAD and leaves the rest of the checkout alone", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "kept.txt"), "kept\n");
+    git(repository, "add", "--", "kept.txt");
+    git(repository, "commit", "-m", "add kept");
+    writeFileSync(join(repository, "README.md"), "edited\n");
+    writeFileSync(join(repository, "kept.txt"), "edited too\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(port.discard({ checkoutRoot: repository, paths: ["README.md"] })).resolves.toEqual(
+      { status: "applied" },
+    );
+
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("initial\n");
+    // Everything the caller did not list keeps its uncommitted state.
+    expect(readFileSync(join(repository, "kept.txt"), "utf8")).toBe("edited too\n");
+  });
+
+  it("drops a staged change for the listed path as well as the working-tree one", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "README.md"), "staged edit\n");
+    git(repository, "add", "--", "README.md");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(port.discard({ checkoutRoot: repository, paths: ["README.md"] })).resolves.toEqual(
+      { status: "applied" },
+    );
+
+    expect(gitOutput(repository, "status", "--porcelain").trim()).toBe("");
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("initial\n");
+  });
+
+  it("rejects a discard path shaped like a Git option", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(port.discard({ checkoutRoot: repository, paths: ["--hard"] })).resolves.toEqual({
+      status: "rejected",
+      reason: "invalid-paths",
+    });
   });
 
   it("fails closed when Seatbelt confinement is unavailable", async () => {

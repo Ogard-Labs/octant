@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import { AppleActionRequest } from "./appleToolchain";
 import {
+  CodeAttachmentId,
+  CodeAttachmentReference,
   CodeCheckoutId,
   CodeApprovalId,
   CodeCheckoutHead,
@@ -19,6 +21,7 @@ import {
   CodeTestRunId,
   CodeThread,
   CodeThreadId,
+  MAX_CODE_TURN_ATTACHMENTS,
   WorktreeReceiptId,
 } from "./code";
 import { CodeRepositoryTestDefinition, CodeRepositoryTestConcern } from "./codeTestDefinitions";
@@ -314,6 +317,25 @@ const StageGit = Schema.Struct({
   ),
   expectedStateToken: GitStateToken,
 }).annotations(strict);
+/**
+ * Throw away uncommitted work in the checkout. This is the one Git command
+ * here that destroys content instead of recording it: what it removes was
+ * never committed, so nothing in the repository can bring it back. It is
+ * therefore an approval-class `destructive-or-irreversible` operation, carries
+ * the exact paths in the receipt, and is never covered by a posture that
+ * auto-accepts edits.
+ */
+const DiscardGitChanges = Schema.Struct({
+  kind: Schema.Literal("discard-git-changes"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  paths: Schema.NonEmptyArray(GitStagePath).pipe(
+    Schema.filter(
+      (paths) => paths.length <= MAX_CODE_OPERATION_PATHS && new Set(paths).size === paths.length,
+    ),
+  ),
+  expectedStateToken: GitStateToken,
+}).annotations(strict);
 const CommitGit = Schema.Struct({
   kind: Schema.Literal("commit-git"),
   ...OperationScope,
@@ -427,6 +449,15 @@ const StartProviderTurn = Schema.Struct({
    * journal records as the user's message. A transcript the browser resolved
    * is never trusted, and never sent.
    */
+  /**
+   * Images already staged for this thread. Ids only: the host reads the bytes
+   * it staged itself, so a renderer cannot send the provider an image the host
+   * never accepted, and the journal records the attachment by name and digest
+   * rather than by content.
+   */
+  attachmentIds: Schema.optional(
+    Schema.Array(CodeAttachmentId).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+  ),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
@@ -480,6 +511,7 @@ export const CodeOperationCommand = Schema.Union(
   CancelRepositoryTest,
   ObserveGit,
   StageGit,
+  DiscardGitChanges,
   CommitGit,
   PushGit,
   CreatePullRequest,
@@ -592,7 +624,7 @@ const GitMutationResult = Schema.Struct({
   kind: Schema.Literal("git-mutation-state"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
-  mutation: Schema.Literal("stage", "commit", "push", "revert"),
+  mutation: Schema.Literal("stage", "discard", "commit", "push", "revert"),
   state: Schema.Literal("completed", "rejected", "failed"),
   headOid: Schema.optional(GitObjectId),
 }).annotations(strict);
@@ -798,6 +830,10 @@ const ConversationTurnStartedEvent = Schema.Struct({
   modelId: ProviderModelId,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  /** Images sent with this turn. Absent when the turn attached none. */
+  attachments: Schema.optional(
+    Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+  ),
 }).annotations(strict);
 const ContentEvent = Schema.Struct({
   kind: Schema.Literal("provider-content"),
@@ -909,6 +945,37 @@ export type CodeOperationEventFrame = typeof CodeOperationEventFrame.Type;
 
 export const MAX_CODE_CONVERSATION_PAGE_SIZE = 100;
 export const MAX_CODE_CONVERSATION_ASSISTANT_PARTS = 256;
+/**
+ * How much of a turn's work the durable conversation carries back.
+ *
+ * A single turn can journal thousands of tool events; replaying all of them
+ * would make reopening a thread as expensive as running it. The projection
+ * keeps the first steps in arrival order and stops, so the transcript is
+ * honest about the shape of the turn without pretending to be its journal —
+ * the full record stays in the operation event stream.
+ */
+export const MAX_CODE_CONVERSATION_TURN_STEPS = 64;
+
+/**
+ * One thing a turn did besides writing its message: a tool call, or a stretch
+ * of reasoning-channel output. Steps are what the live transcript already
+ * shows; recording them on the turn is what lets a reopened thread show the
+ * same rows instead of a bare message.
+ */
+export const CodeConversationStep = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("tool"),
+    toolCallId: ProviderRequestId,
+    toolName: boundedNonEmptyText(255),
+    state: Schema.Literal("started", "running", "completed", "failed"),
+    summary: Schema.optional(boundedNonEmptyText(2_048)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("reasoning"),
+    content: CodeEvidenceReference,
+  }).annotations(strict),
+);
+export type CodeConversationStep = typeof CodeConversationStep.Type;
 
 export const CodeConversationTurn = Schema.Struct({
   operationId: CodeOperationId,
@@ -916,9 +983,21 @@ export const CodeConversationTurn = Schema.Struct({
   modelId: ProviderModelId,
   sessionId: ProviderSessionId,
   prompt: CodeEvidenceReference,
+  /** Images the user attached to this turn. Absent when it attached none. */
+  attachments: Schema.optional(
+    Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
+  ),
   assistant: Schema.Array(CodeEvidenceReference).pipe(
     Schema.filter((parts) => parts.length <= MAX_CODE_CONVERSATION_ASSISTANT_PARTS),
   ),
+  /** Bounded, in arrival order. Absent on a turn that recorded no steps. */
+  steps: Schema.optional(
+    Schema.Array(CodeConversationStep).pipe(
+      Schema.filter((steps) => steps.length <= MAX_CODE_CONVERSATION_TURN_STEPS),
+    ),
+  ),
+  /** Whether the turn journaled more steps than `steps` carries. */
+  stepsTruncated: Schema.optional(Schema.Boolean),
   status: Schema.Literal("waiting", "completed", "interrupted", "failed", "incomplete"),
   startedAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
@@ -926,7 +1005,12 @@ export const CodeConversationTurn = Schema.Struct({
 export type CodeConversationTurn = typeof CodeConversationTurn.Type;
 
 export const CodeConversationPage = Schema.Struct({
-  version: Schema.Literal(1),
+  /**
+   * Version 2 added the images a turn carried. A client that only knows
+   * version 1 refuses the page outright rather than rendering a message
+   * while silently dropping the pictures the user attached to it.
+   */
+  version: Schema.Literal(2),
   threadId: CodeThreadId,
   turns: Schema.Array(CodeConversationTurn).pipe(
     Schema.filter((turns) => turns.length <= MAX_CODE_CONVERSATION_PAGE_SIZE),

@@ -10,6 +10,7 @@ import type {
 } from "@octant/contracts/agent-profile";
 import type {
   ProviderCatalogSnapshot,
+  ProviderExecutionPolicy,
   ProviderInstanceId,
   ProviderModelId,
 } from "@octant/contracts/providers";
@@ -54,9 +55,14 @@ export function isModelAllowedByProfile(profile: AgentProfile, modelId: Provider
  */
 export function validateProfileAuthoritySafety(input: {
   readonly profile: AgentProfile;
-  readonly projectExecutionPolicy: "full-access" | "approval-gated" | "plan";
+  readonly projectExecutionPolicy: ProviderExecutionPolicy;
 }): void {
-  const policyRank = { plan: 0, "approval-gated": 1, "full-access": 2 } as const;
+  const policyRank = {
+    plan: 0,
+    "approval-gated": 1,
+    "auto-accept-edits": 2,
+    "full-access": 3,
+  } as const;
   if (policyRank[input.profile.defaultExecutionPolicy] > policyRank[input.projectExecutionPolicy]) {
     throw new AgentProfileRejected(
       "authority-escalation",
@@ -80,7 +86,7 @@ export function buildExecutionContextPickerEntries(input: {
   readonly hostId: string;
   readonly hostLabel: string;
   readonly mode: OctantMode;
-  readonly projectExecutionPolicy: "full-access" | "approval-gated" | "plan";
+  readonly projectExecutionPolicy: ProviderExecutionPolicy;
 }): ReadonlyArray<ExecutionContextPickerEntry> {
   const entries: ExecutionContextPickerEntry[] = [];
   for (const provider of input.providers) {
@@ -137,7 +143,7 @@ export function buildExecutionContextPickerEntries(input: {
  * or subagent authority here; those require explicit server-side grants.
  */
 function defaultPermissionsForPolicy(
-  policy: "full-access" | "approval-gated" | "plan",
+  policy: ProviderExecutionPolicy,
 ): ExecutionContext["effectivePermissions"] {
   if (policy === "plan") {
     return {
@@ -243,7 +249,7 @@ interface ResolutionCandidate {
 export interface ResolveEffectiveProfileInput {
   readonly mode: OctantMode;
   readonly hostId: HostId;
-  readonly projectExecutionPolicy: "full-access" | "approval-gated" | "plan";
+  readonly projectExecutionPolicy: ProviderExecutionPolicy;
   readonly providers: ReadonlyArray<ProviderInstanceId>;
   readonly catalogs: ReadonlyArray<ProviderCatalogSnapshot>;
   readonly profiles: ReadonlyArray<{

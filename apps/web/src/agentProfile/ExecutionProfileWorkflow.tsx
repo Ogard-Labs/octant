@@ -362,6 +362,7 @@ function ProfileForm(props: {
         >
           <option value="plan">Plan (read-only)</option>
           <option value="approval-gated">Approval gated</option>
+          <option value="auto-accept-edits">Auto-accept edits</option>
           <option value="full-access">Full access (still bounded by Project)</option>
         </OctantNativeSelect>
       </label>

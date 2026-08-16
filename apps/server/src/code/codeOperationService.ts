@@ -2,6 +2,8 @@ import {
   decodeCodeOperationCommand,
   decodeCodeOperationResult,
   type CodeApprovalEffect,
+  type CodeAttachmentId,
+  type CodeAttachmentReference,
   type CodeCheckoutIdentity,
   type CodeEvidenceReference,
   type CodeOperationEvent,
@@ -16,12 +18,14 @@ import {
   type CodeThread,
   type CodeThreadId,
   type MentionableThreadId,
+  type ProviderAttachmentInput,
   type ProviderContextBlock,
   type WindowId,
 } from "@octant/contracts";
 import { authorizeCodeOperation, type CodeOperation } from "@octant/domain/code-policy";
 import { THREAD_MENTION_UNREADABLE_CONTEXT } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
 import { ReviewFindingServiceError } from "./reviewFindingService";
@@ -244,6 +248,12 @@ export interface CodeOperationGitPort {
     readonly paths: readonly string[];
     readonly expectedStateToken: string;
   }) => Promise<GitMutationOutcome>;
+  readonly discard: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+    readonly paths: readonly string[];
+    readonly expectedStateToken: string;
+  }) => Promise<GitMutationOutcome>;
   readonly commit: (input: {
     readonly checkoutId: string;
     readonly checkoutRoot: string;
@@ -430,6 +440,8 @@ export interface CodeOperationTurnPort {
      * of the message the journal keeps and no later turn replays it.
      */
     readonly context?: ReadonlyArray<ProviderContextBlock>;
+    /** Images this turn carries, already read from the host's own store. */
+    readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
   }) => Promise<{
     readonly state: "running" | "waiting" | "completed" | "interrupted" | "failed";
     readonly evidence?: string;
@@ -485,6 +497,13 @@ export interface CodeOperationServiceOptions {
   readonly reviewFindings: CodeOperationReviewFindingPort;
   readonly turns: CodeOperationTurnPort;
   readonly evidence: CodeOperationEvidencePort;
+  /**
+   * The images threads have staged. Optional: a host without one refuses a
+   * turn that names an attachment rather than silently sending it without.
+   */
+  readonly attachments?: CodeAttachmentStore;
+  /** Whether the thread's own provider and model can read an image. */
+  readonly supportsAttachments?: (thread: CodeThread) => boolean;
   readonly events: CodeOperationEventPort;
   /**
    * Resolves the `#thread` mentions a Code turn names.
@@ -597,27 +616,51 @@ export class CodeOperationService {
             "Provider turn identity does not match durable conversation evidence.",
           );
         } else {
-          if (command.kind === "start-provider-turn" && recordedStart === undefined) {
-            this.#options.events.append({
-              threadId: command.threadId,
-              operationId: command.operationId,
-              expectedCursor: resultCursor,
-              event: {
-                kind: "conversation-turn-started",
-                providerInstanceId: scope.thread.providerInstanceId,
-                modelId: scope.thread.modelId,
-                sessionId: command.sessionId,
-                prompt: command.prompt,
-              },
-            });
-            resultCursor += 1;
-          }
-          try {
-            result = await this.#execute(command, windowId, scope.thread, scope.checkout, root);
-          } catch (error) {
-            const category =
-              error instanceof ReviewFindingServiceError ? error.failure : ("failed" as const);
-            result = this.#failed(command.operationId, category, "Code operation failed.");
+          const starting =
+            command.kind !== "start-provider-turn"
+              ? ({ status: "ok", attachments: [] } as const)
+              : recordedStart === undefined
+                ? this.#startingAttachments(command.threadId, command.attachmentIds)
+                : ({ status: "ok", attachments: recordedStart.event.attachments ?? [] } as const);
+          if (starting.status === "unknown") {
+            result = this.#failed(
+              command.operationId,
+              "invalid",
+              "An image attached to this turn is no longer staged.",
+            );
+          } else {
+            if (command.kind === "start-provider-turn" && recordedStart === undefined) {
+              this.#options.events.append({
+                threadId: command.threadId,
+                operationId: command.operationId,
+                expectedCursor: resultCursor,
+                event: {
+                  kind: "conversation-turn-started",
+                  providerInstanceId: scope.thread.providerInstanceId,
+                  modelId: scope.thread.modelId,
+                  sessionId: command.sessionId,
+                  prompt: command.prompt,
+                  ...(starting.attachments.length === 0
+                    ? {}
+                    : { attachments: starting.attachments }),
+                },
+              });
+              resultCursor += 1;
+            }
+            try {
+              result = await this.#execute(
+                command,
+                windowId,
+                scope.thread,
+                scope.checkout,
+                root,
+                starting.attachments,
+              );
+            } catch (error) {
+              const category =
+                error instanceof ReviewFindingServiceError ? error.failure : ("failed" as const);
+              result = this.#failed(command.operationId, category, "Code operation failed.");
+            }
           }
         }
       }
@@ -672,7 +715,13 @@ export class CodeOperationService {
       );
     }
     try {
-      const recovered = await this.#providerTurn(command, windowId, thread, root.checkoutRoot);
+      const recovered = await this.#providerTurn(
+        command,
+        windowId,
+        thread,
+        root.checkoutRoot,
+        recordedTurnAttachments(this.#replay(command.threadId, command.operationId, 0, 256).frames),
+      );
       return recovered.kind === "provider-turn-state" ? recovered : cached;
     } catch {
       return this.#failed(command.operationId, "failed", "Code provider turn recovery failed.");
@@ -923,6 +972,8 @@ export class CodeOperationService {
     thread: CodeThread,
     checkout: CodeCheckoutIdentity,
     root: NonNullable<Awaited<ReturnType<CodeOperationAuthorityPort["resolveCheckoutRoot"]>>>,
+    /** The images the caller resolved for a starting provider turn. */
+    attachments: ReadonlyArray<CodeAttachmentReference>,
   ): Promise<CodeOperationResult> {
     const workingDirectory = root.workingDirectory ?? root.checkoutRoot;
     switch (command.kind) {
@@ -1071,6 +1122,18 @@ export class CodeOperationService {
             expectedStateToken: command.expectedStateToken,
           }),
         );
+      case "discard-git-changes":
+        return this.#gitMutation(
+          command.operationId,
+          command.gitOperationId,
+          "discard",
+          await this.#options.git.discard({
+            checkoutId: checkout.id,
+            checkoutRoot: root.checkoutRoot,
+            paths: command.paths,
+            expectedStateToken: command.expectedStateToken,
+          }),
+        );
       case "commit-git":
         return this.#gitMutation(
           command.operationId,
@@ -1140,7 +1203,7 @@ export class CodeOperationService {
           }),
         });
       case "start-provider-turn":
-        return this.#providerTurn(command, windowId, thread, root.checkoutRoot);
+        return this.#providerTurn(command, windowId, thread, root.checkoutRoot, attachments);
       case "answer-provider-input":
         return this.#providerInput(command, thread, root.checkoutRoot);
       case "answer-provider-approval":
@@ -1335,7 +1398,7 @@ export class CodeOperationService {
   #gitMutation(
     operationId: CodeOperationCommand["operationId"],
     gitOperationId: string,
-    mutation: "stage" | "commit" | "push",
+    mutation: "stage" | "discard" | "commit" | "push",
     result: GitMutationOutcome,
   ): CodeOperationResult {
     if (result.status === "unavailable")
@@ -1471,6 +1534,7 @@ export class CodeOperationService {
     windowId: WindowId,
     thread: CodeThread,
     checkoutRoot: string,
+    references: ReadonlyArray<CodeAttachmentReference>,
   ): Promise<CodeOperationResult> {
     const prompt = await this.#options.evidence.read?.(command.prompt);
     if (prompt === undefined)
@@ -1480,6 +1544,23 @@ export class CodeOperationService {
         "Provider prompt evidence is unavailable.",
       );
     const context = await this.#resolveThreadMentions(command.threadMentionIds, windowId);
+    // A model that cannot read a picture is told so plainly rather than sent
+    // the turn with its images quietly removed.
+    if (references.length > 0 && this.#options.supportsAttachments?.(thread) !== true) {
+      return this.#failed(
+        command.operationId,
+        "invalid",
+        "The selected model does not support images. Choose a vision model, or remove the attachments.",
+      );
+    }
+    const attachments = await this.#attachmentInputs(command.threadId, references);
+    if (attachments === undefined) {
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "An image attached to this turn is unavailable.",
+      );
+    }
     const turn = await this.#options.turns.start({
       windowId,
       thread,
@@ -1487,8 +1568,67 @@ export class CodeOperationService {
       checkoutRoot,
       prompt,
       ...(context.length === 0 ? {} : { context }),
+      ...(attachments.length === 0 ? {} : { attachments }),
     });
     return this.#providerResult(command.operationId, turn);
+  }
+
+  /**
+   * Turn the attachment ids a starting turn names into the references its
+   * `conversation-turn-started` event records.
+   *
+   * The command carries ids, so the name, media type, size, and digest written
+   * to the journal are the ones this host measured when it accepted the bytes,
+   * never ones a renderer claimed. Taking the ids also frees the thread's
+   * staging budget: the images now belong to this turn.
+   */
+  #startingAttachments(
+    threadId: CodeThreadId,
+    attachmentIds: ReadonlyArray<CodeAttachmentId> | undefined,
+  ):
+    | { readonly status: "ok"; readonly attachments: ReadonlyArray<CodeAttachmentReference> }
+    | { readonly status: "unknown" } {
+    if (attachmentIds === undefined || attachmentIds.length === 0) {
+      return { status: "ok", attachments: [] };
+    }
+    const attachments = this.#options.attachments;
+    if (attachments === undefined) return { status: "unknown" };
+    const peeked = attachments.peek(threadId, attachmentIds);
+    if (peeked.status !== "ok") return { status: "unknown" };
+    attachments.release(threadId, attachmentIds);
+    return { status: "ok", attachments: peeked.attachments };
+  }
+
+  /**
+   * Read the images this turn's journalled start recorded.
+   *
+   * The journal is the authority, not the composer: a turn recovered after a
+   * restart sends exactly the images its start event named, verified against
+   * the digests recorded with them.
+   */
+  async #attachmentInputs(
+    threadId: CodeThreadId,
+    references: ReadonlyArray<CodeAttachmentReference>,
+  ): Promise<ReadonlyArray<ProviderAttachmentInput> | undefined> {
+    if (references.length === 0) return [];
+    const attachments = this.#options.attachments;
+    if (attachments === undefined) return undefined;
+    const inputs: ProviderAttachmentInput[] = [];
+    for (const reference of references) {
+      let bytes: Uint8Array;
+      try {
+        bytes = await attachments.read(threadId, reference);
+      } catch {
+        return undefined;
+      }
+      inputs.push({
+        attachmentId: String(reference.attachmentId),
+        displayName: reference.displayName,
+        mediaType: reference.mediaType,
+        bytes,
+      });
+    }
+    return inputs;
   }
 
   /**
@@ -1590,6 +1730,18 @@ export class CodeOperationService {
       failure: { category, message },
     });
   }
+}
+
+/**
+ * The images a turn's durable start recorded, in the order it recorded them.
+ */
+function recordedTurnAttachments(
+  frames: ReadonlyArray<CodeOperationEventFrame>,
+): ReadonlyArray<CodeAttachmentReference> {
+  for (const frame of frames) {
+    if (frame.event.kind === "conversation-turn-started") return frame.event.attachments ?? [];
+  }
+  return [];
 }
 
 function sameConversationStart(
@@ -1695,6 +1847,8 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
       return "test";
     case "stage-git":
       return "stage";
+    case "discard-git-changes":
+      return "discard";
     case "commit-git":
       return "commit";
     case "push-git":

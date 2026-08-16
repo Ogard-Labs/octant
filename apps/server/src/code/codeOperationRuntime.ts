@@ -36,6 +36,7 @@ import { GitMutationPort } from "./gitMutationPort";
 import { GitObservationPort, type GitObservationResult } from "./gitObservationPort";
 import { GitService } from "./gitService";
 import { CodeOperationEventStore } from "./codeOperationEventStore";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import {
   approvalContextDigest,
   CodeOperationApprovalStore,
@@ -51,6 +52,7 @@ import {
   type CodeOperationServiceOptions,
   type CodeOperationTurnPort,
 } from "./codeOperationService";
+import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import { RepositoryTestRunner } from "./repositoryTestRunner";
 import { RepositoryTestDiscoveryService } from "./repositoryTestDiscoveryService";
@@ -99,6 +101,8 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<GhDeliveryTarget | undefined>;
   readonly reviewFiles: ReviewFindingFilePort;
   readonly evidence: CodeOperationEvidencePort;
+  /** The images Code threads have staged for their next turn. */
+  readonly attachments?: CodeAttachmentStore;
   readonly approvalValidator?: CodeApprovalValidationPort;
   readonly approvalStore?: CodeOperationApprovalStore;
   readonly sessionAuthority?: CodeSessionAuthorityStore;
@@ -119,8 +123,17 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly repositoryTestDiscovery?: Pick<RepositoryTestDiscoveryService, "discover">;
   readonly gitObservationPort?: Pick<GitObservationPort, "observe">;
-  readonly gitMutationPort?: Pick<GitMutationPort, "stage" | "commit" | "push" | "revertCommit">;
+  readonly gitMutationPort?: Pick<
+    GitMutationPort,
+    "stage" | "discard" | "commit" | "push" | "revertCommit"
+  >;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
+  /**
+   * Whether the thread's provider can take an image. A host that cannot say so
+   * answers false: a turn that attached images then fails in words rather than
+   * reaching the provider with the pictures silently dropped.
+   */
+  readonly supportsAttachments?: (thread: CodeThread) => boolean;
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
   /** Optional Project-fixed, read-only GitHub tools composed per active turn. */
   readonly githubReadTools?: (input: {
@@ -305,6 +318,10 @@ export function createCodeOperationRuntime(
     },
     turns,
     evidence: options.evidence,
+    ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
+    ...(options.supportsAttachments === undefined
+      ? {}
+      : { supportsAttachments: options.supportsAttachments }),
     events,
     ...(options.resolveThreadMentionContext === undefined
       ? {}
@@ -328,7 +345,7 @@ export function createCodeOperationRuntime(
           thread.checkoutId !== checkout.id ||
           thread.repositoryId !== checkout.repositoryId ||
           thread.lifecycle !== "active" ||
-          thread.executionPolicy !== "approval-gated" ||
+          !decidesCodeEffectsByApproval(thread.executionPolicy) ||
           checkout.availability !== "available" ||
           !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
         ) {
@@ -540,7 +557,7 @@ async function resolveAppleApprovalScope(
     thread.projectId !== request.authority.projectId ||
     thread.providerInstanceId !== request.authority.providerInstanceId ||
     thread.lifecycle !== "active" ||
-    thread.executionPolicy !== "approval-gated" ||
+    !decidesCodeEffectsByApproval(thread.executionPolicy) ||
     checkout.availability !== "available" ||
     request.authority.mode !== "code" ||
     request.authority.extension.kind !== "core" ||
@@ -607,6 +624,10 @@ function approvalPrompt(
       case "stage-git":
         message = "Allow Code stage operation?";
         effectDetail = command.paths.join("\n");
+        break;
+      case "discard-git-changes":
+        message = "Discard uncommitted changes?";
+        effectDetail = `These files lose their uncommitted changes:\n${command.paths.join("\n")}`;
         break;
       case "commit-git":
         message = "Allow Code commit operation?";
@@ -766,7 +787,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       cursor: 0,
       state: "running",
     };
-    active.launch = () => this.#launch(active, input.prompt, input.context);
+    active.launch = () => this.#launch(active, input.prompt, input.context, input.attachments);
     this.#active.set(key, active);
     return turnState("running");
   }
@@ -865,6 +886,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     active: ActiveTurn,
     prompt: string,
     context: Parameters<CodeOperationTurnPort["start"]>[0]["context"],
+    attachments: Parameters<CodeOperationTurnPort["start"]>[0]["attachments"],
   ): void {
     const replay = this.#events.replay({
       threadId: active.thread.id,
@@ -885,6 +907,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           checkoutRoot: active.checkoutRoot,
           prompt,
           ...(context === undefined ? {} : { context }),
+          ...(attachments === undefined ? {} : { attachments }),
           signal: active.abort.signal,
           provider: {
             acquire: (acquireInput) => {
@@ -1183,6 +1206,7 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
     observe: async ({ checkoutRoot, maxDiffBytes }) =>
       mapGitObservation(await git.observe(checkoutRoot), maxDiffBytes),
     stage: (input) => git.stage(input),
+    discard: (input) => git.discard(input),
     commit: (input) =>
       git.commit({
         ...input,
