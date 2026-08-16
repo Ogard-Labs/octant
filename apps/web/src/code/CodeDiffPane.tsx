@@ -1,6 +1,14 @@
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
-import type { CodeOperationResult } from "@octant/contracts/code-operations";
+import type {
+  CodeApprovalId,
+  CodeCheckoutId,
+  CodeGitOperationId,
+  CodeRelativePath,
+  CodeThreadId,
+} from "@octant/contracts/code";
+import type { CodeOperationId, CodeOperationResult } from "@octant/contracts/code-operations";
+import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
+import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
@@ -19,11 +27,22 @@ export type CodeDiffProjection =
   | { readonly state: "stale" | "unavailable"; readonly message: string };
 
 export interface CodeDiffPaneProps {
-  readonly client: Pick<CodeClient, "operationContent">;
+  readonly client: Pick<CodeClient, "operationContent" | "executeOperation">;
+  readonly createGitOperationId?: () => CodeGitOperationId;
+  readonly createOperationId?: () => CodeOperationId;
   readonly diff: CodeDiffProjection;
+  /**
+   * The thread's posture. Discarding is offered only when the thread may
+   * mutate the checkout at all, and only through the same approval the host
+   * would demand for any other destructive Git effect.
+   */
+  readonly executionPolicy?: ProviderExecutionPolicy;
   readonly loadRuntime?: () => Promise<MonacoDiffRuntime>;
   /** Opens a changed file as an editor tab; absent when no editor is bound. */
   readonly onOpenFile?: (path: string) => void;
+  readonly requestApproval?: (
+    command: Parameters<CodeClient["executeOperation"]>[0],
+  ) => Promise<CodeApprovalId | undefined>;
 }
 
 type ContentState =
@@ -54,10 +73,65 @@ function AvailableDiff(
   const [content, setContent] = useState<ContentState>({ kind: "loading" });
   const [selectedId, setSelectedId] = useState<string>();
   const [sideBySide, setSideBySide] = useState(true);
+  const [confirmingDiscard, setConfirmingDiscard] = useState<string>();
+  const [discarding, setDiscarding] = useState(false);
+  const [discardMessage, setDiscardMessage] = useState<string>();
   const generation = useRef(0);
   const evidence = props.diff.observation.diff;
   const operationId = props.diff.observation.operationId;
   const threadId = props.diff.threadId;
+  const policy = props.executionPolicy;
+  // Only a tracked change can be restored from HEAD, and only a thread that may
+  // mutate this checkout — with a way to raise the approval its posture demands
+  // — is offered the control at all.
+  const tracked = new Map(
+    props.diff.observation.status
+      .filter((entry) => entry.index !== "?" && entry.worktree !== "?")
+      .map((entry) => [String(entry.path), entry.path] as const),
+  );
+  const mayDiscard =
+    policy !== undefined &&
+    policy !== "plan" &&
+    props.createOperationId !== undefined &&
+    props.createGitOperationId !== undefined &&
+    (!decidesCodeEffectsByApproval(policy) || props.requestApproval !== undefined);
+
+  async function discard(path: CodeRelativePath) {
+    setConfirmingDiscard(undefined);
+    setDiscardMessage(undefined);
+    const command = {
+      kind: "discard-git-changes",
+      operationId: props.createOperationId!(),
+      gitOperationId: props.createGitOperationId!(),
+      paths: [path],
+      expectedStateToken: props.diff.observation.stateToken,
+      threadId,
+      checkoutId: props.diff.checkoutId,
+    } as const;
+    setDiscarding(true);
+    try {
+      if (
+        decidesCodeEffectsByApproval(policy!) &&
+        (await props.requestApproval?.(command)) === undefined
+      ) {
+        setDiscardMessage(`${path} was not discarded. The change is untouched.`);
+        return;
+      }
+      const result = await props.client.executeOperation(command);
+      if (result.kind === "operation-failed") setDiscardMessage(result.failure.message);
+      else if (result.kind === "git-mutation-state" && result.state === "completed")
+        setDiscardMessage(`Discarded uncommitted changes to ${path}.`);
+      else if (result.kind === "git-mutation-state")
+        setDiscardMessage(
+          `${path} was ${result.state}. Refresh checkout state before trying again.`,
+        );
+      else setDiscardMessage("Discard requested. Waiting for authoritative checkout refresh.");
+    } catch {
+      setDiscardMessage("Discard failed. Refresh checkout state and retry.");
+    } finally {
+      setDiscarding(false);
+    }
+  }
 
   useEffect(() => {
     const request = ++generation.current;
@@ -170,7 +244,47 @@ function AvailableDiff(
                   Open in editor
                 </button>
               )}
+              {mayDiscard && tracked.get(selected.path) !== undefined ? (
+                <button
+                  className="code-diff-pane__discard"
+                  disabled={discarding}
+                  onClick={() => setConfirmingDiscard(selected.path)}
+                  type="button"
+                >
+                  Discard changes
+                </button>
+              ) : null}
             </div>
+            {confirmingDiscard === selected.path ? (
+              <div
+                className="code-diff-pane__confirm"
+                role="alertdialog"
+                aria-label="Discard changes"
+              >
+                <p>
+                  Discard the uncommitted changes to {selected.path}? Nothing has committed them, so
+                  they cannot be recovered.
+                </p>
+                <div className="code-diff-pane__confirm-actions">
+                  <button
+                    className="code-diff-pane__discard"
+                    disabled={discarding}
+                    onClick={() => void discard(tracked.get(selected.path)!)}
+                    type="button"
+                  >
+                    Discard permanently
+                  </button>
+                  <button onClick={() => setConfirmingDiscard(undefined)} type="button">
+                    Keep changes
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            {discardMessage === undefined ? null : (
+              <p className="code-diff-pane__discard-message" role="status">
+                {discardMessage}
+              </p>
+            )}
             {selected.binary ? (
               <p role="status">
                 This file changed without a textual diff, so there is nothing to compare.

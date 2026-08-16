@@ -13,6 +13,7 @@ export type CodeOperation =
   | "terminal"
   | "test"
   | "stage"
+  | "discard"
   | "commit"
   | "push"
   | "create-pr"
@@ -67,6 +68,9 @@ export function approvalClassForCodeOperation(
     case "terminal":
     case "test":
       return "shell-commands";
+    // Discarding uncommitted work destroys content no commit can restore, so
+    // it sits with push and merge rather than with the writes it undoes.
+    case "discard":
     case "push":
     case "create-pr":
     case "merge-pr":

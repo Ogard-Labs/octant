@@ -244,6 +244,12 @@ export interface CodeOperationGitPort {
     readonly paths: readonly string[];
     readonly expectedStateToken: string;
   }) => Promise<GitMutationOutcome>;
+  readonly discard: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+    readonly paths: readonly string[];
+    readonly expectedStateToken: string;
+  }) => Promise<GitMutationOutcome>;
   readonly commit: (input: {
     readonly checkoutId: string;
     readonly checkoutRoot: string;
@@ -1071,6 +1077,18 @@ export class CodeOperationService {
             expectedStateToken: command.expectedStateToken,
           }),
         );
+      case "discard-git-changes":
+        return this.#gitMutation(
+          command.operationId,
+          command.gitOperationId,
+          "discard",
+          await this.#options.git.discard({
+            checkoutId: checkout.id,
+            checkoutRoot: root.checkoutRoot,
+            paths: command.paths,
+            expectedStateToken: command.expectedStateToken,
+          }),
+        );
       case "commit-git":
         return this.#gitMutation(
           command.operationId,
@@ -1335,7 +1353,7 @@ export class CodeOperationService {
   #gitMutation(
     operationId: CodeOperationCommand["operationId"],
     gitOperationId: string,
-    mutation: "stage" | "commit" | "push",
+    mutation: "stage" | "discard" | "commit" | "push",
     result: GitMutationOutcome,
   ): CodeOperationResult {
     if (result.status === "unavailable")
@@ -1695,6 +1713,8 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
       return "test";
     case "stage-git":
       return "stage";
+    case "discard-git-changes":
+      return "discard";
     case "commit-git":
       return "commit";
     case "push-git":

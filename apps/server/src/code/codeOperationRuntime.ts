@@ -120,7 +120,10 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly repositoryTestDiscovery?: Pick<RepositoryTestDiscoveryService, "discover">;
   readonly gitObservationPort?: Pick<GitObservationPort, "observe">;
-  readonly gitMutationPort?: Pick<GitMutationPort, "stage" | "commit" | "push" | "revertCommit">;
+  readonly gitMutationPort?: Pick<
+    GitMutationPort,
+    "stage" | "discard" | "commit" | "push" | "revertCommit"
+  >;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
   /** Optional Project-fixed, read-only GitHub tools composed per active turn. */
@@ -608,6 +611,10 @@ function approvalPrompt(
       case "stage-git":
         message = "Allow Code stage operation?";
         effectDetail = command.paths.join("\n");
+        break;
+      case "discard-git-changes":
+        message = "Discard uncommitted changes?";
+        effectDetail = `These files lose their uncommitted changes:\n${command.paths.join("\n")}`;
         break;
       case "commit-git":
         message = "Allow Code commit operation?";
@@ -1184,6 +1191,7 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
     observe: async ({ checkoutRoot, maxDiffBytes }) =>
       mapGitObservation(await git.observe(checkoutRoot), maxDiffBytes),
     stage: (input) => git.stage(input),
+    discard: (input) => git.discard(input),
     commit: (input) =>
       git.commit({
         ...input,
