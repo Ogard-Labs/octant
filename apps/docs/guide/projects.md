@@ -12,15 +12,15 @@ Projects are the primary organizational unit in Octant. A Project determines the
 | ---- | ---------------------------- | ------------------------------------- |
 | Chat | Virtual (no filesystem root) | Scoped memory only, no shell or files |
 | Work | One OS-confined folder       | Confined filesystem within the root   |
-| Code | One Git repository root      | Git, shell, and tools within the root |
+| Code | One OS-confined folder       | Git, shell, and tools within the root |
 
-Chat Projects are virtual, memory-scoped containers with no implicit filesystem or shell authority. Work Projects bind one selected directory. Code Projects bind one validated Git repository root.
+Chat Projects are virtual, memory-scoped containers with no implicit filesystem or shell authority. Work Projects bind one selected directory. Code Projects bind one selected directory; Git features light up when that directory is a repository.
 
 ## Creating a Project
 
 1. Click **New Project** in the sidebar.
 2. Select the mode (Chat, Work, or Code).
-3. For Work, use the native picker to select a directory. For Code, select a Git repository root.
+3. For Work and Code, use the native picker to select a directory.
 4. Name the Project.
 
 The native selection stays in Electron main. The renderer receives an opaque, single-use receipt rather than the selected path. Invalid Code roots are denied before creation.

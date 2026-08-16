@@ -4853,7 +4853,7 @@ describe("Project renderer flows", () => {
     expect(onCreated).not.toHaveBeenCalled();
   });
 
-  it("does not present command-in-flight creation as cancellable", async () => {
+  it("keeps Cancel usable while creation is in flight and ignores the late result", async () => {
     const command = deferred<typeof projectId>();
     const bridge = hostBridge(
       vi.fn(async () => ({
@@ -4862,20 +4862,23 @@ describe("Project renderer flows", () => {
         displayName: "Documents",
       })),
     );
+    const onClose = vi.fn();
     const onCreated = vi.fn();
     const view = render(
       <ProjectCreateDialog
         hostBridge={bridge}
         mode="code"
-        onClose={vi.fn()}
+        onClose={onClose}
         onCreate={vi.fn(() => command.promise)}
         onCreated={onCreated}
       />,
     );
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Close new Project" })).toBeDisabled(),
-    );
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await waitFor(() => expect(bridge.selectProjectRoot).toHaveBeenCalled());
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(cancel).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Close new Project" })).toBeEnabled();
+    fireEvent.click(cancel);
+    expect(onClose).toHaveBeenCalledOnce();
     view.unmount();
     await act(async () => command.resolve(projectId));
     expect(onCreated).not.toHaveBeenCalled();

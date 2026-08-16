@@ -3753,9 +3753,7 @@ function LaunchedShell(
             onCreate={(mode, name, receiptId) =>
               projectController.create(mode, name, receiptId, createHostId)
             }
-            onCreated={(projectId, mode, name) =>
-              void controller.openProject(projectId, mode, name)
-            }
+            onCreated={(projectId) => void openDraftInProject(projectId)}
           />
         ) : null}
         {attachDialogThread !== undefined ? (
