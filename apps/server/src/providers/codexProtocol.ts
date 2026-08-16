@@ -146,6 +146,40 @@ const FileUpdate = Schema.Struct({
   diff: Schema.String,
 });
 
+const MODELED_ITEM_TYPES: ReadonlySet<string> = new Set([
+  "userMessage",
+  "contextCompaction",
+  "agentMessage",
+  "plan",
+  "reasoning",
+  "commandExecution",
+  "fileChange",
+  "mcpToolCall",
+  "dynamicToolCall",
+  "webSearch",
+]);
+
+/**
+ * Codex adds item kinds over time (image views, review markers, ...). Anything
+ * Octant does not model decodes to this opaque item so one new kind cannot take
+ * down the whole connection; the mapper ignores it. Modeled kinds keep their
+ * strict shapes because the filter excludes their names.
+ */
+const UnmodeledThreadItem = Schema.Struct({
+  type: Schema.String.pipe(
+    Schema.filter((type) => !MODELED_ITEM_TYPES.has(type)),
+    Schema.brand("UnmodeledCodexItemType"),
+  ),
+  id: Schema.String,
+});
+export type UnmodeledThreadItem = Schema.Schema.Type<typeof UnmodeledThreadItem>;
+
+export function isUnmodeledThreadItem(item: {
+  readonly type: string;
+}): item is UnmodeledThreadItem {
+  return !MODELED_ITEM_TYPES.has(item.type);
+}
+
 const ThreadItem = Schema.Union(
   Schema.Struct({
     type: Schema.Literal("userMessage"),
@@ -204,6 +238,12 @@ const ThreadItem = Schema.Union(
     success: Schema.NullOr(Schema.Boolean),
     durationMs: Schema.optional(NullableNonNegativeInteger),
   }),
+  Schema.Struct({
+    type: Schema.Literal("webSearch"),
+    id: Schema.String,
+    query: Schema.String,
+  }),
+  UnmodeledThreadItem,
 );
 
 const ItemStartedNotification = Schema.Struct({
