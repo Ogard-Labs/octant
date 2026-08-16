@@ -58,6 +58,30 @@ describe("DesktopBrowserRuntime", () => {
     ).rejects.toThrow("desktop Browser broker");
   });
 
+  it("surfaces the broker's refused redirect target as a typed navigation block", async () => {
+    const runtime = new DesktopBrowserRuntime({
+      brokerUrl: "http://127.0.0.1:41234/",
+      token: "broker-token",
+      fetch: vi.fn(async () =>
+        Response.json(
+          { error: "navigation-blocked", url: "https://www.example.com/" },
+          { status: 422 },
+        ),
+      ),
+    });
+
+    await expect(
+      runtime.act(
+        contextId,
+        { kind: "navigate", target: "https://example.com/" } as never,
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      name: "BrowserNavigationBlockedError",
+      url: "https://www.example.com/",
+    });
+  });
+
   it("reports only native contexts whose renderer process disappeared", async () => {
     vi.useFakeTimers();
     try {

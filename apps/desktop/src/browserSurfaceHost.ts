@@ -128,6 +128,22 @@ interface OwnedSurface {
   actionTail: Promise<void>;
   control: BrowserSurfaceState["control"];
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
+  /** Last top-level navigation the allowlist guard cancelled during the current action. */
+  blockedNavigationUrl: string | undefined;
+}
+
+/**
+ * The page tried to move to an origin outside the context allowlist, typically
+ * a redirect such as example.com → www.example.com. Carries the refused URL so
+ * the broker can report it instead of a generic operation failure.
+ */
+export class BrowserNavigationBlockedError extends Error {
+  readonly url: string;
+  constructor(url: string) {
+    super(`Navigation to ${url} is outside the browser context allowlist.`);
+    this.name = "BrowserNavigationBlockedError";
+    this.url = url;
+  }
 }
 
 export interface BrowserSurfaceRuntimeObservation {
@@ -220,6 +236,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         actionTail: Promise.resolve(),
         control: "idle",
         shellWindow: undefined,
+        blockedNavigationUrl: undefined,
       };
       for (const event of [
         "did-start-loading",
@@ -235,9 +252,16 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         if (typeof target === "string" && originAllowed(target, owned.policy.allowedOrigins))
           return;
         (event as { preventDefault?: () => void }).preventDefault?.();
+        return target;
       };
-      view.webContents.on("will-navigate", guardNavigation);
-      view.webContents.on("will-redirect", guardNavigation);
+      // Only a refused top-level move explains a failed navigate action to the
+      // user; a cancelled frame navigation is the allowlist working as intended.
+      const guardTopLevelNavigation = (event: unknown, ...details: readonly unknown[]) => {
+        const refused = guardNavigation(event, ...details);
+        if (typeof refused === "string") owned.blockedNavigationUrl = refused;
+      };
+      view.webContents.on("will-navigate", guardTopLevelNavigation);
+      view.webContents.on("will-redirect", guardTopLevelNavigation);
       view.webContents.on("will-frame-navigate", guardNavigation);
       view.webContents.on("login", (event: unknown, ...details: readonly unknown[]) => {
         (event as { preventDefault?: () => void }).preventDefault?.();
@@ -338,6 +362,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       return queueSurfaceAction(owned, async () => {
         throwIfAborted(signal);
         owned.control = "agent";
+        owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
         try {
           const contents = owned.view.webContents;
@@ -349,7 +374,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               ) {
                 throw new Error("Navigation target origin is not in the allowlist.");
               }
-              await contents.loadURL(normalizeUrl(request.target));
+              try {
+                await contents.loadURL(normalizeUrl(request.target));
+              } catch (error) {
+                if (owned.blockedNavigationUrl === undefined) throw error;
+                throw new BrowserNavigationBlockedError(owned.blockedNavigationUrl);
+              }
               break;
             }
             case "click":
