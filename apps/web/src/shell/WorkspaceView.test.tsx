@@ -168,6 +168,9 @@ describe("WorkspaceView Local servers wiring", () => {
         onOpenSurface={onOpenSurface}
       />,
     );
+    // Collapsed by default: no listener enumeration until the user opens it.
+    await screen.findByRole("button", { name: /^Local servers/ }, { timeout: 5_000 });
+    expect(wired.props.localServerClient?.execute).not.toHaveBeenCalled();
     await expandLocalServers();
 
     fireEvent.click(
