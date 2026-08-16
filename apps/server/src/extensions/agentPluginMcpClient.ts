@@ -1,5 +1,5 @@
 import type { Readable, Writable } from "node:stream";
-import type { AgentPluginsMcpLaunchSpec } from "@octant/extensions/agent-plugins";
+import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import { readBoundedResponseBody } from "./boundedResponseBody";
 
 export interface McpToolDefinition {

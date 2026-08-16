@@ -201,13 +201,18 @@ modelId }`, and the model picker is provider-first. Discovery can find
 
 ## Extensions and skills
 
-`@octant/extensions` is the pure model: `ExtensionPackageManifest`, normalized
-component kinds (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`,
-`mcp-resource`, `hook`, `app`, `agent`, `apple-development-adapter`), declared
-capabilities, composer addressing (`@plugin`, `@plugin/component`, `$skill`),
-and the activation ladder. `apps/server/src/extensions` owns the runtime:
-package store, inspector, marketplaces (skills.sh, npm, curated catalog),
-Agent Plugins ingestion, supervisor, MCP session manager, and skill discovery.
+`@octant/plugin-host` is the pure model: normalized component kinds
+(`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
+`hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`),
+composer addressing (`@plugin`, `@plugin/component`, `$skill`), and the
+activation ladder. The manifest and component schemas themselves
+(`ExtensionPackageManifest`, component kinds, declared capabilities,
+`sidebar.destination`/`settings.section` contributions) live in
+`@octant/contracts/extensions`; `@octant/plugin-api` re-exports the subset a
+plugin author needs as a narrower, named surface. `apps/server/src/extensions`
+owns the runtime: package store, inspector, marketplaces (skills.sh, npm,
+curated catalog), Agent Plugins ingestion, supervisor, MCP session manager,
+and skill discovery.
 
 **Activation ladder.** `resolveExtensionActivation` resolves each component to
 an effective state with a structured reason. A component is active only when
@@ -268,20 +273,21 @@ mechanisms are:
 
 ## Package map
 
-| Package                   | Responsibility                                                                                                     | Depends on                                                       |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- |
-| `packages/contracts`      | Effect Schema entities, commands, events, RPC and wire contracts; no runtime logic                                 | `effect`                                                         |
-| `packages/domain`         | Pure policies and state transitions (modes, tool calls, approvals, remote access, boards, canvas, …)               | contracts, theme                                                 |
-| `packages/theme`          | Semantic theme schema, presets, backgrounds, typography, importer, contrast                                        | contracts                                                        |
-| `packages/provider-sdk`   | `ProviderDriver` interface, normalized runtime events, discovery, conformance harnesses                            | contracts, `effect`                                              |
-| `packages/extensions`     | Extension manifests, component model, activation ladder, addressing, bundled skills, Agent Plugins loader          | contracts, `yaml`                                                |
-| `packages/host-runtime`   | Host paths, owner receipts, service lifecycle, bridge secret, diagnostics, redaction (shared by desktop and CLI)   | —                                                                |
-| `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads | contracts, domain                                                |
-| `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                    | contracts, host-runtime                                          |
-| `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway  | contracts, domain, extensions, host-runtime, provider-sdk, theme |
-| `apps/desktop`            | Electron shell: windows, menus, Keychain, brokers, pickers, server process lifecycle, packaging                    | contracts, domain, host-runtime                                  |
-| `apps/web`                | React renderer for desktop and paired browsers                                                                     | client-runtime, contracts, domain, extensions, theme             |
-| `apps/mobile`             | Expo iOS/Android remote-control client                                                                             | client-runtime, contracts, domain                                |
+| Package                   | Responsibility                                                                                                     | Depends on                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `packages/contracts`      | Effect Schema entities, commands, events, RPC and wire contracts; no runtime logic                                 | `effect`                                                          |
+| `packages/domain`         | Pure policies and state transitions (modes, tool calls, approvals, remote access, boards, canvas, …)               | contracts, theme                                                  |
+| `packages/theme`          | Semantic theme schema, presets, backgrounds, typography, importer, contrast                                        | contracts                                                         |
+| `packages/provider-sdk`   | `ProviderDriver` interface, normalized runtime events, discovery, conformance harnesses                            | contracts, `effect`                                               |
+| `packages/plugin-host`    | Extension manifests, component model, activation ladder, addressing, bundled skills, Agent Plugins loader          | contracts, `yaml`                                                 |
+| `packages/plugin-api`     | Public plugin manifest, component, and contribution schemas for third parties (re-exports contracts/extensions)    | contracts                                                         |
+| `packages/host-runtime`   | Host paths, owner receipts, service lifecycle, bridge secret, diagnostics, redaction (shared by desktop and CLI)   | —                                                                 |
+| `packages/client-runtime` | Authenticated transport, per-feature clients, reconnect, remote pairing, host federation registry and merged reads | contracts, domain                                                 |
+| `packages/cli`            | `octant` binary: headless server run, service manager, status, `web` launcher, artifact install                    | contracts, host-runtime                                           |
+| `apps/server`             | Authoritative control plane: routes, services, journal, projections, providers, tools, extensions, remote gateway  | contracts, domain, plugin-host, host-runtime, provider-sdk, theme |
+| `apps/desktop`            | Electron shell: windows, menus, Keychain, brokers, pickers, server process lifecycle, packaging                    | contracts, domain, host-runtime                                   |
+| `apps/web`                | React renderer for desktop and paired browsers                                                                     | client-runtime, contracts, domain, plugin-host, theme             |
+| `apps/mobile`             | Expo iOS/Android remote-control client                                                                             | client-runtime, contracts, domain                                 |
 
 Dependencies point inward: no package imports an app, and `contracts` imports
 nothing first-party.

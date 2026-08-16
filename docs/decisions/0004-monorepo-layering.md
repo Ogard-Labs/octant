@@ -44,7 +44,7 @@ new package and feature follows.
   sequence-based replay, optimistic version handling, and query
   synchronization shared by web, desktop, CLI, mobile, and remote clients.
   React is never the transport owner.
-- `packages/theme`, `packages/extensions` (plugin host), and
+- `packages/theme`, `packages/plugin-host`, and
   `packages/host-runtime` are narrow, purpose-named packages with explicit
   subpath exports; there is no grab-bag utility package.
 - Adapters live at the edges: provider adapters in the server map vendor

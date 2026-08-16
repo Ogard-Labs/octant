@@ -6,7 +6,7 @@ import {
   loadAgentPluginFromEntries,
   type AgentPluginsPackageEntry,
   type LoadedAgentPlugin,
-} from "@octant/extensions/agent-plugins";
+} from "@octant/plugin-host/agent-plugins";
 import {
   calculateExtensionPackageDigest,
   type ExtensionArchiveEntry,

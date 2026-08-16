@@ -1,0 +1,23 @@
+{
+  "name": "@octant/plugin-api",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./manifest": "./src/manifest.ts",
+    "./contributions": "./src/contributions.ts"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@octant/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "tsdown": "0.22.5",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

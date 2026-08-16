@@ -4,7 +4,7 @@ import {
   validateAgentPluginsMcpDocument,
   type AgentPluginsMcpLaunchSpec,
   type AgentPluginsTransport,
-} from "@octant/extensions/agent-plugins";
+} from "@octant/plugin-host/agent-plugins";
 import { lstat, mkdir } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 

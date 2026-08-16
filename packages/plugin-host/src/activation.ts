@@ -25,6 +25,8 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "app",
     "agent",
     "apple-development-adapter",
+    "board",
+    "integration",
   ]),
 };
 

@@ -11,7 +11,7 @@ import {
 } from "@octant/contracts/extensions";
 import { decodeExtensionSnapshot, type ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import type { EventEnvelope } from "@octant/contracts/events";
-import { resolveExtensionActivation } from "@octant/extensions/activation";
+import { resolveExtensionActivation } from "@octant/plugin-host/activation";
 import type { Projection } from "./projection";
 import type { SqliteConnection } from "./sqlitePort";
 

@@ -15,12 +15,12 @@ Canonical design: `docs/security/security-architecture-threat-model.md` §§ Esc
 
 The unified `toolCallPolicy` choke point (S1) is not merged on this branch. Layer 1–2 rows call the **current** fail-closed modules and record the eventual `toolCallPolicy` resolution step they map to:
 
-| Escape-suite fixture         | Current module(s)                                    | Future `toolCallPolicy` step        |
-| ---------------------------- | ---------------------------------------------------- | ----------------------------------- |
-| `injected-readme`            | `toolActionPolicy`, `workConfinementPolicy`          | catalog / schema / approval / taint |
-| `rogue-mcp-server`           | `packages/extensions` activation, `toolActionPolicy` | extension-capability / activation   |
-| `scope-widening-child`       | `agentRunPolicy`                                     | child-clamp                         |
-| `overreaching-remote-client` | `remoteAccessPolicy`, `codePolicy`                   | remote-principal                    |
+| Escape-suite fixture         | Current module(s)                                     | Future `toolCallPolicy` step        |
+| ---------------------------- | ----------------------------------------------------- | ----------------------------------- |
+| `injected-readme`            | `toolActionPolicy`, `workConfinementPolicy`           | catalog / schema / approval / taint |
+| `rogue-mcp-server`           | `packages/plugin-host` activation, `toolActionPolicy` | extension-capability / activation   |
+| `scope-widening-child`       | `agentRunPolicy`                                      | child-clamp                         |
+| `overreaching-remote-client` | `remoteAccessPolicy`, `codePolicy`                    | remote-principal                    |
 
 When S1 lands, prefer routing these rows through `toolCallPolicy` while keeping the same structured denial codes and audit event names.
 

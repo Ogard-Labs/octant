@@ -25,7 +25,7 @@ import type { ExtensionActivationScope } from "@octant/contracts/extensions";
 import {
   resolveDraftExtensionReference,
   type ExtensionAddressingCatalog,
-} from "@octant/extensions";
+} from "@octant/plugin-host";
 import { Effect, Fiber, Stream } from "effect";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";

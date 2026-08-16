@@ -11,7 +11,7 @@ import {
   resolveDraftExtensionReference,
   sourceQualifiedSkillId,
   type ExtensionAddressingCatalog,
-} from "@octant/extensions";
+} from "@octant/plugin-host";
 import { useCallback, useEffect, useState } from "react";
 import type { ChatComposerExtensionSelection } from "./ChatComposer";
 
