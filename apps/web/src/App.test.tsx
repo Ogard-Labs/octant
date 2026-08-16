@@ -1354,6 +1354,30 @@ describe("App", () => {
     expect(codeApi.subscribe).toHaveBeenCalledWith(codeThreadId, 0, expect.any(AbortSignal));
   });
 
+  it("hides the sidebar from its own control and brings it back from the window chrome", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Show sidebar" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
+    expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).not.toBeInTheDocument();
+    expect(globalThis.localStorage.getItem("octant.shell.sidebar-collapsed.v1")).toBe("true");
+    await user.click(screen.getByRole("button", { name: "Show sidebar" }));
+    expect(screen.getByRole("complementary", { name: "Octant sidebar" })).toBeVisible();
+    expect(globalThis.localStorage.getItem("octant.shell.sidebar-collapsed.v1")).toBeNull();
+  });
+
   it("keeps Automations hidden when the release gate is off and overlays implemented rail placeholders", async () => {
     const user = userEvent.setup();
     render(

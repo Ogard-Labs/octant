@@ -685,6 +685,13 @@ function LaunchedShell(
   const [dockSurface, setDockSurface] = useState<RightUtilityDockSurfaceId>();
   const [dockProjectId, setDockProjectId] = useState<ProjectId>();
   const [previewSidebarWidth, setPreviewSidebarWidth] = useState<number>();
+  // Presentation-only: whether the person hid the navigation sidebar. Kept in
+  // local storage so a reload does not surprise them with it back.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(globalThis));
+  const setSidebarCollapsedPersistent = useCallback((collapsed: boolean) => {
+    setSidebarCollapsed(collapsed);
+    writeSidebarCollapsed(globalThis, collapsed);
+  }, []);
   const [previewContextWidth, setPreviewContextWidth] = useState<number>();
   const [pendingCodeDeepLink, setPendingCodeDeepLink] = useState<CodeDeepLink>();
   const [computerUseSessionRepresentationCounts, setComputerUseSessionRepresentationCounts] =
@@ -3181,6 +3188,9 @@ function LaunchedShell(
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             isNarrow={isNarrow}
             material={material}
+            {...(sidebarCollapsed && !isNarrow
+              ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
+              : {})}
             onOpenZen={() => void zen.enterZen()}
             onRecoverZen={() => void zen.recoverZen()}
             onResetLayout={controller.resetActiveLayout}
@@ -3198,6 +3208,7 @@ function LaunchedShell(
           void controller.updateSettings({ sidebarWidth: width });
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
+        sidebarCollapsed={sidebarCollapsed && !isNarrow}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         sidebar={
           <ShellSidebar
@@ -3260,6 +3271,7 @@ function LaunchedShell(
               : {})}
             onAddFolder={() => setCreateOpen(true)}
             onOpenSearch={openThreadSearch}
+            {...(isNarrow ? {} : { onCollapseSidebar: () => setSidebarCollapsedPersistent(true) })}
             onOpenSettings={controller.openSettings}
             onRetryChat={() => void chatController.retry()}
             onSelectMode={handleSelectMode}
@@ -4220,4 +4232,23 @@ export function launchFromLocation(href: string): ShellLaunch | undefined {
 
 function isProjectWindowCapability(value: string | undefined): value is string {
   return value !== undefined && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
+
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "octant.shell.sidebar-collapsed.v1";
+
+function readSidebarCollapsed(scope: { readonly localStorage?: Storage }): boolean {
+  try {
+    return scope.localStorage?.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeSidebarCollapsed(scope: { readonly localStorage?: Storage }, collapsed: boolean) {
+  try {
+    if (collapsed) scope.localStorage?.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, "true");
+    else scope.localStorage?.removeItem(SIDEBAR_COLLAPSED_STORAGE_KEY);
+  } catch {
+    // Presentation persistence is best-effort.
+  }
 }
