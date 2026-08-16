@@ -5243,6 +5243,92 @@ dialog.project-dialog {
   gap: 8px;
 }
 
+/*
+ * Long-thread virtualization without a windowing library: the engine skips
+ * layout and paint for rows scrolled out of view, and the reserved intrinsic
+ * height keeps scrollbar position stable while they are skipped.
+ */
+.code-thread-workspace__row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
+
+.code-transcript-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 6px;
+}
+
+.code-transcript-row__disclosure > summary {
+  cursor: default;
+  color: var(--octant-text-secondary);
+  font-size: 12px;
+  list-style: none;
+}
+
+.code-transcript-row__disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.code-transcript-row__disclosure > summary::before {
+  content: "›";
+  display: inline-block;
+  width: 12px;
+  transition: transform 120ms ease;
+}
+
+.code-transcript-row__disclosure[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.code-transcript-row__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 4px 0 0;
+  padding: 0 0 0 12px;
+  list-style: none;
+}
+
+.code-transcript-row__step {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.code-transcript-row__step-name {
+  flex: none;
+  color: var(--octant-text-primary);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+
+.code-transcript-row__step-state {
+  flex: none;
+  color: var(--octant-text-secondary);
+}
+
+.code-transcript-row__step[data-state="failed"] .code-transcript-row__step-state {
+  color: var(--octant-danger-text);
+}
+
+.code-transcript-row__step-summary {
+  flex: 1;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.code-transcript-row__reasoning {
+  margin: 4px 0 0;
+  padding: 0 0 0 12px;
+  color: var(--octant-text-secondary);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
 .code-thread-workspace__queue {
   display: flex;
   flex-direction: column;

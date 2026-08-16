@@ -331,6 +331,85 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).not.toHaveBeenCalled();
   });
 
+  it("collapses a turn's tool steps and reasoning until the user opens them", async () => {
+    const user = userEvent.setup();
+    const operationId = "70000000-0000-4000-8000-000000000051";
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: `${operationId}:assistant`,
+              role: "assistant",
+              text: "Verified the change.",
+              operationId: operationId as never,
+              status: "completed",
+            },
+          ],
+          turnActivity: new Map([
+            [
+              operationId,
+              {
+                reasoning: "Check the failing suite first.",
+                rows: [
+                  {
+                    kind: "tool",
+                    id: "call-1",
+                    toolName: "Bash",
+                    state: "completed",
+                    summary: "bun run verify",
+                  },
+                  { kind: "task", id: "task-1", state: "running", summary: "Rewrite the pane" },
+                ],
+              },
+            ],
+          ]),
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    // Closed by default: the summary counts the work without printing it.
+    expect(screen.getByText("2 steps")).toBeVisible();
+    expect(screen.queryByText("bun run verify")).not.toBeVisible();
+    expect(screen.queryByText("Check the failing suite first.")).not.toBeVisible();
+
+    await user.click(screen.getByText("2 steps"));
+    expect(screen.getByText("bun run verify")).toBeVisible();
+    expect(screen.getByText("Bash")).toBeVisible();
+
+    await user.click(screen.getByText("Thinking"));
+    expect(screen.getByText("Check the failing suite first.")).toBeVisible();
+  });
+
+  it("renders no activity disclosure for a turn that reported none", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "assistant-plain",
+              role: "assistant",
+              text: "Done.",
+              operationId: "70000000-0000-4000-8000-000000000052" as never,
+              status: "completed",
+            },
+          ],
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
+    expect(screen.queryByText(/steps?$/)).not.toBeInTheDocument();
+  });
+
+  it("lets the engine skip layout for transcript rows scrolled out of view", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(styles).toMatch(/\.code-thread-workspace__row\s*\{[^}]*content-visibility:\s*auto;/);
+    expect(styles).toMatch(/\.code-thread-workspace__row\s*\{[^}]*contain-intrinsic-size:/);
+  });
+
   it("queues a follow-up written while a turn runs instead of blocking the composer", async () => {
     const user = userEvent.setup();
     const queueFollowUp = vi.fn(() => ({ id: "queued-1", prompt: "and then push", threadMentionIds: [] }));
@@ -611,6 +690,7 @@ function controller(
     cancelQueuedFollowUp: vi.fn(),
     queueFollowUp: vi.fn(),
     queuedFollowUps: [],
+    turnActivity: new Map(),
     sendFollowUp: vi.fn(async () => true),
     setPendingDraft: vi.fn(),
     status: "ready",

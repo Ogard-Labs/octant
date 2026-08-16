@@ -1876,6 +1876,7 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
       cancelQueuedFollowUp: vi.fn(),
       queueFollowUp: vi.fn(),
       queuedFollowUps: [],
+      turnActivity: new Map(),
       followUps: new Map(),
       pendingDraft: "",
       completeFollowUp: vi.fn(async () => true),

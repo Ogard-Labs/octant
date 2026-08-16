@@ -24,6 +24,12 @@ import {
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  EMPTY_TURN_ACTIVITY,
+  appendReasoning,
+  applyActivityEvent,
+  type CodeTurnActivity,
+} from "./transcriptActivity";
+import {
   EMPTY_CODE_TURN_QUEUES,
   enqueueCodeTurn,
   queuedTurnsFor,
@@ -140,6 +146,31 @@ export function useCodeController(options: CodeControllerOptions) {
   const noteProviderRequest = useCallback((event: CodeOperationEvent) => {
     const request = providerRequestFromEvent(event);
     if (request !== undefined) setProviderRequests((current) => [...current, request]);
+  }, []);
+  const [turnActivity, setTurnActivity] = useState<ReadonlyMap<string, CodeTurnActivity>>(
+    () => new Map(),
+  );
+  const noteActivity = useCallback((operationId: CodeOperationId, event: CodeOperationEvent) => {
+    setTurnActivity((current) => {
+      const key = String(operationId);
+      const existing = current.get(key) ?? EMPTY_TURN_ACTIVITY;
+      const next = applyActivityEvent(existing, event);
+      if (next === existing) return current;
+      const updated = new Map(current);
+      updated.set(key, next);
+      return updated;
+    });
+  }, []);
+  const noteReasoning = useCallback((operationId: CodeOperationId, chunk: string) => {
+    setTurnActivity((current) => {
+      const key = String(operationId);
+      const existing = current.get(key) ?? EMPTY_TURN_ACTIVITY;
+      const next = appendReasoning(existing, chunk);
+      if (next === existing) return current;
+      const updated = new Map(current);
+      updated.set(key, next);
+      return updated;
+    });
   }, []);
   const editorDraftValues = useRef(new Map<string, string>());
   const firstTurnFailures = useRef(
@@ -370,6 +401,16 @@ export function useCodeController(options: CodeControllerOptions) {
                   }
                   const event = frame.event;
                   noteProviderRequest(event);
+                  noteActivity(operationId, event);
+                  if (event.kind === "provider-content" && event.channel === "reasoning") {
+                    const chunk = await readOperationText(
+                      client,
+                      threadId,
+                      operationId,
+                      event.content.contentId,
+                    );
+                    if (chunk !== undefined) noteReasoning(operationId, chunk);
+                  }
                   if (event.kind === "provider-content" && event.channel === "message") {
                     const chunk = await readOperationText(
                       client,
@@ -618,6 +659,7 @@ export function useCodeController(options: CodeControllerOptions) {
     turnAbort.current = undefined;
     setConversation([]);
     setProviderRequests([]);
+    setTurnActivity(new Map());
     setTurnStatus(
       options.activeThreadId !== undefined &&
         activeTurnOperations.current.has(String(options.activeThreadId))
@@ -893,11 +935,16 @@ export function useCodeController(options: CodeControllerOptions) {
         setPendingDraft("");
         setConversation((current) => [
           ...current,
-          userMessage,
+          { ...userMessage, operationId },
           {
             id: assistantId,
             role: "assistant",
             text: "",
+            // The transcript reads this turn's tool and reasoning rows by
+            // operation, so a live message must name its operation the same way
+            // a replayed one does.
+            operationId,
+            status: "incomplete",
             providerInstanceId: view.thread.providerInstanceId,
             modelId: view.thread.modelId,
           },
@@ -930,6 +977,16 @@ export function useCodeController(options: CodeControllerOptions) {
             cursor = Number(frame.cursor);
             const event = frame.event;
             noteProviderRequest(event);
+            noteActivity(operationId, event);
+            if (event.kind === "provider-content" && event.channel === "reasoning") {
+              const chunk = await readOperationText(
+                client,
+                view.thread.id,
+                operationId,
+                event.content.contentId,
+              );
+              if (chunk !== undefined) noteReasoning(operationId, chunk);
+            }
             if (event.kind === "provider-content" && event.channel === "message") {
               const chunk = await readOperationText(
                 client,
@@ -993,18 +1050,20 @@ export function useCodeController(options: CodeControllerOptions) {
         }
         setProviderRequests([]);
         if (controller.signal.aborted) return false;
-        if (assistantText.trim() === "") {
-          setConversation((current) =>
-            current.map((message) =>
-              message.id === assistantId
-                ? {
-                    ...message,
-                    text: "The provider turn finished without a visible reply.",
-                  }
-                : message,
-            ),
-          );
-        }
+        setConversation((current) =>
+          current.map((message) =>
+            message.id === assistantId
+              ? {
+                  ...message,
+                  status: "completed",
+                  text:
+                    assistantText.trim() === ""
+                      ? "The provider turn finished without a visible reply."
+                      : message.text,
+                }
+              : message,
+          ),
+        );
         setTurnStatus("idle");
         return true;
       } catch (error) {
@@ -1151,6 +1210,7 @@ export function useCodeController(options: CodeControllerOptions) {
     setPendingDraft,
     startThreadTurn,
     status,
+    turnActivity,
     turnError,
     turnStatus,
     updateSettings,

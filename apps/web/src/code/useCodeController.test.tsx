@@ -501,6 +501,92 @@ describe("useCodeController", () => {
     );
   });
 
+  it("collects tool activity and reasoning from the turn stream for the transcript", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000061";
+    const contentId = "60000000-0000-4000-8000-000000000061";
+    async function* frames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: {
+          kind: "tool-activity",
+          toolCallId: "call-1",
+          toolName: "Bash",
+          state: "running",
+          summary: "bun run verify",
+        },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 2,
+        occurredAt: now,
+        event: {
+          kind: "provider-content",
+          channel: "reasoning",
+          content: { contentId, digest: "b".repeat(64), byteLength: 5 },
+        },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 3,
+        occurredAt: now,
+        event: {
+          kind: "tool-activity",
+          toolCallId: "call-1",
+          toolName: "Bash",
+          state: "completed",
+          summary: "bun run verify",
+        },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 4,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      };
+    }
+    const client = fakeClient({
+      putEvidence: vi.fn(async () => ({ contentId, digest: "a".repeat(64), byteLength: 4 })) as never,
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId,
+        state: "running",
+      })) as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+      operationContent: vi.fn(async () => new TextEncoder().encode("plan.")),
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    await act(async () => {
+      await result.current.sendFollowUp("run it");
+    });
+
+    // The host is told which operation to run; activity is keyed by that same
+    // client-minted id, which is also what the live message carries.
+    const startedOperationId = result.current.conversation.find(
+      (message) => message.role === "assistant",
+    )?.operationId;
+    expect(startedOperationId).toBeDefined();
+    const activity = result.current.turnActivity.get(String(startedOperationId));
+    // The tool row reflects the last state the host reported, not one row per
+    // state change, and reasoning stays out of the assistant message text.
+    expect(activity?.rows).toEqual([
+      { kind: "tool", id: "call-1", toolName: "Bash", state: "completed", summary: "bun run verify" },
+    ]);
+    expect(activity?.reasoning).toBe("plan.");
+    expect(
+      result.current.conversation.find((message) => message.role === "assistant")?.text,
+    ).not.toContain("plan.");
+  });
+
   it("sends a queued follow-up once the running turn settles, and forgets a cancelled one", async () => {
     const operationId = "70000000-0000-4000-8000-000000000041";
     const putEvidence = vi.fn(async () => ({
