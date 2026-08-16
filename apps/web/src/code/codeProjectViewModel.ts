@@ -10,10 +10,51 @@ function defaultStorage(): Pick<Storage, "getItem" | "setItem"> | undefined {
   }
 }
 
+export const CODE_PROJECT_VIEW_ICONS = [
+  "folder",
+  "folder-git",
+  "code",
+  "terminal",
+  "box",
+  "layers",
+  "rocket",
+  "star",
+  "flag",
+  "bug",
+  "briefcase",
+  "sparkles",
+] as const;
+export type CodeProjectViewIcon = (typeof CODE_PROJECT_VIEW_ICONS)[number];
+export const DEFAULT_CODE_PROJECT_VIEW_ICON: CodeProjectViewIcon = "folder";
+
+export const CODE_PROJECT_VIEW_COLORS = [
+  "neutral",
+  "red",
+  "orange",
+  "yellow",
+  "green",
+  "teal",
+  "blue",
+  "purple",
+  "pink",
+] as const;
+export type CodeProjectViewColor = (typeof CODE_PROJECT_VIEW_COLORS)[number];
+export const DEFAULT_CODE_PROJECT_VIEW_COLOR: CodeProjectViewColor = "neutral";
+
 export interface CodeProjectView {
   readonly id: string;
   readonly name: string;
   readonly projectIds: ReadonlyArray<string>;
+  readonly icon: CodeProjectViewIcon;
+  readonly color: CodeProjectViewColor;
+}
+
+export interface CodeProjectViewInput {
+  readonly id: string;
+  readonly name: string;
+  readonly projectIds: ReadonlyArray<string>;
+  readonly icon?: CodeProjectViewIcon;
+  readonly color?: CodeProjectViewColor;
 }
 
 export interface CodeProjectViewState {
@@ -60,11 +101,7 @@ export function writeCodeProjectViewState(
 
 export function createCodeProjectView(
   state: CodeProjectViewState,
-  input: {
-    readonly id: string;
-    readonly name: string;
-    readonly projectIds: ReadonlyArray<string>;
-  },
+  input: CodeProjectViewInput,
 ): CodeProjectViewState {
   const view = normalizeView(input);
   if (view === undefined) return normalizeCodeProjectViewState(state);
@@ -74,11 +111,7 @@ export function createCodeProjectView(
 
 export function updateCodeProjectView(
   state: CodeProjectViewState,
-  input: {
-    readonly id: string;
-    readonly name: string;
-    readonly projectIds: ReadonlyArray<string>;
-  },
+  input: CodeProjectViewInput,
 ): CodeProjectViewState {
   const view = normalizeView(input);
   if (view === undefined) return normalizeCodeProjectViewState(state);
@@ -166,6 +199,8 @@ function normalizeView(value: unknown): CodeProjectView | undefined {
     readonly id?: unknown;
     readonly name?: unknown;
     readonly projectIds?: unknown;
+    readonly icon?: unknown;
+    readonly color?: unknown;
   };
   if (
     typeof record.id !== "string" ||
@@ -188,5 +223,13 @@ function normalizeView(value: unknown): CodeProjectView | undefined {
       ),
     ),
   ];
-  return { id: record.id, name, projectIds };
+  const icon = CODE_PROJECT_VIEW_ICONS.find((candidate) => candidate === record.icon);
+  const color = CODE_PROJECT_VIEW_COLORS.find((candidate) => candidate === record.color);
+  return {
+    id: record.id,
+    name,
+    projectIds,
+    icon: icon ?? DEFAULT_CODE_PROJECT_VIEW_ICON,
+    color: color ?? DEFAULT_CODE_PROJECT_VIEW_COLOR,
+  };
 }
