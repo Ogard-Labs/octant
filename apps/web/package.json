@@ -13,7 +13,7 @@
     "@octant/client-runtime": "workspace:*",
     "@octant/contracts": "workspace:*",
     "@octant/domain": "workspace:*",
-    "@octant/extensions": "workspace:*",
+    "@octant/plugin-host": "workspace:*",
     "@octant/theme": "workspace:*",
     "@xterm/addon-fit": "catalog:",
     "@xterm/xterm": "catalog:",

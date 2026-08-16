@@ -1,7 +1,7 @@
 import type { CanvasRefreshRequest, CanvasRefreshSkill } from "@octant/contracts/canvas-refresh";
 import { decodeCanvasSkillContribution } from "@octant/contracts/canvas-skill";
 import type { StandaloneSkillRecord } from "@octant/contracts/extensions";
-import type { CanvasSkillTrustFacts } from "@octant/extensions/canvas-skill-contributions";
+import type { CanvasSkillTrustFacts } from "@octant/plugin-host/canvas-skill-contributions";
 import type { CanvasSkillContributionSource } from "./canvasSkillContributionResolver";
 
 /**

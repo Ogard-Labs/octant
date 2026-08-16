@@ -23,7 +23,7 @@ import {
   validateAgentRunDepth,
   validateWorkspaceReceipt,
 } from "@octant/domain";
-import { isExtensionComponentModeSafe, resolveExtensionActivation } from "@octant/extensions";
+import { isExtensionComponentModeSafe, resolveExtensionActivation } from "@octant/plugin-host";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const ESCAPE_SUITE_FIXTURES_ROOT = join(here, "fixtures");

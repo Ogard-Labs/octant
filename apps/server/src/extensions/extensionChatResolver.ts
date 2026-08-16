@@ -21,7 +21,7 @@ import {
   filterSkillCatalogForScope,
   sourceQualifiedSkillId,
   type ExtensionAddressingCatalog,
-} from "@octant/extensions";
+} from "@octant/plugin-host";
 import type { ChatExtensionSelectionContextResolver } from "../chat/chatService";
 import { ChatServiceError } from "../chat/chatService";
 import type { AppManagedToolSet } from "../chat/chatTurnRunner";

@@ -326,7 +326,7 @@ describe("desktop packaging boundary", () => {
 
   it("does not stage internal packages behind synthetic export maps", () => {
     expect(Object.keys(createServerRuntimeManifest().dependencies)).not.toContain(
-      "@octant/extensions",
+      "@octant/plugin-host",
     );
     expect(PACKAGED_RUNTIME_IMPORTS.some((name) => name.startsWith("@octant/"))).toBe(false);
     expect(REQUIRED_PACKAGED_FILES.some((path) => path.includes("node_modules/@octant/"))).toBe(

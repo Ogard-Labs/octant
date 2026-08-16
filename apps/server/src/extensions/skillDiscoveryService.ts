@@ -11,7 +11,7 @@ import type {
   StandaloneSkillRecord,
   StandaloneSkillScope,
 } from "@octant/contracts/extensions";
-import { sourceQualifiedSkillId, buildSkillCatalog, type SkillCatalog } from "@octant/extensions";
+import { sourceQualifiedSkillId, buildSkillCatalog, type SkillCatalog } from "@octant/plugin-host";
 
 const DEFAULT_MAX_CONTENT_BYTES = 256 * 1024;
 const skillNamePattern = /^[a-z][a-z0-9-]{0,63}$/;

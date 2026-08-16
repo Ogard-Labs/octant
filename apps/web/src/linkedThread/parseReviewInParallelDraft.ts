@@ -1,4 +1,4 @@
-import { REVIEW_IN_PARALLEL_SKILL_NAME } from "@octant/extensions";
+import { REVIEW_IN_PARALLEL_SKILL_NAME } from "@octant/plugin-host";
 
 export interface ReviewInParallelDraft {
   readonly task: string;

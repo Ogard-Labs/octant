@@ -12,7 +12,7 @@ import {
 import { isAbsolute } from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { decodeWindowId } from "@octant/contracts";
-import { AgentPluginsError } from "@octant/extensions/agent-plugins";
+import { AgentPluginsError } from "@octant/plugin-host/agent-plugins";
 import { ClientPrincipalError } from "./clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";

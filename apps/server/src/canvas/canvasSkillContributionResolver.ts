@@ -7,7 +7,7 @@ import type {
 import {
   admitCanvasSkillContribution,
   type CanvasSkillTrustFacts,
-} from "@octant/extensions/canvas-skill-contributions";
+} from "@octant/plugin-host/canvas-skill-contributions";
 import { resolveCanvasSkillPresentation } from "@octant/domain/canvas-skill-policy";
 
 /** A registered contribution plus the effective trust/enablement facts. */

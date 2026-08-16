@@ -124,14 +124,14 @@ A trusted-looking extension ships an MCP server that requests filesystem, shell,
 credential capability it never declared, floods oversized results, or registers tools whose names
 shadow Octant core tools.
 
-| Layer               | Control                                                                                                      | Module                                                                                                 | State           |
-| ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | --------------- |
-| Activation ladder   | Host → mode → Project → thread → trust → enablement → compatibility all fail closed; quarantine blocks first | `packages/extensions/src/activation.ts` (`resolveExtensionActivation`, `isExtensionComponentModeSafe`) | Exists today    |
-| Manifest validation | Declared capabilities, entry points, paths, symlinks, and integrity validated before install                 | `apps/server/src/extensions/packageInspector.ts`, `packages/extensions/src/agentPlugins/mcp.ts`        | Exists today    |
-| Supervised process  | Executable components run under `sandbox-exec` with a minimal `PATH`, ready-handshake, and durable receipts  | `apps/server/src/extensions/nodeExtensionProcessPort.ts`, `extensionSupervisor.ts`                     | Exists today    |
-| Per-call approval   | Each MCP tool invocation is approval-gated with a bounded TTL that denies on timeout or abort                | `apps/server/src/extensions/extensionToolApprovalService.ts`                                           | Exists today    |
-| Policy engine       | An MCP-originated call carries `extension: trusted-extension` authority and cannot claim `core` identity     | `packages/contracts/src/toolActions.ts` (`ToolActionAuthority.extension`), `toolActionPolicy.ts`       | Exists today    |
-| Capability ceiling  | Requested-versus-declared capability mismatch is rejected at resolution, not merely surfaced in review UI    | Unified policy engine (see Policy engine)                                                              | Newly specified |
+| Layer               | Control                                                                                                      | Module                                                                                                  | State           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- | --------------- |
+| Activation ladder   | Host → mode → Project → thread → trust → enablement → compatibility all fail closed; quarantine blocks first | `packages/plugin-host/src/activation.ts` (`resolveExtensionActivation`, `isExtensionComponentModeSafe`) | Exists today    |
+| Manifest validation | Declared capabilities, entry points, paths, symlinks, and integrity validated before install                 | `apps/server/src/extensions/packageInspector.ts`, `packages/plugin-host/src/agentPlugins/mcp.ts`        | Exists today    |
+| Supervised process  | Executable components run under `sandbox-exec` with a minimal `PATH`, ready-handshake, and durable receipts  | `apps/server/src/extensions/nodeExtensionProcessPort.ts`, `extensionSupervisor.ts`                      | Exists today    |
+| Per-call approval   | Each MCP tool invocation is approval-gated with a bounded TTL that denies on timeout or abort                | `apps/server/src/extensions/extensionToolApprovalService.ts`                                            | Exists today    |
+| Policy engine       | An MCP-originated call carries `extension: trusted-extension` authority and cannot claim `core` identity     | `packages/contracts/src/toolActions.ts` (`ToolActionAuthority.extension`), `toolActionPolicy.ts`        | Exists today    |
+| Capability ceiling  | Requested-versus-declared capability mismatch is rejected at resolution, not merely surfaced in review UI    | Unified policy engine (see Policy engine)                                                               | Newly specified |
 
 ### AC3 — Child agent widening scope
 
@@ -240,7 +240,7 @@ window, or approves an action class the host policy reserves for the local user.
 - Work research already classifies source freshness and evidence leakage
   (`packages/domain/src/workResearchPolicy.ts`), and skill/plugin content contributes zero
   context unless explicitly selected and effectively enabled
-  (`packages/extensions/src/activation.ts`, composer reference rules).
+  (`packages/plugin-host/src/activation.ts`, composer reference rules).
 
 ### Newly specified
 
@@ -264,7 +264,7 @@ window, or approves an action class the host policy reserves for the local user.
   engine's step 7 — module `packages/domain/src/toolCallPolicy.ts` with the taint projection in
   `apps/server`.
 - **Structured references stay inert.** `@plugin` and `$skill` references cannot install, trust,
-  enable, or elevate (exists today, `packages/extensions/src/composer.ts`); injected text that
+  enable, or elevate (exists today, `packages/plugin-host/src/composer.ts`); injected text that
   imitates them remains ordinary text.
 
 ## Sandbox Boundary Design
@@ -281,7 +281,7 @@ window, or approves an action class the host policy reserves for the local user.
   provider credentials), and `apps/server/src/childProcessEnvironment.ts` strips the broker URLs,
   broker tokens, and desktop bridge secret from every child.
 - **Extension executable quarantine.** Executable components are quarantined until explicit trust
-  (`packages/extensions/src/activation.ts`), then run only in supervised processes launched under
+  (`packages/plugin-host/src/activation.ts`), then run only in supervised processes launched under
   `sandbox-exec` with `PATH=/usr/bin:/bin`, an explicit ready-handshake, bounded handshake bytes,
   durable process receipts, and stop/drain semantics
   (`apps/server/src/extensions/nodeExtensionProcessPort.ts`, `extensionSupervisor.ts`).
@@ -383,7 +383,7 @@ the gate.
 1. **Pure policy tests** (fastest, exhaustive): truth tables against
    `packages/domain/src/toolCallPolicy.ts` (new), `toolActionPolicy.ts`, `agentRunPolicy.ts`,
    `remoteAccessPolicy.ts`, `codePolicy.ts`, `workConfinementPolicy.ts`, and
-   `packages/extensions/src/activation.ts`, asserting the exact structured denial per fixture row.
+   `packages/plugin-host/src/activation.ts`, asserting the exact structured denial per fixture row.
 2. **Server integration tests**: fixtures driven through real routes and services
    (`apps/server/src`) asserting deny-before-side-effect, journal audit events, and that no
    filesystem, process, or network side effect occurred.
@@ -460,7 +460,7 @@ crosses a server authority or sandbox boundary without additional local compromi
 | Keychain broker with indirect references                             | Exists          | `apps/desktop/src/credentialBroker.ts`, `keychainCredentialStore.ts`                         |
 | Child authority clamps, depth/capacity, workspace receipts           | Exists          | `packages/domain/src/agentRunPolicy.ts`, `agentRunAuthorityCeiling.ts`                       |
 | Live-grant-derived child clamping and Code worktree children         | Exists today    | `agentRunLiveGrant.ts`, `clampAgentRunAuthorityAgainstLiveGrant`, Code receipt port          |
-| Extension quarantine, activation ladder, supervised processes        | Exists          | `packages/extensions/src/activation.ts`, `apps/server/src/extensions/`                       |
+| Extension quarantine, activation ladder, supervised processes        | Exists          | `packages/plugin-host/src/activation.ts`, `apps/server/src/extensions/`                      |
 | Declared-capability ceiling enforced at call resolution              | Newly specified | policy engine + extension manifest data                                                      |
 | Remote principal separation, closed action catalog, clamps           | Exists          | `remoteAccessPolicy.ts`, `clientPrincipal.ts`, `remoteRoutePolicy.ts`, `codePolicy.ts`       |
 | Consolidated audit taxonomy with principal attribution               | Newly specified | `packages/contracts/src/events.ts` or audit payload schemas + owning services                |

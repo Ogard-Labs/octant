@@ -1,5 +1,5 @@
 {
-  "name": "@octant/extensions",
+  "name": "@octant/plugin-host",
   "private": true,
   "type": "module",
   "exports": {

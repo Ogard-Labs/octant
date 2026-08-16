@@ -64,8 +64,13 @@ Hardening in progress for the preview:
   the same manifest, activation ladder, and enable/disable controls as
   third-party ones. Direction and migration order are in
   [decisions/0001-plugin-architecture.md](decisions/0001-plugin-architecture.md).
-  - Publish `@octant/plugin-api`; add renderer contribution points (sidebar
-    destinations, settings sections, panes, preview viewers, appearance).
+  - `@octant/plugin-api` extracted as a narrow, curated re-export of
+    `@octant/contracts/extensions` (manifest, component kinds, capabilities),
+    plus new `board`/`integration` component kinds and `sidebar.destination`/
+    `settings.section` contribution schemas. A minimal renderer contribution
+    registry now resolves sidebar destination availability; settings-section
+    contributions, panes, preview viewers, and appearance contribution points
+    remain open.
   - First bundled plugins: appearance packs and preview viewers, then the
     thread board and GitHub integration behind typed server ports.
 - **Linear integration** — the first bundled-off integration plugin: issue

@@ -14,7 +14,7 @@ import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import {
   isExtensionComponentModeSafe,
   resolveExtensionActivation,
-} from "@octant/extensions/activation";
+} from "@octant/plugin-host/activation";
 
 export interface ExtensionActivationPolicyPort {
   resolve(input: {
