@@ -1,0 +1,115 @@
+.remote-pairing {
+  display: grid;
+  width: min(100%, 420px);
+  gap: 14px;
+  padding: 28px;
+  color: var(--octant-text-primary);
+}
+
+.remote-pairing__centered {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.remote-pairing__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.remote-pairing__description {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.remote-pairing__form {
+  display: grid;
+  gap: 10px;
+}
+
+.remote-pairing__label {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.remote-pairing__input {
+  width: 100%;
+}
+
+.remote-pairing__button {
+  justify-self: start;
+}
+
+.remote-pairing__error {
+  color: var(--octant-danger-text);
+  font-size: 12px;
+}
+
+.remote-pairing__identity {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  background: var(--octant-surface-raised);
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+}
+
+.remote-pairing__fact {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.remote-pairing__fact-label {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.remote-pairing__fact-value {
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-pairing__fact-value--monospace {
+  font-family: var(--octant-editor-font-family);
+  font-size: 11px;
+}
+
+.remote-pairing__comparison {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  text-align: center;
+  background: var(--octant-success-surface);
+  border: 1px solid var(--octant-border);
+  border-radius: 10px;
+}
+
+.remote-pairing__comparison-label {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.remote-pairing__comparison-code {
+  color: var(--octant-text-primary-high-contrast);
+  font-family: var(--octant-editor-font-family);
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}

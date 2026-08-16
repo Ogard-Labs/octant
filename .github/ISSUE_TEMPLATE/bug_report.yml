@@ -1,0 +1,42 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. See …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Octant version and macOS version
+      placeholder: "0.x.y on macOS 15.x (Apple Silicon)"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options: [Chat, Work, Code, Settings, Other]
+  - type: input
+    id: provider
+    attributes:
+      label: Provider and model (if relevant)
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or diagnostics export
+      description: Redact anything private. Settings → Advanced → Export diagnostics produces a redacted bundle.

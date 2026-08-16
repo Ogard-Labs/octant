@@ -1,0 +1,46 @@
+{
+  "fixture": "scope-widening-child",
+  "abuseCase": "AC3",
+  "rows": [
+    {
+      "id": "scope-widening.shell-bit",
+      "kind": "child-clamp",
+      "expectedDenial": "authority-widening",
+      "policySurface": "agent-run",
+      "resolutionStep": "child-clamp",
+      "auditEvent": "authority-transition-recorded"
+    },
+    {
+      "id": "scope-widening.full-access-under-approval-gated",
+      "kind": "child-clamp",
+      "expectedDenial": "authority-widening",
+      "policySurface": "agent-run",
+      "resolutionStep": "child-clamp",
+      "auditEvent": "authority-transition-recorded"
+    },
+    {
+      "id": "scope-widening.project-default-under-session",
+      "kind": "child-clamp",
+      "expectedDenial": "authority-widening",
+      "policySurface": "agent-run",
+      "resolutionStep": "child-clamp",
+      "auditEvent": "authority-transition-recorded"
+    },
+    {
+      "id": "scope-widening.depth-3",
+      "kind": "child-depth",
+      "expectedDenial": "invalid-depth",
+      "policySurface": "agent-run",
+      "resolutionStep": "child-clamp",
+      "auditEvent": "authority-transition-recorded"
+    },
+    {
+      "id": "scope-widening.forged-worktree-receipt",
+      "kind": "workspace-receipt",
+      "expectedDenial": "invalid-workspace",
+      "policySurface": "agent-run",
+      "resolutionStep": "child-clamp",
+      "auditEvent": "authority-transition-recorded"
+    }
+  ]
+}

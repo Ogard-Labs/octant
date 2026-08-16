@@ -1,0 +1,515 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { WindowChrome } from "./WindowChrome";
+import type { OctantHostBridge } from "./hostBridge";
+
+function hostBridge(): OctantHostBridge {
+  return {
+    clearProviderCredential: vi.fn(),
+    close: vi.fn(),
+    maximizeOrRestore: vi.fn(),
+    minimize: vi.fn(),
+    projectWindowCapability: "C".repeat(43),
+    providerCredentialStatus: vi.fn(async () => "missing" as const),
+    resetBounds: vi.fn(),
+    selectProjectRoot: vi.fn(),
+    setProviderCredential: vi.fn(),
+    setSidebarMaterialPreference: vi.fn(),
+    subscribeResolvedMaterial: vi.fn(() => () => undefined),
+  };
+}
+
+function renderChrome(overrides: Partial<React.ComponentProps<typeof WindowChrome>> = {}) {
+  const props: React.ComponentProps<typeof WindowChrome> = {
+    activeSurface: "Welcome to Code",
+    dockAvailable: false,
+    dockExpanded: false,
+    dockLabel: "Project memory",
+    hostBridge: hostBridge(),
+    isNarrow: false,
+    material: "opaque",
+    onResetLayout: vi.fn(),
+    onResetWindowBounds: vi.fn(),
+    onToggleDock: vi.fn(),
+    ...overrides,
+  };
+  return { ...render(<WindowChrome {...props} />), props };
+}
+
+const rootStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8")
+  .replace('@import "./styles/shell.css";', "")
+  .replace('@import "./styles/chat.css";', "")
+  .replace('@import "./styles/code.css";', "");
+const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+const dockStyles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "utf8");
+const styles = [rootStyles, shellStyles, dockStyles].join("\n");
+
+function cssRule(selector: string, occurrence = 0): string {
+  if (selector === ":root" && occurrence === 0) {
+    const start = styles.indexOf(":root {");
+    expect(start, "missing base CSS rule for :root").toBeGreaterThanOrEqual(0);
+    const openingBrace = styles.indexOf("{", start);
+    const closingBrace = styles.indexOf("}", openingBrace);
+    return styles.slice(openingBrace + 1, closingBrace);
+  }
+  const matches = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gs)].filter((match) =>
+    match[1]
+      ?.split(",")
+      .map((candidate) => candidate.trim())
+      .includes(selector),
+  );
+  expect(matches, `missing CSS rule for ${selector}`).not.toHaveLength(0);
+  return matches[occurrence]?.[2] ?? "";
+}
+
+function atRuleBlock(atRule: string): string {
+  const start = styles.indexOf(atRule);
+  expect(start, `missing CSS at-rule ${atRule}`).toBeGreaterThanOrEqual(0);
+  const openingBrace = styles.indexOf("{", start);
+  expect(openingBrace, `missing opening brace for ${atRule}`).toBeGreaterThan(start);
+
+  let depth = 1;
+  for (let index = openingBrace + 1; index < styles.length; index += 1) {
+    if (styles[index] === "{") depth += 1;
+    if (styles[index] === "}") depth -= 1;
+    if (depth === 0) return styles.slice(openingBrace + 1, index);
+  }
+
+  throw new Error(`missing closing brace for ${atRule}`);
+}
+
+describe("WindowChrome", () => {
+  it("makes development authentication visibly distinct", () => {
+    render(
+      <WindowChrome
+        activeSurface="Chat"
+        developmentAuthentication
+        dockAvailable={false}
+        dockExpanded={false}
+        dockLabel="Utility dock"
+        isNarrow={false}
+        material="opaque"
+        onResetLayout={() => undefined}
+        onToggleDock={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("Development authentication")).toBeVisible();
+  });
+  it("uses neutral semantic roles for the shell palette", () => {
+    const root = cssRule(":root");
+
+    expect(root).toContain("--octant-focus-ring:");
+    expect(root).toContain("--octant-workspace:");
+    expect(root).toContain("--octant-chrome:");
+    expect(root).toContain("--octant-sidebar-opaque:");
+    expect(root).toContain("--octant-floating:");
+    expect(root).toContain("--octant-control-hover:");
+    expect(root).toContain("--octant-control-pressed:");
+    expect(root).toContain("--octant-border:");
+    expect(root).toContain("--octant-border-strong:");
+    expect(root).toContain("--octant-text-primary:");
+    expect(root).toContain("--octant-text-secondary:");
+    expect(root).toContain("--octant-text-muted:");
+    expect(root).toContain("--octant-text-primary-high-contrast:");
+    expect(root).toContain("--octant-text-secondary-high-contrast:");
+    expect(root).toContain("--octant-text-muted-high-contrast:");
+    expect(root).toContain("--octant-success-text:");
+    expect(root).toContain("--octant-warning-text:");
+    expect(root).toContain("--octant-danger-text:");
+    expect(root).toContain("--octant-addition-text:");
+    expect(root).toContain("--octant-deletion-text:");
+    expect(root).not.toMatch(/#9a8cff|#d5ceff|154 140 255/i);
+    expect(root).not.toMatch(/--octant-accent-(focus|border|surface|text)/);
+  });
+
+  it("keeps ordinary palette literals behind neutral semantic roles", () => {
+    const declarationsOutsideRoot = shellStyles;
+
+    expect(styles).not.toMatch(/#1a1a1f|#34343a|#414148|#16161a|#121216|#55525e/i);
+    expect(declarationsOutsideRoot).not.toMatch(/#(?:[0-9a-f]{3}|[0-9a-f]{6})\b/i);
+    expect(declarationsOutsideRoot).not.toMatch(/rgb\((?:255 255 255|7 7 9)\s*\//i);
+  });
+
+  it("uses only the approved native hierarchy weights", () => {
+    const weights = [...styles.matchAll(/font-weight:\s*(\d+);/g)].map((match) => Number(match[1]));
+
+    expect(weights.length).toBeGreaterThan(0);
+    expect(weights.every((weight) => [400, 500, 600].includes(weight))).toBe(true);
+  });
+
+  it("normalizes rendered semantic headings and strong text below browser bold", () => {
+    const stylesheet = document.createElement("style");
+    stylesheet.textContent = styles;
+    document.head.append(stylesheet);
+
+    const fixture = document.createElement("section");
+    fixture.innerHTML = `
+      <div class="workspace__message"><h1>Workspace</h1></div>
+      <section class="provider-settings">
+        <div class="provider-settings__intro"><h2>Providers</h2></div>
+        <article class="provider-card"><header class="provider-card__header"><h3>Codex</h3></header></article>
+        <div class="provider-card__discovery"><h4>Capabilities</h4></div>
+      </section>
+      <p class="project-overview__warning"><strong>Unavailable</strong></p>
+    `;
+    document.body.append(fixture);
+
+    try {
+      const weights = [...fixture.querySelectorAll("h1, h2, h3, h4, strong")].map(
+        (element) => getComputedStyle(element).fontWeight,
+      );
+
+      expect(weights).toEqual(["600", "600", "600", "600", "600"]);
+    } finally {
+      fixture.remove();
+      stylesheet.remove();
+    }
+  });
+
+  it("keeps compact native chrome geometry and neutral tool controls", () => {
+    expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
+    expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
+    expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
+    expect(cssRule(".window-chrome__button")).toContain("width: 26px;");
+    expect(cssRule(".window-chrome__button")).toContain("height: 26px;");
+    expect(cssRule(".window-chrome__button")).toContain("background: transparent;");
+    expect(cssRule(".window-chrome__button:hover")).toContain(
+      "background: var(--octant-control-hover);",
+    );
+    expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
+      "background: var(--octant-control-hover);",
+    );
+  });
+
+  it("keeps shell separators and authority notices visually quiet", () => {
+    expect(cssRule(".workspace-split")).toContain("background: transparent;");
+    expect(cssRule(".workspace-split__resize")).toContain("background: transparent;");
+    expect(cssRule(".workspace-split__resize::before")).toContain(
+      "background: var(--octant-border);",
+    );
+    expect(cssRule(".workspace-cross-context-banner")).toContain("box-shadow: none;");
+    expect(cssRule(".workspace-cross-context-banner")).toContain(
+      "background: var(--octant-floating);",
+    );
+  });
+
+  it("keeps ordinary navigation and tab selection neutral", () => {
+    expect(cssRule('.mode-button[aria-pressed="true"]')).toContain(
+      "background: var(--octant-selection);",
+    );
+    expect(cssRule('.mode-button[aria-pressed="true"]')).not.toMatch(/accent|purple/i);
+    expect(cssRule('.project-row[data-active="true"]')).toContain(
+      "background: var(--octant-selection);",
+    );
+    expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple/i);
+    expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])')).toContain(
+      "background: var(--octant-selection);",
+    );
+    expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])')).not.toMatch(
+      /accent|border-bottom-color/i,
+    );
+    expect(styles).not.toMatch(/\.project-row__mark\[data-type=/);
+  });
+
+  it("keeps semantic shell borders and controls restrained", () => {
+    expect(cssRule(":root")).toContain("--octant-border: #323232;");
+    expect(cssRule(":root")).toContain("--octant-border-strong: #414141;");
+    expect(cssRule(".sidebar__native-leading")).not.toMatch(/background|border|box-shadow/);
+
+    expect(cssRule(".new-project", 1)).toContain("color: var(--octant-text-primary);");
+    expect(cssRule(".new-project", 1)).toContain("background: transparent;");
+    expect(cssRule(".new-project:hover")).toContain("background: var(--octant-control-hover);");
+    expect(cssRule(".new-project--subtle")).toContain("color: var(--octant-text-muted);");
+    expect(cssRule(".new-project--subtle")).toContain("font-weight: 400;");
+    expect(cssRule(".new-project--subtle:hover")).toContain("color: var(--octant-text-secondary);");
+  });
+
+  it("standardizes workspace tab and pane IconButton controls", () => {
+    expect(cssRule(".workspace-tab__action")).toContain("width: 26px;");
+    expect(cssRule(".workspace-tab__action")).toContain("height: 26px;");
+    expect(cssRule(".workspace-tab__action")).toContain("background: transparent;");
+    expect(cssRule(".workspace-tab__action:hover")).toContain(
+      "background: var(--octant-control-hover);",
+    );
+    expect(cssRule('.workspace-tab__action[aria-expanded="true"]')).toContain(
+      "background: var(--octant-control-hover);",
+    );
+    expect(cssRule(".workspace-tab__action:active")).toContain(
+      "background: var(--octant-control-pressed);",
+    );
+
+    expect(cssRule(".workspace-pane-actions__trigger")).toContain("width: 26px;");
+    expect(cssRule(".workspace-pane-actions__trigger")).toContain("height: 26px;");
+    expect(cssRule(".workspace-pane-actions__trigger")).toContain("background: transparent;");
+    expect(cssRule(".workspace-pane-actions__trigger:hover")).toContain(
+      "background: var(--octant-control-hover);",
+    );
+    expect(cssRule('.workspace-pane-actions__trigger[aria-expanded="true"]')).toContain(
+      "background: var(--octant-control-hover);",
+    );
+    expect(cssRule(".workspace-pane-actions__trigger:active")).toContain(
+      "background: var(--octant-control-pressed);",
+    );
+  });
+
+  it("keeps reduced transparency independent from increased contrast", () => {
+    const reducedTransparency = atRuleBlock("@media (prefers-reduced-transparency: reduce)");
+    const increasedContrast = atRuleBlock("@media (prefers-contrast: more)");
+
+    expect(styles).not.toContain(
+      "@media (prefers-reduced-transparency: reduce), (prefers-contrast: more)",
+    );
+    expect(reducedTransparency).toContain(".shell--material-translucent.shell-frame > .sidebar");
+    expect(reducedTransparency).toContain(
+      '.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame > .sidebar',
+    );
+    expect(reducedTransparency).toContain(
+      '.shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame > .sidebar',
+    );
+    expect(reducedTransparency).toContain("backdrop-filter: none;");
+    expect(reducedTransparency).not.toContain("--octant-border-strong");
+    expect(reducedTransparency).not.toContain("--octant-text-");
+    expect(reducedTransparency).not.toContain("box-shadow:");
+    expect(increasedContrast).toContain(
+      "--octant-text-primary: var(--octant-text-primary-high-contrast) !important;",
+    );
+    expect(increasedContrast).toContain(
+      "--octant-text-secondary: var(--octant-text-secondary-high-contrast) !important;",
+    );
+    expect(increasedContrast).toContain(
+      "--octant-text-muted: var(--octant-text-muted-high-contrast) !important;",
+    );
+    expect(increasedContrast).toContain("border-color: var(--octant-border-strong);");
+    expect(increasedContrast).toContain("box-shadow: inset 0 0 0 1px var(--octant-border-strong);");
+  });
+
+  it("overrides inline theme text tokens for OS Increased Contrast", () => {
+    const increasedContrast = atRuleBlock("@media (prefers-contrast: more)");
+    expect(increasedContrast).toContain(
+      "--octant-text-primary: var(--octant-text-primary-high-contrast) !important;",
+    );
+    expect(increasedContrast).toContain(
+      "--octant-text-secondary: var(--octant-text-secondary-high-contrast) !important;",
+    );
+    expect(increasedContrast).toContain(
+      "--octant-text-muted: var(--octant-text-muted-high-contrast) !important;",
+    );
+  });
+
+  it("keeps transient project dialogs as compact centered overlays", () => {
+    expect(cssRule(".octant-dialog__viewport")).toContain("align-items: center");
+    expect(cssRule(".octant-dialog__viewport")).toContain("justify-content: center");
+    expect(cssRule(".octant-dialog__popup")).toContain("height: auto");
+    expect(cssRule(".octant-dialog__popup")).toContain("width: min(420px, calc(100vw - 48px))");
+    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: 12px");
+    expect(cssRule(".octant-dialog__popup")).not.toContain("height: 100%");
+    expect(cssRule(".octant-dialog__popup")).not.toContain("border-left: 1px solid");
+    expect(cssRule(".octant-dialog__backdrop")).toContain("rgb(0 0 0 / 28%)");
+    expect(cssRule(".project-dialog", 1)).toContain("width: min(100%, 380px)");
+    expect(cssRule(".project-dialog", 1)).toContain("padding: 16px");
+    expect(cssRule(".project-dialog h1")).toContain("font-size: 16px");
+  });
+
+  it("keeps the opaque utility dock and accessibility fallbacks", () => {
+    expect(cssRule(".right-utility-dock")).toContain("background: var(--octant-workspace);");
+    expect(cssRule(".octant-dialog__popup")).toContain("background: var(--octant-workspace);");
+    expect(cssRule(".environment-git-group dl")).toContain("background: var(--octant-control);");
+    expect(cssRule(".environment-git-group dl")).toContain(
+      "border: 1px solid var(--octant-border);",
+    );
+    expect(cssRule(".environment-git-group dl")).toContain("border-radius: 8px;");
+    expect(cssRule(".environment-git-group__row")).toContain("min-height: 30px;");
+    expect(cssRule(".environment-git-group__row + .environment-git-group__row")).toContain(
+      "border-top: 1px solid var(--octant-border);",
+    );
+    expect(cssRule(".environment-git-group__identity-secondary", 1)).toContain(
+      'font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;',
+    );
+
+    expect(styles).toContain("@media (min-width: 681px) and (max-width: 960px)");
+    expect(cssRule(".workspace")).toContain("min-width: 0;");
+    expect(cssRule(".primary-workspace-layer")).toContain("position: relative;");
+    expect(cssRule(".right-utility-dock")).not.toContain("position: fixed;");
+    expect(styles).toContain("@media (max-width: 680px)");
+    expect(styles).not.toContain(".project-memory-inspector--narrow");
+    expect(styles).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(styles).toContain(".workspace-split__resize::before,");
+    expect(styles).toContain(".project-memory-inspector *");
+    expect(styles).toContain("@media (prefers-reduced-transparency: reduce)");
+    expect(styles).toContain("@media (prefers-contrast: more)");
+    expect(styles).toContain(".shell--material-translucent.shell-frame > .sidebar");
+    expect(styles).toContain(".environment-git-group dl,");
+    expect(cssRule('.project-row[data-active="true"]', 1)).toContain(
+      "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
+    );
+    expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])', 1)).toContain(
+      "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
+    );
+  });
+
+  it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {
+    expect(cssRule('html[data-octant-native-host="true"]')).toContain("background: transparent;");
+    expect(cssRule('html[data-octant-native-host="true"] .shell.shell-frame')).toContain(
+      "background: transparent;",
+    );
+    expect(cssRule(".workspace")).toContain("background: var(--octant-workspace);");
+    expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
+  });
+
+  it("exposes exactly one wide utility dock toggle only when a real surface is available", async () => {
+    const user = userEvent.setup();
+    const { props, rerender } = renderChrome({
+      dockAvailable: true,
+    });
+
+    const dock = screen.getByRole("button", { name: "Open Project memory" });
+    expect(dock).toHaveAttribute("title", "Open Project memory");
+    expect(dock).toHaveAttribute("aria-expanded", "false");
+    expect(dock).toHaveAttribute("aria-controls", "right-utility-dock");
+    expect(dock).toHaveAttribute("data-dock-opener", "true");
+
+    await user.click(dock);
+    expect(props.onToggleDock).toHaveBeenCalledOnce();
+
+    rerender(<WindowChrome {...props} dockAvailable dockExpanded />);
+    expect(screen.getByRole("button", { name: "Close Project memory" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+
+    rerender(<WindowChrome {...props} dockAvailable={false} />);
+    expect(screen.queryByRole("button", { name: /Project memory/i })).not.toBeInTheDocument();
+  });
+
+  it("moves the single utility dock action into narrow disclosure", async () => {
+    const user = userEvent.setup();
+    const { props } = renderChrome({
+      dockAvailable: true,
+      isNarrow: true,
+    });
+    const overflow = screen.getByRole("button", { name: "More window actions" });
+    expect(overflow).toHaveAttribute("data-dock-opener", "true");
+
+    await user.click(overflow);
+    const dock = screen.getByRole("button", { name: "Open Project memory" });
+    expect(dock).toHaveAttribute("aria-expanded", "false");
+    expect(dock).toHaveAttribute("aria-controls", "right-utility-dock");
+    dock.focus();
+    await user.keyboard("{Enter}");
+
+    expect(props.onToggleDock).toHaveBeenCalledOnce();
+    expect(overflow).toHaveAttribute("aria-expanded", "false");
+    expect(overflow).toHaveFocus();
+  });
+
+  it("keeps workspace actions quiet without duplicating sidebar identity or the page title", async () => {
+    const user = userEvent.setup();
+    const bridge = hostBridge();
+    const { container, props } = renderChrome({ hostBridge: bridge });
+
+    expect(container.querySelector("[data-traffic-light-safe-space]")).not.toBeInTheDocument();
+    expect(container.querySelector(".window-chrome__leading")).not.toBeInTheDocument();
+    expect(container.querySelector(".window-chrome__brand")).not.toBeInTheDocument();
+    expect(container.querySelector(".window-chrome__identity")).not.toBeInTheDocument();
+    expect(screen.queryByText("Welcome to Code")).not.toBeInTheDocument();
+    expect(screen.getByRole("banner")).toHaveAccessibleName(
+      "Workspace actions for Welcome to Code",
+    );
+    expect(container.querySelector(".window-chrome__trailing")).toBeInTheDocument();
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    const resetLayout = screen.getByRole("button", { name: "Reset layout" });
+    expect(resetLayout).toHaveAttribute("title", "Reset layout");
+    expect(resetLayout).toHaveClass("window-no-drag");
+    resetLayout.focus();
+    await user.keyboard("{Enter}");
+    expect(props.onResetLayout).toHaveBeenCalledOnce();
+
+    expect(screen.queryByRole("group", { name: "Window controls" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Minimize window" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reset window bounds" }));
+    expect(props.onResetWindowBounds).toHaveBeenCalledOnce();
+    expect(bridge.resetBounds).not.toHaveBeenCalled();
+  });
+
+  it("uses disclosure keyboard behavior for narrow overflow actions", async () => {
+    const user = userEvent.setup();
+    const { container, props } = renderChrome({ isNarrow: true });
+
+    expect(screen.queryByRole("button", { name: "Reset layout" })).not.toBeInTheDocument();
+
+    const overflow = screen.getByRole("button", { name: "More window actions" });
+    expect(overflow).toHaveAttribute("aria-expanded", "false");
+    expect(overflow).not.toHaveAttribute("aria-haspopup");
+    expect(overflow).toHaveClass("window-no-drag");
+    await user.click(overflow);
+
+    expect(overflow).toHaveAttribute("aria-expanded", "true");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(container.querySelector(".window-chrome__disclosure")).toBeInTheDocument();
+    const resetLayout = screen.getByRole("button", { name: "Reset layout" });
+    expect(resetLayout).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(overflow).toHaveAttribute("aria-expanded", "false");
+    expect(overflow).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Reset layout" })).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(props.onResetLayout).toHaveBeenCalledOnce();
+    expect(overflow).toHaveAttribute("aria-expanded", "false");
+    expect(overflow).toHaveFocus();
+  });
+
+  it("resets disclosure state and focus across narrow-wide-narrow transitions", async () => {
+    const user = userEvent.setup();
+    const { props, rerender } = renderChrome({ isNarrow: true });
+
+    await user.click(screen.getByRole("button", { name: "More window actions" }));
+    expect(screen.getByRole("button", { name: "Reset layout" })).toHaveFocus();
+
+    rerender(<WindowChrome {...props} isNarrow={false} />);
+    expect(screen.queryByRole("button", { name: "More window actions" })).not.toBeInTheDocument();
+    expect(document.body).toHaveFocus();
+
+    rerender(<WindowChrome {...props} isNarrow />);
+    const overflow = screen.getByRole("button", { name: "More window actions" });
+    expect(overflow).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: "Reset layout" })).not.toBeInTheDocument();
+    expect(document.body).toHaveFocus();
+
+    overflow.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("button", { name: "Reset layout" })).toHaveFocus();
+  });
+
+  it("marks only empty rail space draggable and exposes the opaque material fallback", () => {
+    const { container } = render(
+      <WindowChrome
+        activeSurface="Welcome to Code"
+        dockAvailable={false}
+        dockExpanded={false}
+        dockLabel="Project memory"
+        isNarrow={false}
+        material="opaque"
+        onResetLayout={vi.fn()}
+        onToggleDock={vi.fn()}
+      />,
+    );
+
+    expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
+    expect(container.querySelector(".window-chrome__drag-space")).toHaveClass("window-drag-region");
+    expect(container.querySelectorAll(".window-drag-region")).toHaveLength(1);
+    for (const control of screen.getAllByRole("button")) {
+      expect(control).toHaveClass("window-no-drag");
+    }
+    expect(screen.queryByRole("button", { name: "Minimize window" })).not.toBeInTheDocument();
+  });
+});

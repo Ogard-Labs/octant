@@ -1,0 +1,209 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import { type AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import { type AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
+import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
+import { AgentRunHierarchy } from "./AgentRunHierarchy";
+
+const parentThreadId = decodeAgentRunParentThreadId("11111111-1111-4111-8111-111111111111");
+const runId = decodeAgentRunId("22222222-2222-4222-8222-222222222222");
+
+function emptyClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
+  return {
+    parentSummary: vi.fn(async () => ({ parentThreadId, entries: [] })),
+    acknowledge: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
+    requestRun: vi.fn(async () => ({ kind: "run-accepted" as const })),
+    cancel: vi.fn(async () => ({ results: [] })),
+    ...overrides,
+  };
+}
+
+async function fillCreationForm(user: ReturnType<typeof userEvent.setup>) {
+  await user.type(screen.getByLabelText("Task"), "Summarize the open PRs.");
+  await user.type(
+    screen.getByLabelText("Provider instance ID"),
+    "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  );
+  await user.type(screen.getByLabelText("Model ID"), "gpt-4o");
+}
+
+describe("AgentRunHierarchy", () => {
+  it("renders server-authored history and acknowledges a completed child", async () => {
+    const user = userEvent.setup();
+    const acknowledge = vi.fn(async () => ({
+      kind: "run-updated" as const,
+      run: {} as never,
+    }));
+    const client = emptyClient({
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          {
+            runId,
+            requestId: "request-1",
+            parentThreadId,
+            role: "review",
+            task: "Verify the packaged child",
+            lifecycleStatus: "completed",
+            executionKind: "provider-native",
+            usageQuality: "provider-reported",
+            resultAcknowledgement: {
+              required: true,
+              acknowledged: false,
+              followUpReason: "unacknowledged-child-result",
+            },
+            version: 2,
+            updatedAt: "2026-08-01T15:01:00.000Z",
+          },
+        ],
+      })),
+      acknowledge,
+    });
+
+    render(
+      <AgentRunHierarchy client={client} parentThreadId={parentThreadId} creationPosture="ask" />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Active / History" })).toBeVisible(),
+    );
+    await user.selectOptions(screen.getByLabelText("Agent hierarchy filter"), "history");
+    expect(screen.getByText("Verify the packaged child")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /acknowledge result/i }));
+
+    expect(acknowledge).toHaveBeenCalledWith({ runId, expectedVersion: 2 });
+  });
+
+  it("hides child creation and shows the Off explanation when posture is Off", async () => {
+    const client = emptyClient();
+    render(
+      <AgentRunHierarchy
+        allowCreation
+        client={client}
+        parentThreadId={parentThreadId}
+        creationPosture="off"
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole("heading")).toBeVisible());
+    expect(screen.getAllByText(/posture is Off/i).length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("Task")).not.toBeInTheDocument();
+  });
+
+  it("submits an explicit child creation request and refreshes on acceptance", async () => {
+    const user = userEvent.setup();
+    const requestRun = vi.fn(async (_input: unknown) => ({ kind: "run-accepted" as const }));
+    const parentSummary = vi.fn(async () => ({ parentThreadId, entries: [] }));
+    const client = emptyClient({ requestRun: requestRun as never, parentSummary });
+    render(
+      <AgentRunHierarchy
+        allowCreation
+        client={client}
+        parentThreadId={parentThreadId}
+        creationPosture="automatic"
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText("Task")).toBeVisible());
+    await fillCreationForm(user);
+    await user.click(screen.getByRole("button", { name: "Create subagent" }));
+
+    await waitFor(() => expect(requestRun).toHaveBeenCalledTimes(1));
+    const submitted = requestRun.mock.calls[0]?.[0];
+    expect(submitted).toMatchObject({
+      parentThreadId,
+      task: "Summarize the open PRs.",
+      mode: "chat",
+      workspace: { kind: "chat-virtual", mode: "chat" },
+    });
+    await waitFor(() => expect(parentSummary).toHaveBeenCalledTimes(2));
+  });
+
+  it("surfaces a server denial reason next to the creation form without crashing the hierarchy", async () => {
+    const user = userEvent.setup();
+    const requestRun = vi.fn(async () => ({
+      kind: "run-command-failed" as const,
+      reason: "posture-rejected",
+      message: "Subagent creation posture is Off.",
+    }));
+    const client = emptyClient({ requestRun });
+    render(
+      <AgentRunHierarchy
+        allowCreation
+        client={client}
+        parentThreadId={parentThreadId}
+        creationPosture="automatic"
+      />,
+    );
+    await waitFor(() => expect(screen.getByLabelText("Task")).toBeVisible());
+    await fillCreationForm(user);
+    await user.click(screen.getByRole("button", { name: "Create subagent" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert")).toHaveTextContent("Subagent creation posture is Off."),
+    );
+  });
+
+  it("cancels an active child through the panel's Cancel action", async () => {
+    const user = userEvent.setup();
+    const cancel = vi.fn(async () => ({
+      results: [{ kind: "run-updated" as const, run: { id: runId, lifecycleStatus: "cancelled" } }],
+    }));
+    const parentSummary = vi.fn(async () => ({
+      parentThreadId,
+      entries: [
+        {
+          runId,
+          requestId: "request-1",
+          parentThreadId,
+          role: "research",
+          task: "Draft the release notes",
+          lifecycleStatus: "running",
+          executionKind: "octant-managed",
+          usageQuality: "provider-reported",
+          resultAcknowledgement: { required: false, acknowledged: false },
+          version: 1,
+          updatedAt: "2026-08-01T15:01:00.000Z",
+        },
+      ],
+    }));
+    const client = emptyClient({ cancel, parentSummary });
+    render(
+      <AgentRunHierarchy
+        allowCreation
+        client={client}
+        parentThreadId={parentThreadId}
+        creationPosture="automatic"
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("Draft the release notes")).toBeVisible());
+    await user.click(screen.getByRole("button", { name: "Cancel Draft the release notes" }));
+
+    expect(cancel).toHaveBeenCalledWith({ runId, scope: "subtree" });
+    await waitFor(() => expect(parentSummary).toHaveBeenCalledTimes(2));
+  });
+
+  it("fetches the server-authoritative posture from an injected settings client", async () => {
+    const settingsClient: AgentRunSettingsClient = {
+      current: vi.fn(async () => ({
+        creationPosture: "automatic" as const,
+        version: 3 as never,
+        updatedAt: "2026-08-01T15:00:00.000Z" as never,
+      })),
+      update: vi.fn() as never,
+    };
+    const client = emptyClient();
+    render(
+      <AgentRunHierarchy
+        allowCreation
+        client={client}
+        parentThreadId={parentThreadId}
+        creationPosture="off"
+        settingsClient={settingsClient}
+      />,
+    );
+    // The static `creationPosture="off"` prop is a fallback only; once the
+    // settings client resolves, the real (Automatic) posture wins and the
+    // creation form appears.
+    await waitFor(() => expect(screen.getByLabelText("Task")).toBeVisible());
+    expect(settingsClient.current).toHaveBeenCalled();
+  });
+});

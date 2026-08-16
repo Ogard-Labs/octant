@@ -1,0 +1,19 @@
+{
+  "name": "@octant/docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun --bun ../../node_modules/vitepress/bin/vitepress.js build .",
+    "dev": "vitepress dev .",
+    "preview": "vitepress preview .",
+    "check:links": "bun scripts/check-links.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@octant/theme": "workspace:*",
+    "typescript": "catalog:",
+    "vitepress": "1.6.4",
+    "vitest": "catalog:"
+  }
+}

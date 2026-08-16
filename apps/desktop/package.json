@@ -1,0 +1,26 @@
+{
+  "name": "@octant/desktop",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "build": "tsdown && bun ../../scripts/build-keychain-helper.ts && bun ../../scripts/build-code-file-helper.ts",
+    "start": "electron dist/main.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@octant/contracts": "workspace:*",
+    "@octant/domain": "workspace:*",
+    "@octant/host-runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "43.1.0",
+    "tsdown": "0.22.5",
+    "typescript": "catalog:",
+    "unrun": "0.3.1",
+    "vitest": "catalog:"
+  },
+  "bundleId": "app.octant.desktop",
+  "productName": "Octant"
+}

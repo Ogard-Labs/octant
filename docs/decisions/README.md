@@ -1,0 +1,37 @@
+# Architecture decision records
+
+Short records of the durable architectural decisions behind Octant. Each ADR
+states context, the decision as concrete rules, and consequences. They are the
+distilled successor of the earlier long-form design specifications.
+
+## Index
+
+| ADR                                                     | Title                                                             | Status   |
+| ------------------------------------------------------- | ----------------------------------------------------------------- | -------- |
+| [0001](0001-plugin-architecture.md)                     | Plugin architecture                                               | Proposed |
+| [0002](0002-durable-event-journal.md)                   | Durable event journal and rebuildable projections                 | Accepted |
+| [0003](0003-product-modes-and-authority.md)             | Product modes: Chat, Work, and Code authority                     | Accepted |
+| [0004](0004-monorepo-layering.md)                       | Monorepo layering and dependency direction                        | Accepted |
+| [0005](0005-provider-sdk-contract.md)                   | Provider SDK contract, registry, and honest capabilities          | Accepted |
+| [0006](0006-acp-agent-drivers.md)                       | ACP agent drivers as one generic stack with per-provider profiles | Accepted |
+| [0007](0007-direct-api-providers-and-native-harness.md) | Direct API providers and the native agent harness                 | Accepted |
+| [0008](0008-context-budget-and-capacity.md)             | Context budget, provider limits, and capacity scheduling          | Accepted |
+| [0009](0009-sandbox-confinement-and-approvals.md)       | Sandbox confinement, approvals, and Plan mode                     | Accepted |
+| [0010](0010-secure-preview-and-canvas.md)               | Secure file preview and canvas artifacts                          | Accepted |
+| [0011](0011-extensions-activation-ladder.md)            | Extensions and skills: the activation ladder                      | Accepted |
+| [0012](0012-mixed-provider-subagents.md)                | Mixed-provider subagents and agent runs                           | Accepted |
+| [0013](0013-remote-access-and-mobile.md)                | Remote access: single host, paired devices, and mobile            | Accepted |
+| [0014](0014-apple-development-capability.md)            | Apple development and validation as an app-managed capability     | Accepted |
+| [0015](0015-workspace-shell-model.md)                   | Workspace shell model                                             | Accepted |
+| [0016](0016-component-foundation-and-theme.md)          | Component foundation and theme                                    | Accepted |
+
+## Adding an ADR
+
+- Take the next number (`00NN-short-slug.md`); never renumber existing records.
+- Use the sections `# 00NN. Title`, `**Status:**`, `## Context`, `## Decision`,
+  `## Consequences`, and optionally `## Related`; keep it under about 90 lines.
+- Status is one of `Proposed` (agreed direction, not yet implemented),
+  `Accepted` (implemented and enforced), `Superseded by 00NN`, or `Deprecated`.
+- To change a decision, write a new ADR and add `**Status:** Superseded by 00NN`
+  to the old one; do not edit history in place.
+- Add the record to the index above in the same change.

@@ -1,0 +1,28 @@
+{
+  "name": "@octant/theme",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./color": "./src/color.ts",
+    "./contrast": "./src/contrast.ts",
+    "./tokens": "./src/tokens.ts",
+    "./fallback": "./src/fallback.ts",
+    "./import": "./src/import.ts",
+    "./backgrounds": "./src/backgrounds.ts",
+    "./typography": "./src/typography.ts"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@octant/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "tsdown": "0.22.5",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

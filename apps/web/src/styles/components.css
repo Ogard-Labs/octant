@@ -1,0 +1,244 @@
+/*
+ * Octant component layer.
+ *
+ * This file is the single tuning point for shared surface materials and
+ * compact component silhouettes. It is imported last (see App.tsx) so its
+ * assignments win over feature stylesheets, and every value is derived from
+ * the semantic `--octant-*` tokens defined in styles.css and packages/theme.
+ *
+ * How to tune the whole app from here:
+ * - Materials: adjust `--octant-glass-*` and `--octant-shadow-*` in styles.css.
+ * - Which surfaces are glass: edit the glass surface group below.
+ * - Chips/cards: adjust `.octant-chip` / `.octant-card` once; consumers inherit.
+ *
+ * Interactive primitives (buttons, inputs, selects, menus, dialogs, tabs,
+ * switches, tooltips) live in apps/web/src/ui/base and consume the same
+ * tokens. Do not restyle primitives inside feature stylesheets.
+ */
+
+/* ── Materials ─────────────────────────────────────────────────────── */
+
+/* Frosted glass panel: blurred tint, hairline edge, top inner highlight. */
+.octant-glass {
+  background: var(--octant-glass-bg);
+  border: 1px solid var(--octant-glass-border);
+  box-shadow: var(--octant-glass-highlight);
+  backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
+}
+
+/* Floating glass: menus, popovers, dialogs, pips. */
+.octant-glass--overlay {
+  box-shadow: var(--octant-glass-highlight), var(--octant-shadow-pop);
+}
+
+/* Raised opaque card for in-flow containers. */
+.octant-card {
+  background: var(--octant-surface-raised);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--octant-radius-panel, 10px);
+  box-shadow: var(--octant-shadow-md);
+}
+
+.octant-card--flat {
+  box-shadow: none;
+}
+
+/* Compact pill chip. */
+.octant-chip {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  color: var(--octant-text-secondary);
+  background: transparent;
+  border: 1px solid var(--octant-border);
+  border-radius: var(--octant-radius-pill, 999px);
+  font-size: 11.5px;
+  font-weight: 500;
+}
+
+.octant-chip:hover {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+  border-color: var(--octant-border-strong);
+}
+
+.octant-chip[aria-pressed="true"],
+.octant-chip[data-active="true"] {
+  color: var(--octant-text-primary);
+  background: var(--octant-selection);
+  box-shadow: var(--octant-shadow-hairline);
+}
+
+/* ── Glass surface group ───────────────────────────────────────────── */
+
+/* Every floating layer adopts the glass material here, in one place. */
+.octant-menu__popup,
+.octant-dialog__popup,
+.window-chrome__disclosure,
+.composer-folder-selector__menu,
+.thread-activity-pip,
+.thread-activity-pip__collapsed-controls,
+.project-dialog,
+.project-search,
+.folder-picker {
+  background: var(--octant-glass-bg);
+  border: 1px solid var(--octant-glass-border);
+  box-shadow: var(--octant-glass-highlight), var(--octant-shadow-pop);
+  backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
+}
+
+/* ── Accessibility and capability fallbacks ────────────────────────── */
+
+/* Reduced transparency (app setting or OS): opaque floating surface. */
+html[data-octant-reduced-transparency="true"] .octant-glass,
+html[data-octant-reduced-transparency="true"] .octant-menu__popup,
+html[data-octant-reduced-transparency="true"] .octant-dialog__popup,
+html[data-octant-reduced-transparency="true"] .window-chrome__disclosure,
+html[data-octant-reduced-transparency="true"] .composer-folder-selector__menu,
+html[data-octant-reduced-transparency="true"] .thread-activity-pip,
+html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-controls,
+html[data-octant-reduced-transparency="true"] .project-dialog,
+html[data-octant-reduced-transparency="true"] .project-search,
+html[data-octant-reduced-transparency="true"] .folder-picker {
+  background: var(--octant-floating);
+  border-color: var(--octant-border-strong);
+  box-shadow: var(--octant-shadow-overlay);
+  backdrop-filter: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .octant-glass,
+  .octant-menu__popup,
+  .octant-dialog__popup,
+  .window-chrome__disclosure,
+  .composer-folder-selector__menu,
+  .thread-activity-pip,
+  .thread-activity-pip__collapsed-controls,
+  .project-dialog,
+  .project-search,
+  .folder-picker {
+    background: var(--octant-floating);
+    border-color: var(--octant-border-strong);
+    box-shadow: var(--octant-shadow-overlay);
+    backdrop-filter: none;
+  }
+}
+
+/* No backdrop-filter support: keep surfaces readable with an opaque fill. */
+@supports not (backdrop-filter: blur(1px)) {
+  .octant-glass,
+  .octant-menu__popup,
+  .octant-dialog__popup,
+  .window-chrome__disclosure,
+  .composer-folder-selector__menu,
+  .thread-activity-pip,
+  .thread-activity-pip__collapsed-controls,
+  .project-dialog,
+  .project-search,
+  .folder-picker {
+    background: var(--octant-floating);
+  }
+}
+
+@media (prefers-contrast: more) {
+  .octant-glass,
+  .octant-chip,
+  .octant-menu__popup,
+  .octant-dialog__popup,
+  .window-chrome__disclosure,
+  .composer-folder-selector__menu,
+  .thread-activity-pip,
+  .thread-activity-pip__collapsed-controls,
+  .project-dialog,
+  .project-search,
+  .folder-picker {
+    border-color: var(--octant-border-strong);
+  }
+}
+
+/* ── Thread Search overlay ─────────────────────────────────────── */
+
+/*
+ * The overlay keeps focus in its combobox, so the active row is marked with a
+ * token-derived fill *and* the row's own words rather than colour alone.
+ */
+.thread-search__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.thread-search__scope,
+.thread-search__listing,
+.thread-search__status,
+.thread-search__group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--octant-text-secondary);
+  font-size: 11.5px;
+}
+
+.thread-search__results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.thread-search__result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--octant-radius-control, 8px);
+  cursor: default;
+}
+
+.thread-search__result[data-active="true"] {
+  background: var(--octant-selection);
+  border-color: var(--octant-border-strong);
+}
+
+.thread-search__result-title {
+  flex: 1 1 auto;
+  color: var(--octant-text-primary);
+}
+
+.thread-search__result-label,
+.thread-search__result-state {
+  color: var(--octant-text-secondary);
+  font-size: 11.5px;
+}
+
+/* ── Thread Goal panel ─────────────────────────────────────────── */
+
+.thread-goal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.thread-goal__create,
+.thread-goal__revise {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.thread-goal__status,
+.thread-goal__empty,
+.thread-goal__command-error,
+.thread-goal__history,
+.thread-goal__retention {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--octant-text-secondary);
+  font-size: 11.5px;
+}

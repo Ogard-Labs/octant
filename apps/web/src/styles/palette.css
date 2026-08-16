@@ -1,0 +1,105 @@
+/*
+ * Command surfaces: the `/` composer affordance and the global command palette.
+ *
+ * Both surfaces mark their active row with a token-derived fill *and* a word or
+ * shape the user can read — `Enter` in the palette, the selected button variant
+ * in the composer — so the active state never rests on colour alone. Values are
+ * derived from the semantic `--octant-*` tokens in styles.css.
+ */
+
+/* ── `/` command typeahead in the chat composer ────────────────────── */
+
+.chat-composer__command-typeahead {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--octant-border);
+  border-radius: var(--octant-radius-md, 8px);
+  background: var(--octant-surface, var(--octant-control));
+}
+
+.chat-composer__command-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  margin: 0;
+  list-style: none;
+}
+
+.chat-composer__command-option > button {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.chat-composer__command-meta {
+  margin-left: auto;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.chat-composer__command-empty {
+  padding: 8px 10px;
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+/* ── Global command palette ────────────────────────────────────────── */
+
+.command-palette__field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.command-palette__scope,
+.command-palette__status,
+.command-palette__group-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: 11.5px;
+}
+
+.command-palette__results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.command-palette__result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--octant-radius-control, 8px);
+  cursor: default;
+}
+
+.command-palette__result[data-active="true"] {
+  background: var(--octant-selection);
+  border-color: var(--octant-border-strong);
+}
+
+.command-palette__result-title {
+  flex: 1 1 auto;
+  color: var(--octant-text-primary);
+}
+
+.command-palette__result-detail {
+  color: var(--octant-text-secondary);
+  font-size: 11.5px;
+}
+
+.command-palette__result-hint {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--octant-text-secondary);
+  font-size: 11px;
+}

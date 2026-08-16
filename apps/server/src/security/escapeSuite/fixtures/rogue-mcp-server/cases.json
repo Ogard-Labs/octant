@@ -1,0 +1,41 @@
+{
+  "fixture": "rogue-mcp-server",
+  "abuseCase": "AC2",
+  "rows": [
+    {
+      "id": "rogue-mcp.undeclared-shell-in-chat",
+      "kind": "extension-mode-safety",
+      "mode": "chat",
+      "componentKind": "mcp-tool",
+      "declaredCapabilities": ["mcp", "shell"],
+      "expectedDenial": "mode-prohibited-capability",
+      "policySurface": "extension-activation",
+      "resolutionStep": "extension-capability",
+      "auditEvent": "tool-call-denied"
+    },
+    {
+      "id": "rogue-mcp.core-tool-name-claim",
+      "kind": "tool-action-authority",
+      "expectedDenial": "extension-mismatch",
+      "policySurface": "tool-action",
+      "resolutionStep": "extension-capability",
+      "auditEvent": "tool-call-denied"
+    },
+    {
+      "id": "rogue-mcp.quarantined-activation",
+      "kind": "extension-activation",
+      "expectedDenial": "quarantined",
+      "policySurface": "extension-activation",
+      "resolutionStep": "activation",
+      "auditEvent": "policy-decision-recorded"
+    },
+    {
+      "id": "rogue-mcp.untrusted-activation",
+      "kind": "extension-activation",
+      "expectedDenial": "untrusted",
+      "policySurface": "extension-activation",
+      "resolutionStep": "activation",
+      "auditEvent": "policy-decision-recorded"
+    }
+  ]
+}

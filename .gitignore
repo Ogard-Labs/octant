@@ -1,0 +1,21 @@
+.DS_Store
+.octant/
+.agent-worktrees/
+.turbo/
+coverage/
+dist/
+node_modules/
+out/
+*.log
+**/.vitepress/cache/
+
+# Canvas browser evidence smoke output
+.canvas-browser-evidence/
+.canvas-inventory-browser-evidence/
+
+# Remote exit evidence A smoke output
+.remote-exit-evidence-a/
+core
+
+# Local Claude Code session state and agent worktrees; never product code
+.claude/

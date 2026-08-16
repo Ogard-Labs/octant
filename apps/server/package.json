@@ -1,0 +1,49 @@
+{
+  "name": "@octant/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsdown",
+    "browser:smoke": "bun src/browser/browserRuntime.smoke.ts",
+    "canvas:browser:smoke": "bun src/canvas/canvasRendererBrowser.smoke.ts",
+    "canvas:inventory:browser:smoke": "bun src/canvas/canvasInventoryBrowser.smoke.ts",
+    "db:backup": "bun src/dbCli.ts backup",
+    "db:rebuild": "bun src/dbCli.ts rebuild",
+    "db:remove": "bun src/dbCli.ts remove",
+    "db:reset": "bun src/dbCli.ts reset",
+    "db:restore": "bun src/dbCli.ts restore",
+    "db:status": "bun src/dbCli.ts status",
+    "db:verify": "bun src/dbCli.ts verify",
+    "remote:exit-evidence-a": "OCTANT_RUN_REMOTE_EXIT_EVIDENCE_A=1 tsc -p tsconfig.remote-evidence.json && OCTANT_RUN_REMOTE_EXIT_EVIDENCE_A=1 vitest run --maxWorkers=1 --testTimeout=300000 src/remote/remoteExitEvidenceA.smoke.test.ts",
+    "sqlite:smoke:bun": "bun src/persistence/sqlitePort.smoke.ts",
+    "sqlite:smoke:node": "node src/persistence/sqlitePort.smoke.ts",
+    "start": "bun src/main.ts",
+    "test": "vitest run --project unit --project process --testTimeout=30000",
+    "test:evidence": "vitest run --project evidence --testTimeout=300000",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "catalog:",
+    "@octant/contracts": "workspace:*",
+    "@octant/domain": "workspace:*",
+    "@octant/extensions": "workspace:*",
+    "@octant/host-runtime": "workspace:*",
+    "@octant/provider-sdk": "workspace:*",
+    "@octant/theme": "workspace:*",
+    "@opencode-ai/sdk": "catalog:",
+    "better-sqlite3": "catalog:",
+    "effect": "catalog:",
+    "node-pty": "catalog:",
+    "playwright-core": "catalog:",
+    "yaml": "catalog:"
+  },
+  "devDependencies": {
+    "@octant/client-runtime": "workspace:*",
+    "@types/better-sqlite3": "catalog:",
+    "@types/bun": "catalog:",
+    "tsdown": "0.22.5",
+    "typescript": "catalog:",
+    "unrun": "0.3.1",
+    "vitest": "catalog:"
+  }
+}

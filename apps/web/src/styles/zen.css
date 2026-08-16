@@ -1,0 +1,582 @@
+.zen-root {
+  position: relative;
+  min-height: 100%;
+}
+
+.zen-root__shell--hidden {
+  display: none;
+}
+
+.zen-root__surface {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.zen-surface {
+  --octant-text-primary: #eeeeec;
+  --octant-text-secondary: #c8c8c5;
+  --octant-text-muted: #a5a5a0;
+  --foreground: #eeeeec;
+  --primary: #eeeeec;
+  --primary-foreground: #171719;
+  --secondary: #222225;
+  --secondary-foreground: #eeeeec;
+  --muted: #222225;
+  --muted-foreground: #a5a5a0;
+  --accent: #2b2b2f;
+  --accent-foreground: #eeeeec;
+  --border: rgb(255 255 255 / 14%);
+  --input: rgb(255 255 255 / 18%);
+  --ring: #eeeeec;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: var(--octant-text-primary, #eeeeec);
+  outline: none;
+}
+
+.zen-surface__traffic-light-safe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 88px;
+  height: 44px;
+  z-index: 3;
+}
+
+.zen-surface__canvas {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+
+.zen-element {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 12px;
+  background: rgb(17 17 19 / 92%);
+  box-shadow: 0 12px 40px rgb(0 0 0 / 35%);
+  overflow: hidden;
+}
+
+.zen-element--focused {
+  border-color: rgb(255 255 255 / 28%);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 18%),
+    0 16px 48px rgb(0 0 0 / 45%);
+}
+
+.zen-element__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--octant-text-secondary, #c8c8c5);
+  border-bottom: 1px solid rgb(255 255 255 / 8%);
+  cursor: grab;
+}
+
+.zen-element__actions {
+  display: flex;
+  gap: 4px;
+}
+
+.zen-element__actions button {
+  min-height: 24px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.zen-element__resize-handle {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-right: 2px solid rgb(255 255 255 / 45%);
+  border-bottom: 2px solid rgb(255 255 255 / 45%);
+  background: transparent;
+  cursor: nwse-resize;
+}
+
+.zen-element__body {
+  flex: 1;
+  padding: 12px;
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.zen-timer {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  min-height: 100%;
+  align-content: center;
+  white-space: normal;
+}
+
+.zen-timer__time {
+  font-size: clamp(32px, 5vw, 54px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+}
+
+.zen-timer__status {
+  color: var(--octant-text-secondary, #c8c8c5);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.zen-timer__status--completed {
+  color: var(--octant-text-primary, #eeeeec);
+}
+
+.zen-timer__controls {
+  display: flex;
+  gap: 8px;
+}
+
+.zen-panel__timer-create {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.zen-panel__timer-create input {
+  min-height: 32px;
+  border: 1px solid var(--input);
+  border-radius: 6px;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  padding: 4px 8px;
+}
+
+.zen-notes,
+.zen-checklist {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 8px;
+  white-space: normal;
+}
+
+.zen-notes__editor {
+  min-height: 110px;
+  flex: 1;
+  resize: none;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 10px;
+  background: rgb(8 8 10 / 42%);
+  color: inherit;
+  padding: 10px;
+  font: inherit;
+  line-height: 1.5;
+}
+
+.zen-widget-status {
+  margin: 0;
+  color: var(--octant-text-secondary, #c8c8c5);
+  font-size: 11px;
+}
+
+.zen-widget-status--error {
+  color: #ffb4a8;
+}
+
+.zen-checklist__items {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.zen-checklist__item,
+.zen-checklist__label,
+.zen-checklist__actions,
+.zen-checklist__add,
+.zen-widget-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.zen-checklist__item {
+  justify-content: space-between;
+  padding: 5px 6px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.zen-checklist__label {
+  min-width: 0;
+  flex: 1;
+}
+
+.zen-checklist__text--done {
+  color: var(--octant-text-secondary, #c8c8c5);
+  text-decoration: line-through;
+}
+
+.zen-checklist__actions button {
+  min-height: 24px;
+  padding: 2px 6px;
+  font-size: 11px;
+}
+
+.zen-checklist__add {
+  margin-top: auto;
+}
+
+.zen-checklist__add label,
+.zen-checklist__add input {
+  min-width: 0;
+  flex: 1;
+}
+
+.zen-checklist__add input {
+  width: 100%;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 8px;
+  background: rgb(8 8 10 / 42%);
+  color: inherit;
+  padding: 7px 9px;
+  font: inherit;
+}
+
+.zen-widget-picker {
+  margin: 12px 0;
+}
+
+.zen-surface__controls {
+  position: absolute;
+  top: 52px;
+  right: 16px;
+  display: flex;
+  gap: 8px;
+  z-index: 4;
+}
+
+.zen-surface__message {
+  position: absolute;
+  top: 52px;
+  left: 16px;
+  max-width: min(420px, calc(100% - 32px));
+  z-index: 4;
+  padding: 8px 12px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 10px;
+  background: rgb(17 17 19 / 90%);
+  color: var(--octant-text-secondary, #c8c8c5);
+  font-size: 12px;
+}
+
+.zen-surface__panel-anchor,
+.zen-surface__manual-panel {
+  position: absolute;
+  top: 76px;
+  left: 50%;
+  z-index: 6;
+  width: min(620px, calc(100% - 32px));
+  max-height: calc(100% - 180px);
+  transform: translateX(-50%);
+}
+
+.zen-panel {
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 18px;
+  background: rgb(17 17 19 / 96%);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 55%);
+  backdrop-filter: blur(20px);
+}
+
+.zen-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.zen-panel h2,
+.zen-panel p {
+  margin: 0;
+}
+
+.zen-panel__header p,
+.zen-thread-picker__entry p,
+.zen-thread-element p,
+.zen-assistant__capability p {
+  color: var(--octant-text-secondary, #c8c8c5);
+  font-size: 12px;
+}
+
+.zen-thread-picker > input {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.zen-thread-picker__results,
+.zen-assistant__transcript {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.zen-thread-picker__entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.zen-thread-element {
+  display: grid;
+  gap: 8px;
+  white-space: normal;
+}
+
+.zen-thread-element code {
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.zen-thread-element--unavailable {
+  color: var(--octant-text-secondary, #c8c8c5);
+}
+
+.zen-assistant__capability {
+  padding: 10px 12px;
+  border: 1px solid rgb(255 255 255 / 9%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.zen-assistant__message {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgb(255 255 255 / 4%);
+}
+
+.zen-assistant__message span {
+  white-space: pre-wrap;
+}
+
+.zen-assistant form {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.zen-assistant form input {
+  min-width: 0;
+  flex: 1;
+}
+
+.zen-surface__manual-panel {
+  left: auto;
+  right: 16px;
+  width: min(360px, calc(100% - 32px));
+  transform: none;
+}
+
+.zen-surface__manual-panel label {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.zen-surface__controls button,
+.zen-bar__button,
+.zen-pill__show,
+.zen-pill__exit {
+  appearance: none;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  background: rgb(34 34 37 / 92%);
+  color: var(--octant-text-primary, #eeeeec);
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.zen-surface__controls button:hover,
+.zen-bar__button:hover,
+.zen-pill__show:hover,
+.zen-pill__exit:hover {
+  background: rgb(43 43 47 / 96%);
+}
+
+.zen-surface__bar-anchor {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: calc(100% - 32px);
+}
+
+.zen-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  background: rgb(17 17 19 / 88%);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 40%);
+}
+
+.zen-bar__provider {
+  font-size: 12px;
+  color: var(--octant-text-secondary, #c8c8c5);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.zen-bar__ask {
+  display: flex;
+  min-width: 160px;
+  flex: 1;
+}
+
+.zen-bar__ask input {
+  width: 100%;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 999px;
+  background: rgb(10 10 11 / 70%);
+  color: inherit;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.zen-bar__button--deferred {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.zen-bar__exit,
+.zen-pill__exit {
+  border-color: rgb(255 255 255 / 22%);
+}
+
+.zen-pill {
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 999px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  background: rgb(17 17 19 / 92%);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 720px) {
+  .zen-bar {
+    flex-wrap: wrap;
+    border-radius: 20px;
+    max-width: 100%;
+  }
+
+  .zen-bar__ask {
+    min-width: 120px;
+    flex-basis: 100%;
+  }
+
+  .zen-surface__bar-anchor {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    bottom: 12px;
+  }
+
+  .zen-surface__panel-anchor,
+  .zen-surface__manual-panel {
+    top: 52px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: calc(100% - 180px);
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zen-surface__canvas,
+  .zen-element {
+    transition: none;
+  }
+}
+
+.zen-surface__overlay {
+  position: absolute;
+  inset: 0;
+  background: #08080a;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.zen-surface__background-status {
+  position: relative;
+  z-index: 2;
+}
+
+.zen-surface__canvas {
+  z-index: 2;
+}
+
+.zen-appearance__presets {
+  border: 0;
+  padding: 0;
+  margin: 12px 0 0;
+}
+
+.zen-appearance__group h3 {
+  margin: 12px 0 6px;
+  font-size: 12px;
+  text-transform: capitalize;
+  color: var(--octant-text-secondary, #c8c8c5);
+}
+
+.zen-appearance__preset-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}

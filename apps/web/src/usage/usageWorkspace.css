@@ -1,0 +1,458 @@
+/**
+ * Usage destination styling.
+ *
+ * Measurement state is always carried by a glyph, border style, or word as well
+ * as by colour, so the dashboard stays readable for a viewer who cannot
+ * distinguish the hues or who overrides them.
+ */
+
+.usage-workspace {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  gap: 18px;
+  padding: 16px;
+  color: var(--octant-text-primary);
+  overflow-y: auto;
+}
+
+.usage-workspace__header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 12px;
+}
+
+.usage-workspace__back {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.usage-workspace__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 17px;
+}
+
+.usage-workspace__subtitle,
+.usage-workspace__status,
+.usage-workspace__note,
+.usage-workspace__footer,
+.usage-workspace__empty,
+.usage-workspace__truncated,
+.usage-workspace__excluded {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+}
+
+.usage-workspace__subtitle {
+  grid-column: 1;
+}
+
+.usage-workspace__filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  background: var(--octant-surface-raised);
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+}
+
+.usage-workspace__field {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.usage-workspace__error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: var(--octant-warning-text);
+  background: var(--octant-warning-surface);
+  border: 1px solid var(--octant-warning-border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.usage-workspace__error p {
+  flex: 1;
+  margin: 0;
+}
+
+.usage-workspace__section {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--octant-border);
+}
+
+.usage-workspace__section h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.usage-workspace__subheading {
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.usage-workspace__totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.usage-workspace__total {
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  background: var(--octant-surface-raised);
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+}
+
+.usage-workspace__total dt {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.usage-workspace__total dd {
+  margin: 0;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.usage-workspace__total dd[data-unavailable="true"] {
+  color: var(--octant-text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.usage-workspace__coverage,
+.usage-workspace__highlights,
+.usage-workspace__hosts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.usage-workspace__coverage {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.usage-workspace__coverage li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--octant-border-strong);
+  border-radius: 6px;
+}
+
+/* Border style, not colour, separates the measurement qualities. */
+.usage-workspace__coverage li[data-quality="estimated"] {
+  border-style: dashed;
+}
+
+.usage-workspace__coverage li[data-quality="reconciled"] {
+  border-style: double;
+}
+
+.usage-workspace__coverage li[data-quality="stale"] {
+  border-style: dotted;
+}
+
+.usage-workspace__coverage li[data-quality="unavailable"] {
+  color: var(--octant-warning-text);
+  border-color: var(--octant-warning-border);
+}
+
+.usage-workspace__coverage-count {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.usage-workspace__hosts li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--octant-border-strong);
+  border-radius: 6px;
+}
+
+.usage-workspace__hosts li[data-status="stale"] {
+  border-style: dotted;
+  color: var(--octant-warning-text);
+}
+
+.usage-workspace__host-id {
+  font-weight: 600;
+}
+
+.usage-workspace__excluded {
+  color: var(--octant-warning-text);
+}
+
+.usage-workspace__stale {
+  margin: 0;
+  color: var(--octant-warning-text);
+  font-size: 12px;
+}
+
+.usage-workspace__sources {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.usage-workspace__sources div {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--octant-border);
+  border-radius: 6px;
+}
+
+.usage-workspace__sources div[data-status="partial"] {
+  border-style: dashed;
+}
+
+.usage-workspace__sources div[data-status="unavailable"] {
+  border-style: dotted;
+  color: var(--octant-text-muted);
+}
+
+.usage-workspace__sources dt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.usage-workspace__sources dd {
+  margin: 0;
+  color: var(--octant-text-muted);
+}
+
+.usage-workspace__source-status {
+  padding: 1px 6px;
+  border: 1px solid currentcolor;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.usage-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--octant-border);
+  white-space: nowrap;
+}
+
+.usage-table thead th {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.usage-table tbody tr[data-availability="unavailable"] th {
+  font-style: italic;
+  color: var(--octant-text-muted);
+}
+
+.usage-table--narrow th,
+.usage-table--narrow td {
+  padding: 4px 6px;
+}
+
+.usage-heatmap {
+  display: grid;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--octant-border);
+}
+
+.usage-heatmap__caption,
+.usage-heatmap__empty {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+}
+
+.usage-heatmap__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.usage-heatmap__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.usage-heatmap__grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 14px);
+  gap: 3px;
+  min-width: 0;
+  padding-bottom: 4px;
+  overflow-x: auto;
+}
+
+.usage-heatmap__blank {
+  width: 14px;
+  height: 14px;
+}
+
+.usage-heatmap__cell,
+.usage-heatmap__glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--octant-border-strong);
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.usage-heatmap__cell:focus-visible {
+  outline: 2px solid var(--octant-focus-ring, currentcolor);
+  outline-offset: 1px;
+}
+
+.usage-heatmap__cell[data-state="no-activity"],
+.usage-heatmap__glyph[data-state="no-activity"] {
+  color: var(--octant-text-muted);
+  border-style: dashed;
+}
+
+.usage-heatmap__cell[data-state="unavailable"],
+.usage-heatmap__glyph[data-state="unavailable"] {
+  color: var(--octant-warning-text);
+  border-color: var(--octant-warning-border);
+  border-style: dotted;
+}
+
+.usage-heatmap__cell[data-state="partially-unavailable"],
+.usage-heatmap__glyph[data-state="partially-unavailable"] {
+  border-style: double;
+}
+
+.usage-heatmap__cell[data-level="1"] {
+  background: color-mix(in srgb, var(--octant-text-primary) 12%, transparent);
+}
+
+.usage-heatmap__cell[data-level="2"] {
+  background: color-mix(in srgb, var(--octant-text-primary) 28%, transparent);
+}
+
+.usage-heatmap__cell[data-level="3"] {
+  background: color-mix(in srgb, var(--octant-text-primary) 48%, transparent);
+}
+
+.usage-heatmap__cell[data-level="4"] {
+  background: color-mix(in srgb, var(--octant-text-primary) 70%, transparent);
+}
+
+.usage-heatmap__table-toggle summary {
+  cursor: pointer;
+  color: var(--octant-text-secondary);
+  font-size: 12px;
+}
+
+.thread-usage {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  color: var(--octant-text-primary);
+}
+
+.thread-usage__title {
+  margin: 0;
+  font-size: 13px;
+}
+
+.thread-usage__status {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+}
+
+.thread-usage__totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 6px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.thread-usage__totals div {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--octant-surface-raised);
+  border: 1px solid var(--octant-border);
+  border-radius: 6px;
+}
+
+.thread-usage__totals dt {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.thread-usage__totals dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* A floor rather than a complete total is a caveat on every number below it,
+   so it reads as a statement rather than a caption. */
+.usage-workspace__truncated {
+  margin-bottom: 8px;
+  color: var(--octant-text-primary);
+}

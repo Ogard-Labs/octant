@@ -1,0 +1,42 @@
+{
+  "name": "@octant/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "test": "vitest run --testTimeout=15000",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@base-ui/react": "1.6.0",
+    "@octant/client-runtime": "workspace:*",
+    "@octant/contracts": "workspace:*",
+    "@octant/domain": "workspace:*",
+    "@octant/extensions": "workspace:*",
+    "@octant/theme": "workspace:*",
+    "@xterm/addon-fit": "catalog:",
+    "@xterm/xterm": "catalog:",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "lucide-react": "1.24.0",
+    "monaco-editor": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "tailwind-merge": "3.6.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "6.0.3",
+    "jsdom": "29.1.1",
+    "tailwindcss": "4.3.3",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}

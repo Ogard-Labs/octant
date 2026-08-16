@@ -1,0 +1,29 @@
+{
+  "name": "@octant/extensions",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./activation": "./src/activation.ts",
+    "./agent-plugins": "./src/agentPlugins/index.ts",
+    "./canvas-skill-contributions": "./src/canvasSkillContributions.ts",
+    "./addressing": "./src/addressing.ts",
+    "./collisions": "./src/collisions.ts",
+    "./composer": "./src/composer.ts",
+    "./model": "./src/model.ts"
+  },
+  "scripts": {
+    "build": "tsdown src/index.ts --format esm --dts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@octant/contracts": "workspace:*",
+    "yaml": "catalog:"
+  },
+  "devDependencies": {
+    "tsdown": "0.22.5",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

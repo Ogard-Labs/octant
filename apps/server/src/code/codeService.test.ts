@@ -1,0 +1,2506 @@
+import {
+  decodeCodeCheckoutIdentity,
+  decodeCodeCommandResult,
+  decodeBindingRevisionId,
+  decodeCodeEvidenceContentId,
+  decodeCodeFileId,
+  decodeCodeFileReference,
+  decodeCodeRepositoryId,
+  decodeCodeThread,
+  decodeCodeThreadId,
+  decodeCodeWorktreeSourcePreview,
+  decodeProjectId,
+  decodeWindowId,
+  type Project,
+  type CodeCheckoutIdentity,
+  type CodeEventFrame,
+  type EventEnvelope,
+  type CodeWorktreeRemoteFacts,
+} from "@octant/contracts";
+import { createHash } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
+import { ConcurrencyConflict } from "../persistence/journalErrors";
+import { CodeContentStore, type CodeContentStoreOptions } from "./codeContentStore";
+import {
+  MAXIMUM_OPENED_CODE_FILE_BYTES,
+  MAXIMUM_OPENED_CODE_FILE_ENTRIES,
+  CodeService,
+  CodeServiceError,
+  type CodeServiceOptions,
+  type CodePersistencePort,
+  type CodeWorktreeRefsPort,
+  type CodeWorktreeSourcePreviewPort,
+  type ManagedCodeThreadCreationPort,
+} from "./codeService";
+import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+
+const ids = {
+  window: decodeWindowId("00000000-0000-4000-8000-000000001001"),
+  thread: decodeCodeThreadId("00000000-0000-4000-8000-000000001002"),
+  unauthorizedThread: decodeCodeThreadId("00000000-0000-4000-8000-000000001003"),
+  project: decodeProjectId("00000000-0000-4000-8000-000000001004"),
+  unauthorizedProject: decodeProjectId("00000000-0000-4000-8000-000000001005"),
+  binding: decodeBindingRevisionId("00000000-0000-4000-8000-000000001006"),
+  checkout: "00000000-0000-4000-8000-000000001007",
+  provider: "00000000-0000-4000-8000-000000001008",
+  file: decodeCodeFileId("00000000-0000-4000-8000-000000001009"),
+  content: decodeCodeEvidenceContentId("00000000-0000-4000-8000-000000001010"),
+} as const;
+const testUuid = (sequence: number) =>
+  `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`;
+const now = "2026-07-20T23:00:00.000Z";
+const repositoryId = `repo_${"d".repeat(64)}`;
+const oldDigest = "a".repeat(64);
+const nextDigest = "b".repeat(64);
+
+const checkout = decodeCodeCheckoutIdentity({
+  id: ids.checkout,
+  repositoryId,
+  kind: "existing-worktree",
+  availability: "available",
+  head: { kind: "branch", name: "feature/phase-7", oid: "c".repeat(40) },
+  observedAt: now,
+});
+
+function thread(
+  overrides: Partial<ReturnType<typeof decodeCodeThread>> = {},
+): ReturnType<typeof decodeCodeThread> {
+  return decodeCodeThread({
+    id: ids.thread,
+    projectId: ids.project,
+    bindingRevisionId: ids.binding,
+    repositoryId,
+    checkoutId: ids.checkout,
+    title: "Authority foundation",
+    lifecycle: "active",
+    providerInstanceId: ids.provider,
+    modelId: "model-a",
+    executionPolicy: "full-access",
+    permissionPersistence: "current-session",
+    deliveryTarget: {
+      branchIntent: "feature/phase-7",
+      remoteName: "origin",
+      proposedBaseRepository: "octant/octant",
+      proposedBaseBranch: "development",
+      outcomeKind: "opened-pr",
+      confirmedAt: now,
+    },
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  });
+}
+
+describe("CodeService reads", () => {
+  it("returns default settings and only window-authorized threads and checkouts", async () => {
+    const allowed = thread();
+    const hidden = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({ threads: [allowed, hidden] });
+
+    await expect(fixture.service.bootstrap(ids.window)).resolves.toEqual({
+      settings: {
+        defaultExecutionPolicy: "approval-gated",
+        defaultPermissionPersistence: "current-session",
+        version: 0,
+        updatedAt: now,
+      },
+      threads: [allowed],
+      checkouts: [checkout],
+    });
+    expect(fixture.access.canAccessProject).toHaveBeenCalledWith(ids.window, ids.project);
+    expect(fixture.access.canAccessProject).toHaveBeenCalledWith(
+      ids.window,
+      ids.unauthorizedProject,
+    );
+  });
+
+  it("re-observes a waiting checkout during authenticated restart bootstrap", async () => {
+    const waiting = decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" });
+    const fixture = serviceFixture({ threads: [thread()], checkout: waiting });
+
+    const result = await fixture.service.bootstrap(ids.window);
+
+    expect(fixture.checkouts.observe).toHaveBeenCalledWith(ids.window, ids.project);
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: { aggregateType: "code-checkout", aggregateId: ids.checkout },
+        expectedVersion: 0,
+        events: [expect.objectContaining({ eventName: "code.checkout-observed@1" })],
+      }),
+    );
+    expect(result.checkouts).toContainEqual(checkout);
+  });
+
+  it("re-observes a shared existing checkout only once during restart bootstrap", async () => {
+    const waiting = decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" });
+    const secondThread = thread({
+      id: decodeCodeThreadId("00000000-0000-4000-8000-000000001013"),
+    });
+    const fixture = serviceFixture({
+      threads: [thread(), secondThread],
+      checkout: waiting,
+    });
+
+    const result = await fixture.service.bootstrap(ids.window);
+
+    expect(fixture.checkouts.observe).toHaveBeenCalledTimes(1);
+    expect(result.threads).toHaveLength(2);
+    expect(result.checkouts).toEqual([checkout]);
+  });
+
+  it("revalidates a waiting managed worktree during authenticated restart bootstrap", async () => {
+    const managedCheckout = decodeCodeCheckoutIdentity({
+      id: "00000000-0000-4000-8000-000000001011",
+      repositoryId,
+      kind: "managed-worktree",
+      availability: "waiting",
+      head: { kind: "branch", name: "feature/managed", oid: "c".repeat(40) },
+      ownershipReceiptId: "00000000-0000-4000-8000-000000001012",
+      observedAt: now,
+    });
+    const managedThread = thread({ checkoutId: managedCheckout.id });
+    const fixture = serviceFixture({
+      threads: [managedThread],
+      allCheckouts: [managedCheckout],
+    });
+
+    const result = await fixture.service.bootstrap(ids.window);
+
+    expect(fixture.roots.resolve).toHaveBeenCalledWith(
+      ids.window,
+      managedThread,
+      managedCheckout,
+      "package.json",
+    );
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: { aggregateType: "code-checkout", aggregateId: managedCheckout.id },
+        expectedVersion: 0,
+        events: [
+          expect.objectContaining({
+            eventName: "code.checkout-observed@1",
+            payload: {
+              kind: "checkout-observed",
+              checkout: expect.objectContaining({
+                id: managedCheckout.id,
+                kind: "managed-worktree",
+                availability: "available",
+              }),
+            },
+          }),
+        ],
+      }),
+    );
+    expect(result.checkouts).toContainEqual(
+      expect.objectContaining({
+        id: managedCheckout.id,
+        kind: "managed-worktree",
+        availability: "available",
+      }),
+    );
+  });
+
+  it("keeps managed restart recovery waiting when root authority cannot be revalidated", async () => {
+    const managedCheckout = decodeCodeCheckoutIdentity({
+      id: "00000000-0000-4000-8000-000000001014",
+      repositoryId,
+      kind: "managed-worktree",
+      availability: "waiting",
+      head: { kind: "branch", name: "feature/managed", oid: "c".repeat(40) },
+      ownershipReceiptId: "00000000-0000-4000-8000-000000001015",
+      observedAt: now,
+    });
+    const fixture = serviceFixture({
+      threads: [thread({ checkoutId: managedCheckout.id })],
+      allCheckouts: [managedCheckout],
+    });
+    fixture.roots.resolve.mockResolvedValueOnce(undefined as never);
+
+    const result = await fixture.service.bootstrap(ids.window);
+
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(result.checkouts).toContainEqual(managedCheckout);
+  });
+
+  it("fails closed when a thread is missing or outside the authenticated window", async () => {
+    const hidden = thread({ projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({ threads: [hidden] });
+
+    await expect(fixture.service.read(ids.window, ids.thread)).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+    fixture.persistence.readCodeThread.mockReturnValue(undefined);
+    await expect(fixture.service.read(ids.window, ids.thread)).rejects.toMatchObject({
+      failure: { category: "invalid" },
+    });
+  });
+
+  it("authorizes content through its owning file reference and verifies stored metadata", async () => {
+    const fixture = serviceFixture();
+    const bytes = new TextEncoder().encode("hello");
+    const reference = fixture.content.put(bytes);
+    expect(reference.contentId).toBe(String(ids.content));
+    fixture.persistence.readCodeFileReferences.mockReturnValue([
+      decodeCodeFileReference({
+        id: ids.file,
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        contentId: ids.content,
+        digest: reference.digest,
+        byteLength: reference.byteLength,
+        state: "available",
+        version: 1,
+        updatedAt: now,
+      }),
+    ]);
+
+    await expect(fixture.service.readContent(ids.window, ids.content)).resolves.toEqual({
+      bytes,
+      digest: reference.digest,
+      byteLength: reference.byteLength,
+    });
+
+    fixture.persistence.readCodeFileReferences.mockReturnValue([]);
+    await expect(fixture.service.readContent(ids.window, ids.content)).rejects.toMatchObject({
+      failure: { category: "unauthorized" },
+    });
+  });
+});
+
+describe("CodeService commands", () => {
+  it("observes and journals the authenticated Project checkout without exposing its root", async () => {
+    const fixture = serviceFixture();
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "prepare-code-project-checkout",
+        projectId: ids.project,
+      }),
+    ).resolves.toEqual({
+      kind: "checkout-prepared",
+      bindingRevisionId: ids.binding,
+      checkout,
+    });
+    expect(fixture.checkouts.observe).toHaveBeenCalledWith(ids.window, ids.project);
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: { aggregateType: "code-checkout", aggregateId: ids.checkout },
+        expectedVersion: 0,
+        events: [
+          expect.objectContaining({
+            eventName: "code.checkout-observed@1",
+            payload: { kind: "checkout-observed", checkout },
+          }),
+        ],
+      }),
+    );
+    expect(JSON.stringify(await fixture.service.bootstrap(ids.window))).not.toContain("/private");
+  });
+
+  it("returns a wire-valid checkout receipt when observation also includes remote facts", async () => {
+    const fixture = serviceFixture({
+      worktreeRemoteFacts: {
+        remotes: ["origin"],
+        defaultRemote: "origin",
+        upstreamRemote: "origin",
+      },
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "prepare-code-project-checkout",
+      projectId: ids.project,
+    });
+
+    expect(() => decodeCodeCommandResult(result)).not.toThrow();
+    expect(result).toEqual({
+      kind: "checkout-prepared",
+      bindingRevisionId: ids.binding,
+      checkout,
+    });
+  });
+
+  it("updates defaults without mutating existing threads", async () => {
+    const existing = thread();
+    const fixture = serviceFixture({ threads: [existing] });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "update-code-settings",
+        expectedVersion: 0,
+        defaultExecutionPolicy: "plan",
+        defaultPermissionPersistence: "project-default",
+        externalEditor: {
+          executable: "/usr/local/bin/editor",
+          arguments: ["--goto", "{file}:{line}:{column}"],
+        },
+      }),
+    ).resolves.toMatchObject({
+      kind: "settings-updated",
+      settings: {
+        defaultExecutionPolicy: "plan",
+        defaultPermissionPersistence: "project-default",
+        version: 1,
+      },
+    });
+    expect(existing.executionPolicy).toBe("full-access");
+    expect(existing.permissionPersistence).toBe("current-session");
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: {
+          aggregateType: "code-settings",
+          aggregateId: "00000000-0000-4000-8000-000000000020",
+        },
+        expectedVersion: 0,
+        events: [expect.objectContaining({ eventName: "code.settings-updated@1" })],
+      }),
+    );
+  });
+
+  it("journals an authorized new thread at expected aggregate version zero", async () => {
+    const created = thread({ executionPolicy: "approval-gated" });
+    const fixture = serviceFixture({ threads: [] });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).resolves.toEqual({ kind: "thread-created", thread: created });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregate: { aggregateType: "code-thread", aggregateId: ids.thread },
+        expectedVersion: 0,
+        events: [
+          expect.objectContaining({
+            eventName: "code.thread-created@1",
+            payload: { kind: "thread-created", thread: created },
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("changes provider/model without changing Code authority or delivery", async () => {
+    const existing = thread({ workingDirectory: "packages/app" as never });
+    const fixture = serviceFixture({ threads: [existing] });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      }),
+    ).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+        projectId: ids.project,
+        repositoryId,
+        checkoutId: ids.checkout,
+        workingDirectory: "packages/app",
+        executionPolicy: "full-access",
+        permissionPersistence: "current-session",
+        deliveryTarget: existing.deliveryTarget,
+        providerHandoff: {
+          previousProviderInstanceId: ids.provider,
+          previousModelId: "model-a",
+          nextProviderInstanceId: ids.provider,
+          nextModelId: "model-b",
+          changedAt: now,
+        },
+        version: 2,
+      },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({
+            eventName: "code.thread-updated@1",
+            payload: expect.objectContaining({
+              kind: "thread-updated",
+              thread: expect.objectContaining({
+                providerInstanceId: ids.provider,
+                modelId: "model-b",
+              }),
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("records an agent outcome proposal without redefining the confirmed outcome", async () => {
+    const existing = thread();
+    const fixture = serviceFixture({ threads: [existing] });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "propose-code-delivery-outcome",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      outcomeKind: "merged-pr",
+      rationale: "The pull request has been merged upstream.",
+    });
+
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        version: 2,
+        deliveryTarget: {
+          // The confirmed outcome is unchanged: only a pending proposal is added.
+          outcomeKind: "opened-pr",
+          proposedOutcome: {
+            outcomeKind: "merged-pr",
+            rationale: "The pull request has been merged upstream.",
+            proposedAt: now,
+          },
+        },
+      },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [expect.objectContaining({ eventName: "code.thread-updated@1" })],
+      }),
+    );
+  });
+
+  it("rejects an outcome proposal that matches the confirmed outcome", async () => {
+    const fixture = serviceFixture({ threads: [thread()] });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "propose-code-delivery-outcome",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        outcomeKind: "opened-pr",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("confirms a user outcome change, keeps Git fields immutable, and clears the pending proposal", async () => {
+    const existing = thread({
+      deliveryTarget: {
+        branchIntent: "feature/phase-7",
+        remoteName: "origin",
+        proposedBaseRepository: "octant/octant",
+        proposedBaseBranch: "development",
+        outcomeKind: "opened-pr",
+        confirmedAt: now,
+        proposedOutcome: { outcomeKind: "merged-pr", proposedAt: now },
+      } as never,
+    });
+    const fixture = serviceFixture({ threads: [existing] });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "confirm-code-delivery-outcome",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      outcomeKind: "merged-pr",
+    });
+
+    expect(result).toMatchObject({
+      kind: "thread-updated",
+      thread: {
+        version: 2,
+        deliveryTarget: {
+          branchIntent: "feature/phase-7",
+          remoteName: "origin",
+          proposedBaseRepository: "octant/octant",
+          proposedBaseBranch: "development",
+          outcomeKind: "merged-pr",
+          confirmedAt: now,
+        },
+      },
+    });
+    if (result.kind === "thread-updated") {
+      expect(result.thread.deliveryTarget.proposedOutcome).toBeUndefined();
+    }
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({
+            eventName: "code.thread-updated@1",
+            payload: expect.objectContaining({
+              kind: "thread-updated",
+              thread: expect.objectContaining({
+                deliveryTarget: expect.objectContaining({ outcomeKind: "merged-pr" }),
+              }),
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("denies renderer-selected full access without an exact host approval", async () => {
+    const created = thread({ executionPolicy: "full-access" });
+    const fixture = serviceFixture({ threads: [] });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("consumes an exact host approval when creating a full-access thread", async () => {
+    const created = thread({ executionPolicy: "full-access" });
+    const fixture = serviceFixture({ threads: [], approve: true });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: created,
+        approvalId: "00000000-0000-4000-8000-000000000088" as never,
+      }),
+    ).resolves.toEqual({ kind: "thread-created", thread: created });
+    expect(fixture.approvals.validate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        windowId: ids.window,
+        effect: { kind: "create-thread-full-access", thread: created },
+      }),
+    );
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            payload: {
+              kind: "thread-created",
+              thread: expect.objectContaining({ executionPolicy: "approval-gated" }),
+            },
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("denies direct elevation of an existing thread without native approval", async () => {
+    const current = thread({ executionPolicy: "approval-gated" });
+    const fixture = serviceFixture({ threads: [current] });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        executionPolicy: "full-access",
+        permissionPersistence: "current-session",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+  });
+
+  it("denies durable Full access until the canonical Code Project opts in", async () => {
+    const current = thread({ executionPolicy: "approval-gated" });
+    const fixture = serviceFixture({
+      threads: [current],
+      approve: true,
+      project: {
+        id: ids.project,
+        type: "code",
+        name: "Repository",
+        lifecycle: "active",
+        pinned: false,
+        rank: "0/1" as never,
+        version: 1 as never,
+        createdAt: now as never,
+        updatedAt: now as never,
+        binding: { canonicalRoot: "/repo" },
+        bindingHistory: [
+          {
+            revisionId: ids.binding,
+            revision: 1,
+            currentBinding: { canonicalRoot: "/repo" },
+            actor: { kind: "local-user", actorId: ids.window as never },
+            changedAt: now as never,
+          },
+        ],
+        codeAccessPersistence: "current-session",
+      },
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+        approvalId: "00000000-0000-4000-8000-000000000088" as never,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("requires a fresh native approval when making session Full access durable", async () => {
+    const current = thread({ executionPolicy: "approval-gated" });
+    const sessionAuthority = new CodeSessionAuthorityStore();
+    sessionAuthority.grantFullAccess(ids.window, current.id);
+    const fixture = serviceFixture({
+      threads: [current],
+      approve: false,
+      sessionAuthority,
+      project: {
+        id: ids.project,
+        type: "code",
+        name: "Repository",
+        lifecycle: "active",
+        pinned: false,
+        rank: "0/1" as never,
+        version: 1 as never,
+        createdAt: now as never,
+        updatedAt: now as never,
+        binding: { canonicalRoot: "/repo" },
+        bindingHistory: [
+          {
+            revisionId: ids.binding,
+            revision: 1,
+            currentBinding: { canonicalRoot: "/repo" },
+            actor: { kind: "local-user", actorId: ids.window as never },
+            changedAt: now as never,
+          },
+        ],
+        codeAccessPersistence: "project-default",
+      },
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+        approvalId: "00000000-0000-0000-0000-000000000088" as never,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.approvals.validate).toHaveBeenCalledOnce();
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("re-observes the checkout atomically and rejects a stale thread creation", async () => {
+    const created = thread({ executionPolicy: "approval-gated" });
+    const fixture = serviceFixture({ threads: [] });
+    fixture.checkouts.observe.mockResolvedValueOnce({
+      bindingRevisionId: "00000000-0000-4000-8000-000000000099" as never,
+      checkout: { ...checkout, head: { ...checkout.head, oid: "c".repeat(40) } } as never,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("updates lifecycle and access with optimistic versions and public results", async () => {
+    const fixture = serviceFixture();
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-lifecycle",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        lifecycle: "archived",
+      }),
+    ).resolves.toEqual({
+      kind: "thread-lifecycle-changed",
+      threadId: ids.thread,
+      lifecycle: "archived",
+      version: 2,
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        expectedVersion: 1,
+        events: [
+          expect.objectContaining({
+            eventName: "code.thread-updated@1",
+            payload: expect.objectContaining({
+              thread: expect.objectContaining({ lifecycle: "archived", version: 2 }),
+            }),
+          }),
+        ],
+      }),
+    );
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-access",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        executionPolicy: "plan",
+        permissionPersistence: "project-default",
+      }),
+    ).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: { executionPolicy: "plan", permissionPersistence: "project-default", version: 2 },
+    });
+  });
+
+  it("validates the target before journaling an unavailable provider", async () => {
+    const current = thread();
+    const probeProvider = vi.fn(async () => ({ readiness: "unavailable", models: [] }) as never);
+    const fixture = serviceFixture({ threads: [current], probeProvider });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-b",
+      }),
+    ).rejects.toEqual(
+      new CodeServiceError({
+        category: "unavailable",
+        message: "Selected Code provider is not ready.",
+      }),
+    );
+    expect(probeProvider).toHaveBeenCalledWith(ids.provider);
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.persistence.readCodeThread(ids.thread)).toEqual(current);
+  });
+
+  it("persists a host-validated checkout-relative working directory", async () => {
+    const fixture = serviceFixture();
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-working-directory",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        workingDirectory: "packages/app",
+      }),
+    ).resolves.toMatchObject({
+      kind: "thread-updated",
+      thread: { workingDirectory: "packages/app", version: 2 },
+    });
+    expect(fixture.workingDirectories.resolve).toHaveBeenCalledWith(
+      ids.window,
+      expect.objectContaining({ id: ids.thread }),
+      checkout,
+      "packages/app",
+    );
+    expect(fixture.onWorkingDirectoryChanged).toHaveBeenCalledWith({
+      mode: "code",
+      projectId: ids.project,
+      threadId: ids.thread,
+    });
+  });
+
+  it("maps journal concurrency conflicts without leaking persistence details", async () => {
+    const fixture = serviceFixture();
+    fixture.persistence.journal.append.mockImplementation(() => {
+      throw new ConcurrencyConflict({
+        aggregateType: "code-thread",
+        aggregateId: String(ids.thread),
+        expectedVersion: 1,
+        actualVersion: 2,
+      });
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "change-code-thread-lifecycle",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        lifecycle: "archived",
+      }),
+    ).rejects.toEqual(
+      new CodeServiceError({ category: "stale", message: "Code state changed; reload and retry." }),
+    );
+  });
+});
+
+describe("CodeService replay and files", () => {
+  it("does not query the journal when the subscriber already has the current thread head", async () => {
+    const fixture = serviceFixture();
+    const frames: CodeEventFrame[] = [];
+
+    for await (const frame of fixture.service.subscribe(ids.window, ids.thread, 1)) {
+      frames.push(frame);
+    }
+
+    expect(frames).toEqual([]);
+    expect(fixture.persistence.journal.replayAggregate).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.replay).not.toHaveBeenCalled();
+  });
+
+  it("replays ordered public thread events and rejects a thread-version gap", async () => {
+    const updated = thread({ version: 2 as never });
+    const fixture = serviceFixture({
+      threads: [updated],
+      events: [
+        eventEnvelope(42, "code.thread-updated@1", { kind: "thread-updated", thread: updated }, 2),
+      ],
+    });
+    const frames: CodeEventFrame[] = [];
+    for await (const frame of fixture.service.subscribe(ids.window, ids.thread, 1)) {
+      frames.push(frame);
+    }
+    expect(frames).toEqual([
+      { threadId: ids.thread, sequence: 2, event: { kind: "thread-updated", thread: updated } },
+    ]);
+    expect(fixture.persistence.journal.replayAggregate).toHaveBeenCalledWith({
+      aggregateType: "code-thread",
+      aggregateId: ids.thread,
+      afterVersion: 1,
+      limit: 100,
+    });
+    expect(fixture.persistence.journal.replay).not.toHaveBeenCalled();
+
+    fixture.persistence.journal.replayAggregate.mockReturnValue([
+      eventEnvelope(44, "code.thread-updated@1", { kind: "thread-updated", thread: updated }, 4),
+    ]);
+    await expect(async () => {
+      for await (const _frame of fixture.service.subscribe(ids.window, ids.thread, 1)) {
+        // Drain to surface the cursor failure.
+      }
+    }).rejects.toMatchObject({ failure: { category: "stale" } });
+  });
+
+  it("rejects a per-thread cursor ahead of the current thread head", async () => {
+    const fixture = serviceFixture();
+
+    await expect(async () => {
+      for await (const _frame of fixture.service.subscribe(ids.window, ids.thread, 2)) {
+        // Drain to surface the snapshot requirement.
+      }
+    }).rejects.toMatchObject({
+      failure: { category: "stale", message: "Code replay requires a snapshot." },
+    });
+    expect(fixture.persistence.journal.replay).not.toHaveBeenCalled();
+  });
+
+  it("resolves private file authority server-side, denies Plan, and returns the strict save envelope", async () => {
+    const fixture = serviceFixture();
+    fixture.files.save.mockResolvedValue({
+      status: "completed",
+      metadata: {
+        identity: { device: "1", inode: "4" },
+        byteLength: 5,
+        modifiedNanoseconds: "5",
+        digest: nextDigest,
+      },
+    });
+
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "hello",
+      }),
+    ).resolves.toEqual({
+      kind: "code-file-save-result",
+      result: {
+        status: "completed",
+        metadata: {
+          identity: { device: "1", inode: "4" },
+          byteLength: 5,
+          modifiedNanoseconds: "5",
+          digest: nextDigest,
+        },
+      },
+    });
+    expect(fixture.roots.resolve).toHaveBeenCalledWith(
+      ids.window,
+      thread(),
+      checkout,
+      "src/file.ts",
+    );
+    expect(fixture.files.save).toHaveBeenCalledWith({
+      rootPath: "/private/authorized-root",
+      rootIdentity: { device: "7", inode: "8" },
+      path: "src/file.ts",
+      expectedIdentity: { device: "1", inode: "3" },
+      expectedDigest: oldDigest,
+      text: "hello",
+    });
+    const appends = fixture.persistence.journal.append.mock.calls.map(([request]) => request);
+    expect(appends).toHaveLength(2);
+    expect(appends[0]).toMatchObject({
+      aggregate: { aggregateType: "code-file", aggregateId: ids.file },
+      expectedVersion: 0,
+      events: [
+        {
+          payload: {
+            file: {
+              state: "saving",
+              version: 1,
+              digest: createHash("sha256").update("hello").digest("hex"),
+              byteLength: 5,
+            },
+          },
+        },
+      ],
+    });
+    expect(appends[1]).toMatchObject({
+      expectedVersion: 1,
+      events: [{ payload: { file: { state: "completed", version: 2 } } }],
+    });
+    expect(fixture.persistence.journal.append.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.files.save.mock.invocationCallOrder[0]!,
+    );
+    expect(fixture.files.save.mock.invocationCallOrder[0]).toBeLessThan(
+      fixture.persistence.journal.append.mock.invocationCallOrder[1]!,
+    );
+    expect(JSON.stringify(await fixture.service.bootstrap(ids.window))).not.toContain(
+      "/private/authorized-root",
+    );
+
+    fixture.persistence.readCodeThread.mockReturnValue(thread({ executionPolicy: "plan" }));
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "hello",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+  });
+
+  it("saves a user's manual edit under approval-gated without an approval prompt", async () => {
+    const persisted = thread({ executionPolicy: "approval-gated" });
+    const fixture = serviceFixture({ threads: [persisted] });
+    fixture.files.save.mockResolvedValue({
+      status: "completed",
+      metadata: {
+        identity: { device: "1", inode: "4" },
+        byteLength: 5,
+        modifiedNanoseconds: "5",
+        digest: nextDigest,
+      },
+    });
+
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "hello",
+      }),
+    ).resolves.toMatchObject({ result: { status: "completed" } });
+  });
+
+  it("applies the current-session Full access overlay to file saves", async () => {
+    const persisted = thread({ executionPolicy: "approval-gated" });
+    const sessionAuthority = new CodeSessionAuthorityStore();
+    sessionAuthority.grantFullAccess(ids.window, persisted.id);
+    const fixture = serviceFixture({ threads: [persisted], sessionAuthority });
+    fixture.files.save.mockResolvedValue({
+      status: "completed",
+      metadata: {
+        identity: { device: "1", inode: "4" },
+        byteLength: 5,
+        modifiedNanoseconds: "5",
+        digest: nextDigest,
+      },
+    });
+
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "hello",
+      }),
+    ).resolves.toMatchObject({ result: { status: "completed" } });
+    expect(fixture.roots.resolve).toHaveBeenCalledWith(
+      ids.window,
+      expect.objectContaining({ executionPolicy: "full-access" }),
+      checkout,
+      "src/file.ts",
+    );
+  });
+
+  it.each([
+    [
+      { status: "conflict", failure: { category: "conflict", code: "digest-mismatch" } },
+      "conflict",
+    ],
+    [{ status: "interrupted", rescanRequired: true }, "interrupted"],
+    [{ status: "failed", failure: { category: "failed", code: "helper-failed" } }, "failed"],
+  ] as const)("journals saving then %s as consecutive file versions", async (result, state) => {
+    const fixture = serviceFixture();
+    fixture.files.save.mockResolvedValue(result);
+
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "next",
+      }),
+    ).resolves.toMatchObject({ result });
+
+    const appends = fixture.persistence.journal.append.mock.calls.map(
+      ([request]) => request as any,
+    );
+    expect(appends.map((request) => request.expectedVersion)).toEqual([0, 1]);
+    expect(appends.map((request) => request.events[0].payload.file.state)).toEqual([
+      "saving",
+      state,
+    ]);
+    expect(appends.map((request) => request.events[0].payload.file.version)).toEqual([1, 2]);
+  });
+
+  it("preserves the last authoritative file metadata when a save conflicts", async () => {
+    const fixture = serviceFixture();
+    fixture.persistence.readCodeFileReference.mockReturnValue(
+      decodeCodeFileReference({
+        id: ids.file,
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        contentId: ids.content,
+        digest: oldDigest,
+        byteLength: 6,
+        state: "available",
+        version: 4,
+        updatedAt: now,
+      }),
+    );
+    fixture.files.save.mockResolvedValue({
+      status: "conflict",
+      failure: { category: "conflict", code: "digest-mismatch" },
+    });
+
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "newer",
+      }),
+    ).resolves.toMatchObject({ result: { status: "conflict" } });
+
+    const terminal = fixture.persistence.journal.append.mock.calls[1]![0] as any;
+    expect(terminal.events[0].payload.file).toMatchObject({
+      state: "conflict",
+      contentId: ids.content,
+      digest: oldDigest,
+      byteLength: 6,
+    });
+  });
+
+  it("preserves the last authoritative file metadata when the helper disconnects", async () => {
+    const fixture = serviceFixture();
+    fixture.persistence.readCodeFileReference.mockReturnValue(
+      decodeCodeFileReference({
+        id: ids.file,
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        contentId: ids.content,
+        digest: oldDigest,
+        byteLength: 6,
+        state: "available",
+        version: 4,
+        updatedAt: now,
+      }),
+    );
+    fixture.files.save.mockResolvedValue({ status: "interrupted", rescanRequired: true });
+
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "newer",
+      }),
+    ).resolves.toMatchObject({ result: { status: "interrupted", rescanRequired: true } });
+
+    const terminal = fixture.persistence.journal.append.mock.calls[1]![0] as any;
+    expect(terminal.events[0].payload.file).toMatchObject({
+      state: "interrupted",
+      contentId: ids.content,
+      digest: oldDigest,
+      byteLength: 6,
+    });
+  });
+
+  it("records helper exceptions as interrupted after the durable saving marker", async () => {
+    const fixture = serviceFixture();
+    fixture.files.save.mockRejectedValue(new Error("private helper detail"));
+
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "next",
+      }),
+    ).resolves.toEqual({
+      kind: "code-file-save-result",
+      result: { status: "interrupted", rescanRequired: true },
+    });
+
+    const appends = fixture.persistence.journal.append.mock.calls.map(
+      ([request]) => request as any,
+    );
+    expect(appends.map((request) => request.events[0].payload.file.state)).toEqual([
+      "saving",
+      "interrupted",
+    ]);
+  });
+
+  it("advances saving and terminal events from the current persisted file version", async () => {
+    const fixture = serviceFixture();
+    fixture.persistence.readCodeFileReference.mockReturnValue(
+      decodeCodeFileReference({
+        id: ids.file,
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        digest: oldDigest,
+        byteLength: 6,
+        state: "available",
+        version: 7,
+        updatedAt: now,
+      }),
+    );
+    fixture.files.save.mockResolvedValue({ status: "interrupted", rescanRequired: true });
+
+    await fixture.service.saveFile(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+      relativePath: "src/file.ts" as never,
+      expectedIdentity: { device: "1", inode: "3" },
+      expectedDigest: oldDigest,
+      text: "next",
+    });
+
+    const appends = fixture.persistence.journal.append.mock.calls.map(
+      ([request]) => request as any,
+    );
+    expect(appends.map((request) => request.expectedVersion)).toEqual([7, 8]);
+    expect(appends.map((request) => request.events[0].payload.file.version)).toEqual([8, 9]);
+  });
+
+  it("does not invoke the helper when the optimistic saving append conflicts", async () => {
+    const fixture = serviceFixture();
+    fixture.persistence.journal.append.mockImplementationOnce(() => {
+      throw new ConcurrencyConflict({
+        aggregateType: "code-file",
+        aggregateId: String(ids.file),
+        expectedVersion: 0,
+        actualVersion: 1,
+      });
+    });
+
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "next",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "stale" } });
+    expect(fixture.files.save).not.toHaveBeenCalled();
+  });
+
+  it("does not start a second helper mutation while the durable file state is saving", async () => {
+    const fixture = serviceFixture();
+    fixture.persistence.readCodeFileReference.mockReturnValue(
+      decodeCodeFileReference({
+        id: ids.file,
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        digest: oldDigest,
+        byteLength: 4,
+        state: "saving",
+        version: 3,
+        updatedAt: now,
+      }),
+    );
+
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "next",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "waiting" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(fixture.files.save).not.toHaveBeenCalled();
+  });
+
+  it("returns interrupted while preserving saving when the terminal append fails", async () => {
+    const fixture = serviceFixture();
+    fixture.files.save.mockResolvedValue({ status: "interrupted", rescanRequired: true });
+    fixture.persistence.journal.append
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => {
+        throw new Error("private storage detail");
+      });
+
+    await expect(
+      fixture.service.saveFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+        expectedIdentity: { device: "1", inode: "3" },
+        expectedDigest: oldDigest,
+        text: "next",
+      }),
+    ).resolves.toEqual({
+      kind: "code-file-save-result",
+      result: { status: "interrupted", rescanRequired: true },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledTimes(2);
+    expect(
+      (fixture.persistence.journal.append.mock.calls[0]![0] as any).events[0].payload.file.state,
+    ).toBe("saving");
+  });
+});
+
+describe("CodeService worktree source preview", () => {
+  const previewCommand = {
+    kind: "preview-code-worktree-source",
+    projectId: ids.project,
+    bindingRevisionId: ids.binding,
+    repositoryId,
+    refIntent: "refs/heads/development",
+    startFromOrigin: true,
+    remoteName: "origin",
+  } as const;
+
+  it("returns the server-resolved preview for an authorized Project and forwards the signal", async () => {
+    const preview = vi.fn(async () =>
+      decodeCodeWorktreeSourcePreview({
+        kind: "origin",
+        remoteName: "origin",
+        branch: "development",
+        resolvedHead: "a".repeat(40),
+        fetchedAt: now,
+      }),
+    );
+    const fixture = serviceFixture({ worktreeSourcePreview: { preview } });
+    const signal = new AbortController().signal;
+
+    await expect(fixture.service.execute(ids.window, previewCommand, signal)).resolves.toEqual({
+      kind: "worktree-source-previewed",
+      preview: {
+        kind: "origin",
+        remoteName: "origin",
+        branch: "development",
+        resolvedHead: "a".repeat(40),
+        fetchedAt: now,
+      },
+    });
+    expect(preview).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: ids.project, startFromOrigin: true }),
+      signal,
+    );
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the Project is outside the authenticated window", async () => {
+    const preview = vi.fn();
+    const fixture = serviceFixture({ worktreeSourcePreview: { preview } });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...previewCommand,
+        projectId: ids.unauthorizedProject,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(preview).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when no preview port is configured", async () => {
+    const fixture = serviceFixture();
+
+    await expect(fixture.service.execute(ids.window, previewCommand)).rejects.toMatchObject({
+      failure: { category: "unavailable" },
+    });
+  });
+});
+
+describe("CodeService managed thread creation", () => {
+  const managedThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000001201");
+  const managedCheckoutId = "00000000-0000-4000-8000-000000001202";
+  const managedCommand = {
+    kind: "create-managed-code-thread",
+    threadId: managedThreadId,
+    projectId: ids.project,
+    bindingRevisionId: ids.binding,
+    title: "Managed work",
+    providerInstanceId: ids.provider,
+    modelId: "model-a",
+    executionPolicy: "approval-gated",
+    permissionPersistence: "current-session",
+    deliveryTarget: {
+      branchIntent: "feature/managed",
+      remoteName: "origin",
+      proposedBaseRepository: "octant/octant",
+      proposedBaseBranch: "development",
+      outcomeKind: "opened-pr",
+      confirmedAt: now,
+    },
+    sourceBranch: "development",
+    startFromOrigin: true,
+    remoteName: "origin",
+  } as const;
+
+  const resolvedHead = "a".repeat(40);
+  const receiptId = "00000000-0000-4000-8000-000000001203";
+
+  function preparation() {
+    return {
+      repositoryId: decodeCodeRepositoryId(repositoryId),
+      checkoutId: managedCheckoutId as never,
+      branchIntent: "feature/managed",
+      resolvedHead,
+      mode: "origin" as const,
+      sourceBranch: "development",
+      remoteName: "origin",
+      fetchedAt: now,
+    };
+  }
+
+  function mockCreationPort(
+    overrides: {
+      readonly prepare?: () => Promise<unknown>;
+      readonly commit?: () => Promise<unknown>;
+      readonly cleanup?: () => Promise<unknown>;
+    } = {},
+  ) {
+    return {
+      prepare: vi.fn(
+        overrides.prepare ??
+          (async () => ({ status: "prepared" as const, preparation: preparation() })),
+      ),
+      commit: vi.fn(
+        overrides.commit ??
+          (async () => ({ status: "created" as const, receiptId, expectedHead: resolvedHead })),
+      ),
+      cleanup: vi.fn(overrides.cleanup ?? (async () => ({ status: "removed" as const }))),
+    };
+  }
+
+  it("creates the managed worktree on the delivery branch, journals checkout + thread, and returns exact provenance", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    const result = await fixture.service.execute(ids.window, managedCommand);
+
+    // F3: the confirmed delivery branch is threaded through to the commit.
+    expect(port.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ branchIntent: "feature/managed" }),
+      expect.objectContaining({ branchIntent: "feature/managed", resolvedHead }),
+      expect.any(AbortSignal),
+    );
+    expect(result).toMatchObject({
+      kind: "managed-thread-created",
+      thread: { id: managedThreadId, checkoutId: managedCheckoutId, repositoryId, version: 1 },
+      provenance: { mode: "origin", resolvedHead, receiptId },
+    });
+    // F3: checkout, receipt-backed provenance, and thread delivery all agree on the branch.
+    if (result?.kind !== "managed-thread-created")
+      throw new Error("expected managed-thread-created");
+    expect(result.checkout.head).toEqual({
+      kind: "branch",
+      name: "feature/managed",
+      oid: resolvedHead,
+    });
+    expect(result.thread.deliveryTarget.branchIntent).toBe("feature/managed");
+    const appended = fixture.persistence.journal.append.mock.calls.map(
+      (call) => (call[0] as { events: { eventName: string }[] }).events[0]!.eventName,
+    );
+    expect(appended).toEqual(["code.checkout-observed@1", "code.thread-created@1"]);
+  });
+
+  it("fails closed when the Project is outside the authenticated window without preparing or committing", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...managedCommand,
+        projectId: ids.unauthorizedProject,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(port.prepare).not.toHaveBeenCalled();
+    expect(port.commit).not.toHaveBeenCalled();
+  });
+
+  it("F1: never prepares or commits when Project-default Full access is not enabled", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...managedCommand,
+        executionPolicy: "full-access",
+        permissionPersistence: "project-default",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(port.prepare).not.toHaveBeenCalled();
+    expect(port.commit).not.toHaveBeenCalled();
+  });
+
+  it("F1: never commits when native Full-access approval is missing", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({
+      threads: [],
+      managedThreadCreation: port as never,
+      approve: false,
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...managedCommand,
+        executionPolicy: "full-access",
+        permissionPersistence: "current-session",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(port.commit).not.toHaveBeenCalled();
+  });
+
+  it("maps a refused prepare to a typed actionable conflict failure", async () => {
+    const port = mockCreationPort({
+      prepare: async () => ({ status: "refused" as const, reason: "branch-collision" }),
+    });
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    await expect(fixture.service.execute(ids.window, managedCommand)).rejects.toMatchObject({
+      failure: {
+        category: "conflict",
+        message:
+          "The delivery branch already exists. Choose a different delivery branch and retry.",
+      },
+    });
+    expect(port.commit).not.toHaveBeenCalled();
+  });
+
+  it("F2: compensates with a fresh cleanup when the first journal append fails", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+    (fixture.persistence.journal.append as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("journal failed");
+    });
+
+    await expect(fixture.service.execute(ids.window, managedCommand)).rejects.toMatchObject({
+      failure: { category: "interrupted" },
+    });
+    expect(port.cleanup).toHaveBeenCalledWith({ receiptId }, expect.any(AbortSignal));
+  });
+
+  it("F2: compensates when the second journal append fails", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+    let calls = 0;
+    (fixture.persistence.journal.append as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      calls += 1;
+      if (calls === 2) throw new Error("journal failed");
+    });
+
+    await expect(fixture.service.execute(ids.window, managedCommand)).rejects.toMatchObject({
+      failure: { category: "interrupted" },
+    });
+    expect(port.cleanup).toHaveBeenCalledWith({ receiptId }, expect.any(AbortSignal));
+  });
+
+  it("F2: reports an honest Waiting recovery state when cleanup cannot remove the worktree", async () => {
+    const port = mockCreationPort({ cleanup: async () => ({ status: "waiting" as const }) });
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+    (fixture.persistence.journal.append as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("journal failed");
+    });
+
+    await expect(fixture.service.execute(ids.window, managedCommand)).rejects.toMatchObject({
+      failure: { category: "waiting" },
+    });
+  });
+
+  it("F2: compensates when cancelled after the worktree is created", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      fixture.service.execute(ids.window, managedCommand, controller.signal),
+    ).rejects.toMatchObject({ failure: { category: "interrupted" } });
+    expect(port.cleanup).toHaveBeenCalledWith({ receiptId }, expect.any(AbortSignal));
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("F2: compensates when the created HEAD diverges from the approved resolution", async () => {
+    const port = mockCreationPort({
+      commit: async () => ({ status: "created" as const, receiptId, expectedHead: "b".repeat(40) }),
+    });
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    await expect(fixture.service.execute(ids.window, managedCommand)).rejects.toMatchObject({
+      failure: { category: "conflict" },
+    });
+    expect(port.cleanup).toHaveBeenCalledWith({ receiptId }, expect.any(AbortSignal));
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when no managed creation port is configured", async () => {
+    const fixture = serviceFixture({ threads: [] });
+
+    await expect(fixture.service.execute(ids.window, managedCommand)).rejects.toMatchObject({
+      failure: { category: "unavailable" },
+    });
+  });
+
+  it("D3: get-worktree-remote-facts returns server-authoritative remote facts from the checkout observation", async () => {
+    const remoteFacts = {
+      remotes: ["origin", "upstream"],
+      upstreamRemote: "origin",
+      defaultRemote: "origin",
+    };
+    const fixture = serviceFixture({ threads: [] });
+    // Override the checkout observation to return remote facts.
+    (fixture.checkouts.observe as ReturnType<typeof vi.fn>).mockResolvedValue({
+      bindingRevisionId: ids.binding,
+      checkout,
+      worktreeRemoteFacts: remoteFacts,
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "get-worktree-remote-facts",
+      projectId: ids.project,
+    });
+
+    expect(result).toMatchObject({
+      kind: "worktree-remote-facts-retrieved",
+      projectId: ids.project,
+      facts: remoteFacts,
+    });
+  });
+
+  it("D3: get-worktree-remote-facts fails closed with empty remotes when the repository is unavailable", async () => {
+    const fixture = serviceFixture({ threads: [] });
+    (fixture.checkouts.observe as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("repository unavailable"),
+    );
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "get-worktree-remote-facts",
+      projectId: ids.project,
+    });
+
+    expect(result).toMatchObject({
+      kind: "worktree-remote-facts-retrieved",
+      projectId: ids.project,
+      facts: { remotes: [] },
+    });
+  });
+
+  it("D3: get-worktree-remote-facts fails closed with empty remotes when the observation returns no remote facts", async () => {
+    const fixture = serviceFixture({ threads: [] });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "get-worktree-remote-facts",
+      projectId: ids.project,
+    });
+
+    expect(result).toMatchObject({
+      kind: "worktree-remote-facts-retrieved",
+      projectId: ids.project,
+      facts: { remotes: [] },
+    });
+  });
+
+  it("lists server-authoritative worktree refs for the branch selector", async () => {
+    const refs = [
+      { name: "development", kind: "local" as const, isCurrent: true },
+      { name: "origin/development", kind: "remote" as const, remoteName: "origin" },
+    ];
+    const fixture = serviceFixture({
+      threads: [],
+      worktreeRefs: { list: vi.fn(async () => refs) },
+    });
+
+    const result = await fixture.service.execute(ids.window, {
+      kind: "list-code-worktree-refs",
+      projectId: ids.project,
+    });
+
+    expect(result).toMatchObject({
+      kind: "worktree-refs-listed",
+      projectId: ids.project,
+      refs,
+    });
+  });
+
+  it("fails closed with an empty ref list when the refs port is unavailable or throws", async () => {
+    const withoutPort = serviceFixture({ threads: [] });
+    await expect(
+      withoutPort.service.execute(ids.window, {
+        kind: "list-code-worktree-refs",
+        projectId: ids.project,
+      }),
+    ).resolves.toMatchObject({ kind: "worktree-refs-listed", refs: [] });
+
+    const throwing = serviceFixture({
+      threads: [],
+      worktreeRefs: {
+        list: vi.fn(async () => {
+          throw new Error("git unavailable");
+        }),
+      },
+    });
+    await expect(
+      throwing.service.execute(ids.window, {
+        kind: "list-code-worktree-refs",
+        projectId: ids.project,
+      }),
+    ).resolves.toMatchObject({ kind: "worktree-refs-listed", refs: [] });
+  });
+
+  it("F3: appends a compensating checkout-removed when thread journal fails after checkout journal succeeds", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    // The first append (checkout-observed) succeeds; the second (thread-created) throws.
+    let appendCall = 0;
+    fixture.persistence.journal.append = vi.fn(() => {
+      appendCall += 1;
+      if (appendCall === 2) throw new Error("journal write failed");
+    }) as never;
+
+    await expect(fixture.service.execute(ids.window, managedCommand)).rejects.toMatchObject({
+      failure: { category: "interrupted" },
+    });
+
+    // Cleanup was called to remove the worktree.
+    expect(port.cleanup).toHaveBeenCalledWith({ receiptId }, expect.any(AbortSignal));
+
+    // Three events were appended: checkout-observed, thread-created (failed),
+    // and a compensating checkout-removed so replay cannot expose an orphan
+    // available checkout.
+    type AppendArg = { events: { eventName: string }[] };
+    const calls = fixture.persistence.journal.append.mock.calls as unknown as AppendArg[][];
+    const appended = calls.map((call) => call[0]!.events[0]!.eventName);
+    expect(appended).toEqual([
+      "code.checkout-observed@1",
+      "code.thread-created@1",
+      "code.checkout-removed@1",
+    ]);
+  });
+
+  it("D2: reports waiting (not interrupted) when compensation append also fails, preserving cleanup-pending honestly", async () => {
+    const port = mockCreationPort();
+    const fixture = serviceFixture({ threads: [], managedThreadCreation: port as never });
+
+    // checkout-observed (call 1) succeeds; thread-created (call 2) fails;
+    // checkout-removed compensation (call 3) also fails.
+    let appendCall = 0;
+    fixture.persistence.journal.append = vi.fn(() => {
+      appendCall += 1;
+      if (appendCall === 2) throw new Error("thread journal failed");
+      if (appendCall === 3) throw new Error("compensation journal failed");
+    }) as never;
+
+    // D2: the result must be "waiting", not "interrupted", because the orphan
+    // checkout-observed event remains in the journal and needs recovery.
+    await expect(fixture.service.execute(ids.window, managedCommand)).rejects.toMatchObject({
+      failure: { category: "waiting" },
+    });
+
+    // Cleanup was still called to remove the worktree.
+    expect(port.cleanup).toHaveBeenCalledWith({ receiptId }, expect.any(AbortSignal));
+
+    // Three append attempts were made: checkout-observed, thread-created (failed),
+    // and checkout-removed (also failed).
+    type AppendArg = { events: { eventName: string }[] };
+    const calls = fixture.persistence.journal.append.mock.calls as unknown as AppendArg[][];
+    const appended = calls.map((call) => call[0]!.events[0]!.eventName);
+    expect(appended).toEqual([
+      "code.checkout-observed@1",
+      "code.thread-created@1",
+      "code.checkout-removed@1",
+    ]);
+  });
+
+  it("D2: restart/bootstrap recovery compensates orphan available checkouts with no corresponding thread", async () => {
+    const port = mockCreationPort();
+    // The projection has an orphan available checkout (the managed checkout)
+    // with no corresponding thread. readCodeCheckouts returns it.
+    const orphanCheckout = decodeCodeCheckoutIdentity({
+      id: managedCheckoutId as never,
+      repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/managed", oid: resolvedHead },
+      ownershipReceiptId: receiptId as never,
+      observedAt: now,
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      managedThreadCreation: port as never,
+      checkout: orphanCheckout,
+    });
+
+    // Bootstrap should detect the orphan (available checkout with no thread)
+    // and append a compensating checkout-removed event.
+    await fixture.service.bootstrap(ids.window);
+
+    type AppendArg = {
+      events: { eventName: string; payload: { kind: string; checkoutId?: string } }[];
+    };
+    const calls = fixture.persistence.journal.append.mock.calls as unknown as AppendArg[][];
+    const appended = calls.map((call) => call[0]!.events[0]);
+    expect(appended).toContainEqual(
+      expect.objectContaining({
+        eventName: "code.checkout-removed@1",
+        payload: expect.objectContaining({
+          kind: "checkout-removed",
+          checkoutId: managedCheckoutId,
+        }),
+      }),
+    );
+
+    // The bootstrap response must not expose the orphan checkout.
+    const bootstrap = await fixture.service.bootstrap(ids.window);
+    expect(bootstrap.checkouts).not.toContainEqual(
+      expect.objectContaining({ id: managedCheckoutId }),
+    );
+  });
+
+  it("D2-fix: bootstrap must not remove an inaccessible Project's checkout when the window lacks access", async () => {
+    // Two Projects: the window can access ids.project but not ids.unauthorizedProject.
+    // The inaccessible Project has a valid thread+checkout. The recovery must use
+    // ALL persisted threads (not the auth-filtered subset) so it never classifies
+    // the inaccessible Project's checkout as an orphan.
+    const inaccessibleCheckoutId = "00000000-0000-4000-8000-000000002001";
+    const inaccessibleThread = thread({
+      id: decodeCodeThreadId("00000000-0000-4000-8000-000000002002"),
+      projectId: ids.unauthorizedProject,
+      checkoutId: inaccessibleCheckoutId as never,
+    });
+    const inaccessibleCheckout = decodeCodeCheckoutIdentity({
+      id: inaccessibleCheckoutId as never,
+      repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/other", oid: "d".repeat(40) },
+      ownershipReceiptId: "00000000-0000-4000-8000-000000002003" as never,
+      observedAt: now,
+    });
+    const fixture = serviceFixture({
+      threads: [inaccessibleThread],
+      allCheckouts: [inaccessibleCheckout],
+    });
+
+    await fixture.service.bootstrap(ids.window);
+
+    // No checkout-removed event must be appended for the inaccessible Project's
+    // checkout — it has a corresponding thread in the global thread set.
+    type AppendArg = {
+      events: { eventName: string; payload: { kind: string; checkoutId?: string } }[];
+    };
+    const calls = fixture.persistence.journal.append.mock.calls as unknown as AppendArg[][];
+    const removed = calls
+      .map((call) => call[0]!.events[0]!)
+      .filter((event) => event.eventName === "code.checkout-removed@1");
+    expect(removed).not.toContainEqual(
+      expect.objectContaining({
+        payload: expect.objectContaining({ checkoutId: inaccessibleCheckoutId }),
+      }),
+    );
+  });
+
+  it("D2-fix: an available unattached existing-worktree checkout survives recovery", async () => {
+    // An existing-worktree checkout created by prepare-code-project-checkout
+    // has no corresponding thread (the user prepared but never created a thread).
+    // It must NOT be classified as an orphan — only managed-worktree checkouts
+    // from failed managed binding can be orphans.
+    const existingCheckout = decodeCodeCheckoutIdentity({
+      id: "00000000-0000-4000-8000-000000003001" as never,
+      repositoryId,
+      kind: "existing-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/existing", oid: "e".repeat(40) },
+      observedAt: now,
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      allCheckouts: [existingCheckout],
+    });
+
+    await fixture.service.bootstrap(ids.window);
+
+    // No checkout-removed event must be appended for the existing-worktree checkout.
+    type AppendArg = {
+      events: { eventName: string; payload: { kind: string; checkoutId?: string } }[];
+    };
+    const calls = fixture.persistence.journal.append.mock.calls as unknown as AppendArg[][];
+    const removed = calls
+      .map((call) => call[0]!.events[0]!)
+      .filter((event) => event.eventName === "code.checkout-removed@1");
+    expect(removed).toEqual([]);
+  });
+
+  it("D2-fix: true unattached managed-worktree checkout is removed and filtered on restart/rebuild", async () => {
+    // A managed-worktree checkout with ownership/receipt facts that has no
+    // corresponding thread across ALL persisted threads is a true orphan from
+    // failed managed binding. Recovery must append checkout-removed and the
+    // bootstrap response must not expose it.
+    const orphanCheckout = decodeCodeCheckoutIdentity({
+      id: managedCheckoutId as never,
+      repositoryId,
+      kind: "managed-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/managed", oid: resolvedHead },
+      ownershipReceiptId: receiptId as never,
+      observedAt: now,
+    });
+    // Also include an existing-worktree checkout to prove recovery is scoped.
+    const existingCheckout = decodeCodeCheckoutIdentity({
+      id: "00000000-0000-4000-8000-000000004001" as never,
+      repositoryId,
+      kind: "existing-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/existing", oid: "f".repeat(40) },
+      observedAt: now,
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      allCheckouts: [orphanCheckout, existingCheckout],
+    });
+
+    const bootstrap = await fixture.service.bootstrap(ids.window);
+
+    // A checkout-removed event was appended for the managed-worktree orphan only.
+    type AppendArg = {
+      events: { eventName: string; payload: { kind: string; checkoutId?: string } }[];
+    };
+    const calls = fixture.persistence.journal.append.mock.calls as unknown as AppendArg[][];
+    const removed = calls
+      .map((call) => call[0]!.events[0]!)
+      .filter((event) => event.eventName === "code.checkout-removed@1");
+    expect(removed).toEqual([
+      expect.objectContaining({
+        eventName: "code.checkout-removed@1",
+        payload: expect.objectContaining({
+          kind: "checkout-removed",
+          checkoutId: managedCheckoutId,
+        }),
+      }),
+    ]);
+    // The bootstrap response must not expose the orphan managed checkout.
+    expect(bootstrap.checkouts).not.toContainEqual(
+      expect.objectContaining({ id: managedCheckoutId }),
+    );
+  });
+});
+
+/**
+ * Confined file listing (#code-file-explorer). Listing is a read, so Plan may
+ * perform it; what gates it is the same root authority the save path uses.
+ */
+describe("CodeService.listFiles", () => {
+  it("lists through the resolved root authority", async () => {
+    const fixture = serviceFixture();
+    const list = vi.fn(async (_request: unknown) => ({
+      status: "listed" as const,
+      listing: {
+        kind: "code-file-listing" as const,
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        entries: [],
+        truncated: false,
+        observedAt: now,
+      },
+    }));
+    (fixture.files as { list?: unknown }).list = list;
+
+    const result = await fixture.service.listFiles(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+    });
+
+    expect(result.status).toBe("listed");
+    expect(list.mock.lastCall?.[0]).toMatchObject({
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+      rootPath: "/private/authorized-root",
+    });
+  });
+
+  it("fails closed as unavailable when no listing capability was wired", async () => {
+    const fixture = serviceFixture();
+    const result = await fixture.service.listFiles(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+    });
+    expect(result).toEqual({
+      status: "failed",
+      failure: { category: "unavailable", message: "Code file listing is unavailable." },
+    });
+  });
+
+  it("refuses a checkout the thread is not bound to", async () => {
+    const fixture = serviceFixture();
+    (fixture.files as { list?: unknown }).list = vi.fn();
+    await expect(
+      fixture.service.listFiles(ids.window, {
+        threadId: ids.thread,
+        checkoutId: "00000000-0000-4000-8000-000000009999" as typeof checkout.id,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("reports unavailable when the root authority refuses to resolve", async () => {
+    const fixture = serviceFixture();
+    (fixture.files as { list?: unknown }).list = vi.fn();
+    fixture.roots.resolve.mockResolvedValueOnce(undefined as never);
+    const result = await fixture.service.listFiles(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+    });
+    expect(result).toMatchObject({ status: "failed", failure: { category: "unavailable" } });
+  });
+});
+
+/**
+ * Confined file open for the editor surface (#code-file tabs). Opening is a
+ * read that shares the listing's checkout authority: it never appends journal
+ * events, and the staged bytes stay readable only through the same thread
+ * authority the open used.
+ */
+describe("CodeService.openFile", () => {
+  const openMetadata = (digest: string, byteLength: number) => ({
+    identity: { device: "1", inode: "3" },
+    byteLength,
+    modifiedNanoseconds: "5",
+    digest,
+  });
+
+  it("opens through the resolved root authority and serves the staged content", async () => {
+    const fixture = serviceFixture();
+    const reference = fixture.content.put(new TextEncoder().encode("hello"));
+    fixture.files.open.mockResolvedValue({
+      status: "editable",
+      metadata: openMetadata(reference.digest, 5),
+      content: reference,
+    });
+
+    await expect(
+      fixture.service.openFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+      }),
+    ).resolves.toEqual({
+      kind: "code-file-open-result",
+      result: {
+        status: "editable",
+        fileId: ids.file,
+        metadata: openMetadata(reference.digest, 5),
+        content: {
+          contentId: reference.contentId,
+          digest: reference.digest,
+          byteLength: 5,
+        },
+      },
+    });
+    expect(fixture.roots.resolve).toHaveBeenCalledWith(
+      ids.window,
+      thread(),
+      checkout,
+      "src/file.ts",
+    );
+    expect(fixture.files.open).toHaveBeenCalledWith({
+      rootPath: "/private/authorized-root",
+      rootIdentity: { device: "7", inode: "8" },
+      path: "src/file.ts",
+    });
+    // Opening is a read: the journal never observes it.
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    // The staged bytes are readable through the same thread authority.
+    await expect(fixture.service.readContent(ids.window, reference.contentId)).resolves.toEqual({
+      bytes: new TextEncoder().encode("hello"),
+      digest: reference.digest,
+      byteLength: 5,
+    });
+    // A window without Project access is refused the staged content.
+    fixture.access.canAccessProject.mockResolvedValue(false as never);
+    await expect(
+      fixture.service.readContent(ids.window, reference.contentId),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+  });
+
+  it("refuses a window that cannot access the thread's Project", async () => {
+    const hidden = thread({ projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({ threads: [hidden] });
+
+    await expect(
+      fixture.service.openFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: "src/file.ts" as never,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.files.open).not.toHaveBeenCalled();
+  });
+
+  it("maps the helper's read-only answers without staging content", async () => {
+    const fixture = serviceFixture();
+    fixture.files.open.mockResolvedValueOnce({
+      status: "read-only",
+      metadata: openMetadata(oldDigest, 3),
+      reason: "binary",
+    });
+    fixture.files.open.mockResolvedValueOnce({
+      status: "read-only",
+      metadata: openMetadata(oldDigest, 3),
+      reason: "too-large",
+    });
+
+    const input = {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+      relativePath: "assets/logo.png" as never,
+    };
+    await expect(fixture.service.openFile(ids.window, input)).resolves.toMatchObject({
+      result: { status: "read-only", fileId: ids.file, reason: "binary" },
+    });
+    await expect(fixture.service.openFile(ids.window, input)).resolves.toMatchObject({
+      result: { status: "read-only", fileId: ids.file, reason: "oversized" },
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Browsing stages bytes in the same content store saves stage into, so the
+   * opened-file cache is bounded. A window that browses far more files than the
+   * bound may lose the oldest staging, but it may never consume the capacity a
+   * save needs.
+   */
+  describe("bounded staging", () => {
+    const browsedFiles = MAXIMUM_OPENED_CODE_FILE_ENTRIES + 4;
+
+    function browsingFixture() {
+      let staged = 0;
+      let resolved = 0;
+      const fixture = serviceFixture({
+        // One slot per bounded open plus the headroom a save needs.
+        content: {
+          maximumEntries: browsedFiles,
+          maximumBytes: 64 * 1024,
+          newContentId: () => testUuid(3000 + ++staged),
+        },
+      });
+      fixture.roots.resolve.mockImplementation(async () => ({
+        fileId: decodeCodeFileId(testUuid(2000 + ++resolved)),
+        rootPath: "/private/authorized-root",
+        rootIdentity: { device: "7", inode: "8" },
+      }));
+      // Mirrors CodeFileService.open: the bytes are staged in the shared store.
+      fixture.files.open.mockImplementation(async () => {
+        const bytes = new TextEncoder().encode(`opened ${staged + 1}`);
+        const content = fixture.content.put(bytes);
+        return {
+          status: "editable",
+          metadata: openMetadata(content.digest, bytes.byteLength),
+          content,
+        };
+      });
+      // Mirrors CodeFileService.save: staging its bytes is what a full store
+      // denies, and the save reports that honestly instead of writing.
+      fixture.files.save.mockImplementation(async (input: { readonly text: string }) => {
+        let content;
+        try {
+          content = fixture.content.put(new TextEncoder().encode(input.text));
+        } catch (error) {
+          return {
+            status: "failed",
+            failure: {
+              category: "unavailable",
+              code: `content-${(error as { code: string }).code}`,
+            },
+          };
+        }
+        fixture.content.purge(content.contentId);
+        return {
+          status: "completed",
+          metadata: {
+            identity: { device: "1", inode: "4" },
+            byteLength: content.byteLength,
+            modifiedNanoseconds: "5",
+            digest: content.digest,
+          },
+        };
+      });
+      return fixture;
+    }
+
+    async function browse(fixture: ReturnType<typeof browsingFixture>, index: number) {
+      const envelope = await fixture.service.openFile(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+        relativePath: `src/file-${index}.ts` as never,
+      });
+      const result = envelope.result;
+      if (result.status !== "editable") throw new Error(`open ${index} was not editable`);
+      return result.content;
+    }
+
+    it("leaves the capacity a save needs after many distinct files were opened", async () => {
+      const fixture = browsingFixture();
+
+      for (let index = 0; index < browsedFiles; index += 1) await browse(fixture, index);
+
+      await expect(
+        fixture.service.saveFile(ids.window, {
+          threadId: ids.thread,
+          checkoutId: checkout.id,
+          relativePath: "src/file-0.ts" as never,
+          expectedIdentity: { device: "1", inode: "3" },
+          expectedDigest: oldDigest,
+          text: "hello",
+        }),
+      ).resolves.toMatchObject({ result: { status: "completed" } });
+      expect(fixture.content.stats().entryCount).toBeLessThanOrEqual(
+        MAXIMUM_OPENED_CODE_FILE_ENTRIES,
+      );
+    });
+
+    it("refuses a reference whose staging was released instead of serving other bytes", async () => {
+      const fixture = browsingFixture();
+      const first = await browse(fixture, 0);
+
+      for (let index = 1; index < browsedFiles; index += 1) await browse(fixture, index);
+
+      // The server holds no record that the released reference was ever staged,
+      // so it refuses for want of authority rather than serving another file's
+      // bytes under the recycled reference.
+      await expect(fixture.service.readContent(ids.window, first.contentId)).rejects.toMatchObject({
+        failure: { category: "unauthorized" },
+      });
+    });
+
+    it("keeps a recently opened file readable after other files were opened", async () => {
+      const fixture = browsingFixture();
+      const kept = await browse(fixture, 0);
+
+      for (let index = 1; index < MAXIMUM_OPENED_CODE_FILE_ENTRIES; index += 1) {
+        await browse(fixture, index);
+      }
+
+      await expect(fixture.service.readContent(ids.window, kept.contentId)).resolves.toMatchObject({
+        digest: kept.digest,
+        byteLength: kept.byteLength,
+      });
+    });
+
+    /**
+     * Opening answers with a reference the editor fetches in a second request,
+     * so two tabs or windows on one file, or a re-open racing the first fetch,
+     * hold two live references to the same file id. Only the ceilings may take
+     * a reference away; a later open of the same file may not.
+     */
+    it("keeps an earlier open's reference readable when the same file is opened again", async () => {
+      const fixture = browsingFixture();
+      fixture.roots.resolve.mockImplementation(async () => ({
+        fileId: ids.file,
+        rootPath: "/private/authorized-root",
+        rootIdentity: { device: "7", inode: "8" },
+      }));
+
+      const first = await browse(fixture, 0);
+      const second = await browse(fixture, 0);
+
+      expect(second.contentId).not.toEqual(first.contentId);
+      await expect(fixture.service.readContent(ids.window, first.contentId)).resolves.toMatchObject(
+        {
+          digest: first.digest,
+          byteLength: first.byteLength,
+        },
+      );
+      await expect(
+        fixture.service.readContent(ids.window, second.contentId),
+      ).resolves.toMatchObject({ digest: second.digest, byteLength: second.byteLength });
+    });
+
+    /**
+     * The byte ceiling is the other half of the bound, and one file bigger than
+     * the whole slice is what terminates the release loop.
+     */
+    function sizedFixture(openedByteLength: number, maximumBytes: number) {
+      let staged = 0;
+      let resolved = 0;
+      const fixture = serviceFixture({
+        content: { maximumEntries: 8, maximumBytes, newContentId: () => testUuid(3000 + ++staged) },
+      });
+      fixture.roots.resolve.mockImplementation(async () => ({
+        fileId: decodeCodeFileId(testUuid(2000 + ++resolved)),
+        rootPath: "/private/authorized-root",
+        rootIdentity: { device: "7", inode: "8" },
+      }));
+      fixture.files.open.mockImplementation(async () => {
+        // Distinct bytes per open so every reference verifies its own digest.
+        const bytes = new Uint8Array(openedByteLength).fill(staged + 1);
+        const content = fixture.content.put(bytes);
+        return {
+          status: "editable",
+          metadata: openMetadata(content.digest, bytes.byteLength),
+          content,
+        };
+      });
+      return fixture;
+    }
+
+    it("releases the oldest staging once the byte ceiling is exceeded", async () => {
+      const half = Math.floor(MAXIMUM_OPENED_CODE_FILE_BYTES / 2) + 1024;
+      const fixture = sizedFixture(half, MAXIMUM_OPENED_CODE_FILE_BYTES * 2);
+
+      const first = await browse(fixture, 0);
+      const second = await browse(fixture, 1);
+
+      await expect(fixture.service.readContent(ids.window, first.contentId)).rejects.toMatchObject({
+        failure: { category: "unauthorized" },
+      });
+      await expect(
+        fixture.service.readContent(ids.window, second.contentId),
+      ).resolves.toMatchObject({ digest: second.digest, byteLength: second.byteLength });
+    });
+
+    it("stages a file larger than the byte slice and keeps it readable", async () => {
+      const oversized = MAXIMUM_OPENED_CODE_FILE_BYTES + 1024;
+      const fixture = sizedFixture(oversized, oversized * 2);
+
+      const only = await browse(fixture, 0);
+
+      await expect(fixture.service.readContent(ids.window, only.contentId)).resolves.toMatchObject({
+        digest: only.digest,
+        byteLength: only.byteLength,
+      });
+    });
+  });
+});
+
+/**
+ * Repository test discovery. Discovery is a read that shares the file listing's
+ * checkout authority, and it fails closed to an empty list rather than to an
+ * error that would take the Code workspace down.
+ */
+describe("CodeService.listTests", () => {
+  it("discovers through the resolved root authority", async () => {
+    const fixture = serviceFixture();
+    fixture.tests.discover.mockResolvedValueOnce([
+      {
+        id: "00000000-0000-4000-8000-000000001080",
+        name: "test",
+        source: {
+          kind: "package-script",
+          packagePath: "package.json",
+          packageManager: "bun",
+          script: "test",
+        },
+        argv: ["bun", "run", "test"],
+        cwd: ".",
+        environmentRefs: [],
+        timeoutMs: 900_000,
+        artifactPaths: [],
+      },
+    ] as never);
+
+    const listing = await fixture.service.listTests(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+    });
+
+    expect(listing.definitions.map((definition) => definition.name)).toEqual(["test"]);
+    expect(fixture.tests.discover).toHaveBeenCalledWith({
+      checkoutId: String(checkout.id),
+      rootPath: "/private/authorized-root",
+    });
+  });
+
+  it("answers an empty list when the root authority refuses to resolve", async () => {
+    const fixture = serviceFixture();
+    fixture.roots.resolve.mockResolvedValueOnce(undefined as never);
+
+    const listing = await fixture.service.listTests(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+    });
+
+    expect(listing.definitions).toEqual([]);
+    expect(fixture.tests.discover).not.toHaveBeenCalled();
+  });
+
+  it("refuses a checkout the thread is not bound to", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.listTests(ids.window, {
+        threadId: ids.thread,
+        checkoutId: "00000000-0000-4000-8000-000000009999" as typeof checkout.id,
+      }),
+    ).rejects.toThrow();
+    expect(fixture.tests.discover).not.toHaveBeenCalled();
+  });
+});
+
+function serviceFixture(
+  options: {
+    readonly threads?: ReturnType<typeof thread>[];
+    readonly events?: EventEnvelope[];
+    readonly checkout?: typeof checkout;
+    readonly allCheckouts?: ReadonlyArray<CodeCheckoutIdentity>;
+    readonly approve?: boolean;
+    readonly project?: Project;
+    readonly sessionAuthority?: CodeSessionAuthorityStore;
+    readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
+    readonly worktreeRefs?: CodeWorktreeRefsPort;
+    readonly managedThreadCreation?: ManagedCodeThreadCreationPort;
+    readonly worktreeRemoteFacts?: CodeWorktreeRemoteFacts;
+    readonly probeProvider?: CodeServiceOptions["probeProvider"];
+    readonly content?: CodeContentStoreOptions;
+  } = {},
+) {
+  const threads = options.threads ?? [thread()];
+  const checkoutList = options.allCheckouts ?? [options.checkout ?? checkout];
+  const persistence = {
+    readCodeSettings: vi.fn(() => undefined),
+    readProject: vi.fn(() => options.project),
+    readCodeThread: vi.fn((threadId) => threads.find((candidate) => candidate.id === threadId)),
+    readCodeThreads: vi.fn(() => threads),
+    readCodeCheckout: vi.fn((checkoutId: string) =>
+      checkoutList.find((candidate) => String(candidate.id) === checkoutId),
+    ),
+    readCodeCheckoutAggregateVersion: vi.fn(() => 0),
+    readCodeCheckouts: vi.fn(() => [...checkoutList]),
+    readCodeFileReference: vi.fn(
+      () => undefined as ReturnType<CodePersistencePort["readCodeFileReference"]>,
+    ),
+    readCodeFileReferences: vi.fn(
+      () => [] as ReturnType<CodePersistencePort["readCodeFileReferences"]>,
+    ),
+    readCodeThreadView: vi.fn((threadId) => {
+      const found = threads.find((candidate) => candidate.id === threadId);
+      if (found === undefined) return undefined;
+      const threadCheckout = checkoutList.find((c) => String(c.id) === String(found.checkoutId));
+      return { thread: found, checkout: threadCheckout ?? checkout, lastSequence: found.version };
+    }),
+    journal: {
+      append: vi.fn(),
+      replay: vi.fn(() => options.events ?? []),
+      replayAggregate: vi.fn(() => options.events ?? []),
+    },
+  };
+  const access = {
+    canAccessProject: vi.fn((_windowId, projectId) => projectId === ids.project),
+  };
+  const roots = {
+    resolve: vi.fn(async () => ({
+      fileId: ids.file,
+      rootPath: "/private/authorized-root",
+      rootIdentity: { device: "7", inode: "8" },
+    })),
+  };
+  const checkouts = {
+    observe: vi.fn(async () => ({
+      bindingRevisionId: ids.binding,
+      checkout,
+      ...(options.worktreeRemoteFacts === undefined
+        ? {}
+        : { worktreeRemoteFacts: options.worktreeRemoteFacts }),
+    })),
+  };
+  const files = { open: vi.fn(), save: vi.fn() };
+  const tests = { discover: vi.fn(async () => [] as ReadonlyArray<never>) };
+  const approvals = { validate: vi.fn(async () => options.approve === true) };
+  const workingDirectories = {
+    resolve: vi.fn(async () => "/private/authorized-root/packages/app"),
+  };
+  const onWorkingDirectoryChanged = vi.fn(async () => undefined);
+  const content = new CodeContentStore({
+    maximumBytes: 1024,
+    maximumEntries: 4,
+    newContentId: () => String(ids.content),
+    ...options.content,
+  });
+  const service = new CodeService({
+    persistence: persistence as unknown as CodePersistencePort,
+    access,
+    checkouts,
+    roots,
+    files,
+    tests,
+    content,
+    uuid: () => "00000000-0000-4000-8000-000000001099",
+    clock: () => now,
+    approvals,
+    workingDirectories,
+    onWorkingDirectoryChanged,
+    ...(options.sessionAuthority === undefined
+      ? {}
+      : { sessionAuthority: options.sessionAuthority }),
+    ...(options.worktreeSourcePreview === undefined
+      ? {}
+      : { worktreeSourcePreview: options.worktreeSourcePreview }),
+    ...(options.worktreeRefs === undefined ? {} : { worktreeRefs: options.worktreeRefs }),
+    ...(options.managedThreadCreation === undefined
+      ? {}
+      : { managedThreadCreation: options.managedThreadCreation }),
+    ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
+  });
+  return {
+    service,
+    persistence,
+    access,
+    checkouts,
+    roots,
+    files,
+    tests,
+    content,
+    approvals,
+    workingDirectories,
+    onWorkingDirectoryChanged,
+  };
+}
+
+function eventEnvelope(
+  sequence: number,
+  eventName: string,
+  payload: unknown,
+  aggregateVersion = 2,
+): EventEnvelope {
+  return {
+    eventId: "00000000-0000-4000-8000-000000001091" as never,
+    globalSequence: sequence as never,
+    aggregateType: "code-thread" as never,
+    aggregateId: ids.thread as never,
+    aggregateVersion: aggregateVersion as never,
+    eventName: eventName as never,
+    eventVersion: 1 as never,
+    hostId: "local" as never,
+    correlationId: "00000000-0000-4000-8000-000000001092" as never,
+    actor: {
+      kind: "local-user",
+      actorId: "00000000-0000-4000-8000-000000001093" as never,
+    },
+    occurredAt: now as never,
+    payload,
+  };
+}

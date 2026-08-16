@@ -1,0 +1,15 @@
+{
+  "name": "@octant/scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.0.2",
+    "@electron/rebuild": "4.2.0",
+    "@octant/contracts": "workspace:*",
+    "@octant/host-runtime": "workspace:*",
+    "@octant/provider-sdk": "workspace:*"
+  }
+}

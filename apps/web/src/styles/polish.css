@@ -1,0 +1,107 @@
+/* Distilled graphite polish for shadcn-backed controls and shell density. */
+
+.sidebar-navigation__thread-unread {
+  color: var(--octant-text-primary);
+  background: var(--octant-selection);
+  border-color: var(--octant-border-strong);
+}
+
+.workspace-tab {
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.workspace-tab__pin {
+  flex-shrink: 0;
+  margin-right: 4px;
+  opacity: 0.72;
+}
+
+.workspace-tab__action {
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease,
+    transform 100ms ease;
+}
+
+.workspace-tab-item:hover .workspace-tab__action,
+.workspace-tab[aria-selected="true"] ~ .workspace-tab__action,
+.workspace-tab[aria-selected="true"] ~ .workspace-tab__actions .workspace-tab__action,
+.workspace-tab-item:focus-within .workspace-tab__action {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.workspace-tab__action:active {
+  transform: scale(0.96);
+}
+
+.settings-view__header h1 {
+  letter-spacing: -0.03em;
+}
+
+.settings-view__field--search .settings-view__text-input,
+.settings-view__field--search input {
+  min-height: 34px;
+  border-radius: 8px;
+  background: var(--octant-control);
+}
+
+.provider-card {
+  border-radius: 10px;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.provider-card:hover {
+  border-color: var(--octant-border-strong);
+}
+
+.chat-composer select,
+.chat-composer button,
+.chat-composer textarea,
+.chat-composer [role="combobox"] {
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    opacity 120ms ease;
+}
+
+.chat-composer__actions > button:last-child:not(:disabled) {
+  box-shadow: inset 0 1px 0
+    color-mix(in srgb, var(--octant-text-primary-high-contrast) 10%, transparent);
+}
+
+.project-dialog {
+  animation: octant-dialog-enter 140ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes octant-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-tab,
+  .workspace-tab__action,
+  .provider-card,
+  .chat-composer select,
+  .chat-composer button,
+  .chat-composer textarea,
+  .project-dialog {
+    animation: none;
+    transition: none;
+  }
+}
