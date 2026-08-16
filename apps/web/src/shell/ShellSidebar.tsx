@@ -16,11 +16,14 @@ import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgro
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
 
 /**
- * Stand-in for the server's first-party plugin activation state. Both
- * components are seeded and enabled by default with no toggle UI yet, so
- * this is a constant, not a live query; ADR 0001 step 4 replaces it with a
- * value sourced from the server's plugin gate once the board and GitHub
- * plugins are seeded (see docs/decisions/0001-plugin-architecture.md).
+ * Stand-in for the server's first-party plugin activation state. The board
+ * plugin is now seeded and gated server-side (ADR 0001 step 4) and toggling
+ * it off is enforced on the board route and reflected in the existing
+ * Settings > Plugins UI; this sidebar entry stays a constant rather than a
+ * live per-mode query because the board's own compatibility is Code-only
+ * while its sidebar contribution spans Work and Code, so a single boolean
+ * can't represent both modes correctly. Deferred to a focused follow-up
+ * (see docs/decisions/0001-plugin-architecture.md).
  */
 const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponentId, boolean> = new Map([
   ["board", true],

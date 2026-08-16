@@ -239,6 +239,11 @@ The path from this extensions model to a general plugin host — first-party
 features as toggleable plugins, renderer contribution points, integration and
 board plugin kinds — is recorded in
 [decisions/0001-plugin-architecture.md](decisions/0001-plugin-architecture.md).
+The Code thread board is the first of these: `apps/server/src/extensions/firstPartyPlugins.ts`
+seeds a real `@octant/board` package at startup, and
+`apps/server/src/extensions/firstPartyPluginGate.ts` gates the board route on
+its effective state through the same unmodified activation ladder every other
+plugin uses.
 
 ## Security and authority
 

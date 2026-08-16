@@ -204,6 +204,31 @@ replaces the hard-coded thread-board/pull-requests availability check;
 `settings.section` and the remaining contribution points (panes, preview
 viewers, appearance) are not yet built.
 
+Step 4 landed the board half. `apps/server/src/extensions/firstPartyPlugins.ts`
+seeds a real `@octant/board` package (component kind `board`, zero declared
+capabilities, `entryPoint: "builtin:board"`, an opaque marker never handed to
+the Agent Plugins loader — the board stays statically wired in `server.ts`)
+idempotently into the projection at startup by appending the same
+install-committed / source-trust-changed / plugin-desired-state-changed /
+component-desired-state-changed events the real lifecycle commands produce.
+It is a real row in the existing Settings > Plugins UI, toggleable through the
+existing generic commands — no new toggle UI was built.
+`apps/server/src/extensions/firstPartyPluginGate.ts` resolves board's
+effective state by reusing the server's existing `ExtensionActivationService`
+instance and the unmodified activation ladder — the same ladder third-party
+plugins go through, not an analogy. `apps/server/src/codeRoutes.ts`'s `board`
+route case gates on it, returning the existing `unavailable` failure shape;
+`CodeThreadBoard`'s already-existing `loadBoard` error handling (not new code)
+surfaces that as an inline "board is unavailable" state with the server's
+message. The board's sidebar entry visibility was **not** wired to this live
+state: `apps/web/src/shell/ShellSidebar.tsx`'s `FIRST_PARTY_PLUGINS_EFFECTIVE`
+stays a stub. The board's manifest declares Code-only compatibility but its
+sidebar contribution spans Work and Code (matching pre-existing behavior), so
+a single per-component boolean can't represent a mode-scoped effective state
+correctly; making the sidebar row itself reactive needs a small design of its
+own (likely a live per-mode query, not a static bootstrap field) and is
+deferred to a focused follow-up shared with the GitHub half of this step.
+
 ## Consequences
 
 - Product surfaces become explainable: every sidebar entry, pane, and settings

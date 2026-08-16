@@ -335,6 +335,8 @@ import {
 } from "./extensions/extensionSupervisor";
 import { createNodeExtensionProcessPort } from "./extensions/nodeExtensionProcessPort";
 import { ExtensionPackageStore } from "./extensions/extensionPackageStore";
+import { BOARD_EXTENSION_ID, seedFirstPartyPlugins } from "./extensions/firstPartyPlugins";
+import { isFirstPartyPluginEffective } from "./extensions/firstPartyPluginGate";
 import {
   createExtensionChatResolver,
   createStoredExtensionMaterialLoader,
@@ -1903,6 +1905,12 @@ export function startOctantServer(
         await agentRunProcessSupervisor.reconcile?.();
         await extensionSupervisor.reconcile?.();
         await extensionLifecycleService.reconcileStartup();
+        seedFirstPartyPlugins({
+          journal: persistence.journal,
+          connection: persistence.connection,
+          uuid: randomUUID,
+          clock: () => new Date().toISOString(),
+        });
         await standaloneSkillService.reconcile();
       },
       catch: () =>
@@ -2654,6 +2662,15 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       maxFileBodySize: MAX_CODE_FILE_BODY_SIZE,
+      boardPluginEffective: () =>
+        isFirstPartyPluginEffective({
+          connection: persistence.connection,
+          activationService: extensionActivationService,
+          clock: () => new Date().toISOString(),
+          extensionId: BOARD_EXTENSION_ID,
+          componentId: "board",
+          mode: "code",
+        }),
     });
     // Local servers. The scope resolver is what decides who may stop a
     // process, so it is bound to the same authoritative thread, checkout, and

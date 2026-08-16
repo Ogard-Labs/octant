@@ -71,8 +71,12 @@ Hardening in progress for the preview:
     registry now resolves sidebar destination availability; settings-section
     contributions, panes, preview viewers, and appearance contribution points
     remain open.
-  - First bundled plugins: appearance packs and preview viewers, then the
-    thread board and GitHub integration behind typed server ports.
+  - The Code thread board is now a real, seeded `@octant/board` plugin: a
+    real row in Settings > Plugins, gated by the unmodified activation
+    ladder, enforced on its server route. Its sidebar entry visibility isn't
+    yet live-wired to that toggle; GitHub (auth, catalogue, clone; PR
+    lifecycle gated but staying host-embedded), appearance packs, and preview
+    viewers remain open.
 - **Linear integration** — the first bundled-off integration plugin: issue
   intake and delivery-target sync from a Work or Code thread, with the same
   read/write authority model as GitHub.
