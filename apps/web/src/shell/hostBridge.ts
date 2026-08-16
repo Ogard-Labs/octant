@@ -65,7 +65,17 @@ export type ProjectWindowTarget =
       threadId: string;
     }>;
 
+export type AttentionReason = "turn-finished" | "approval-required" | "question-asked";
+
+export interface AttentionNotificationRequest {
+  readonly reason: AttentionReason;
+  readonly threadTitle: string;
+  readonly detail?: string;
+}
+
 export interface OctantHostBridge {
+  readonly notifyAttention?: (request: AttentionNotificationRequest) => Promise<void>;
+  readonly setAttentionBadge?: (count: number) => Promise<void>;
   readonly attachBrowserSurface?: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds?: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface?: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
