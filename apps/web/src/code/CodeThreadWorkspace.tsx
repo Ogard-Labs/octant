@@ -23,6 +23,8 @@ import {
 } from "../chat/ThreadMentionPicker";
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
+import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
+import type { CodeFileListingClient } from "@octant/client-runtime";
 
 export interface CodeThreadWorkspaceProps {
   readonly agentRunClient?: AgentRunClient;
@@ -41,6 +43,8 @@ export interface CodeThreadWorkspaceProps {
    * nothing can resolve.
    */
   readonly threadMentionClient?: ThreadMentionClient;
+  /** Lists this checkout's files for `@path` mentions. */
+  readonly fileListingClient?: CodeFileListingClient;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -82,6 +86,30 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     textarea: () => textareaRef.current,
   });
   const mentionListId = `code-thread-mentions-${String(props.threadId)}`;
+
+  // `@` names a file or folder in the checkout this thread is already bound to.
+  // The path travels as ordinary prompt text; the host still decides what the
+  // turn may read, so naming a file here reaches nothing on its own.
+  const pathMentions = useCodePathMentions({
+    ...(props.fileListingClient === undefined ? {} : { client: props.fileListingClient }),
+    threadId: props.threadId,
+    checkoutId: view?.checkout.id,
+    draft,
+    onDraftChange: (next) => {
+      setDraft(next);
+      props.controller.setPendingDraft?.(next);
+    },
+    textarea: () => textareaRef.current,
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
+  const pathMentionOpen = pathMentions.open && !mention.open;
+
+  function syncMentions(value: string, caret: number | null) {
+    mention.sync(value, caret);
+    pathMentions.sync(value, caret);
+  }
 
   if (props.controller.status === "disconnected") {
     return (
@@ -156,6 +184,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (mention.handleKeyDown(event)) return;
+    if (pathMentions.handleKeyDown(event)) return;
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     void submitFollowUp();
@@ -437,6 +466,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               onHover={mention.setActiveIndex}
             />
           ) : null}
+          {pathMentionOpen ? (
+            <PathMentionTypeahead
+              activeIndex={pathMentions.activeIndex}
+              busy={pathMentions.busy}
+              candidates={pathMentions.candidates}
+              listId={pathMentionListId}
+              onChoose={pathMentions.choose}
+              onHover={pathMentions.setActiveIndex}
+            />
+          ) : null}
           {/*
            * Side Chat has no surface in a Code tab, so the chip offers only
            * removal here: rendering a control whose sidecar this workspace
@@ -476,27 +515,31 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             </label>
             <OctantTextarea
               aria-activedescendant={
-                mention.activeCandidate === undefined
-                  ? undefined
-                  : `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                mention.activeCandidate !== undefined
+                  ? `${mentionListId}-${String(mention.activeCandidate.threadId)}`
+                  : pathMentionOpen && pathMentions.activeCandidate !== undefined
+                    ? `${pathMentionListId}-${pathMentions.activeCandidate.path}`
+                    : undefined
               }
-              aria-autocomplete={threadMentions.composer === undefined ? undefined : "list"}
-              aria-controls={mention.open ? mentionListId : undefined}
-              aria-expanded={threadMentions.composer === undefined ? undefined : mention.open}
+              aria-autocomplete="list"
+              aria-controls={
+                mention.open ? mentionListId : pathMentionOpen ? pathMentionListId : undefined
+              }
+              aria-expanded={mention.open || pathMentionOpen}
               className="code-thread-workspace__input window-no-drag"
               id={`code-thread-composer-${String(thread.id)}`}
               onChange={(event) => {
                 setDraft(event.currentTarget.value);
                 props.controller.setPendingDraft?.(event.currentTarget.value);
-                mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
               onClick={(event) =>
-                mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart)
               }
               onKeyDown={onKeyDown}
               onKeyUp={(event) => {
                 if (event.key === "Escape") return;
-                mention.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
               placeholder={busy ? "Queue the next message…" : "Ask for follow-up changes…"}
               ref={textareaRef}

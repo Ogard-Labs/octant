@@ -133,7 +133,7 @@ export function useCodeController(options: CodeControllerOptions) {
   const [activeView, setActiveView] = useState<CodeThreadView>();
   const [errorCategory, setErrorCategory] = useState<CodeFailure["category"]>();
   const [errorMessage, setErrorMessage] = useState<string>();
-  const [pendingDraft, setPendingDraft] = useState("");
+  const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
   const [followUps, setFollowUps] = useState<ReadonlyMap<string, CodeThreadFollowUpView>>(
     () => new Map(),
@@ -194,6 +194,22 @@ export function useCodeController(options: CodeControllerOptions) {
   const lastExecuteError = useRef<
     { category: CodeFailure["category"]; message: string } | undefined
   >(undefined);
+
+  // Drafts are kept per thread so moving between threads never loses what was
+  // typed and never carries one thread's prompt into another's composer. A
+  // draft is renderer-local by design: it is not a message until the user
+  // sends it, so the journal records nothing here.
+  const pendingDraft = drafts.get(draftKey(options.activeThreadId)) ?? "";
+  const setPendingDraft = useCallback((value: string) => {
+    const key = draftKey(activeThreadId.current);
+    setDrafts((current) => {
+      if ((current.get(key) ?? "") === value) return current;
+      const next = new Map(current);
+      if (value === "") next.delete(key);
+      else next.set(key, value);
+      return next;
+    });
+  }, []);
 
   const clearFailure = useCallback(() => {
     setErrorCategory(undefined);
@@ -1235,6 +1251,11 @@ function conversationFallback(
 }
 
 export type CodeController = ReturnType<typeof useCodeController>;
+
+/** Draft bucket for one thread, or for the composer before a thread exists. */
+function draftKey(threadId: CodeThreadId | undefined): string {
+  return threadId === undefined ? "" : String(threadId);
+}
 
 function required(value: string | undefined): string {
   if (value === undefined) throw new Error("Code controller requires launch authority.");

@@ -347,6 +347,34 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("keeps one draft per thread while the user moves between them", async () => {
+    const nextThreadId = "10000000-0000-4000-8000-000000000002" as CodeThreadId;
+    const client = fakeClient({
+      thread: vi.fn(async (threadId) =>
+        threadId === ids.thread ? view(1) : { ...view(1), thread: { ...thread(1), id: threadId } },
+      ),
+    });
+    const { result, rerender, unmount } = renderHook(
+      ({ activeThreadId }) =>
+        useCodeController({ activeThreadId, client, reconnectDelayMs: 60_000 }),
+      { initialProps: { activeThreadId: ids.thread } },
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => result.current.setPendingDraft("Draft for the first thread"));
+
+    rerender({ activeThreadId: nextThreadId });
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(nextThreadId));
+    // A second thread starts empty rather than inheriting the first one's words.
+    expect(result.current.pendingDraft).toBe("");
+    act(() => result.current.setPendingDraft("Draft for the second thread"));
+
+    rerender({ activeThreadId: ids.thread });
+    await waitFor(() => expect(result.current.pendingDraft).toBe("Draft for the first thread"));
+    rerender({ activeThreadId: nextThreadId });
+    await waitFor(() => expect(result.current.pendingDraft).toBe("Draft for the second thread"));
+    unmount();
+  });
+
   it("stages prompt evidence and starts a provider turn for follow-ups", async () => {
     const operationId = "70000000-0000-4000-8000-000000000001";
     const contentId = "60000000-0000-4000-8000-000000000001";
