@@ -397,16 +397,20 @@ function GitWorkspaceSurface(
   if (observation === undefined) {
     return <GitObservationLoading />;
   }
+  const policy = props.controller.activeView!.thread.executionPolicy;
   if (props.tab.kind === "code-diff") {
     return (
       <CodeDiffPane
-        client={props.client}
+        client={refreshingClient}
+        createGitOperationId={() => props.nextUuid() as never}
+        createOperationId={() => props.nextUuid() as never}
         diff={{ state: "available", observation, ...props.scope }}
+        executionPolicy={policy}
         {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
+        {...(props.approvals?.git === undefined ? {} : { requestApproval: props.approvals.git })}
       />
     );
   }
-  const policy = props.controller.activeView!.thread.executionPolicy;
   if (decidesCodeEffectsByApproval(policy) && props.approvals?.git === undefined) {
     return <ApprovalUnavailable surface="Git mutation" />;
   }

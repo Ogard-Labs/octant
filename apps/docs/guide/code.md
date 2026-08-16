@@ -48,7 +48,7 @@ Code exposes repository-valid engineering surfaces:
 - Thread conversations
 - Terminal (confined to the Project root)
 - Files/Explorer
-- Diff viewer
+- Diff viewer, including discarding a tracked file's uncommitted changes (asked about every time outside Full access, because nothing can restore them)
 - Git/Review surfaces
 - Side Chat
 - Browser tabs

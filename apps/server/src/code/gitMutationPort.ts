@@ -99,6 +99,27 @@ export class GitMutationPort {
     return this.#apply(input.checkoutRoot, ["add", "--", ...input.paths], signal);
   }
 
+  /**
+   * Restore the index and working tree of the given paths from HEAD, throwing
+   * away uncommitted work. Tracked paths only: `git restore` cannot remove an
+   * untracked file, and deleting one is not something this port will do
+   * implicitly, so the caller rejects those before reaching here.
+   */
+  async discard(
+    input: { readonly checkoutRoot: string; readonly paths: readonly string[] },
+    signal?: AbortSignal,
+  ): Promise<GitMutationResult> {
+    if (!validPaths(input.paths)) return { status: "rejected", reason: "invalid-paths" };
+    const lock = await this.#lockState(input.checkoutRoot, signal);
+    if (lock === "failed") return { status: "failed" };
+    if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    return this.#apply(
+      input.checkoutRoot,
+      ["restore", "--staged", "--worktree", "--source=HEAD", "--", ...input.paths],
+      signal,
+    );
+  }
+
   async commit(
     input: {
       readonly checkoutRoot: string;

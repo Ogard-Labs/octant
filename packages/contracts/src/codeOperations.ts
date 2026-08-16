@@ -314,6 +314,25 @@ const StageGit = Schema.Struct({
   ),
   expectedStateToken: GitStateToken,
 }).annotations(strict);
+/**
+ * Throw away uncommitted work in the checkout. This is the one Git command
+ * here that destroys content instead of recording it: what it removes was
+ * never committed, so nothing in the repository can bring it back. It is
+ * therefore an approval-class `destructive-or-irreversible` operation, carries
+ * the exact paths in the receipt, and is never covered by a posture that
+ * auto-accepts edits.
+ */
+const DiscardGitChanges = Schema.Struct({
+  kind: Schema.Literal("discard-git-changes"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  paths: Schema.NonEmptyArray(GitStagePath).pipe(
+    Schema.filter(
+      (paths) => paths.length <= MAX_CODE_OPERATION_PATHS && new Set(paths).size === paths.length,
+    ),
+  ),
+  expectedStateToken: GitStateToken,
+}).annotations(strict);
 const CommitGit = Schema.Struct({
   kind: Schema.Literal("commit-git"),
   ...OperationScope,
@@ -480,6 +499,7 @@ export const CodeOperationCommand = Schema.Union(
   CancelRepositoryTest,
   ObserveGit,
   StageGit,
+  DiscardGitChanges,
   CommitGit,
   PushGit,
   CreatePullRequest,
@@ -592,7 +612,7 @@ const GitMutationResult = Schema.Struct({
   kind: Schema.Literal("git-mutation-state"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
-  mutation: Schema.Literal("stage", "commit", "push", "revert"),
+  mutation: Schema.Literal("stage", "discard", "commit", "push", "revert"),
   state: Schema.Literal("completed", "rejected", "failed"),
   headOid: Schema.optional(GitObjectId),
 }).annotations(strict);

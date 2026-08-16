@@ -15,6 +15,10 @@ interface MutationPort {
     input: Parameters<GitMutationPort["stage"]>[0],
     signal?: AbortSignal,
   ): Promise<GitMutationResult>;
+  discard(
+    input: Parameters<GitMutationPort["discard"]>[0],
+    signal?: AbortSignal,
+  ): Promise<GitMutationResult>;
   commit(
     input: Parameters<GitMutationPort["commit"]>[0],
     signal?: AbortSignal,
@@ -36,6 +40,7 @@ export type GitServiceResult =
       readonly reason:
         | "stale-state"
         | "unlisted-path"
+        | "untracked-path"
         | "staged-summary-mismatch"
         | "approval-required"
         | "detached-head"
@@ -80,6 +85,43 @@ export class GitService {
       if (input.paths.some((path) => !changed.has(path)))
         return { status: "rejected", reason: "unlisted-path" };
       return this.#mutation.stage(
+        { checkoutRoot: current.checkoutRoot, paths: input.paths },
+        signal,
+      );
+    });
+  }
+
+  /**
+   * Throw away uncommitted changes to the listed paths. The listing is checked
+   * against the same observation the caller saw — a stale token, a path the
+   * checkout does not report as changed, or an untracked path is refused
+   * rather than resolved generously, because the loss cannot be undone.
+   */
+  discard(
+    input: {
+      readonly checkoutId: string;
+      readonly checkoutRoot: string;
+      readonly paths: readonly string[];
+      readonly expectedStateToken: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<GitServiceResult> {
+    return this.#serialized(input.checkoutId, async () => {
+      const current = await this.#ready(input.checkoutRoot, signal);
+      if (!current) return { status: "unavailable" };
+      if (current.stateToken !== input.expectedStateToken)
+        return { status: "rejected", reason: "stale-state" };
+      const changed = new Set(current.changedPaths);
+      if (input.paths.some((path) => !changed.has(path)))
+        return { status: "rejected", reason: "unlisted-path" };
+      const untracked = new Set(
+        current.statusEntries
+          .filter((entry) => entry.index === "?" || entry.worktree === "?")
+          .map((entry) => entry.path),
+      );
+      if (input.paths.some((path) => untracked.has(path)))
+        return { status: "rejected", reason: "untracked-path" };
+      return this.#mutation.discard(
         { checkoutRoot: current.checkoutRoot, paths: input.paths },
         signal,
       );

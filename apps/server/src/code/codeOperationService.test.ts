@@ -131,7 +131,13 @@ describe("CodeOperationService", () => {
       replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
       append: vi.fn(),
     };
-    const git = { observe: vi.fn(), stage: vi.fn(), commit: vi.fn(), push: vi.fn() };
+    const git = {
+      observe: vi.fn(),
+      stage: vi.fn(),
+      discard: vi.fn(),
+      commit: vi.fn(),
+      push: vi.fn(),
+    };
     const approvals = { validate: vi.fn(async () => approved) };
     const service = new CodeOperationService({
       authority,
@@ -779,6 +785,88 @@ describe("CodeOperationService", () => {
     expect(turns.start).toHaveBeenCalledOnce();
     // Recovery must not append a second operation-result for the same receipt.
     expect(events.append).not.toHaveBeenCalled();
+  });
+
+  it("never discards uncommitted work on an auto-accepting thread without an approval", async () => {
+    const discard = vi.fn(async () => ({ status: "applied" as const }));
+    let approved = false;
+    const activeThread = decodeCodeThread({
+      ...thread(),
+      executionPolicy: "auto-accept-edits",
+    });
+    const service = new CodeOperationService({
+      authority: {
+        readThread: vi.fn(() => activeThread),
+        readCheckout: vi.fn(() =>
+          decodeCodeCheckoutIdentity({
+            id: ids.checkout,
+            repositoryId: activeThread.repositoryId,
+            kind: "existing-worktree",
+            availability: "available",
+            head: { kind: "branch", name: "development", oid: "a".repeat(40) },
+            observedAt: "2026-07-21T10:00:00.000Z",
+          }),
+        ),
+        canAccessProject: vi.fn(async () => true),
+        approvalContextDigest: vi.fn(async () => "a".repeat(64)),
+        resolveCheckoutRoot: vi.fn(async () => ({
+          checkoutRoot: "/tmp/repo",
+          credentialReferences: [],
+        })),
+      } as never,
+      approvals: { validate: vi.fn(async () => approved) },
+      terminals: {
+        launch: vi.fn(),
+        attach: vi.fn(),
+        write: vi.fn(),
+        resize: vi.fn(),
+        terminate: vi.fn(),
+      } as never,
+      repositoryTests: { run: vi.fn(), cancel: vi.fn() } as never,
+      git: { observe: vi.fn(), stage: vi.fn(), discard, commit: vi.fn(), push: vi.fn() } as never,
+      pullRequests: {
+        createPullRequest: vi.fn(),
+        observePullRequest: vi.fn(),
+        mergePullRequest: vi.fn(),
+      } as never,
+      reviewFindings: { createFinding: vi.fn(), updateFinding: vi.fn() } as never,
+      turns: { start: vi.fn(), answerInput: vi.fn(), answerApproval: vi.fn(), cancel: vi.fn() },
+      evidence: { put: vi.fn(), read: vi.fn(async () => "prompt") } as never,
+      events: {
+        replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
+        append: vi.fn(),
+      } as never,
+    });
+    const command = {
+      kind: "discard-git-changes",
+      operationId: ids.operation,
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      gitOperationId: decodeCodeOperationId("53535353-5353-4535-8535-535353535353"),
+      paths: ["src/file.ts"],
+      expectedStateToken: "f".repeat(64),
+    } as const;
+
+    // The posture waives project file writes. Destroying uncommitted work is
+    // not one, so the host waits for a receipt rather than proceeding.
+    await expect(service.execute(ids.window, command)).resolves.toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "waiting" },
+    });
+    expect(discard).not.toHaveBeenCalled();
+
+    approved = true;
+    await expect(service.execute(ids.window, command)).resolves.toMatchObject({
+      kind: "git-mutation-state",
+      mutation: "discard",
+      state: "completed",
+    });
+    expect(discard).toHaveBeenCalledWith({
+      checkoutId: ids.checkout,
+      checkoutRoot: "/tmp/repo",
+      paths: ["src/file.ts"],
+      expectedStateToken: "f".repeat(64),
+    });
   });
 
   it("runs only a definition the server discovered for the checkout", async () => {

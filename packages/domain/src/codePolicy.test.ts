@@ -55,6 +55,7 @@ describe("Code authority policy", () => {
         "terminal",
         "test",
         "stage",
+        "discard",
         "commit",
         "push",
         "create-pr",
@@ -119,7 +120,7 @@ describe("Code authority policy", () => {
       externalContentIngested: true,
       ingestedSources: ["readme-md"],
     } as const;
-    for (const operation of ["push", "create-pr", "merge-pr"] as const) {
+    for (const operation of ["discard", "push", "create-pr", "merge-pr"] as const) {
       const result = authorizeCodeOperation({
         actor: "local-user",
         posture: "full-access",
@@ -157,6 +158,32 @@ describe("Code authority policy", () => {
         },
       }).decision,
     ).toBe("allow");
+  });
+
+  it("prompts before discarding uncommitted work even when the user asked for it", () => {
+    // A plain editor save is the user's own action and needs no prompt. Throwing
+    // away uncommitted work is the user's action too, but nothing can undo it,
+    // so it is asked about in every posture that asks about anything.
+    for (const posture of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(
+        authorizeCodeOperation({
+          actor: "local-user",
+          posture,
+          operation: "edit",
+          initiator: "user",
+        }).decision,
+      ).toBe("allow");
+      expect(
+        authorizeCodeOperation({
+          actor: "local-user",
+          posture,
+          operation: "discard",
+          initiator: "user",
+        }).decision,
+      ).toBe("prompt");
+    }
+    expect(decision("local-user", "plan", "discard")).toBe("deny");
+    expect(decision("remote-client", "full-access", "discard")).toBe("host-thread-clamped");
   });
 
   it("requires local confirmation for managed roots and denies every PR mutation", () => {

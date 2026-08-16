@@ -136,6 +136,115 @@ describe("CodeDiffPane", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("valid UTF-8");
     expect(fixture.loadRuntime).not.toHaveBeenCalled();
   });
+
+  it("discards a tracked file only after confirmation and an approval receipt", async () => {
+    const user = userEvent.setup();
+    const code = client();
+    const executeOperation = vi.fn(async () => ({
+      kind: "git-mutation-state" as const,
+      state: "completed" as const,
+    }));
+    const requestApproval = vi.fn(async () => "40000000-0000-4000-8000-000000000009" as never);
+    render(
+      <CodeDiffPane
+        client={{ ...code, executeOperation } as never}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        diff={available()}
+        executionPolicy="approval-gated"
+        loadRuntime={runtime().loadRuntime}
+        requestApproval={requestApproval}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+    // Nothing happens on the first click: the change is gone for good, so the
+    // pane asks before it asks the host.
+    expect(executeOperation).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Discard permanently" }));
+
+    const command = {
+      kind: "discard-git-changes",
+      operationId: ids.operation,
+      gitOperationId: ids.git,
+      paths: ["src/index.ts"],
+      expectedStateToken: "b".repeat(64),
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+    };
+    expect(requestApproval).toHaveBeenCalledWith(command);
+    expect(executeOperation).toHaveBeenCalledWith(command);
+    expect(await screen.findByText("Discarded uncommitted changes to src/index.ts.")).toBeVisible();
+  });
+
+  it("keeps the file when the approval is refused", async () => {
+    const user = userEvent.setup();
+    const executeOperation = vi.fn();
+    render(
+      <CodeDiffPane
+        client={{ ...client(), executeOperation } as never}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        diff={available()}
+        executionPolicy="approval-gated"
+        loadRuntime={runtime().loadRuntime}
+        requestApproval={vi.fn(async () => undefined)}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Discard changes" }));
+    await user.click(screen.getByRole("button", { name: "Discard permanently" }));
+
+    expect(executeOperation).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText("src/index.ts was not discarded. The change is untouched."),
+    ).toBeVisible();
+  });
+
+  it("offers no discard for Plan mode, for an untracked file, or without a way to approve", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <CodeDiffPane
+        client={client()}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        diff={available()}
+        executionPolicy="plan"
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    expect(await screen.findByRole("heading", { name: "src/index.ts" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
+
+    // Approval-gated with no approval path: the control would only fail later.
+    rerender(
+      <CodeDiffPane
+        client={client()}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        diff={available()}
+        executionPolicy="approval-gated"
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    expect(await screen.findByRole("heading", { name: "src/index.ts" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
+
+    // Full access can discard, but an untracked file has nothing to restore.
+    rerender(
+      <CodeDiffPane
+        client={client()}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        diff={available()}
+        executionPolicy="full-access"
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Discard changes" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "README.mdadded+1−0" }));
+    expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
+  });
 });
 
 const ids = {
@@ -159,8 +268,11 @@ function available(
       gitOperationId: ids.git,
       head: { kind: "branch", name: "feature/editor", oid: "a".repeat(40) },
       stateToken: "b".repeat(64),
-      status: [],
-      changedPaths: ["src/index.ts"],
+      status: [
+        { path: "src/index.ts", index: " ", worktree: "M" },
+        { path: "README.md", index: "?", worktree: "?" },
+      ],
+      changedPaths: ["src/index.ts", "README.md"],
       diff: {
         contentId: ids.content,
         digest: "c".repeat(64),
