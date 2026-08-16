@@ -5243,6 +5243,50 @@ dialog.project-dialog {
   gap: 8px;
 }
 
+/* Attached images, in the composer and on the message that carried them. */
+.code-thread-workspace__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.code-thread-workspace__attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 3px 6px 3px 3px;
+  border: 1px solid var(--octant-border, rgb(0 0 0 / 12%));
+  border-radius: 8px;
+}
+
+.code-thread-workspace__attachment-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 5px;
+  object-fit: cover;
+  background: var(--octant-surface-muted, rgb(0 0 0 / 6%));
+}
+
+.code-thread-workspace__attachment-name {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.code-thread-workspace__attachment-remove {
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
 /*
  * Long-thread virtualization without a windowing library: the engine skips
  * layout and paint for rows scrolled out of view, and the reserved intrinsic

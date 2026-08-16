@@ -27,6 +27,14 @@ Code threads run in one of four server-enforced authority modes:
 
 Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The access control sits in the thread composer and applies from the next turn; raising a thread to Full access still needs the native confirmation.
 
+## Attaching images
+
+Paste or drop a PNG, JPEG, WebP, or GIF into the thread composer to send it with your next message. Each image uploads to the host as you attach it, and the turn sends only the identifier the host answered with, so the provider receives bytes the host itself accepted.
+
+A turn carries at most eight images, each up to 10 MB, alongside a written message. Repository files do not need attaching — name them with `@path` instead. If the thread's provider and model cannot read images, the turn fails and says so rather than sending your message with the pictures quietly dropped.
+
+Images stay readable in the transcript after a restart. Removing a chip before sending discards the image on the host too.
+
 ## Thread environment
 
 Each Code thread tab owns its Environment panel, which reflects the authoritative thread environment. The panel can be:

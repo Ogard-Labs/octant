@@ -20,6 +20,8 @@ import {
   type CodeOperationEvent,
   type CodeOperationId,
   type CodeThreadFollowUpView,
+  type CodeAttachmentId,
+  type CodeAttachmentReference,
   type MentionableThreadId,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -92,6 +94,8 @@ export interface CodeConversationMessage {
   readonly providerInstanceId?: CodeThread["providerInstanceId"];
   readonly modelId?: CodeThread["modelId"];
   readonly status?: "waiting" | "completed" | "interrupted" | "failed" | "incomplete";
+  /** Images this message carried, as the turn's start event recorded them. */
+  readonly attachments?: ReadonlyArray<CodeAttachmentReference>;
 }
 
 export interface CodeThreadNavigationItem {
@@ -323,6 +327,9 @@ export function useCodeController(options: CodeControllerOptions) {
           providerInstanceId: turn.providerInstanceId,
           modelId: turn.modelId,
           status: turn.status,
+          ...(turn.attachments === undefined || turn.attachments.length === 0
+            ? {}
+            : { attachments: turn.attachments }),
         });
         const parts: string[] = [];
         for (const reference of turn.assistant) {
@@ -799,6 +806,12 @@ export function useCodeController(options: CodeControllerOptions) {
        * the journal records as the message.
        */
       readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
+      /**
+       * Images this turn carries. Ids only: the host holds the bytes it
+       * accepted and reads them itself, so the renderer never re-sends an
+       * image and never decides what an id stands for.
+       */
+      readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
       readonly signal?: AbortSignal;
     }) => {
       const reference = await client.putEvidence(input.threadId, input.prompt);
@@ -817,6 +830,9 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
           ? {}
           : { threadMentionIds: [...input.threadMentionIds] }),
+        ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
+          ? {}
+          : { attachmentIds: [...input.attachmentIds] }),
       });
       return { operationId, started } as const;
     },
@@ -941,6 +957,8 @@ export function useCodeController(options: CodeControllerOptions) {
        * message.
        */
       threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
+      /** Images the host already staged for this thread. */
+      attachments: ReadonlyArray<CodeAttachmentReference> = [],
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -956,6 +974,7 @@ export function useCodeController(options: CodeControllerOptions) {
         text: trimmed,
         providerInstanceId: view.thread.providerInstanceId,
         modelId: view.thread.modelId,
+        ...(attachments.length === 0 ? {} : { attachments }),
       };
 
       turnAbort.current?.abort();
@@ -969,6 +988,7 @@ export function useCodeController(options: CodeControllerOptions) {
           checkoutId: view.checkout.id,
           prompt: trimmed,
           threadMentionIds,
+          attachmentIds: attachments.map((attachment) => attachment.attachmentId),
           signal: controller.signal,
         });
         if (controller.signal.aborted) return false;
@@ -1142,6 +1162,7 @@ export function useCodeController(options: CodeControllerOptions) {
     (
       prompt: string,
       threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
+      attachments: ReadonlyArray<CodeAttachmentReference> = [],
     ): QueuedCodeTurn | undefined => {
       const trimmed = prompt.trim();
       const threadId = activeThreadId.current;
@@ -1150,6 +1171,7 @@ export function useCodeController(options: CodeControllerOptions) {
         id: globalThis.crypto.randomUUID(),
         prompt: trimmed,
         threadMentionIds,
+        attachments,
       };
       setTurnQueues((current) => enqueueCodeTurn(current, String(threadId), turn));
       return turn;
@@ -1182,7 +1204,7 @@ export function useCodeController(options: CodeControllerOptions) {
     draining.current = true;
     void (async () => {
       try {
-        const sent = await sendFollowUp(next.prompt, next.threadMentionIds);
+        const sent = await sendFollowUp(next.prompt, next.threadMentionIds, next.attachments);
         if (!mounted.current || !sent) return;
         setTurnQueues((current) => removeQueuedCodeTurn(current, String(threadId), next.id));
       } finally {

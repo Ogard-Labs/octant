@@ -52,6 +52,7 @@ import {
   type CodeOperationServiceOptions,
   type CodeOperationTurnPort,
 } from "./codeOperationService";
+import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import { RepositoryTestRunner } from "./repositoryTestRunner";
 import { RepositoryTestDiscoveryService } from "./repositoryTestDiscoveryService";
@@ -100,6 +101,8 @@ export interface CodeOperationRuntimeOptions {
   ) => Promise<GhDeliveryTarget | undefined>;
   readonly reviewFiles: ReviewFindingFilePort;
   readonly evidence: CodeOperationEvidencePort;
+  /** The images Code threads have staged for their next turn. */
+  readonly attachments?: CodeAttachmentStore;
   readonly approvalValidator?: CodeApprovalValidationPort;
   readonly approvalStore?: CodeOperationApprovalStore;
   readonly sessionAuthority?: CodeSessionAuthorityStore;
@@ -125,6 +128,12 @@ export interface CodeOperationRuntimeOptions {
     "stage" | "discard" | "commit" | "push" | "revertCommit"
   >;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
+  /**
+   * Whether the thread's provider can take an image. A host that cannot say so
+   * answers false: a turn that attached images then fails in words rather than
+   * reaching the provider with the pictures silently dropped.
+   */
+  readonly supportsAttachments?: (thread: CodeThread) => boolean;
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
   /** Optional Project-fixed, read-only GitHub tools composed per active turn. */
   readonly githubReadTools?: (input: {
@@ -309,6 +318,10 @@ export function createCodeOperationRuntime(
     },
     turns,
     evidence: options.evidence,
+    ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
+    ...(options.supportsAttachments === undefined
+      ? {}
+      : { supportsAttachments: options.supportsAttachments }),
     events,
     ...(options.resolveThreadMentionContext === undefined
       ? {}
@@ -774,7 +787,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       cursor: 0,
       state: "running",
     };
-    active.launch = () => this.#launch(active, input.prompt, input.context);
+    active.launch = () => this.#launch(active, input.prompt, input.context, input.attachments);
     this.#active.set(key, active);
     return turnState("running");
   }
@@ -873,6 +886,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     active: ActiveTurn,
     prompt: string,
     context: Parameters<CodeOperationTurnPort["start"]>[0]["context"],
+    attachments: Parameters<CodeOperationTurnPort["start"]>[0]["attachments"],
   ): void {
     const replay = this.#events.replay({
       threadId: active.thread.id,
@@ -893,6 +907,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           checkoutRoot: active.checkoutRoot,
           prompt,
           ...(context === undefined ? {} : { context }),
+          ...(attachments === undefined ? {} : { attachments }),
           signal: active.abort.signal,
           provider: {
             acquire: (acquireInput) => {

@@ -3,6 +3,9 @@ import {
   ActorId,
   AggregateId,
   CorrelationId,
+  type CodeAttachmentId,
+  type CodeAttachmentMediaType,
+  type CodeAttachmentReference,
   EventId,
   UtcTimestamp,
   decodeCodeCommand,
@@ -67,6 +70,11 @@ import {
   CodeContentStoreError,
   type CodeContentReference,
 } from "./codeContentStore";
+import {
+  CodeAttachmentInvalid,
+  CodeAttachmentStore,
+  CodeAttachmentTooLarge,
+} from "./codeAttachmentStore";
 import type { CodeFileService, CodeFileOpenResult, CodeFileSaveResult } from "./codeFileService";
 import type { FileIdentity } from "./fileOperationPort";
 import {
@@ -327,6 +335,12 @@ export interface CodeServiceOptions {
       metadata?: { readonly truncated?: boolean },
     ) => CodeEvidenceReference;
   };
+  /**
+   * Where a thread's attached images live. Optional: a host that wired no
+   * attachment store answers `unavailable` rather than pretending an upload
+   * succeeded.
+   */
+  readonly attachments?: CodeAttachmentStore;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly approvals?: CodeApprovalValidationPort;
@@ -419,6 +433,7 @@ export class CodeService {
   readonly #tests: CodeRepositoryTestDiscoveryPort | undefined;
   readonly #content: CodeContentStore;
   readonly #evidence: CodeServiceOptions["evidence"];
+  readonly #attachments: CodeServiceOptions["attachments"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #approvals: CodeApprovalValidationPort | undefined;
@@ -454,6 +469,7 @@ export class CodeService {
     this.#tests = options.tests;
     this.#content = options.content;
     this.#evidence = options.evidence;
+    this.#attachments = options.attachments;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#approvals = options.approvals;
@@ -1291,6 +1307,88 @@ export class CodeService {
         "Code evidence could not be staged.",
       );
     }
+  }
+
+  /**
+   * Accept one image for a thread's next turn.
+   *
+   * Authority is the thread's own: whoever may send this thread a turn may
+   * attach a picture to it. Nothing the renderer claims about the bytes is
+   * kept — the store re-derives the name, size, and digest the journal will
+   * later record from what it actually wrote.
+   */
+  async stageAttachment(
+    authenticatedWindowId: WindowId,
+    input: {
+      readonly threadId: CodeThreadId;
+      readonly attachmentId: CodeAttachmentId;
+      readonly displayName: string;
+      readonly mediaType: CodeAttachmentMediaType;
+      readonly bytes: Uint8Array;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<CodeAttachmentReference> {
+    const attachments = await this.#authorizeAttachment(authenticatedWindowId, input.threadId);
+    try {
+      return await attachments.stage(input);
+    } catch (error) {
+      throw this.#failure(
+        error instanceof CodeAttachmentTooLarge || error instanceof CodeAttachmentInvalid
+          ? "invalid"
+          : "failed",
+        error instanceof CodeAttachmentTooLarge || error instanceof CodeAttachmentInvalid
+          ? error.message
+          : "Code attachment could not be staged.",
+      );
+    }
+  }
+
+  /**
+   * Read one attached image back, verified against the size and digest the
+   * journal recorded for it rather than trusted for being on disk.
+   */
+  async readAttachment(
+    authenticatedWindowId: WindowId,
+    threadId: CodeThreadId,
+    input: {
+      readonly attachmentId: CodeAttachmentId;
+      readonly byteLength: number;
+      readonly digest: string;
+    },
+  ): Promise<Uint8Array> {
+    const attachments = await this.#authorizeAttachment(authenticatedWindowId, threadId);
+    try {
+      return await attachments.read(threadId, input);
+    } catch {
+      throw this.#failure("unavailable", "Code attachment is unavailable.");
+    }
+  }
+
+  async discardAttachment(
+    authenticatedWindowId: WindowId,
+    threadId: CodeThreadId,
+    attachmentId: CodeAttachmentId,
+  ): Promise<void> {
+    const attachments = await this.#authorizeAttachment(authenticatedWindowId, threadId);
+    try {
+      await attachments.discard(threadId, attachmentId);
+    } catch {
+      throw this.#failure("failed", "Code attachment could not be discarded.");
+    }
+  }
+
+  async #authorizeAttachment(
+    authenticatedWindowId: WindowId,
+    threadId: CodeThreadId,
+  ): Promise<CodeAttachmentStore> {
+    const thread = this.#persistence.readCodeThread(threadId);
+    if (thread === undefined) throw this.#failure("invalid", "Code thread was not found.");
+    await this.#authorizeThread(authenticatedWindowId, thread);
+    const attachments = this.#attachments;
+    if (attachments === undefined) {
+      throw this.#failure("unavailable", "Code attachments are unavailable.");
+    }
+    return attachments;
   }
 
   /**

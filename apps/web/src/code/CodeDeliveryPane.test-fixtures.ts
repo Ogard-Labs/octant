@@ -41,6 +41,9 @@ export function codeClient(options: { readonly evidence?: string } = {}): CodeCl
     operationContent: vi.fn(async () =>
       new TextEncoder().encode(options.evidence ?? "authoritative evidence"),
     ),
+    putAttachment: vi.fn(),
+    discardAttachment: vi.fn(),
+    attachment: vi.fn(),
     putEvidence: vi.fn(async () => ({
       contentId: ids.content as never,
       digest: "a".repeat(64),
