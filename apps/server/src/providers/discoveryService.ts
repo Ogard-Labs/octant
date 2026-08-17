@@ -14,7 +14,12 @@ const MAX_PROBE_TIMEOUT_MS = 5_000;
 const MAX_PROBE_OUTPUT_BYTES = 4_096;
 const MAX_CANDIDATES_PER_DRIVER = 4;
 const MAX_TOTAL_CANDIDATES = 64;
-const APPROVED_HOME_BIN_DIRECTORIES = [".local/bin", ".bun/bin", ".kimi-code/bin"] as const;
+const APPROVED_HOME_BIN_DIRECTORIES = [
+  ".local/bin",
+  ".bun/bin",
+  ".kimi-code/bin",
+  ".grok/bin",
+] as const;
 const PROBE_ENVIRONMENT_KEYS = [
   "HOME",
   "PATH",

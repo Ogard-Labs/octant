@@ -137,7 +137,11 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     executableNames: ["grok"],
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
-    onboardingGuidance: "Run grok login in your terminal, then check the connection again.",
+    // Octant runs Grok with `GROK_HOME` pointed at the instance's managed home
+    // and bridges no host credential, so a terminal `grok login` authenticates
+    // `~/.grok` and leaves this instance exactly as unauthenticated as before.
+    onboardingGuidance:
+      "Sign in to Grok Build from Provider Settings, then check the connection again.",
     isDirectEndpoint: false,
   },
   {
