@@ -55,6 +55,8 @@ export interface ChatThreadNavigationItem {
   readonly threadId: string;
   readonly title: string;
   readonly unread?: boolean;
+  /** Whether the user pinned this thread to the top of the sidebar. */
+  readonly pinned?: boolean;
   readonly updatedAt?: string;
 }
 

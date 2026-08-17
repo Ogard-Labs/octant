@@ -1,5 +1,6 @@
 import { decodeWindowId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { CodeServiceError } from "./code/codeService";
 import { createCodeRouteHandler, type CodeRouteService } from "./codeRoutes";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -15,6 +16,18 @@ const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 const threadId = "00000000-0000-4000-8000-000000000902";
 const checkoutId = "00000000-0000-4000-8000-000000000903";
 const listingUrl = `http://127.0.0.1/api/code/files/listing?threadId=${threadId}&checkoutId=${checkoutId}`;
+const watchUrl = `http://127.0.0.1/api/code/files/watch?threadId=${threadId}&checkoutId=${checkoutId}`;
+
+function notice(paths: ReadonlyArray<string>, truncated = false) {
+  return {
+    kind: "code-file-change",
+    threadId,
+    checkoutId,
+    paths,
+    truncated,
+    observedAt: "2026-08-14T08:00:01.000Z",
+  };
+}
 
 function listedResult() {
   return {
@@ -104,5 +117,137 @@ describe("Code file listing route", () => {
     const response = await handler(get());
     expect(response?.status).toBe(503);
     expect(await response?.json()).toMatchObject({ category: "unavailable" });
+  });
+});
+
+describe("Code file search route", () => {
+  const searchUrl = `http://127.0.0.1/api/code/files/search?threadId=${threadId}&checkoutId=${checkoutId}&scope=path&query=main`;
+
+  function searchedResult() {
+    return {
+      status: "searched",
+      search: {
+        kind: "code-search",
+        threadId,
+        checkoutId,
+        scope: "path",
+        query: "main",
+        matches: [],
+        truncated: false,
+        observedAt: "2026-08-14T08:00:00.000Z",
+      },
+    };
+  }
+
+  it("returns the host's typed search", async () => {
+    const searchFiles = vi.fn().mockResolvedValue(searchedResult());
+    const { handler } = createRoute({ searchFiles });
+    const response = await handler(get(searchUrl));
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual(searchedResult());
+    expect(searchFiles.mock.calls[0]?.[1]).toMatchObject({ scope: "path", query: "main" });
+  });
+
+  it("refuses a scope the contract does not name", async () => {
+    const searchFiles = vi.fn();
+    const { handler } = createRoute({ searchFiles });
+    const url = searchUrl.replace("scope=path", "scope=regex");
+    expect((await handler(get(url)))?.status).toBe(400);
+    expect(searchFiles).not.toHaveBeenCalled();
+  });
+
+  it("refuses a query longer than the contract allows", async () => {
+    const searchFiles = vi.fn();
+    const { handler } = createRoute({ searchFiles });
+    const url = `${searchUrl.replace("query=main", "")}query=${"x".repeat(201)}`;
+    expect((await handler(get(url)))?.status).toBe(400);
+    expect(searchFiles).not.toHaveBeenCalled();
+  });
+
+  it("answers unavailable when the host wired no searcher", async () => {
+    const { handler } = createRoute({ searchFiles: undefined });
+    const response = await handler(get(searchUrl));
+    expect(response?.status).toBe(503);
+    expect(await response?.json()).toMatchObject({ category: "unavailable" });
+  });
+
+  it("refuses an unauthenticated search", async () => {
+    const searchFiles = vi.fn();
+    const { handler } = createRoute({ searchFiles });
+    const response = await handler(new Request(searchUrl, { method: "GET" }));
+    expect(response?.status).toBe(401);
+    expect(searchFiles).not.toHaveBeenCalled();
+  });
+});
+
+describe("Code file watch route", () => {
+  it("streams the host's change notices as NDJSON", async () => {
+    const { handler } = createRoute({
+      watchFiles: () =>
+        (async function* () {
+          yield notice(["src/main.ts"]);
+          yield notice([], true);
+        })(),
+    });
+    const response = await handler(get(watchUrl));
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("content-type")).toBe("application/x-ndjson");
+    const lines = (await response!.text()).trim().split("\n");
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      notice(["src/main.ts"]),
+      notice([], true),
+    ]);
+  });
+
+  it("answers a refused watch with its status instead of a stream that closes", async () => {
+    const { handler } = createRoute({
+      watchFiles: () =>
+        Promise.reject(
+          new CodeServiceError({
+            category: "unauthorized",
+            message: "Code file watching is unauthorized.",
+          }),
+        ),
+    });
+    const response = await handler(get(watchUrl));
+
+    // A 200 whose body ends immediately is indistinguishable from a dropped
+    // watch, so the client would retry forever instead of showing the refusal.
+    expect(response?.status).toBe(401);
+    expect(await response?.json()).toMatchObject({ category: "unauthorized" });
+  });
+
+  it("answers unavailable when the host wired no watcher", async () => {
+    const { handler } = createRoute({ watchFiles: undefined });
+    const response = await handler(get(watchUrl));
+    expect(response?.status).toBe(503);
+    expect(await response?.json()).toMatchObject({ category: "unavailable" });
+  });
+
+  it("rejects an unknown query parameter and a mutating method", async () => {
+    const watchFiles = vi.fn();
+    const { handler } = createRoute({ watchFiles });
+    expect((await handler(get(`${watchUrl}&directory=src`)))?.status).toBe(400);
+    expect(
+      (
+        await handler(
+          new Request(watchUrl, {
+            method: "PUT",
+            headers: { "x-octant-window-capability": capability },
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(watchFiles).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unauthenticated watch", async () => {
+    const watchFiles = vi.fn();
+    const { handler } = createRoute({ watchFiles });
+    const response = await handler(new Request(watchUrl, { method: "GET" }));
+    expect(response?.status).toBe(401);
+    expect(watchFiles).not.toHaveBeenCalled();
   });
 });

@@ -179,6 +179,7 @@ function usageEvent(
   context: ClaudeEventContext,
   value: ClaudeUsage,
   providerExecutionDurationMs?: number,
+  costUsd?: number,
 ): ClaudeMappedMessage {
   return event(context, {
     kind: "usage",
@@ -187,6 +188,7 @@ function usageEvent(
     cacheReadInputTokens: value.cacheReadInputTokens,
     cacheWriteInputTokens: value.cacheCreationInputTokens,
     ...(providerExecutionDurationMs === undefined ? {} : { providerExecutionDurationMs }),
+    ...(costUsd === undefined || !Number.isFinite(costUsd) || costUsd < 0 ? {} : { costUsd }),
   });
 }
 
@@ -668,6 +670,47 @@ function mapTask(
   ];
 }
 
+/**
+ * Claude's own window facts, normalized. A message that names no window is
+ * dropped rather than reported under an invented name: only the provider
+ * decides what a window covers.
+ */
+function rateLimitWindowEvent(
+  context: ClaudeEventContext,
+  message: Extract<ClaudeDecodedMessage, { readonly kind: "rate-limit" }>,
+): ClaudeMappedMessage | undefined {
+  const window = normalized(message.rateLimitType ?? "", LABEL_MAX_CHARACTERS);
+  if (window === undefined || window.length === 0) return undefined;
+  const utilization = message.utilization;
+  const resetsAt = resetTimestamp(message.resetsAt);
+  return event(context, {
+    kind: "rate-limit-window",
+    window,
+    status:
+      message.status === "rejected"
+        ? "exhausted"
+        : message.status === "allowed_warning"
+          ? "warning"
+          : "allowed",
+    ...(utilization === undefined || !Number.isFinite(utilization) || utilization < 0
+      ? {}
+      : { utilization: Math.min(utilization, 1) }),
+    ...(resetsAt === undefined ? {} : { resetsAt }),
+  });
+}
+
+/** Claude reports a reset instant in seconds or milliseconds; both are accepted. */
+function resetTimestamp(
+  resetsAt: number | undefined,
+): ProviderRuntimeEvent["occurredAt"] | undefined {
+  if (resetsAt === undefined || !Number.isFinite(resetsAt) || resetsAt <= 0) return undefined;
+  const absolute = resetsAt < 10_000_000_000 ? resetsAt * 1_000 : resetsAt;
+  const at = new Date(absolute);
+  return Number.isNaN(at.getTime())
+    ? undefined
+    : (at.toISOString() as ProviderRuntimeEvent["occurredAt"]);
+}
+
 function retryAfterMs(
   context: ClaudeEventContext,
   resetsAt: number | undefined,
@@ -692,7 +735,9 @@ function mapResult(
   if (!usageIsSafe(message.usage)) {
     return [failure("Claude returned invalid usage metadata.")];
   }
-  const results: ClaudeMappedMessage[] = [usageEvent(context, message.usage, message.durationMs)];
+  const results: ClaudeMappedMessage[] = [
+    usageEvent(context, message.usage, message.durationMs, message.totalCostUsd),
+  ];
   if (message.outcome === "success") {
     results.push(
       terminal(context, {
@@ -810,9 +855,15 @@ export function mapClaudeMessage(
     case "task":
       return mapTask(context, message);
     case "rate-limit": {
-      if (message.status !== "rejected") return [{ kind: "ignored" }];
+      // Every rate-limit message says how much of a window is spent, not only
+      // the ones that reject a turn. Passing the window through is what lets a
+      // thread warn before the limit lands instead of after.
+      const results: ClaudeMappedMessage[] = [];
+      const window = rateLimitWindowEvent(context, message);
+      if (window !== undefined) results.push(window);
+      if (message.status !== "rejected") return withoutIgnored(results);
       const retry = retryAfterMs(context, message.resetsAt);
-      return [
+      results.push(
         terminal(context, {
           kind: "failed",
           failure: {
@@ -821,7 +872,8 @@ export function mapClaudeMessage(
             ...(retry === undefined ? {} : { retryAfterMs: retry }),
           },
         }),
-      ];
+      );
+      return results;
     }
     case "authentication":
       return message.failed

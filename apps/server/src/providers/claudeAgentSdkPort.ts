@@ -217,6 +217,8 @@ export type ClaudeDecodedMessage =
       readonly terminalReason?: string;
       readonly durationMs?: number;
       readonly usage: ClaudeUsage;
+      /** What Claude says this turn cost, in US dollars. */
+      readonly totalCostUsd?: number;
       readonly permissionDenials: readonly {
         readonly toolName: string;
         readonly toolUseId: string;

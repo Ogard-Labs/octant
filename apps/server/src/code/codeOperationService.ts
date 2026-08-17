@@ -4,6 +4,7 @@ import {
   type CodeApprovalEffect,
   type CodeAttachmentId,
   type CodeAttachmentReference,
+  type CodeCheckpoint,
   type CodeCheckoutIdentity,
   type CodeEvidenceReference,
   type CodeOperationEvent,
@@ -16,13 +17,18 @@ import {
   type CodeRepositoryTestRun,
   type CodeReviewFinding,
   type CodeThread,
+  type CodeThreadForkOrigin,
   type CodeThreadId,
   type MentionableThreadId,
   type ProviderAttachmentInput,
   type ProviderContextBlock,
   type WindowId,
 } from "@octant/contracts";
-import { authorizeCodeOperation, type CodeOperation } from "@octant/domain/code-policy";
+import {
+  authorizeCodeOperation,
+  mayWriteToRepository,
+  type CodeOperation,
+} from "@octant/domain/code-policy";
 import { THREAD_MENTION_UNREADABLE_CONTEXT } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
@@ -250,6 +256,12 @@ export interface CodeOperationGitPort {
     readonly paths: readonly string[];
     readonly expectedStateToken: string;
   }) => Promise<GitMutationOutcome>;
+  readonly unstage: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+    readonly paths: readonly string[];
+    readonly expectedStateToken: string;
+  }) => Promise<GitMutationOutcome>;
   readonly discard: (input: {
     readonly checkoutId: string;
     readonly checkoutRoot: string;
@@ -279,6 +291,34 @@ export interface CodeOperationGitPort {
     readonly expectedStateToken: string;
     readonly authority: "approved" | "full-access";
   }) => Promise<GitMutationOutcome>;
+  /**
+   * Record the checkout's content without changing it. Optional so a host
+   * assembled without checkpoint support simply runs turns that carry none.
+   */
+  readonly checkpoint?: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+  }) => Promise<
+    | { readonly status: "captured"; readonly snapshot: CodeCheckpoint }
+    | { readonly status: "unavailable" }
+  >;
+  /**
+   * Asks the thread's own provider for delivery text. Optional so a host with
+   * no provider for the thread simply reports the draft unavailable.
+   */
+  readonly draft?: (input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly purpose: "commit-message" | "pull-request";
+  }) => Promise<
+    | { readonly status: "drafted"; readonly title: string; readonly body?: string }
+    | { readonly status: "unavailable" | "failed" }
+  >;
+  readonly restoreCheckpoint?: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+    readonly snapshot: CodeCheckpoint;
+  }) => Promise<GitMutationOutcome & { readonly undo?: CodeCheckpoint }>;
 }
 
 type GitMutationOutcome =
@@ -533,6 +573,25 @@ export interface CodeOperationServiceOptions {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
     readonly windowId: WindowId;
   }) => Promise<ReadonlyArray<CodeThreadMentionContext>>;
+  /**
+   * Reads the conversation a forked thread inherits, for its first turn only.
+   *
+   * A fork's own transcript starts empty, so without this its provider would be
+   * answering from nothing while the user believes it continues a conversation.
+   * The host reads the source thread itself and bounds what it hands over; a
+   * source it cannot read contributes nothing rather than a claimed history.
+   */
+  readonly resolveForkHandoff?: (input: {
+    readonly threadId: CodeThreadId;
+    readonly origin: CodeThreadForkOrigin;
+    readonly windowId: WindowId;
+    /**
+     * The turn asking for the handoff. Its own start event is already in the
+     * journal by the time this runs, so the resolver has to know which turn to
+     * discount before it can tell whether any earlier one exists.
+     */
+    readonly operationId: CodeOperationId;
+  }) => Promise<string | undefined>;
 }
 
 export class CodeOperationService {
@@ -649,6 +708,11 @@ export class CodeOperationService {
             );
           } else {
             if (command.kind === "start-provider-turn" && recordedStart === undefined) {
+              const checkpoint = await this.#checkpoint(
+                scope.thread,
+                scope.checkout.id,
+                root.checkoutRoot,
+              );
               this.#options.events.append({
                 threadId: command.threadId,
                 operationId: command.operationId,
@@ -662,6 +726,7 @@ export class CodeOperationService {
                   ...(starting.attachments.length === 0
                     ? {}
                     : { attachments: starting.attachments }),
+                  ...(checkpoint === undefined ? {} : { checkpoint }),
                 },
               });
               resultCursor += 1;
@@ -1151,6 +1216,20 @@ export class CodeOperationService {
             expectedStateToken: command.expectedStateToken,
           }),
         );
+      case "unstage-git":
+        return this.#gitMutation(
+          command.operationId,
+          command.gitOperationId,
+          "unstage",
+          await this.#options.git.unstage({
+            checkoutId: checkout.id,
+            checkoutRoot: root.checkoutRoot,
+            paths: command.paths,
+            expectedStateToken: command.expectedStateToken,
+          }),
+        );
+      case "draft-git-text":
+        return this.#gitDraft(command, thread, root.checkoutRoot);
       case "discard-git-changes":
         return this.#gitMutation(
           command.operationId,
@@ -1193,6 +1272,25 @@ export class CodeOperationService {
             authority: command.authorization.kind === "approved" ? "approved" : "full-access",
           }),
         );
+      case "restore-git-checkpoint": {
+        const restore = this.#options.git.restoreCheckpoint;
+        if (restore === undefined)
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "Restoring a checkpoint is unavailable.",
+          );
+        return this.#gitMutation(
+          command.operationId,
+          command.gitOperationId,
+          "restore-checkpoint",
+          await restore({
+            checkoutId: checkout.id,
+            checkoutRoot: root.checkoutRoot,
+            snapshot: command.checkpoint,
+          }),
+        );
+      }
       case "create-pull-request":
         return this.#pullRequest(command);
       case "observe-pull-request":
@@ -1427,8 +1525,8 @@ export class CodeOperationService {
   #gitMutation(
     operationId: CodeOperationCommand["operationId"],
     gitOperationId: string,
-    mutation: "stage" | "discard" | "commit" | "push",
-    result: GitMutationOutcome,
+    mutation: "stage" | "unstage" | "discard" | "commit" | "push" | "restore-checkpoint",
+    result: GitMutationOutcome & { readonly undo?: CodeCheckpoint },
   ): CodeOperationResult {
     if (result.status === "unavailable")
       return this.#failed(operationId, "unavailable", "Git mutation is unavailable.");
@@ -1444,7 +1542,56 @@ export class CodeOperationService {
             ? "rejected"
             : "failed",
       ...(result.status === "applied" && result.oid !== undefined ? { headOid: result.oid } : {}),
+      // A failed restore may have moved files before it stopped, so its undo
+      // point travels with it too; only a rejection is certainly untouched.
+      ...(result.status !== "rejected" && result.undo !== undefined ? { undo: result.undo } : {}),
     });
+  }
+
+  async #gitDraft(
+    command: Extract<CodeOperationCommand, { readonly kind: "draft-git-text" }>,
+    thread: CodeThread,
+    checkoutRoot: string,
+  ): Promise<CodeOperationResult> {
+    const draft = this.#options.git.draft;
+    const result =
+      draft === undefined
+        ? ({ status: "unavailable" } as const)
+        : await draft({ thread, checkoutRoot, purpose: command.purpose });
+    return decodeCodeOperationResult({
+      kind: "git-draft-state",
+      operationId: command.operationId,
+      purpose: command.purpose,
+      state: result.status === "drafted" ? "completed" : result.status,
+      ...(result.status === "drafted"
+        ? { title: result.title, ...(result.body === undefined ? {} : { body: result.body }) }
+        : {}),
+    });
+  }
+
+  /**
+   * Record the checkout just before a turn runs, so the user can put the files
+   * back at this message. Best effort by design: a checkout that cannot be
+   * read costs the turn its restore point, never the turn itself.
+   *
+   * A Plan turn gets none. Capturing one stages the tree into a scratch index
+   * and writes the resulting trees into the object database, which is a write
+   * to the repository however little it disturbs the working tree — and a Plan
+   * turn changes no file, so the restore point it would buy restores nothing.
+   */
+  async #checkpoint(
+    thread: CodeThread,
+    checkoutId: string,
+    checkoutRoot: string,
+  ): Promise<CodeCheckpoint | undefined> {
+    const capture = this.#options.git.checkpoint;
+    if (capture === undefined || !mayWriteToRepository(thread.executionPolicy)) return undefined;
+    try {
+      const result = await capture({ checkoutId, checkoutRoot });
+      return result.status === "captured" ? result.snapshot : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   async #pullRequest(
@@ -1572,7 +1719,10 @@ export class CodeOperationService {
         "unavailable",
         "Provider prompt evidence is unavailable.",
       );
-    const context = await this.#resolveThreadMentions(command.threadMentionIds, windowId);
+    const context = [
+      ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
+      ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
+    ];
     // A model that cannot read a picture is told so plainly rather than sent
     // the turn with its images quietly removed.
     if (references.length > 0 && this.#options.supportsAttachments?.(thread) !== true) {
@@ -1658,6 +1808,34 @@ export class CodeOperationService {
       });
     }
     return inputs;
+  }
+
+  /**
+   * Resolve the conversation a forked thread carries into its first turn.
+   *
+   * The thread record names its own origin, so the renderer never chooses what
+   * history a turn is given. The resolver decides whether this turn is the
+   * fork's first — a later turn has the fork's own transcript to work from —
+   * and a source it cannot read contributes nothing rather than a claimed
+   * history the model would treat as real.
+   */
+  async #resolveForkHandoff(
+    thread: CodeThread,
+    windowId: WindowId,
+    operationId: CodeOperationId,
+  ): Promise<ReadonlyArray<ProviderContextBlock>> {
+    const origin = thread.forkedFrom;
+    const resolve = this.#options.resolveForkHandoff;
+    if (origin === undefined || resolve === undefined) return [];
+    let text: string | undefined;
+    try {
+      text = await resolve({ threadId: thread.id, origin, windowId, operationId });
+    } catch {
+      return [];
+    }
+    return text === undefined || text.trim().length === 0
+      ? []
+      : [{ kind: "user-message", text } as const];
   }
 
   /**
@@ -1876,8 +2054,16 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
       return "test";
     case "stage-git":
       return "stage";
+    case "unstage-git":
+      return "unstage";
+    // Drafting reads the checkout's own diff and writes a sentence. It
+    // changes nothing, so it is an ordinary read.
+    case "draft-git-text":
+      return "read";
     case "discard-git-changes":
       return "discard";
+    case "restore-git-checkpoint":
+      return "restore-checkpoint";
     case "commit-git":
       return "commit";
     case "push-git":

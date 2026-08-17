@@ -6,6 +6,7 @@ export * from "./appleToolchainPolicy";
 export * from "./chatPolicy";
 export * from "./chatMessageParts";
 export * from "./codePolicy";
+export * from "./keybindings";
 export * from "./codeProjectWorkspacePolicy";
 export * from "./localServerPolicy";
 export * from "./pullRequestMergeabilityPolicy";

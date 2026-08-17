@@ -1,4 +1,9 @@
-import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/contracts";
+import type {
+  CodeCheckoutId,
+  CodeFileChangeNotice,
+  CodeRelativePath,
+  CodeThreadId,
+} from "@octant/contracts";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { FolderTree, RefreshCw } from "lucide-react";
 import { CodeFileExplorer, type CodeFileExplorerEntry } from "./CodeFileExplorer";
@@ -15,6 +20,8 @@ export interface CodeFileExplorerPanelProps {
   readonly client?: CodeFileListingClient;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  /** Called for every host-reported change, so an open editor can reload. */
+  readonly onFilesChanged?: (notice: CodeFileChangeNotice) => void;
 }
 
 /**
@@ -29,6 +36,8 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
   const bound = props.threadId !== undefined && props.checkoutId !== undefined;
   const controller = useCodeFileListingController({
     enabled: bound,
+    watch: true,
+    ...(props.onFilesChanged === undefined ? {} : { onFilesChanged: props.onFilesChanged }),
     ...(props.client === undefined ? {} : { client: props.client }),
     ...(props.threadId === undefined ? {} : { threadId: props.threadId }),
     ...(props.checkoutId === undefined ? {} : { checkoutId: props.checkoutId }),

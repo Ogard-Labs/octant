@@ -134,6 +134,7 @@ describe("CodeOperationService", () => {
     const git = {
       observe: vi.fn(),
       stage: vi.fn(),
+      unstage: vi.fn(),
       discard: vi.fn(),
       commit: vi.fn(),
       push: vi.fn(),
@@ -1152,6 +1153,81 @@ describe("CodeOperationService", () => {
     );
   });
 
+  it("gives a forked thread the conversation it branched from, on the host's own reading", async () => {
+    const resolveForkHandoff = vi.fn(async () => "Forked from: user asked about the loader.");
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({
+        ...thread(),
+        forkedFrom: {
+          threadId: "b0000000-0000-4000-8000-0000000000ff",
+          throughOperationId: "c0000000-0000-4000-8000-0000000000ff",
+        },
+      }),
+      resolveForkHandoff,
+    });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+
+    // The origin comes from the thread record, never from the command, so a
+    // renderer cannot choose what history a turn is given. The asking turn is
+    // named too: its own start is already journalled, so the resolver cannot
+    // tell a first turn from a later one without it.
+    expect(resolveForkHandoff).toHaveBeenCalledWith({
+      threadId: thread().id,
+      origin: {
+        threadId: "b0000000-0000-4000-8000-0000000000ff",
+        throughOperationId: "c0000000-0000-4000-8000-0000000000ff",
+      },
+      windowId: ids.window,
+      operationId: startProviderTurn.operationId,
+    });
+    const started = fixture.turns.start.mock.calls[0]![0];
+    expect((started.context ?? []).map((block) => block.text).join("\n")).toContain(
+      "Forked from: user asked about the loader.",
+    );
+    // The durable message stays exactly what the user typed.
+    expect(started.prompt).toBe("does this still hold?");
+  });
+
+  it("takes no restore point on a Plan turn, which may write nothing", async () => {
+    const checkpoint = vi.fn(async () => ({ status: "failed" as const }));
+    const planning = providerTurnFixture({
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "plan" }),
+      git: { checkpoint } as never,
+    });
+
+    await expect(planning.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+
+    // Capturing one stages the tree into a scratch index and writes trees into
+    // the object database. Plan mode promises the repository is not written to,
+    // and a turn that changes no file has nothing to restore anyway.
+    expect(checkpoint).not.toHaveBeenCalled();
+
+    const editing = providerTurnFixture({ git: { checkpoint } as never });
+    await expect(editing.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(checkpoint).toHaveBeenCalledOnce();
+  });
+
+  it("sends a thread that was never forked without asking for a handoff", async () => {
+    const resolveForkHandoff = vi.fn(async () => "should never be read");
+    const fixture = providerTurnFixture({ resolveForkHandoff });
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+
+    expect(resolveForkHandoff).not.toHaveBeenCalled();
+    expect(fixture.turns.start.mock.calls[0]![0].context).toBeUndefined();
+  });
+
   it("does not carry a Code turn's mention context into the next turn", async () => {
     const fixture = providerTurnFixture({
       resolveThreadMentionContext: async (input) =>
@@ -1236,11 +1312,16 @@ function providerTurnFixture(
   options: Partial<
     Pick<
       CodeOperationServiceOptions,
-      "resolveThreadMentionContext" | "attachments" | "supportsAttachments"
+      | "resolveThreadMentionContext"
+      | "resolveForkHandoff"
+      | "attachments"
+      | "supportsAttachments"
+      | "git"
     >
-  >,
+  > & { readonly thread?: CodeThread },
 ) {
-  const activeThread = thread();
+  const { thread: threadOverride, ...serviceOptions } = options;
+  const activeThread = threadOverride ?? thread();
   const turns = {
     start: vi.fn(
       async (_input: Parameters<CodeOperationServiceOptions["turns"]["start"]>[0]) =>
@@ -1281,7 +1362,7 @@ function providerTurnFixture(
     turns: turns as never,
     evidence: { put: vi.fn(), read: vi.fn(async () => "does this still hold?") } as never,
     events: events as never,
-    ...options,
+    ...serviceOptions,
   });
   return { service, turns, events };
 }

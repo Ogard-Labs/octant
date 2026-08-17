@@ -132,6 +132,26 @@ describe("CommandPalette", () => {
     expect(screen.getByRole("combobox", { name: "Search commands" })).toBeVisible();
   });
 
+  it("answers the user's own chord instead of the default once one is bound", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      "octant.keybindings.v1",
+      JSON.stringify({ "command-palette": "Mod+Alt+J" }),
+    );
+    try {
+      harness(hostCommands());
+
+      // The default is no longer the palette's chord, so it must fall through.
+      await user.keyboard("{Meta>}k{/Meta}");
+      expect(screen.queryByRole("combobox", { name: "Search commands" })).not.toBeInTheDocument();
+
+      await user.keyboard("{Meta>}{Alt>}j{/Alt}{/Meta}");
+      expect(screen.getByRole("combobox", { name: "Search commands" })).toBeVisible();
+    } finally {
+      window.localStorage.removeItem("octant.keybindings.v1");
+    }
+  });
+
   it("runs the row it marks active when grouping reorders the ranked results", async () => {
     const user = userEvent.setup();
     const openChatProject = vi.fn();
