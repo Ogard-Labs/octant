@@ -46,6 +46,11 @@ export interface CodeForkHandoffOptions {
     operationId: CodeOperationId,
     contentId: string,
   ) => Promise<{ readonly bytes: Uint8Array }>;
+  /**
+   * The Project a thread belongs to, as this window is allowed to observe it,
+   * or `undefined` when the window cannot see the thread at all.
+   */
+  readonly projectOf: (windowId: WindowId, threadId: CodeThreadId) => Promise<string | undefined>;
 }
 
 /**
@@ -121,6 +126,12 @@ export async function buildCodeForkHandoff(
  * the earliest is either this turn, and there is no history, or an older one,
  * and there is.
  *
+ * The origin is a renderer-supplied claim, so the source thread is authorized
+ * here rather than trusted: a window with access to two Projects could otherwise
+ * name a thread in one as the origin of a fork in the other and read its
+ * transcript back out through the fork's first turn. The Projects have to match,
+ * and both have to be readable by this window.
+ *
  * The ports are reached lazily because the runtime that holds this resolver is
  * composed before the service behind them exists.
  */
@@ -133,6 +144,14 @@ export function codeForkHandoffResolver(ports: () => CodeForkHandoffOptions | un
   }): Promise<string | undefined> => {
     const options = ports();
     if (options === undefined) return undefined;
+    const destinationProject = await options.projectOf(input.windowId, input.threadId);
+    const sourceProject = await options.projectOf(input.windowId, input.origin.threadId);
+    if (
+      destinationProject === undefined ||
+      sourceProject === undefined ||
+      destinationProject !== sourceProject
+    )
+      return undefined;
     try {
       const own = await options.conversation(input.windowId, input.threadId, 0, 1);
       const earliest = own.turns[0];

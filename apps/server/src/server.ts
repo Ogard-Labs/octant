@@ -960,6 +960,16 @@ function forkHandoffResolver(codeService: () => CodeRouteService) {
     return {
       conversation: async (...args) => await conversation(...args),
       readEvidence: async (...args) => await readEvidence(...args),
+      projectOf: async (windowId, threadId) => {
+        try {
+          // `read` authorizes the window against the thread, so a thread this
+          // window may not observe is indistinguishable from one that is absent.
+          const view = await service.read(windowId, threadId);
+          return String(view.thread.projectId);
+        } catch {
+          return undefined;
+        }
+      },
     };
   });
 }

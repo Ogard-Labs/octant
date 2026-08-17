@@ -31,6 +31,7 @@ function options(
       if (value === undefined) throw new Error("unavailable");
       return { bytes: new TextEncoder().encode(value) };
     }),
+    projectOf: vi.fn(async () => "project-1"),
   };
 }
 
@@ -120,7 +121,10 @@ describe("codeForkHandoffResolver", () => {
   const origin = { threadId: sourceThreadId, throughOperationId: "operation-1" as never };
 
   /** Two transcripts behind one reader: the fork's own, and the source it came from. */
-  function ports(own: ReadonlyArray<CodeForkHandoffTurn>): () => CodeForkHandoffOptions {
+  function ports(
+    own: ReadonlyArray<CodeForkHandoffTurn>,
+    projectOf: CodeForkHandoffOptions["projectOf"] = async () => "project-1",
+  ): () => CodeForkHandoffOptions {
     const source = options([turn(1)]);
     return () => ({
       conversation: async (windowId, threadId, afterCursor, limit) =>
@@ -128,6 +132,7 @@ describe("codeForkHandoffResolver", () => {
           ? { turns: own, nextCursor: 1, hasMore: false }
           : await source.conversation(windowId, threadId, afterCursor, limit),
       readEvidence: source.readEvidence,
+      projectOf,
     });
   }
 
@@ -151,6 +156,37 @@ describe("codeForkHandoffResolver", () => {
         { ...turn(1), operationId: "operation-fork-0" as never },
         { ...turn(2), operationId: asking, status: "incomplete" },
       ]),
+    );
+
+    await expect(
+      resolve({ threadId: forkThreadId, origin, windowId, operationId: asking }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("hands over nothing when the fork origin names a thread in another Project", async () => {
+    // The origin arrives from the client, so a window holding two Projects could
+    // otherwise name a thread in one as the source of a fork in the other and
+    // read that transcript back out of the fork's first turn.
+    const resolve = codeForkHandoffResolver(
+      ports(
+        [{ ...turn(1), operationId: asking, status: "incomplete" }],
+        async (_window, threadId) =>
+          String(threadId) === String(forkThreadId) ? "project-1" : "project-2",
+      ),
+    );
+
+    await expect(
+      resolve({ threadId: forkThreadId, origin, windowId, operationId: asking }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("hands over nothing when the source thread is beyond this window's reach", async () => {
+    const resolve = codeForkHandoffResolver(
+      ports(
+        [{ ...turn(1), operationId: asking, status: "incomplete" }],
+        async (_window, threadId) =>
+          String(threadId) === String(forkThreadId) ? "project-1" : undefined,
+      ),
     );
 
     await expect(
