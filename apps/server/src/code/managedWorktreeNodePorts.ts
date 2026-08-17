@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { lstat, realpath } from "node:fs/promises";
 import { promisify } from "node:util";
+import { checkpointRefNamespace } from "./gitMutationPort";
 import {
   observeRepositoryIdentity,
   type FileSystemIdentity,
@@ -187,6 +188,20 @@ export function createManagedWorktreeNodePorts(): {
         signal,
       );
       return { status: result.exitCode === 0 ? "removed" : "rejected" };
+    },
+    removeCheckpointRefs: async (input, signal) => {
+      const namespace = checkpointRefNamespace(input.checkoutId);
+      if (namespace === undefined) return;
+      const listed = await run(
+        "git",
+        ["-C", input.repositoryRoot, "for-each-ref", "--format=%(refname)", namespace],
+        signal,
+      );
+      if (listed.exitCode !== 0) return;
+      for (const name of listed.stdout.split("\n").map((line) => line.trim())) {
+        if (!name.startsWith(`${namespace}/`)) continue;
+        await run("git", ["-C", input.repositoryRoot, "update-ref", "-d", name], signal);
+      }
     },
   };
 

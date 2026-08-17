@@ -67,6 +67,7 @@ export type CodeTurnEventCategory =
   | "observation"
   | "task-progress"
   | "usage"
+  | "provider-limit"
   | "child-activity"
   | "citation"
   | "research"
@@ -91,6 +92,9 @@ export interface CodeTurnEvent {
   readonly change?: string;
   readonly inputTokens?: number;
   readonly outputTokens?: number;
+  readonly costUsd?: number;
+  readonly utilization?: number;
+  readonly resetsAt?: string;
   readonly providerClaimIsMutationProof?: false;
   readonly reconciliation?: CodeObservationReconciliation;
   readonly executionPolicy?: CodeThread["executionPolicy"];
@@ -499,6 +503,16 @@ function normalizeProviderEvent(
         category: "usage",
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
+        ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+      });
+    case "rate-limit-window":
+      return Effect.succeed({
+        ...base,
+        category: "provider-limit",
+        text: text(event.window),
+        status: event.status,
+        ...(event.utilization === undefined ? {} : { utilization: event.utilization }),
+        ...(event.resetsAt === undefined ? {} : { resetsAt: event.resetsAt }),
       });
     case "citation":
       return Effect.succeed({

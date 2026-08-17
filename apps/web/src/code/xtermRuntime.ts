@@ -45,6 +45,7 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
       terminal.dispose();
     },
     focus: () => terminal.focus(),
+    readSelection: () => terminal.getSelection(),
     setInteractive: (next) => {
       interactive = next;
       terminal.options.disableStdin = !next;

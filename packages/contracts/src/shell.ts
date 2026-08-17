@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { AppleProjectPath } from "./appleToolchain";
 import { ChatThreadId } from "./chat";
-import { CodeRelativePath, CodeTestRunId, CodeThreadId } from "./code";
+import { CodeRelativePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
 import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
 import { AggregateVersion } from "./events";
@@ -331,7 +331,17 @@ const CodeDiffWorkspaceTab = Schema.Struct({
 const codeThreadSurface = <K extends string>(kind: K) =>
   Schema.Struct({ kind: Schema.Literal(kind), ...CodeWorkspaceTabFields }).annotations(strict);
 
-const CodeTerminalWorkspaceTab = codeThreadSurface("code-terminal");
+const CodeTerminalWorkspaceTab = Schema.Struct({
+  kind: Schema.Literal("code-terminal"),
+  ...CodeWorkspaceTabFields,
+  /**
+   * The one terminal process this tab shows. Each tab carries its own identity
+   * so a second terminal is a second shell rather than a second view of the
+   * first. Absent for a tab journaled before terminals had identities of their
+   * own, which stays bound to the thread's original terminal.
+   */
+  terminalId: Schema.optional(CodeTerminalId),
+}).annotations(strict);
 const CodeTestWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-test"),
   ...CodeWorkspaceTabFields,

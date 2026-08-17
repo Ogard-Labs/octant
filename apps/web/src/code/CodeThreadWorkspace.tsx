@@ -1,7 +1,13 @@
-import type { CodeApprovalId, CodeThreadId } from "@octant/contracts/code";
+import {
+  MAX_CODE_THREAD_TITLE_LENGTH,
+  type CodeApprovalId,
+  type CodeThread,
+  type CodeThreadId,
+} from "@octant/contracts/code";
+import type { CodeCheckpoint } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
-import type { PickerGroup } from "@octant/domain";
+import { decidesCodeEffectsByApproval, type PickerGroup } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { ArrowUp, Bot, GitCompare, Globe2, ListChecks, Terminal, X } from "lucide-react";
@@ -11,7 +17,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeOverviewSurfaceKind } from "./CodeOverview";
-import type { CodeController } from "./useCodeController";
+import type { CodeConversationMessage, CodeController } from "./useCodeController";
 import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -81,6 +87,32 @@ export interface CodeThreadWorkspaceProps {
     readonly expectedVersion: number;
     readonly permissionPersistence: "current-session" | "project-default";
   }) => Promise<CodeApprovalId | undefined>;
+  /**
+   * Runs the checkpoint restore. Absent on a host that serves no operation
+   * route, which keeps the control off the transcript rather than offering an
+   * undo nothing could carry out.
+   */
+  readonly operationClient?: Pick<CodeClient, "executeOperation">;
+  /** Mints the operation identities a restore needs. */
+  readonly nextUuid?: () => string;
+  /**
+   * Raises the approval a destructive Code operation needs under an
+   * approval-deciding posture. Absent when the host cannot raise one, which
+   * keeps the restore control hidden on those threads.
+   */
+  readonly requestApproval?: (
+    command: Parameters<CodeClient["executeOperation"]>[0],
+  ) => Promise<CodeApprovalId | undefined>;
+  /**
+   * Opens a thread this workspace started. Absent on a host with no tab
+   * surface, which keeps the fork control off the transcript rather than
+   * creating a thread the user would then have to go looking for.
+   */
+  readonly onOpenCodeThread?: (
+    threadId: CodeThreadId,
+    title: string,
+    projectId: CodeThread["projectId"],
+  ) => void;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -100,6 +132,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [accessMessage, setAccessMessage] = useState<string>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [auxiliarySurface, setAuxiliarySurface] = useState<"agents">();
+  const [confirmingRestore, setConfirmingRestore] = useState<string>();
+  const [restoring, setRestoring] = useState(false);
+  const [restoreMessage, setRestoreMessage] = useState<string>();
+  const [restoreUndo, setRestoreUndo] = useState<CodeCheckpoint>();
+  const [forking, setForking] = useState(false);
+  const [forkMessage, setForkMessage] = useState<string>();
 
   useEffect(() => {
     setDraft(props.controller.pendingDraft);
@@ -201,6 +239,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
   const showEmptyConversation = messages.length === 0;
+  // Restoring rewrites files on disk, so the control appears only where this
+  // thread may change the checkout and the renderer can raise whatever
+  // approval the posture demands.
+  const mayRestore =
+    thread.executionPolicy !== "plan" &&
+    props.operationClient !== undefined &&
+    props.nextUuid !== undefined &&
+    (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
   const followUp = props.controller.followUps.get(String(thread.id))?.followUp;
   const followUpOpen = followUp?.state === "open";
 
@@ -273,6 +319,112 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
    * authoritative command — it never elevates on the renderer's say-so, and a
    * declined confirmation leaves the thread exactly where it was.
    */
+  /**
+   * Put the checkout's files back the way they were just before this message
+   * was sent.
+   *
+   * The host records what it replaced, so this is reversible; it still asks
+   * first, because the files on disk are what the user has been reading.
+   */
+  async function restoreCheckpoint(message: CodeConversationMessage) {
+    setConfirmingRestore(undefined);
+    await runRestore(message.checkpoint, "Files restored to this point.");
+  }
+
+  /**
+   * Put the files back the way they were just before the last restore.
+   *
+   * The host returns what a restore replaced precisely so the overwrite is not
+   * final. Undoing is itself a restore, so it runs the same authoritative
+   * command and leaves its own undo point behind.
+   */
+  async function undoRestore() {
+    await runRestore(restoreUndo, "The restore was undone.");
+  }
+
+  async function runRestore(
+    checkpoint: CodeCheckpoint | undefined,
+    completedMessage: string,
+  ): Promise<void> {
+    const client = props.operationClient;
+    const nextUuid = props.nextUuid;
+    if (checkpoint === undefined || client === undefined || nextUuid === undefined) return;
+    if (view === undefined) return;
+    setRestoreMessage(undefined);
+    setRestoreUndo(undefined);
+    setRestoring(true);
+    try {
+      const command = {
+        kind: "restore-git-checkpoint",
+        operationId: nextUuid() as never,
+        gitOperationId: nextUuid() as never,
+        threadId: view.thread.id,
+        checkoutId: view.checkout.id,
+        checkpoint,
+      } as const;
+      if (
+        decidesCodeEffectsByApproval(thread.executionPolicy) &&
+        (await props.requestApproval?.(command)) === undefined
+      ) {
+        setRestoreMessage("The files were not restored. Nothing changed.");
+        return;
+      }
+      const result = await client.executeOperation(command);
+      if (result.kind === "operation-failed") setRestoreMessage(result.failure.message);
+      else if (result.kind === "git-mutation-state" && result.state === "completed") {
+        setRestoreMessage(completedMessage);
+        // Keeping what the host replaced is what makes the overwrite reversible;
+        // dropping it here would strand the only copy of the previous state.
+        if (result.undo !== undefined) setRestoreUndo(result.undo);
+      } else if (result.kind === "git-mutation-state" && result.undo !== undefined) {
+        // A failed restore reports the state it replaced, which means it may
+        // have moved files before it stopped. Saying "untouched" here would be
+        // a guess, and it would bury the only way back.
+        setRestoreMessage(`The restore ${result.state}. Some files may already have changed.`);
+        setRestoreUndo(result.undo);
+      } else if (result.kind === "git-mutation-state")
+        setRestoreMessage(`The restore was ${result.state}. The checkout is untouched.`);
+      else setRestoreMessage("The restore did not report a result.");
+    } catch {
+      // The request did not come back. The host may have applied the restore
+      // anyway, so claiming the checkout is untouched would be a guess about
+      // the user's files.
+      setRestoreMessage("The restore did not report back. Refresh before assuming it did nothing.");
+    } finally {
+      setRestoring(false);
+    }
+  }
+
+  /**
+   * Start a second thread that continues this conversation from this answer.
+   *
+   * Nothing here changes: the fork is a new thread on the same checkout, and
+   * the original keeps every turn it already has. The host decides what
+   * history the fork's first turn carries, so this only names the point.
+   */
+  async function forkFrom(message: CodeConversationMessage) {
+    const operationId = message.operationId;
+    if (operationId === undefined || view === undefined) return;
+    setForkMessage(undefined);
+    setForking(true);
+    try {
+      const forked = await props.controller.forkThread({
+        threadId: view.thread.id,
+        throughOperationId: String(operationId),
+        title: forkTitle(view.thread.title),
+      });
+      if (forked === undefined) {
+        setForkMessage("The thread could not be forked. This thread is unchanged.");
+        return;
+      }
+      props.onOpenCodeThread?.(forked.id, forked.title, forked.projectId);
+    } catch {
+      setForkMessage("The thread could not be forked. This thread is unchanged.");
+    } finally {
+      setForking(false);
+    }
+  }
+
   async function changeAccess(next: ProviderExecutionPolicy) {
     if (next === thread.executionPolicy) return;
     setAccessMessage(undefined);
@@ -567,6 +719,58 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     />
                   )}
                   <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
+                  {message.role === "assistant" &&
+                  message.operationId !== undefined &&
+                  message.status === "completed" &&
+                  props.onOpenCodeThread !== undefined ? (
+                    <footer className="code-thread-workspace__fork">
+                      <OctantButton
+                        disabled={forking}
+                        onClick={() => void forkFrom(message)}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        {forking ? "Forking…" : "Fork from here"}
+                      </OctantButton>
+                    </footer>
+                  ) : null}
+                  {message.role === "user" && message.checkpoint !== undefined && mayRestore ? (
+                    <footer className="code-thread-workspace__restore">
+                      {confirmingRestore === message.id ? (
+                        <>
+                          <span>Put the files back the way they were before this message?</span>
+                          <OctantButton
+                            disabled={restoring}
+                            onClick={() => void restoreCheckpoint(message)}
+                            size="sm"
+                            variant="destructive"
+                          >
+                            Restore files
+                          </OctantButton>
+                          <OctantButton
+                            disabled={restoring}
+                            onClick={() => setConfirmingRestore(undefined)}
+                            size="sm"
+                            variant="ghost"
+                          >
+                            Keep current files
+                          </OctantButton>
+                        </>
+                      ) : (
+                        <OctantButton
+                          disabled={restoring}
+                          onClick={() => {
+                            setRestoreMessage(undefined);
+                            setConfirmingRestore(message.id);
+                          }}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          Restore files to this point
+                        </OctantButton>
+                      )}
+                    </footer>
+                  ) : null}
                 </article>
               </div>
             );
@@ -746,6 +950,38 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {accessMessage}
               </span>
             )}
+            {restoreMessage === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="status">
+                {restoreMessage}
+                {restoreUndo === undefined ? null : (
+                  <OctantButton
+                    disabled={restoring}
+                    onClick={() => {
+                      void undoRestore();
+                    }}
+                    variant="ghost"
+                  >
+                    Undo restore
+                  </OctantButton>
+                )}
+              </span>
+            )}
+            {forkMessage === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="alert">
+                {forkMessage}
+              </span>
+            )}
+            <span className="code-thread-workspace__hint" aria-label="Thread usage">
+              {threadUsageLabel(props.controller.threadUsage)}
+            </span>
+            {props.controller.threadUsage.limits.map((limit) => (
+              <span
+                className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
+                key={limit.window}
+              >
+                {providerLimitLabel(limit)}
+              </span>
+            ))}
           </div>
         </div>
       </div>
@@ -762,6 +998,59 @@ function previousAssistantMessage(
     if (candidate?.role === "assistant") return candidate;
   }
   return undefined;
+}
+
+/**
+ * What this thread has spent, in the provider's own figures. A provider that
+ * reports no tokens says so plainly rather than reading as a free thread, and
+ * a cost appears only when the provider stated one.
+ */
+/**
+ * Name a fork after the thread it came from, without stacking one suffix on
+ * another when a fork is itself forked.
+ */
+function forkTitle(sourceTitle: string): string {
+  const base = sourceTitle.replace(/ \(fork(?: \d+)?\)$/, "").trim();
+  const title = `${base.length === 0 ? "Code thread" : base} (fork)`;
+  return title.length > MAX_CODE_THREAD_TITLE_LENGTH
+    ? `${title.slice(0, MAX_CODE_THREAD_TITLE_LENGTH - 7).trimEnd()} (fork)`
+    : title;
+}
+
+function threadUsageLabel(usage: CodeController["threadUsage"]): string {
+  if (usage.inputTokens === 0 && usage.outputTokens === 0) {
+    return "This thread's provider has reported no usage yet.";
+  }
+  const tokens = `${compactTokens(usage.inputTokens)} in · ${compactTokens(usage.outputTokens)} out`;
+  return usage.costUsd === undefined ? tokens : `${tokens} · ${formatUsd(usage.costUsd)}`;
+}
+
+function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][number]): string {
+  const share =
+    limit.utilization === undefined ? undefined : `${Math.round(limit.utilization * 100)}% used`;
+  const resets =
+    limit.resetsAt === undefined
+      ? undefined
+      : `resets ${new Date(limit.resetsAt).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`;
+  const state =
+    limit.status === "exhausted" ? "spent" : limit.status === "warning" ? "low" : undefined;
+  const parts = [limit.window.replaceAll("_", " "), state, share, resets].filter(
+    (part): part is string => part !== undefined,
+  );
+  return parts.join(" · ");
+}
+
+function compactTokens(tokens: number): string {
+  if (tokens < 1_000) return String(tokens);
+  if (tokens < 1_000_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return `${(tokens / 1_000_000).toFixed(2)}M`;
+}
+
+function formatUsd(cost: number): string {
+  return cost < 0.01 && cost > 0 ? "<$0.01" : `$${cost.toFixed(2)}`;
 }
 
 function providerIdentityChanged(

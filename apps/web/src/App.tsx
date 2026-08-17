@@ -201,6 +201,7 @@ import { ContextTabWarning } from "./context/ContextTabWarning";
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { useCodeController } from "./code/useCodeController";
+import { CodeSearchDialog } from "./code/CodeSearchDialog";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
 import { CodeThreadBoard } from "./code/CodeThreadBoard";
 import type { ZenClient } from "@octant/client-runtime/zen-client";
@@ -2152,6 +2153,8 @@ function LaunchedShell(
           projectId: String(thread.projectId),
           meta: thread.lifecycle,
           ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
+          ...(thread.unread === undefined ? {} : { unread: thread.unread }),
+          ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
           ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
         }))
       : [];
@@ -3661,8 +3664,17 @@ function LaunchedShell(
                   onToggleCanvasPin={(groupId, tab) => {
                     if (tab.kind === "canvas") void controller.toggleCanvasTabPin(groupId, tab);
                   }}
-                  onOpenCodeSurface={(kind, threadId, title) =>
-                    void controller.openCodeSurface({ kind, threadId, title })
+                  onOpenCodeSurface={(kind, threadId, title, terminalId) =>
+                    void controller.openCodeSurface(
+                      kind === "code-terminal"
+                        ? {
+                            kind,
+                            threadId,
+                            title,
+                            ...(terminalId === undefined ? {} : { terminalId }),
+                          }
+                        : { kind, threadId, title },
+                    )
                   }
                   onPreviewResize={controller.previewSplitResize}
                   onReorder={controller.reorderTab}
@@ -3993,6 +4005,27 @@ function LaunchedShell(
         {/* One palette for the window. Zen is a deliberate full-surface focus
           mode, so the chord stays inert while it is active. */}
         {zen.active ? null : <CommandPalette />}
+        {/* One quick-open for the window, scoped to the Code thread currently
+          in view. Mounting it per tab would make one chord open a dialog for
+          every split pane at once. */}
+        {zen.active || codeController.activeView === undefined ? null : (
+          <CodeSearchDialog
+            checkoutId={codeController.activeView.checkout.id}
+            onOpenFile={(relativePath) => {
+              void controller.openCodeSurface({
+                kind: "code-file",
+                threadId: codeController.activeView!.thread.id,
+                title: relativePath,
+                relativePath,
+              });
+            }}
+            {...(props.launch.serverUrl === undefined ? {} : { serverUrl: props.launch.serverUrl })}
+            {...(props.projectWindowCapability === undefined
+              ? {}
+              : { windowCapability: props.projectWindowCapability })}
+            threadId={codeController.activeView.thread.id}
+          />
+        )}
         <FirstRunOnboarding
           chatModelGroups={chatProviderGroups}
           controller={firstRunController}

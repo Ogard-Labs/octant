@@ -53,6 +53,7 @@ import {
   settingId,
 } from "../settings/registry";
 import { octantSettingsRegistry } from "../settings/octantSettingsRegistry";
+import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
 import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import { SettingRow } from "../settings/primitives";
@@ -535,6 +536,15 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           label="Enable Work"
           onCheckedChange={(checked) => props.onSettingsChange({ workEnabled: checked })}
         />
+      </SettingRow>
+      <SettingRow
+        description="The chords that reach Octant's global surfaces on this machine."
+        focused={focusedSetting === settingId("keybindings")}
+        label="Keyboard shortcuts"
+        scope="app"
+        settingId="keybindings"
+      >
+        <KeybindingSettings />
       </SettingRow>
     </section>
   );

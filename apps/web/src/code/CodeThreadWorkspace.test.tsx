@@ -48,6 +48,235 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], []);
   });
 
+  it("restores the checkout to a message's checkpoint only after a confirmation and an approval", async () => {
+    const user = userEvent.setup();
+    const executeOperation = vi.fn(async () => ({
+      kind: "git-mutation-state" as const,
+      state: "completed" as const,
+    }));
+    const requestApproval = vi.fn(async () => undefined);
+    const conversation = [
+      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+      { id: "turn-1:assistant", role: "assistant" as const, text: "done" },
+    ];
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ conversation } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={requestApproval}
+        threadId={threadId}
+      />,
+    );
+
+    // The assistant reply carries no checkpoint, so only the message that
+    // started the turn offers to put the files back.
+    expect(screen.getAllByRole("button", { name: "Restore files to this point" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Restore files to this point" }));
+    await user.click(screen.getByRole("button", { name: "Restore files" }));
+
+    // This thread decides effects by approval, and the approval was declined:
+    // nothing may reach the checkout.
+    expect(requestApproval).toHaveBeenCalledOnce();
+    expect(executeOperation).not.toHaveBeenCalled();
+    expect(screen.getByText("The files were not restored. Nothing changed.")).toBeVisible();
+
+    requestApproval.mockResolvedValue("40000000-0000-4000-8000-000000000001" as never);
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ conversation } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={requestApproval}
+        threadId={threadId}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Restore files to this point" }));
+    await user.click(screen.getByRole("button", { name: "Restore files" }));
+
+    await waitFor(() =>
+      expect(executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "restore-git-checkpoint", checkpoint }),
+      ),
+    );
+    expect(screen.getByText("Files restored to this point.")).toBeVisible();
+  });
+
+  it("keeps the checkpoint a restore replaced so the overwrite can be undone", async () => {
+    const user = userEvent.setup();
+    const undo = { worktree: "e".repeat(40), index: "f".repeat(40) };
+    const executeOperation = vi.fn(async () => ({
+      kind: "git-mutation-state" as const,
+      state: "completed" as const,
+      undo,
+    }));
+    const conversation = [
+      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+    ];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ conversation } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={vi.fn(async () => "40000000-0000-4000-8000-000000000001" as never)}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Restore files to this point" }));
+    await user.click(screen.getByRole("button", { name: "Restore files" }));
+    await waitFor(() => expect(screen.getByText("Files restored to this point.")).toBeVisible());
+
+    // The host returned what it replaced, so the destructive overwrite is
+    // reachable rather than stranded.
+    await user.click(await screen.findByRole("button", { name: "Undo restore" }));
+    await waitFor(() =>
+      expect(executeOperation).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "restore-git-checkpoint", checkpoint: undo }),
+      ),
+    );
+    expect(screen.getByText("The restore was undone.")).toBeVisible();
+  });
+
+  it("forks a new thread from a finished answer and opens it, leaving this one alone", async () => {
+    const user = userEvent.setup();
+    const forkThread = vi.fn(async () => ({
+      id: "10000000-0000-4000-8000-0000000000aa",
+      title: "find bugs in this repo (fork)",
+      projectId: "10000000-0000-4000-8000-0000000000bb",
+    }));
+    const onOpenCodeThread = vi.fn();
+    const conversation = [
+      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser" },
+      {
+        id: "turn-1:assistant",
+        role: "assistant" as const,
+        text: "done",
+        operationId: "50000000-0000-4000-8000-000000000001",
+        status: "completed" as const,
+      },
+      // A turn still running has no answer to branch from yet.
+      {
+        id: "turn-2:assistant",
+        role: "assistant" as const,
+        text: "working",
+        operationId: "50000000-0000-4000-8000-000000000002",
+        status: "incomplete" as const,
+      },
+    ];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ conversation, forkThread } as never)}
+        onOpenCodeThread={onOpenCodeThread}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getAllByRole("button", { name: "Fork from here" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Fork from here" }));
+
+    await waitFor(() =>
+      expect(forkThread).toHaveBeenCalledWith({
+        threadId,
+        throughOperationId: "50000000-0000-4000-8000-000000000001",
+        title: "find bugs in this repo (fork)",
+      }),
+    );
+    expect(onOpenCodeThread).toHaveBeenCalledWith(
+      "10000000-0000-4000-8000-0000000000aa",
+      "find bugs in this repo (fork)",
+      "10000000-0000-4000-8000-0000000000bb",
+    );
+  });
+
+  it("says the fork failed instead of opening a thread that was never created", async () => {
+    const user = userEvent.setup();
+    const onOpenCodeThread = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:assistant",
+              role: "assistant" as const,
+              text: "done",
+              operationId: "50000000-0000-4000-8000-000000000001",
+              status: "completed" as const,
+            },
+          ],
+          forkThread: vi.fn(async () => undefined),
+        } as never)}
+        onOpenCodeThread={onOpenCodeThread}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Fork from here" }));
+    expect(
+      await screen.findByText("The thread could not be forked. This thread is unchanged."),
+    ).toBeVisible();
+    expect(onOpenCodeThread).not.toHaveBeenCalled();
+  });
+
+  it("shows the provider's own token, cost, and usage-window figures", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          threadUsage: {
+            inputTokens: 12_400,
+            outputTokens: 3_100,
+            costUsd: 0.42,
+            limits: [
+              { window: "five_hour", status: "warning", utilization: 0.87 },
+              { window: "seven_day", status: "allowed", utilization: 0.12 },
+            ],
+          },
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByLabelText("Thread usage")).toHaveTextContent("12.4k in · 3.1k out · $0.42");
+    expect(screen.getByText(/five hour · low · 87% used/)).toBeVisible();
+    expect(screen.getByText(/seven day · 12% used/)).toBeVisible();
+  });
+
+  it("says a provider reported nothing rather than reading as a free thread", () => {
+    render(<CodeThreadWorkspace controller={controller()} threadId={threadId} />);
+
+    // Zero tokens with no report is not the same as a thread that cost
+    // nothing, and the strip must not claim otherwise.
+    expect(screen.getByLabelText("Thread usage")).toHaveTextContent(
+      "This thread's provider has reported no usage yet.",
+    );
+  });
+
+  it("keeps the restore control off a thread that cannot change the checkout", () => {
+    const conversation = [
+      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+    ];
+    const plan = controller({ conversation } as never);
+    render(
+      <CodeThreadWorkspace
+        controller={
+          {
+            ...plan,
+            activeView: {
+              ...plan.activeView,
+              thread: { ...plan.activeView!.thread, executionPolicy: "plan" },
+            },
+          } as never
+        }
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation: vi.fn() } as never}
+        requestApproval={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Restore files to this point" })).toBeNull();
+  });
+
   it("opens the `#` picker in the Code composer and sends the chip as an id", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async (_prompt: string) => true);
@@ -1008,6 +1237,8 @@ function alternateProviderGroup(): PickerGroup {
   } as never;
 }
 
+const checkpoint = { worktree: "c".repeat(40), index: "d".repeat(40) } as never;
+
 function controller(
   overrides: Partial<CodeController> = {},
   activeThreadId = threadId,
@@ -1046,6 +1277,7 @@ function controller(
     cancelQueuedFollowUp: vi.fn(),
     queueFollowUp: vi.fn(),
     queuedFollowUps: [],
+    threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     turnActivity: new Map(),
     sendFollowUp: vi.fn(async () => true),
     setPendingDraft: vi.fn(),

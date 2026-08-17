@@ -20,7 +20,8 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       id: "general",
       label: "General",
       scope: "app",
-      keywords: "general enabled modes startup default chat work profile name email avatar",
+      keywords:
+        "general enabled modes startup default chat work profile name email avatar keybindings keyboard shortcuts chord",
       settings: [
         {
           id: settingId("user-profile"),
@@ -39,6 +40,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Enable Work",
           scope: "app",
           keywords: "enable work mode",
+        },
+        {
+          id: settingId("keybindings"),
+          label: "Keyboard shortcuts",
+          scope: "app",
+          keywords: "keybindings keyboard shortcut chord palette zen search rebind json",
         },
       ],
     },

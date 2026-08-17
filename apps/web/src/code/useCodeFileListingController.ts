@@ -1,6 +1,7 @@
 import { createCodeFileListingClient, type CodeFileListingClient } from "@octant/client-runtime";
 import type {
   CodeCheckoutId,
+  CodeFileChangeNotice,
   CodeFileListing,
   CodeFileListingEntry,
   CodeRelativePath,
@@ -8,6 +9,7 @@ import type {
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CodeFileExplorerEntry } from "./CodeFileExplorer";
+import { useCodeFileChangeWatch } from "./useCodeFileChangeWatch";
 
 export type CodeFileListingStatus = "idle" | "loading" | "ready" | "error";
 
@@ -28,6 +30,18 @@ export interface CodeFileListingControllerOptions {
   readonly enabled: boolean;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  /**
+   * Follow the checkout live. Surfaces that stay on screen while an agent
+   * edits — the explorer — want this; a transient picker does not, and holding
+   * a connection open for a menu that closes in a second would only cost one.
+   */
+  readonly watch?: boolean;
+  /**
+   * Called for every change the host reports, before the listing reloads, so a
+   * surface holding an open file can decide for itself whether that file is
+   * one of the changed paths.
+   */
+  readonly onFilesChanged?: (notice: CodeFileChangeNotice) => void;
 }
 
 /**
@@ -35,9 +49,10 @@ export interface CodeFileListingControllerOptions {
  *
  * The renderer never decides availability: a file the host marked oversized or
  * unavailable is rendered exactly as the host classified it. The listing is
- * fetched when the surface mounts and on explicit refresh only — a file tree is
- * not a live observation, and polling one would scan the checkout on a timer
- * for no user-visible gain.
+ * fetched when the surface mounts, on explicit refresh, and — when the caller
+ * asks to watch — when the host reports that the checkout changed. It is never
+ * polled: a timer would rescan the repository whether or not anything moved,
+ * while a notice arrives only when something did.
  */
 export function useCodeFileListingController(
   options: CodeFileListingControllerOptions,
@@ -129,6 +144,23 @@ export function useCodeFileListingController(
       generation.current += 1;
     };
   }, []);
+
+  const watchTarget = options.watch === true;
+  const onFilesChanged = useRef(options.onFilesChanged);
+  onFilesChanged.current = options.onFilesChanged;
+  const reload = useRef(load);
+  reload.current = load;
+
+  useCodeFileChangeWatch({
+    enabled: options.enabled && watchTarget,
+    ...(client === undefined ? {} : { client }),
+    ...(options.threadId === undefined ? {} : { threadId: options.threadId }),
+    ...(options.checkoutId === undefined ? {} : { checkoutId: options.checkoutId }),
+    onChanged: (notice) => {
+      onFilesChanged.current?.(notice);
+      void reload.current();
+    },
+  });
 
   return { status, entries, truncated, errorMessage, refresh: load };
 }

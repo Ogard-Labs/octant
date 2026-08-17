@@ -1,6 +1,7 @@
 export * from "./chat";
 export * from "./code";
 export * from "./codeFileListing";
+export * from "./codeSearch";
 export * from "./codeOperations";
 export * from "./codeTestDefinitions";
 export * from "./context";

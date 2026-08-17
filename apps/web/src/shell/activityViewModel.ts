@@ -37,6 +37,7 @@ export interface SidebarActivityProject {
 
 export interface SidebarActivityThread {
   readonly attention: SidebarActivityAttention;
+  readonly pinned?: boolean;
   readonly navigationId: string;
   readonly projectName: string;
   readonly threadId: string;
@@ -96,13 +97,21 @@ export function buildSidebarActivityView(input: {
   const rows = input.threads
     .map((thread) => toActivityThread(thread, projectNames, input.rootlessLabel ?? "Unfiled"))
     .sort(compareActivityThreads);
-  const priority = rows.filter(
+  // A pin is the user saying "keep this where I can see it", so it outranks
+  // both attention and recency; a pinned thread that also needs attention still
+  // shows its mark, it just does not move.
+  const pinned = rows.filter((thread) => thread.pinned === true);
+  const unpinned = rows.filter((thread) => thread.pinned !== true);
+  const priority = unpinned.filter(
     (thread) => thread.attention === "unread" || thread.attention === "follow-up",
   );
-  const remaining = rows.filter(
+  const remaining = unpinned.filter(
     (thread) => thread.attention !== "unread" && thread.attention !== "follow-up",
   );
   const groups: SidebarActivityGroup[] = [];
+  if (pinned.length > 0) {
+    groups.push({ id: "pinned", label: "Pinned", threads: pinned });
+  }
   if (priority.length > 0) {
     groups.push({ id: "priority", label: "Priority", threads: priority });
   }
@@ -132,6 +141,7 @@ function toActivityThread(
       : (projectNames.get(thread.projectId) ?? rootlessLabel);
   return {
     attention: activityAttention(thread),
+    ...(thread.pinned === true ? { pinned: true } : {}),
     navigationId: thread.navigationId ?? thread.threadId,
     projectName,
     threadId: thread.threadId,
