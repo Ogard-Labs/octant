@@ -102,6 +102,42 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Files restored to this point.")).toBeVisible();
   });
 
+  it("keeps the checkpoint a restore replaced so the overwrite can be undone", async () => {
+    const user = userEvent.setup();
+    const undo = { worktree: "e".repeat(40), index: "f".repeat(40) };
+    const executeOperation = vi.fn(async () => ({
+      kind: "git-mutation-state" as const,
+      state: "completed" as const,
+      undo,
+    }));
+    const conversation = [
+      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+    ];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ conversation } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation } as never}
+        requestApproval={vi.fn(async () => "40000000-0000-4000-8000-000000000001" as never)}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Restore files to this point" }));
+    await user.click(screen.getByRole("button", { name: "Restore files" }));
+    await waitFor(() => expect(screen.getByText("Files restored to this point.")).toBeVisible());
+
+    // The host returned what it replaced, so the destructive overwrite is
+    // reachable rather than stranded.
+    await user.click(await screen.findByRole("button", { name: "Undo restore" }));
+    await waitFor(() =>
+      expect(executeOperation).toHaveBeenLastCalledWith(
+        expect.objectContaining({ kind: "restore-git-checkpoint", checkpoint: undo }),
+      ),
+    );
+    expect(screen.getByText("The restore was undone.")).toBeVisible();
+  });
+
   it("forks a new thread from a finished answer and opens it, leaving this one alone", async () => {
     const user = userEvent.setup();
     const forkThread = vi.fn(async () => ({

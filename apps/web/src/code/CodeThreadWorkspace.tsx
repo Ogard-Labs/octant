@@ -4,6 +4,7 @@ import {
   type CodeThread,
   type CodeThreadId,
 } from "@octant/contracts/code";
+import type { CodeCheckpoint } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { decidesCodeEffectsByApproval, type PickerGroup } from "@octant/domain";
@@ -134,6 +135,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
   const [restoring, setRestoring] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<string>();
+  const [restoreUndo, setRestoreUndo] = useState<CodeCheckpoint>();
   const [forking, setForking] = useState(false);
   const [forkMessage, setForkMessage] = useState<string>();
 
@@ -325,13 +327,31 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
    * first, because the files on disk are what the user has been reading.
    */
   async function restoreCheckpoint(message: CodeConversationMessage) {
-    const checkpoint = message.checkpoint;
+    setConfirmingRestore(undefined);
+    await runRestore(message.checkpoint, "Files restored to this point.");
+  }
+
+  /**
+   * Put the files back the way they were just before the last restore.
+   *
+   * The host returns what a restore replaced precisely so the overwrite is not
+   * final. Undoing is itself a restore, so it runs the same authoritative
+   * command and leaves its own undo point behind.
+   */
+  async function undoRestore() {
+    await runRestore(restoreUndo, "The restore was undone.");
+  }
+
+  async function runRestore(
+    checkpoint: CodeCheckpoint | undefined,
+    completedMessage: string,
+  ): Promise<void> {
     const client = props.operationClient;
     const nextUuid = props.nextUuid;
-    setConfirmingRestore(undefined);
     if (checkpoint === undefined || client === undefined || nextUuid === undefined) return;
     if (view === undefined) return;
     setRestoreMessage(undefined);
+    setRestoreUndo(undefined);
     setRestoring(true);
     try {
       const command = {
@@ -351,9 +371,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       }
       const result = await client.executeOperation(command);
       if (result.kind === "operation-failed") setRestoreMessage(result.failure.message);
-      else if (result.kind === "git-mutation-state" && result.state === "completed")
-        setRestoreMessage("Files restored to this point.");
-      else if (result.kind === "git-mutation-state")
+      else if (result.kind === "git-mutation-state" && result.state === "completed") {
+        setRestoreMessage(completedMessage);
+        // Keeping what the host replaced is what makes the overwrite reversible;
+        // dropping it here would strand the only copy of the previous state.
+        if (result.undo !== undefined) setRestoreUndo(result.undo);
+      } else if (result.kind === "git-mutation-state")
         setRestoreMessage(`The restore was ${result.state}. The checkout is untouched.`);
       else setRestoreMessage("The restore did not report a result.");
     } catch {
@@ -921,6 +944,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             {restoreMessage === undefined ? null : (
               <span className="code-thread-workspace__hint" role="status">
                 {restoreMessage}
+                {restoreUndo === undefined ? null : (
+                  <OctantButton
+                    disabled={restoring}
+                    onClick={() => {
+                      void undoRestore();
+                    }}
+                    variant="ghost"
+                  >
+                    Undo restore
+                  </OctantButton>
+                )}
               </span>
             )}
             {forkMessage === undefined ? null : (

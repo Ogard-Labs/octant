@@ -148,10 +148,12 @@ describe("CodeGitPane", () => {
 
   it("sends both halves of a staged rename so the rename cannot half-apply", async () => {
     const client = codeClient();
-    const renamed = {
+    const renamed: typeof gitObservation = {
       ...gitObservation,
-      status: [{ path: "src/new.ts", originalPath: "src/old.ts", index: "R", worktree: " " }],
-    } as typeof gitObservation;
+      status: [
+        { path: "src/new.ts", originalPath: "src/old.ts", index: "R", worktree: " " },
+      ] as unknown as typeof gitObservation.status,
+    };
     render(
       <CodeGitPane
         client={client}
