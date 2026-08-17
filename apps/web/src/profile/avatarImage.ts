@@ -16,6 +16,16 @@ export const AVATAR_PIXELS = 128;
 /** The size asked of Gravatar, before the same downscale every avatar gets. */
 const GRAVATAR_REQUEST_PIXELS = 256;
 
+/**
+ * How long a Gravatar request may stay unanswered before it is given up on.
+ *
+ * A connection that is accepted and then never answered fails no other way, and
+ * the profile step disables every exit — including Escape and Skip — while an
+ * import is running, so an unbounded request traps a user on first launch until
+ * the window is restarted.
+ */
+const GRAVATAR_TIMEOUT_MS = 10_000;
+
 export type AvatarImportFailure =
   | { readonly kind: "unsupported-type"; readonly message: string }
   | { readonly kind: "unreadable"; readonly message: string }
@@ -83,14 +93,20 @@ export async function importAvatarFromGravatar(
   environment: AvatarImageEnvironment = browserAvatarEnvironment(),
 ): Promise<AvatarImportResult> {
   const hash = await environment.digest(normalizeGravatarEmail(email));
+  const abandon = new AbortController();
+  const bound = setTimeout(() => abandon.abort(), GRAVATAR_TIMEOUT_MS);
   let response: Response;
   try {
-    response = await environment.fetch(gravatarImageUrl(hash, GRAVATAR_REQUEST_PIXELS));
+    response = await environment.fetch(gravatarImageUrl(hash, GRAVATAR_REQUEST_PIXELS), {
+      signal: abandon.signal,
+    });
   } catch {
     return failed({
       kind: "gravatar-unreachable",
       message: "Octant could not reach gravatar.com. Check the connection, or upload a photo.",
     });
+  } finally {
+    clearTimeout(bound);
   }
   if (response.status === 404) {
     return failed({

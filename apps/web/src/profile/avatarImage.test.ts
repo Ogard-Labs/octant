@@ -82,7 +82,9 @@ describe("importing an avatar from Gravatar", () => {
     expect(env.digest).toHaveBeenCalledWith("ada@example.com");
     // `d=404` means a miss is reported as a miss, so Octant never stores the
     // placeholder Gravatar would otherwise generate.
-    expect(env.fetch).toHaveBeenCalledWith("https://gravatar.com/avatar/hashed?s=256&d=404");
+    expect(env.fetch).toHaveBeenCalledWith("https://gravatar.com/avatar/hashed?s=256&d=404", {
+      signal: expect.any(AbortSignal),
+    });
     expect(result).toEqual({ kind: "imported", dataUrl: encoded });
   });
 
@@ -114,5 +116,31 @@ describe("importing an avatar from Gravatar", () => {
 
     expect(offline).toMatchObject({ failure: { kind: "gravatar-unreachable" } });
     expect(broken).toMatchObject({ failure: { kind: "gravatar-unreachable" } });
+  });
+
+  // A request that is accepted and then never answered fails no other way, and
+  // first run disables Escape and Skip while an import runs, so an unbounded
+  // one leaves the user with no way out of the profile step.
+  it("gives up on a request gravatar.com accepts and never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = importAvatarFromGravatar(
+        "ada@example.com",
+        environment({
+          fetch: vi.fn(
+            async (_input, init) =>
+              await new Promise<Response>((_resolve, reject) => {
+                init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+              }),
+          ),
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(await pending).toMatchObject({ failure: { kind: "gravatar-unreachable" } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
