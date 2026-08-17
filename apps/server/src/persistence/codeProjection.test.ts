@@ -19,6 +19,7 @@ import {
   readCodeSettings,
   readCodeThread,
   readCodeThreads,
+  readCodeThreadActivity,
   readCodeThreadView,
   reconcileCodeRestart,
 } from "./codeProjection";
@@ -44,6 +45,7 @@ const ids = {
   runtime: "81000000-0000-4000-8000-000000000011",
   runtimeNewer: "81000000-0000-4000-8000-000000000012",
   runtimeAmbiguous: "81000000-0000-4000-8000-000000000013",
+  operation: "81000000-0000-4000-8000-000000000014",
 } as const;
 const repositoryId = `repo_${"a".repeat(64)}`;
 
@@ -185,6 +187,33 @@ describe("CodeProjection", () => {
         state: "failed",
         version: 2,
       });
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("advances a thread's activity sequence for a provider turn that moves nothing on the thread", () => {
+    const { connection, journal } = openStore();
+    try {
+      appendFixture(journal);
+      const threadId = decodeCodeThreadId(ids.thread);
+      const versionBefore = readCodeThread(connection, threadId)?.version;
+      const updatedAtBefore = readCodeThread(connection, threadId)?.updatedAt;
+      expect(readCodeThreadActivity(connection)).toEqual([]);
+
+      appendOperationEvent(journal, 1, "running");
+      const [first] = readCodeThreadActivity(connection);
+      expect(String(first?.threadId)).toBe(ids.thread);
+      expect(first?.lastSequence).toBeGreaterThan(0);
+
+      appendOperationEvent(journal, 2, "completed");
+      const [second] = readCodeThreadActivity(connection);
+      // The turn finishing is exactly the moment an unread mark has to notice,
+      // and it is invisible on the thread aggregate: same version, same
+      // `updatedAt`, higher activity sequence.
+      expect(second?.lastSequence).toBeGreaterThan(first!.lastSequence);
+      expect(readCodeThread(connection, threadId)?.version).toBe(versionBefore);
+      expect(readCodeThread(connection, threadId)?.updatedAt).toBe(updatedAtBefore);
     } finally {
       connection.close();
     }
@@ -424,6 +453,38 @@ function appendFixture(journal: Journal): void {
   }
 }
 
+/**
+ * One provider-turn event on the `code-operation` aggregate. Deliberately
+ * touches nothing on `code-thread`, which is the whole point of the case.
+ */
+function appendOperationEvent(
+  journal: Journal,
+  cursor: number,
+  state: "running" | "completed",
+): void {
+  journal.append({
+    aggregate: { aggregateType: "code-operation", aggregateId: ids.operation },
+    expectedVersion: cursor - 1,
+    events: [
+      {
+        eventId: `8100000b-0000-4000-8000-00000000000${cursor}`,
+        eventName: "code.operation-event-recorded@1",
+        eventVersion: 1,
+        correlationId: ids.correlation,
+        actor: { kind: "system", actorId: ids.actor },
+        occurredAt: now,
+        payload: {
+          threadId: ids.thread,
+          operationId: ids.operation,
+          cursor,
+          occurredAt: now,
+          event: { kind: "operation-state", state },
+        },
+      },
+    ],
+  });
+}
+
 function projectedRows(connection: ReturnType<typeof openSqlite>) {
   return {
     settings: connection.prepare("SELECT * FROM code_settings_projection").all(),
@@ -431,5 +492,6 @@ function projectedRows(connection: ReturnType<typeof openSqlite>) {
     checkouts: connection.prepare("SELECT * FROM code_checkout_projection").all(),
     files: connection.prepare("SELECT * FROM code_file_projection").all(),
     runtime: connection.prepare("SELECT * FROM code_runtime_projection").all(),
+    activity: connection.prepare("SELECT * FROM code_thread_activity_projection").all(),
   };
 }

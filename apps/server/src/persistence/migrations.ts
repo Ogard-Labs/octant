@@ -688,6 +688,14 @@ CREATE INDEX code_thread_follow_up_open_idx
   WHERE state = 'open';
 `;
 
+const CODE_THREAD_ACTIVITY_PROJECTION_SQL = `
+CREATE TABLE code_thread_activity_projection (
+  thread_id TEXT PRIMARY KEY CHECK(length(trim(thread_id)) > 0),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+`;
+
 const ADD_EVENT_JOURNAL_HOST_ID_SQL = `
 ALTER TABLE event_journal
   ADD COLUMN host_id TEXT NOT NULL DEFAULT 'local'
@@ -1353,6 +1361,11 @@ ALTER TABLE context_summary_projection
     version: 44,
     name: "move_agent_run_text_to_subject_store",
     sql: AGENT_RUN_CONTENT_STORE_SQL,
+  },
+  {
+    version: 45,
+    name: "create_code_thread_activity_projection",
+    sql: CODE_THREAD_ACTIVITY_PROJECTION_SQL,
   },
 ];
 

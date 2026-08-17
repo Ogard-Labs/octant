@@ -14,6 +14,7 @@ import type {
   CodeRuntimeWork,
   CodeRuntimeWorkId,
   CodeThread,
+  CodeThreadActivity,
   CodeThreadId,
   CodeThreadView,
   MemoryEntry,
@@ -97,6 +98,7 @@ import {
   readCodeReviewFindings,
   readCodeSettings,
   readCodeThread,
+  readCodeThreadActivity,
   readCodeThreads,
   readCodeThreadView,
   reconcileCodeRestart,
@@ -180,6 +182,7 @@ export interface PersistenceService {
   readonly readThemeSettings: () => ProjectedThemeSettings | undefined;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
+  readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
   readonly readCodeCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
   readonly readCodeCheckoutAggregateVersion: (checkoutId: CodeCheckoutId) => number;
   readonly readCodeCheckouts: () => ReadonlyArray<CodeCheckoutIdentity>;
@@ -346,6 +349,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readThemeSettings: () => readThemeSettings(connection),
       readCodeThread: (threadId) => readCodeThread(connection, threadId),
       readCodeThreads: () => readCodeThreads(connection),
+      readCodeThreadActivity: () => readCodeThreadActivity(connection),
       readCodeCheckout: (checkoutId) => readCodeCheckout(connection, checkoutId),
       readCodeCheckoutAggregateVersion: (checkoutId) =>
         readCodeCheckoutAggregateVersion(connection, checkoutId),

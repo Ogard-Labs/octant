@@ -554,6 +554,7 @@ function createMockTransport(input: {
             settings: codeSettings,
             threads: codeThreads,
             checkouts: [codeCheckout],
+            activity: [],
           }),
         );
       }

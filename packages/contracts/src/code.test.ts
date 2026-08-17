@@ -262,6 +262,47 @@ describe("Code aggregate contracts", () => {
       }),
     ).toMatchObject({ kind: "checkout-prepared", bindingRevisionId: ids.bindingRevision });
   });
+
+  it("carries a per-thread activity sequence through the bootstrap", () => {
+    const settings = {
+      defaultExecutionPolicy: "approval-gated",
+      defaultPermissionPersistence: "current-session",
+      version: 1,
+      updatedAt: now,
+    } as const;
+    const checkout = {
+      id: ids.checkout,
+      repositoryId,
+      kind: "existing-worktree",
+      availability: "available",
+      head: { kind: "branch", name: "feature/phase-7", oid: "b".repeat(40) },
+      observedAt: now,
+    } as const;
+    const bootstrap = {
+      settings,
+      threads: [thread],
+      checkouts: [checkout],
+      activity: [{ threadId: ids.thread, lastSequence: 42 }],
+    } as const;
+
+    expect(codeContracts.decodeCodeBootstrap(bootstrap)).toEqual(bootstrap);
+    // A thread with no journaled operation event is absent, not reported at
+    // zero, so the client can tell silence from "nothing has happened yet".
+    expect(codeContracts.decodeCodeBootstrap({ ...bootstrap, activity: [] }).activity).toEqual([]);
+    expect(() =>
+      codeContracts.decodeCodeBootstrap({ settings, threads: [], checkouts: [] }),
+    ).toThrow();
+    expect(() =>
+      codeContracts.decodeCodeThreadActivity({ threadId: ids.thread, lastSequence: -1 }),
+    ).toThrow();
+    expect(() =>
+      codeContracts.decodeCodeThreadActivity({
+        threadId: ids.thread,
+        lastSequence: 1,
+        version: 1,
+      }),
+    ).toThrow();
+  });
 });
 
 describe("Code delivery outcome contracts", () => {
