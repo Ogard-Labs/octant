@@ -278,17 +278,38 @@ describe("reconcileCodeRestart", () => {
       });
 
       const works = readCodeRuntimeWorks(connection, decodeCodeThreadId(ids.thread));
-      const byId = new Map(works.map((work) => [String(work.id), work]));
-      // The frozen turn becomes a wait but keeps the time it last moved, so the
-      // newer completed turn is still the latest one.
+      const byId = new Map(works.map((entry) => [String(entry.work.id), entry]));
+      // The frozen turn becomes a wait but keeps the time it last moved.
       const frozen = byId.get(ids.runtime);
-      expect(frozen?.state).toBe("waiting");
-      expect(frozen?.updatedAt).toBe(now);
-      expect(byId.get(ids.runtimeNewer)?.updatedAt).toBe(later);
-      expect(frozen!.updatedAt < byId.get(ids.runtimeNewer)!.updatedAt).toBe(true);
+      expect(frozen?.work.state).toBe("waiting");
+      expect(frozen?.work.updatedAt).toBe(now);
+      expect(byId.get(ids.runtimeNewer)?.work.updatedAt).toBe(later);
+      // Reconciliation appended a fresh event to the older record, so its last
+      // journal position now sits past the turn that finished before it. Its
+      // first position does not move, and that is what orders the records: the
+      // newer turn is still read as the thread's latest one.
+      const newer = byId.get(ids.runtimeNewer)!;
+      expect(frozen!.firstSequence).toBeLessThan(newer.firstSequence);
+      expect(works.map((entry) => String(entry.work.id))).toEqual([
+        ids.runtime,
+        ids.runtimeNewer,
+        ids.runtimeAmbiguous,
+      ]);
+      const lastSequences = connection
+        .prepare(
+          "SELECT runtime_work_id, last_sequence FROM code_runtime_projection WHERE runtime_work_id IN (?, ?)",
+        )
+        .all(ids.runtime, ids.runtimeNewer) as ReadonlyArray<{
+        readonly runtime_work_id: string;
+        readonly last_sequence: number;
+      }>;
+      const lastById = new Map(
+        lastSequences.map((row) => [row.runtime_work_id, row.last_sequence]),
+      );
+      expect(lastById.get(ids.runtime)!).toBeGreaterThan(lastById.get(ids.runtimeNewer)!);
       // An outcome that could not be established stays unresolved rather than
       // being rewritten into a conclusion nobody observed.
-      expect(byId.get(ids.runtimeAmbiguous)?.state).toBe("ambiguous");
+      expect(byId.get(ids.runtimeAmbiguous)?.work.state).toBe("ambiguous");
     } finally {
       connection.close();
     }

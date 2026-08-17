@@ -1372,6 +1372,15 @@ ALTER TABLE context_summary_projection
   },
   {
     version: 45,
+    name: "record_code_runtime_first_sequence",
+    sql: `
+ALTER TABLE code_runtime_projection
+  ADD COLUMN first_sequence INTEGER
+    CHECK(first_sequence IS NULL OR first_sequence > 0);
+`,
+  },
+  {
+    version: 46,
     name: "create_code_thread_activity_projection",
     sql: CODE_THREAD_ACTIVITY_PROJECTION_SQL,
   },

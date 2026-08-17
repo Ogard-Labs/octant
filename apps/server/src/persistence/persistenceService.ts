@@ -102,6 +102,7 @@ import {
   readCodeThreads,
   readCodeThreadView,
   reconcileCodeRestart,
+  type ProjectedCodeRuntimeWork,
 } from "./codeProjection";
 import { databaseStatus, type DatabaseStatus } from "./recovery";
 import {
@@ -189,7 +190,9 @@ export interface PersistenceService {
   readonly readCodeFileReference: (fileId: CodeFileId) => CodeFileReference | undefined;
   readonly readCodeFileReferences: (threadId: CodeThreadId) => ReadonlyArray<CodeFileReference>;
   readonly readCodeRuntimeWork: (workId: CodeRuntimeWorkId) => CodeRuntimeWork | undefined;
-  readonly readCodeRuntimeWorks: (threadId: CodeThreadId) => ReadonlyArray<CodeRuntimeWork>;
+  readonly readCodeRuntimeWorks: (
+    threadId: CodeThreadId,
+  ) => ReadonlyArray<ProjectedCodeRuntimeWork>;
   readonly readCodeReviewFinding: (findingId: CodeReviewFindingId) => CodeReviewFinding | undefined;
   readonly readCodeReviewFindings: (threadId: CodeThreadId) => ReadonlyArray<CodeReviewFinding>;
   readonly readCodeThreadView: (threadId: CodeThreadId) => CodeThreadView | undefined;
