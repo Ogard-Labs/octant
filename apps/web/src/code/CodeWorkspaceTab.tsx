@@ -230,7 +230,12 @@ function useCodeEditorFile(options: {
       return;
     }
     let active = true;
-    const scope = `${threadId}/${checkoutId}/${relativePath}`;
+    // The execution policy is part of what the open file is, not a detail of
+    // it: a thread that drops to Plan mode must stop being writable now, not
+    // when the next `openFile` happens to settle. Leaving it out of the scope
+    // kept the old writable projection — Save included — through a slow or
+    // stalled request, after Plan mode was already in force.
+    const scope = `${threadId}/${checkoutId}/${relativePath}/${executionPolicy}`;
     if (openedScope.current !== scope) {
       openedScope.current = scope;
       setFile(undefined);

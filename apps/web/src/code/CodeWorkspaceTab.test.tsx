@@ -158,6 +158,22 @@ describe("CodeWorkspaceTab code files", () => {
     expect(await screen.findByText("Binary files are read-only.")).toBeVisible();
   });
 
+  // Plan mode is read-only, so it has to take effect when the thread enters it
+  // — not when the next open happens to answer. A stalled request used to leave
+  // the previous writable projection, Save included, on screen.
+  it("stops offering the writable file the moment the thread enters Plan mode", async () => {
+    const client = codeClient();
+    const view = render(<CodeWorkspaceTab controller={controller(client)} tab={fileTab()} />);
+    expect(await screen.findByLabelText("Code editor for src/index.ts")).toBeVisible();
+
+    vi.mocked(client.openFile).mockReturnValue(new Promise(() => undefined));
+    view.rerender(
+      <CodeWorkspaceTab controller={controller(client, undefined, "plan")} tab={fileTab()} />,
+    );
+
+    expect(screen.queryByLabelText("Code editor for src/index.ts")).toBeNull();
+  });
+
   it("re-opens the file through the host when the conflict action reloads it", async () => {
     const client = codeClient();
     vi.mocked(client.openFile)
@@ -295,6 +311,7 @@ function testTab() {
 function controller(
   client: ReturnType<typeof codeClient>,
   editorDrafts?: ReturnType<typeof draftStore>,
+  executionPolicy: "full-access" | "plan" = "full-access",
 ) {
   return {
     client,
@@ -311,7 +328,7 @@ function controller(
       thread: {
         id: ids.thread,
         checkoutId: ids.checkout,
-        executionPolicy: "full-access",
+        executionPolicy,
         lifecycle: "active",
         title: "Tests",
       },
