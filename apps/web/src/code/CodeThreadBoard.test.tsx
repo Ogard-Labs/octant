@@ -71,6 +71,13 @@ const projects = [
   { id: projectB, name: "Project B" },
 ];
 
+/** The card article that owns the thread title, whatever column it is in. */
+function cardFor(title: string): HTMLElement {
+  const card = screen.getByRole("button", { name: title }).closest("article");
+  if (card === null) throw new Error(`Expected a board card for ${title}`);
+  return card;
+}
+
 function memoryStorage() {
   const map = new Map<string, string>();
   return {
@@ -158,10 +165,21 @@ describe("CodeThreadBoard", () => {
     await screen.findByRole("region", { name: "Ready (1)" });
     expect(loadBoard).toHaveBeenCalledTimes(1);
 
+    // Status grouping: the column header states the status visibly, so the card
+    // carries it for assistive technology instead of relying on the dot color.
+    const statusStatus = within(cardFor("A thread")).getByText("Ready");
+    expect(statusStatus).toHaveClass("sr-only");
+
     fireEvent.click(screen.getByRole("radio", { name: "Project" }));
 
     expect(await screen.findByRole("region", { name: "Project A (1)" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Project B (1)" })).toBeVisible();
+    // Project grouping: no column states the status, so every card shows it as
+    // a visible chip rather than a colored dot alone.
+    const projectStatus = within(cardFor("A thread")).getByText("Ready");
+    expect(projectStatus).toBeVisible();
+    expect(projectStatus).not.toHaveClass("sr-only");
+    expect(within(cardFor("B thread")).getByText("Waiting")).toBeVisible();
     // Grouping is a pure client projection: no additional server query.
     expect(loadBoard).toHaveBeenCalledTimes(1);
   });

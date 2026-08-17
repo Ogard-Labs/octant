@@ -347,26 +347,56 @@ describe("boardRuntimeActivityFromWorks", () => {
       updatedAt,
     }) as never;
 
-  it("puts a thread in Waiting only for its most recent provider turn, never for leftover terminals", () => {
-    // A restart froze an old terminal and an old test run as interrupted, and
-    // the previous turn as waiting; the newest turn completed. Nothing here
-    // still needs the person.
+  it("ignores restart-frozen tool work and superseded turns", () => {
+    // A restart marked an old terminal and test run interrupted because their
+    // processes are gone, and the previous turn's wait was superseded by a
+    // newer completed turn. Nothing here still needs the person.
     expect(
       boardRuntimeActivityFromWorks([
         work("terminal", "interrupted", "2026-07-22T09:00:00.000Z"),
         work("test", "interrupted", "2026-07-22T09:01:00.000Z"),
-        work("provider-turn", "waiting", "2026-07-22T09:02:00.000Z"),
+        work("provider-turn", "interrupted", "2026-07-22T09:02:00.000Z"),
         work("provider-turn", "completed", "2026-07-22T09:30:00.000Z"),
       ]),
     ).toEqual({ executing: false, waiting: false });
+  });
 
+  it("keeps the thread Waiting for the latest interrupted provider turn", () => {
     expect(
       boardRuntimeActivityFromWorks([
         work("provider-turn", "completed", "2026-07-22T09:00:00.000Z"),
-        work("provider-turn", "waiting", "2026-07-22T09:30:00.000Z"),
+        work("provider-turn", "interrupted", "2026-07-22T09:30:00.000Z"),
       ]),
-    ).toMatchObject({ executing: false, waiting: true });
+    ).toEqual({
+      executing: false,
+      waiting: true,
+      blockingReason: "The last agent turn was interrupted.",
+    });
+  });
 
+  it("preserves an authoritative wait from every runtime work kind", () => {
+    // Git, delivery, review, and file work that genuinely reports `waiting` or
+    // `ambiguous` still owes the person a decision, even though the thread's
+    // latest provider turn has finished.
+    for (const kind of ["git", "delivery", "review", "file"] as const) {
+      expect(
+        boardRuntimeActivityFromWorks([
+          work("provider-turn", "completed", "2026-07-22T09:30:00.000Z"),
+          work(kind, "waiting", "2026-07-22T09:10:00.000Z"),
+        ]),
+      ).toEqual({
+        executing: false,
+        waiting: true,
+        blockingReason: "Runtime work is waiting for a decision or input.",
+      });
+    }
+
+    expect(
+      boardRuntimeActivityFromWorks([work("test", "ambiguous", "2026-07-22T09:10:00.000Z")]),
+    ).toMatchObject({ executing: false, waiting: true });
+  });
+
+  it("reports executing work without a blocking reason", () => {
     expect(
       boardRuntimeActivityFromWorks([
         work("provider-turn", "interrupted", "2026-07-22T09:00:00.000Z"),

@@ -471,6 +471,11 @@ function CodeBoardColumnView(props: {
   readonly onOpenThread?: (threadId: CodeThreadId) => void;
 }) {
   const { column } = props;
+  // A Status column header already states the status visibly, so its cards only
+  // need the status for assistive technology. Project and Recovery columns carry
+  // no status of their own, so their cards must show it as visible text — the
+  // colored dot alone is not a status.
+  const statusPresentation = column.kind === "status" ? "screen-reader" : "visible";
   return (
     <section
       aria-label={`${column.label} (${column.cards.length})`}
@@ -494,6 +499,7 @@ function CodeBoardColumnView(props: {
             <li key={String(card.threadId)}>
               <CodeBoardCardView
                 card={card}
+                statusPresentation={statusPresentation}
                 {...(() => {
                   const projectName = props.projectNames.get(String(card.projectId));
                   return projectName === undefined ? {} : { projectName };
@@ -510,10 +516,12 @@ function CodeBoardColumnView(props: {
 
 function CodeBoardCardView(props: {
   readonly card: CodeBoardCard;
+  readonly statusPresentation: "visible" | "screen-reader";
   readonly projectName?: string;
   readonly onOpen?: (threadId: CodeThreadId) => void;
 }) {
   const { card } = props;
+  const statusLabel = codeBoardStatusLabel(card.status);
   const stale =
     card.githubFreshness === "stale" ||
     card.changedFiles.kind === "unavailable" ||
@@ -527,12 +535,7 @@ function CodeBoardCardView(props: {
       data-status={card.status}
     >
       <div className="code-board__card-head">
-        <span
-          aria-hidden="true"
-          className="code-board__status-dot"
-          data-status={card.status}
-          title={codeBoardStatusLabel(card.status)}
-        />
+        <span aria-hidden="true" className="code-board__status-dot" data-status={card.status} />
         <button
           className="code-board__card-open"
           onClick={() => props.onOpen?.(card.threadId as CodeThreadId)}
@@ -540,6 +543,20 @@ function CodeBoardCardView(props: {
         >
           <span className="code-board__card-title">{card.title}</span>
         </button>
+        {/*
+         * The dot is decorative. The status itself is always text: a compact
+         * chip where the column does not state it, and screen-reader-only where
+         * the Status column header already does.
+         */}
+        <span
+          className={
+            props.statusPresentation === "visible"
+              ? "code-board__flag code-board__card-status"
+              : "sr-only"
+          }
+        >
+          {statusLabel}
+        </span>
       </div>
       <p className="code-board__card-meta-line">
         {props.projectName === undefined ? null : <span>{props.projectName}</span>}
@@ -600,10 +617,6 @@ function CodeBoardCardView(props: {
               <dd>{props.projectName}</dd>
             </div>
           )}
-          <div>
-            <dt>Status</dt>
-            <dd>{codeBoardStatusLabel(card.status)}</dd>
-          </div>
           <div>
             <dt>Delivery target</dt>
             <dd>{deliveryTargetLabel(card.outcomeKind)}</dd>

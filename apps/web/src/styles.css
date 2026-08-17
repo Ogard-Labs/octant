@@ -7136,6 +7136,12 @@ dialog.project-dialog {
   margin-top: 5px;
 }
 
+.code-board__card-status {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  white-space: nowrap;
+}
+
 .code-board__card-open {
   flex: 1 1 auto;
   min-width: 0;

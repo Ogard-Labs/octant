@@ -640,7 +640,14 @@ export function reconcileCodeRestart(input: {
     .all() as ReadonlyArray<CodeRuntimeProjectionRow>;
   for (const row of runtimeRows) {
     const work = decodeRuntimeRow(row);
-    const state = work.state === "running" ? "waiting" : "interrupted";
+    // A restart ends every OS process this host owned. Only a provider turn can
+    // legitimately survive as a wait — it may still be owed a resume or an
+    // approval — so it becomes `waiting`. File, terminal, test, Git, delivery,
+    // and review work has no process left to wait for and is `interrupted`;
+    // calling a dead shell "waiting" would leave the thread blocked forever.
+    // Ambiguous work stays interrupted because completion cannot be invented.
+    const state =
+      work.state === "running" && work.kind === "provider-turn" ? "waiting" : "interrupted";
     const reconciled = decodeCodeRuntimeWork({ ...work, state, updatedAt: input.reconciledAt });
     input.journal.append({
       aggregate: { aggregateType: "code-runtime", aggregateId: work.id },

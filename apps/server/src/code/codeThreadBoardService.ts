@@ -39,11 +39,11 @@ export interface CodeBoardThreadSource {
 /**
  * Live runtime activity for a thread derived from the operation runtime works.
  * `executing` is true while a provider turn, tool, or subagent is actively
- * running. `waiting` covers non-delivery wait signals — pending approval or
- * input, or provider recovery — that should surface a Waiting status even when
- * the delivery target is not itself waiting. Delivery-, CI-, and review-based
- * waiting is already captured by the metadata projection's delivery
- * satisfaction and does not need to be repeated here.
+ * running. `waiting` covers runtime wait signals — pending approval or input, an
+ * unresolved outcome, or an interrupted agent turn — that should surface a
+ * Waiting status even when the delivery target is not itself waiting. The
+ * delivery target's own satisfaction is evaluated separately by the metadata
+ * projection and is not repeated here.
  */
 export interface CodeBoardRuntimeActivity {
   readonly executing: boolean;
@@ -59,33 +59,36 @@ export interface CodeBoardRuntimeSource {
  * Derive a thread's board activity from its runtime work records.
  *
  * `executing` is any work still running. `waiting` is narrower than "some
- * record is not finished": only the thread's most recent provider turn can put
- * it in Waiting, and only while that turn is waiting for approval or input,
- * ambiguous, or interrupted. Terminals, tests, Git, and delivery work that a
- * restart left interrupted are runtime housekeeping, not something the person
- * owes the thread — a board that kept every such record in Waiting would never
- * let a thread return to Ready. Older provider turns are superseded by the
- * newer one, whatever state the restart froze them in.
+ * record is not finished". A record in `waiting` or `ambiguous` is an
+ * authoritative live wait whatever its kind: a Git push awaiting credentials, a
+ * delivery or review step awaiting a decision, or an unresolved file write all
+ * genuinely owe the person something. `interrupted` is different — restart
+ * reconciliation marks every non-provider work interrupted because its process
+ * is gone, so only the thread's latest provider turn can hold the thread in
+ * Waiting from that state. Older provider turns are superseded by the newer
+ * one, whatever state the restart froze them in.
  */
 export function boardRuntimeActivityFromWorks(
   works: ReadonlyArray<CodeRuntimeWork>,
 ): CodeBoardRuntimeActivity {
   const executing = works.some((work) => work.state === "running");
+  const liveWait = works.some((work) => work.state === "waiting" || work.state === "ambiguous");
   let latestTurn: CodeRuntimeWork | undefined;
   for (const work of works) {
     if (work.kind !== "provider-turn") continue;
     if (latestTurn === undefined || work.updatedAt >= latestTurn.updatedAt) latestTurn = work;
   }
-  const waiting =
-    latestTurn !== undefined &&
-    (latestTurn.state === "waiting" ||
-      latestTurn.state === "ambiguous" ||
-      latestTurn.state === "interrupted");
+  const interruptedTurn = latestTurn !== undefined && latestTurn.state === "interrupted";
+  const waiting = liveWait || interruptedTurn;
   return {
     executing,
     waiting,
     ...(waiting && !executing
-      ? { blockingReason: "The last agent turn is waiting or was interrupted." }
+      ? {
+          blockingReason: liveWait
+            ? "Runtime work is waiting for a decision or input."
+            : "The last agent turn was interrupted.",
+        }
       : {}),
   };
 }
