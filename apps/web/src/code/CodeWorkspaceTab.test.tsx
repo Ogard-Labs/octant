@@ -1,3 +1,4 @@
+import type { CodeFileChangeNotice } from "@octant/contracts";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -24,6 +25,20 @@ vi.mock("./monacoRuntime", () => ({
       setReadOnly: () => undefined,
       setValue: (value: string) => void (element.textContent = value),
     };
+  },
+}));
+
+/**
+ * The host's watch transport is covered where it lives; this file only needs to
+ * deliver a notice to the surface under test.
+ */
+const fileWatch = vi.hoisted(() => ({
+  notify: undefined as ((notice: CodeFileChangeNotice) => void) | undefined,
+}));
+vi.mock("./useCodeFileChangeWatch", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./useCodeFileChangeWatch")>()),
+  useCodeFileChangeWatch: (options: { readonly onChanged: (n: CodeFileChangeNotice) => void }) => {
+    fileWatch.notify = options.onChanged;
   },
 }));
 
@@ -174,6 +189,39 @@ describe("CodeWorkspaceTab code files", () => {
     await user.click(await screen.findByRole("button", { name: "Save src/index.ts" }));
     expect(client.save).toHaveBeenLastCalledWith(
       expect.objectContaining({ expectedDigest: "e".repeat(64), text: "edited after the reload" }),
+    );
+  });
+
+  it("reports a watched external change as a conflict instead of saving over it", async () => {
+    const client = codeClient();
+    vi.mocked(client.openFile)
+      .mockResolvedValueOnce(openedFile(ids.content, "d".repeat(64)))
+      .mockResolvedValue(openedFile(reloadedContentId, "e".repeat(64)));
+    vi.mocked(client.content).mockImplementation(async (contentId) =>
+      new TextEncoder().encode(
+        contentId === reloadedContentId ? "changed on disk" : "opened before the edit",
+      ),
+    );
+    vi.mocked(client.save).mockResolvedValue({ status: "conflict" } as never);
+    render(<CodeWorkspaceTab controller={controller(client)} tab={fileTab()} />);
+
+    await screen.findByText("opened before the edit");
+    act(() => editor.change?.("my unsaved draft"));
+    act(() => fileWatch.notify?.({ paths: ["src/index.ts"], truncated: false } as never));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "A new external revision is available.",
+    );
+
+    // The draft still belongs to the revision the user opened, so the save
+    // carries that revision and the host refuses it. Adopting the external
+    // digest here would overwrite the change nobody has looked at yet.
+    await userEvent.setup().click(screen.getByRole("button", { name: "Save src/index.ts" }));
+    expect(client.save).toHaveBeenCalledWith(
+      expect.objectContaining({ expectedDigest: "d".repeat(64), text: "my unsaved draft" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "This file changed outside this editor.",
     );
   });
 
