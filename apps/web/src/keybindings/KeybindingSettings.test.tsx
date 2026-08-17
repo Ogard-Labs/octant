@@ -38,6 +38,26 @@ describe("KeybindingSettings", () => {
     ).toHaveTextContent(/J/);
   });
 
+  it("starts up where reading the storage property itself throws", () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get: () => {
+        throw new Error("SecurityError");
+      },
+    });
+
+    try {
+      // A browser with site data blocked throws from the property, not from a
+      // later call, so keybindings have to survive never reaching storage at
+      // all rather than taking the whole settings surface down with them.
+      expect(createKeybindingStore().getSnapshot()).toBe("");
+    } finally {
+      if (original === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+      else Object.defineProperty(globalThis, "localStorage", original);
+    }
+  });
+
   it("keeps a chord for this sitting when storage refuses to persist it", async () => {
     const user = userEvent.setup();
     const refusing = createKeybindingStore({

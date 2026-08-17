@@ -22,8 +22,22 @@ export interface KeybindingStore {
   readonly subscribe: (listener: () => void) => () => void;
 }
 
+/**
+ * Reading the property is itself the risk: a browser with site data blocked
+ * throws `SecurityError` from the `localStorage` getter rather than from any
+ * later call, so a default argument that names it would fail before this
+ * store's own refusal handling could hold anything in memory.
+ */
+function defaultKeybindingStorage(): Pick<Storage, "getItem" | "setItem"> | undefined {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
 export function createKeybindingStore(
-  storage: Pick<Storage, "getItem" | "setItem"> | undefined = globalThis.localStorage,
+  storage: Pick<Storage, "getItem" | "setItem"> | undefined = defaultKeybindingStorage(),
 ): KeybindingStore {
   const listeners = new Set<() => void>();
   // Held only while storage refuses the document. Reading through otherwise is

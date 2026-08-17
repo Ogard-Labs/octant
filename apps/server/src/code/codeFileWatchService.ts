@@ -77,6 +77,7 @@ export class CodeFileWatchService {
 
     let pending = new Set<string>();
     let truncated = false;
+    let dropped = false;
     let live = true;
     let wake: (() => void) | undefined;
     const signal = (): void => {
@@ -104,6 +105,7 @@ export class CodeFileWatchService {
         // A watcher the host dropped cannot be trusted to report the next
         // change, so the stream ends and the client reconnects rather than
         // holding a subscription that silently observes nothing.
+        dropped = true;
         live = false;
         signal();
       },
@@ -147,6 +149,28 @@ export class CodeFileWatchService {
           continue;
         }
         yield notice;
+      }
+
+      if (dropped && !isAborted(request.signal)) {
+        // Reconnecting is not enough on its own: the changes made while nothing
+        // was watching are already lost, and an ordinary end of stream is
+        // indistinguishable from a quiet one. A truncated notice naming no path
+        // is the contract's way of saying the whole surface is stale, which is
+        // the only honest report left once the watcher is gone.
+        let farewell: CodeFileChangeNotice | undefined;
+        try {
+          farewell = decodeCodeFileChangeNotice({
+            kind: "code-file-change",
+            threadId: request.threadId,
+            checkoutId: request.checkoutId,
+            paths: [],
+            truncated: true,
+            observedAt: this.#clock(),
+          });
+        } catch {
+          farewell = undefined;
+        }
+        if (farewell !== undefined) yield farewell;
       }
     } finally {
       request.signal?.removeEventListener("abort", abort);

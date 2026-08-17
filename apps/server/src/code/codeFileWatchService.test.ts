@@ -151,14 +151,20 @@ describe("CodeFileWatchService", () => {
     await stream.return(undefined);
   });
 
-  it("ends the stream when the host drops the watcher", async () => {
+  it("says the whole surface is stale when the host drops the watcher", async () => {
     const port = emitter();
     const stream = service(port).watch({ threadId, checkoutId, rootPath });
     const next = stream.next();
     await port.subscribed;
     port.fail();
 
-    expect((await next).done).toBe(true);
+    // Reopening the watch cannot recover the changes made while nothing was
+    // watching, and a stream that simply ends looks the same as a quiet one.
+    // The last thing a dropped watch says is that everything must be re-read.
+    const notice = (await next).value;
+    expect(notice?.paths).toEqual([]);
+    expect(notice?.truncated).toBe(true);
+    expect((await stream.next()).done).toBe(true);
     expect(port.closed()).toBe(true);
   });
 
