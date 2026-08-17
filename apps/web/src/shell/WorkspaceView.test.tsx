@@ -1039,6 +1039,36 @@ describe("WorkspaceView tab isolation", () => {
     );
   });
 
+  // The tab is the only thing carrying the identity, so if it goes while the
+  // shell is still running there is nothing left to retry or stop it with.
+  it("keeps a terminal tab when its shell will not stop", async () => {
+    const terminalId = "b0000000-0000-4000-8000-000000000002";
+    const secondary = { ...codeTab("code-terminal", "Terminal 3"), terminalId } as WorkspaceTab;
+    const secondaryProps = propsFor(secondary);
+    const executeOperation = secondaryProps.codeController.client!.executeOperation as ReturnType<
+      typeof vi.fn
+    >;
+    executeOperation.mockImplementation(async (command) =>
+      command.kind === "stop-terminal"
+        ? {
+            kind: "operation-failed",
+            operationId: command.operationId,
+            failure: { kind: "denied" },
+          }
+        : gitObservation,
+    );
+    render(<WorkspaceView {...secondaryProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal 3" }));
+
+    await waitFor(() =>
+      expect(executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "stop-terminal" as const }),
+      ),
+    );
+    expect(secondaryProps.onClose).not.toHaveBeenCalled();
+  });
+
   it("closes one local server's tab without releasing the thread's other contexts", async () => {
     // Releasing the thread would stop every context it owns, taking the other
     // local servers' sessions down with this one.
@@ -1891,9 +1921,19 @@ function codeTab(kind: WorkspaceTab["kind"], title: string): WorkspaceTab {
 
 function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
   const client = codeClient();
-  (client.executeOperation as ReturnType<typeof vi.fn>).mockImplementation(async (command) =>
-    command.kind === "observe-pull-request" ? pullRequestReviewNone : gitObservation,
-  );
+  (client.executeOperation as ReturnType<typeof vi.fn>).mockImplementation(async (command) => {
+    if (command.kind === "observe-pull-request") return pullRequestReviewNone;
+    if (command.kind === "stop-terminal") {
+      return {
+        kind: "terminal-state",
+        operationId: command.operationId,
+        terminalId: command.terminalId,
+        state: "exited",
+        exitCode: 0,
+      };
+    }
+    return gitObservation;
+  });
   const layout = {
     kind: "group",
     nodeId: ids.node,
