@@ -170,6 +170,11 @@ export interface WorkspaceViewProps {
     kind: CodeOverviewSurfaceKind,
     threadId: CodeThreadId,
     title: string,
+    /**
+     * The terminal process a `code-terminal` surface must show, when the caller
+     * is opening a second shell rather than returning to the thread's first.
+     */
+    terminalId?: import("@octant/contracts/code").CodeTerminalId,
   ) => void;
   /**
    * Open one workspace surface, resolving to whether a tab bound to
@@ -499,11 +504,19 @@ function renderTab(
             ? {}
             : { appleToolchainClient: props.appleToolchainClient })}
           controller={props.codeController}
+          onOpenCodeThread={props.onOpenCodeThread}
           {...(props.onOpenSurface === undefined
             ? {}
             : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
-          onOpenSurface={(kind) =>
-            props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))
+          onOpenSurface={(kind, options) =>
+            options?.terminalId === undefined
+              ? props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))
+              : props.onOpenCodeSurface(
+                  kind,
+                  tab.threadId,
+                  codeSurfaceTitle(kind),
+                  options.terminalId,
+                )
           }
           {...(props.onOpenCodeFile === undefined
             ? {}

@@ -21,7 +21,7 @@ const modelId = "anthropic/claude-sonnet" as ProviderModelId;
 const now = "2026-07-15T00:00:00.000Z";
 
 describe("OpenCode driver", () => {
-  it("normalizes connected models, reasoning variants, and capabilities", () => {
+  it("reports that a model reasons without offering a variant it cannot send", () => {
     expect(
       normalizeOpenCodeProbe(instanceId, { version: "1.18.0" }, providerList(), now),
     ).toMatchObject({
@@ -36,7 +36,12 @@ describe("OpenCode driver", () => {
           verification: "verified",
           contextLimit: 200000,
           reasoning: "supported",
-          options: [{ id: "reasoning", kind: "selection", values: ["low", "high"] }],
+          // The fixture reports low/high variants, but this driver prompts with
+          // provider and model ids only. Declaring the variants would put a
+          // control in the composer whose choice is saved and then ignored, so
+          // the honest report is that the model reasons and nothing is
+          // selectable about how.
+          options: [],
         },
       ],
       capabilities: {

@@ -856,6 +856,63 @@ describe("RemoteConnection device-key possession", () => {
     // Session id rotates on renewal; device identity stays the same.
     expect(renewed.deviceId).toBe(firstSession.deviceId);
   });
+
+  it("renews a session the machine slept through instead of failing every request", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-16T08:00:00.000Z"));
+    try {
+      const server = createFakeServer({});
+      const { store } = createTestDeviceKeyStore();
+      const connection = createRemoteConnection({
+        origin: ORIGIN,
+        webBuildVersion: WEB_BUILD_VERSION,
+        fetch: server.fetch,
+        deviceKey: store,
+        pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+      });
+      await connection.connect();
+      const spentSessionId = connection.session()!.sessionId;
+
+      // Longer than the idle window: the session the client is holding is one
+      // the host will no longer accept.
+      vi.setSystemTime(new Date("2026-08-16T08:20:00.000Z"));
+      const response = await connection.authenticatedFetch({
+        method: "GET",
+        path: "/api/chat/threads",
+      });
+
+      expect(response.ok).toBe(true);
+      expect(connection.session()!.sessionId).not.toBe(spentSessionId);
+      expect(connection.state()).toBe("ready");
+      expect(connection.deviceIdentity()).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the pairing when the host is merely unreachable", async () => {
+    const server = createFakeServer({});
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+    await connection.connect();
+    const paired = connection.deviceIdentity()!;
+
+    connection.updateFetch(async () => {
+      throw new Error("network");
+    });
+    await expect(connection.reconnect()).rejects.toBeInstanceOf(RemoteConnectionError);
+
+    // An unreachable host said nothing about this credential, so the device
+    // stays paired and the next attempt can simply succeed.
+    expect(connection.state()).toBe("unavailable");
+    expect(connection.deviceIdentity()).toEqual(paired);
+  });
 });
 
 describe("RemoteConnection secret leakage", () => {

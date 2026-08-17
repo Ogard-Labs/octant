@@ -318,6 +318,35 @@ const StageGit = Schema.Struct({
   expectedStateToken: GitStateToken,
 }).annotations(strict);
 /**
+ * Take listed paths back out of the index, leaving the files themselves
+ * exactly as they are. Nothing is lost, so this is an ordinary index write
+ * rather than a destructive operation.
+ */
+const UnstageGit = Schema.Struct({
+  kind: Schema.Literal("unstage-git"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  paths: Schema.NonEmptyArray(GitStagePath).pipe(
+    Schema.filter(
+      (paths) => paths.length <= MAX_CODE_OPERATION_PATHS && new Set(paths).size === paths.length,
+    ),
+  ),
+  expectedStateToken: GitStateToken,
+}).annotations(strict);
+/**
+ * Ask this thread's own provider to draft delivery text from the change the
+ * checkout already shows.
+ *
+ * Reading a diff and writing a sentence changes nothing, so this needs no
+ * approval and never touches the checkout. The draft is a suggestion the user
+ * edits and sends themselves; nothing here commits, pushes, or opens anything.
+ */
+const DraftGitText = Schema.Struct({
+  kind: Schema.Literal("draft-git-text"),
+  ...OperationScope,
+  purpose: Schema.Literal("commit-message", "pull-request"),
+}).annotations(strict);
+/**
  * Throw away uncommitted work in the checkout. This is the one Git command
  * here that destroys content instead of recording it: what it removes was
  * never committed, so nothing in the repository can bring it back. It is
@@ -368,6 +397,42 @@ const PushGit = Schema.Struct({
         command.confirmation.refspec === `${command.localRef}:${command.remoteRef}`,
     ),
   );
+/**
+ * The state of a checkout at one moment, recorded as ordinary Git objects so
+ * nothing outside the repository has to hold the content.
+ *
+ * `worktree` is every tracked and untracked-but-not-ignored file as it stood;
+ * `index` is what was staged at the same moment, so restoring puts back the
+ * same staged/unstaged split the user had. Ignored files are not captured and
+ * are never touched by a restore.
+ */
+export const CodeCheckpoint = Schema.Struct({
+  worktree: GitObjectId,
+  index: GitObjectId,
+  /** The commit the checkout was on. Absent in a repository with no commits. */
+  head: Schema.optional(GitObjectId),
+}).annotations(strict);
+export type CodeCheckpoint = typeof CodeCheckpoint.Type;
+/**
+ * Put the checkout's files back the way a checkpoint recorded them.
+ *
+ * This overwrites uncommitted work with older content, so it is an
+ * approval-class `destructive-or-irreversible` operation like discarding. What
+ * it replaces is not lost: the host records a checkpoint of the current state
+ * first, and reports it back, so the restore is itself undoable.
+ *
+ * Unlike the other Git mutations this carries no state token. It does not
+ * apply a change to the state the caller was looking at; it names an exact
+ * recorded state to return to, which stays well defined however far the
+ * checkout has moved since — and moving on is precisely when a restore is
+ * wanted.
+ */
+const RestoreGitCheckpoint = Schema.Struct({
+  kind: Schema.Literal("restore-git-checkpoint"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  checkpoint: CodeCheckpoint,
+}).annotations(strict);
 const CreatePullRequest = Schema.Struct({
   kind: Schema.Literal("create-pull-request"),
   ...OperationScope,
@@ -514,6 +579,9 @@ export const CodeOperationCommand = Schema.Union(
   DiscardGitChanges,
   CommitGit,
   PushGit,
+  UnstageGit,
+  DraftGitText,
+  RestoreGitCheckpoint,
   CreatePullRequest,
   ObservePullRequest,
   MergePullRequest,
@@ -624,9 +692,23 @@ const GitMutationResult = Schema.Struct({
   kind: Schema.Literal("git-mutation-state"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
-  mutation: Schema.Literal("stage", "discard", "commit", "push", "revert"),
+  mutation: Schema.Literal(
+    "stage",
+    "unstage",
+    "discard",
+    "commit",
+    "push",
+    "revert",
+    "restore-checkpoint",
+  ),
   state: Schema.Literal("completed", "rejected", "failed"),
   headOid: Schema.optional(GitObjectId),
+  /**
+   * The state this mutation replaced, recorded before it ran. Present on a
+   * completed restore, which is what makes undoing one possible, and on a
+   * failed one, which may have moved files before it stopped.
+   */
+  undo: Schema.optional(CodeCheckpoint),
 }).annotations(strict);
 const PullRequestUrl = Schema.String.pipe(
   Schema.maxLength(2_048),
@@ -796,12 +878,29 @@ const OperationFailed = Schema.Struct({
   failure: CodeOperationFailure,
 }).annotations(strict);
 
+/**
+ * Delivery text a provider drafted from the checkout's own change. Plain
+ * suggestion: the user reads it, edits it, and decides whether to use it, so
+ * nothing here has been committed, pushed, or opened.
+ */
+const GitDraftResult = Schema.Struct({
+  kind: Schema.Literal("git-draft-state"),
+  operationId: CodeOperationId,
+  purpose: Schema.Literal("commit-message", "pull-request"),
+  state: Schema.Literal("completed", "unavailable", "failed"),
+  /** The one-line subject. Absent unless the draft completed. */
+  title: Schema.optional(boundedNonEmptyText(512)),
+  /** The longer body, when the provider wrote one. */
+  body: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES)),
+}).annotations(strict);
+
 export const CodeOperationResult = Schema.Union(
   OperationAccepted,
   TerminalStateResult,
   RepositoryTestResult,
   GitObservation,
   GitMutationResult,
+  GitDraftResult,
   PullRequestResult,
   PullRequestReviewResult,
   ReviewFindingResult,
@@ -834,6 +933,13 @@ const ConversationTurnStartedEvent = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
+  /**
+   * The checkout as it stood just before the provider was asked, so the user
+   * can put the files back the way they were at any message. Absent when the
+   * checkout could not be read, and on turns journaled before checkpoints
+   * existed.
+   */
+  checkpoint: Schema.optional(CodeCheckpoint),
 }).annotations(strict);
 const ContentEvent = Schema.Struct({
   kind: Schema.Literal("provider-content"),
@@ -904,6 +1010,24 @@ const UsageEvent = Schema.Struct({
   kind: Schema.Literal("usage"),
   inputTokens: Schema.Int.pipe(Schema.nonNegative()),
   outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  /**
+   * What the provider says this turn cost, in US dollars. Absent whenever the
+   * provider reports no cost: the host never derives one from a price list of
+   * its own.
+   */
+  costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+}).annotations(strict);
+/**
+ * How much of a provider usage window this account has spent, as the provider
+ * reported it during the turn. Recording it lets a thread show the window
+ * closing in before a turn fails against it.
+ */
+const ProviderLimitEvent = Schema.Struct({
+  kind: Schema.Literal("provider-limit"),
+  window: boundedNonEmptyText(64),
+  status: Schema.Literal("allowed", "warning", "exhausted"),
+  utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  resetsAt: Schema.optional(UtcTimestamp),
 }).annotations(strict);
 const ChildActivityEvent = Schema.Struct({
   kind: Schema.Literal("child-activity"),
@@ -929,6 +1053,7 @@ export const CodeOperationEvent = Schema.Union(
   DiffEvent,
   TaskProgressEvent,
   UsageEvent,
+  ProviderLimitEvent,
   ChildActivityEvent,
   ResultEvent,
 );
@@ -977,6 +1102,26 @@ export const CodeConversationStep = Schema.Union(
 );
 export type CodeConversationStep = typeof CodeConversationStep.Type;
 
+export const CodeConversationTurnUsage = Schema.Struct({
+  inputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  /** The provider's own price for the turn. Never one the host derived. */
+  costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+}).annotations(strict);
+export type CodeConversationTurnUsage = typeof CodeConversationTurnUsage.Type;
+
+/**
+ * How much of a provider usage window this account has spent, as last
+ * reported. Account state rather than turn state, so it belongs to the page.
+ */
+export const CodeProviderLimit = Schema.Struct({
+  window: boundedNonEmptyText(64),
+  status: Schema.Literal("allowed", "warning", "exhausted"),
+  utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  resetsAt: Schema.optional(UtcTimestamp),
+}).annotations(strict);
+export type CodeProviderLimit = typeof CodeProviderLimit.Type;
+
 export const CodeConversationTurn = Schema.Struct({
   operationId: CodeOperationId,
   providerInstanceId: ProviderInstanceId,
@@ -987,6 +1132,13 @@ export const CodeConversationTurn = Schema.Struct({
   attachments: Schema.optional(
     Schema.Array(CodeAttachmentReference).pipe(Schema.maxItems(MAX_CODE_TURN_ATTACHMENTS)),
   ),
+  /** The checkout as it stood before this turn ran, when the host caught it. */
+  checkpoint: Schema.optional(CodeCheckpoint),
+  /**
+   * What this turn consumed, as the provider reported it. Absent on a turn
+   * whose provider reported nothing, which is not the same as zero.
+   */
+  usage: Schema.optional(CodeConversationTurnUsage),
   assistant: Schema.Array(CodeEvidenceReference).pipe(
     Schema.filter((parts) => parts.length <= MAX_CODE_CONVERSATION_ASSISTANT_PARTS),
   ),
@@ -1017,6 +1169,11 @@ export const CodeConversationPage = Schema.Struct({
   ),
   nextCursor: Schema.Int.pipe(Schema.nonNegative()),
   hasMore: Schema.Boolean,
+  /**
+   * The provider usage windows this thread last heard about, most recent
+   * report per window. Absent when the provider reported none.
+   */
+  limits: Schema.optional(Schema.Array(CodeProviderLimit).pipe(Schema.maxItems(8))),
 }).annotations(strict);
 export type CodeConversationPage = typeof CodeConversationPage.Type;
 
@@ -1404,11 +1561,23 @@ export const CodeBoardView = Schema.Struct({
 }).annotations(strict);
 export type CodeBoardView = typeof CodeBoardView.Type;
 
+/**
+ * The effects a thread may seek an approval for.
+ *
+ * A command absent here cannot be approved at all, so in the approval-gated and
+ * auto-accept-edits postures it is not merely unprompted: the request fails to
+ * decode and the command never reaches the service. Every Git effect the
+ * renderer gates therefore has to appear, including the three that take work
+ * back out of the index or off the disk.
+ */
 const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "start-terminal",
   "run-repository-test",
   "cancel-repository-test",
   "stage-git",
+  "unstage-git",
+  "discard-git-changes",
+  "restore-git-checkpoint",
   "commit-git",
   "push-git",
   "create-pull-request",

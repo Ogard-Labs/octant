@@ -156,7 +156,7 @@ describe("CodeOverview", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Code sessions" })).toBeVisible(),
     );
-    expect(screen.getByRole("button", { name: /Controller foundation/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Controller foundation/ })).toBeVisible();
     expect(screen.queryByText("Another Project")).not.toBeInTheDocument();
     expect(
       screen.getByRole("region", { name: "Repository, checkout, and worktree" }),
@@ -180,7 +180,12 @@ describe("CodeOverview", () => {
     const message = screen.getByLabelText("First message");
     fireEvent.change(message, { target: { value: "Keep the draft" } });
     expect(message).toHaveValue("Keep the draft");
-    fireEvent.click(screen.getByRole("button", { name: /Controller foundation/ }));
+    // Pinning is only offered by this list, so a Project the board has already
+    // projected cards for must still show the control rather than hiding the
+    // command behind an empty-board state nobody reaches twice.
+    fireEvent.click(screen.getByRole("button", { name: "Pin Controller foundation" }));
+    expect(value.pinThread).toHaveBeenCalledWith(ids.thread, true);
+    fireEvent.click(screen.getByRole("button", { name: /^Controller foundation/ }));
     expect(onOpenThread).toHaveBeenCalledWith(ids.thread);
   });
 
@@ -308,6 +313,10 @@ function controller(): CodeController {
   return {
     activeView: { checkout, lastSequence: 1, thread } as never,
     answerProviderRequest: vi.fn(async () => true),
+    threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
+    forkThread: vi.fn(async () => undefined),
+    renameThread: vi.fn(async () => true),
+    pinThread: vi.fn(async () => true),
     cancelQueuedFollowUp: vi.fn(),
     queueFollowUp: vi.fn(),
     queuedFollowUps: [],
