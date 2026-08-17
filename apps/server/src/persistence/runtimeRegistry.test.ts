@@ -601,6 +601,7 @@ describe("createPhase1RuntimeRegistries", () => {
         lastContextSurface: null,
         modeSwitcherPresentation: "buttons",
         navigatorAssistant: {},
+        projectViewSwitcherPresentation: "dropdown",
         sidebarBackground: {
           kind: "none",
           overlayColor: "#1a1a1c",
@@ -623,6 +624,7 @@ describe("createPhase1RuntimeRegistries", () => {
           lastContextSurface,
           modeSwitcherPresentation,
           navigatorAssistant: {},
+          projectViewSwitcherPresentation: "dropdown",
           sidebarBackground: {
             kind: "none",
             overlayColor: "#1a1a1c",
@@ -655,6 +657,7 @@ describe("createPhase1RuntimeRegistries", () => {
         firstRunOnboarding: "completed",
         modeSwitcherPresentation: "buttons",
         navigatorAssistant: {},
+        projectViewSwitcherPresentation: "dropdown",
         sidebarBackground: {
           kind: "none",
           overlayColor: "#1a1a1c",
@@ -835,6 +838,7 @@ function validSettingsPayload() {
       modeSwitcherPresentation: "dropdown",
       // Unconfigured Navigator: the section decodes to its empty honest state.
       navigatorAssistant: {},
+      projectViewSwitcherPresentation: "dropdown",
       sidebarBackground: {
         kind: "none",
         overlayColor: "#1a1a1c",

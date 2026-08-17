@@ -8,6 +8,7 @@ import {
   isKnownThemeTokenRole,
 } from "./tokens";
 import { parseHexColor } from "./color";
+import { meetsContrast } from "./contrast";
 
 describe("theme semantic token catalog", () => {
   it("covers every required token category from the approved design", () => {
@@ -21,6 +22,7 @@ describe("theme semantic token catalog", () => {
     expect(categories).toContain("accent");
     expect(categories).toContain("status");
     expect(categories).toContain("diff");
+    expect(categories).toContain("palette");
   });
 
   it("covers application foundation, navigation, editor, terminal, diff, focus, and status surfaces", () => {
@@ -97,6 +99,26 @@ describe("theme semantic token catalog", () => {
       if (role.contrastTarget !== undefined) {
         expect(isKnownThemeTokenRole(role.contrastTarget)).toBe(true);
       }
+    }
+  });
+
+  it("keeps every palette choice legible on the sidebar in both modes", () => {
+    const palette = THEME_TOKEN_ROLES.filter((role) => role.category === "palette");
+    expect(palette.map((role) => role.id)).toEqual([
+      "palette-red",
+      "palette-orange",
+      "palette-yellow",
+      "palette-green",
+      "palette-teal",
+      "palette-blue",
+      "palette-purple",
+      "palette-pink",
+    ]);
+    for (const role of palette) {
+      expect(role.contrastTarget).toBe("sidebar");
+      expect(role.defaultLight).not.toBe(role.defaultDark);
+      expect(meetsContrast(role.defaultLight, DEFAULT_LIGHT_TOKENS["sidebar"]!, "ui")).toBe(true);
+      expect(meetsContrast(role.defaultDark, DEFAULT_DARK_TOKENS["sidebar"]!, "ui")).toBe(true);
     }
   });
 
