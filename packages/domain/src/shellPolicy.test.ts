@@ -170,6 +170,7 @@ describe("shell settings policy", () => {
       lastContextSurface: null,
       sidebarMaterial: "system",
       modeSwitcherPresentation: "buttons",
+      projectViewSwitcherPresentation: "dropdown",
       sidebarBackground: {
         kind: "none",
         overlayColor: "#1a1a1c",

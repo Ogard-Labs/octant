@@ -53,6 +53,7 @@ import {
   CodeOperationServiceError,
   type CodeOperationAuthorityPort,
   type CodeOperationEvidencePort,
+  type CodeOperationExecuteOptions,
   type CodeOperationGitPort,
   type CodeOperationPullRequestPort,
   type CodeOperationServiceOptions,
@@ -162,7 +163,11 @@ export interface CodeOperationRuntimeOptions {
 }
 
 export interface CodeOperationRuntime {
-  execute(windowId: WindowId, command: unknown): Promise<CodeOperationResult>;
+  execute(
+    windowId: WindowId,
+    command: unknown,
+    options?: CodeOperationExecuteOptions,
+  ): Promise<CodeOperationResult>;
   inspectTerminal(
     windowId: WindowId,
     input: import("@octant/contracts").CodeTerminalInspectionRequest,
@@ -451,11 +456,11 @@ export function createCodeOperationRuntime(
       });
     },
     revokeApprovals: (windowId) => approvalStore?.revokeWindow(windowId),
-    execute: async (windowId, rawCommand) => {
+    execute: async (windowId, rawCommand, options) => {
       const command = decodeCodeOperationCommand(rawCommand);
       if (command.kind === "start-provider-turn") turns.noteStart(command);
       try {
-        const result = await service.execute(windowId, command);
+        const result = await service.execute(windowId, command, options);
         if (
           command.kind === "start-provider-turn" &&
           result.kind === "provider-turn-state" &&

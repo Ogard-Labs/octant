@@ -67,14 +67,14 @@ receives an explicit normalized path set.
 
 ## Authority matrix
 
-| Operation                       | Plan                                                        | Approval-gated  | Full access |
-| ------------------------------- | ----------------------------------------------------------- | --------------- | ----------- |
-| Read, search, status, diff      | Allow                                                       | Allow           | Allow       |
-| Edit, save, rename, delete file | Deny                                                        | Prompt          | Allow       |
-| Start/stop terminal or test     | Deny                                                        | Prompt          | Allow       |
-| Stage, commit, push, create PR  | Deny                                                        | Prompt          | Allow       |
-| Merge or other PR mutation      | Deny everywhere                                             | Deny everywhere | Deny        |
-| Create sibling managed root     | Separate local-user confirmation (denied to remote clients) |                 |             |
+| Operation                       | Plan                                                        | Approval-gated                                           | Full access |
+| ------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------- | ----------- |
+| Read, search, status, diff      | Allow                                                       | Allow                                                    | Allow       |
+| Edit, save, rename, delete file | Deny                                                        | Prompt                                                   | Allow       |
+| Start/stop terminal or test     | Deny                                                        | Prompt (agent); your own terminal opens without a prompt | Allow       |
+| Stage, commit, push, create PR  | Deny                                                        | Prompt                                                   | Allow       |
+| Merge or other PR mutation      | Deny everywhere                                             | Deny everywhere                                          | Deny        |
+| Create sibling managed root     | Separate local-user confirmation (denied to remote clients) |                                                          |             |
 
 ## Pull Requests window
 

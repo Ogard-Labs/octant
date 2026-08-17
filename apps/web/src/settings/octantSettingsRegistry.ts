@@ -69,6 +69,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "mode switcher compact buttons dropdown sidebar navigation",
         },
         {
+          id: settingId("project-view-switcher"),
+          label: "Project view switcher",
+          scope: "app",
+          keywords: "project view switcher icons dropdown sidebar code",
+        },
+        {
           id: settingId("environment-presentation"),
           label: "Environment panel",
           scope: "app",

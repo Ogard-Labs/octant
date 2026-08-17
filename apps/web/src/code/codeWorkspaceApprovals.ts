@@ -18,7 +18,6 @@ export function nativeCodeWorkspaceApprovals(
     git: async (command) => (await approve(command)) as never,
     pullRequest: async (command) => (await approve(command)) as never,
     review: async ({ command }) => (await approve(command)) !== undefined,
-    terminal: async ({ command }) => (await approve(command)) !== undefined,
     test: async ({ command }) => (await approve(command)) !== undefined,
   };
 }

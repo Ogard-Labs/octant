@@ -107,6 +107,10 @@ export type SplitRatio = typeof SplitRatio.Type;
 export const ModeSwitcherPresentation = Schema.Literal("buttons", "dropdown");
 export type ModeSwitcherPresentation = typeof ModeSwitcherPresentation.Type;
 
+/** How the Code sidebar offers its saved project views: a dropdown or inline icon buttons. */
+export const ProjectViewSwitcherPresentation = Schema.Literal("dropdown", "inline");
+export type ProjectViewSwitcherPresentation = typeof ProjectViewSwitcherPresentation.Type;
+
 export const EnvironmentPresentation = Schema.Literal("floating", "pinned", "hidden");
 export type EnvironmentPresentation = typeof EnvironmentPresentation.Type;
 
@@ -218,6 +222,9 @@ export const ShellSettings = Schema.Struct({
   lastContextSurface: Schema.NullOr(ContextSurfaceId),
   sidebarMaterial: Schema.Literal("system", "opaque"),
   modeSwitcherPresentation: ModeSwitcherPresentation,
+  projectViewSwitcherPresentation: Schema.optionalWith(ProjectViewSwitcherPresentation, {
+    default: () => "dropdown" as const,
+  }),
   sidebarBackground: Schema.optionalWith(SidebarBackground, {
     default: () => DEFAULT_SIDEBAR_BACKGROUND,
   }),

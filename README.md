@@ -131,7 +131,8 @@ bun run dev
 `bun run dev` starts the Vite renderer for `apps/web` with hot reload and
 launches Electron against it. The desktop shell spawns the server from source:
 renderer edits hot-reload, server edits take effect on the next app relaunch,
-and only `apps/desktop/src` edits need `bun run --cwd apps/desktop build`.
+and `apps/desktop/src` edits are rebuilt automatically the next time you start
+`bun run dev`.
 
 To run the host without Electron and attach a browser client:
 

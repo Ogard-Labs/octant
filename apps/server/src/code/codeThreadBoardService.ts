@@ -4,6 +4,7 @@ import {
   type CodeBoardQuery,
   type CodeBoardStatus,
   type CodeBoardView,
+  type CodeRuntimeWork,
   type CodeThread,
   type CodeThreadId,
   type CodeThreadOperationalMetadata,
@@ -38,11 +39,11 @@ export interface CodeBoardThreadSource {
 /**
  * Live runtime activity for a thread derived from the operation runtime works.
  * `executing` is true while a provider turn, tool, or subagent is actively
- * running. `waiting` covers non-delivery wait signals — pending approval or
- * input, or provider recovery — that should surface a Waiting status even when
- * the delivery target is not itself waiting. Delivery-, CI-, and review-based
- * waiting is already captured by the metadata projection's delivery
- * satisfaction and does not need to be repeated here.
+ * running. `waiting` covers runtime wait signals — pending approval or input, an
+ * unresolved outcome, or an interrupted agent turn — that should surface a
+ * Waiting status even when the delivery target is not itself waiting. The
+ * delivery target's own satisfaction is evaluated separately by the metadata
+ * projection and is not repeated here.
  */
 export interface CodeBoardRuntimeActivity {
   readonly executing: boolean;
@@ -52,6 +53,77 @@ export interface CodeBoardRuntimeActivity {
 
 export interface CodeBoardRuntimeSource {
   observe(threadId: CodeThreadId): CodeBoardRuntimeActivity | Promise<CodeBoardRuntimeActivity>;
+}
+
+/**
+ * Derive a thread's board activity from its runtime work records.
+ *
+ * Only the thread's latest provider turn speaks for provider activity. A newer
+ * turn supersedes every older one whatever state it was frozen in, so a stale
+ * `running` or `waiting` row cannot pin an idle thread in In progress or
+ * Waiting. Non-provider work is aggregated across every record.
+ *
+ * `executing` is any contributing work still running. `waiting` is narrower
+ * than "some record is not finished". A record in `waiting` or `ambiguous` is
+ * an authoritative live wait whatever its kind: a Git push awaiting
+ * credentials, a delivery or review step awaiting a decision, or an unresolved
+ * file write all genuinely owe the person something. `interrupted` is
+ * different — restart reconciliation marks every non-provider work interrupted
+ * because its process is gone, so only the latest provider turn can hold the
+ * thread in Waiting from that state.
+ */
+const SETTLED_RUNTIME_STATES: ReadonlySet<CodeRuntimeWork["state"]> = new Set([
+  "completed",
+  "failed",
+]);
+
+/**
+ * Whether one provider turn supersedes another.
+ *
+ * `updatedAt` decides it whenever the two differ. Records written in the same
+ * millisecond carry no chronology, so the tie is broken deliberately rather
+ * than by whatever order the projection happened to return: a turn that still
+ * owes the person something outranks a settled one, because reporting Ready on
+ * the strength of record ordering would claim a thread is finished when the
+ * evidence does not say so. A remaining tie falls back to the work id, which is
+ * arbitrary but stable — the same input always yields the same status.
+ */
+function supersedes(candidate: CodeRuntimeWork, incumbent: CodeRuntimeWork): boolean {
+  if (candidate.updatedAt !== incumbent.updatedAt) {
+    return candidate.updatedAt > incumbent.updatedAt;
+  }
+  const candidateSettled = SETTLED_RUNTIME_STATES.has(candidate.state);
+  const incumbentSettled = SETTLED_RUNTIME_STATES.has(incumbent.state);
+  if (candidateSettled !== incumbentSettled) return incumbentSettled;
+  return String(candidate.id) > String(incumbent.id);
+}
+
+export function boardRuntimeActivityFromWorks(
+  works: ReadonlyArray<CodeRuntimeWork>,
+): CodeBoardRuntimeActivity {
+  let latestTurn: CodeRuntimeWork | undefined;
+  for (const work of works) {
+    if (work.kind !== "provider-turn") continue;
+    if (latestTurn === undefined || supersedes(work, latestTurn)) latestTurn = work;
+  }
+  const contributing = works.filter((work) => work.kind !== "provider-turn" || work === latestTurn);
+  const executing = contributing.some((work) => work.state === "running");
+  const liveWait = contributing.some(
+    (work) => work.state === "waiting" || work.state === "ambiguous",
+  );
+  const interruptedTurn = latestTurn !== undefined && latestTurn.state === "interrupted";
+  const waiting = liveWait || interruptedTurn;
+  return {
+    executing,
+    waiting,
+    ...(waiting && !executing
+      ? {
+          blockingReason: liveWait
+            ? "Runtime work is waiting for a decision or input."
+            : "The last agent turn was interrupted.",
+        }
+      : {}),
+  };
 }
 
 export interface CodeThreadBoardServiceDependencies {

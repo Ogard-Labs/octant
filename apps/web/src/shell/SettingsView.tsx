@@ -629,6 +629,30 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           </OctantNativeSelect>
         </SettingRow>
       ) : null}
+      {isAvailable("project-view-switcher") ? (
+        <SettingRow
+          description="How the Code sidebar offers saved project views."
+          focused={focusedSetting === settingId("project-view-switcher")}
+          label="Project view switcher"
+          scope="app"
+          settingId="project-view-switcher"
+        >
+          <OctantNativeSelect
+            aria-label="Project view switcher"
+            className="settings-view__select"
+            onChange={(event) =>
+              props.onSettingsChange({
+                projectViewSwitcherPresentation: event.currentTarget
+                  .value as ShellSettings["projectViewSwitcherPresentation"],
+              })
+            }
+            value={props.settings.projectViewSwitcherPresentation}
+          >
+            <option value="dropdown">Dropdown</option>
+            <option value="inline">Icon buttons</option>
+          </OctantNativeSelect>
+        </SettingRow>
+      ) : null}
       {isAvailable("environment-presentation") ? (
         <SettingRow
           description="Default presentation for the Environment panel in each mode."

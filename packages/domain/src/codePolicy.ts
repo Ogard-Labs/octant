@@ -44,9 +44,10 @@ export interface CodePolicyInput {
   /**
    * Who is asking. `agent` (default) is a provider acting on the user's
    * behalf and is what the approval-gated posture exists to gate. `user` is
-   * the local person acting directly (e.g. saving in the editor): their own
-   * action is the approval, so a plain edit needs no further prompt. Plan
-   * mode stays read-only for both.
+   * the local person acting directly (e.g. saving in the editor, opening a
+   * repository terminal): their own action is the approval, so a plain edit
+   * or their own confined shell needs no further prompt. Plan mode stays
+   * read-only for both.
    */
   readonly initiator?: "agent" | "user";
   /** When present, irreversible classes on tainted threads require fresh confirmation. */
@@ -177,7 +178,12 @@ function authorizeCodeOperationBase(input: CodePolicyInput): CodePolicyDecision 
 
   if (input.operation === "read") return { decision: "allow" };
   if (input.posture === "plan") return { decision: "deny" };
-  if (input.initiator === "user" && input.operation === "edit") return { decision: "allow" };
+  if (
+    input.initiator === "user" &&
+    (input.operation === "edit" || input.operation === "terminal")
+  ) {
+    return { decision: "allow" };
+  }
   // Auto-accept edits covers project file writes and nothing else: shell,
   // tests, and every Git effect keep prompting exactly as approval-gated does.
   if (input.posture === "auto-accept-edits" && input.operation === "edit") {

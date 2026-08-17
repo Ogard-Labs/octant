@@ -46,6 +46,7 @@ import { enabledModes } from "@octant/domain/mode-policy";
 import { sideChatTitle } from "@octant/domain";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { ProjectWindowTarget } from "./hostBridge";
+import { createTabActivationRegistry, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceTabDropDestination } from "./workspaceTabDragGeometry";
 
 export const SHELL_BOOTSTRAP_TIMEOUT_MS = 10_000;
@@ -64,6 +65,7 @@ export type ImplementedSettingId =
   | "sidebar-material"
   | "sidebar-background"
   | "mode-switcher"
+  | "project-view-switcher"
   | "environment-presentation"
   | "theme-mode"
   | "theme-preset"
@@ -280,6 +282,7 @@ const settingSearchText: Readonly<Record<ImplementedSettingId, string>> = {
   "sidebar-background":
     "sidebar background image preset gradient custom upload overlay color opacity vibrancy",
   "mode-switcher": "mode switcher compact buttons dropdown sidebar navigation",
+  "project-view-switcher": "project view switcher icons dropdown sidebar code",
   "environment-presentation":
     "environment panel presentation floating pinned hidden per mode default chat work code",
   "theme-mode": "theme mode system light dark appearance",
@@ -310,6 +313,7 @@ export function useShellController(options: ShellControllerOptions) {
   const mutationQueue = useRef<Promise<void>>(settledMutationQueue);
   const activeLoad = useRef<Promise<void> | undefined>(undefined);
   const mounted = useRef(true);
+  const tabActivation = useRef(createTabActivationRegistry()).current;
   const [status, setStatus] = useState<ShellControllerStatus>("loading");
   const [authoritative, setAuthoritative] = useState<AuthoritativeShell>();
   const [errorMessage, setErrorMessage] = useState<string>();
@@ -411,6 +415,7 @@ export function useShellController(options: ShellControllerOptions) {
           await commitPresentation(latest, mutation.presentation);
         } else {
           const workspaceMutation = createWorkspaceMutation(latest, mutation.intent);
+          noteTabActivation(tabActivation, workspaceMutation.operation);
           await commitWorkspaceOperation(
             latest,
             workspaceMutation.operation,
@@ -1109,6 +1114,7 @@ export function useShellController(options: ShellControllerOptions) {
     settingsSearch,
     splitGroup,
     status,
+    tabActivation,
     toggleCanvasTabPin,
     updateSettings,
     visibleSettings,
@@ -1122,6 +1128,20 @@ function normalizeSettingsSearch(value: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+/**
+ * Records the tab a workspace intent brings to the front. Every intent is a
+ * gesture in this window, so opening, switching to, or activating a tab is the
+ * person asking for it. A restored layout arrives through bootstrap instead and
+ * is deliberately never recorded.
+ */
+function noteTabActivation(registry: TabActivationRegistry, operation: WorkspaceOperation): void {
+  if (operation.kind === "open-tab" || operation.kind === "switch-project-tab") {
+    registry.noteActivated(operation.tab.id);
+    return;
+  }
+  if (operation.kind === "activate-tab") registry.noteActivated(operation.tabId);
 }
 
 function createWorkspaceMutation(

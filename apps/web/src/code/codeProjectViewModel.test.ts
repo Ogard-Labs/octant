@@ -66,7 +66,13 @@ describe("codeProjectViewModel", () => {
     const restored = readCodeProjectViewState(storage);
     expect(restored.activeViewId).toBe("view-main");
     expect(restored.views).toEqual([
-      { id: "view-main", name: "Main", projectIds: [alpha.id, "missing"] },
+      {
+        id: "view-main",
+        name: "Main",
+        projectIds: [alpha.id, "missing"],
+        icon: "folder",
+        color: "neutral",
+      },
     ]);
     expect(visibleCodeProjects([alpha, beta], restored)).toEqual([alpha]);
   });
@@ -80,12 +86,50 @@ describe("codeProjectViewModel", () => {
     const selected = selectCodeProjectView(
       {
         activeViewId: "view-main",
-        views: [{ id: "view-main", name: "Main", projectIds: [alpha.id] }],
+        views: [
+          {
+            id: "view-main",
+            name: "Main",
+            projectIds: [alpha.id],
+            icon: "folder",
+            color: "neutral",
+          },
+        ],
       },
       "missing",
     );
     expect(selected.activeViewId).toBe(ALL_CODE_PROJECTS_VIEW_ID);
     expect(visibleCodeProjects([alpha, beta], selected)).toEqual([alpha, beta]);
+  });
+
+  it("persists a view icon and color and normalizes unknown values to defaults", () => {
+    const storage = memoryStorage();
+    writeCodeProjectViewState(
+      createCodeProjectView(readCodeProjectViewState(storage), {
+        id: "view-main",
+        name: "Main",
+        projectIds: [alpha.id],
+        icon: "rocket",
+        color: "purple",
+      }),
+      storage,
+    );
+    expect(readCodeProjectViewState(storage).views[0]).toMatchObject({
+      icon: "rocket",
+      color: "purple",
+    });
+
+    storage.setItem(
+      CODE_PROJECT_VIEWS_STORAGE_KEY,
+      JSON.stringify({
+        activeViewId: "view-main",
+        views: [{ id: "view-main", name: "Main", projectIds: [alpha.id], icon: "nope", color: 42 }],
+      }),
+    );
+    expect(readCodeProjectViewState(storage).views[0]).toMatchObject({
+      icon: "folder",
+      color: "neutral",
+    });
   });
 
   it("rejects the reserved All Projects label", () => {
@@ -104,7 +148,15 @@ describe("codeProjectViewModel", () => {
     const next = deleteCodeProjectView(
       {
         activeViewId: "view-main",
-        views: [{ id: "view-main", name: "Main", projectIds: [alpha.id] }],
+        views: [
+          {
+            id: "view-main",
+            name: "Main",
+            projectIds: [alpha.id],
+            icon: "folder",
+            color: "neutral",
+          },
+        ],
       },
       "view-main",
     );

@@ -62,6 +62,38 @@ describe("ThemeService", () => {
     );
   });
 
+  it("carries a saved profile onto the current terminal font default", () => {
+    const test = fixture();
+    const legacyFamily = "'JetBrains Mono', 'SF Mono', Menlo, monospace";
+    const withLegacy = (family: string) => ({
+      settings: {
+        ...DEFAULT_THEME_SETTINGS,
+        mode: "dark" as const,
+        typography: {
+          ...DEFAULT_THEME_SETTINGS.typography,
+          terminal: { ...DEFAULT_THEME_SETTINGS.typography.terminal, family },
+        },
+      },
+      aggregateVersion: 4,
+    });
+
+    // Saving any appearance setting persisted the whole object, so this person
+    // holds the old stack without ever having chosen a terminal font.
+    test.setProjected(withLegacy(legacyFamily));
+    const migrated = test.service.bootstrap();
+    expect(migrated.settings.typography.terminal.family).toBe(
+      DEFAULT_THEME_SETTINGS.typography.terminal.family,
+    );
+    expect(migrated.settings.mode).toBe("dark");
+    expect(migrated.version).toBe(4);
+
+    // A family they actually chose is theirs and is left exactly as saved.
+    test.setProjected(withLegacy("'IBM Plex Mono', monospace"));
+    expect(test.service.bootstrap().settings.typography.terminal.family).toBe(
+      "'IBM Plex Mono', monospace",
+    );
+  });
+
   it("rejects stale or invalid changes without journaling", () => {
     const test = fixture();
     test.setProjected({ settings: DEFAULT_THEME_SETTINGS, aggregateVersion: 2 });

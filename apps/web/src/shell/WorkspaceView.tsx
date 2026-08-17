@@ -29,6 +29,7 @@ import { ProjectOverview } from "../projects/ProjectOverview";
 import type { OctantHostBridge } from "./hostBridge";
 import type { ProviderController } from "../providers/useProviderController";
 import { ShellState } from "./ShellState";
+import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
 import type { WorkspaceTabDropDestination } from "./workspaceTabDragGeometry";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
 import { Component, lazy, Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
@@ -236,6 +237,8 @@ export interface WorkspaceViewProps {
   readonly rootlessThreads?: ReadonlyMap<string, RootlessThreadSummary>;
   readonly onRetryRootlessThreads?: () => void;
   readonly statusBar?: ReactNode;
+  /** Session record of which tabs the person activated, opened, or created. */
+  readonly tabActivation?: TabActivationRegistry;
   readonly environmentPresentation: EnvironmentPresentationState;
   readonly onSetEnvironmentPresentation: (next: EnvironmentPresentationState) => void;
   readonly projectClient?: ProjectClient;
@@ -351,34 +354,38 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   );
 
   return (
-    <main className="workspace" hidden={props.hidden}>
-      {props.crossContextOffer === undefined ? null : (
-        <CrossContextBanner
-          message={props.crossContextOffer.message}
-          {...(props.onDismissCrossContextOffer === undefined
-            ? {}
-            : { onDismiss: props.onDismissCrossContextOffer })}
-          {...(props.onOpenCrossContextInNewWindow === undefined ||
-          !props.crossContextOffer.canOpenInNewWindow
-            ? {}
-            : { onOpenInNewWindow: props.onOpenCrossContextInNewWindow })}
-        />
-      )}
-      <SplitWorkspace
-        {...props}
-        onClose={closeTab}
-        {...(props.availableSurfaces === undefined
-          ? {}
-          : { availableSurfaces: props.availableSurfaces })}
-        {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
-        renderTab={(tab, groupId) => renderTab(tab, props, groupId, canvasContext)}
-        totalWorkspaceGroupCount={Object.values(props.workspace.layouts).reduce(
-          (count, layout) => count + countGroups(layout),
-          0,
+    <TabActivationProvider
+      {...(props.tabActivation === undefined ? {} : { registry: props.tabActivation })}
+    >
+      <main className="workspace" hidden={props.hidden}>
+        {props.crossContextOffer === undefined ? null : (
+          <CrossContextBanner
+            message={props.crossContextOffer.message}
+            {...(props.onDismissCrossContextOffer === undefined
+              ? {}
+              : { onDismiss: props.onDismissCrossContextOffer })}
+            {...(props.onOpenCrossContextInNewWindow === undefined ||
+            !props.crossContextOffer.canOpenInNewWindow
+              ? {}
+              : { onOpenInNewWindow: props.onOpenCrossContextInNewWindow })}
+          />
         )}
-      />
-      {props.statusBar}
-    </main>
+        <SplitWorkspace
+          {...props}
+          onClose={closeTab}
+          {...(props.availableSurfaces === undefined
+            ? {}
+            : { availableSurfaces: props.availableSurfaces })}
+          {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
+          renderTab={(tab, groupId) => renderTab(tab, props, groupId, canvasContext)}
+          totalWorkspaceGroupCount={Object.values(props.workspace.layouts).reduce(
+            (count, layout) => count + countGroups(layout),
+            0,
+          )}
+        />
+        {props.statusBar}
+      </main>
+    </TabActivationProvider>
   );
 }
 

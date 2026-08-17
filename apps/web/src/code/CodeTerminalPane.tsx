@@ -2,7 +2,6 @@ import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
 import type { CodeOperationId, CodeOperationResult } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
-import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { XtermTerminalAdapter, type XtermAdapterRuntime } from "./XtermTerminalAdapter";
@@ -22,9 +21,6 @@ export interface CodeTerminalPaneProps {
   readonly onAddSelectionToChat?: (selection: string) => void;
   /** Opens a second terminal for this thread. Absent when tabs cannot open. */
   readonly onOpenAnotherTerminal?: () => void;
-  readonly requestApproval?: (input: {
-    readonly command: Parameters<CodeClient["executeOperation"]>[0];
-  }) => Promise<boolean>;
   readonly restart?: {
     readonly columns: number;
     readonly createTerminalId: () => CodeTerminalId;
@@ -205,12 +201,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
               credentialRefs: props.restart!.credentialRefs,
               ...props.scope,
             } as const);
-      if (
-        action === "restart" &&
-        decidesCodeEffectsByApproval(props.executionPolicy) &&
-        (await props.requestApproval?.({ command })) !== true
-      )
-        return;
+      // The person at the window restarting their own terminal is the
+      // approval; the host authorizes it as a user-initiated operation.
       setFailure(undefined);
       const next = await props.client.executeOperation(command);
       if (next.kind === "terminal-state") setResult(next);

@@ -306,8 +306,11 @@ bun run verify     # wiring:check, fmt:check, lint, typecheck, test, build
 ```
 
 - `bun run dev` starts Vite for `apps/web` and launches Electron against it.
-  Renderer edits hot-reload; server edits apply on the next relaunch;
-  `apps/desktop/src` edits need `bun run --cwd apps/desktop build`.
+  Renderer edits hot-reload; server edits apply on the next relaunch. On
+  startup the dev script rebuilds `apps/desktop/dist/main.mjs` whenever
+  `apps/desktop/src` is newer, so `apps/desktop/src` edits need only a
+  restart of `bun run dev` rather than a manual
+  `bun run --cwd apps/desktop build`.
 - A headless host: `bun --cwd packages/cli src/bin.ts server run`, then
   `bun --cwd packages/cli src/bin.ts web` (or `web --dev` for Vite).
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be

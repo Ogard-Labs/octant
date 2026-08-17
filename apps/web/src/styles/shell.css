@@ -55,6 +55,33 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   pointer-events: none;
 }
 
+.shell.shell-frame.shell--sidebar-collapsed {
+  --octant-rendered-sidebar-width: 0px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shell--sidebar-collapsed.shell-frame > .window-chrome,
+.shell--sidebar-collapsed.shell-frame > .workspace-layer {
+  grid-column: 1;
+}
+
+.window-chrome__leading {
+  display: flex;
+  flex: 0 0 auto;
+  height: 100%;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  pointer-events: auto;
+}
+
+/* Same reserve the sidebar keeps for the macOS traffic lights (see
+   .sidebar__traffic-light-space); it moves here while the sidebar is hidden. */
+.window-chrome__traffic-light-space {
+  flex: 0 0 76px;
+  height: 100%;
+}
+
 .window-chrome__drag-space {
   align-self: stretch;
   flex: 1 1 auto;
