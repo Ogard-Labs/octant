@@ -72,13 +72,39 @@ export interface CodeBoardRuntimeSource {
  * because its process is gone, so only the latest provider turn can hold the
  * thread in Waiting from that state.
  */
+const SETTLED_RUNTIME_STATES: ReadonlySet<CodeRuntimeWork["state"]> = new Set([
+  "completed",
+  "failed",
+]);
+
+/**
+ * Whether one provider turn supersedes another.
+ *
+ * `updatedAt` decides it whenever the two differ. Records written in the same
+ * millisecond carry no chronology, so the tie is broken deliberately rather
+ * than by whatever order the projection happened to return: a turn that still
+ * owes the person something outranks a settled one, because reporting Ready on
+ * the strength of record ordering would claim a thread is finished when the
+ * evidence does not say so. A remaining tie falls back to the work id, which is
+ * arbitrary but stable — the same input always yields the same status.
+ */
+function supersedes(candidate: CodeRuntimeWork, incumbent: CodeRuntimeWork): boolean {
+  if (candidate.updatedAt !== incumbent.updatedAt) {
+    return candidate.updatedAt > incumbent.updatedAt;
+  }
+  const candidateSettled = SETTLED_RUNTIME_STATES.has(candidate.state);
+  const incumbentSettled = SETTLED_RUNTIME_STATES.has(incumbent.state);
+  if (candidateSettled !== incumbentSettled) return incumbentSettled;
+  return String(candidate.id) > String(incumbent.id);
+}
+
 export function boardRuntimeActivityFromWorks(
   works: ReadonlyArray<CodeRuntimeWork>,
 ): CodeBoardRuntimeActivity {
   let latestTurn: CodeRuntimeWork | undefined;
   for (const work of works) {
     if (work.kind !== "provider-turn") continue;
-    if (latestTurn === undefined || work.updatedAt >= latestTurn.updatedAt) latestTurn = work;
+    if (latestTurn === undefined || supersedes(work, latestTurn)) latestTurn = work;
   }
   const contributing = works.filter((work) => work.kind !== "provider-turn" || work === latestTurn);
   const executing = contributing.some((work) => work.state === "running");

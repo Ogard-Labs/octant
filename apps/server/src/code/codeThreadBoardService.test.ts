@@ -374,6 +374,21 @@ describe("boardRuntimeActivityFromWorks", () => {
     }
   });
 
+  it("breaks a same-millisecond turn tie toward the turn that still owes something", () => {
+    const tie = "2026-07-22T09:00:00.000Z";
+    const settled = { ...work("provider-turn", "completed", tie), id: "turn-z" } as CodeRuntimeWork;
+    const running = { ...work("provider-turn", "running", tie), id: "turn-a" } as CodeRuntimeWork;
+
+    // Records written in the same millisecond carry no chronology, so the
+    // answer must not depend on which one the projection returns first.
+    for (const order of [
+      [settled, running],
+      [running, settled],
+    ]) {
+      expect(boardRuntimeActivityFromWorks(order)).toEqual({ executing: true, waiting: false });
+    }
+  });
+
   it("keeps the thread Waiting for the latest interrupted provider turn", () => {
     expect(
       boardRuntimeActivityFromWorks([
