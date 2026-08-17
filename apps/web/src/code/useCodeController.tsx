@@ -121,9 +121,11 @@ export interface CodeThreadNavigationItem {
    */
   readonly followUp?: boolean;
   /**
-   * Whether the thread advanced since the user last had it open. Session-scoped
-   * like Chat's: an unread mark is about this sitting, and carrying it across
-   * restarts would resurface work the user already dealt with.
+   * Whether the thread's journaled activity advanced since the user last had it
+   * open — including a provider turn that ran entirely in the background.
+   * Session-scoped like Chat's: an unread mark is about this sitting, and
+   * carrying it across restarts would resurface work the user already dealt
+   * with.
    */
   readonly unread?: boolean;
   /** Whether the user pinned this thread to the top of the list. */
@@ -131,7 +133,11 @@ export interface CodeThreadNavigationItem {
 }
 
 /**
- * Per-thread record of the version the user has actually seen.
+ * Per-thread record of the activity sequence the user has actually seen.
+ *
+ * The sequence is the host's, from the bootstrap: a thread's own version cannot
+ * stand in for it, because a provider turn is journaled on a different
+ * aggregate and moves neither the version nor `updatedAt`.
  *
  * Deliberately in memory and deliberately shaped like Chat's: unread is a
  * property of this sitting at the app, so a durable one would tell the user
@@ -139,7 +145,7 @@ export interface CodeThreadNavigationItem {
  */
 export interface CodeReadCursorStore {
   readonly getSnapshot: () => ReadonlyMap<string, number>;
-  readonly mark: (threadId: CodeThreadId, version: number) => void;
+  readonly mark: (threadId: CodeThreadId, sequence: number) => void;
   readonly subscribe: (listener: () => void) => () => void;
 }
 
@@ -148,11 +154,11 @@ export function createCodeReadCursorStore(): CodeReadCursorStore {
   const listeners = new Set<() => void>();
   return {
     getSnapshot: () => snapshot,
-    mark: (threadId, version) => {
+    mark: (threadId, sequence) => {
       const key = String(threadId);
-      if (version <= (snapshot.get(key) ?? 0)) return;
+      if (sequence <= (snapshot.get(key) ?? 0)) return;
       const next = new Map(snapshot);
-      next.set(key, version);
+      next.set(key, sequence);
       snapshot = next;
       for (const listener of listeners) listener();
     },
@@ -429,8 +435,6 @@ export function useCodeController(options: CodeControllerOptions) {
   const installView = useCallback(
     (view: CodeThreadView) => {
       setActiveView(view);
-      // The thread is on screen, so everything it has reached is seen.
-      readCursorStore.mark(view.thread.id, Number(view.thread.version));
       setBootstrap((current) =>
         current === undefined
           ? current
@@ -443,7 +447,7 @@ export function useCodeController(options: CodeControllerOptions) {
       setStatus("ready");
       clearFailure();
     },
-    [clearFailure, readCursorStore],
+    [clearFailure],
   );
 
   const hydrateConversation = useCallback(
@@ -960,6 +964,27 @@ export function useCodeController(options: CodeControllerOptions) {
   const bootstrapRef = useRef(bootstrap);
   bootstrapRef.current = bootstrap;
 
+  // How far each thread's own journaled activity has reached. A provider turn
+  // never touches the thread aggregate, so this — not `thread.version` — is the
+  // only number that moves when one runs or finishes.
+  const activityByThread = useMemo(() => {
+    const byThread = new Map<string, number>();
+    for (const entry of bootstrap?.activity ?? []) {
+      byThread.set(String(entry.threadId), Number(entry.lastSequence));
+    }
+    return byThread;
+  }, [bootstrap]);
+
+  // The thread on screen is being read, so everything the host has journaled
+  // for it counts as seen. Re-marking on every refresh is what keeps a turn
+  // that finishes while the user is watching from raising a mark they would
+  // have to clear by hand.
+  useEffect(() => {
+    const threadId = options.activeThreadId;
+    if (threadId === undefined) return;
+    readCursorStore.mark(threadId, activityByThread.get(String(threadId)) ?? 0);
+  }, [activityByThread, options.activeThreadId, readCursorStore]);
+
   const navigation = useMemo(
     (): ReadonlyArray<CodeThreadNavigationItem> =>
       (bootstrap?.threads ?? [])
@@ -971,7 +996,9 @@ export function useCodeController(options: CodeControllerOptions) {
           threadId: thread.id,
           title: thread.title,
           followUp: followUps.get(String(thread.id))?.followUp?.state === "open",
-          unread: Number(thread.version) > (readCursors.get(String(thread.id)) ?? 0),
+          unread:
+            (activityByThread.get(String(thread.id)) ?? 0) >
+            (readCursors.get(String(thread.id)) ?? 0),
           ...(thread.pinned === true ? { pinned: true } : {}),
           updatedAt: thread.updatedAt,
         }))
@@ -979,16 +1006,17 @@ export function useCodeController(options: CodeControllerOptions) {
         // Sorting the whole list by recency instead would move a pinned thread
         // the moment anything else ran, which is the opposite of pinning it.
         .sort((left, right) => Number(right.pinned ?? false) - Number(left.pinned ?? false)),
-    [bootstrap, followUps, readCursors],
+    [activityByThread, bootstrap, followUps, readCursors],
   );
 
   // Only the thread in view streams, so the list is re-read on a timer to keep
   // titles, lifecycle, and access current for threads nobody is watching.
   //
-  // It does not yet report background provider output: a turn is journaled on
-  // the `code-operation` aggregate, so a thread's own version — which is what
-  // the unread mark compares — does not move when one finishes. Saying so is
-  // better than a mark that quietly never appears.
+  // The activity sequence is what makes background provider output visible
+  // here. A turn is journaled on the `code-operation` aggregate, so a thread's
+  // own version stands still while it runs; the host projects the operation
+  // events per thread and reports that instead, which is what the unread mark
+  // compares against.
   useEffect(() => {
     if (navigationRefreshMs <= 0) return;
     let cancelled = false;
@@ -998,7 +1026,9 @@ export function useCodeController(options: CodeControllerOptions) {
           const next = await client.bootstrap();
           if (cancelled || !mounted.current) return;
           setBootstrap((current) =>
-            current === undefined ? next : { ...current, threads: next.threads },
+            current === undefined
+              ? next
+              : { ...current, threads: next.threads, activity: next.activity },
           );
         } catch {
           // A refresh that fails leaves the last list on screen; the stream and
