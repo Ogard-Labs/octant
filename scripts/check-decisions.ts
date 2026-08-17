@@ -132,12 +132,36 @@ function findNumberingGaps(
       ];
 }
 
+/**
+ * The lines of a Markdown file with fenced blocks removed.
+ *
+ * These documents are allowed to show what a status line or an index row looks
+ * like — the conventions are written down here, examples and all. A matcher
+ * that reads the whole file cannot tell an example from the real declaration,
+ * so it would reject documentation for doing exactly what it should.
+ */
+function linesOutsideFences(content: string): ReadonlyArray<string> {
+  const lines: Array<string> = [];
+  let fenced = false;
+  for (const line of content.split("\n")) {
+    if (/^\s*(?:```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (!fenced) lines.push(line);
+  }
+  return lines;
+}
+
 function collectRecords(files: ReadonlyArray<ScannedFile>): ReadonlyArray<DecisionRecord> {
   return files.flatMap((file): ReadonlyArray<DecisionRecord> => {
     const named = /^docs\/decisions\/(\d{4})-[a-z0-9-]+\.md$/.exec(file.path);
     if (named === null) return [];
-    const heading = /^# (\d{4})\. (.+)$/m.exec(file.content);
-    const statuses = [...file.content.matchAll(/^\*\*Status:\*\* (.+)$/gm)];
+    // Every check below reads the record outside its fenced examples, so a
+    // record that documents the conventions is not judged by its own samples.
+    const content = linesOutsideFences(file.content).join("\n");
+    const heading = /^# (\d{4})\. (.+)$/m.exec(content);
+    const statuses = [...content.matchAll(/^\*\*Status:\*\* (.+)$/gm)];
     const status = statuses[0];
     return [
       {
@@ -147,7 +171,7 @@ function collectRecords(files: ReadonlyArray<ScannedFile>): ReadonlyArray<Decisi
         title: heading?.[2]?.trim(),
         status: status?.[1]?.trim(),
         statusDeclarations: statuses.length,
-        content: file.content,
+        content,
       },
     ];
   });
@@ -262,19 +286,26 @@ function findIndexDisagreements(
   return violations;
 }
 
+/** Only the `## Index` table is live index data; anything else is prose. */
 function parseIndexRows(content: string): ReadonlyArray<IndexRow> {
-  return content.split("\n").flatMap((line): ReadonlyArray<IndexRow> => {
+  const rows: Array<IndexRow> = [];
+  let indexed = false;
+  for (const line of linesOutsideFences(content)) {
+    if (/^##\s/.test(line)) {
+      indexed = /^##\s+Index\s*$/.test(line);
+      continue;
+    }
+    if (!indexed) continue;
     const cells = /^\|\s*\[(\d{4})\]\(([^)]+)\)\s*\|([^|]+)\|([^|]+)\|\s*$/.exec(line);
-    if (cells === null) return [];
-    return [
-      {
-        number: cells[1] ?? "",
-        target: (cells[2] ?? "").trim(),
-        title: (cells[3] ?? "").trim(),
-        status: (cells[4] ?? "").trim(),
-      },
-    ];
-  });
+    if (cells === null) continue;
+    rows.push({
+      number: cells[1] ?? "",
+      target: (cells[2] ?? "").trim(),
+      title: (cells[3] ?? "").trim(),
+      status: (cells[4] ?? "").trim(),
+    });
+  }
+  return rows;
 }
 
 /** Rule E: the contract never routes an agent to a record that is not there. */
@@ -283,13 +314,14 @@ function findUnroutableReferences(
   contract: ScannedFile | undefined,
 ): ReadonlyArray<DecisionViolation> {
   if (contract === undefined) return [];
+  const routing = linesOutsideFences(contract.content).join("\n");
   const referenced = new Set(
-    [...contract.content.matchAll(/docs\/decisions\/(\d{4})/g)].map((match) => match[1] ?? ""),
+    [...routing.matchAll(/docs\/decisions\/(\d{4})/g)].map((match) => match[1] ?? ""),
   );
   // A written range routes an agent to every record between its ends, so those
   // are references too. Checking only the two written numbers would let the
   // middle of a range be deleted without the gate noticing.
-  for (const range of contract.content.matchAll(
+  for (const range of routing.matchAll(
     /docs\/decisions\/(\d{4})`?\s*[–—-]\s*`?docs\/decisions\/(\d{4})/g,
   )) {
     const from = Number(range[1]);

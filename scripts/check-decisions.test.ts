@@ -29,7 +29,9 @@ function wellFormed(number: string, title: string, status = "Accepted"): string 
 function index(...rows: ReadonlyArray<string>): ScannedFile {
   return {
     path: "docs/decisions/README.md",
-    content: ["| ADR | Title | Status |", "| --- | --- | --- |", ...rows, ""].join("\n"),
+    content: ["## Index", "", "| ADR | Title | Status |", "| --- | --- | --- |", ...rows, ""].join(
+      "\n",
+    ),
   };
 }
 
@@ -191,6 +193,43 @@ describe("findDecisionViolations, on the gaps a weaker gate leaves", () => {
         index(row("0001", "first", "First", "Proposed")),
       ]),
     ).toContain("declares a status 2 times");
+  });
+
+  it("reads the conventions' own examples as examples, not declarations", () => {
+    // These documents are where the conventions are written down, so they show
+    // what a status line and an index row look like. Judging a record by its
+    // own samples would block the documentation for being complete.
+    const documented = [
+      wellFormed("0001", "First"),
+      "",
+      "```markdown",
+      "**Status:** Proposed",
+      "| [0042](0042-example.md) | Example | Accepted |",
+      "```",
+      "",
+    ].join("\n");
+    expect(
+      reasons([
+        { path: "docs/decisions/0001-first.md", content: documented },
+        {
+          path: "docs/decisions/README.md",
+          content: [
+            "## Index",
+            "",
+            "| ADR | Title | Status |",
+            "| --- | --- | --- |",
+            row("0001", "first", "First"),
+            "",
+            "## Adding an ADR",
+            "",
+            "```markdown",
+            row("0042", "example", "Example"),
+            "```",
+            "",
+          ].join("\n"),
+        },
+      ]),
+    ).toEqual([]);
   });
 
   it("checks the numbers a written range only implies", () => {
