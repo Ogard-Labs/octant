@@ -71,6 +71,13 @@ const projects = [
   { id: projectB, name: "Project B" },
 ];
 
+/** The card article that owns the thread title, whatever column it is in. */
+function cardFor(title: string): HTMLElement {
+  const card = screen.getByRole("button", { name: title }).closest("article");
+  if (card === null) throw new Error(`Expected a board card for ${title}`);
+  return card;
+}
+
 function memoryStorage() {
   const map = new Map<string, string>();
   return {
@@ -86,7 +93,7 @@ describe("CodeThreadBoard", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows populated Status columns, hides empty groups by default, and opens a thread", async () => {
+  it("renders every Status column by default, including empty ones, and opens a thread", async () => {
     const loadBoard = vi.fn(async () =>
       view([
         card({ id: "01", status: "ready", title: "Ready thread" }),
@@ -104,15 +111,24 @@ describe("CodeThreadBoard", () => {
     );
 
     await screen.findByRole("button", { name: "Ready thread" });
-    // Done remains first-class when populated, while empty groups stay out of the scan path.
+    // All four status columns are present in the approved order; empty ones stay
+    // visible with a quiet placeholder so the view reads as a board.
+    const columns = screen.getAllByRole("region", { name: /\(\d+\)$/ });
+    expect(columns.map((column) => column.getAttribute("aria-label"))).toEqual([
+      "Ready (1)",
+      "In Progress (0)",
+      "Waiting (0)",
+      "Done (1)",
+    ]);
     const doneColumn = screen.getByRole("region", { name: "Done (1)" });
     expect(within(doneColumn).getByText("Done thread")).toBeVisible();
-    expect(screen.getByRole("region", { name: "Ready (1)" })).toBeVisible();
-    expect(screen.queryByRole("region", { name: "In Progress (0)" })).not.toBeInTheDocument();
+    const waitingColumn = screen.getByRole("region", { name: "Waiting (0)" });
+    expect(within(waitingColumn).getByText("No threads")).toBeVisible();
 
     fireEvent.click(screen.getByText("View"));
     fireEvent.click(screen.getByRole("checkbox", { name: "Show empty groups" }));
-    expect(screen.getByRole("region", { name: "In Progress (0)" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "In Progress (0)" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Ready (1)" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Ready thread" }));
     expect(onOpenThread).toHaveBeenCalledWith("00000000-0000-4000-8000-000000005101");
@@ -126,13 +142,15 @@ describe("CodeThreadBoard", () => {
     );
 
     await screen.findByText("Thread 01");
+    expect(screen.getByRole("region", { name: "Done (0)" })).toBeVisible();
     fireEvent.click(screen.getByText("View"));
     fireEvent.click(screen.getByRole("checkbox", { name: "Show empty groups" }));
-    expect(screen.getByRole("region", { name: "Done (0)" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
     first.unmount();
 
     render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={storage} />);
-    expect(await screen.findByRole("region", { name: "Done (0)" })).toBeVisible();
+    await screen.findByText("Thread 01");
+    expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
   });
 
   it("switches to Project grouping without issuing another board query", async () => {
@@ -147,10 +165,21 @@ describe("CodeThreadBoard", () => {
     await screen.findByRole("region", { name: "Ready (1)" });
     expect(loadBoard).toHaveBeenCalledTimes(1);
 
+    // Status grouping: the column header states the status visibly, so the card
+    // carries it for assistive technology instead of relying on the dot color.
+    const statusStatus = within(cardFor("A thread")).getByText("Ready");
+    expect(statusStatus).toHaveClass("sr-only");
+
     fireEvent.click(screen.getByRole("radio", { name: "Project" }));
 
     expect(await screen.findByRole("region", { name: "Project A (1)" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Project B (1)" })).toBeVisible();
+    // Project grouping: no column states the status, so every card shows it as
+    // a visible chip rather than a colored dot alone.
+    const projectStatus = within(cardFor("A thread")).getByText("Ready");
+    expect(projectStatus).toBeVisible();
+    expect(projectStatus).not.toHaveClass("sr-only");
+    expect(within(cardFor("B thread")).getByText("Waiting")).toBeVisible();
     // Grouping is a pure client projection: no additional server query.
     expect(loadBoard).toHaveBeenCalledTimes(1);
   });
@@ -189,16 +218,19 @@ describe("CodeThreadBoard", () => {
     await waitFor(() => expect(loadBoard).toHaveBeenLastCalledWith({ version: 1 }));
   });
 
-  it("keeps advanced filters behind one disclosure and summarizes active choices", async () => {
+  it("keeps advanced filters in a Filters popover and summarizes active choices", async () => {
     const loadBoard = vi.fn(async () => view([card({ id: "01", status: "ready" })]));
     render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
     await screen.findByText("Thread 01");
+    expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Project" })).not.toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Pull request" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Project" }), {
+    const panel = screen.getByRole("dialog", { name: "Filters" });
+    expect(within(panel).getByRole("checkbox", { name: "Ready" })).toBeChecked();
+    fireEvent.change(within(panel).getByRole("combobox", { name: "Project" }), {
       target: { value: String(projectB) },
     });
     fireEvent.change(screen.getByRole("combobox", { name: "Pull request" }), {
@@ -217,9 +249,15 @@ describe("CodeThreadBoard", () => {
     expect(within(activeFilters).getByText("Project B")).toBeVisible();
     expect(within(activeFilters).getByText("Open PR")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Reset filters" }));
     await waitFor(() => expect(loadBoard).toHaveBeenLastCalledWith({ version: 1 }));
     expect(screen.getByRole("button", { name: "Filters" })).toBeVisible();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
+    // Escape unmounts the dialog the person was in, so focus goes back to the
+    // control that opened it rather than falling to the document body.
+    expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
   });
 
   it("keeps secondary card metadata collapsed until Details is opened", async () => {
@@ -265,6 +303,13 @@ describe("CodeThreadBoard", () => {
     const empty = message.closest("[role='status']");
     expect(empty).not.toBeNull();
     expect(empty).toHaveTextContent("No threads were deleted or completed");
+
+    // Status grouping still shows its four fixed columns: the column view is
+    // the point, and a board with nothing in it is when its shape matters most.
+    for (const column of ["Ready (0)", "In Progress (0)", "Waiting (0)", "Done (0)"]) {
+      const region = screen.getByRole("region", { name: column });
+      expect(within(region).getByText("No threads")).toBeVisible();
+    }
   });
 
   it("surfaces a recovering thread in a Recovery column with its reason", async () => {

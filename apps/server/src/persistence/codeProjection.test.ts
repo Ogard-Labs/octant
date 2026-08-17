@@ -20,6 +20,7 @@ import {
   readCodeThread,
   readCodeThreads,
   readCodeThreadView,
+  reconcileCodeRestart,
 } from "./codeProjection";
 import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
@@ -41,6 +42,8 @@ const ids = {
   file: "81000000-0000-4000-8000-000000000009",
   content: "81000000-0000-4000-8000-000000000010",
   runtime: "81000000-0000-4000-8000-000000000011",
+  runtimeNewer: "81000000-0000-4000-8000-000000000012",
+  runtimeAmbiguous: "81000000-0000-4000-8000-000000000013",
 } as const;
 const repositoryId = `repo_${"a".repeat(64)}`;
 
@@ -198,6 +201,65 @@ describe("CodeProjection", () => {
       expect(() => readCodeFileReference(connection, decodeCodeFileId(ids.file))).toThrow(
         "unsupported Code projection schema version",
       );
+    } finally {
+      connection.close();
+    }
+  });
+});
+
+describe("reconcileCodeRestart", () => {
+  it("keeps turn order and leaves an unresolved outcome unresolved", () => {
+    const { connection, journal } = openStore();
+    try {
+      appendFixture(journal);
+      const later = "2026-07-20T23:00:00.000Z";
+      const appendWork = (id: string, work: { kind: string; state: string; updatedAt: string }) => {
+        journal.append({
+          aggregate: { aggregateType: "code-runtime", aggregateId: id },
+          expectedVersion: 0,
+          events: [
+            {
+              eventId: `8100000a-0000-4000-8000-0000000001${id.slice(-2)}`,
+              eventName: "code.runtime-work-updated@1",
+              eventVersion: 1,
+              correlationId: ids.correlation,
+              actor: { kind: "system" as const, actorId: ids.actor },
+              occurredAt: work.updatedAt,
+              payload: {
+                kind: "runtime-work-updated",
+                work: { id, threadId: ids.thread, ...work },
+              },
+            },
+          ],
+        });
+      };
+      // A newer turn finished after the frozen one, and a Git push never
+      // reported an outcome.
+      appendWork(ids.runtimeNewer, {
+        kind: "provider-turn",
+        state: "completed",
+        updatedAt: later,
+      });
+      appendWork(ids.runtimeAmbiguous, { kind: "git", state: "ambiguous", updatedAt: now });
+
+      reconcileCodeRestart({
+        connection,
+        journal,
+        reconciledAt: "2026-07-21T08:00:00.000Z",
+      });
+
+      const works = readCodeRuntimeWorks(connection, decodeCodeThreadId(ids.thread));
+      const byId = new Map(works.map((work) => [String(work.id), work]));
+      // The frozen turn becomes a wait but keeps the time it last moved, so the
+      // newer completed turn is still the latest one.
+      const frozen = byId.get(ids.runtime);
+      expect(frozen?.state).toBe("waiting");
+      expect(frozen?.updatedAt).toBe(now);
+      expect(byId.get(ids.runtimeNewer)?.updatedAt).toBe(later);
+      expect(frozen!.updatedAt < byId.get(ids.runtimeNewer)!.updatedAt).toBe(true);
+      // An outcome that could not be established stays unresolved rather than
+      // being rewritten into a conclusion nobody observed.
+      expect(byId.get(ids.runtimeAmbiguous)?.state).toBe("ambiguous");
     } finally {
       connection.close();
     }

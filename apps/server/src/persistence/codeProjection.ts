@@ -635,13 +635,28 @@ export function reconcileCodeRestart(input: {
     });
   }
 
+  // Only running work is reconciled. `ambiguous` already says exactly what a
+  // restart leaves behind — an outcome that cannot be established — and the
+  // board treats it as a live wait for every kind, so rewriting it to
+  // `interrupted` would invent a conclusion and let an unresolved Git push,
+  // delivery, or review read as Ready.
   const runtimeRows = input.connection
-    .prepare("SELECT * FROM code_runtime_projection WHERE state IN ('running', 'ambiguous')")
+    .prepare("SELECT * FROM code_runtime_projection WHERE state = 'running'")
     .all() as ReadonlyArray<CodeRuntimeProjectionRow>;
   for (const row of runtimeRows) {
     const work = decodeRuntimeRow(row);
-    const state = work.state === "running" ? "waiting" : "interrupted";
-    const reconciled = decodeCodeRuntimeWork({ ...work, state, updatedAt: input.reconciledAt });
+    // A restart ends every OS process this host owned. Only a provider turn can
+    // legitimately survive as a wait — it may still be owed a resume or an
+    // approval — so it becomes `waiting`. File, terminal, test, Git, delivery,
+    // and review work has no process left to wait for and is `interrupted`;
+    // calling a dead shell "waiting" would leave the thread blocked forever.
+    const state = work.kind === "provider-turn" ? "waiting" : "interrupted";
+    // `updatedAt` keeps the moment this work last actually moved. Stamping the
+    // restart here would make an old frozen turn look newer than a turn that
+    // finished after it, and the board reads the latest provider turn to decide
+    // whether the thread is still owed anything. The reconciliation time lives
+    // on the event instead.
+    const reconciled = decodeCodeRuntimeWork({ ...work, state });
     input.journal.append({
       aggregate: { aggregateType: "code-runtime", aggregateId: work.id },
       expectedVersion: row.aggregate_version,

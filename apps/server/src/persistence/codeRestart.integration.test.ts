@@ -25,6 +25,7 @@ const ids = {
   file: "84000000-0000-4000-8000-000000000005",
   running: "84000000-0000-4000-8000-000000000006",
   ambiguous: "84000000-0000-4000-8000-000000000007",
+  runningTerminal: "84000000-0000-4000-8000-00000000000a",
 } as const;
 
 afterEach(() => {
@@ -34,7 +35,7 @@ afterEach(() => {
 });
 
 describe("Code persistence restart", () => {
-  it("fails stale checkout identity closed and reconciles ambiguous work without inventing completion", async () => {
+  it("fails stale checkout identity closed and reconciles running work without inventing completion or reordering turns", async () => {
     const directory = temporaryDirectory();
     const path = join(directory, "octant.sqlite3");
     const first = openSqlite(path);
@@ -48,6 +49,7 @@ describe("Code persistence restart", () => {
     });
     appendRuntime(journal, ids.running, "running", 101);
     appendRuntime(journal, ids.ambiguous, "ambiguous", 102);
+    appendRuntime(journal, ids.runningTerminal, "running", 107, "terminal");
     appendCheckout(journal, {
       id: ids.checkout,
       kind: "existing-worktree",
@@ -94,6 +96,9 @@ describe("Code persistence restart", () => {
           return {
             running: persistence.readCodeRuntimeWork(decodeCodeRuntimeWorkId(ids.running)),
             ambiguous: persistence.readCodeRuntimeWork(decodeCodeRuntimeWorkId(ids.ambiguous)),
+            runningTerminal: persistence.readCodeRuntimeWork(
+              decodeCodeRuntimeWorkId(ids.runningTerminal),
+            ),
             file: persistence.readCodeFileReference(decodeCodeFileId(ids.file)),
             existingCheckout: persistence.readCodeCheckout(decodeCodeCheckoutId(ids.checkout)),
             managedCheckout: persistence.readCodeCheckout(
@@ -108,8 +113,20 @@ describe("Code persistence restart", () => {
       ),
     );
 
-    expect(states.running).toMatchObject({ state: "waiting", updatedAt: restartedAt });
-    expect(states.ambiguous).toMatchObject({ state: "interrupted", updatedAt: restartedAt });
+    // A provider turn may still be owed a resume or an approval, so it waits.
+    // Its `updatedAt` keeps the moment the work last actually moved: stamping
+    // the restart would make a frozen turn look newer than one that finished
+    // after it, and the board reads the latest turn to decide what is owed.
+    expect(states.running).toMatchObject({ state: "waiting", updatedAt: now });
+    // An outcome that could not be established stays unresolved rather than
+    // being rewritten into a conclusion nobody observed.
+    expect(states.ambiguous).toMatchObject({ state: "ambiguous", updatedAt: now });
+    // A terminal's OS process did not survive the restart; it is interrupted,
+    // not waiting, so it can never hold its thread in Waiting forever.
+    expect(states.runningTerminal).toMatchObject({
+      state: "interrupted",
+      updatedAt: now,
+    });
     expect(states.file).toMatchObject({
       state: "interrupted",
       version: 2,
@@ -169,8 +186,11 @@ describe("Code persistence restart", () => {
       state: "waiting",
     });
     expect(readCodeRuntimeWork(rebuilt, decodeCodeRuntimeWorkId(ids.ambiguous))).toMatchObject({
-      state: "interrupted",
+      state: "ambiguous",
     });
+    expect(
+      readCodeRuntimeWork(rebuilt, decodeCodeRuntimeWorkId(ids.runningTerminal)),
+    ).toMatchObject({ state: "interrupted" });
     expect(readCodeFileReference(rebuilt, decodeCodeFileId(ids.file))).toMatchObject({
       state: "interrupted",
       version: 2,
@@ -295,6 +315,7 @@ function appendRuntime(
   runtimeWorkId: string,
   state: "running" | "ambiguous",
   eventSuffix: number,
+  kind: "provider-turn" | "terminal" = "provider-turn",
 ): void {
   journal.append({
     aggregate: { aggregateType: "code-runtime", aggregateId: runtimeWorkId },
@@ -312,7 +333,7 @@ function appendRuntime(
           work: {
             id: runtimeWorkId,
             threadId: ids.thread,
-            kind: "provider-turn",
+            kind,
             state,
             updatedAt: now,
           },
