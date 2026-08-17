@@ -14,7 +14,7 @@ import type { ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contra
 
 export type AcpProviderKind = Extract<
   ProviderDriverKind,
-  "kilo" | "devin" | "mistral-vibe" | "kimi-code"
+  "kilo" | "devin" | "mistral-vibe" | "kimi-code" | "grok"
 >;
 export type AcpSessionMode = "chat" | "work" | "code";
 
@@ -344,6 +344,73 @@ const vibeProfile: AcpProviderProfile = {
   },
 };
 
+const GROK_CONFIGURATION_TOML = [
+  "[cli]",
+  "auto_update = false",
+  "",
+  "[features]",
+  "telemetry = false",
+  "feedback = false",
+  "codebase_indexing = false",
+  "remote_fetch = false",
+  "",
+  "[session]",
+  "load_envrc = false",
+].join("\n");
+
+const grokProfile: AcpProviderProfile = {
+  kind: "grok",
+  displayName: "Grok Build",
+  reasoningOptionId: "thinking",
+  sessionMode: (mode, policy) => {
+    if (mode === "chat") return "default";
+    if (policy === "plan") return "plan";
+    if (policy === "full-access") return "bypassPermissions";
+    return "default";
+  },
+  chatSessionRoot: "managed-home",
+  userQuestions: "supported",
+  resumeMethod: "session/load",
+  closesSessions: true,
+  authenticateOnProbe: false,
+  authentication: { kind: "delegated-browser", apiKeyVariable: "XAI_API_KEY" },
+  unauthenticatedMessage:
+    "Grok Build is not authenticated. Sign in from Provider Settings, then retry.",
+  process: {
+    // UNVERIFIED against the real `grok` binary (no CLI access in this
+    // environment): confirm/correct against a live `grok --version` and ACP
+    // `initialize` response before enabling this driver for real users.
+    agentName: "Grok Build",
+    versionPattern:
+      /^(?:grok )?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?\r?\n?$/,
+    minimumVersion: [0, 1, 0],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    guards: {
+      GROK_TELEMETRY_ENABLED: "0",
+      GROK_TELEMETRY_TRACE_UPLOAD: "0",
+      GROK_TELEMETRY_MIXPANEL_ENABLED: "0",
+      GROK_FEEDBACK_ENABLED: "0",
+      GROK_MEMORY: "0",
+      GROK_SUBAGENTS: "0",
+      GROK_WORKFLOWS: "0",
+      GROK_SANDBOX: "off",
+      NO_COLOR: "1",
+    },
+    environment: ({ managedHome, apiKey }) => ({
+      GROK_HOME: managedHome,
+      ...(apiKey === undefined ? {} : { XAI_API_KEY: apiKey }),
+    }),
+    args: () => ["agent", "stdio"],
+    managedFiles: ({ managedHome }) => [
+      {
+        path: join(managedHome, "config.toml"),
+        content: `${GROK_CONFIGURATION_TOML}\n`,
+      },
+    ],
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
+
 const KIMI_REVIEWED_COMMANDS = [
   "compact",
   "status",
@@ -441,6 +508,7 @@ export const acpProviderProfiles: Readonly<Record<AcpProviderKind, AcpProviderPr
   devin: devinProfile,
   "mistral-vibe": vibeProfile,
   "kimi-code": kimiProfile,
+  grok: grokProfile,
 };
 
 export function isAcpProviderKind(kind: ProviderDriverKind): kind is AcpProviderKind {

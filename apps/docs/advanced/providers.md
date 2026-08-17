@@ -32,7 +32,7 @@ Check first.
 
 Local CLI and SDK providers include Codex CLI, Claude Agent SDK, Cursor,
 OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
-Ollama, and Kimi Code ACP.
+Ollama, Kimi Code ACP, and Grok Build ACP.
 
 ### API endpoints
 

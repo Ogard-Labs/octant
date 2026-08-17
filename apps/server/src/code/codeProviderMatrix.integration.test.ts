@@ -21,6 +21,7 @@ const CODE_OUTCOMES = {
   "kimi-code": "complete",
   kilo: "complete",
   "mistral-vibe": "complete",
+  grok: "complete",
   devin: "complete",
   pi: "complete",
   "oh-my-pi": "unavailable",
@@ -33,7 +34,7 @@ const CODE_OUTCOMES = {
 
 describe("Code provider matrix", () => {
   it("classifies every declared provider kind with conformance or explicit unavailability", () => {
-    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(14);
+    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(15);
     for (const [providerKind, outcome] of Object.entries(CODE_OUTCOMES) as Array<
       [ProviderDriverKind, CodeOutcome]
     >) {

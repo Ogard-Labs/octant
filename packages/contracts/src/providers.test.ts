@@ -53,6 +53,7 @@ describe("provider registry contracts", () => {
     "mistral-vibe",
     "ollama",
     "kimi-code",
+    "grok",
     "openai-compatible",
     "anthropic-compatible",
     "azure-foundry",
@@ -482,6 +483,69 @@ describe("provider registry contracts", () => {
       decodeProviderInstance({
         ...vibe,
         configuration: { ...vibe.configuration, authentication: "automatic" },
+      }),
+    ).toThrow();
+  });
+
+  it("decodes only strict non-secret Grok instances, events, and commands", () => {
+    const grok = {
+      id: ids.instance,
+      displayName: "Grok Build local",
+      driverKind: "grok",
+      configuration: {
+        kind: "grok-acp",
+        binaryPath: "/Users/example/.local/bin/grok",
+        authentication: "subscription",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(decodeProviderInstance(grok)).toEqual(grok);
+    expect(decodeProviderInstanceConfigurationChanged({ instance: grok })).toEqual({
+      instance: grok,
+    });
+    expect(() => decodeProviderInstanceBinaryChanged({ instance: grok })).toThrow();
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "create-grok-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: grok.displayName,
+        configuration: grok.configuration,
+      }),
+    ).toMatchObject({ kind: "create-grok-provider" });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "change-grok-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: { ...grok.configuration, authentication: "api-key" },
+      }),
+    ).toMatchObject({ kind: "change-grok-configuration" });
+
+    for (const excessField of ["apiKey", "oauthToken", "account", "grokHome", "sessionId"] as const) {
+      expect(() => decodeProviderInstance({ ...grok, [excessField]: "must-not-cross" })).toThrow();
+      expect(() =>
+        decodeProviderInstance({
+          ...grok,
+          configuration: { ...grok.configuration, [excessField]: "must-not-cross" },
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      decodeProviderInstance({
+        ...grok,
+        configuration: { ...grok.configuration, binaryPath: "bin/grok" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...grok,
+        configuration: { ...grok.configuration, authentication: "automatic" },
       }),
     ).toThrow();
   });

@@ -273,6 +273,39 @@ CREATE INDEX provider_instance_projection_enabled_idx
   ON provider_instance_projection(enabled);
 `;
 
+const ADD_GROK_PROVIDER_PROJECTION_SQL = `
+DROP INDEX provider_instance_projection_driver_idx;
+DROP INDEX provider_instance_projection_enabled_idx;
+
+ALTER TABLE provider_instance_projection RENAME TO provider_instance_projection_v44;
+
+CREATE TABLE provider_instance_projection (
+  instance_id TEXT PRIMARY KEY CHECK(length(trim(instance_id)) > 0),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  driver_kind TEXT NOT NULL CHECK(driver_kind IN (
+    'codex', 'claude', 'cursor', 'opencode', 'kilo', 'pi', 'oh-my-pi', 'devin',
+    'mistral-vibe', 'ollama', 'openai-compatible', 'kimi-code', 'anthropic-compatible',
+    'azure-foundry', 'grok'
+  )),
+  enabled INTEGER NOT NULL CHECK(enabled IN (0, 1)),
+  instance_json TEXT NOT NULL CHECK(json_valid(instance_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0)
+) STRICT;
+
+INSERT INTO provider_instance_projection (
+  instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+)
+SELECT instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+FROM provider_instance_projection_v44;
+
+DROP TABLE provider_instance_projection_v44;
+
+CREATE INDEX provider_instance_projection_driver_idx
+  ON provider_instance_projection(driver_kind);
+CREATE INDEX provider_instance_projection_enabled_idx
+  ON provider_instance_projection(enabled);
+`;
+
 const ZEN_PROJECTION_SQL = `
 CREATE TABLE zen_space_projection (
   space_id TEXT PRIMARY KEY CHECK(length(trim(space_id)) > 0),
@@ -1353,6 +1386,11 @@ ALTER TABLE context_summary_projection
     version: 44,
     name: "move_agent_run_text_to_subject_store",
     sql: AGENT_RUN_CONTENT_STORE_SQL,
+  },
+  {
+    version: 45,
+    name: "add_grok_provider_projection",
+    sql: ADD_GROK_PROVIDER_PROJECTION_SQL,
   },
 ];
 

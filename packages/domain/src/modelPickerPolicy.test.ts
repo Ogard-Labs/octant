@@ -168,6 +168,7 @@ describe("model picker policy", () => {
       expect(driverLabel("devin")).toBe("Devin ACP");
       expect(driverLabel("pi")).toBe("Pi RPC");
       expect(driverLabel("mistral-vibe")).toBe("Mistral Vibe ACP");
+      expect(driverLabel("grok")).toBe("Grok Build ACP");
       expect(driverLabel("cursor")).toBe("Cursor");
     });
   });

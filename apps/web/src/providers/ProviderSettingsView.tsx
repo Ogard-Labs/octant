@@ -8,6 +8,8 @@ import type {
   ClaudeProviderConfiguration,
   DevinProviderConfiguration,
   DiscoverySnapshot,
+  GrokAuthentication,
+  GrokProviderConfiguration,
   KiloProviderConfiguration,
   MistralVibeAuthentication,
   MistralVibeProviderConfiguration,
@@ -74,6 +76,11 @@ export interface ProviderSettingsViewProps {
     configuration: MistralVibeProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
+  readonly onCreateGrok: (
+    displayName: string,
+    configuration: GrokProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
   readonly onCreateOllama: (
     displayName: string,
     configuration: OllamaProviderConfiguration,
@@ -103,6 +110,11 @@ export interface ProviderSettingsViewProps {
   readonly onChangeMistralVibeConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: MistralVibeProviderConfiguration,
+    credential: TransientProviderCredential,
+  ) => Promise<boolean>;
+  readonly onChangeGrokConfiguration: (
+    instanceId: ProviderInstanceId,
+    configuration: GrokProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onChangeDevinConfiguration: (
@@ -188,6 +200,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
     | "oh-my-pi"
     | "ollama"
     | "mistral-vibe"
+    | "grok"
     | "openai-compatible"
     | "anthropic-compatible"
     | "azure-foundry"
@@ -196,6 +209,8 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
     useState<ClaudeAuthentication>("subscription");
   const [vibeAuthentication, setVibeAuthentication] =
     useState<MistralVibeAuthentication>("subscription");
+  const [grokAuthentication, setGrokAuthentication] =
+    useState<GrokAuthentication>("subscription");
   const credentialInput = useRef<HTMLInputElement>(null);
   const selectedDriverLabel = driverLabel(providerType);
   const selectedBinaryName =
@@ -290,7 +305,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
                             ? "Add Claude provider"
                             : providerType === "mistral-vibe"
                               ? "Add Mistral Vibe provider"
-                              : "Add provider"
+                              : providerType === "grok"
+                                ? "Add Grok Build provider"
+                                : "Add provider"
                 }
                 className={`provider-settings__create provider-settings__create--${providerType}`}
                 onSubmit={(event) => {
@@ -338,6 +355,20 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
                       String(data.get("displayName") ?? ""),
                       configuration,
                       vibeAuthentication === "api-key"
+                        ? enteredCredential
+                        : emptyTransientCredential(enteredCredential),
+                    );
+                  } else if (providerType === "grok") {
+                    const configuration: GrokProviderConfiguration = {
+                      kind: "grok-acp",
+                      binaryPath: String(data.get("binaryPath") ?? ""),
+                      authentication: grokAuthentication,
+                    };
+                    const enteredCredential = transientCredential(credentialInput.current);
+                    operation = props.onCreateGrok(
+                      String(data.get("displayName") ?? ""),
+                      configuration,
+                      grokAuthentication === "api-key"
                         ? enteredCredential
                         : emptyTransientCredential(enteredCredential),
                     );
@@ -403,6 +434,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
                     <option value="oh-my-pi">Oh My Pi</option>
                     <option value="ollama">Ollama native HTTP</option>
                     <option value="mistral-vibe">Mistral Vibe ACP</option>
+                    <option value="grok">Grok Build ACP</option>
                     <option value="openai-compatible">OpenAI-compatible HTTP</option>
                     <option value="anthropic-compatible">Anthropic-compatible HTTP</option>
                     <option value="azure-foundry">Azure AI Foundry</option>
@@ -673,6 +705,19 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
                     }}
                   />
                 ) : null}
+                {providerType === "grok" ? (
+                  <GrokCreateAuthenticationFields
+                    authentication={grokAuthentication}
+                    credentialInput={credentialInput}
+                    credentialManagementAvailable={props.credentialManagementAvailable}
+                    onAuthenticationChange={(next) => {
+                      if (next === "subscription" && credentialInput.current !== null) {
+                        credentialInput.current.value = "";
+                      }
+                      setGrokAuthentication(next);
+                    }}
+                  />
+                ) : null}
                 {providerType === "devin" ? (
                   <p className="provider-settings__field-guidance">
                     Uses provider-owned Devin subscription authentication. Run devin auth login in
@@ -708,6 +753,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
                       !props.credentialManagementAvailable) ||
                     (providerType === "mistral-vibe" &&
                       vibeAuthentication === "api-key" &&
+                      !props.credentialManagementAvailable) ||
+                    (providerType === "grok" &&
+                      grokAuthentication === "api-key" &&
                       !props.credentialManagementAvailable)
                   }
                   type="submit"
@@ -761,6 +809,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
                 onChangeBinary={props.onChangeBinary}
                 onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
                 onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
+                onChangeGrokConfiguration={props.onChangeGrokConfiguration}
                 onChangeDevinConfiguration={props.onChangeDevinConfiguration}
                 onChangeKiloConfiguration={props.onChangeKiloConfiguration}
                 onChangePiConfiguration={props.onChangePiConfiguration}
@@ -1161,6 +1210,51 @@ function VibeCreateAuthenticationFields(props: {
   );
 }
 
+function GrokCreateAuthenticationFields(props: {
+  readonly authentication: GrokAuthentication;
+  readonly credentialInput: RefObject<HTMLInputElement | null>;
+  readonly credentialManagementAvailable: boolean;
+  readonly onAuthenticationChange: (authentication: GrokAuthentication) => void;
+}) {
+  return (
+    <>
+      <label>
+        <span>Authentication</span>
+        <OctantNativeSelect
+          aria-label="Grok Build authentication"
+          className="settings-view__select window-no-drag"
+          onChange={(event) =>
+            props.onAuthenticationChange(event.currentTarget.value as GrokAuthentication)
+          }
+          value={props.authentication}
+        >
+          <option value="subscription">xAI subscription</option>
+          <option value="api-key">xAI API key</option>
+        </OctantNativeSelect>
+      </label>
+      {props.authentication === "api-key" ? (
+        <label>
+          <span>xAI API key</span>
+          <OctantInput
+            aria-label="xAI API key"
+            autoComplete="new-password"
+            className="settings-view__text-input window-no-drag"
+            disabled={!props.credentialManagementAvailable}
+            ref={props.credentialInput}
+            spellCheck={false}
+            type="password"
+          />
+        </label>
+      ) : (
+        <p className="provider-settings__field-guidance">
+          Create the provider, then use its browser sign-in action. Octant never receives the
+          resulting OAuth credential.
+        </p>
+      )}
+    </>
+  );
+}
+
 interface ProviderCardProps {
   readonly instance: ProviderInstance;
   readonly observed?: ProviderObservedState;
@@ -1177,6 +1271,7 @@ interface ProviderCardProps {
   readonly onChangeOhMyPiConfiguration: ProviderSettingsViewProps["onChangeOhMyPiConfiguration"];
   readonly onChangeOllamaConfiguration: ProviderSettingsViewProps["onChangeOllamaConfiguration"];
   readonly onChangeMistralVibeConfiguration: ProviderSettingsViewProps["onChangeMistralVibeConfiguration"];
+  readonly onChangeGrokConfiguration: ProviderSettingsViewProps["onChangeGrokConfiguration"];
   readonly onChangeOpenAiCompatibleConfiguration: ProviderSettingsViewProps["onChangeOpenAiCompatibleConfiguration"];
   readonly onChangeAnthropicCompatibleConfiguration: ProviderSettingsViewProps["onChangeAnthropicCompatibleConfiguration"];
   readonly onChangeAzureFoundryConfiguration: ProviderSettingsViewProps["onChangeAzureFoundryConfiguration"];
@@ -1205,6 +1300,7 @@ function ProviderCard(props: ProviderCardProps) {
     props.instance.driverKind === "kimi-code";
   const isClaude = props.instance.driverKind === "claude";
   const isVibe = props.instance.driverKind === "mistral-vibe";
+  const isGrok = props.instance.driverKind === "grok";
   const isDevin = props.instance.driverKind === "devin";
   const isKilo = props.instance.driverKind === "kilo";
   const isPi = props.instance.driverKind === "pi";
@@ -1217,12 +1313,12 @@ function ProviderCard(props: ProviderCardProps) {
     isHttp ||
     isAnthropicHttp ||
     isFoundry ||
-    ((isClaude || isVibe) && props.instance.configuration.authentication === "api-key");
+    ((isClaude || isVibe || isGrok) && props.instance.configuration.authentication === "api-key");
   const credential = useCredentialStatus(props, !usesCredential);
   const label = driverLabel(props.instance.driverKind);
   const runtimeLabel = isClaude
     ? "Agent SDK"
-    : isVibe || isDevin || isKilo
+    : isVibe || isGrok || isDevin || isKilo
       ? "ACP"
       : isPi || isOhMyPi
         ? "RPC"
@@ -1396,6 +1492,21 @@ function ProviderCard(props: ProviderCardProps) {
               ) : null}
             </div>
           )}
+          {!isGrok ? null : (
+            <div className="provider-card__facts provider-card__facts--grok">
+              <span>
+                Authentication:{" "}
+                {props.instance.configuration.authentication === "api-key"
+                  ? "xAI API key"
+                  : "xAI subscription"}
+              </span>
+              {props.instance.configuration.authentication === "api-key" ? (
+                <span>
+                  Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
+                </span>
+              ) : null}
+            </div>
+          )}
           {!isDevin ? null : (
             <div className="provider-card__facts provider-card__facts--devin">
               <span>Authentication: Devin subscription</span>
@@ -1438,6 +1549,7 @@ function ProviderCard(props: ProviderCardProps) {
           props.instance.driverKind === "kimi-code" ||
           isClaude ||
           isVibe ||
+          isGrok ||
           isDevin ||
           isKilo ||
           isPi ||
@@ -1561,6 +1673,17 @@ function ProviderCard(props: ProviderCardProps) {
                   key={`vibe:${props.instance.version}`}
                   onBeginAuthentication={props.onBeginProviderAuthentication}
                   onChange={props.onChangeMistralVibeConfiguration}
+                  onCompleteAuthentication={props.onCompleteProviderAuthentication}
+                />
+              ) : isGrok ? (
+                <GrokConfigurationForm
+                  credential={credential}
+                  credentialManagementAvailable={props.credentialManagementAvailable}
+                  disabled={disabled}
+                  instance={props.instance}
+                  key={`grok:${props.instance.version}`}
+                  onBeginAuthentication={props.onBeginProviderAuthentication}
+                  onChange={props.onChangeGrokConfiguration}
                   onCompleteAuthentication={props.onCompleteProviderAuthentication}
                 />
               ) : isDevin ? (
@@ -2052,6 +2175,120 @@ function VibeConfigurationForm(props: VibeConfigurationFormProps) {
       )}
       <OctantButton disabled={props.disabled} type="submit">
         Save Mistral Vibe settings for {props.instance.displayName}
+      </OctantButton>
+    </form>
+  );
+}
+
+interface GrokConfigurationFormProps {
+  readonly instance: Extract<ProviderInstance, { driverKind: "grok" }>;
+  readonly disabled: boolean;
+  readonly credentialManagementAvailable: boolean;
+  readonly credential: CredentialStatusController;
+  readonly onChange: ProviderSettingsViewProps["onChangeGrokConfiguration"];
+  readonly onBeginAuthentication: ProviderSettingsViewProps["onBeginProviderAuthentication"];
+  readonly onCompleteAuthentication: ProviderSettingsViewProps["onCompleteProviderAuthentication"];
+}
+
+function GrokConfigurationForm(props: GrokConfigurationFormProps) {
+  const credentialInput = useRef<HTMLInputElement>(null);
+  const [authentication, setAuthentication] = useState<GrokAuthentication>(
+    props.instance.configuration.authentication,
+  );
+  const [attempt, setAttempt] = useState<ProviderAuthenticationAttempt>();
+  return (
+    <form
+      className="provider-card__edit provider-card__edit--grok"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const configuration: GrokProviderConfiguration = {
+          kind: "grok-acp",
+          binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
+          authentication,
+        };
+        const enteredCredential = transientCredential(credentialInput.current);
+        const key =
+          authentication === "api-key"
+            ? enteredCredential
+            : emptyTransientCredential(enteredCredential);
+        void props.onChange(props.instance.id, configuration, key);
+      }}
+    >
+      <label>
+        <span>grok binary path</span>
+        <OctantInput
+          aria-label={`grok binary for ${props.instance.displayName}`}
+          className="settings-view__text-input"
+          defaultValue={props.instance.configuration.binaryPath}
+          name="binaryPath"
+          required
+        />
+      </label>
+      <label>
+        <span>Authentication</span>
+        <OctantNativeSelect
+          aria-label={`Grok Build authentication for ${props.instance.displayName}`}
+          className="settings-view__select"
+          onChange={(event) => {
+            const next = event.currentTarget.value as GrokAuthentication;
+            if (next === "subscription" && credentialInput.current !== null) {
+              credentialInput.current.value = "";
+            }
+            setAttempt(undefined);
+            setAuthentication(next);
+          }}
+          value={authentication}
+        >
+          <option value="subscription">xAI subscription</option>
+          <option value="api-key">xAI API key</option>
+        </OctantNativeSelect>
+      </label>
+      {authentication === "api-key" ? (
+        <label>
+          <span>xAI API key (leave blank to preserve)</span>
+          <OctantInput
+            aria-label={`xAI API key for ${props.instance.displayName}`}
+            autoComplete="new-password"
+            className="settings-view__text-input"
+            disabled={!props.credentialManagementAvailable}
+            ref={credentialInput}
+            spellCheck={false}
+            type="password"
+          />
+        </label>
+      ) : (
+        <div className="provider-card__credential-actions">
+          <OctantButton
+            disabled={props.disabled}
+            onClick={() => void props.onBeginAuthentication(props.instance.id).then(setAttempt)}
+            type="button"
+          >
+            Start xAI browser sign-in for {props.instance.displayName}
+          </OctantButton>
+          {attempt === undefined ? null : (
+            <>
+              <a href={attempt.signInUrl} rel="noreferrer" target="_blank">
+                Open xAI sign-in
+              </a>
+              <OctantButton
+                disabled={props.disabled}
+                onClick={() =>
+                  void props
+                    .onCompleteAuthentication(props.instance.id, attempt.attemptId)
+                    .then((completed) => {
+                      if (completed) setAttempt(undefined);
+                    })
+                }
+                type="button"
+              >
+                Complete xAI browser sign-in for {props.instance.displayName}
+              </OctantButton>
+            </>
+          )}
+        </div>
+      )}
+      <OctantButton disabled={props.disabled} type="submit">
+        Save Grok Build settings for {props.instance.displayName}
       </OctantButton>
     </form>
   );
@@ -2595,7 +2832,11 @@ function guidance(
                           ? instance.configuration.authentication === "api-key"
                             ? "Add or replace the Mistral API key in the Octant host, then check the connection again."
                             : "Use the Mistral browser sign-in action below, then check the connection again."
-                          : driverKind === "anthropic-compatible"
+                          : driverKind === "grok"
+                            ? instance.configuration.authentication === "api-key"
+                              ? "Add or replace the xAI API key in the Octant host, then check the connection again."
+                              : "Use the xAI browser sign-in action below, then check the connection again."
+                            : driverKind === "anthropic-compatible"
                             ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
                             : driverKind === "azure-foundry"
                               ? "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again."
@@ -2758,6 +2999,7 @@ function driverLabel(
   | "Oh My Pi"
   | "Ollama"
   | "Mistral Vibe"
+  | "Grok Build"
   | "OpenAI-compatible"
   | "Anthropic-compatible"
   | "Azure AI Foundry" {
@@ -2771,6 +3013,7 @@ function driverLabel(
   if (driverKind === "oh-my-pi") return "Oh My Pi";
   if (driverKind === "ollama") return "Ollama";
   if (driverKind === "mistral-vibe") return "Mistral Vibe";
+  if (driverKind === "grok") return "Grok Build";
   if (driverKind === "anthropic-compatible") return "Anthropic-compatible";
   if (driverKind === "azure-foundry") return "Azure AI Foundry";
   return "OpenAI-compatible";

@@ -457,6 +457,7 @@ function ProvidersSection(props: {
         onChangeOhMyPiConfiguration={props.providerController.changeOhMyPiConfiguration}
         onChangeOllamaConfiguration={props.providerController.changeOllamaConfiguration}
         onChangeMistralVibeConfiguration={props.providerController.changeMistralVibeConfiguration}
+        onChangeGrokConfiguration={props.providerController.changeGrokConfiguration}
         onChangeOpenAiCompatibleConfiguration={
           props.providerController.changeOpenAiCompatibleConfiguration
         }
@@ -470,6 +471,7 @@ function ProvidersSection(props: {
         onCreate={props.providerController.create}
         onCreateClaude={props.providerController.createClaude}
         onCreateMistralVibe={props.providerController.createMistralVibe}
+        onCreateGrok={props.providerController.createGrok}
         onCreateOllama={props.providerController.createOllama}
         onCreateOpenAiCompatible={props.providerController.createOpenAiCompatible}
         onCreateAnthropicCompatible={props.providerController.createAnthropicCompatible}

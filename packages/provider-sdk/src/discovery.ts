@@ -132,6 +132,15 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     isDirectEndpoint: false,
   },
   {
+    driverKind: "grok",
+    displayName: "Grok Build",
+    executableNames: ["grok"],
+    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
+    versionProbeArgs: ["--version"],
+    onboardingGuidance: "Run grok login in your terminal, then check the connection again.",
+    isDirectEndpoint: false,
+  },
+  {
     driverKind: "ollama",
     displayName: "Ollama",
     executableNames: ["ollama"],
