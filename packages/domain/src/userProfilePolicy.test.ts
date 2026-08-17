@@ -62,4 +62,11 @@ describe("profile completeness", () => {
       }),
     ).toBe(true);
   });
+
+  it("counts a colour the user chose, since the accent always holds a value", () => {
+    // Name, address, and picture are absent until given, so their presence is
+    // the answer. An accent is never absent, so only a change from the shipped
+    // one separates a choice from a default nobody looked at.
+    expect(isProfileConfigured({ accent: "teal", avatar: { kind: "initials" } })).toBe(true);
+  });
 });

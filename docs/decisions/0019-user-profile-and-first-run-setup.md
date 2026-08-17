@@ -43,10 +43,21 @@ calls unless a decision record and the request authorise them.
   turning Chat or Work off hides the mode without deleting its data, because a
   bare "Enable Work" toggle reads to a new user as a choice about whether their
   work will exist.
-- The rail's checkmark means "the host holds a real answer". Workspace settings
-  always hold a value, so for that step alone the checkmark means "changed from
-  what Octant ships with" — the only fact that separates a decision from a
-  default nobody looked at.
+- The rail's checkmark means "the host holds a real answer". Name, address, and
+  picture are absent until given, so their presence is the answer. Every
+  workspace setting and the avatar accent always hold a value, so for those the
+  checkmark means "changed from what Octant ships with" — the only fact that
+  separates a decision from a default nobody looked at.
+- Profile edits persist when they settle — a blurred field, a chosen accent, a
+  finished import — not when the step is left. Quitting the app is not one of
+  this dialog's exits, and an answer that waited for one would be lost by
+  someone who typed their name and closed the window. Settling is not
+  keystroking, so this costs a handful of writes, not one per character.
+- Settings writes are queued per surface, and each reads the expected version as
+  it goes out. A queued write is abandoned if an earlier one hit a conflict:
+  these commands carry the whole settings record, so re-stamping a stale one
+  with the reloaded version would get it accepted and put this window's old
+  values back over the ones another window just wrote.
 - Answers are recorded as they are made, so quitting part-way keeps what was
   already chosen. Only the first-run _outcome_ is recorded at the end, and
   dismissing the dialog records the same durable "skipped" outcome as the button.

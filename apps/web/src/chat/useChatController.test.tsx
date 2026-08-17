@@ -997,6 +997,56 @@ describe("useChatController", () => {
     await waitFor(() => expect(result.current.bootstrap?.settings.defaultModelId).toBe("model-c"));
   });
 
+  it("stands down a queued defaults write once another window has won", async () => {
+    const current = bootstrap();
+    const elsewhere = decodeChatBootstrap({
+      ...current,
+      settings: {
+        ...current.settings,
+        defaultPersonalityInstructions: "Be blunt.",
+        version: 2,
+      },
+    });
+    const execute = vi.fn(async () => {
+      throw new ChatClientFailure({ category: "stale", message: "Settings changed." });
+    });
+    const client = createMockClient({
+      bootstrap: vi.fn().mockResolvedValueOnce(current).mockResolvedValue(elsewhere),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute,
+    });
+    const { result } = renderHook(() =>
+      useChatController({ client, serverUrl: "http://127.0.0.1", windowCapability: capability }),
+    );
+    await waitFor(() => expect(result.current.bootstrap).toEqual(current));
+
+    const command = (modelId: string) => ({
+      kind: "update-chat-settings" as const,
+      expectedVersion: current.settings.version,
+      defaultProviderInstanceId: current.settings.defaultProviderInstanceId,
+      defaultModelId: modelId as never,
+      defaultResearchEnabled: current.settings.defaultResearchEnabled,
+      defaultResearchRouting: current.settings.defaultResearchRouting,
+      defaultPersonalityInstructions: current.settings.defaultPersonalityInstructions,
+    });
+
+    await act(async () => {
+      const first = result.current.updateSettings(command("model-b"));
+      const second = result.current.updateSettings(command("model-c"));
+      expect(await first).toBe(false);
+      expect(await second).toBe(false);
+    });
+
+    // The command carries the whole settings record. Re-stamping the second one
+    // with the reloaded version would get it accepted, putting this window's
+    // pre-conflict personality back over the one the other window just wrote.
+    expect(execute).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect(result.current.bootstrap?.settings.defaultPersonalityInstructions).toBe("Be blunt."),
+    );
+  });
+
   it("surfaces a stale Chat defaults conflict after loading authoritative values", async () => {
     const current = bootstrap();
     const updated = decodeChatBootstrap({

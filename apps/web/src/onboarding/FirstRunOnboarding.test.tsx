@@ -167,6 +167,20 @@ describe("FirstRunOnboarding", () => {
     );
   });
 
+  it("keeps a settled answer for someone who quits the app on the first step", async () => {
+    const user = userEvent.setup();
+    const props = mount();
+
+    await user.type(screen.getByLabelText("Name"), "Ada");
+    await user.tab();
+
+    // Quitting the app is not one of this dialog's exits, so waiting for
+    // Continue or Skip would lose a name the user had already finished giving.
+    expect(props.onSaveProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: "Ada" }),
+    );
+  });
+
   it("walks forward and back without losing the draft", async () => {
     const user = userEvent.setup();
     mount();

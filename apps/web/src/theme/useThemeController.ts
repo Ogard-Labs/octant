@@ -53,6 +53,11 @@ export function useThemeController(options: {
   // user chose last. Writes queue, and each reads the version as it goes out.
   const versionRef = useRef(0);
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+  // A conflict means another window wrote these settings and the host reloaded
+  // them. Anything already queued was composed from what this window held
+  // before that, so sending it at the reloaded version would put the other
+  // window's values back. Queued writes check this and stand down instead.
+  const conflicts = useRef(0);
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -103,6 +108,7 @@ export function useThemeController(options: {
       } catch (cause) {
         if (!mounted.current) return false;
         if (cause instanceof ThemeClientFailure && cause.category === "conflict") {
+          conflicts.current += 1;
           setStatus("conflict");
           setError(cause.message);
           void load();
@@ -123,8 +129,11 @@ export function useThemeController(options: {
       if (settings === undefined || draft === undefined) return false;
       // Queued behind whatever is already in flight, so this write expects the
       // version that one produced rather than the version this render saw.
+      const startedAt = conflicts.current;
       const started = queue.current;
-      const write = started.catch(() => undefined).then(async () => await send(next));
+      const write = started
+        .catch(() => undefined)
+        .then(async () => (conflicts.current === startedAt ? await send(next) : false));
       queue.current = write;
       return await write;
     },

@@ -1,4 +1,4 @@
-import type { ThemeClient } from "@octant/client-runtime/theme-client";
+import { ThemeClientFailure, type ThemeClient } from "@octant/client-runtime/theme-client";
 import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/theme";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -57,6 +57,35 @@ describe("useThemeController", () => {
     ]);
     expect(view.result.current.settings?.mode).toBe("dark");
     expect(view.result.current.status).toBe("ready");
+  });
+
+  it("stands down a queued write once another window has won", async () => {
+    const seen: Array<string> = [];
+    const client = {
+      bootstrap: async () => ({ settings: DEFAULT_THEME_SETTINGS, version: 1 }),
+      execute: async (command: { settings: ThemeSettings }) => {
+        seen.push(command.settings.mode);
+        throw new ThemeClientFailure({
+          category: "conflict",
+          message: "Appearance changed elsewhere.",
+          expectedVersion: 1 as never,
+          actualVersion: 2 as never,
+        });
+      },
+    } as unknown as ThemeClient;
+    const view = mount(client);
+    await waitFor(() => expect(view.result.current.status).toBe("ready"));
+
+    await act(async () => {
+      const first = view.result.current.applyPatch({ mode: "light" });
+      const second = view.result.current.applyPatch({ mode: "dark" });
+      expect(await first).toBe(false);
+      expect(await second).toBe(false);
+    });
+
+    // A write replaces the whole record, so re-sending the queued one against
+    // the reloaded version would put this window's stale values back.
+    expect(seen).toEqual(["light"]);
   });
 
   it("saves the value pressed, not the draft as it stood before the press", async () => {

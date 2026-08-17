@@ -220,6 +220,16 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   setProfileEdited(true);
                   setProfileDraft(next);
                 }}
+                // Quitting the app is not one of this dialog's exits, so an
+                // answer that waited for one would be lost by someone who
+                // typed their name and then closed the window. A settled edit
+                // is a blur or a chosen avatar, not a keystroke, so persisting
+                // it here costs a handful of writes rather than one per
+                // character.
+                onCommit={(next) => {
+                  setProfileEdited(false);
+                  props.onSaveProfile(next);
+                }}
                 profile={profileDraft}
                 {...(props.avatarEnvironment === undefined
                   ? {}

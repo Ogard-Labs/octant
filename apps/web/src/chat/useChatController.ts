@@ -87,6 +87,12 @@ export function useChatController(options: ChatControllerOptions) {
   // queued write sees the previous one's result without waiting for React.
   const settingsVersion = useRef<ChatBootstrap["settings"]["version"] | undefined>(undefined);
   const settingsQueue = useRef<Promise<unknown>>(Promise.resolve());
+  // A conflict means another window wrote these settings and the host reloaded
+  // them. An update command carries the whole record, so a queued write
+  // composed before that reload would be accepted at the new version and put
+  // this window's stale research, endpoint, and personality values back over
+  // the other window's. Queued writes check this and stand down instead.
+  const settingsConflicts = useRef(0);
   const [activeView, setActiveView] = useState<ChatThreadView | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [settingsMessage, setSettingsMessage] = useState<string | undefined>(undefined);
@@ -393,6 +399,7 @@ export function useChatController(options: ChatControllerOptions) {
         return undefined;
       }
       if (failureCategory(error) === "stale") {
+        if (command.kind === "update-chat-settings") settingsConflicts.current += 1;
         setStatus("conflict-reload");
         const reloaded = await loadBootstrap();
         if (command.kind === "update-chat-settings") {
@@ -453,10 +460,12 @@ export function useChatController(options: ChatControllerOptions) {
   async function updateSettings(
     command: Extract<ChatCommand, { kind: "update-chat-settings" }>,
   ): Promise<boolean> {
+    const startedAt = settingsConflicts.current;
     const started = settingsQueue.current;
     const write = started
       .catch(() => undefined)
       .then(async () => {
+        if (settingsConflicts.current !== startedAt) return false;
         const expectedVersion = settingsVersion.current ?? command.expectedVersion;
         const result = await execute({ ...command, expectedVersion });
         return result?.kind === "settings-updated";

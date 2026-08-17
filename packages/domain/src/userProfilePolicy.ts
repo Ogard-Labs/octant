@@ -1,4 +1,4 @@
-import type { UserProfile } from "@octant/contracts/user-profile";
+import { DEFAULT_AVATAR_ACCENT, type UserProfile } from "@octant/contracts/user-profile";
 
 /**
  * The letters an initials avatar shows.
@@ -68,6 +68,9 @@ export function isProfileConfigured(profile: UserProfile): boolean {
   return (
     profile.displayName !== undefined ||
     profile.email !== undefined ||
-    profile.avatar.kind === "image"
+    profile.avatar.kind === "image" ||
+    // A colour is the one field that always holds a value, so only a change
+    // from the shipped one separates a choice from a default nobody looked at.
+    profile.accent !== DEFAULT_AVATAR_ACCENT
   );
 }
