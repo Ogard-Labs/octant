@@ -33,6 +33,7 @@ import {
   type CanvasRefreshRequest,
   type CanvasRefreshSkill,
   type CapacityReservationId,
+  type CodeOperationId,
   type CodeThreadForkOrigin,
   type CodeThreadId,
   type WorkThreadId,
@@ -307,7 +308,7 @@ import {
   createWorkThreadMentionDirectory,
   createChatSideChatThreadFactory,
 } from "./chat/threadMentionService";
-import { buildCodeForkHandoff } from "./code/codeForkHandoff";
+import { codeForkHandoffResolver } from "./code/codeForkHandoff";
 import { createThreadMentionRouteHandler } from "./threadMentionRoutes";
 import { createLocalServerRouteHandler } from "./localServerRoutes";
 import { createLiveLocalListenerPort } from "./localServers/localListenerPort";
@@ -941,43 +942,22 @@ function observedCheckoutHeadMatches(
  * hold this: nothing is read until a turn actually runs.
  */
 /**
- * The conversation a forked Code thread inherits, for its own first turn only.
- *
- * A fork that has already answered has its own transcript to work from, so the
- * handoff is resolved once and never repeated — a later turn would be paying
- * for history the thread already carries. The Code service is reached lazily
- * because the runtime that holds this is composed before it exists.
+ * Reach the Code service's conversation and evidence readers for the fork
+ * handoff. Lazy because the runtime that holds the resolver is composed before
+ * the service exists; the decision about when a handoff is owed lives with the
+ * handoff itself.
  */
 function forkHandoffResolver(codeService: () => CodeRouteService) {
-  return async ({
-    threadId,
-    origin,
-    windowId,
-  }: {
-    readonly threadId: CodeThreadId;
-    readonly origin: CodeThreadForkOrigin;
-    readonly windowId: WindowId;
-  }): Promise<string | undefined> => {
+  return codeForkHandoffResolver(() => {
     const service = codeService();
     const conversation = service.conversation;
     const readEvidence = service.readOperationContent;
     if (conversation === undefined || readEvidence === undefined) return undefined;
-    try {
-      const own = await conversation(windowId, threadId, 0, 1);
-      if (own.turns.length > 0) return undefined;
-    } catch {
-      // A thread whose own transcript cannot be read may already have turns, so
-      // the handoff is withheld rather than risking a repeat of it.
-      return undefined;
-    }
-    return await buildCodeForkHandoff(
-      {
-        conversation: async (...args) => await conversation(...args),
-        readEvidence: async (...args) => await readEvidence(...args),
-      },
-      { windowId, origin },
-    );
-  };
+    return {
+      conversation: async (...args) => await conversation(...args),
+      readEvidence: async (...args) => await readEvidence(...args),
+    };
+  });
 }
 
 function threadMentionContextResolver(threadMentions: () => ThreadMentionService) {

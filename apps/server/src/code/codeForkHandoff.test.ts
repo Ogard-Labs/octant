@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildCodeForkHandoff,
+  codeForkHandoffResolver,
   type CodeForkHandoffOptions,
   type CodeForkHandoffTurn,
 } from "./codeForkHandoff";
@@ -110,5 +111,58 @@ describe("buildCodeForkHandoff", () => {
     // The turn the fork branched from is the one it continues, so it survives.
     expect(handoff).toContain("prompt-30");
     expect(handoff).not.toContain("prompt-1 ");
+  });
+});
+
+describe("codeForkHandoffResolver", () => {
+  const forkThreadId = "90000000-0000-4000-8000-000000000003" as never;
+  const asking = "operation-fork-1" as never;
+  const origin = { threadId: sourceThreadId, throughOperationId: "operation-1" as never };
+
+  /** Two transcripts behind one reader: the fork's own, and the source it came from. */
+  function ports(own: ReadonlyArray<CodeForkHandoffTurn>): () => CodeForkHandoffOptions {
+    const source = options([turn(1)]);
+    return () => ({
+      conversation: async (windowId, threadId, afterCursor, limit) =>
+        String(threadId) === String(forkThreadId)
+          ? { turns: own, nextCursor: 1, hasMore: false }
+          : await source.conversation(windowId, threadId, afterCursor, limit),
+      readEvidence: source.readEvidence,
+    });
+  }
+
+  it("hands over the source conversation on the turn that is asking for it", async () => {
+    // The asking turn's own start event is journaled before the handoff is
+    // resolved, so the fork's transcript already holds exactly this turn. A
+    // resolver that read that as history would withhold the handoff from every
+    // fork there has ever been.
+    const resolve = codeForkHandoffResolver(
+      ports([{ ...turn(1), operationId: asking, status: "incomplete" }]),
+    );
+
+    await expect(
+      resolve({ threadId: forkThreadId, origin, windowId, operationId: asking }),
+    ).resolves.toContain("User: prompt-1");
+  });
+
+  it("hands over nothing once the fork has a turn of its own", async () => {
+    const resolve = codeForkHandoffResolver(
+      ports([
+        { ...turn(1), operationId: "operation-fork-0" as never },
+        { ...turn(2), operationId: asking, status: "incomplete" },
+      ]),
+    );
+
+    await expect(
+      resolve({ threadId: forkThreadId, origin, windowId, operationId: asking }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("hands over nothing when the Code service is not composed yet", async () => {
+    const resolve = codeForkHandoffResolver(() => undefined);
+
+    await expect(
+      resolve({ threadId: forkThreadId, origin, windowId, operationId: asking }),
+    ).resolves.toBeUndefined();
   });
 });

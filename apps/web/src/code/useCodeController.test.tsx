@@ -696,6 +696,61 @@ describe("useCodeController", () => {
     ).not.toContain("plan.");
   });
 
+  it("reports a turn's latest usage figure rather than adding every report to the last", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000062";
+    // A provider that reports as it goes sends the turn's running total each
+    // time. Adding them would show 30 in for a turn that used 20, until the
+    // thread was reopened and the journal's own projection disagreed.
+    async function* frames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "usage", inputTokens: 10, outputTokens: 4, costUsd: 0.01 },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 2,
+        occurredAt: now,
+        event: { kind: "usage", inputTokens: 20, outputTokens: 9, costUsd: 0.02 },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 3,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      };
+    }
+    const client = fakeClient({
+      putEvidence: vi.fn(async () => ({
+        contentId: "60000000-0000-4000-8000-000000000062",
+        digest: "a".repeat(64),
+        byteLength: 4,
+      })) as never,
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId,
+        state: "running",
+      })) as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    await act(async () => {
+      await result.current.sendFollowUp("run it");
+    });
+
+    await waitFor(() => expect(result.current.threadUsage.outputTokens).toBe(9));
+    expect(result.current.threadUsage.inputTokens).toBe(20);
+    expect(result.current.threadUsage.costUsd).toBeCloseTo(0.02);
+  });
+
   it("sends a queued follow-up once the running turn settles, and forgets a cancelled one", async () => {
     const operationId = "70000000-0000-4000-8000-000000000041";
     const putEvidence = vi.fn(async () => ({

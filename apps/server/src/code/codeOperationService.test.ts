@@ -1114,7 +1114,9 @@ describe("CodeOperationService", () => {
     });
 
     // The origin comes from the thread record, never from the command, so a
-    // renderer cannot choose what history a turn is given.
+    // renderer cannot choose what history a turn is given. The asking turn is
+    // named too: its own start is already journalled, so the resolver cannot
+    // tell a first turn from a later one without it.
     expect(resolveForkHandoff).toHaveBeenCalledWith({
       threadId: thread().id,
       origin: {
@@ -1122,6 +1124,7 @@ describe("CodeOperationService", () => {
         throughOperationId: "c0000000-0000-4000-8000-0000000000ff",
       },
       windowId: ids.window,
+      operationId: startProviderTurn.operationId,
     });
     const started = fixture.turns.start.mock.calls[0]![0];
     expect((started.context ?? []).map((block) => block.text).join("\n")).toContain(
@@ -1129,6 +1132,30 @@ describe("CodeOperationService", () => {
     );
     // The durable message stays exactly what the user typed.
     expect(started.prompt).toBe("does this still hold?");
+  });
+
+  it("takes no restore point on a Plan turn, which may write nothing", async () => {
+    const checkpoint = vi.fn(async () => ({ status: "failed" as const }));
+    const planning = providerTurnFixture({
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "plan" }),
+      git: { checkpoint } as never,
+    });
+
+    await expect(planning.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+
+    // Capturing one stages the tree into a scratch index and writes trees into
+    // the object database. Plan mode promises the repository is not written to,
+    // and a turn that changes no file has nothing to restore anyway.
+    expect(checkpoint).not.toHaveBeenCalled();
+
+    const editing = providerTurnFixture({ git: { checkpoint } as never });
+    await expect(editing.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+    });
+    expect(checkpoint).toHaveBeenCalledOnce();
   });
 
   it("sends a thread that was never forked without asking for a handoff", async () => {
@@ -1227,7 +1254,11 @@ function providerTurnFixture(
   options: Partial<
     Pick<
       CodeOperationServiceOptions,
-      "resolveThreadMentionContext" | "resolveForkHandoff" | "attachments" | "supportsAttachments"
+      | "resolveThreadMentionContext"
+      | "resolveForkHandoff"
+      | "attachments"
+      | "supportsAttachments"
+      | "git"
     >
   > & { readonly thread?: CodeThread },
 ) {

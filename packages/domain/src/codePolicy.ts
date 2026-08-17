@@ -105,6 +105,20 @@ export function decidesCodeEffectsByApproval(posture: ProviderExecutionPolicy): 
   return posture === "approval-gated" || posture === "auto-accept-edits";
 }
 
+/**
+ * Whether a turn under this posture may leave the repository different than it
+ * found it.
+ *
+ * Plan is read-only, and read-only is a promise about the repository, not only
+ * about the working tree: a host that records a restore point by writing trees
+ * into the object database has still written to a repository the user was told
+ * nothing would be written to. Ask this before any preparatory write, not only
+ * before the effects a provider requests.
+ */
+export function mayWriteToRepository(posture: ProviderExecutionPolicy): boolean {
+  return posture !== "plan";
+}
+
 function standingGrantForPosture(posture: ProviderExecutionPolicy): StandingApprovalGrant {
   if (posture === "full-access") return "remembered-full-access";
   if (posture === "approval-gated" || posture === "auto-accept-edits") return "session";

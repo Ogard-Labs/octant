@@ -3,11 +3,20 @@ import type {
   GitObservation,
   GitObservationPort,
   GitObservationResult,
+  GitScopedDiffResult,
   GitStatusEntry,
 } from "./gitObservationPort";
 
 interface ObservationPort {
   observe(root: string, signal?: AbortSignal): Promise<GitObservationResult>;
+  /**
+   * Optional: an observation fake that only answers `observe` reports no
+   * scoped diff rather than being unusable.
+   */
+  readDiff?: (
+    input: Parameters<GitObservationPort["readDiff"]>[0],
+    signal?: AbortSignal,
+  ) => Promise<GitScopedDiffResult>;
 }
 
 interface MutationPort {
@@ -81,6 +90,14 @@ export class GitService {
 
   observe(root: string, signal?: AbortSignal): Promise<GitObservationResult> {
     return this.#observation.observe(root, signal);
+  }
+
+  /** Read one named slice of the checkout's changes. Read-only, so unqueued. */
+  async readDiff(
+    input: Parameters<GitObservationPort["readDiff"]>[0],
+    signal?: AbortSignal,
+  ): Promise<GitScopedDiffResult> {
+    return (await this.#observation.readDiff?.(input, signal)) ?? { status: "unavailable" };
   }
 
   stage(

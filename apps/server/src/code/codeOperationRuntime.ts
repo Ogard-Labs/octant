@@ -35,7 +35,11 @@ import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/dr
 import type { Journal } from "../persistence/journal";
 import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
-import { GitObservationPort, type GitObservationResult } from "./gitObservationPort";
+import {
+  GitObservationPort,
+  type GitObservationResult,
+  type GitScopedDiffResult,
+} from "./gitObservationPort";
 import { GitService } from "./gitService";
 import { CodeOperationEventStore } from "./codeOperationEventStore";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
@@ -125,7 +129,8 @@ export interface CodeOperationRuntimeOptions {
    * the instance it already built for the listing surface.
    */
   readonly repositoryTestDiscovery?: Pick<RepositoryTestDiscoveryService, "discover">;
-  readonly gitObservationPort?: Pick<GitObservationPort, "observe">;
+  readonly gitObservationPort?: Pick<GitObservationPort, "observe"> &
+    Partial<Pick<GitObservationPort, "readDiff">>;
   readonly gitMutationPort?: Pick<
     GitMutationPort,
     | "stage"
@@ -1275,17 +1280,17 @@ async function draftDeliveryText(
 ): Promise<CodeGitDraftResult> {
   const observed = await git.observe(input.checkoutRoot);
   if (observed.status !== "ready") return { status: "unavailable" };
-  // A commit describes what is staged; a pull request describes the branch's
-  // whole change, which is every change the checkout reports.
-  const paths =
-    input.purpose === "commit-message"
-      ? observed.stagedSummary.map((entry) => entry.path)
-      : observed.changedPaths;
-  if (paths.length === 0 || observed.diff.text.trim().length === 0)
-    return { status: "unavailable" };
+  // Each purpose gets the changes it is actually about. The working-tree diff
+  // is neither: it would let a commit message describe unstaged work that the
+  // commit will not carry, and it would call a branch whose changes are already
+  // committed empty.
+  const scoped = await readDraftDiff(git, observed, input);
+  if (scoped.status !== "ready" || scoped.paths.length === 0) return { status: "unavailable" };
+  if (scoped.diff.text.trim().length === 0) return { status: "unavailable" };
   const driver = await options.resolveProviderDriver(input.thread);
   if (driver === undefined) return { status: "unavailable" };
-  const diff = boundedDiff(observed.diff.text);
+  const diff = boundedDiff(scoped.diff.text);
+  const paths = scoped.paths;
   return draftGitText(
     {
       driver,
@@ -1298,10 +1303,42 @@ async function draftDeliveryText(
       purpose: input.purpose,
       ...(observed.head.branch.kind === "named" ? { branch: observed.head.branch.name } : {}),
       diff: diff.text,
-      diffTruncated: diff.truncated || observed.diff.truncated,
+      diffTruncated: diff.truncated || scoped.diff.truncated,
       paths,
     },
   );
+}
+
+/**
+ * The slice of the checkout each kind of draft describes.
+ *
+ * A commit describes the index. A pull request describes what the branch has
+ * committed since it left its base, which is why the base is tried as a
+ * remote-tracking ref first and as a local branch second: the remote's copy is
+ * what the pull request will actually be opened against, and the local branch
+ * is the honest fallback on a checkout that has never fetched.
+ */
+async function readDraftDiff(
+  git: GitService,
+  observed: Extract<GitObservationResult, { readonly status: "ready" }>,
+  input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly purpose: "commit-message" | "pull-request";
+  },
+): Promise<GitScopedDiffResult> {
+  const checkoutRoot = observed.checkoutRoot;
+  if (input.purpose === "commit-message")
+    return await git.readDiff({ checkoutRoot, scope: { kind: "staged" } });
+  const target = input.thread.deliveryTarget;
+  for (const baseRef of [
+    `${target.remoteName}/${target.proposedBaseBranch}`,
+    target.proposedBaseBranch,
+  ]) {
+    const result = await git.readDiff({ checkoutRoot, scope: { kind: "branch", baseRef } });
+    if (result.status === "ready") return result;
+  }
+  return { status: "unavailable" };
 }
 
 function mapGitObservation(

@@ -110,6 +110,47 @@ export async function buildCodeForkHandoff(
 }
 
 /**
+ * The handoff a forked thread's turn inherits, for its own first turn only.
+ *
+ * A fork that has already answered has its own transcript to work from, so the
+ * handoff is given once and never repeated — a later turn would be paying for
+ * history the thread already carries. Deciding that has one trap in it: by the
+ * time a turn asks, its own `conversation-turn-started` event is already in the
+ * journal, so the fork's transcript is never empty. The question is whether any
+ * turn *other* than the asking one exists, and one turn is enough to answer it:
+ * the earliest is either this turn, and there is no history, or an older one,
+ * and there is.
+ *
+ * The ports are reached lazily because the runtime that holds this resolver is
+ * composed before the service behind them exists.
+ */
+export function codeForkHandoffResolver(ports: () => CodeForkHandoffOptions | undefined) {
+  return async (input: {
+    readonly threadId: CodeThreadId;
+    readonly origin: CodeThreadForkOrigin;
+    readonly windowId: WindowId;
+    readonly operationId: CodeOperationId;
+  }): Promise<string | undefined> => {
+    const options = ports();
+    if (options === undefined) return undefined;
+    try {
+      const own = await options.conversation(input.windowId, input.threadId, 0, 1);
+      const earliest = own.turns[0];
+      if (earliest !== undefined && String(earliest.operationId) !== String(input.operationId))
+        return undefined;
+    } catch {
+      // A thread whose own transcript cannot be read may already have turns, so
+      // the handoff is withheld rather than risking a repeat of it.
+      return undefined;
+    }
+    return await buildCodeForkHandoff(options, {
+      windowId: input.windowId,
+      origin: input.origin,
+    });
+  };
+}
+
+/**
  * Walk the source thread's conversation and stop at the fork point.
  *
  * The reader is forward-only, so reaching a given turn means walking to it. A

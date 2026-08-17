@@ -30,7 +30,11 @@ import { openSqlite } from "../persistence/sqlitePort";
 import { CODE_OPERATION_EVENT_RECORDED } from "./codeOperationEventStore";
 import { createCodeOperationRuntime } from "./codeOperationRuntime";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
-import type { GitObservationResult } from "./gitObservationPort";
+import type {
+  GitObservationPort,
+  GitObservationResult,
+  GitScopedDiffResult,
+} from "./gitObservationPort";
 
 const now = "2026-07-21T13:00:00.000Z";
 const windowId = "90000000-0000-4000-8000-000000000001" as WindowId;
@@ -421,6 +425,84 @@ describe("CodeOperationRuntime", () => {
     missingCredential.close();
   });
 
+  it("drafts a commit from the index and a pull request from what the branch committed", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    // The drafting session is minted per request, so the answer has to be given
+    // against whatever session the host actually opened.
+    const connection = providerConnection(queue);
+    const answering: ProviderConnection = {
+      ...connection,
+      send: (input) =>
+        Effect.sync(() => {
+          const base = {
+            instanceId: thread().providerInstanceId,
+            sessionId: input.sessionId,
+            correlationId: operationId(900) as never,
+            occurredAt: now,
+          };
+          Effect.runSync(
+            Queue.offerAll(queue, [
+              { ...base, sequence: 1, kind: "text-delta", text: "Tidy the loader\n\nWhy." },
+              { ...base, sequence: 2, kind: "completed" },
+            ] as unknown as ReadonlyArray<ProviderRuntimeEvent>),
+          );
+        }),
+    };
+    const asked: unknown[] = [];
+    const fixture = runtimeFixture({
+      provider: providerDriver(answering),
+      // A branch whose work is already committed: the working tree is clean, so
+      // the diff the pane shows is empty and describes neither draft.
+      gitObservation: {
+        status: "ready",
+        checkoutRoot: "/private/exact",
+        head: { oid: "a".repeat(40), branch: { kind: "named", name: "feature/runtime" } },
+        statusEntries: [],
+        changedPaths: [],
+        stagedSummary: [{ path: "src/staged.ts", index: "M", worktree: " " }],
+        diff: { text: "", byteLength: 0, truncated: false },
+        remotes: [],
+        upstream: { remote: "origin", mergeRef: "refs/heads/feature/runtime" },
+        worktrees: [],
+        stateToken: "b".repeat(64),
+      },
+      gitReadDiff: async (input) => {
+        asked.push(input.scope);
+        return {
+          status: "ready",
+          paths: ["src/staged.ts"],
+          diff: { text: "+scoped", byteLength: 7, truncated: false },
+        };
+      },
+    });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "draft-git-text",
+        operationId: operationId(33),
+        threadId,
+        checkoutId,
+        purpose: "commit-message",
+      }),
+    ).resolves.toMatchObject({ kind: "git-draft-state", state: "completed" });
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "draft-git-text",
+        operationId: operationId(34),
+        threadId,
+        checkoutId,
+        purpose: "pull-request",
+      }),
+    ).resolves.toMatchObject({ kind: "git-draft-state", state: "completed" });
+
+    // A commit describes the index, so unstaged work cannot leak into its
+    // message. A pull request describes what the branch changed since it left
+    // its base, which is why a clean checkout still has something to say.
+    expect(asked).toEqual([{ kind: "staged" }, { kind: "branch", baseRef: "origin/development" }]);
+    fixture.close();
+  });
+
   it("normalizes scp remotes and preserves worktree and truncation evidence", async () => {
     const fixture = runtimeFixture({
       gitObservation: {
@@ -506,6 +588,9 @@ function runtimeFixture(options: {
   credential?: string | undefined;
   credentialReferences?: readonly { environmentName: string; reference: string }[];
   gitObservation?: GitObservationResult;
+  gitReadDiff?: (
+    input: Parameters<GitObservationPort["readDiff"]>[0],
+  ) => Promise<GitScopedDiffResult>;
   approvalValidator?: boolean;
   evidencePut?: (
     content: string,
@@ -596,6 +681,7 @@ function runtimeFixture(options: {
     },
     gitObservationPort: {
       observe: async () => options.gitObservation ?? { status: "unavailable" as const },
+      ...(options.gitReadDiff === undefined ? {} : { readDiff: options.gitReadDiff }),
     },
     gitMutationPort: {
       stage: async () => ({ status: "failed" as const }),

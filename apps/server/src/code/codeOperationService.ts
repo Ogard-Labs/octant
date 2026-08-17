@@ -24,7 +24,11 @@ import {
   type ProviderContextBlock,
   type WindowId,
 } from "@octant/contracts";
-import { authorizeCodeOperation, type CodeOperation } from "@octant/domain/code-policy";
+import {
+  authorizeCodeOperation,
+  mayWriteToRepository,
+  type CodeOperation,
+} from "@octant/domain/code-policy";
 import { THREAD_MENTION_UNREADABLE_CONTEXT } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
@@ -567,6 +571,12 @@ export interface CodeOperationServiceOptions {
     readonly threadId: CodeThreadId;
     readonly origin: CodeThreadForkOrigin;
     readonly windowId: WindowId;
+    /**
+     * The turn asking for the handoff. Its own start event is already in the
+     * journal by the time this runs, so the resolver has to know which turn to
+     * discount before it can tell whether any earlier one exists.
+     */
+    readonly operationId: CodeOperationId;
   }) => Promise<string | undefined>;
 }
 
@@ -679,7 +689,11 @@ export class CodeOperationService {
             );
           } else {
             if (command.kind === "start-provider-turn" && recordedStart === undefined) {
-              const checkpoint = await this.#checkpoint(scope.checkout.id, root.checkoutRoot);
+              const checkpoint = await this.#checkpoint(
+                scope.thread,
+                scope.checkout.id,
+                root.checkoutRoot,
+              );
               this.#options.events.append({
                 threadId: command.threadId,
                 operationId: command.operationId,
@@ -1528,10 +1542,19 @@ export class CodeOperationService {
    * Record the checkout just before a turn runs, so the user can put the files
    * back at this message. Best effort by design: a checkout that cannot be
    * read costs the turn its restore point, never the turn itself.
+   *
+   * A Plan turn gets none. Capturing one stages the tree into a scratch index
+   * and writes the resulting trees into the object database, which is a write
+   * to the repository however little it disturbs the working tree — and a Plan
+   * turn changes no file, so the restore point it would buy restores nothing.
    */
-  async #checkpoint(checkoutId: string, checkoutRoot: string): Promise<CodeCheckpoint | undefined> {
+  async #checkpoint(
+    thread: CodeThread,
+    checkoutId: string,
+    checkoutRoot: string,
+  ): Promise<CodeCheckpoint | undefined> {
     const capture = this.#options.git.checkpoint;
-    if (capture === undefined) return undefined;
+    if (capture === undefined || !mayWriteToRepository(thread.executionPolicy)) return undefined;
     try {
       const result = await capture({ checkoutId, checkoutRoot });
       return result.status === "captured" ? result.snapshot : undefined;
@@ -1666,7 +1689,7 @@ export class CodeOperationService {
         "Provider prompt evidence is unavailable.",
       );
     const context = [
-      ...(await this.#resolveForkHandoff(thread, windowId)),
+      ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
       ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
     ];
     // A model that cannot read a picture is told so plainly rather than sent
@@ -1768,13 +1791,14 @@ export class CodeOperationService {
   async #resolveForkHandoff(
     thread: CodeThread,
     windowId: WindowId,
+    operationId: CodeOperationId,
   ): Promise<ReadonlyArray<ProviderContextBlock>> {
     const origin = thread.forkedFrom;
     const resolve = this.#options.resolveForkHandoff;
     if (origin === undefined || resolve === undefined) return [];
     let text: string | undefined;
     try {
-      text = await resolve({ threadId: thread.id, origin, windowId });
+      text = await resolve({ threadId: thread.id, origin, windowId, operationId });
     } catch {
       return [];
     }
