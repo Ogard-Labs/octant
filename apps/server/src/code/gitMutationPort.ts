@@ -1,7 +1,7 @@
 import { execFile as nodeExecFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, copyFile, rm } from "node:fs/promises";
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
 import {
   createGitSeatbeltConfinement,
@@ -55,7 +55,8 @@ export type GitMutationResult =
         | "empty-staged-summary"
         | "invalid-remote"
         | "invalid-refspec"
-        | "unconfirmed-target";
+        | "unconfirmed-target"
+        | "ignored-path-collision";
     }
   | { readonly status: "failed" };
 
@@ -327,8 +328,11 @@ export class GitMutationPort {
    *
    * The working tree is then moved through a throwaway index that first records
    * the current content, which is what lets `read-tree -u` remove files the
-   * snapshot did not have instead of leaving them behind. Ignored files are in
-   * neither tree and are never touched.
+   * snapshot did not have instead of leaving them behind.
+   *
+   * A file the checkout ignores today is in neither tree, so the restore leaves
+   * it alone — unless the snapshot itself carries that path, which is the one
+   * case that would destroy it. See `#wouldOverwriteIgnored`.
    */
   async restoreWorkingTree(
     input: { readonly checkoutRoot: string; readonly snapshot: GitTreeSnapshot },
@@ -357,6 +361,14 @@ export class GitMutationPort {
       ) {
         return { status: "rejected", reason: "invalid-commit" };
       }
+      // Asked against the real index, which nothing has touched yet.
+      const overwrites = await this.#wouldOverwriteIgnored(
+        input.checkoutRoot,
+        input.snapshot.worktree,
+        signal,
+      );
+      if (overwrites === undefined) return { status: "failed" };
+      if (overwrites) return { status: "rejected", reason: "ignored-path-collision" };
       const index = await this.#run(
         ["-C", input.checkoutRoot, "read-tree", "--reset", input.snapshot.index],
         signal,
@@ -371,6 +383,56 @@ export class GitMutationPort {
     } finally {
       await this.#discardScratchIndex(scratch);
     }
+  }
+
+  /**
+   * Whether restoring this tree would write over a file the checkout now ignores.
+   *
+   * A path can be both in a snapshot and ignored today: tracked when the
+   * checkpoint was taken, then removed from Git, added to `.gitignore`, and
+   * recreated with local content — the ordinary life of a `.env`. Restoring
+   * overwrites it, and the pre-restore undo point cannot give it back, because
+   * the `git add -A` that builds that point skips ignored files. So the restore
+   * is refused while the checkout is still untouched rather than trading a file
+   * the user cannot recover for one they can.
+   *
+   * `undefined` means the question could not be answered, which is not an answer
+   * of "no": the caller fails rather than proceeding on an unchecked tree.
+   */
+  async #wouldOverwriteIgnored(
+    checkoutRoot: string,
+    tree: string,
+    signal?: AbortSignal,
+  ): Promise<boolean | undefined> {
+    const listed = await this.#run(
+      ["-C", checkoutRoot, "ls-tree", "-r", "-z", "--name-only", tree],
+      signal,
+    );
+    if (listed.exitCode !== 0) return undefined;
+    const tracked = await this.#run(["-C", checkoutRoot, "ls-files", "-z"], signal);
+    if (tracked.exitCode !== 0) return undefined;
+    const indexed = new Set(splitNulPaths(tracked.stdout));
+    // A path the checkout still tracks cannot be the case at issue: Git does not
+    // ignore tracked paths, and a restore writing over one is exactly what the
+    // undo point covers. Only a path that has left the index can be ignored now,
+    // and only one that exists holds content the restore would destroy.
+    for (const path of splitNulPaths(listed.stdout)) {
+      if (indexed.has(path)) continue;
+      if (!(await this.#dependencies.pathExists(join(checkoutRoot, path)))) continue;
+      // `-q` answers through the exit code alone, so no path has to survive a
+      // round trip through a text format that quotes unusual names. It takes one
+      // pathname at a time, which is affordable here: the candidates are only
+      // the snapshot's untracked files, not the whole tree.
+      const checked = await this.#run(
+        ["-C", checkoutRoot, "check-ignore", "-q", "--", path],
+        signal,
+      );
+      if (checked.exitCode === 0) return true;
+      // Exit 1 is the answer "this one is not ignored"; anything higher is a
+      // refusal to answer.
+      if (checked.exitCode !== 1) return undefined;
+    }
+    return false;
   }
 
   /** Prove a snapshot tree is readable before any part of the checkout moves. */
@@ -511,6 +573,10 @@ export class GitMutationPort {
  * checkout, so a fixed path would let concurrent checkpoints overwrite or
  * delete each other's scratch index.
  */
+function splitNulPaths(output: string): ReadonlyArray<string> {
+  return output.split("\0").filter((path) => path.length > 0);
+}
+
 function checkpointIndexName(): string {
   return `octant-checkpoint-index-${randomUUID()}`;
 }

@@ -344,6 +344,55 @@ describe("GitMutationPort", () => {
     );
   });
 
+  it("refuses a restore that would overwrite a file the checkout now ignores", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const port = new GitMutationPort(undefined, confinedOptions());
+    writeFileSync(join(repository, "secrets.env"), "checkpointed\n");
+    git(repository, "add", "--", "secrets.env");
+    git(repository, "commit", "-m", "secrets");
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository });
+    expect(captured).toMatchObject({ status: "captured" });
+    if (captured.status !== "captured") return;
+
+    // The ordinary life of a checked-in secret: taken out of Git, ignored, and
+    // rewritten locally. It is now in the snapshot and ignored at the same time.
+    git(repository, "rm", "--cached", "--", "secrets.env");
+    writeFileSync(join(repository, ".gitignore"), "secrets.env\n");
+    git(repository, "add", "--", ".gitignore");
+    git(repository, "commit", "-m", "ignore secrets");
+    writeFileSync(join(repository, "secrets.env"), "the only copy\n");
+
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: repository, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "rejected", reason: "ignored-path-collision" });
+
+    // The undo point a restore hands back is built with `git add -A`, which
+    // skips ignored files, so overwriting this would have been irreversible.
+    expect(readFileSync(join(repository, "secrets.env"), "utf8")).toBe("the only copy\n");
+  });
+
+  it("restores over an ignored path the snapshot carries when nothing is there to lose", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const port = new GitMutationPort(undefined, confinedOptions());
+    writeFileSync(join(repository, "secrets.env"), "checkpointed\n");
+    git(repository, "add", "--", "secrets.env");
+    git(repository, "commit", "-m", "secrets");
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository });
+    expect(captured).toMatchObject({ status: "captured" });
+    if (captured.status !== "captured") return;
+
+    git(repository, "rm", "--", "secrets.env");
+    writeFileSync(join(repository, ".gitignore"), "secrets.env\n");
+    git(repository, "add", "--", ".gitignore");
+    git(repository, "commit", "-m", "ignore secrets");
+
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: repository, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "applied" });
+
+    expect(readFileSync(join(repository, "secrets.env"), "utf8")).toBe("checkpointed\n");
+  });
+
   it("fails closed when Seatbelt confinement is unavailable", async () => {
     const port = new GitMutationPort(undefined, {
       platform: "linux",
