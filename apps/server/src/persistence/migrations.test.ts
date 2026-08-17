@@ -79,7 +79,8 @@ describe("applyMigrations", () => {
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
         currentVersion: 46,
         appliedVersions: [
-          24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46,
+          24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
+          46,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -486,7 +487,7 @@ describe("applyMigrations", () => {
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
         currentVersion: 46,
-        appliedVersions: [45],
+        appliedVersions: [45, 46],
       });
       expect(
         connection
