@@ -65,6 +65,7 @@ export * from "./untrustedContentPolicy";
 export * from "./threadWorkPolicy";
 export * from "./threadMentionPolicy";
 export * from "./usagePolicy";
+export * from "./userProfilePolicy";
 export * from "./agentProfilePolicy";
 export * from "./agentRunPolicy";
 export * from "./agentRunAuthorityCeiling";

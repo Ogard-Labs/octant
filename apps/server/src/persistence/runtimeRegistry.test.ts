@@ -602,6 +602,7 @@ describe("createPhase1RuntimeRegistries", () => {
         modeSwitcherPresentation: "buttons",
         navigatorAssistant: {},
         projectViewSwitcherPresentation: "dropdown",
+        userProfile: { accent: "indigo", avatar: { kind: "initials" } },
         sidebarBackground: {
           kind: "none",
           overlayColor: "#1a1a1c",
@@ -625,6 +626,7 @@ describe("createPhase1RuntimeRegistries", () => {
           modeSwitcherPresentation,
           navigatorAssistant: {},
           projectViewSwitcherPresentation: "dropdown",
+          userProfile: { accent: "indigo", avatar: { kind: "initials" } },
           sidebarBackground: {
             kind: "none",
             overlayColor: "#1a1a1c",
@@ -658,6 +660,7 @@ describe("createPhase1RuntimeRegistries", () => {
         modeSwitcherPresentation: "buttons",
         navigatorAssistant: {},
         projectViewSwitcherPresentation: "dropdown",
+        userProfile: { accent: "indigo", avatar: { kind: "initials" } },
         sidebarBackground: {
           kind: "none",
           overlayColor: "#1a1a1c",
@@ -839,6 +842,7 @@ function validSettingsPayload() {
       // Unconfigured Navigator: the section decodes to its empty honest state.
       navigatorAssistant: {},
       projectViewSwitcherPresentation: "dropdown",
+      userProfile: { accent: "indigo", avatar: { kind: "initials" } },
       sidebarBackground: {
         kind: "none",
         overlayColor: "#1a1a1c",

@@ -18,6 +18,8 @@ export interface ThemeController {
   readonly hasDraftChanges: boolean;
   readonly updateDraft: (patch: Partial<ThemeSettings>) => void;
   readonly apply: () => Promise<boolean>;
+  /** Save one change now, bypassing the draft the editor accumulates. */
+  readonly applyPatch: (patch: Partial<ThemeSettings>) => Promise<boolean>;
   readonly cancel: () => void;
   readonly reset: () => void;
   readonly importJson: (value: string) => void;
@@ -75,36 +77,62 @@ export function useThemeController(options: {
     setDraft((current) => (current === undefined ? undefined : { ...current, ...patch }));
   }, []);
 
-  const apply = useCallback(async () => {
-    if (settings === undefined || draft === undefined) return false;
-    try {
-      const result = await client.execute({
-        kind: "update-theme-settings",
-        settings: draft,
-        expectedVersion: version as never,
-      });
-      if (!mounted.current) return false;
-      setSettings(result.settings);
-      setDraft(result.settings);
-      setVersion(result.version);
-      setStatus("ready");
-      setError(undefined);
-      return true;
-    } catch (cause) {
-      if (!mounted.current) return false;
-      if (cause instanceof ThemeClientFailure && cause.category === "conflict") {
-        setStatus("conflict");
-        setError(cause.message);
-        void load();
-      } else {
-        setStatus("unavailable");
-        setError(
-          cause instanceof Error ? cause.message : "Appearance settings could not be applied.",
-        );
+  const applyExact = useCallback(
+    async (next: ThemeSettings) => {
+      if (settings === undefined || draft === undefined) return false;
+      try {
+        const result = await client.execute({
+          kind: "update-theme-settings",
+          settings: next,
+          expectedVersion: version as never,
+        });
+        if (!mounted.current) return false;
+        setSettings(result.settings);
+        setDraft(result.settings);
+        setVersion(result.version);
+        setStatus("ready");
+        setError(undefined);
+        return true;
+      } catch (cause) {
+        if (!mounted.current) return false;
+        if (cause instanceof ThemeClientFailure && cause.category === "conflict") {
+          setStatus("conflict");
+          setError(cause.message);
+          void load();
+        } else {
+          setStatus("unavailable");
+          setError(
+            cause instanceof Error ? cause.message : "Appearance settings could not be applied.",
+          );
+        }
+        return false;
       }
-      return false;
-    }
-  }, [client, draft, load, settings, version]);
+    },
+    [client, draft, load, settings, version],
+  );
+
+  const apply = useCallback(async () => {
+    if (draft === undefined) return false;
+    return applyExact(draft);
+  }, [applyExact, draft]);
+
+  /**
+   * Save one change immediately, without going through the draft.
+   *
+   * The editor's Apply button saves whatever the draft has accumulated, which
+   * is right for a form the user is composing. A control that takes effect the
+   * moment it is pressed cannot use that path: `updateDraft` schedules a state
+   * update, so an `apply` in the same tick would save the draft as it stood
+   * *before* the press. Passing the patch straight through keeps the saved
+   * value the one the user just chose.
+   */
+  const applyPatch = useCallback(
+    async (patch: Partial<ThemeSettings>) => {
+      if (draft === undefined) return false;
+      return applyExact({ ...draft, ...patch });
+    },
+    [applyExact, draft],
+  );
 
   const cancel = useCallback(() => {
     if (settings === undefined) return;
@@ -148,6 +176,7 @@ export function useThemeController(options: {
     hasDraftChanges,
     updateDraft,
     apply,
+    applyPatch,
     cancel,
     reset,
     importJson,

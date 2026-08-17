@@ -26,6 +26,7 @@ distilled successor of the earlier long-form design specifications.
 | [0016](0016-component-foundation-and-theme.md)          | Component foundation and theme                                    | Accepted |
 | [0017](0017-code-projects-bind-any-folder.md)           | Code Projects bind any folder                                     | Accepted |
 | [0018](0018-auto-accept-edits-posture.md)               | Auto-accept edits as a fourth access posture                      | Accepted |
+| [0019](0019-user-profile-and-first-run-setup.md)        | User profile and first-run setup                                  | Accepted |
 
 ## Adding an ADR
 

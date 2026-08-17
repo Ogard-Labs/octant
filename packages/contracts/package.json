@@ -65,6 +65,7 @@
     "./shell": "./src/shell.ts",
     "./thread-draft": "./src/threadDraft.ts",
     "./theme": "./src/theme.ts",
+    "./user-profile": "./src/userProfile.ts",
     "./content-provenance": "./src/contentProvenance.ts",
     "./tool-actions": "./src/toolActions.ts",
     "./tool-catalog": "./src/toolCatalog.ts",

@@ -13,6 +13,7 @@ function controller(): ThemeController {
     error: undefined,
     hasDraftChanges: false,
     updateDraft: vi.fn(),
+    applyPatch: vi.fn(async () => true),
     apply: vi.fn(async () => true),
     cancel: vi.fn(),
     reset: vi.fn(),

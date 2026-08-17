@@ -20,8 +20,14 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       id: "general",
       label: "General",
       scope: "app",
-      keywords: "general enabled modes startup default chat work",
+      keywords: "general enabled modes startup default chat work profile name email avatar",
       settings: [
+        {
+          id: settingId("user-profile"),
+          label: "Your profile",
+          scope: "app",
+          keywords: "profile name email avatar gravatar initials colour color picture",
+        },
         {
           id: settingId("enable-chat"),
           label: "Enable Chat",
