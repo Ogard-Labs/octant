@@ -166,12 +166,15 @@ export class GitObservationPort {
       // observable checkout state, not a failure — but only when HEAD names a
       // branch, because a detached HEAD without an object is broken.
       if (resolvedOid === undefined && branchName === undefined) return { status: "failed" };
-      const head: GitObservedHead =
-        resolvedOid === undefined
-          ? { kind: "unborn", name: branchName! }
-          : branchName === undefined
-            ? { kind: "detached", oid: resolvedOid }
-            : { kind: "branch", name: branchName, oid: resolvedOid };
+      let head: GitObservedHead;
+      if (resolvedOid === undefined) {
+        if (branchName === undefined) return { status: "failed" };
+        head = { kind: "unborn", name: branchName };
+      } else if (branchName === undefined) {
+        head = { kind: "detached", oid: resolvedOid };
+      } else {
+        head = { kind: "branch", name: branchName, oid: resolvedOid };
+      }
       const statusResult = await run([
         "status",
         "--porcelain=v1",
@@ -181,13 +184,21 @@ export class GitObservationPort {
       if (statusResult.exitCode !== 0) return { status: "failed" };
       const statusEntries = parseStatus(statusResult.stdout);
       if (!statusEntries) return { status: "failed" };
-      // An unborn head has no commit to diff against, so the index itself is
-      // the whole difference from the empty tree.
-      const diffResult = await run(
-        head.kind === "unborn"
-          ? ["diff", "--no-ext-diff", "--no-color", "--cached", "--"]
-          : ["diff", "--no-ext-diff", "--no-color", "HEAD", "--"],
-      );
+      // An unborn head has no commit to diff against, so the empty tree stands
+      // in for one. It has to be a baseline rather than `--cached`, or a file
+      // that was staged and then edited again would show the pane its staged
+      // version while `git diff HEAD` on any other branch reaches the working
+      // tree. `hash-object` is asked for the empty tree rather than the value
+      // hardcoded, so a repository on a different hash algorithm still works.
+      let baseline = "HEAD";
+      if (head.kind === "unborn") {
+        const empty = await run(["hash-object", "-t", "tree", "/dev/null"]);
+        const emptyTree = empty.stdout.trim();
+        if (empty.exitCode !== 0 || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(emptyTree))
+          return { status: "failed" };
+        baseline = emptyTree;
+      }
+      const diffResult = await run(["diff", "--no-ext-diff", "--no-color", baseline, "--"]);
       if (diffResult.exitCode !== 0) return { status: "failed" };
       const diff = boundUtf8(diffResult.stdout, this.#maxDiffBytes);
       const remoteNamesResult = await run(["remote"]);

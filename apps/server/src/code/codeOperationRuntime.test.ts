@@ -516,7 +516,7 @@ describe("CodeOperationRuntime", () => {
       gitObservation: {
         status: "ready",
         checkoutRoot: "/private/exact",
-        head: { oid: "a".repeat(40), branch: { kind: "named", name: "feature/runtime" } },
+        head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
         statusEntries: [],
         changedPaths: [],
         stagedSummary: [{ path: "src/staged.ts", index: "M", worktree: " " }],

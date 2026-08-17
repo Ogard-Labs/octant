@@ -1329,7 +1329,7 @@ async function draftDeliveryText(
     },
     {
       purpose: input.purpose,
-      ...(observed.head.branch.kind === "named" ? { branch: observed.head.branch.name } : {}),
+      ...(observed.head.kind === "branch" ? { branch: observed.head.name } : {}),
       diff: diff.text,
       diffTruncated: diff.truncated || scoped.diff.truncated,
       paths,

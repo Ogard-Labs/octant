@@ -119,6 +119,28 @@ describe("GitObservationPort", () => {
     expect(result.stateToken).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  // On any other branch `git diff HEAD` reaches the working tree, so a file
+  // staged and then edited again shows its latest text. An unborn branch has to
+  // reach just as far, or the pane shows content the file no longer has.
+  it("shows the working-tree text of a file edited after staging on an unborn branch", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Octant Test");
+    git(repository, "config", "user.email", "test@octant.local");
+    writeFileSync(join(repository, "staged.txt"), "first\n");
+    git(repository, "add", "--", "staged.txt");
+    writeFileSync(join(repository, "staged.txt"), "first\nsecond\n");
+
+    const result = await new GitObservationPort(confinedOptions()).observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.statusEntries).toEqual([{ path: "staged.txt", index: "A", worktree: "M" }]);
+    expect(result.diff.text).toContain("+second");
+  });
+
   it("reports both sides of a staged rename as explicit changed paths", async () => {
     const repository = createRepository();
     git(repository, "mv", "README.md", "renamed.md");
