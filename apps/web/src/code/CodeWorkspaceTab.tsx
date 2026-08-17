@@ -2,7 +2,7 @@ import type { CodeClient, CodeFileOpenResult } from "@octant/client-runtime/code
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import type { CodeRelativePath, CodeThread } from "@octant/contracts/code";
 import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-definitions";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deferredCodeAdapterFor } from "./codeLeafAdapters";
 import { CodeWorkspace } from "./CodeWorkspace";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
@@ -230,12 +230,12 @@ function useCodeEditorFile(options: {
       return;
     }
     let active = true;
-    // The execution policy is part of what the open file is, not a detail of
-    // it: a thread that drops to Plan mode must stop being writable now, not
-    // when the next `openFile` happens to settle. Leaving it out of the scope
-    // kept the old writable projection — Save included — through a slow or
-    // stalled request, after Plan mode was already in force.
-    const scope = `${threadId}/${checkoutId}/${relativePath}/${executionPolicy}`;
+    // A policy change re-reads the file but does not clear it. The open pane
+    // holds the unsaved draft together with the revision that draft was based
+    // on, and that pairing is what makes a change underneath it a conflict
+    // rather than a silent overwrite; dropping the projection here would throw
+    // the anchor away and let Save carry the new revision's digest.
+    const scope = `${threadId}/${checkoutId}/${relativePath}`;
     if (openedScope.current !== scope) {
       openedScope.current = scope;
       setFile(undefined);
@@ -258,7 +258,16 @@ function useCodeEditorFile(options: {
     return () => void (active = false);
   }, [checkoutId, client, enabled, executionPolicy, refreshGeneration, relativePath, threadId]);
 
-  return { file, refresh };
+  // The posture is re-applied to whatever is already open, so a thread that
+  // drops to Plan mode stops offering Save now rather than when the reopen
+  // settles, while the pane it belongs to stays mounted.
+  const posture = useMemo(
+    () =>
+      file === undefined || executionPolicy === undefined ? file : { ...file, executionPolicy },
+    [executionPolicy, file],
+  );
+
+  return { file: posture, refresh };
 }
 
 function editorFileProjection(

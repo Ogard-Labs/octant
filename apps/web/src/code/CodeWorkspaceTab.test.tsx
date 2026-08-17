@@ -160,18 +160,33 @@ describe("CodeWorkspaceTab code files", () => {
 
   // Plan mode is read-only, so it has to take effect when the thread enters it
   // — not when the next open happens to answer. A stalled request used to leave
-  // the previous writable projection, Save included, on screen.
-  it("stops offering the writable file the moment the thread enters Plan mode", async () => {
+  // the previous writable projection, Save included, on screen. The unsaved
+  // draft has to survive that: it is the user's work, and the revision it was
+  // based on is what makes a later external change a conflict.
+  it("stops offering Save the moment the thread enters Plan mode, and keeps the draft", async () => {
     const client = codeClient();
     const view = render(<CodeWorkspaceTab controller={controller(client)} tab={fileTab()} />);
-    expect(await screen.findByLabelText("Code editor for src/index.ts")).toBeVisible();
+    expect(await screen.findByText("const answer = 42;")).toBeVisible();
+    act(() => editor.change?.("my unsaved draft"));
+    expect(await screen.findByText("Unsaved changes")).toBeVisible();
 
     vi.mocked(client.openFile).mockReturnValue(new Promise(() => undefined));
     view.rerender(
       <CodeWorkspaceTab controller={controller(client, undefined, "plan")} tab={fileTab()} />,
     );
 
-    expect(screen.queryByLabelText("Code editor for src/index.ts")).toBeNull();
+    expect(await screen.findByText("Plan · read-only")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save src/index.ts" })).toBeNull();
+
+    // Back under Full access, the same draft saves against the revision it was
+    // written on. A remount would have re-read the file and anchored the save
+    // to whatever is on disk by then, overwriting an outside edit silently.
+    view.rerender(<CodeWorkspaceTab controller={controller(client)} tab={fileTab()} />);
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Save src/index.ts" }));
+
+    expect(client.save).toHaveBeenLastCalledWith(
+      expect.objectContaining({ expectedDigest: "d".repeat(64), text: "my unsaved draft" }),
+    );
   });
 
   it("re-opens the file through the host when the conflict action reloads it", async () => {
