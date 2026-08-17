@@ -233,6 +233,134 @@ describe("useCodeController", () => {
     expect(result.current.bootstrap?.checkouts).toContainEqual(prepared);
   });
 
+  it("forks a thread onto a freshly prepared checkout and records where it branched from", async () => {
+    const prepared = { ...checkout(), id: "40000000-0000-4000-8000-000000000009" as never };
+    const execute = vi.fn(async (command: CodeCommand) =>
+      command.kind === "prepare-code-project-checkout"
+        ? ({
+            kind: "checkout-prepared",
+            bindingRevisionId: ids.bindingRevision,
+            checkout: prepared,
+          } as never)
+        : ({ kind: "unhandled" } as never),
+    );
+    // The identity this renderer holds is stale: bootstrap no longer knows the
+    // checkout it names at all, which is the case re-observing exists for.
+    const client = fakeClient({
+      execute,
+      bootstrap: vi.fn(async () => ({ ...bootstrap(), checkouts: [] })),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.forkThread({
+        threadId: ids.thread,
+        throughOperationId: "70000000-0000-4000-8000-000000000001",
+        title: "Controller foundation (fork)",
+      });
+    });
+
+    const created = execute.mock.calls
+      .map(([command]) => command)
+      .find((command) => command.kind === "create-code-thread");
+    expect(created).toMatchObject({
+      thread: {
+        title: "Controller foundation (fork)",
+        // The fork binds the checkout the server just prepared, not the
+        // identity this renderer happened to be holding.
+        checkoutId: prepared.id,
+        version: 1,
+        forkedFrom: {
+          threadId: ids.thread,
+          throughOperationId: "70000000-0000-4000-8000-000000000001",
+        },
+      },
+    });
+    expect(String((created as never as { thread: { id: string } }).thread.id)).not.toBe(
+      String(ids.thread),
+    );
+    // Forking is additive: the source thread is never commanded.
+    expect(
+      execute.mock.calls.every(
+        ([command]) => !("threadId" in command) || command.threadId !== ids.thread,
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses to fork a thread that lives on its own worktree", async () => {
+    const prepared = { ...checkout(), id: "40000000-0000-4000-8000-000000000009" as never };
+    const execute = vi.fn(async (command: CodeCommand) =>
+      command.kind === "prepare-code-project-checkout"
+        ? ({
+            kind: "checkout-prepared",
+            bindingRevisionId: ids.bindingRevision,
+            checkout: prepared,
+          } as never)
+        : ({ kind: "unhandled" } as never),
+    );
+    // The source's own checkout is still there and is not the one the Project
+    // is bound to, so a fork could only be created against a different branch
+    // and working tree than the conversation it inherits.
+    const client = fakeClient({ execute });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let forked: unknown = "unset";
+    await act(async () => {
+      forked = await result.current.forkThread({
+        threadId: ids.thread,
+        throughOperationId: "70000000-0000-4000-8000-000000000001",
+        title: "Controller foundation (fork)",
+      });
+    });
+
+    expect(forked).toBeUndefined();
+    expect(execute.mock.calls.some(([command]) => command.kind === "create-code-thread")).toBe(
+      false,
+    );
+  });
+
+  it("refuses that fork even while the source worktree is out of reach", async () => {
+    const prepared = { ...checkout(), id: "40000000-0000-4000-8000-000000000009" as never };
+    const execute = vi.fn(async (command: CodeCommand) =>
+      command.kind === "prepare-code-project-checkout"
+        ? ({
+            kind: "checkout-prepared",
+            bindingRevisionId: ids.bindingRevision,
+            checkout: prepared,
+          } as never)
+        : ({ kind: "unhandled" } as never),
+    );
+    // A managed worktree that is waiting or unrecovered is the same tree the
+    // conversation describes, temporarily out of reach. Treating that as a
+    // stale identity would bind the fork to the Project's checkout instead and
+    // silently move the work to another branch.
+    const client = fakeClient({
+      execute,
+      bootstrap: vi.fn(async () => ({
+        ...bootstrap(),
+        checkouts: [{ ...checkout(), availability: "waiting" as never }],
+      })),
+    });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let forked: unknown = "unset";
+    await act(async () => {
+      forked = await result.current.forkThread({
+        threadId: ids.thread,
+        throughOperationId: "70000000-0000-4000-8000-000000000001",
+        title: "Controller foundation (fork)",
+      });
+    });
+
+    expect(forked).toBeUndefined();
+    expect(execute.mock.calls.some(([command]) => command.kind === "create-code-thread")).toBe(
+      false,
+    );
+  });
+
   it("bootstraps authoritative navigation and activates a thread through codeClient only", async () => {
     const client = fakeClient();
     const { result, unmount } = renderHook(() =>
@@ -288,6 +416,27 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.activeView?.lastSequence).toBe(2));
     expect(result.current.pendingDraft).toBe("Keep this prompt");
     expect(client.thread).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
+  it("keeps catching up after a failed snapshot instead of freezing the thread", async () => {
+    const gap = deferred<void>();
+    const thread = vi
+      .fn()
+      .mockResolvedValueOnce(view(1))
+      .mockRejectedValueOnce({ category: "unavailable", message: "Octant Code is unavailable." })
+      .mockResolvedValue(view(4));
+    const client = fakeClient({ subscribe: vi.fn(() => gapStream(gap.promise)), thread });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 0 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.lastSequence).toBe(1));
+
+    await act(async () => gap.resolve());
+
+    await waitFor(() => expect(result.current.activeView?.lastSequence).toBe(4));
+    expect(result.current.status).toBe("ready");
+    expect(thread.mock.calls.length).toBeGreaterThanOrEqual(3);
     unmount();
   });
 
@@ -623,6 +772,61 @@ describe("useCodeController", () => {
     expect(
       result.current.conversation.find((message) => message.role === "assistant")?.text,
     ).not.toContain("plan.");
+  });
+
+  it("reports a turn's latest usage figure rather than adding every report to the last", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000062";
+    // A provider that reports as it goes sends the turn's running total each
+    // time. Adding them would show 30 in for a turn that used 20, until the
+    // thread was reopened and the journal's own projection disagreed.
+    async function* frames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "usage", inputTokens: 10, outputTokens: 4, costUsd: 0.01 },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 2,
+        occurredAt: now,
+        event: { kind: "usage", inputTokens: 20, outputTokens: 9, costUsd: 0.02 },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 3,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      };
+    }
+    const client = fakeClient({
+      putEvidence: vi.fn(async () => ({
+        contentId: "60000000-0000-4000-8000-000000000062",
+        digest: "a".repeat(64),
+        byteLength: 4,
+      })) as never,
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId,
+        state: "running",
+      })) as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    await act(async () => {
+      await result.current.sendFollowUp("run it");
+    });
+
+    await waitFor(() => expect(result.current.threadUsage.outputTokens).toBe(9));
+    expect(result.current.threadUsage.inputTokens).toBe(20);
+    expect(result.current.threadUsage.costUsd).toBeCloseTo(0.02);
   });
 
   it("sends a queued follow-up once the running turn settles, and forgets a cancelled one", async () => {

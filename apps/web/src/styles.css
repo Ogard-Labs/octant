@@ -5884,6 +5884,30 @@ dialog.project-dialog {
   font-size: 11px;
 }
 
+.code-thread-workspace__limit {
+  font-size: 11px;
+  color: var(--octant-text-secondary);
+}
+
+.code-thread-workspace__limit--warning {
+  color: var(--octant-warning-text);
+}
+
+.code-thread-workspace__limit--exhausted {
+  color: var(--octant-danger-text);
+}
+
+.code-thread-workspace__fork,
+.code-thread-workspace__restore {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
 .code-thread-workspace__provider-binding {
   color: var(--octant-text-secondary);
   font-size: 11px;
@@ -7580,4 +7604,54 @@ dialog.project-dialog {
   .code-board__filter-fields {
     grid-template-columns: 1fr;
   }
+}
+
+.keybinding-settings {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.keybinding-settings__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.keybinding-settings__list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.keybinding-settings__action {
+  display: grid;
+  flex: 1;
+  min-width: 160px;
+  gap: 2px;
+}
+
+.keybinding-settings__area,
+.keybinding-settings__warning {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.keybinding-settings__warning {
+  color: var(--octant-warning-text);
+}
+
+.keybinding-settings__json {
+  display: grid;
+  gap: 4px;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.keybinding-settings__actions {
+  display: flex;
+  gap: 8px;
 }

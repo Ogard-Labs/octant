@@ -10,6 +10,7 @@ import type { CodeController } from "./useCodeController";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { CodeOverviewSurfaceKind } from "./CodeOverview";
 import { nativeCodeWorkspaceApprovals } from "./codeWorkspaceApprovals";
+import { noticeTouches, useCodeFileChangeWatch } from "./useCodeFileChangeWatch";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
@@ -29,11 +30,23 @@ export default function CodeWorkspaceTab(props: {
   readonly onOpenBrowser?: () => void;
   /** Opens one changed repository file as a Code file tab, from the diff. */
   readonly onOpenFile?: (relativePath: string) => void;
-  readonly onOpenSurface?: (kind: CodeOverviewSurfaceKind) => void;
+  readonly onOpenSurface?: (
+    kind: CodeOverviewSurfaceKind,
+    options?: { readonly terminalId?: import("@octant/contracts/code").CodeTerminalId },
+  ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly canvasClient?: CanvasClient;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /**
+   * Opens a Code thread this workspace started, such as a fork of the one in
+   * view. Absent on a surface with no tab of its own.
+   */
+  readonly onOpenCodeThread?: (
+    threadId: import("@octant/contracts/code").CodeThreadId,
+    title: string,
+    projectId: import("@octant/contracts/projects").ProjectId,
+  ) => void;
   /** Reaches the host's `#thread` mention surface from the Code composer. */
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -60,6 +73,23 @@ export default function CodeWorkspaceTab(props: {
           checkoutId: view.checkout.id,
           executionPolicy: view.thread.executionPolicy,
         }),
+  });
+  // An open file follows the checkout on its own: the explorer's watch belongs
+  // to the explorer's tab, and the two are rarely on screen together.
+  useCodeFileChangeWatch({
+    enabled:
+      props.tab.kind === "code-file" && view !== undefined && view.thread.id === props.tab.threadId,
+    ...(view === undefined ? {} : { threadId: view.thread.id, checkoutId: view.checkout.id }),
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+    onChanged: (notice) => {
+      if (props.tab.kind !== "code-file") return;
+      if (!noticeTouches(notice, String(props.tab.relativePath))) return;
+      // Reopening restates the file's identity and revision. The editor keeps a
+      // dirty buffer and reports the external change as a conflict rather than
+      // overwriting what the user typed.
+      editorFile.refresh();
+    },
   });
   const projections = {
     ...(editorFile.file === undefined ? {} : { file: editorFile.file }),
@@ -94,6 +124,9 @@ export default function CodeWorkspaceTab(props: {
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
+        {...(props.onOpenCodeThread === undefined
+          ? {}
+          : { onOpenCodeThread: props.onOpenCodeThread })}
         {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
         {...(props.windowCapability === undefined
           ? {}

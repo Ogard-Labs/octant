@@ -228,4 +228,31 @@ describe("activity view preference", () => {
     expect(readActivityViewEnabled(throwingStorage)).toBe(false);
     expect(() => writeActivityViewEnabled(true, throwingStorage)).not.toThrow();
   });
+
+  it("keeps a pinned thread at the top, above attention and recency", () => {
+    const view = buildSidebarActivityView({
+      now: new Date("2026-08-14T12:00:00.000Z"),
+      projects: [{ id: "project-one", name: "Octant" }],
+      threads: [
+        {
+          threadId: "unread",
+          title: "Needs a look",
+          projectId: "project-one",
+          unread: true,
+          updatedAt: "2026-08-14T11:59:00.000Z",
+        },
+        {
+          threadId: "pinned",
+          title: "Always here",
+          projectId: "project-one",
+          pinned: true,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(view.groups[0]?.id).toBe("pinned");
+    expect(view.groups[0]?.threads.map((thread) => thread.threadId)).toEqual(["pinned"]);
+    expect(view.groups[1]?.id).toBe("priority");
+  });
 });

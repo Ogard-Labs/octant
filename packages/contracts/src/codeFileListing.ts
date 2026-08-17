@@ -87,6 +87,39 @@ export const CodeFileListingResult = Schema.Union(
 );
 export type CodeFileListingResult = typeof CodeFileListingResult.Type;
 
+/**
+ * Bound on how many changed paths one notice names. Past this the notice says
+ * `truncated` and the renderer refetches the listing, which is cheaper and
+ * more honest than streaming every path of a branch switch one at a time.
+ */
+export const MAX_CODE_FILE_CHANGE_PATHS = 64;
+
+/**
+ * One coalesced observation that files under a thread's checkout changed.
+ *
+ * The notice carries identity, never content: paths are relative to the
+ * checkout root and nothing here says what changed or what the file now
+ * contains. A renderer acts on it by refetching through the listing and open
+ * routes, which apply the same confinement and authority they always did, so a
+ * notice can never widen what a client may read.
+ */
+export const CodeFileChangeNotice = Schema.Struct({
+  kind: Schema.Literal("code-file-change"),
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  paths: Schema.Array(CodeRelativePath).pipe(Schema.maxItems(MAX_CODE_FILE_CHANGE_PATHS)),
+  /**
+   * True when more changed than the notice can name, including a host that
+   * reported a change without naming a file. `paths` is then a hint and the
+   * whole surface has to be refreshed.
+   */
+  truncated: Schema.Boolean,
+  observedAt: UtcTimestamp,
+}).annotations(strict);
+export type CodeFileChangeNotice = typeof CodeFileChangeNotice.Type;
+
+export const decodeCodeFileChangeNotice = Schema.decodeUnknownSync(CodeFileChangeNotice);
+
 export const decodeCodeFileListingEntry = Schema.decodeUnknownSync(CodeFileListingEntry);
 export const decodeCodeFileListing = Schema.decodeUnknownSync(CodeFileListing);
 export const decodeCodeFileListingFailure = Schema.decodeUnknownSync(CodeFileListingFailure);

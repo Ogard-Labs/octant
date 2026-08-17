@@ -364,6 +364,41 @@ describe("useChatController", () => {
     unmount();
   });
 
+  it("keeps catching up after a failed snapshot instead of freezing the thread", async () => {
+    const subscribe = vi
+      .fn()
+      .mockImplementationOnce(async function* () {
+        throw new Error("Event stream dropped.");
+      })
+      .mockImplementation(async function* (_threadId, _cursor, signal: AbortSignal) {
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+      });
+    const thread = vi
+      .fn()
+      .mockResolvedValueOnce(threadView(1))
+      .mockRejectedValueOnce(new Error("Octant Chat service is unavailable."))
+      .mockResolvedValue(threadView(5));
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread,
+      subscribe,
+    });
+    const { result, unmount } = renderHook(() =>
+      useChatController({
+        activeThreadId: threadId,
+        client,
+        reconnectDelayMs: 0,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.activeView?.lastSequence).toBe(5));
+    expect(result.current.status).toBe("ready");
+    expect(thread.mock.calls.length).toBeGreaterThanOrEqual(3);
+    unmount();
+  });
+
   it("does not refetch an unchanged thread after a finite empty replay", async () => {
     const client = createMockClient({
       bootstrap: vi.fn(async () => decodeChatBootstrap({ ...bootstrap(), threads: [] })),

@@ -1134,6 +1134,13 @@ export const ProviderRuntimeEvent = Schema.Union(
     cacheReadInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
     cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
     providerExecutionDurationMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+    /**
+     * What the provider says this turn cost, in US dollars. Only ever the
+     * provider's own figure: Octant holds no price list and never multiplies
+     * tokens by a rate it guessed, so a provider that reports no cost leaves
+     * this absent rather than showing an invented number.
+     */
+    costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -1145,6 +1152,25 @@ export const ProviderRuntimeEvent = Schema.Union(
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("diff"),
     diff: Schema.NonEmptyString,
+  }).annotations(strict),
+  /**
+   * How much of a provider's usage window this account has spent.
+   *
+   * Providers that meter by rolling window (a five-hour and a weekly one, for
+   * example) say so during a turn. Passing it through is what lets a thread
+   * warn before the window closes instead of the user meeting the limit as a
+   * failed turn. `window` is the provider's own name for the window, kept
+   * verbatim because only the provider defines what it covers.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("rate-limit-window"),
+    window: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+    status: Schema.Literal("allowed", "warning", "exhausted"),
+    /** Share of the window spent, 0 to 1. Absent when the provider gives none. */
+    utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+    /** When the window next resets. Absent when the provider gives none. */
+    resetsAt: Schema.optional(UtcTimestamp),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

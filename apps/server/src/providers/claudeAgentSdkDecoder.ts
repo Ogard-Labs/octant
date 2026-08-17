@@ -651,6 +651,9 @@ function decodeResult(
       : {}),
     durationMs,
     usage,
+    // Claude states the turn's price itself. Carrying it through is the only
+    // way Octant can show a cost: it holds no price list of its own.
+    totalCostUsd: message.total_cost_usd as number,
     permissionDenials: permissionDenials.map((entry) => ({
       toolName: entry!.tool_name as string,
       toolUseId: entry!.tool_use_id as string,

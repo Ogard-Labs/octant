@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { CornerDownLeft, Search } from "lucide-react";
+import { matchKeybinding, resolveKeybindings, type OctantKeybindings } from "@octant/domain";
 import { isApplePlatform } from "../platform";
+import { useKeybindings } from "../keybindings/useKeybindings";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { useOctantCommands } from "./CommandRegistry";
@@ -15,17 +17,17 @@ function optionId(index: number): string {
 /**
  * Report whether a keyboard event is the palette chord.
  *
+ * The chord is whatever the user has bound `command-palette` to, defaulting to
  * `Cmd+K` on Apple hardware and `Ctrl+K` elsewhere. On macOS — the shipping
  * target — `Ctrl+K` is Cocoa's "delete to end of line" in every text field, and
- * the handler that asks this question cancels the event, so accepting `Ctrl+K`
- * there would take that editing command away from the whole app in exchange for
- * a second way to reach a palette `Cmd+K` already opens. Shift and Alt must be
- * absent, so the chord cannot collide with Zen (`Cmd/Ctrl+Shift+Z`) or with any
- * Shift/Alt-qualified editor binding.
+ * the handler that asks this question cancels the event, so `Mod` never stands
+ * for Control there.
  */
-export function isCommandPaletteEvent(event: globalThis.KeyboardEvent): boolean {
-  if (event.shiftKey || event.altKey || event.key.toLowerCase() !== "k") return false;
-  return isApplePlatform() ? event.metaKey : event.metaKey || event.ctrlKey;
+export function isCommandPaletteEvent(
+  event: globalThis.KeyboardEvent,
+  keybindings: OctantKeybindings = resolveKeybindings(),
+): boolean {
+  return matchKeybinding(keybindings, event, isApplePlatform()) === "command-palette";
 }
 
 /**
@@ -46,6 +48,7 @@ export function isCommandPaletteEvent(event: globalThis.KeyboardEvent): boolean 
  */
 export function CommandPalette() {
   const commands = useOctantCommands().filter((command) => command.action.kind === "run");
+  const { keybindings } = useKeybindings();
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -56,7 +59,7 @@ export function CommandPalette() {
   useEffect(() => {
     if (!available) return;
     function onKeyDown(event: globalThis.KeyboardEvent): void {
-      if (!isCommandPaletteEvent(event)) return;
+      if (!isCommandPaletteEvent(event, keybindings)) return;
       event.preventDefault();
       if (open) {
         setOpen(false);
@@ -70,7 +73,7 @@ export function CommandPalette() {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [available, open]);
+  }, [available, keybindings, open]);
 
   if (!open) return null;
 
