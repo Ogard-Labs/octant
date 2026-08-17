@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as nodePty from "node-pty";
@@ -84,10 +85,11 @@ interface TerminalProcessDependencies {
   readonly sandboxPath?: string;
   readonly temporaryDirectory?: string;
   /**
-   * Octant-owned directory the confined shell may keep its own state in
-   * (history, prompt caches). The profile denies writes to the real home, so
-   * without this an interactive zsh spends its first seconds printing
-   * permission errors for `~/.zsh_history` and `~/.cache`.
+   * Base of the Octant-owned directories the confined shells keep their own
+   * state in (history, prompt caches). The profile denies writes to the real
+   * home, so without this an interactive zsh spends its first seconds printing
+   * permission errors for `~/.zsh_history` and `~/.cache`. Each launch gets a
+   * subdirectory of its own bound root; the base is never itself exposed.
    */
   readonly shellStateDirectory?: string;
   readonly networkEgress?: OsNetworkEgress;
@@ -209,7 +211,10 @@ export class TerminalProcessPort {
   start(input: TerminalLaunchInput): TerminalProcessHandle {
     validateLaunch(input);
     this.#dependencies.ensurePtyHelperExecutable();
-    const shellState = this.#dependencies.shellStateDirectory;
+    const shellState = shellStateDirectoryForRoot(
+      this.#dependencies.shellStateDirectory,
+      input.cwd,
+    );
     mkdirSync(shellState, { recursive: true, mode: 0o700 });
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
@@ -369,6 +374,24 @@ export class TerminalProcessPort {
     }
     return true;
   }
+}
+
+/**
+ * Derives the shell-state directory of one bound root. Shell history and prompt
+ * caches carry the command lines typed against that root, so they belong to the
+ * authority scope that produced them: a shell confined to one repository must
+ * not read or write the state of a shell confined to another. Only this
+ * subdirectory is granted to the launch; the shared base never is.
+ */
+function shellStateDirectoryForRoot(base: string, cwd: string): string {
+  const resolved = resolve(cwd);
+  let identity = resolved;
+  try {
+    identity = realpathSync(resolved);
+  } catch {
+    // A root the Seatbelt profile will reject anyway still gets its own scope.
+  }
+  return join(base, createHash("sha256").update(identity).digest("hex").slice(0, 16));
 }
 
 function spawnBunPty(shell: string, args: readonly string[], options: PtyForkOptions): PtyProcess {

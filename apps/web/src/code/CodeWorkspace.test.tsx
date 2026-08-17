@@ -1,8 +1,10 @@
-import type { WorkspaceTab } from "@octant/contracts/shell";
+import type { WorkspaceTab, WorkspaceTabId } from "@octant/contracts/shell";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CodeWorkspace } from "./CodeWorkspace";
 import { codeClient, gitObservation, ids, terminalResult } from "./CodeDeliveryPane.test-fixtures";
+import { createTabActivationRegistry, TabActivationProvider } from "../shell/TabActivation";
 
 describe("CodeWorkspace", () => {
   it("uses a structured loading surface while Git observation is pending", () => {
@@ -47,7 +49,7 @@ describe("CodeWorkspace", () => {
     );
   });
 
-  it("opens a terminal the first time the tab is viewed, without an approval prompt", async () => {
+  it("opens a terminal the first time an activated tab is viewed, without an approval prompt", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
     (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce(terminalResult);
@@ -55,12 +57,14 @@ describe("CodeWorkspace", () => {
     // Approval-gated and no approval bridge: the person opening the tab is the
     // approval, and the host authorizes their own terminal without a prompt.
     render(
-      <CodeWorkspace
-        client={client}
-        controller={controller("approval-gated")}
-        createUuid={uuidFactory()}
-        tab={tab("code-terminal", "Terminal")}
-      />,
+      activated(
+        <CodeWorkspace
+          client={client}
+          controller={controller("approval-gated")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
     );
 
     await waitFor(() =>
@@ -75,6 +79,34 @@ describe("CodeWorkspace", () => {
     expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
   });
 
+  it("waits for an explicit Start on a Terminal tab restored with the layout", async () => {
+    const client = codeClient();
+    (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
+
+    // No activation provenance: the tab came back with a restored layout after
+    // a restart, so nobody asked for an interactive shell here.
+    render(
+      <CodeWorkspace
+        client={client}
+        controller={controller("full-access")}
+        createUuid={uuidFactory()}
+        tab={tab("code-terminal", "Terminal")}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Start terminal" })).toBeVisible();
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(client.executeOperation).not.toHaveBeenCalled();
+
+    // The person asking for it explicitly still gets one.
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce(terminalResult);
+    fireEvent.click(screen.getByRole("button", { name: "Start terminal" }));
+    expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
+    expect(client.executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "start-terminal", terminalId: ids.thread }),
+    );
+  });
+
   it("starts only one terminal while the first request is in flight", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
@@ -83,12 +115,14 @@ describe("CodeWorkspace", () => {
     );
 
     render(
-      <CodeWorkspace
-        client={client}
-        controller={controller("full-access")}
-        createUuid={uuidFactory()}
-        tab={tab("code-terminal", "Terminal")}
-      />,
+      activated(
+        <CodeWorkspace
+          client={client}
+          controller={controller("full-access")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
     );
 
     await waitFor(() => expect(client.executeOperation).toHaveBeenCalledOnce());
@@ -175,12 +209,14 @@ describe("CodeWorkspace", () => {
       .mockResolvedValueOnce(terminalResult);
 
     render(
-      <CodeWorkspace
-        client={client}
-        controller={controller("full-access")}
-        createUuid={uuidFactory()}
-        tab={tab("code-terminal", "Terminal")}
-      />,
+      activated(
+        <CodeWorkspace
+          client={client}
+          controller={controller("full-access")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
     );
 
     expect(
@@ -203,12 +239,14 @@ describe("CodeWorkspace", () => {
       failure: { category: "unavailable", message: "Terminal runtime is unavailable." },
     });
     const { unmount } = render(
-      <CodeWorkspace
-        client={client}
-        controller={controller("approval-gated")}
-        createUuid={uuidFactory()}
-        tab={tab("code-terminal", "Terminal")}
-      />,
+      activated(
+        <CodeWorkspace
+          client={client}
+          controller={controller("approval-gated")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
     );
 
     expect(await screen.findByRole("button", { name: "Start terminal" })).toBeVisible();
@@ -220,12 +258,14 @@ describe("CodeWorkspace", () => {
       terminalUnavailable(),
     );
     render(
-      <CodeWorkspace
-        client={planClient}
-        controller={controller("plan")}
-        createUuid={uuidFactory()}
-        tab={tab("code-terminal", "Terminal")}
-      />,
+      activated(
+        <CodeWorkspace
+          client={planClient}
+          controller={controller("plan")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
     );
     expect(await screen.findByRole("heading", { name: "No terminal attached" })).toBeVisible();
     await new Promise((resolve) => setTimeout(resolve, 700));
@@ -337,12 +377,21 @@ function controller(
 
 function tab(kind: WorkspaceTab["kind"], title: string) {
   return {
-    id: "d0000000-0000-4000-8000-000000000001",
+    id: TAB_ID,
     kind,
     mode: "code",
     threadId: ids.thread,
     title,
   } as Extract<WorkspaceTab, { readonly mode: "code" }>;
+}
+
+const TAB_ID = "d0000000-0000-4000-8000-000000000001" as WorkspaceTabId;
+
+/** The person activated, opened, or created this tab in this session. */
+function activated(children: ReactNode) {
+  const registry = createTabActivationRegistry();
+  registry.noteActivated(TAB_ID);
+  return <TabActivationProvider registry={registry}>{children}</TabActivationProvider>;
 }
 
 function uuidFactory() {

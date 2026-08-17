@@ -11,6 +11,7 @@ import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { LoaderCircle } from "lucide-react";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
+import { useTabActivation } from "../shell/TabActivation";
 import { CodeGitPane } from "./CodeGitPane";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";
@@ -546,9 +547,11 @@ function TerminalWorkspaceSurface(
   );
   const [starting, setStarting] = useState(false);
   const startInFlight = useRef(false);
-  // A tab that has never had a process opens one on first view; the person
-  // opening the tab asked for a terminal. A process that later exited is not
-  // restarted behind their back.
+  // A tab the person activated, opened, or created in this session opens a
+  // process on first view; they asked for a terminal. A tab that only came
+  // back with a restored layout, and a process that later exited, wait for an
+  // explicit Start instead of launching a shell nobody asked for.
+  const { wasActivatedThisSession } = useTabActivation();
   const autoStarted = useRef(false);
   const startRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
@@ -611,7 +614,14 @@ function TerminalWorkspaceSurface(
       } finally {
         if (active && initial) setReattaching(false);
       }
-      if (active && initial && absent && !autoStarted.current && props.threadPolicy !== "plan") {
+      if (
+        active &&
+        initial &&
+        absent &&
+        !autoStarted.current &&
+        props.threadPolicy !== "plan" &&
+        wasActivatedThisSession(props.tab.id)
+      ) {
         autoStarted.current = true;
         void startRef.current();
       }
@@ -630,9 +640,11 @@ function TerminalWorkspaceSurface(
     props.nextUuid,
     props.scope.checkoutId,
     props.scope.threadId,
+    props.tab.id,
     props.terminal,
     props.terminalId,
     props.threadPolicy,
+    wasActivatedThisSession,
   ]);
 
   const start = async () => {

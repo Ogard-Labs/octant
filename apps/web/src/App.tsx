@@ -3478,6 +3478,7 @@ function LaunchedShell(
                   hostId={createHostId}
                   hidden={railPlaceholder !== undefined || codeBoardOpen || automationCenterVisible}
                   onActivate={controller.activateTab}
+                  tabActivation={controller.tabActivation}
                   onClearFocus={controller.clearFocus}
                   onClose={controller.closeTab}
                   onCommitResize={controller.commitSplitResize}
