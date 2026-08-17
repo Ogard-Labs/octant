@@ -116,6 +116,32 @@ describe("GitService", () => {
     );
   });
 
+  it("accepts both halves of a staged rename when unstaging", async () => {
+    const observation = {
+      ...readyObservation(),
+      statusEntries: [{ path: "new.txt", originalPath: "old.txt", index: "R", worktree: " " }],
+      changedPaths: ["new.txt", "old.txt"],
+      stagedSummary: [{ path: "new.txt", originalPath: "old.txt", index: "R", worktree: " " }],
+    };
+    const mutation = mutationPort();
+    const service = new GitService({ observe: vi.fn(async () => observation) }, mutation);
+
+    // One staged entry occupies two paths, and Git needs both to take the
+    // rename out of the index instead of half-applying it.
+    await expect(
+      service.unstage({
+        checkoutId: "checkout-1",
+        checkoutRoot: "/repo",
+        paths: ["new.txt", "old.txt"],
+        expectedStateToken: observation.stateToken,
+      }),
+    ).resolves.toEqual({ status: "applied" });
+    expect(mutation.unstage).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", paths: ["new.txt", "old.txt"] },
+      undefined,
+    );
+  });
+
   it("requires approval or Full access and a named branch with an observed confirmed remote", async () => {
     const observation = readyObservation();
     const mutation = mutationPort();

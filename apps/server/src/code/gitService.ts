@@ -143,7 +143,14 @@ export class GitService {
       if (!current) return { status: "unavailable" };
       if (current.stateToken !== input.expectedStateToken)
         return { status: "rejected", reason: "stale-state" };
-      const staged = new Set(current.stagedSummary.map((entry) => entry.path));
+      // A staged rename is one entry occupying two paths. Git's pathspec
+      // applies only to the paths it is given, so both sides have to be
+      // accepted or unstaging a rename is refused as an unlisted path.
+      const staged = new Set(
+        current.stagedSummary.flatMap((entry) =>
+          entry.originalPath === undefined ? [entry.path] : [entry.path, entry.originalPath],
+        ),
+      );
       if (input.paths.some((path) => !staged.has(path)))
         return { status: "rejected", reason: "unlisted-path" };
       return this.#mutation.unstage(
