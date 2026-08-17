@@ -232,6 +232,28 @@ describe("findDecisionViolations, on the gaps a weaker gate leaves", () => {
     ).toEqual([]);
   });
 
+  it("keeps a shorter fence inside a longer one an example, not a declaration", () => {
+    // Showing a fenced record inside a fenced example needs a longer outer
+    // marker. Closing on the inner one read the sample status line as the
+    // record's own second declaration and blocked the documentation.
+    const documented = [
+      wellFormed("0001", "First"),
+      "",
+      "````markdown",
+      "```markdown",
+      "**Status:** Proposed",
+      "```",
+      "````",
+      "",
+    ].join("\n");
+    expect(
+      reasons([
+        { path: "docs/decisions/0001-first.md", content: documented },
+        index(row("0001", "first", "First")),
+      ]),
+    ).toEqual([]);
+  });
+
   it("checks the numbers a written range only implies", () => {
     // Both written ends exist, so only the implied middle can fail here. That is
     // exactly the reference the plain matcher cannot see.

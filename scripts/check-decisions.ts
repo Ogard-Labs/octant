@@ -142,13 +142,25 @@ function findNumberingGaps(
  */
 function linesOutsideFences(content: string): ReadonlyArray<string> {
   const lines: Array<string> = [];
-  let fenced = false;
+  // A fence closes only on its own marker, at least as long as the opener. A
+  // four-backtick example holding a three-backtick snippet is how these
+  // documents show a fenced record, and closing on the inner snippet would
+  // read its sample status line as a real declaration.
+  let open: { readonly marker: string; readonly length: number } | undefined;
   for (const line of content.split("\n")) {
-    if (/^\s*(?:```|~~~)/.test(line)) {
-      fenced = !fenced;
-      continue;
+    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (marker !== undefined) {
+      const character = marker.slice(0, 1);
+      if (open === undefined) {
+        open = { marker: character, length: marker.length };
+        continue;
+      }
+      if (character === open.marker && marker.length >= open.length) {
+        open = undefined;
+        continue;
+      }
     }
-    if (!fenced) lines.push(line);
+    if (open === undefined) lines.push(line);
   }
   return lines;
 }
