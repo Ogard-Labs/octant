@@ -162,6 +162,7 @@ describe("mobileInboxClient", () => {
           settings: codeSettings,
           threads: [codeThread],
           checkouts: [codeCheckout],
+          activity: [],
         }).threads[0]!,
       ],
     });
@@ -183,6 +184,7 @@ describe("mobileInboxClient", () => {
       settings: codeSettings,
       threads: [codeThread],
       checkouts: [codeCheckout],
+      activity: [],
     }).threads[0]!;
     const rows = normalizeMobileInbox({
       hostId,
@@ -216,6 +218,7 @@ describe("mobileInboxClient", () => {
             settings: codeSettings,
             threads: [codeThread],
             checkouts: [codeCheckout],
+            activity: [],
           }),
         );
       }
@@ -249,6 +252,7 @@ describe("mobileInboxClient", () => {
             settings: codeSettings,
             threads: [codeThread],
             checkouts: [codeCheckout],
+            activity: [],
           }),
         );
       }

@@ -105,6 +105,7 @@ async function readyBridge(): Promise<ReturnType<typeof createRemoteSessionBridg
           },
           threads: [],
           checkouts: [],
+          activity: [],
         });
       }
       if (method === "POST" && path === "/api/code/commands") {

@@ -91,6 +91,7 @@ describe("remote authenticated product smoke", () => {
             },
             threads: [],
             checkouts: [],
+            activity: [],
           });
         }
         return Response.json({ ok: true });
