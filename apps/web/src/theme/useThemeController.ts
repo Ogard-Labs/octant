@@ -47,6 +47,12 @@ export function useThemeController(options: {
   const [version, setVersion] = useState(0);
   const [error, setError] = useState<string>();
   const mounted = useRef(true);
+  // A write carries the version it expects, so two of them started from the
+  // same render both claim it and the server rejects the second as a conflict.
+  // Which one survives would then be whichever arrived first, not the one the
+  // user chose last. Writes queue, and each reads the version as it goes out.
+  const versionRef = useRef(0);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -56,6 +62,7 @@ export function useThemeController(options: {
       setSettings(bootstrap.settings);
       setDraft(bootstrap.settings);
       setVersion(bootstrap.version);
+      versionRef.current = bootstrap.version;
       setError(undefined);
       setStatus("ready");
     } catch (cause) {
@@ -77,15 +84,15 @@ export function useThemeController(options: {
     setDraft((current) => (current === undefined ? undefined : { ...current, ...patch }));
   }, []);
 
-  const applyExact = useCallback(
+  const send = useCallback(
     async (next: ThemeSettings) => {
-      if (settings === undefined || draft === undefined) return false;
       try {
         const result = await client.execute({
           kind: "update-theme-settings",
           settings: next,
-          expectedVersion: version as never,
+          expectedVersion: versionRef.current as never,
         });
+        versionRef.current = result.version;
         if (!mounted.current) return false;
         setSettings(result.settings);
         setDraft(result.settings);
@@ -108,7 +115,20 @@ export function useThemeController(options: {
         return false;
       }
     },
-    [client, draft, load, settings, version],
+    [client, load],
+  );
+
+  const applyExact = useCallback(
+    async (next: ThemeSettings) => {
+      if (settings === undefined || draft === undefined) return false;
+      // Queued behind whatever is already in flight, so this write expects the
+      // version that one produced rather than the version this render saw.
+      const started = queue.current;
+      const write = started.catch(() => undefined).then(async () => await send(next));
+      queue.current = write;
+      return await write;
+    },
+    [draft, send, settings],
   );
 
   const apply = useCallback(async () => {

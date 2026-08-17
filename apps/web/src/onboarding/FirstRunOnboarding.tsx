@@ -139,12 +139,17 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     setStep(target);
   }
 
+  // Guarded here rather than only on the buttons: Escape and a backdrop press
+  // reach `skip` through the dialog's own close, and an import that has not
+  // reported its picture yet would be thrown away by either of them.
   function finish() {
+    if (importing) return;
     flushProfile();
     controller.complete();
   }
 
   function skip() {
+    if (importing) return;
     flushProfile();
     controller.skip();
   }

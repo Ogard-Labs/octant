@@ -313,6 +313,11 @@ describe("FirstRunOnboarding", () => {
       expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled(),
     );
 
+    // Escape reaches the same answer without touching a button, so guarding
+    // only the footer would still lose the picture.
+    await user.keyboard("{Escape}");
+    expect(props.controller.skip).not.toHaveBeenCalled();
+
     release(new Response("binary", { status: 200 }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Skip for now" }));

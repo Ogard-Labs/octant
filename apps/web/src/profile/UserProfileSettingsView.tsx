@@ -17,11 +17,27 @@ export interface UserProfileSettingsViewProps {
  */
 export function UserProfileSettingsView(props: UserProfileSettingsViewProps) {
   const [draft, setDraft] = useState<UserProfile>(props.profile);
+  const [synced, setSynced] = useState<UserProfile>(props.profile);
+  const [editing, setEditing] = useState(false);
+
+  // Settings can stay mounted while the host's own profile changes underneath
+  // it — another window wrote one, or a conflict forced a reload. Holding the
+  // draft from before would let the next settled edit put the old values back.
+  if (synced !== props.profile) {
+    setSynced(props.profile);
+    if (!editing) setDraft(props.profile);
+  }
 
   return (
     <ProfileEditor
-      onChange={setDraft}
-      onCommit={(profile) => props.onSettingsChange({ userProfile: profile })}
+      onChange={(next) => {
+        setEditing(true);
+        setDraft(next);
+      }}
+      onCommit={(profile) => {
+        setEditing(false);
+        props.onSettingsChange({ userProfile: profile });
+      }}
       profile={draft}
     />
   );
