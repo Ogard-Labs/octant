@@ -540,12 +540,73 @@ describe("ProjectSidebarSection code project views", () => {
     await user.click(screen.getByRole("button", { name: "New project view" }));
     await user.type(screen.getByLabelText("Project view name"), "Main");
     await user.click(screen.getByRole("checkbox", { name: "octant" }));
+    await user.click(screen.getByRole("button", { name: "Rocket" }));
+    await user.click(screen.getByRole("button", { name: "Purple" }));
     await user.click(screen.getByRole("button", { name: "Create project view" }));
 
     expect(screen.getByRole("button", { name: "Project view" })).toHaveTextContent("Main");
+    expect(
+      JSON.parse(window.localStorage.getItem("octant.code.project-views.v1") ?? "{}"),
+    ).toMatchObject({ views: [{ name: "Main", icon: "rocket", color: "purple" }] });
     expect(screen.getByRole("button", { name: "Collapse octant" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Collapse auroradocs" })).not.toBeInTheDocument();
     expect(screen.getByText("Projects 1")).toBeVisible();
+  });
+
+  it("offers saved views as inline icon buttons when configured, and a dropdown otherwise", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-views.v1",
+      JSON.stringify({
+        activeViewId: "all",
+        views: [
+          {
+            id: "view-main",
+            name: "Main",
+            projectIds: [codeProjectA.id],
+            icon: "rocket",
+            color: "purple",
+          },
+          { id: "view-docs", name: "Docs", projectIds: [codeProjectB.id] },
+        ],
+      }),
+    );
+    const sharedProps = {
+      archivedProjects: [],
+      availabilityByProject: new Map(),
+      onArchive: vi.fn(),
+      onMove: vi.fn(),
+      onProjectOpen: vi.fn(),
+      onReorder: vi.fn(),
+      onRestore: vi.fn(),
+      projectViewsEnabled: true,
+      projects: [codeProjectA, codeProjectB],
+    } as const;
+
+    const { rerender } = render(
+      <ProjectSidebarSection {...sharedProps} projectViewSwitcherPresentation="inline" />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Project view" })).not.toBeInTheDocument();
+    const group = screen.getByRole("group", { name: "Project views" });
+    expect(within(group).getByRole("button", { name: "All Projects" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    const mainButton = within(group).getByRole("button", { name: "Main" });
+    expect(mainButton).toHaveAttribute("title", "Main");
+    expect(within(group).getByRole("button", { name: "Docs" })).toHaveAttribute("title", "Docs");
+    expect(within(group).getByRole("button", { name: "New project view" })).toBeVisible();
+
+    await user.click(mainButton);
+    expect(mainButton).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Collapse octant" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Collapse auroradocs" })).not.toBeInTheDocument();
+
+    rerender(<ProjectSidebarSection {...sharedProps} projectViewSwitcherPresentation="dropdown" />);
+    expect(screen.queryByRole("group", { name: "Project views" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Project view" })).toHaveTextContent("Main");
   });
 
   it("initializes project views when Code becomes enabled after Chat", async () => {

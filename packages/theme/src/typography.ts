@@ -15,7 +15,7 @@ export const DEFAULT_EDITOR_TYPOGRAPHY: EditorTypographyProjection = {
 };
 
 export const DEFAULT_TERMINAL_TYPOGRAPHY: TerminalTypographyProjection = {
-  fontFamily: "'JetBrains Mono', 'SF Mono', Menlo, monospace",
+  fontFamily: DEFAULT_THEME_SETTINGS.typography.terminal.family,
   fontSize: 12,
   fontWeight: 400,
   lineHeight: 1.4,

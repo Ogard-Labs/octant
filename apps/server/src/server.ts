@@ -119,7 +119,11 @@ import {
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { CodeOperationEventStore } from "./code/codeOperationEventStore";
 import { CodeThreadMetadataService } from "./code/codeThreadMetadataService";
-import { CodeThreadBoardService, type CodeBoardThread } from "./code/codeThreadBoardService";
+import {
+  boardRuntimeActivityFromWorks,
+  CodeThreadBoardService,
+  type CodeBoardThread,
+} from "./code/codeThreadBoardService";
 import { CodeFollowUpService } from "./code/codeFollowUpService";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
@@ -999,7 +1003,7 @@ function withCodeOperationRuntime(
     bootstrap: (windowId) => service.bootstrap(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
     execute: (windowId, command) => service.execute(windowId, command),
-    executeOperation: (windowId, command) => runtime.execute(windowId, command),
+    executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
     inspectTerminal: (windowId, input) => runtime.inspectTerminal(windowId, input),
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
@@ -2353,6 +2357,7 @@ export function startOctantServer(
     if (codeOperationRuntime === undefined && options.codeService === undefined) {
       const terminalProcessPort = new TerminalProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "terminal-receipts"),
+        shellStateDirectory: join(providerDataDirectory, "code", "terminal-shell"),
       });
       const repositoryTestProcessPort = new RepositoryTestProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "test-receipts"),
@@ -2540,23 +2545,8 @@ export function startOctantServer(
           threads: { list: () => boardThreads },
           metadata: codeThreadMetadataService,
           runtime: {
-            observe: (threadId) => {
-              const works = persistence.readCodeRuntimeWorks(threadId);
-              const executing = works.some((work) => work.state === "running");
-              const waiting = works.some(
-                (work) =>
-                  work.state === "waiting" ||
-                  work.state === "ambiguous" ||
-                  work.state === "interrupted",
-              );
-              return {
-                executing,
-                waiting,
-                ...(waiting && !executing
-                  ? { blockingReason: "Runtime work is waiting or interrupted." }
-                  : {}),
-              };
-            },
+            observe: (threadId) =>
+              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId)),
           },
           clock: () => new Date().toISOString(),
         });

@@ -9,7 +9,8 @@ export type ThemeTokenCategory =
   | "focus"
   | "accent"
   | "status"
-  | "diff";
+  | "diff"
+  | "palette";
 
 export interface ThemeTokenRoleDefinition {
   readonly id: string;
@@ -267,6 +268,78 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     contrastLevel: "normal-text",
     defaultLight: "#c62f34",
     defaultDark: "#ee5c61",
+  },
+  {
+    id: "palette-red",
+    displayName: "Palette red",
+    category: "palette",
+    contrastTarget: "sidebar",
+    contrastLevel: "ui",
+    defaultLight: "#c62f34",
+    defaultDark: "#ee5c61",
+  },
+  {
+    id: "palette-orange",
+    displayName: "Palette orange",
+    category: "palette",
+    contrastTarget: "sidebar",
+    contrastLevel: "ui",
+    defaultLight: "#a75613",
+    defaultDark: "#f0954a",
+  },
+  {
+    id: "palette-yellow",
+    displayName: "Palette yellow",
+    category: "palette",
+    contrastTarget: "sidebar",
+    contrastLevel: "ui",
+    defaultLight: "#7a6a00",
+    defaultDark: "#f0c383",
+  },
+  {
+    id: "palette-green",
+    displayName: "Palette green",
+    category: "palette",
+    contrastTarget: "sidebar",
+    contrastLevel: "ui",
+    defaultLight: "#157a3d",
+    defaultDark: "#8fd8ab",
+  },
+  {
+    id: "palette-teal",
+    displayName: "Palette teal",
+    category: "palette",
+    contrastTarget: "sidebar",
+    contrastLevel: "ui",
+    defaultLight: "#0d7772",
+    defaultDark: "#5ccfc9",
+  },
+  {
+    id: "palette-blue",
+    displayName: "Palette blue",
+    category: "palette",
+    contrastTarget: "sidebar",
+    contrastLevel: "ui",
+    defaultLight: "#0170dd",
+    defaultDark: "#3d9aff",
+  },
+  {
+    id: "palette-purple",
+    displayName: "Palette purple",
+    category: "palette",
+    contrastTarget: "sidebar",
+    contrastLevel: "ui",
+    defaultLight: "#6f42d0",
+    defaultDark: "#b48cf2",
+  },
+  {
+    id: "palette-pink",
+    displayName: "Palette pink",
+    category: "palette",
+    contrastTarget: "sidebar",
+    contrastLevel: "ui",
+    defaultLight: "#b32e83",
+    defaultDark: "#f08ac0",
   },
 ];
 

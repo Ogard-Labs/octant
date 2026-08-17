@@ -26,6 +26,8 @@ export interface TerminalLaunchRequest {
   readonly terminalId: string;
   readonly shell: string;
   readonly cwd: string;
+  /** Authority this shell's persisted state belongs to; see TerminalLaunchInput. */
+  readonly stateScope: string;
   readonly columns: number;
   readonly rows: number;
   readonly credentialReferences: readonly TerminalCredentialReference[];
@@ -133,6 +135,7 @@ export class TerminalService {
     const process = this.#options.port.start({
       shell: request.shell,
       cwd: request.cwd,
+      stateScope: request.stateScope,
       environment,
       columns: request.columns,
       rows: request.rows,

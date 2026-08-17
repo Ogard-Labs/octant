@@ -2,7 +2,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import { enabledModes } from "@octant/domain/mode-policy";
 import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
-import { Search, Settings } from "lucide-react";
+import { PanelLeftClose, Search, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -50,6 +50,8 @@ export interface ShellSidebarProps {
   readonly onAddFolder: () => void;
   readonly onOpenSearch: () => void;
   readonly onOpenSettings: () => void;
+  /** Hides the sidebar; the window chrome then offers the matching Show control. */
+  readonly onCollapseSidebar?: () => void;
   readonly onRetryChat?: () => void;
   readonly onSelectMode: (mode: OctantMode) => void;
   readonly settings: ShellSettings;
@@ -109,6 +111,14 @@ export function ShellSidebar(props: ShellSidebarProps) {
                 onClick={props.onOpenSearch}
                 title="Search ⌘K"
               />
+              {props.onCollapseSidebar === undefined ? null : (
+                <IconButton
+                  data-navigation-id="hide-sidebar"
+                  icon={PanelLeftClose}
+                  label="Hide sidebar"
+                  onClick={props.onCollapseSidebar}
+                />
+              )}
               <span className="sidebar__chrome-activity" data-octant-sidebar-chrome-actions />
             </>
           }
