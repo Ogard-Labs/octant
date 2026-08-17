@@ -441,16 +441,20 @@ function CodeBoardBody(props: {
     );
   }
   const cards = props.board.view.cards;
-  if (cards.length === 0) {
-    return (
-      <div className="code-board__body">
-        <div className="code-board__empty" role="status">
-          <p>No Code threads match the current filters.</p>
-          <p>{activeFilterSummary(props.filters)}</p>
-          <p>No threads were deleted or completed; adjust the filters to see more.</p>
-        </div>
+  // Status grouping with empty groups shown promises four fixed columns. A
+  // board with no matches is exactly when someone needs to see that shape, so
+  // the result flows through grouping and the explanation sits above it.
+  const showsFixedColumns = props.grouping === "status" && props.showEmptyGroups;
+  const emptyNote =
+    cards.length === 0 ? (
+      <div className="code-board__empty" role="status">
+        <p>No Code threads match the current filters.</p>
+        <p>{activeFilterSummary(props.filters)}</p>
+        <p>No threads were deleted or completed; adjust the filters to see more.</p>
       </div>
-    );
+    ) : null;
+  if (cards.length === 0 && !showsFixedColumns) {
+    return <div className="code-board__body">{emptyNote}</div>;
   }
   const columns = groupCodeBoardCards(cards, props.grouping, { projects: props.projects });
   const visibleColumns = props.showEmptyGroups
@@ -458,6 +462,7 @@ function CodeBoardBody(props: {
     : columns.filter((column) => column.cards.length > 0);
   return (
     <div className="code-board__body" data-grouping={props.grouping}>
+      {emptyNote}
       <div className="code-board__columns" data-grouping={props.grouping}>
         {visibleColumns.map((column) => (
           <CodeBoardColumnView

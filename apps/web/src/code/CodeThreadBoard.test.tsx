@@ -303,6 +303,13 @@ describe("CodeThreadBoard", () => {
     const empty = message.closest("[role='status']");
     expect(empty).not.toBeNull();
     expect(empty).toHaveTextContent("No threads were deleted or completed");
+
+    // Status grouping still shows its four fixed columns: the column view is
+    // the point, and a board with nothing in it is when its shape matters most.
+    for (const column of ["Ready (0)", "In Progress (0)", "Waiting (0)", "Done (0)"]) {
+      const region = screen.getByRole("region", { name: column });
+      expect(within(region).getByText("No threads")).toBeVisible();
+    }
   });
 
   it("surfaces a recovering thread in a Recovery column with its reason", async () => {

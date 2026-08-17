@@ -688,10 +688,21 @@ function LaunchedShell(
   // Presentation-only: whether the person hid the navigation sidebar. Kept in
   // local storage so a reload does not surprise them with it back.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(globalThis));
+  // Toggling unmounts the button that was activated, so a keyboard user would
+  // otherwise be dropped on the document body. Remember which control replaces
+  // it and focus that one once the new layout has rendered.
+  const sidebarToggleFocusRef = useRef<"Hide sidebar" | "Show sidebar" | undefined>(undefined);
   const setSidebarCollapsedPersistent = useCallback((collapsed: boolean) => {
+    sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
     setSidebarCollapsed(collapsed);
     writeSidebarCollapsed(globalThis, collapsed);
   }, []);
+  useLayoutEffect(() => {
+    const label = sidebarToggleFocusRef.current;
+    if (label === undefined) return;
+    sidebarToggleFocusRef.current = undefined;
+    document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)?.focus();
+  }, [sidebarCollapsed]);
   const [previewContextWidth, setPreviewContextWidth] = useState<number>();
   const [pendingCodeDeepLink, setPendingCodeDeepLink] = useState<CodeDeepLink>();
   const [computerUseSessionRepresentationCounts, setComputerUseSessionRepresentationCounts] =

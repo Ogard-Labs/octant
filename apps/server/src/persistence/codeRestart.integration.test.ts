@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 describe("Code persistence restart", () => {
-  it("fails stale checkout identity closed and reconciles ambiguous work without inventing completion", async () => {
+  it("fails stale checkout identity closed and reconciles running work without inventing completion or reordering turns", async () => {
     const directory = temporaryDirectory();
     const path = join(directory, "octant.sqlite3");
     const first = openSqlite(path);
@@ -114,13 +114,18 @@ describe("Code persistence restart", () => {
     );
 
     // A provider turn may still be owed a resume or an approval, so it waits.
-    expect(states.running).toMatchObject({ state: "waiting", updatedAt: restartedAt });
-    expect(states.ambiguous).toMatchObject({ state: "interrupted", updatedAt: restartedAt });
+    // Its `updatedAt` keeps the moment the work last actually moved: stamping
+    // the restart would make a frozen turn look newer than one that finished
+    // after it, and the board reads the latest turn to decide what is owed.
+    expect(states.running).toMatchObject({ state: "waiting", updatedAt: now });
+    // An outcome that could not be established stays unresolved rather than
+    // being rewritten into a conclusion nobody observed.
+    expect(states.ambiguous).toMatchObject({ state: "ambiguous", updatedAt: now });
     // A terminal's OS process did not survive the restart; it is interrupted,
     // not waiting, so it can never hold its thread in Waiting forever.
     expect(states.runningTerminal).toMatchObject({
       state: "interrupted",
-      updatedAt: restartedAt,
+      updatedAt: now,
     });
     expect(states.file).toMatchObject({
       state: "interrupted",
@@ -181,7 +186,7 @@ describe("Code persistence restart", () => {
       state: "waiting",
     });
     expect(readCodeRuntimeWork(rebuilt, decodeCodeRuntimeWorkId(ids.ambiguous))).toMatchObject({
-      state: "interrupted",
+      state: "ambiguous",
     });
     expect(
       readCodeRuntimeWork(rebuilt, decodeCodeRuntimeWorkId(ids.runningTerminal)),

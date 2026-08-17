@@ -1373,9 +1373,13 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Hide sidebar" }));
     expect(screen.queryByRole("complementary", { name: "Octant sidebar" })).not.toBeInTheDocument();
     expect(globalThis.localStorage.getItem("octant.shell.sidebar-collapsed.v1")).toBe("true");
+    // The activated control is unmounted by its own state change, so focus
+    // moves to the control that replaced it instead of the document body.
+    expect(screen.getByRole("button", { name: "Show sidebar" })).toHaveFocus();
     await user.click(screen.getByRole("button", { name: "Show sidebar" }));
     expect(screen.getByRole("complementary", { name: "Octant sidebar" })).toBeVisible();
     expect(globalThis.localStorage.getItem("octant.shell.sidebar-collapsed.v1")).toBeNull();
+    expect(screen.getByRole("button", { name: "Hide sidebar" })).toHaveFocus();
   });
 
   it("keeps Automations hidden when the release gate is off and overlays implemented rail placeholders", async () => {
