@@ -54,6 +54,16 @@ export interface SeatbeltProfileInput {
    * beneath it are re-allowed by the later allow rules.
    */
   readonly additionalDenyReadPaths?: ReadonlyArray<string>;
+  /**
+   * Extra write denials emitted after the bound-root and temporary-directory
+   * grants and before `additionalWriteRoots`.
+   *
+   * A shared parent that happens to sit under the temporary directory is
+   * otherwise writable through that ancestor grant, so denying the subpath here
+   * and re-allowing this launch's own directory below keeps sibling scopes
+   * unreachable for writes as well as reads.
+   */
+  readonly additionalDenyWritePaths?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
   readonly extraRules?: ReadonlyArray<string>;
   readonly homeDirectory?: string;
@@ -85,6 +95,8 @@ export interface SeatbeltConfinementPrepareInput {
   readonly writeBoundRoot?: boolean;
   /** See {@link SeatbeltProfileInput.additionalDenyReadPaths}. */
   readonly additionalDenyReadPaths?: ReadonlyArray<string>;
+  /** See {@link SeatbeltProfileInput.additionalDenyWritePaths}. */
+  readonly additionalDenyWritePaths?: ReadonlyArray<string>;
   readonly privateHomeAllowPaths?: ReadonlyArray<string>;
   readonly extraRules?: ReadonlyArray<string>;
 }
@@ -179,6 +191,8 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
   ];
   for (const path of input.additionalDenyReadPaths ?? [])
     assertAbsolute(path, "additional deny read path");
+  const additionalDenyWritePaths = input.additionalDenyWritePaths ?? [];
+  for (const path of additionalDenyWritePaths) assertAbsolute(path, "additional deny write path");
   const privateAllowPaths = input.privateHomeAllowPaths ?? [
     input.boundRoot,
     input.temporaryDirectory,
@@ -214,6 +228,7 @@ export function buildDenyDefaultSeatbeltProfile(input: SeatbeltProfileInput): st
     ]).map((path) => seatbeltAllowRule("file-read*", path)),
     ...(writeBoundRoot ? [seatbeltAllowRule("file-write*", input.boundRoot)] : []),
     seatbeltAllowRule("file-write*", input.temporaryDirectory),
+    ...additionalDenyWritePaths.map((path) => seatbeltDenyRule("file-write*", path)),
     ...additionalWriteRoots.map((path) => seatbeltAllowRule("file-write*", path)),
     '(allow file-write-data (literal "/dev/null"))',
     ...(input.extraRules ?? []),
@@ -298,6 +313,9 @@ export function makeSeatbeltConfinementLive(
         ...(input.additionalDenyReadPaths === undefined
           ? {}
           : { additionalDenyReadPaths: input.additionalDenyReadPaths }),
+        ...(input.additionalDenyWritePaths === undefined
+          ? {}
+          : { additionalDenyWritePaths: input.additionalDenyWritePaths }),
         privateHomeAllowPaths,
         ...(input.extraRules === undefined ? {} : { extraRules: input.extraRules }),
         ...(options.homeDirectory === undefined ? {} : { homeDirectory: options.homeDirectory }),

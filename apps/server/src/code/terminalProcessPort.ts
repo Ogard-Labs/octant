@@ -240,6 +240,10 @@ export class TerminalProcessPort {
         // profile is generated, and this shell must never gain it. The allow
         // rules below re-grant only this launch's own subdirectory.
         additionalDenyReadPaths: [this.#dependencies.shellStateDirectory],
+        // The base can sit under the temporary directory, whose write grant
+        // would otherwise reach every sibling through that ancestor. Deny the
+        // base for writes too; the own-directory grant below re-allows it.
+        additionalDenyWritePaths: [this.#dependencies.shellStateDirectory],
         readRoots: [
           input.cwd,
           this.#dependencies.temporaryDirectory,

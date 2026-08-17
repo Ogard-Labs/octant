@@ -187,6 +187,16 @@ describe("TerminalProcessPort", () => {
       expect(own.profile).toContain(
         `(deny file-read* (subpath "${realpathSync(shellStateDirectory)}"))`,
       );
+      // The base can sit under an ancestor that is itself writable, so the
+      // write side needs the same stable denial.
+      expect(own.profile).toContain(
+        `(deny file-write* (subpath "${realpathSync(shellStateDirectory)}"))`,
+      );
+      expect(
+        own.profile.indexOf(`(deny file-write* (subpath "${realpathSync(shellStateDirectory)}"))`),
+      ).toBeLessThan(
+        own.profile.indexOf(`(allow file-write* (subpath "${realpathSync(own.stateDirectory)}"))`),
+      );
       expect(
         own.profile.indexOf(`(deny file-read* (subpath "${realpathSync(shellStateDirectory)}"))`),
       ).toBeLessThan(
