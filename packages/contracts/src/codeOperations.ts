@@ -1561,11 +1561,23 @@ export const CodeBoardView = Schema.Struct({
 }).annotations(strict);
 export type CodeBoardView = typeof CodeBoardView.Type;
 
+/**
+ * The effects a thread may seek an approval for.
+ *
+ * A command absent here cannot be approved at all, so in the approval-gated and
+ * auto-accept-edits postures it is not merely unprompted: the request fails to
+ * decode and the command never reaches the service. Every Git effect the
+ * renderer gates therefore has to appear, including the three that take work
+ * back out of the index or off the disk.
+ */
 const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "start-terminal",
   "run-repository-test",
   "cancel-repository-test",
   "stage-git",
+  "unstage-git",
+  "discard-git-changes",
+  "restore-git-checkpoint",
   "commit-git",
   "push-git",
   "create-pull-request",

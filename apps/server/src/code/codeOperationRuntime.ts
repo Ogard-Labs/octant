@@ -656,6 +656,23 @@ function approvalPrompt(
         message = "Allow Code stage operation?";
         effectDetail = command.paths.join("\n");
         break;
+      case "unstage-git":
+        message = "Allow Code unstage operation?";
+        effectDetail = `These files leave the index:\n${command.paths.join("\n")}`;
+        break;
+      case "restore-git-checkpoint":
+        message = "Restore the checkout to this checkpoint?";
+        // The one Git effect that destroys work the user never staged, so the
+        // prompt names what is at risk before naming the point restored to.
+        effectDetail = [
+          "Uncommitted work not saved in this checkpoint is overwritten.",
+          `Worktree: ${command.checkpoint.worktree}`,
+          `Index: ${command.checkpoint.index}`,
+          ...(command.checkpoint.head === undefined
+            ? ["HEAD: no commits"]
+            : [`HEAD: ${command.checkpoint.head}`]),
+        ].join("\n");
+        break;
       case "discard-git-changes":
         message = "Discard uncommitted changes?";
         effectDetail = `These files lose their uncommitted changes:\n${command.paths.join("\n")}`;

@@ -244,14 +244,11 @@ describe("useCodeController", () => {
           } as never)
         : ({ kind: "unhandled" } as never),
     );
-    // The identity this renderer holds is stale: the checkout it names is no
-    // longer available, which is the case re-observing exists for.
+    // The identity this renderer holds is stale: bootstrap no longer knows the
+    // checkout it names at all, which is the case re-observing exists for.
     const client = fakeClient({
       execute,
-      bootstrap: vi.fn(async () => ({
-        ...bootstrap(),
-        checkouts: [{ ...checkout(), availability: "unavailable" as never }],
-      })),
+      bootstrap: vi.fn(async () => ({ ...bootstrap(), checkouts: [] })),
     });
     const { result } = renderHook(() => useCodeController({ client }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
@@ -306,6 +303,46 @@ describe("useCodeController", () => {
     // is bound to, so a fork could only be created against a different branch
     // and working tree than the conversation it inherits.
     const client = fakeClient({ execute });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let forked: unknown = "unset";
+    await act(async () => {
+      forked = await result.current.forkThread({
+        threadId: ids.thread,
+        throughOperationId: "70000000-0000-4000-8000-000000000001",
+        title: "Controller foundation (fork)",
+      });
+    });
+
+    expect(forked).toBeUndefined();
+    expect(execute.mock.calls.some(([command]) => command.kind === "create-code-thread")).toBe(
+      false,
+    );
+  });
+
+  it("refuses that fork even while the source worktree is out of reach", async () => {
+    const prepared = { ...checkout(), id: "40000000-0000-4000-8000-000000000009" as never };
+    const execute = vi.fn(async (command: CodeCommand) =>
+      command.kind === "prepare-code-project-checkout"
+        ? ({
+            kind: "checkout-prepared",
+            bindingRevisionId: ids.bindingRevision,
+            checkout: prepared,
+          } as never)
+        : ({ kind: "unhandled" } as never),
+    );
+    // A managed worktree that is waiting or unrecovered is the same tree the
+    // conversation describes, temporarily out of reach. Treating that as a
+    // stale identity would bind the fork to the Project's checkout instead and
+    // silently move the work to another branch.
+    const client = fakeClient({
+      execute,
+      bootstrap: vi.fn(async () => ({
+        ...bootstrap(),
+        checkouts: [{ ...checkout(), availability: "waiting" as never }],
+      })),
+    });
     const { result } = renderHook(() => useCodeController({ client }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
 

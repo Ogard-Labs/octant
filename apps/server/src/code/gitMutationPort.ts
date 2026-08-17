@@ -135,17 +135,30 @@ export class GitMutationPort {
       ["-C", input.checkoutRoot, "rev-parse", "--verify", "--quiet", "HEAD"],
       signal,
     );
-    // Before the first commit there is no HEAD to restore the index from, so
-    // the entry is dropped from the index instead. `--cached` never touches the
-    // file on disk, and `--force` only waives Git's warning about discarding
-    // staged content, which is exactly what unstaging asks for.
-    return head.exitCode === 0
-      ? this.#apply(input.checkoutRoot, ["restore", "--staged", "--", ...input.paths], signal)
-      : this.#apply(
-          input.checkoutRoot,
-          ["rm", "--cached", "--force", "--", ...input.paths],
-          signal,
-        );
+    if (head.exitCode === 0) {
+      return this.#apply(input.checkoutRoot, ["restore", "--staged", "--", ...input.paths], signal);
+    }
+    // A nonzero probe is not proof of an unborn branch: an aborted run, the
+    // command timeout, and an unusable checkout root all report the same way.
+    // That matters because the fallback below is only correct when there is no
+    // HEAD — against a repository that does have commits, dropping a staged
+    // modification from the index leaves the file deleted and untracked rather
+    // than merely unstaged. So the unborn case is established positively, by
+    // HEAD being a symbolic ref to a branch that has no commit yet, and an
+    // indeterminate probe fails instead of guessing.
+    const symbolic = await this.#run(
+      ["-C", input.checkoutRoot, "symbolic-ref", "--quiet", "HEAD"],
+      signal,
+    );
+    if (symbolic.exitCode !== 0) return { status: "failed" };
+    // `--cached` never touches the file on disk, and `--force` only waives
+    // Git's warning about discarding staged content, which is what unstaging
+    // asks for when the content was never committed.
+    return this.#apply(
+      input.checkoutRoot,
+      ["rm", "--cached", "--force", "--", ...input.paths],
+      signal,
+    );
   }
 
   /**

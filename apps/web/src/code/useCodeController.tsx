@@ -1184,18 +1184,19 @@ export function useCodeController(options: CodeControllerOptions) {
         projectId: source.projectId,
       });
       if (prepared?.kind !== "checkout-prepared") return undefined;
-      // Re-observing is right when the renderer's identity is merely stale. It
-      // is not when the source sits on its own managed worktree: that checkout
-      // is still real and still different, and only the Project's is accepted
-      // for a new thread, so the fork would inherit the conversation while
-      // opening another branch and working tree. Refused rather than pointed
-      // somewhere the conversation never described.
+      // Re-observing is right only when the renderer's identity is stale enough
+      // that bootstrap no longer knows the checkout at all. A checkout bootstrap
+      // still lists is still real and still different, and only the Project's is
+      // accepted for a new thread, so forking would inherit the conversation
+      // while opening another branch and working tree. Availability does not
+      // soften that: a managed worktree that is waiting or unrecovered is the
+      // same tree, temporarily out of reach, and pointing the fork at the
+      // Project's checkout instead would silently rebind the work.
       const sourceCheckout = bootstrapRef.current?.checkouts.find(
         (candidate) => String(candidate.id) === String(source.checkoutId),
       );
       if (
         sourceCheckout !== undefined &&
-        sourceCheckout.availability === "available" &&
         String(prepared.checkout.id) !== String(sourceCheckout.id)
       ) {
         return undefined;

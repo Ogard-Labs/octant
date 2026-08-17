@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
-import { GitMutationPort } from "./gitMutationPort";
+import { GitMutationPort, type GitMutationDependencies } from "./gitMutationPort";
 
 const directories: string[] = [];
 
@@ -221,6 +221,29 @@ describe("GitMutationPort", () => {
     expect(gitOutput(repository, "diff", "--cached", "--name-only").trim()).toBe("");
     expect(gitOutput(repository, "status", "--porcelain").trimEnd()).toBe(" M README.md");
     expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("staged edit\n");
+  });
+
+  it("refuses to unstage when it cannot tell an unborn branch from a failed probe", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "README.md"), "staged edit\n");
+    git(repository, "add", "--", "README.md");
+    // A probe the command timeout aborted reports exactly as an unborn branch
+    // does. Guessing wrong here does not merely unstage: against a repository
+    // that has commits, dropping the path from the index leaves the file
+    // deleted and untracked, so an indeterminate answer has to fail.
+    const indeterminate: GitMutationDependencies = {
+      execFile: async () => ({ exitCode: 128, stdout: "", stderr: "" }),
+      pathExists: async () => false,
+      copyFile: async () => undefined,
+      removeFile: async () => undefined,
+    };
+    const port = new GitMutationPort(indeterminate, confinedOptions());
+
+    await expect(port.unstage({ checkoutRoot: repository, paths: ["README.md"] })).resolves.toEqual(
+      { status: "failed" },
+    );
+
+    expect(gitOutput(repository, "status", "--porcelain").trimEnd()).toBe("M  README.md");
   });
 
   it("takes a path back out of the index before the first commit exists", async () => {

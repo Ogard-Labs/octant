@@ -180,6 +180,66 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  // Code starts approval-gated, and the renderer awaits an approval before
+  // sending either command. A missing prompt is not a cosmetic gap: it throws,
+  // so Unstage and Restore never reach the service in the default posture.
+  it("prompts for the Git operations that leave the index or overwrite the tree", async () => {
+    const fixture = runtimeFixture({ approvalValidator: false });
+
+    const unstage = await fixture.runtime.prepareApproval(windowId, {
+      effect: {
+        kind: "operation",
+        command: {
+          kind: "unstage-git",
+          threadId,
+          checkoutId,
+          operationId: operationId(3),
+          gitOperationId: operationId(4) as never,
+          paths: ["src/main.ts"] as never,
+          expectedStateToken: "b".repeat(64),
+        },
+      },
+    });
+    const restore = await fixture.runtime.prepareApproval(windowId, {
+      effect: {
+        kind: "operation",
+        command: {
+          kind: "restore-git-checkpoint",
+          threadId,
+          checkoutId,
+          operationId: operationId(5),
+          gitOperationId: operationId(6) as never,
+          checkpoint: { worktree: "c".repeat(40), index: "d".repeat(40) } as never,
+        },
+      },
+    });
+
+    const discard = await fixture.runtime.prepareApproval(windowId, {
+      effect: {
+        kind: "operation",
+        command: {
+          kind: "discard-git-changes",
+          threadId,
+          checkoutId,
+          operationId: operationId(7),
+          gitOperationId: operationId(8) as never,
+          paths: ["src/main.ts"] as never,
+          expectedStateToken: "b".repeat(64),
+        },
+      },
+    });
+
+    expect(discard?.message).toBe("Discard uncommitted changes?");
+    expect(unstage?.message).toBe("Allow Code unstage operation?");
+    expect(unstage?.detail).toContain("src/main.ts");
+    expect(restore?.message).toBe("Restore the checkout to this checkpoint?");
+    // The prompt has to name the loss, not only the point restored to.
+    expect(restore?.detail).toContain(
+      "Uncommitted work not saved in this checkpoint is overwritten.",
+    );
+    fixture.close();
+  });
+
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
