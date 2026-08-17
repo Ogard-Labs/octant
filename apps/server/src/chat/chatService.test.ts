@@ -226,6 +226,11 @@ function openFixture(options?: {
   readonly fakeDriver: {
     readonly acquireInputs: ProviderAcquireInput[];
     readonly startedSessionIds: string[];
+    readonly startInputs: Array<{
+      readonly sessionId: string;
+      readonly modelId: string;
+      readonly modelOptionValues?: Readonly<Record<string, string>>;
+    }>;
     readonly resumeInputs: Array<{
       readonly sessionId: string;
       readonly resumeCursor: { readonly driverKind: string; readonly value: string };
@@ -361,6 +366,11 @@ function openFixture(options?: {
 
   const acquireInputs: ProviderAcquireInput[] = [];
   const startedSessionIds: string[] = [];
+  const startInputs: Array<{
+    readonly sessionId: string;
+    readonly modelId: string;
+    readonly modelOptionValues?: Readonly<Record<string, string>>;
+  }> = [];
   const resumeInputs: Array<{
     readonly sessionId: string;
     readonly resumeCursor: { readonly driverKind: string; readonly value: string };
@@ -378,9 +388,14 @@ function openFixture(options?: {
   const queue = Effect.runSync(Queue.unbounded<never>());
   const connectionDriver = {
     events: Stream.fromQueue(queue),
-    start: (input: { readonly sessionId: string }) =>
+    start: (input: {
+      readonly sessionId: string;
+      readonly modelId: string;
+      readonly modelOptionValues?: Readonly<Record<string, string>>;
+    }) =>
       Effect.sync(() => {
         startedSessionIds.push(input.sessionId);
+        startInputs.push(input);
         return {
           sessionId: input.sessionId,
           resumeCursor: {
@@ -522,7 +537,15 @@ function openFixture(options?: {
     contextHarness,
     capacityScheduler,
     threadReservationIds,
-    fakeDriver: { acquireInputs, startedSessionIds, resumeInputs, sentTurns, driver, queue },
+    fakeDriver: {
+      acquireInputs,
+      startedSessionIds,
+      startInputs,
+      resumeInputs,
+      sentTurns,
+      driver,
+      queue,
+    },
   };
 }
 
@@ -3140,6 +3163,79 @@ describe("ChatService", () => {
     await expect(providerChange).resolves.toMatchObject({ kind: "thread-updated" });
     await expect(staleSend).rejects.toMatchObject({ failure: { category: "stale" } });
     expect(planTurn).not.toHaveBeenCalled();
+  });
+
+  it("persists declared model option values on the thread and hands them to session start", async () => {
+    const probeResult = probeFixture();
+    const effortModel = {
+      ...probeResult.models[0]!,
+      options: [
+        {
+          id: "effort",
+          displayName: "Effort",
+          kind: "selection" as const,
+          values: ["low", "high"] as [string, ...string[]],
+        },
+      ],
+    };
+    const { service, fakeDriver } = openFixture({
+      probe: probeFixture({
+        models: [effortModel, { ...effortModel, id: "model-b" as never, options: [] }],
+      }),
+    });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Effort",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    await expect(
+      service.execute({
+        kind: "change-chat-provider",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        modelOptionValues: { effort: "max" },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+
+    const updated = await service.execute({
+      kind: "change-chat-provider",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      modelOptionValues: { effort: "high" },
+    });
+    if (updated.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
+    expect(updated.thread.modelOptionValues).toEqual({ effort: "high" });
+    expect(service.read(created.thread.id).thread.modelOptionValues).toEqual({ effort: "high" });
+
+    await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: updated.thread.version,
+      prompt: "Think hard",
+    });
+    expect(fakeDriver.startInputs).toHaveLength(1);
+    expect(fakeDriver.startInputs[0]).toMatchObject({
+      modelId: "model-a",
+      modelOptionValues: { effort: "high" },
+    });
+
+    // Switching to a model that declares no such option drops the stale value.
+    const afterTurn = service.read(created.thread.id);
+    const switched = await service.execute({
+      kind: "change-chat-provider",
+      threadId: created.thread.id,
+      expectedVersion: afterTurn.thread.version,
+      providerInstanceId: ids.provider,
+      modelId: "model-b",
+    });
+    if (switched.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
+    expect(switched.thread.modelOptionValues).toBeUndefined();
   });
 
   it("sends accepted prior transcript and unresolved work as provider context", async () => {

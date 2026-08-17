@@ -9,7 +9,7 @@ import {
 import { buildModelPickerGroups } from "@octant/domain";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 
 const providerA = decodeProviderInstanceId("80000000-0000-4000-8000-0000000000a1");
@@ -19,6 +19,10 @@ const modelTwo = decodeProviderModelId("model-two");
 const modelThree = decodeProviderModelId("model-three");
 
 describe("ComposerModelPicker", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it("opens a nested provider → model menu from the compact trigger", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
@@ -58,6 +62,77 @@ describe("ComposerModelPicker", () => {
     expect(
       screen.queryByRole("dialog", { name: "Choose provider and model" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders the provider rail as icon-only buttons with accessible names", async () => {
+    const user = userEvent.setup();
+    render(<ComposerModelPicker groups={groups()} onSelect={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const rail = screen.getByRole("listbox", { name: "Providers" });
+    const items = within(rail).getAllByRole("option");
+    expect(items.map((item) => item.getAttribute("aria-label"))).toEqual([
+      "Favorites",
+      "Local OpenCode",
+      "Remote Claude",
+    ]);
+    for (const item of items) {
+      expect(item).toHaveTextContent("");
+      expect(item.querySelector("svg")).not.toBeNull();
+    }
+    expect(within(rail).getByRole("option", { name: "Local OpenCode" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      within(rail).getByRole("option", { name: "Local OpenCode" }).querySelector("svg"),
+    ).toHaveAttribute("data-driver-kind", "opencode");
+    expect(
+      within(rail).getByRole("option", { name: "Remote Claude" }).querySelector("svg"),
+    ).toHaveAttribute("data-driver-kind", "claude");
+  });
+
+  it("stars models into a persisted cross-provider Favorites list without selecting them", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const { unmount } = render(<ComposerModelPicker groups={groups()} onSelect={onSelect} />);
+
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    const menu = screen.getByRole("dialog", { name: "Choose provider and model" });
+    const modelTwoRow = within(menu).getByRole("option", { name: "Model Two" }).parentElement!;
+    const star = within(modelTwoRow).getByRole("button", { name: "Add to favorites" });
+    expect(star).toHaveAttribute("aria-pressed", "false");
+    await user.click(star);
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(menu).toBeInTheDocument();
+    expect(
+      within(modelTwoRow).getByRole("button", { name: "Remove from favorites" }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(within(menu).getByRole("option", { name: "Remote Claude" }));
+    const modelThreeRow = within(menu).getByRole("option", { name: "Model Three" }).parentElement!;
+    await user.click(within(modelThreeRow).getByRole("button", { name: "Add to favorites" }));
+
+    await user.click(within(menu).getByRole("option", { name: "Favorites" }));
+    const favoriteNames = within(within(menu).getByRole("listbox", { name: "Models" }))
+      .getAllByRole("option")
+      .map((option) => option.getAttribute("aria-label"));
+    expect(favoriteNames).toEqual(["Model Two", "Model Three"]);
+    expect(within(menu).queryByRole("option", { name: "Model One" })).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("octant.models.favorites.v1") ?? "[]")).toEqual([
+      `${String(providerA)}:${String(modelTwo)}`,
+      `${String(providerB)}:${String(modelThree)}`,
+    ]);
+
+    unmount();
+    render(<ComposerModelPicker groups={groups()} onSelect={onSelect} />);
+    await user.click(screen.getByRole("button", { name: "Provider and model" }));
+    await user.click(screen.getByRole("option", { name: "Favorites" }));
+    expect(screen.getByRole("option", { name: "Model Three" })).toBeVisible();
+    const modelTwoAgain = screen.getByRole("option", { name: "Model Two" }).parentElement!;
+    await user.click(within(modelTwoAgain).getByRole("button", { name: "Remove from favorites" }));
+    expect(screen.queryByRole("option", { name: "Model Two" })).not.toBeInTheDocument();
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("shows readiness labels on providers that are not fully ready", async () => {

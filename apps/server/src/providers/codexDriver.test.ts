@@ -559,6 +559,50 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("forwards only declared reasoning and service tier selections to thread/start", async () => {
+    const f = fixture();
+    const registry = new ProviderRuntimeRegistry();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    // The server records the last probe as the instance's observed state; the
+    // driver validates option values against that declared catalog.
+    registry.setObservedState(await Effect.runPromise(Effect.scoped(driver.probe({ instanceId }))));
+    const acquired = await acquireConnection(driver);
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        modelOptionValues: { reasoning: "low", "service-tier": "fast", effort: "high" },
+      }),
+    );
+    // "medium" is not a reasoning level this model advertised; "slow" is not
+    // one of its tiers. Neither may reach Codex.
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId: secondSessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        modelOptionValues: { reasoning: "medium", "service-tier": "slow" },
+      }),
+    );
+    const starts = f.calls.filter(({ method }) => method === "thread/start");
+    expect(starts[0]?.input).toEqual({
+      cwd: projectRoot,
+      model: "gpt-5.4",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      serviceTier: "fast",
+      config: { model_reasoning_effort: "low" },
+    });
+    expect(starts[1]?.input).toEqual({
+      cwd: projectRoot,
+      model: "gpt-5.4",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+    });
+    await acquired.close();
+  });
+
   it("starts a thread with root/model/policy, subscribes before a text turn, and interrupts exact IDs", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));

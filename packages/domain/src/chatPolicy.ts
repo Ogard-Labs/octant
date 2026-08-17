@@ -20,6 +20,8 @@ import type { ProjectId } from "@octant/contracts/projects";
 import type {
   ProviderInstanceId,
   ProviderModelId,
+  ProviderModelOption,
+  ProviderModelOptionValues,
   ProviderResumeCursor,
   ProviderSessionId,
 } from "@octant/contracts/providers";
@@ -32,6 +34,7 @@ export type ChatPolicyRejectionCode =
   | "invalid-title"
   | "invalid-instructions"
   | "model-unavailable"
+  | "invalid-model-option"
   | "retry-not-allowed"
   | "invalid-attempt-transition";
 
@@ -122,6 +125,42 @@ export interface ChangeChatProviderInput {
   readonly expectedVersion: AggregateVersion;
   readonly updatedAt: UtcTimestamp;
   readonly availableModels?: ReadonlyArray<ProviderModelId>;
+  /** Options the selected model declares; absent means it declares none. */
+  readonly modelOptions?: ReadonlyArray<ProviderModelOption>;
+  /**
+   * Explicit replacement values. Every entry must name a declared selection
+   * option and one of its values. Absent keeps the thread's current values
+   * that the selected model still declares and drops the rest.
+   */
+  readonly modelOptionValues?: ProviderModelOptionValues;
+}
+
+function declaresModelOptionValue(
+  options: ReadonlyArray<ProviderModelOption>,
+  optionId: string,
+  value: string,
+): boolean {
+  const option = options.find((candidate) => candidate.id === optionId);
+  return option?.kind === "selection" && option.values.includes(value);
+}
+
+function resolveModelOptionValues(
+  thread: ChatThread,
+  input: ChangeChatProviderInput,
+): ProviderModelOptionValues | undefined {
+  const declared = input.modelOptions ?? [];
+  if (input.modelOptionValues !== undefined) {
+    for (const [optionId, value] of Object.entries(input.modelOptionValues)) {
+      if (!declaresModelOptionValue(declared, optionId, value)) {
+        reject("invalid-model-option", `Selected model does not offer ${optionId}=${value}`);
+      }
+    }
+    return Object.keys(input.modelOptionValues).length === 0 ? undefined : input.modelOptionValues;
+  }
+  const carried = Object.entries(thread.modelOptionValues ?? {}).filter(([optionId, value]) =>
+    declaresModelOptionValue(declared, optionId, value),
+  );
+  return carried.length === 0 ? undefined : Object.fromEntries(carried);
 }
 
 export function changeChatProvider(thread: ChatThread, input: ChangeChatProviderInput): ChatThread {
@@ -131,11 +170,14 @@ export function changeChatProvider(thread: ChatThread, input: ChangeChatProvider
   if (input.availableModels !== undefined && !input.availableModels.includes(input.modelId)) {
     reject("model-unavailable", "Selected model is not available");
   }
+  const modelOptionValues = resolveModelOptionValues(thread, input);
+  const { modelOptionValues: _previousValues, ...withoutValues } = thread;
 
   return decodeChatThread({
-    ...thread,
+    ...withoutValues,
     providerInstanceId: input.providerInstanceId,
     modelId: input.modelId,
+    ...(modelOptionValues === undefined ? {} : { modelOptionValues }),
     version: nextVersion(thread.version),
     updatedAt: input.updatedAt,
   });

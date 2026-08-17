@@ -20,7 +20,10 @@ const providerId = "10000000-0000-4000-8000-000000000001";
 const turnId = "00000000-0000-4000-8000-000000000931";
 const contentId = "00000000-0000-4000-8000-000000000932";
 
-function controllerFixture(overrides: Partial<ChatController> = {}): ChatController {
+function controllerFixture(
+  overrides: Partial<ChatController> = {},
+  thread: Record<string, unknown> = {},
+): ChatController {
   const view = decodeChatThreadView({
     thread: {
       id: threadId,
@@ -34,6 +37,7 @@ function controllerFixture(overrides: Partial<ChatController> = {}): ChatControl
       version: 3,
       createdAt: now,
       updatedAt: now,
+      ...thread,
     },
     turns: [],
     lastSequence: 4,
@@ -718,6 +722,58 @@ describe("ChatWorkspace", () => {
 
     expect(screen.getByText(/Disconnected — reconnecting/)).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent("Connection lost.");
+  });
+
+  it("offers the selected model's declared options and issues change-chat-provider with the values", async () => {
+    const user = userEvent.setup();
+    const snapshot = providerSnapshot();
+    const baseModel = snapshot.observedStates[0]!.models[0]!;
+    const withOptions: ProviderRegistrySnapshot = {
+      ...snapshot,
+      observedStates: [
+        {
+          ...snapshot.observedStates[0]!,
+          models: [
+            {
+              ...baseModel,
+              options: [
+                { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
+                { id: "service-tier", displayName: "Speed", kind: "selection", values: ["fast"] },
+              ],
+            },
+            { ...baseModel, id: "model-b" as never, displayName: "Model B" },
+          ],
+        },
+      ],
+    };
+    const controller = controllerFixture({}, { modelOptionValues: { "service-tier": "fast" } });
+    const { rerender } = render(
+      <ChatWorkspace controller={controller} providerSnapshot={withOptions} />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Speed" })).toHaveTextContent("Speed: fast");
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    expect(controller.execute).toHaveBeenCalledWith({
+      kind: "change-chat-provider",
+      threadId,
+      expectedVersion: 3,
+      providerInstanceId: providerId,
+      modelId: "model-a",
+      modelOptionValues: { "service-tier": "fast", effort: "high" },
+    });
+
+    await user.click(screen.getByRole("combobox", { name: "Speed" }));
+    await user.click(await screen.findByRole("option", { name: "Speed: Default" }));
+    expect(controller.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "change-chat-provider", modelOptionValues: {} }),
+    );
+
+    // A model that declares no options gets no option controls.
+    const onModelB = controllerFixture({}, { modelId: "model-b" });
+    rerender(<ChatWorkspace controller={onModelB} providerSnapshot={withOptions} />);
+    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Speed" })).toBeNull();
   });
 
   it("keeps unavailable provider and model selections visible and fail closed", () => {

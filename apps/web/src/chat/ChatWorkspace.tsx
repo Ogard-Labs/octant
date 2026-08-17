@@ -27,6 +27,7 @@ import {
   ChatComposer,
   type ChatComposerAttachmentCapability,
   type ChatComposerExtensionSelection,
+  type ChatComposerModelOption,
   type ChatComposerOption,
   type ChatComposerProps,
   type ChatComposerResearchBackend,
@@ -549,6 +550,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             modelId: decodeProviderModelId(modelId),
           });
         }}
+        modelOptions={providerState.declaredModelOptions}
+        onModelOptionChange={(optionId, value) => {
+          const { [optionId]: _previous, ...rest } = view.thread.modelOptionValues ?? {};
+          void props.controller.execute({
+            kind: "change-chat-provider",
+            threadId: view.thread.id,
+            expectedVersion: view.thread.version,
+            providerInstanceId: view.thread.providerInstanceId,
+            modelId: view.thread.modelId,
+            modelOptionValues: value === undefined ? rest : { ...rest, [optionId]: value },
+          });
+        }}
         {...(props.providerGroups === undefined
           ? {}
           : {
@@ -838,8 +851,26 @@ function providerPresentation(
   const modelOptions: ReadonlyArray<ChatComposerOption> = (selected?.observation.models ?? []).map(
     (model) => ({ id: model.id, label: model.displayName }),
   );
+  const modelOptionValues = view.thread.modelOptionValues ?? {};
+  const declaredModelOptions: ReadonlyArray<ChatComposerModelOption> = (
+    selectedModel?.options ?? []
+  ).flatMap((option) =>
+    option.kind === "selection"
+      ? [
+          {
+            id: option.id,
+            displayName: option.displayName,
+            values: option.values,
+            ...(modelOptionValues[option.id] === undefined
+              ? {}
+              : { value: modelOptionValues[option.id] }),
+          },
+        ]
+      : [],
+  );
   return {
     available,
+    declaredModelOptions,
     observation: selectedModel === undefined ? undefined : selected?.observation,
     providerLabel:
       selected?.instance.displayName ?? configuredSelected?.displayName ?? "Provider unavailable",

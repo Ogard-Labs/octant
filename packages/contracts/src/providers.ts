@@ -625,6 +625,27 @@ export const ProviderModelOption = Schema.Union(
 );
 export type ProviderModelOption = typeof ProviderModelOption.Type;
 
+export const MAX_PROVIDER_MODEL_OPTION_VALUES = 16;
+const ProviderModelOptionKey = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+
+/**
+ * A user's chosen value per declared model option (e.g. `effort`,
+ * `reasoning`, `service-tier`), keyed by `ProviderModelOption.id`. Absent keys
+ * mean the provider default. Only values the selected model actually declares
+ * are meaningful; the server validates against the current catalog.
+ */
+export const ProviderModelOptionValues = Schema.Record({
+  key: ProviderModelOptionKey,
+  value: ProviderModelOptionKey,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((values) => Object.keys(values).length <= MAX_PROVIDER_MODEL_OPTION_VALUES, {
+      message: () => `At most ${MAX_PROVIDER_MODEL_OPTION_VALUES} model option values`,
+    }),
+  );
+export type ProviderModelOptionValues = typeof ProviderModelOptionValues.Type;
+
 const ProviderModelFields = {
   id: ProviderModelId,
   displayName: Schema.NonEmptyTrimmedString,
@@ -1226,6 +1247,7 @@ export const decodeProviderDefaultsUpdated = Schema.decodeUnknownSync(ProviderDe
 export const decodeProviderCatalogSnapshot = Schema.decodeUnknownSync(ProviderCatalogSnapshot);
 export const decodeProviderCatalogUpdated = Schema.decodeUnknownSync(ProviderCatalogUpdated);
 export const decodeProviderModelOption = Schema.decodeUnknownSync(ProviderModelOption);
+export const decodeProviderModelOptionValues = Schema.decodeUnknownSync(ProviderModelOptionValues);
 export const decodeProviderModel = Schema.decodeUnknownSync(ProviderModel);
 export const decodeProviderCapabilities = Schema.decodeUnknownSync(ProviderCapabilities);
 export const decodeProviderObservedState = Schema.decodeUnknownSync(ProviderObservedState);

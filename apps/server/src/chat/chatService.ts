@@ -1327,12 +1327,19 @@ export class ChatService {
           );
         }
       }
+      const selectedModel = targetProbe.models.find(
+        (model) => String(model.id) === String(command.modelId),
+      );
       const changed = changeChatProvider(current, {
         providerInstanceId,
         modelId: command.modelId,
         expectedVersion: command.expectedVersion,
         updatedAt: timestamp,
         availableModels: targetProbe.models.map((model) => model.id),
+        modelOptions: selectedModel?.options ?? [],
+        ...(command.modelOptionValues === undefined
+          ? {}
+          : { modelOptionValues: command.modelOptionValues }),
       });
       const omissions = this.#historicalAttachmentOmissions(current, targetProbe, command.modelId);
       const { handoffWarning: _previousWarning, ...withoutPreviousWarning } = changed;

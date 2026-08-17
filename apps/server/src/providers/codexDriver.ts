@@ -8,6 +8,8 @@ import {
   type ProviderFailure,
   type ProviderCapabilities,
   type ProviderInstanceId,
+  type ProviderModel,
+  type ProviderModelOptionValues,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
@@ -51,6 +53,10 @@ export interface CodexThreadStartInput {
   readonly model: string;
   readonly approvalPolicy: "never" | "on-request";
   readonly sandbox: "danger-full-access" | "workspace-write" | "read-only";
+  /** app-server `thread/start` `serviceTier`: the model's declared speed tier. */
+  readonly serviceTier?: string;
+  /** app-server config overrides; `model_reasoning_effort` carries the reasoning selection. */
+  readonly config?: { readonly model_reasoning_effort: string };
 }
 
 export interface CodexThreadResumeInput {
@@ -198,6 +204,32 @@ export function codexExecutionSettings(
     return { approvalPolicy: "on-request", sandbox: "workspace-write" };
   }
   return { approvalPolicy: "never", sandbox: "read-only" };
+}
+
+/**
+ * Maps Octant option values onto Codex thread settings. Only values the
+ * observed model declares are forwarded (`reasoning` -> config
+ * `model_reasoning_effort`, `service-tier` -> `serviceTier`); anything else is
+ * dropped so the Codex default applies.
+ */
+export function codexModelOptionSettings(
+  model: ProviderModel | undefined,
+  values: ProviderModelOptionValues | undefined,
+): Pick<CodexThreadStartInput, "serviceTier" | "config"> {
+  if (model === undefined || values === undefined) return {};
+  const declared = (optionId: string): string | undefined => {
+    const value = values[optionId];
+    const option = model.options.find((candidate) => candidate.id === optionId);
+    return value !== undefined && option?.kind === "selection" && option.values.includes(value)
+      ? value
+      : undefined;
+  };
+  const reasoning = declared("reasoning");
+  const serviceTier = declared("service-tier");
+  return {
+    ...(serviceTier === undefined ? {} : { serviceTier }),
+    ...(reasoning === undefined ? {} : { config: { model_reasoning_effort: reasoning } }),
+  };
 }
 
 export function makeCodexClient(connection: CodexAppServerConnection): CodexClientPort {
@@ -690,11 +722,15 @@ function makeConnection(
           Effect.gen(function* () {
             ensureSubscribed();
             const settings = codexExecutionSettings(input.executionPolicy);
+            const observedModel = options.runtimeRegistry
+              .observedState(options.instanceId)
+              ?.models.find((candidate) => candidate.id === input.modelId);
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
                 model: input.modelId,
                 ...settings,
+                ...codexModelOptionSettings(observedModel, input.modelOptionValues),
               }),
             );
             if (
