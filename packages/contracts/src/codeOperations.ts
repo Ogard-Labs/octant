@@ -1177,6 +1177,15 @@ export const CodeConversationPage = Schema.Struct({
    * report per window. Absent when the provider reported none.
    */
   limits: Schema.optional(Schema.Array(CodeProviderLimit).pipe(Schema.maxItems(8))),
+  /**
+   * What this thread's most recent restore replaced, as the host recorded it
+   * before overwriting the checkout. Thread state rather than turn state, so it
+   * belongs to the page: the surface that ran the restore is gone as soon as the
+   * user opens another tab, and the way back must outlive it. Absent when the
+   * thread has never restored, or when its last restore was rejected and so
+   * replaced nothing.
+   */
+  restoreUndo: Schema.optional(CodeCheckpoint),
 }).annotations(strict);
 export type CodeConversationPage = typeof CodeConversationPage.Type;
 
