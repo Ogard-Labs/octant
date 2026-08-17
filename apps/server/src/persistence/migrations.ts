@@ -1354,6 +1354,15 @@ ALTER TABLE context_summary_projection
     name: "move_agent_run_text_to_subject_store",
     sql: AGENT_RUN_CONTENT_STORE_SQL,
   },
+  {
+    version: 45,
+    name: "record_code_runtime_first_sequence",
+    sql: `
+ALTER TABLE code_runtime_projection
+  ADD COLUMN first_sequence INTEGER
+    CHECK(first_sequence IS NULL OR first_sequence > 0);
+`,
+  },
 ];
 
 interface AppliedMigrationRow {

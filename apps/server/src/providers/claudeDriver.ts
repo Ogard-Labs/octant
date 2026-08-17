@@ -13,6 +13,7 @@ import {
   type ProviderInstanceId,
   type ProviderModel,
   type ProviderModelId,
+  type ProviderModelOptionValues,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
   type UtcTimestamp,
@@ -29,15 +30,17 @@ import { Cause, Effect, Exit, Fiber, Option, PubSub, Scope, Stream } from "effec
 
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { claudeAuthorityInputDigest, waitForClaudeAuthorityValue } from "./claudeAuthority";
-import type {
-  ClaudeAgentSdkPort,
-  ClaudeDecodedMessage,
-  ClaudeModelInfo,
-  ClaudeOpenQueryInput,
-  ClaudePermissionMode,
-  ClaudeQueryPort,
-  ClaudeSandboxSettings,
-  ClaudeToolDecision,
+import {
+  isClaudeEffortLevel,
+  type ClaudeAgentSdkPort,
+  type ClaudeDecodedMessage,
+  type ClaudeEffortLevel,
+  type ClaudeModelInfo,
+  type ClaudeOpenQueryInput,
+  type ClaudePermissionMode,
+  type ClaudeQueryPort,
+  type ClaudeSandboxSettings,
+  type ClaudeToolDecision,
 } from "./claudeAgentSdkPort";
 import {
   mapClaudeMessage,
@@ -451,6 +454,21 @@ function modelFromClaude(source: ClaudeModelInfo): ProviderModel | undefined {
             },
           ],
   };
+}
+
+/**
+ * The `effort` value to hand the Agent SDK: only a level the verified model
+ * observation declared for this model. Anything else (unknown option ids, a
+ * level this model does not support) is dropped so the SDK default applies.
+ */
+function selectedEffort(
+  model: ProviderModel,
+  values: ProviderModelOptionValues | undefined,
+): ClaudeEffortLevel | undefined {
+  const requested = values?.["effort"];
+  if (requested === undefined || !isClaudeEffortLevel(requested)) return undefined;
+  const option = model.options.find((candidate) => candidate.id === "effort");
+  return option?.kind === "selection" && option.values.includes(requested) ? requested : undefined;
 }
 
 function observation(
@@ -1016,6 +1034,7 @@ function makeConnection(
         readonly sessionId: ProviderSessionId;
         readonly modelId: ProviderModelId;
         readonly executionPolicy: ProviderExecutionPolicy;
+        readonly modelOptionValues?: ProviderModelOptionValues;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -1032,6 +1051,7 @@ function makeConnection(
           "Claude model is not available in the verified provider observation.",
         );
       }
+      const effort = selectedEffort(selectedModel, input.modelOptionValues);
       if (sessions.has(input.sessionId)) {
         throw failure("protocol", "Claude session is already active.");
       }
@@ -1322,6 +1342,7 @@ function makeConnection(
               projectRoot,
               authEnvironment: environment.environment,
               model: input.modelId,
+              ...(effort === undefined ? {} : { effort }),
               executionPolicy: input.executionPolicy,
               ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
               tools: executionOptions.tools,
@@ -1520,6 +1541,9 @@ function makeConnection(
               sessionId: input.sessionId,
               modelId: identity.modelId,
               executionPolicy: input.executionPolicy,
+              ...(input.modelOptionValues === undefined
+                ? {}
+                : { modelOptionValues: input.modelOptionValues }),
             },
             signal,
             input.resumeCursor.value,
