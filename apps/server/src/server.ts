@@ -1183,6 +1183,7 @@ export function startOctantServer(
       now: Date.now,
     });
     const codeSessionAuthority = new CodeSessionAuthorityStore();
+    let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
     let activeComputerUseRuntime: ComputerUseRuntime | undefined;
     let workRequestRuntime: WorkRequestRuntime | undefined;
@@ -1191,6 +1192,7 @@ export function startOctantServer(
         codeApprovalStore.revokeWindow(windowId);
         extensionToolApprovalService.revokeWindow(windowId);
         codeSessionAuthority.revokeWindow(windowId);
+        activeCodeService?.revokeWindow?.(windowId);
         void browserAutomationService?.revokeWindow(windowId);
         void activeComputerUseRuntime?.revokeWindow(windowId);
       },
@@ -1868,6 +1870,8 @@ export function startOctantServer(
         onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
         probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
       });
+    // Revocation is wired at construction, before any window can hold a watch.
+    activeCodeService = codeService;
     let codeOperationRuntime = options.codeOperationRuntime;
     const providerDataDirectory = persistence.dataDirectory;
     const providerRuntimeRegistry =

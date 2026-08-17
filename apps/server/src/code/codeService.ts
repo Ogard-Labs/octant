@@ -478,6 +478,12 @@ export class CodeService {
   readonly #files: Pick<CodeFileService, "open" | "save"> & Partial<Pick<CodeFileService, "list">>;
   readonly #tests: CodeRepositoryTestDiscoveryPort | undefined;
   readonly #watcher: Pick<CodeFileWatchService, "watch"> | undefined;
+  /**
+   * Open file watches, by the window that opened them. A watch is the one Code
+   * read that outlives the request that authorized it, so revoking a window has
+   * to reach the streams it left running rather than only the next reconnect.
+   */
+  readonly #openWatches = new Map<string, Set<AbortController>>();
   readonly #searcher: Pick<CodeSearchService, "search"> | undefined;
   readonly #content: CodeContentStore;
   readonly #evidence: CodeServiceOptions["evidence"];
@@ -1570,10 +1576,11 @@ export class CodeService {
    * Watch the checkout bound to a Code thread for changes.
    *
    * Authority is resolved once, before the subscription exists, through the
-   * same checkout read the listing uses — so a watch can never outlive the
-   * grant that opened it by more than the connection itself, and a client that
-   * loses access reconnects into a refusal rather than a live stream. The
-   * notices carry paths only; every refetch they provoke is authorized again.
+   * same checkout read the listing uses, and the stream is then registered
+   * against the window that opened it so `revokeWindow` ends it. A watch
+   * therefore cannot outlive its grant, rather than only being refused on the
+   * next reconnect. The notices carry paths only; every refetch they provoke is
+   * authorized again.
    *
    * The authorization is awaited before the stream exists rather than inside a
    * generator body, which does not run until its first `next()`. A refusal has
@@ -1600,12 +1607,43 @@ export class CodeService {
       CODE_LISTING_ROOT_PROBE_PATH,
     );
     if (root === undefined) return noNotices();
-    return watcher.watch({
+    const revocation = new AbortController();
+    const abort = () => revocation.abort();
+    input.signal?.addEventListener("abort", abort, { once: true });
+    if (input.signal?.aborted === true) revocation.abort();
+    const open = this.#openWatches.get(String(authenticatedWindowId)) ?? new Set();
+    open.add(revocation);
+    this.#openWatches.set(String(authenticatedWindowId), open);
+    const notices = watcher.watch({
       threadId: authorized.thread.id,
       checkoutId: authorized.checkout.id,
       rootPath: root.rootPath,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      signal: revocation.signal,
     });
+    const openWatches = this.#openWatches;
+    const windowKey = String(authenticatedWindowId);
+    return (async function* () {
+      try {
+        yield* notices;
+      } finally {
+        input.signal?.removeEventListener("abort", abort);
+        const remaining = openWatches.get(windowKey);
+        remaining?.delete(revocation);
+        if (remaining?.size === 0) openWatches.delete(windowKey);
+      }
+    })();
+  }
+
+  /**
+   * End every file watch a window left open. Called when its capability is
+   * revoked, so a retained connection cannot keep reporting repository paths
+   * after the authority that opened it is gone.
+   */
+  revokeWindow(windowId: WindowId): void {
+    const open = this.#openWatches.get(String(windowId));
+    if (open === undefined) return;
+    this.#openWatches.delete(String(windowId));
+    for (const controller of open) controller.abort();
   }
 
   /**

@@ -44,6 +44,10 @@ export function KeybindingSettings(props: KeybindingSettingsProps) {
     // waiting for a real key is what lets the user press Cmd then Shift then P.
     if (["Meta", "Control", "Shift", "Alt"].includes(event.key)) return;
     event.preventDefault();
+    // While recording, the chord is being named, not used. Without this it also
+    // reaches the window-level listeners, so pressing a chord that is already
+    // assigned runs its action — Zen mode hiding Settings mid-recording, say.
+    event.stopPropagation();
     if (event.key === "Escape") {
       setRecording(undefined);
       setRecordError(undefined);

@@ -1,6 +1,6 @@
 import { fireEvent, render, renderHook, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { KeybindingSettings } from "./KeybindingSettings";
 import { createKeybindingStore, useKeybindings, type KeybindingStore } from "./useKeybindings";
 
@@ -59,6 +59,26 @@ describe("KeybindingSettings", () => {
     expect(
       screen.getByRole("button", { name: "Change the chord for Toggle Zen mode" }),
     ).toHaveTextContent(/J/);
+  });
+
+  it("keeps a recorded chord from reaching the global handler it is naming", async () => {
+    const user = userEvent.setup();
+    const globalHandler = vi.fn();
+    document.addEventListener("keydown", globalHandler);
+    const { hook } = renderSettings(memoryStore());
+
+    try {
+      const zen = screen.getByRole("button", { name: "Change the chord for Toggle Zen mode" });
+      await user.click(zen);
+      fireEvent.keyDown(zen, { key: "j", metaKey: true, altKey: true });
+
+      expect(JSON.parse(hook.result.current.document)).toEqual({ "zen-mode": "Mod+Alt+J" });
+      // Naming a chord must not also run it: the window-level listeners are
+      // exactly the ones the chord is being bound to.
+      expect(globalHandler).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", globalHandler);
+    }
   });
 
   it("refuses a chord that would swallow ordinary typing and changes nothing", async () => {

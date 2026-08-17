@@ -244,7 +244,15 @@ describe("useCodeController", () => {
           } as never)
         : ({ kind: "unhandled" } as never),
     );
-    const client = fakeClient({ execute });
+    // The identity this renderer holds is stale: the checkout it names is no
+    // longer available, which is the case re-observing exists for.
+    const client = fakeClient({
+      execute,
+      bootstrap: vi.fn(async () => ({
+        ...bootstrap(),
+        checkouts: [{ ...checkout(), availability: "unavailable" as never }],
+      })),
+    });
     const { result } = renderHook(() => useCodeController({ client }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
@@ -281,6 +289,39 @@ describe("useCodeController", () => {
         ([command]) => !("threadId" in command) || command.threadId !== ids.thread,
       ),
     ).toBe(true);
+  });
+
+  it("refuses to fork a thread that lives on its own worktree", async () => {
+    const prepared = { ...checkout(), id: "40000000-0000-4000-8000-000000000009" as never };
+    const execute = vi.fn(async (command: CodeCommand) =>
+      command.kind === "prepare-code-project-checkout"
+        ? ({
+            kind: "checkout-prepared",
+            bindingRevisionId: ids.bindingRevision,
+            checkout: prepared,
+          } as never)
+        : ({ kind: "unhandled" } as never),
+    );
+    // The source's own checkout is still there and is not the one the Project
+    // is bound to, so a fork could only be created against a different branch
+    // and working tree than the conversation it inherits.
+    const client = fakeClient({ execute });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let forked: unknown = "unset";
+    await act(async () => {
+      forked = await result.current.forkThread({
+        threadId: ids.thread,
+        throughOperationId: "70000000-0000-4000-8000-000000000001",
+        title: "Controller foundation (fork)",
+      });
+    });
+
+    expect(forked).toBeUndefined();
+    expect(execute.mock.calls.some(([command]) => command.kind === "create-code-thread")).toBe(
+      false,
+    );
   });
 
   it("bootstraps authoritative navigation and activates a thread through codeClient only", async () => {

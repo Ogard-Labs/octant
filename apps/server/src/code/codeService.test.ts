@@ -2027,6 +2027,45 @@ describe("CodeService.listFiles", () => {
 });
 
 /**
+ * A file watch is the one Code read that outlives the request authorizing it,
+ * so revoking the window has to reach the stream rather than only the next
+ * reconnect.
+ */
+describe("CodeService.watchFiles", () => {
+  it("ends the watches a revoked window left open", async () => {
+    let observed: AbortSignal | undefined;
+    const fixture = serviceFixture({
+      watcher: {
+        watch: (input) => {
+          observed = input.signal;
+          return (async function* (): AsyncGenerator<never> {
+            await new Promise<void>((resolve) => {
+              input.signal?.addEventListener("abort", () => resolve(), { once: true });
+            });
+          })();
+        },
+      },
+    });
+
+    const notices = await fixture.service.watchFiles(ids.window, {
+      threadId: ids.thread,
+      checkoutId: checkout.id,
+    });
+    const drained = (async () => {
+      for await (const _notice of notices) {
+        // The watcher yields nothing; this loop exists to keep it open.
+      }
+    })();
+    expect(observed?.aborted).toBe(false);
+
+    fixture.service.revokeWindow(ids.window);
+
+    expect(observed?.aborted).toBe(true);
+    await drained;
+  });
+});
+
+/**
  * Confined file open for the editor surface (#code-file tabs). Opening is a
  * read that shares the listing's checkout authority: it never appends journal
  * events, and the staged bytes stay readable only through the same thread
@@ -2410,6 +2449,9 @@ describe("CodeService.listTests", () => {
 function serviceFixture(
   options: {
     readonly threads?: ReturnType<typeof thread>[];
+    readonly watcher?: {
+      readonly watch: (input: { readonly signal?: AbortSignal }) => AsyncIterable<never>;
+    };
     readonly events?: EventEnvelope[];
     readonly checkout?: typeof checkout;
     readonly allCheckouts?: ReadonlyArray<CodeCheckoutIdentity>;
@@ -2510,6 +2552,9 @@ function serviceFixture(
       ? {}
       : { managedThreadCreation: options.managedThreadCreation }),
     ...(options.probeProvider === undefined ? {} : { probeProvider: options.probeProvider }),
+    ...(options.watcher === undefined
+      ? {}
+      : { watcher: options.watcher as unknown as NonNullable<CodeServiceOptions["watcher"]> }),
   });
   return {
     service,

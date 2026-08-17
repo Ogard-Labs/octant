@@ -250,6 +250,11 @@ export interface CodeRouteService {
    * The stream may be promised so the host can authorize before handing one
    * back; a rejection then still has a status code to become.
    */
+  /**
+   * End the file watches a window left open, because its capability was
+   * revoked. Optional: a host with no watching has nothing to end.
+   */
+  readonly revokeWindow?: (windowId: WindowId) => void;
   readonly watchFiles?: (
     authenticatedWindowId: WindowId,
     input: CodeFileWatchInput,

@@ -386,7 +386,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         setRestoreMessage(`The restore was ${result.state}. The checkout is untouched.`);
       else setRestoreMessage("The restore did not report a result.");
     } catch {
-      setRestoreMessage("The restore failed. The checkout is untouched.");
+      // The request did not come back. The host may have applied the restore
+      // anyway, so claiming the checkout is untouched would be a guess about
+      // the user's files.
+      setRestoreMessage("The restore did not report back. Refresh before assuming it did nothing.");
     } finally {
       setRestoring(false);
     }
