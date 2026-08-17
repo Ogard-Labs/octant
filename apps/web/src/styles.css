@@ -6686,6 +6686,10 @@ dialog.project-dialog {
 }
 
 .code-board__toolbar {
+  /* Containing block for the board popovers. The board layer clips its own
+     overflow, so a popover anchored to a control that wrapped near either edge
+     would be cut off; anchoring to the toolbar keeps it inside at any width. */
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -6780,7 +6784,7 @@ dialog.project-dialog {
 }
 
 .code-board__filters {
-  position: relative;
+  display: flex;
 }
 
 .code-board__filters-toggle {
@@ -6817,7 +6821,9 @@ dialog.project-dialog {
 .code-board__view-popover {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
+  right: 0;
+  left: auto;
+  max-width: 100%;
   z-index: 6;
   border: 1px solid var(--octant-border-strong);
   border-radius: 10px;
@@ -6829,8 +6835,10 @@ dialog.project-dialog {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: min(440px, calc(100vw - 32px));
+  width: 440px;
+  max-height: calc(100vh - 220px);
   padding: 12px;
+  overflow-y: auto;
 }
 
 .code-board__filters-panel legend,
@@ -6935,7 +6943,8 @@ dialog.project-dialog {
 }
 
 .code-board__view-options {
-  position: relative;
+  display: flex;
+  flex-direction: column;
 }
 
 .code-board__view-options summary,
