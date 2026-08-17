@@ -60,11 +60,20 @@ export interface ClaudeSandboxSettings {
   };
 }
 
+export const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type ClaudeEffortLevel = (typeof CLAUDE_EFFORT_LEVELS)[number];
+
+export function isClaudeEffortLevel(value: string): value is ClaudeEffortLevel {
+  return (CLAUDE_EFFORT_LEVELS as ReadonlyArray<string>).includes(value);
+}
+
 export interface ClaudeOpenQueryInput {
   readonly binaryPath: string;
   readonly projectRoot: string;
   readonly authEnvironment: Readonly<Record<string, string | undefined>>;
   readonly model: string;
+  /** Agent SDK `effort` for the session; absent means the SDK default. */
+  readonly effort?: ClaudeEffortLevel;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly resumeSessionId?: string;
   readonly tools: readonly string[];
@@ -333,6 +342,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly cwd: string;
   readonly env: Record<string, string | undefined>;
   readonly model: string;
+  readonly effort?: ClaudeEffortLevel;
   readonly pathToClaudeCodeExecutable: string;
   readonly resume?: string;
   readonly permissionMode: ClaudePermissionMode;
@@ -646,6 +656,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               cwd: input.projectRoot,
               env: { ...input.authEnvironment },
               model: input.model,
+              ...(input.effort === undefined ? {} : { effort: input.effort }),
               pathToClaudeCodeExecutable: input.binaryPath,
               ...(input.resumeSessionId === undefined ? {} : { resume: input.resumeSessionId }),
               permissionMode: expectedMode,
