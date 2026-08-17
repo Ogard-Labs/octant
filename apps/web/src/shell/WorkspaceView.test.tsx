@@ -615,6 +615,7 @@ describe("WorkspaceView split Code file explorer", () => {
       ...(base.codeController as object),
       bootstrap: {
         checkouts: [],
+        activity: [],
         threads: [
           { id: codeIds.thread, checkoutId: codeIds.checkout, title: "Thread A" },
           { id: threadBId, checkoutId: checkoutBId, title: "Thread B" },

@@ -263,6 +263,7 @@ describe("SettingsView", () => {
         },
         threads: [],
         checkouts: [],
+        activity: [],
       },
       updateSettings: vi.fn(async () => true),
     } as unknown as CodeController;
