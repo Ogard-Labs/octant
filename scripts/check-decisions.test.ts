@@ -178,6 +178,21 @@ describe("findDecisionViolations, on the gaps a weaker gate leaves", () => {
     );
   });
 
+  it("refuses a record that declares its status twice", () => {
+    // Only the first line is read, so the index can agree with a stale
+    // `Proposed` while the record itself already reads `Accepted` below it.
+    const doubled = wellFormed("0001", "First", "Proposed").replace(
+      "## Context",
+      "**Status:** Accepted\n\n## Context",
+    );
+    expect(
+      reasons([
+        { path: "docs/decisions/0001-first.md", content: doubled },
+        index(row("0001", "first", "First", "Proposed")),
+      ]),
+    ).toContain("declares a status 2 times");
+  });
+
   it("checks the numbers a written range only implies", () => {
     // Both written ends exist, so only the implied middle can fail here. That is
     // exactly the reference the plain matcher cannot see.

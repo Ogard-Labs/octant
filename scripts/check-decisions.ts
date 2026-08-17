@@ -53,6 +53,7 @@ interface DecisionRecord {
   readonly heading: string | undefined;
   readonly title: string | undefined;
   readonly status: string | undefined;
+  readonly statusDeclarations: number;
   readonly content: string;
 }
 
@@ -136,7 +137,8 @@ function collectRecords(files: ReadonlyArray<ScannedFile>): ReadonlyArray<Decisi
     const named = /^docs\/decisions\/(\d{4})-[a-z0-9-]+\.md$/.exec(file.path);
     if (named === null) return [];
     const heading = /^# (\d{4})\. (.+)$/m.exec(file.content);
-    const status = /^\*\*Status:\*\* (.+)$/m.exec(file.content);
+    const statuses = [...file.content.matchAll(/^\*\*Status:\*\* (.+)$/gm)];
+    const status = statuses[0];
     return [
       {
         path: file.path,
@@ -144,6 +146,7 @@ function collectRecords(files: ReadonlyArray<ScannedFile>): ReadonlyArray<Decisi
         heading: heading?.[1],
         title: heading?.[2]?.trim(),
         status: status?.[1]?.trim(),
+        statusDeclarations: statuses.length,
         content: file.content,
       },
     ];
@@ -168,6 +171,14 @@ function findMalformedRecords(
     const status = record.status;
     if (status === undefined) {
       violations.push({ path: record.path, reason: "no `**Status:**` line" });
+    } else if (record.statusDeclarations > 1) {
+      // Only the first line is read, so a stale `Proposed` above a later
+      // `Accepted` passes while the record shows a reader two lifecycles at
+      // once — and status is what decides whether it may be revised in place.
+      violations.push({
+        path: record.path,
+        reason: `declares a status ${String(record.statusDeclarations)} times`,
+      });
     } else if (!SIMPLE_STATUSES.has(status)) {
       const superseded = /^Superseded by (\d{4})$/.exec(status);
       if (superseded === null) {
