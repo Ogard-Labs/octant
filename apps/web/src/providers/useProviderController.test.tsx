@@ -1092,6 +1092,34 @@ describe("useProviderController", () => {
     unmount();
   });
 
+  // A browser-only window has a provider client but no desktop bridge. An edit
+  // that neither stores nor clears a key needs no Keychain authority, and
+  // demanding one made a subscription instance uneditable outside the desktop.
+  it("changes a subscription Grok binary path in a window without host credential authority", async () => {
+    const calls: string[] = [];
+    const instance = grokProvider();
+    const api = client(snapshot([instance]));
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.update");
+      return { kind: "provider-updated", instance: grokProvider({ version: 2 as never }) };
+    });
+    const { result, unmount } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeGrokConfiguration(
+          id,
+          { ...grokProvider().configuration, binaryPath: "/opt/homebrew/bin/grok" },
+          transientCredential("", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(calls).toEqual(["provider.update", "field.clear"]);
+    unmount();
+  });
+
   it("clears the Anthropic-compatible credential when switching auth to none", async () => {
     const calls: string[] = [];
     const apiKeyProvider = anthropicProvider({
@@ -1694,6 +1722,27 @@ function vibeProvider(
     updatedAt: "2026-07-17T10:00:00.000Z" as ProviderInstance["updatedAt"],
     ...patch,
   } as Extract<ProviderInstance, { driverKind: "mistral-vibe" }>;
+}
+
+function grokProvider(
+  patch: Partial<ProviderInstance> = {},
+): Extract<ProviderInstance, { driverKind: "grok" }> {
+  return {
+    id,
+    displayName: "Grok Build local",
+    driverKind: "grok",
+    configuration: {
+      kind: "grok-acp",
+      binaryPath: "/Users/example/.grok/bin/grok",
+      authentication: "subscription",
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: "2026-07-17T10:00:00.000Z" as ProviderInstance["createdAt"],
+    updatedAt: "2026-07-17T10:00:00.000Z" as ProviderInstance["updatedAt"],
+    ...patch,
+  } as Extract<ProviderInstance, { driverKind: "grok" }>;
 }
 
 function devinProvider(

@@ -937,14 +937,17 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
+          // Only credential work needs the desktop bridge. A renderer without
+          // one can still edit a binary path or re-save an instance whose key
+          // is unchanged, so the requirement stays inside the branches that
+          // actually touch the Keychain.
           const bridge = hostBridge;
-          if (bridge === undefined) return false;
           // A key is stored before the change that starts using it, but cleared
           // only after the change that stops. The server refuses this command
           // while the instance has an active session, and clearing first left
           // the instance still configured for API-key authentication with no
           // key to connect with and nothing able to put it back.
-          if (mustSet) {
+          if (mustSet && bridge !== undefined) {
             try {
               await bridge.setProviderCredential(instanceId, credentialValue);
             } catch {
@@ -967,7 +970,7 @@ export function useProviderController(options: ProviderControllerOptions) {
               current,
               install,
             );
-            if (mustClear) {
+            if (mustClear && bridge !== undefined) {
               // The instance no longer uses the key. A clear that fails here
               // leaves a secret behind rather than an unusable provider, so it
               // is retried by the same deferred cleanup the other paths use.
@@ -977,7 +980,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return true;
           } catch (error) {
-            if (mustSet && previousAuthentication === "subscription") {
+            if (mustSet && previousAuthentication === "subscription" && bridge !== undefined) {
               try {
                 await bridge.clearProviderCredential(instanceId);
               } catch {
