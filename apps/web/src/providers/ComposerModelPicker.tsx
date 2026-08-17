@@ -1,7 +1,14 @@
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { ModelPickerSelection, PickerGroup, PickerModel } from "@octant/domain";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown, Search, Star } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  modelFavoriteKey,
+  readModelFavorites,
+  toggleModelFavorite,
+  writeModelFavorites,
+} from "./modelFavorites";
+import { ProviderGlyph } from "./ProviderGlyph";
 
 export interface ComposerModelPickerProps {
   readonly groups: ReadonlyArray<PickerGroup>;
@@ -13,9 +20,20 @@ export interface ComposerModelPickerProps {
   readonly ariaLabel?: string;
 }
 
+const FAVORITES_RAIL_ID = "favorites";
+type RailId = ProviderInstanceId | typeof FAVORITES_RAIL_ID;
+
+interface ModelRow {
+  readonly picker: PickerModel;
+  readonly sectionId: string;
+  readonly sectionLabel: string;
+  readonly group: PickerGroup;
+}
+
 export function ComposerModelPicker(props: ComposerModelPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [favorites, setFavorites] = useState<ReadonlySet<string>>(() => readModelFavorites());
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const ariaLabel = props.ariaLabel ?? "Provider and model";
@@ -26,13 +44,12 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       props.groups[0],
     [props.groups, props.selectedProviderInstanceId],
   );
-  const [activeProviderId, setActiveProviderId] = useState<ProviderInstanceId | undefined>(
-    selectedGroup?.instance.id,
-  );
+  const [activeRailId, setActiveRailId] = useState<RailId | undefined>(selectedGroup?.instance.id);
 
   useEffect(() => {
     if (!open) return;
-    setActiveProviderId(selectedGroup?.instance.id ?? props.groups[0]?.instance.id);
+    setActiveRailId(selectedGroup?.instance.id ?? props.groups[0]?.instance.id);
+    setFavorites(readModelFavorites());
   }, [open, props.groups, selectedGroup?.instance.id]);
 
   useEffect(() => {
@@ -76,22 +93,38 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   }
 
   const activeGroup =
-    props.groups.find((group) => group.instance.id === activeProviderId) ?? props.groups[0]!;
+    props.groups.find((group) => group.instance.id === activeRailId) ?? props.groups[0]!;
   const selectedLabel =
     selectedModelLabel(props.groups, props.selectedProviderInstanceId, props.selectedModelId) ??
     activeGroup.sections[0]?.models[0]?.model.displayName ??
     activeGroup.instance.displayName;
   const trimmedQuery = query.trim().toLowerCase();
-  // With a search query, matches span every provider; otherwise the list
-  // shows the active provider's models.
-  const models =
-    trimmedQuery === ""
-      ? flattenModels(activeGroup).map((entry) => ({ ...entry, group: activeGroup }))
-      : props.groups.flatMap((group) =>
-          flattenModels(group)
-            .filter((entry) => entry.picker.model.displayName.toLowerCase().includes(trimmedQuery))
-            .map((entry) => ({ ...entry, group })),
-        );
+  const searching = trimmedQuery !== "";
+  const favoritesActive = !searching && activeRailId === FAVORITES_RAIL_ID;
+  // With a search query, matches span every provider; the Favorites rail entry
+  // lists starred models across providers; otherwise the list shows the active
+  // provider's models.
+  const models: ReadonlyArray<ModelRow> = searching
+    ? props.groups.flatMap((group) =>
+        flattenModels(group).filter((row) =>
+          row.picker.model.displayName.toLowerCase().includes(trimmedQuery),
+        ),
+      )
+    : favoritesActive
+      ? props.groups.flatMap((group) =>
+          flattenModels(group).filter((row) =>
+            favorites.has(modelFavoriteKey(group.instance.id, row.picker.model.id)),
+          ),
+        )
+      : flattenModels(activeGroup);
+
+  function toggleFavorite(key: string) {
+    setFavorites((current) => {
+      const next = toggleModelFavorite(current, key);
+      writeModelFavorites(next);
+      return next;
+    });
+  }
 
   return (
     <div
@@ -123,97 +156,154 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           id={menuId}
           role="dialog"
         >
-          <label className="composer-model-picker__search">
-            <Search aria-hidden="true" size={13} />
-            <input
-              aria-label="Search models"
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              placeholder="Search models…"
-              type="search"
-              value={query}
-            />
-          </label>
-          <div className="composer-model-picker__panes">
-            <div aria-label="Providers" className="composer-model-picker__providers" role="listbox">
-              {props.groups.map((group) => {
-                const selected = group.instance.id === activeGroup.instance.id;
-                const status = readinessStatus(group.readiness);
-                return (
-                  <button
-                    aria-label={group.instance.displayName}
-                    aria-selected={selected && trimmedQuery === ""}
-                    className={`composer-model-picker__provider${selected && trimmedQuery === "" ? " composer-model-picker__provider--active" : ""}`}
-                    key={String(group.instance.id)}
-                    onClick={() => {
-                      setQuery("");
-                      setActiveProviderId(group.instance.id);
-                    }}
-                    onMouseEnter={() => {
-                      if (trimmedQuery === "") setActiveProviderId(group.instance.id);
-                    }}
-                    role="option"
-                    type="button"
-                  >
-                    <span aria-hidden="true" className="composer-model-picker__provider-glyph">
-                      {monogram(group.instance.displayName)}
+          <div aria-label="Providers" className="composer-model-picker__rail" role="listbox">
+            <button
+              aria-label="Favorites"
+              aria-selected={favoritesActive}
+              className={`composer-model-picker__rail-item composer-model-picker__rail-item--favorites${favoritesActive ? " composer-model-picker__rail-item--active" : ""}`}
+              onClick={() => {
+                setQuery("");
+                setActiveRailId(FAVORITES_RAIL_ID);
+              }}
+              role="option"
+              title="Favorites"
+              type="button"
+            >
+              <Star aria-hidden="true" fill="currentColor" size={16} strokeWidth={1.75} />
+            </button>
+            <span aria-hidden="true" className="composer-model-picker__rail-divider" />
+            {props.groups.map((group) => {
+              const active = !searching && group.instance.id === activeRailId;
+              const status = readinessStatus(group.readiness);
+              return (
+                <button
+                  aria-label={group.instance.displayName}
+                  aria-selected={active}
+                  className={`composer-model-picker__rail-item${active ? " composer-model-picker__rail-item--active" : ""}`}
+                  key={String(group.instance.id)}
+                  onClick={() => {
+                    setQuery("");
+                    setActiveRailId(group.instance.id);
+                  }}
+                  onMouseEnter={() => {
+                    if (!searching) setActiveRailId(group.instance.id);
+                  }}
+                  role="option"
+                  title={group.instance.displayName}
+                  type="button"
+                >
+                  <ProviderGlyph
+                    displayName={group.instance.displayName}
+                    driverKind={group.instance.driverKind}
+                    size={18}
+                  />
+                  {status === undefined ? null : (
+                    <span
+                      className={`composer-model-picker__rail-status composer-model-picker__rail-status--${group.readiness}`}
+                      title={status}
+                    >
+                      <span className="sr-only">{status}</span>
                     </span>
-                    <span className="composer-model-picker__provider-name">
-                      {group.instance.displayName}
-                    </span>
-                    {status === undefined ? null : (
-                      <span className="composer-model-picker__provider-status">{status}</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div className="composer-model-picker__pane">
+            <label className="composer-model-picker__search">
+              <Search aria-hidden="true" size={14} />
+              <input
+                aria-label="Search models"
+                onChange={(event) => setQuery(event.currentTarget.value)}
+                placeholder="Search models…"
+                type="search"
+                value={query}
+              />
+            </label>
             <div aria-label="Models" className="composer-model-picker__models" role="listbox">
               {models.length === 0 ? (
                 <p className="composer-model-picker__models-empty" role="status">
-                  {trimmedQuery === ""
-                    ? "No models reported for this provider."
-                    : "No models match the search."}
+                  {searching
+                    ? "No models match the search."
+                    : favoritesActive
+                      ? "No favorites yet. Star a model to keep it here."
+                      : "No models reported for this provider."}
                 </p>
               ) : (
-                models.map(({ picker, sectionLabel, group }) => {
+                models.map(({ picker, sectionId, sectionLabel, group }) => {
                   const modelId = picker.model.id;
+                  const favoriteKey = modelFavoriteKey(group.instance.id, modelId);
+                  const favorited = favorites.has(favoriteKey);
                   const selected =
                     props.selectedProviderInstanceId === group.instance.id &&
                     props.selectedModelId === modelId;
                   const unavailable = picker.unavailableReason !== undefined;
+                  // The generic "all models" section adds nothing next to the
+                  // provider name; only informative sections get a suffix.
+                  const detail =
+                    sectionId === "all-models" || sectionLabel === group.instance.displayName
+                      ? group.instance.displayName
+                      : `${group.instance.displayName} · ${sectionLabel}`;
                   return (
-                    <button
-                      aria-label={picker.model.displayName}
-                      aria-selected={selected}
-                      className={`composer-model-picker__model${selected ? " composer-model-picker__model--selected" : ""}${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
-                      disabled={unavailable || props.disabled}
+                    <div
+                      className={`composer-model-picker__row${selected ? " composer-model-picker__row--selected" : ""}`}
                       key={`${String(group.instance.id)}:${sectionLabel}:${String(modelId)}`}
-                      onClick={() => {
-                        if (unavailable) return;
-                        props.onSelect({
-                          providerInstanceId: group.instance.id,
-                          modelId,
-                        });
-                        setOpen(false);
-                      }}
-                      role="option"
-                      title={picker.unavailableReason}
-                      type="button"
                     >
-                      <span className="composer-model-picker__model-copy">
-                        <span className="composer-model-picker__model-name">
-                          {picker.model.displayName}
+                      <button
+                        aria-label={picker.model.displayName}
+                        aria-selected={selected}
+                        className={`composer-model-picker__model${selected ? " composer-model-picker__model--selected" : ""}${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
+                        disabled={unavailable || props.disabled}
+                        onClick={() => {
+                          if (unavailable) return;
+                          props.onSelect({
+                            providerInstanceId: group.instance.id,
+                            modelId,
+                          });
+                          setOpen(false);
+                        }}
+                        role="option"
+                        title={picker.unavailableReason}
+                        type="button"
+                      >
+                        <span className="composer-model-picker__model-copy">
+                          <span className="composer-model-picker__model-name">
+                            {picker.model.displayName}
+                          </span>
+                          <span className="composer-model-picker__model-detail">
+                            <ProviderGlyph
+                              displayName={group.instance.displayName}
+                              driverKind={group.instance.driverKind}
+                              size={11}
+                            />
+                            {detail}
+                          </span>
                         </span>
-                        <span className="composer-model-picker__model-detail">
-                          {group.instance.displayName} · {sectionLabel}
-                        </span>
-                      </span>
-                      {unavailable ? (
-                        <span className="composer-model-picker__model-badge">
-                          {compactUnavailableLabel(picker.unavailableReason)}
-                        </span>
-                      ) : null}
-                    </button>
+                        {unavailable ? (
+                          <span className="composer-model-picker__model-badge">
+                            {compactUnavailableLabel(picker.unavailableReason)}
+                          </span>
+                        ) : null}
+                      </button>
+                      <button
+                        aria-label={favorited ? "Remove from favorites" : "Add to favorites"}
+                        aria-pressed={favorited}
+                        className={`composer-model-picker__star${favorited ? " composer-model-picker__star--on" : ""}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleFavorite(favoriteKey);
+                        }}
+                        title={favorited ? "Remove from favorites" : "Add to favorites"}
+                        type="button"
+                      >
+                        <Star
+                          aria-hidden="true"
+                          fill={favorited ? "currentColor" : "none"}
+                          size={14}
+                          strokeWidth={1.75}
+                        />
+                      </button>
+                    </div>
                   );
                 })
               )}
@@ -225,18 +315,14 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   );
 }
 
-function monogram(displayName: string): string {
-  const words = displayName.trim().split(/\s+/);
-  const first = words[0]?.[0] ?? "?";
-  const second = words[1]?.[0] ?? "";
-  return `${first}${second}`.toUpperCase();
-}
-
-function flattenModels(
-  group: PickerGroup,
-): ReadonlyArray<{ readonly picker: PickerModel; readonly sectionLabel: string }> {
+function flattenModels(group: PickerGroup): ReadonlyArray<ModelRow> {
   return group.sections.flatMap((section) =>
-    section.models.map((picker) => ({ picker, sectionLabel: section.label })),
+    section.models.map((picker) => ({
+      picker,
+      sectionId: section.id,
+      sectionLabel: section.label,
+      group,
+    })),
   );
 }
 

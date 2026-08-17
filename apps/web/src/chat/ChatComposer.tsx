@@ -70,6 +70,23 @@ export interface ChatComposerResearch {
   readonly routing: ChatComposerResearchRouting;
 }
 
+/**
+ * One selectable option the selected model declares (effort, reasoning, speed
+ * tier). `value` is the thread's current choice; absent means provider default.
+ */
+export interface ChatComposerModelOption {
+  readonly id: string;
+  readonly displayName: string;
+  readonly values: ReadonlyArray<string>;
+  readonly value?: string;
+}
+
+/**
+ * Sentinel select id for "use the provider default". Provider option values
+ * are trimmed tokens (`low`, `fast`), so a value with spaces never collides.
+ */
+const MODEL_OPTION_DEFAULT_ID = "(provider default)";
+
 export interface ChatComposerProps {
   /** Caller-owned pending text. The component never persists or clears this value itself. */
   readonly draft: string;
@@ -127,6 +144,10 @@ export interface ChatComposerProps {
   readonly threadMentions?: ChatComposerThreadMentions;
   /** Compact opt-in multi-model pool control, rendered by the caller. */
   readonly poolControl?: ReactNode;
+  /** Model options declared by the selected model, rendered beside the picker. */
+  readonly modelOptions?: ReadonlyArray<ChatComposerModelOption>;
+  /** `undefined` clears the option back to the provider default. */
+  readonly onModelOptionChange?: (optionId: string, value: string | undefined) => void;
   readonly onResolveExtensionReference?: (draft: string) => Promise<boolean>;
   readonly sendDisabledReason?: string;
   readonly statusMessage?: string;
@@ -593,6 +614,32 @@ export function ChatComposer(props: ChatComposerProps) {
               </label>
             </>
           )}
+          {(props.modelOptions ?? []).map((option) => (
+            <label key={option.id}>
+              <span className="chat-composer__visually-hidden">{option.displayName}</span>
+              <OctantSelectField
+                disabled={controlDisabled}
+                onValueChange={(value) =>
+                  props.onModelOptionChange?.(
+                    option.id,
+                    value === MODEL_OPTION_DEFAULT_ID ? undefined : value,
+                  )
+                }
+                options={[
+                  { id: MODEL_OPTION_DEFAULT_ID, label: `${option.displayName}: Default` },
+                  ...option.values.map((value) => ({
+                    id: value,
+                    label: `${option.displayName}: ${value}`,
+                  })),
+                ]}
+                value={
+                  option.value !== undefined && option.values.includes(option.value)
+                    ? option.value
+                    : MODEL_OPTION_DEFAULT_ID
+                }
+              />
+            </label>
+          ))}
           {props.poolControl}
         </div>
         <div className="chat-composer__research">

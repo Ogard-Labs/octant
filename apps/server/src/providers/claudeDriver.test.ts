@@ -232,7 +232,9 @@ function harness(
         verification: "verified",
         reasoning: "supported",
         inputModalities: ["text"],
-        options: [],
+        options: [
+          { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
+        ],
       },
     ],
     capabilities: readyCapabilities,
@@ -2755,6 +2757,31 @@ describe("Claude session lifecycle", () => {
       await acquired.close();
     },
   );
+
+  it("passes only a declared effort level to the Agent SDK query and drops the rest", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        modelOptionValues: { effort: "high", "service-tier": "fast" },
+      }),
+    );
+    // "medium" is a real SDK level, but the verified observation for this
+    // model only declared low/high, so it must not be forwarded.
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId: otherSessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        modelOptionValues: { effort: "medium" },
+      }),
+    );
+    expect(f.opens.map(({ effort }) => effort)).toEqual(["high", undefined]);
+    await acquired.close();
+  });
 
   it("opens one isolated query per concurrent session with exact root, model, and policy", async () => {
     const f = harness();

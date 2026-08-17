@@ -13,6 +13,7 @@ import {
   type CodeThread,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import {
   CodeThreadMetadataService,
   type CodeGithubMetadataObservation,
@@ -334,18 +335,24 @@ describe("CodeThreadBoardService filters", () => {
 });
 
 describe("boardRuntimeActivityFromWorks", () => {
+  // `firstSequence` is the journal position where the record first appeared, so
+  // a higher number always means the work started later. `updatedAt` only says
+  // when the record last moved and defaults to a value no assertion depends on.
   const work = (
     kind: CodeRuntimeWork["kind"],
     state: CodeRuntimeWork["state"],
-    updatedAt: string,
-  ): CodeRuntimeWork =>
-    ({
-      id: `${kind}-${updatedAt}`,
+    firstSequence: number,
+    updatedAt = "2026-07-22T09:00:00.000Z",
+  ): ProjectedCodeRuntimeWork => ({
+    work: {
+      id: `${kind}-${firstSequence}`,
       threadId: ids.done,
       kind,
       state,
       updatedAt,
-    }) as never;
+    } as never,
+    firstSequence,
+  });
 
   it("ignores restart-frozen tool work and superseded turns", () => {
     // A restart marked an old terminal and test run interrupted because their
@@ -353,10 +360,10 @@ describe("boardRuntimeActivityFromWorks", () => {
     // newer completed turn. Nothing here still needs the person.
     expect(
       boardRuntimeActivityFromWorks([
-        work("terminal", "interrupted", "2026-07-22T09:00:00.000Z"),
-        work("test", "interrupted", "2026-07-22T09:01:00.000Z"),
-        work("provider-turn", "interrupted", "2026-07-22T09:02:00.000Z"),
-        work("provider-turn", "completed", "2026-07-22T09:30:00.000Z"),
+        work("terminal", "interrupted", 1),
+        work("test", "interrupted", 2),
+        work("provider-turn", "interrupted", 3),
+        work("provider-turn", "completed", 4),
       ]),
     ).toEqual({ executing: false, waiting: false });
   });
@@ -367,33 +374,43 @@ describe("boardRuntimeActivityFromWorks", () => {
     for (const stale of ["running", "waiting", "ambiguous"] as const) {
       expect(
         boardRuntimeActivityFromWorks([
-          work("provider-turn", stale, "2026-07-22T09:00:00.000Z"),
-          work("provider-turn", "completed", "2026-07-22T09:30:00.000Z"),
+          work("provider-turn", stale, 1),
+          work("provider-turn", "completed", 2),
         ]),
       ).toEqual({ executing: false, waiting: false });
     }
   });
 
-  it("breaks a same-millisecond turn tie toward the turn that still owes something", () => {
+  it("ranks turns by when they started, not by when their records last moved", () => {
     const tie = "2026-07-22T09:00:00.000Z";
-    const settled = { ...work("provider-turn", "completed", tie), id: "turn-z" } as CodeRuntimeWork;
-    const running = { ...work("provider-turn", "running", tie), id: "turn-a" } as CodeRuntimeWork;
-
-    // Records written in the same millisecond carry no chronology, so the
-    // answer must not depend on which one the projection returns first.
+    // Two turns whose records were last written in the same millisecond. Their
+    // stamps cannot separate them, but the journal chronology can: the second
+    // turn finished, so nothing is still running.
+    const stale = work("provider-turn", "running", 1, tie);
+    const latest = work("provider-turn", "completed", 2, tie);
     for (const order of [
-      [settled, running],
-      [running, settled],
+      [stale, latest],
+      [latest, stale],
     ]) {
-      expect(boardRuntimeActivityFromWorks(order)).toEqual({ executing: true, waiting: false });
+      expect(boardRuntimeActivityFromWorks(order)).toEqual({ executing: false, waiting: false });
     }
+
+    // A wall-clock stamp can also run backwards — the host clock guard exists
+    // because local time rolls back. The turn that started later still decides,
+    // whatever its record claims about the hour it moved.
+    expect(
+      boardRuntimeActivityFromWorks([
+        work("provider-turn", "running", 1, "2026-07-22T09:30:00.000Z"),
+        work("provider-turn", "completed", 2, "2026-07-22T09:00:00.000Z"),
+      ]),
+    ).toEqual({ executing: false, waiting: false });
   });
 
   it("keeps the thread Waiting for the latest interrupted provider turn", () => {
     expect(
       boardRuntimeActivityFromWorks([
-        work("provider-turn", "completed", "2026-07-22T09:00:00.000Z"),
-        work("provider-turn", "interrupted", "2026-07-22T09:30:00.000Z"),
+        work("provider-turn", "completed", 1),
+        work("provider-turn", "interrupted", 2),
       ]),
     ).toEqual({
       executing: false,
@@ -409,8 +426,8 @@ describe("boardRuntimeActivityFromWorks", () => {
     for (const kind of ["git", "delivery", "review", "file"] as const) {
       expect(
         boardRuntimeActivityFromWorks([
-          work("provider-turn", "completed", "2026-07-22T09:30:00.000Z"),
-          work(kind, "waiting", "2026-07-22T09:10:00.000Z"),
+          work("provider-turn", "completed", 2),
+          work(kind, "waiting", 1),
         ]),
       ).toEqual({
         executing: false,
@@ -419,16 +436,17 @@ describe("boardRuntimeActivityFromWorks", () => {
       });
     }
 
-    expect(
-      boardRuntimeActivityFromWorks([work("test", "ambiguous", "2026-07-22T09:10:00.000Z")]),
-    ).toMatchObject({ executing: false, waiting: true });
+    expect(boardRuntimeActivityFromWorks([work("test", "ambiguous", 1)])).toMatchObject({
+      executing: false,
+      waiting: true,
+    });
   });
 
   it("reports executing work without a blocking reason", () => {
     expect(
       boardRuntimeActivityFromWorks([
-        work("provider-turn", "interrupted", "2026-07-22T09:00:00.000Z"),
-        work("terminal", "running", "2026-07-22T09:30:00.000Z"),
+        work("provider-turn", "interrupted", 1),
+        work("terminal", "running", 2),
       ]),
     ).toEqual({ executing: true, waiting: true });
   });
