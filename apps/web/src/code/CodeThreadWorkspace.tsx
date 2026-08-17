@@ -861,6 +861,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {restoreMessage}
               </span>
             )}
+            <span className="code-thread-workspace__hint" aria-label="Thread usage">
+              {threadUsageLabel(props.controller.threadUsage)}
+            </span>
+            {props.controller.threadUsage.limits.map((limit) => (
+              <span
+                className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
+                key={limit.window}
+              >
+                {providerLimitLabel(limit)}
+              </span>
+            ))}
           </div>
         </div>
       </div>
@@ -877,6 +888,47 @@ function previousAssistantMessage(
     if (candidate?.role === "assistant") return candidate;
   }
   return undefined;
+}
+
+/**
+ * What this thread has spent, in the provider's own figures. A provider that
+ * reports no tokens says so plainly rather than reading as a free thread, and
+ * a cost appears only when the provider stated one.
+ */
+function threadUsageLabel(usage: CodeController["threadUsage"]): string {
+  if (usage.inputTokens === 0 && usage.outputTokens === 0) {
+    return "This thread's provider has reported no usage yet.";
+  }
+  const tokens = `${compactTokens(usage.inputTokens)} in · ${compactTokens(usage.outputTokens)} out`;
+  return usage.costUsd === undefined ? tokens : `${tokens} · ${formatUsd(usage.costUsd)}`;
+}
+
+function providerLimitLabel(limit: CodeController["threadUsage"]["limits"][number]): string {
+  const share =
+    limit.utilization === undefined ? undefined : `${Math.round(limit.utilization * 100)}% used`;
+  const resets =
+    limit.resetsAt === undefined
+      ? undefined
+      : `resets ${new Date(limit.resetsAt).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`;
+  const state =
+    limit.status === "exhausted" ? "spent" : limit.status === "warning" ? "low" : undefined;
+  const parts = [limit.window.replaceAll("_", " "), state, share, resets].filter(
+    (part): part is string => part !== undefined,
+  );
+  return parts.join(" · ");
+}
+
+function compactTokens(tokens: number): string {
+  if (tokens < 1_000) return String(tokens);
+  if (tokens < 1_000_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return `${(tokens / 1_000_000).toFixed(2)}M`;
+}
+
+function formatUsd(cost: number): string {
+  return cost < 0.01 && cost > 0 ? "<$0.01" : `$${cost.toFixed(2)}`;
 }
 
 function providerIdentityChanged(

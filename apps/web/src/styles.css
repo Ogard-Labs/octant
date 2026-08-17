@@ -5652,6 +5652,19 @@ dialog.project-dialog {
   font-size: 11px;
 }
 
+.code-thread-workspace__limit {
+  font-size: 11px;
+  color: var(--octant-text-secondary);
+}
+
+.code-thread-workspace__limit--warning {
+  color: var(--octant-warning-text);
+}
+
+.code-thread-workspace__limit--exhausted {
+  color: var(--octant-danger-text);
+}
+
 .code-thread-workspace__restore {
   display: flex;
   align-items: center;

@@ -102,6 +102,39 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Files restored to this point.")).toBeVisible();
   });
 
+  it("shows the provider's own token, cost, and usage-window figures", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          threadUsage: {
+            inputTokens: 12_400,
+            outputTokens: 3_100,
+            costUsd: 0.42,
+            limits: [
+              { window: "five_hour", status: "warning", utilization: 0.87 },
+              { window: "seven_day", status: "allowed", utilization: 0.12 },
+            ],
+          },
+        } as never)}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByLabelText("Thread usage")).toHaveTextContent("12.4k in · 3.1k out · $0.42");
+    expect(screen.getByText(/five hour · low · 87% used/)).toBeVisible();
+    expect(screen.getByText(/seven day · 12% used/)).toBeVisible();
+  });
+
+  it("says a provider reported nothing rather than reading as a free thread", () => {
+    render(<CodeThreadWorkspace controller={controller()} threadId={threadId} />);
+
+    // Zero tokens with no report is not the same as a thread that cost
+    // nothing, and the strip must not claim otherwise.
+    expect(screen.getByLabelText("Thread usage")).toHaveTextContent(
+      "This thread's provider has reported no usage yet.",
+    );
+  });
+
   it("keeps the restore control off a thread that cannot change the checkout", () => {
     const conversation = [
       { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
@@ -1128,6 +1161,7 @@ function controller(
     cancelQueuedFollowUp: vi.fn(),
     queueFollowUp: vi.fn(),
     queuedFollowUps: [],
+    threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     turnActivity: new Map(),
     sendFollowUp: vi.fn(async () => true),
     setPendingDraft: vi.fn(),

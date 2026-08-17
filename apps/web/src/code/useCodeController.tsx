@@ -17,6 +17,7 @@ import {
   type CodeApprovalId,
   type CodeCheckpoint,
   type CodeConversationTurn,
+  type CodeProviderLimit,
   type CodeEvidenceContentId,
   type CodeOperationEvent,
   type CodeOperationId,
@@ -172,6 +173,20 @@ const MAX_CODE_RECONNECT_DELAY_MS = 10_000;
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
 
+/**
+ * What a Code thread has consumed, and the provider usage windows it last
+ * heard about. Every figure comes from the provider: a provider that reports
+ * no cost leaves `costUsd` absent rather than showing a derived number.
+ */
+export interface CodeThreadUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly costUsd?: number;
+  readonly limits: ReadonlyArray<CodeProviderLimit>;
+}
+
+const EMPTY_THREAD_USAGE: CodeThreadUsage = { inputTokens: 0, outputTokens: 0, limits: [] };
+
 export interface CodeControllerOptions {
   readonly activeThreadId?: CodeThreadId;
   readonly client?: CodeClient;
@@ -231,6 +246,33 @@ export function useCodeController(options: CodeControllerOptions) {
   const [turnActivity, setTurnActivity] = useState<ReadonlyMap<string, CodeTurnActivity>>(
     () => new Map(),
   );
+  // What this thread has consumed and how much of the provider's usage windows
+  // is left. Both are the provider's own figures; nothing here is derived from
+  // a price list or a limit Octant assumed.
+  const [threadUsage, setThreadUsage] = useState<CodeThreadUsage>(EMPTY_THREAD_USAGE);
+  const noteUsage = useCallback((event: CodeOperationEvent) => {
+    if (event.kind === "usage") {
+      const { inputTokens, outputTokens, costUsd } = event;
+      setThreadUsage((current) => ({
+        ...current,
+        inputTokens: current.inputTokens + inputTokens,
+        outputTokens: current.outputTokens + outputTokens,
+        ...(costUsd === undefined ? {} : { costUsd: (current.costUsd ?? 0) + costUsd }),
+      }));
+      return;
+    }
+    if (event.kind !== "provider-limit") return;
+    const limit = {
+      window: event.window,
+      status: event.status,
+      ...(event.utilization === undefined ? {} : { utilization: event.utilization }),
+      ...(event.resetsAt === undefined ? {} : { resetsAt: event.resetsAt }),
+    };
+    setThreadUsage((current) => ({
+      ...current,
+      limits: [...current.limits.filter((entry) => entry.window !== limit.window), limit],
+    }));
+  }, []);
   const noteActivity = useCallback((operationId: CodeOperationId, event: CodeOperationEvent) => {
     setTurnActivity((current) => {
       const key = String(operationId);
@@ -374,11 +416,13 @@ export function useCodeController(options: CodeControllerOptions) {
       let nextCursor = 0;
       let pageCount = 0;
       const turns: CodeConversationTurn[] = [];
+      let pageLimits: ReadonlyArray<CodeProviderLimit> = [];
       for (;;) {
         const page = await client.conversation(threadId, cursor, 50);
         if (!isActive(request, threadGeneration, mounted) || page.threadId !== threadId)
           return undefined;
         turns.push(...page.turns);
+        if (page.limits !== undefined) pageLimits = page.limits;
         nextCursor = page.nextCursor;
         if (!page.hasMore) break;
         if (page.nextCursor <= cursor || (pageCount += 1) >= 100) {
@@ -463,6 +507,16 @@ export function useCodeController(options: CodeControllerOptions) {
           });
         }
       }
+      setThreadUsage({
+        inputTokens: turns.reduce((total, turn) => total + (turn.usage?.inputTokens ?? 0), 0),
+        outputTokens: turns.reduce((total, turn) => total + (turn.usage?.outputTokens ?? 0), 0),
+        ...(turns.some((turn) => turn.usage?.costUsd !== undefined)
+          ? {
+              costUsd: turns.reduce((total, turn) => total + (turn.usage?.costUsd ?? 0), 0),
+            }
+          : {}),
+        limits: pageLimits,
+      });
       setConversation(messages);
       if (replayedActivity.size > 0) {
         setTurnActivity((current) => new Map([...current, ...replayedActivity]));
@@ -541,6 +595,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   const event = frame.event;
                   noteProviderRequest(event);
                   noteActivity(operationId, event);
+                  noteUsage(event);
                   if (event.kind === "provider-content" && event.channel === "reasoning") {
                     const chunk = await readOperationText(
                       client,
@@ -1249,6 +1304,7 @@ export function useCodeController(options: CodeControllerOptions) {
             const event = frame.event;
             noteProviderRequest(event);
             noteActivity(operationId, event);
+            noteUsage(event);
             // The checkpoint is only known once the host has taken it, so the
             // message the user already sees gains its restore point here
             // rather than waiting for the thread to be reopened.
@@ -1496,6 +1552,7 @@ export function useCodeController(options: CodeControllerOptions) {
     setPendingDraft,
     startThreadTurn,
     status,
+    threadUsage,
     turnActivity,
     turnError,
     turnStatus,

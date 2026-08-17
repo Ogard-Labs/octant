@@ -953,6 +953,24 @@ const UsageEvent = Schema.Struct({
   kind: Schema.Literal("usage"),
   inputTokens: Schema.Int.pipe(Schema.nonNegative()),
   outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  /**
+   * What the provider says this turn cost, in US dollars. Absent whenever the
+   * provider reports no cost: the host never derives one from a price list of
+   * its own.
+   */
+  costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+}).annotations(strict);
+/**
+ * How much of a provider usage window this account has spent, as the provider
+ * reported it during the turn. Recording it lets a thread show the window
+ * closing in before a turn fails against it.
+ */
+const ProviderLimitEvent = Schema.Struct({
+  kind: Schema.Literal("provider-limit"),
+  window: boundedNonEmptyText(64),
+  status: Schema.Literal("allowed", "warning", "exhausted"),
+  utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  resetsAt: Schema.optional(UtcTimestamp),
 }).annotations(strict);
 const ChildActivityEvent = Schema.Struct({
   kind: Schema.Literal("child-activity"),
@@ -978,6 +996,7 @@ export const CodeOperationEvent = Schema.Union(
   DiffEvent,
   TaskProgressEvent,
   UsageEvent,
+  ProviderLimitEvent,
   ChildActivityEvent,
   ResultEvent,
 );
@@ -1026,6 +1045,26 @@ export const CodeConversationStep = Schema.Union(
 );
 export type CodeConversationStep = typeof CodeConversationStep.Type;
 
+export const CodeConversationTurnUsage = Schema.Struct({
+  inputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  outputTokens: Schema.Int.pipe(Schema.nonNegative()),
+  /** The provider's own price for the turn. Never one the host derived. */
+  costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+}).annotations(strict);
+export type CodeConversationTurnUsage = typeof CodeConversationTurnUsage.Type;
+
+/**
+ * How much of a provider usage window this account has spent, as last
+ * reported. Account state rather than turn state, so it belongs to the page.
+ */
+export const CodeProviderLimit = Schema.Struct({
+  window: boundedNonEmptyText(64),
+  status: Schema.Literal("allowed", "warning", "exhausted"),
+  utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  resetsAt: Schema.optional(UtcTimestamp),
+}).annotations(strict);
+export type CodeProviderLimit = typeof CodeProviderLimit.Type;
+
 export const CodeConversationTurn = Schema.Struct({
   operationId: CodeOperationId,
   providerInstanceId: ProviderInstanceId,
@@ -1038,6 +1077,11 @@ export const CodeConversationTurn = Schema.Struct({
   ),
   /** The checkout as it stood before this turn ran, when the host caught it. */
   checkpoint: Schema.optional(CodeCheckpoint),
+  /**
+   * What this turn consumed, as the provider reported it. Absent on a turn
+   * whose provider reported nothing, which is not the same as zero.
+   */
+  usage: Schema.optional(CodeConversationTurnUsage),
   assistant: Schema.Array(CodeEvidenceReference).pipe(
     Schema.filter((parts) => parts.length <= MAX_CODE_CONVERSATION_ASSISTANT_PARTS),
   ),
@@ -1068,6 +1112,11 @@ export const CodeConversationPage = Schema.Struct({
   ),
   nextCursor: Schema.Int.pipe(Schema.nonNegative()),
   hasMore: Schema.Boolean,
+  /**
+   * The provider usage windows this thread last heard about, most recent
+   * report per window. Absent when the provider reported none.
+   */
+  limits: Schema.optional(Schema.Array(CodeProviderLimit).pipe(Schema.maxItems(8))),
 }).annotations(strict);
 export type CodeConversationPage = typeof CodeConversationPage.Type;
 

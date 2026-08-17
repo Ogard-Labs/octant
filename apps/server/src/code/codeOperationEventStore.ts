@@ -19,6 +19,7 @@ import {
   type CodeConversationPage,
   type CodeConversationStep,
   type CodeConversationTurn,
+  type CodeProviderLimit,
   type CodeOperationId,
   type CodeThreadId,
   type EventEnvelope,
@@ -326,6 +327,7 @@ export class CodeOperationEventStore {
 
     const turns: Array<CodeConversationBuilder> = [];
     const byOperation = new Map<string, CodeConversationBuilder>();
+    const limits = new Map<string, CodeProviderLimit>();
     let afterSequence = 0;
     let scannedEvents = 0;
     let hasMore = false;
@@ -418,6 +420,23 @@ export class CodeOperationEventStore {
           };
           if (existing === -1) appendStep(builder, step);
           else builder.steps[existing] = step;
+        } else if (frame.event.kind === "usage") {
+          // A provider may report usage more than once in a turn; the last
+          // report is the turn's own figure, not a running sum to add to.
+          builder.usage = {
+            inputTokens: frame.event.inputTokens,
+            outputTokens: frame.event.outputTokens,
+            ...(frame.event.costUsd === undefined ? {} : { costUsd: frame.event.costUsd }),
+          };
+        } else if (frame.event.kind === "provider-limit") {
+          limits.set(frame.event.window, {
+            window: frame.event.window,
+            status: frame.event.status,
+            ...(frame.event.utilization === undefined
+              ? {}
+              : { utilization: frame.event.utilization }),
+            ...(frame.event.resetsAt === undefined ? {} : { resetsAt: frame.event.resetsAt }),
+          });
         } else if (frame.event.kind === "operation-state") {
           builder.status = conversationStatus(frame.event.state);
         } else if (frame.event.kind === "operation-result") {
@@ -441,6 +460,7 @@ export class CodeOperationEventStore {
       })),
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,
+      ...(limits.size === 0 ? {} : { limits: [...limits.values()].slice(0, 8) }),
     });
   }
 }
@@ -453,6 +473,7 @@ type CodeConversationBuilder = {
   sessionId: CodeConversationTurn["sessionId"];
   prompt: CodeConversationTurn["prompt"];
   checkpoint?: CodeConversationTurn["checkpoint"];
+  usage?: CodeConversationTurn["usage"];
   assistant: Array<CodeConversationTurn["assistant"][number]>;
   steps: Array<CodeConversationStep>;
   stepsTruncated: boolean;

@@ -20,6 +20,7 @@ import {
   type CodeOperationApprovalConfirmation,
   type CodeEvidenceContentId,
   type CodeOperationEvent,
+  type CodeOperationEventFrame,
   type CodeOperationId,
   type CodeOperationResult,
   type CodeThread,
@@ -1121,6 +1122,17 @@ function normalizedOperationEvent(
       kind: "usage",
       inputTokens: event.inputTokens ?? 0,
       outputTokens: event.outputTokens ?? 0,
+      ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+    };
+  if (event.category === "provider-limit" && event.text !== undefined)
+    return {
+      kind: "provider-limit",
+      window: event.text,
+      status: (event.status ?? "allowed") as "allowed" | "warning" | "exhausted",
+      ...(event.utilization === undefined ? {} : { utilization: event.utilization }),
+      ...(event.resetsAt === undefined
+        ? {}
+        : { resetsAt: event.resetsAt as CodeOperationEventFrame["occurredAt"] }),
     };
   if (event.category === "task-progress")
     return {
