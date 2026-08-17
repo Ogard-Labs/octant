@@ -51,6 +51,7 @@ import {
   type CodeRepositoryTestListing,
   type CodeSettings,
   type CodeThread,
+  type CodeThreadActivity,
   type CodeThreadId,
   type CodeThreadView,
   type Project,
@@ -192,6 +193,7 @@ export interface CodePersistencePort {
   readonly readCodeSettings: () => { readonly settings: CodeSettings } | undefined;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
+  readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
   readonly readCodeCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
   readonly readCodeCheckoutAggregateVersion: (checkoutId: CodeCheckoutId) => number;
   readonly readCodeCheckouts: () => ReadonlyArray<CodeCheckoutIdentity>;
@@ -635,6 +637,7 @@ export class CodeService {
         // restart will retry the compensation.
       }
     }
+    const threadIds = new Set(threads.map((thread) => String(thread.id)));
     return {
       settings: this.#persistence.readCodeSettings()?.settings ?? this.#defaultSettings(),
       threads,
@@ -642,6 +645,12 @@ export class CodeService {
         .readCodeCheckouts()
         .filter((checkout) => checkoutIds.has(String(checkout.id)))
         .map((checkout) => recoveredCheckouts.get(String(checkout.id)) ?? checkout),
+      // Filtered by the same authorization the thread list went through: a
+      // window that cannot see a thread must not learn that it is running from
+      // its activity sequence either.
+      activity: this.#persistence
+        .readCodeThreadActivity()
+        .filter((entry) => threadIds.has(String(entry.threadId))),
     };
   }
 

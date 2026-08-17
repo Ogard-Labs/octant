@@ -107,12 +107,31 @@ describe("CodeService reads", () => {
       },
       threads: [allowed],
       checkouts: [checkout],
+      activity: [],
     });
     expect(fixture.access.canAccessProject).toHaveBeenCalledWith(ids.window, ids.project);
     expect(fixture.access.canAccessProject).toHaveBeenCalledWith(
       ids.window,
       ids.unauthorizedProject,
     );
+  });
+
+  it("returns activity only for threads the window may see", async () => {
+    const allowed = thread();
+    const hidden = thread({ id: ids.unauthorizedThread, projectId: ids.unauthorizedProject });
+    const fixture = serviceFixture({
+      threads: [allowed, hidden],
+      activity: [
+        { threadId: allowed.id, lastSequence: 11 as never },
+        { threadId: hidden.id, lastSequence: 12 as never },
+      ],
+    });
+
+    const result = await fixture.service.bootstrap(ids.window);
+
+    // The unauthorized thread's sequence would report that it is running, which
+    // is exactly as much as the window is not allowed to learn.
+    expect(result.activity).toEqual([{ threadId: allowed.id, lastSequence: 11 }]);
   });
 
   it("re-observes a waiting checkout during authenticated restart bootstrap", async () => {
@@ -2455,6 +2474,7 @@ function serviceFixture(
     readonly events?: EventEnvelope[];
     readonly checkout?: typeof checkout;
     readonly allCheckouts?: ReadonlyArray<CodeCheckoutIdentity>;
+    readonly activity?: ReturnType<CodePersistencePort["readCodeThreadActivity"]>;
     readonly approve?: boolean;
     readonly project?: Project;
     readonly sessionAuthority?: CodeSessionAuthorityStore;
@@ -2473,6 +2493,9 @@ function serviceFixture(
     readProject: vi.fn(() => options.project),
     readCodeThread: vi.fn((threadId) => threads.find((candidate) => candidate.id === threadId)),
     readCodeThreads: vi.fn(() => threads),
+    readCodeThreadActivity: vi.fn(
+      () => options.activity ?? ([] as ReturnType<CodePersistencePort["readCodeThreadActivity"]>),
+    ),
     readCodeCheckout: vi.fn((checkoutId: string) =>
       checkoutList.find((candidate) => String(candidate.id) === checkoutId),
     ),
