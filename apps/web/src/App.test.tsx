@@ -500,6 +500,7 @@ function codes(): CodeClient {
       async () =>
         ({
           checkouts: [checkout],
+          activity: [],
           settings: {
             defaultExecutionPolicy: "approval-gated",
             defaultPermissionPersistence: "current-session",

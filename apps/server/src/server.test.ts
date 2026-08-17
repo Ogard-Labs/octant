@@ -675,6 +675,7 @@ describe("startOctantServer", () => {
         },
         threads: [],
         checkouts: [],
+        activity: [],
       }),
     );
 
@@ -2170,6 +2171,7 @@ describe("startOctantServer", () => {
         },
         threads: [codeThread],
         checkouts: [],
+        activity: [],
       }),
     );
 

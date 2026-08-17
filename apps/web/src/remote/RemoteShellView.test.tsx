@@ -80,6 +80,7 @@ async function readyBridge(): Promise<ReturnType<typeof createRemoteSessionBridg
           },
           threads: [],
           checkouts: [],
+          activity: [],
         });
       }
       if (method === "GET" && path === "/api/projects/bootstrap") {
