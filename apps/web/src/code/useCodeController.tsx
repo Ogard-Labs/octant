@@ -982,8 +982,13 @@ export function useCodeController(options: CodeControllerOptions) {
     [bootstrap, followUps, readCursors],
   );
 
-  // Only the thread in view streams. Re-reading the list is what lets a thread
-  // that finished in the background show an unread mark at all.
+  // Only the thread in view streams, so the list is re-read on a timer to keep
+  // titles, lifecycle, and access current for threads nobody is watching.
+  //
+  // It does not yet report background provider output: a turn is journaled on
+  // the `code-operation` aggregate, so a thread's own version — which is what
+  // the unread mark compares — does not move when one finishes. Saying so is
+  // better than a mark that quietly never appears.
   useEffect(() => {
     if (navigationRefreshMs <= 0) return;
     let cancelled = false;

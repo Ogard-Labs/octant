@@ -332,7 +332,6 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
     <section aria-label="Code Project Overview" className="code-project-overview">
       <CodeProjectSessions
         boardState={boardState}
-        cards={cards}
         navigationThreads={navigationThreads}
         onRenameThread={(threadId, title) =>
           void props.controller.renameThread(threadId as CodeThreadId, title)
@@ -383,7 +382,6 @@ type ProjectBoardState =
 
 function CodeProjectSessions(props: {
   readonly boardState: ProjectBoardState;
-  readonly cards: ReadonlyArray<CodeBoardCard>;
   readonly navigationThreads: CodeController["navigation"];
   readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly onPinThread?: (threadId: string, pinned: boolean) => void;
@@ -412,28 +410,12 @@ function CodeProjectSessions(props: {
             <RefreshCw aria-hidden="true" size={14} /> Retry projections
           </OctantButton>
         </div>
-      ) : props.cards.length > 0 ? (
-        <ul className="code-project-overview__thread-list">
-          {props.cards.map((card) => (
-            <li key={String(card.threadId)}>
-              <OctantButton
-                className="project-button project-button--quiet"
-                onClick={() => props.onOpenThread(card.threadId)}
-                type="button"
-                variant="ghost"
-              >
-                <span>{card.title}</span>
-                <span>
-                  {boardStatusLabel(card.status)} · {card.followUp ? "Follow-up" : "No follow-up"}
-                </span>
-              </OctantButton>
-            </li>
-          ))}
-        </ul>
       ) : (
-        // Board cards are the richer projection; when they are absent the
-        // navigation list is the authoritative fallback, and it carries the
-        // follow-up filter so a Project with many threads stays scannable.
+        // One list, whether or not the board has projected cards for this
+        // Project: it is the only surface that carries rename and pin, and
+        // showing cards instead whenever any exist left those controls
+        // unreachable for every Project that has been worked in. The board's
+        // own projections stay below, where their status belongs.
         <CodeSidebarSection
           onSelectThread={(threadId) => props.onOpenThread(threadId as CodeThreadId)}
           {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
