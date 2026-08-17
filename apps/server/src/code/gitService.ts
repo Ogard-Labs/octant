@@ -15,6 +15,10 @@ interface MutationPort {
     input: Parameters<GitMutationPort["stage"]>[0],
     signal?: AbortSignal,
   ): Promise<GitMutationResult>;
+  unstage(
+    input: Parameters<GitMutationPort["unstage"]>[0],
+    signal?: AbortSignal,
+  ): Promise<GitMutationResult>;
   discard(
     input: Parameters<GitMutationPort["discard"]>[0],
     signal?: AbortSignal,
@@ -97,6 +101,35 @@ export class GitService {
       if (input.paths.some((path) => !changed.has(path)))
         return { status: "rejected", reason: "unlisted-path" };
       return this.#mutation.stage(
+        { checkoutRoot: current.checkoutRoot, paths: input.paths },
+        signal,
+      );
+    });
+  }
+
+  /**
+   * Take the listed paths back out of the index. The listing is checked
+   * against the staged set the caller saw, so a path that is not actually
+   * staged is refused rather than silently doing nothing.
+   */
+  unstage(
+    input: {
+      readonly checkoutId: string;
+      readonly checkoutRoot: string;
+      readonly paths: readonly string[];
+      readonly expectedStateToken: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<GitServiceResult> {
+    return this.#serialized(input.checkoutId, async () => {
+      const current = await this.#ready(input.checkoutRoot, signal);
+      if (!current) return { status: "unavailable" };
+      if (current.stateToken !== input.expectedStateToken)
+        return { status: "rejected", reason: "stale-state" };
+      const staged = new Set(current.stagedSummary.map((entry) => entry.path));
+      if (input.paths.some((path) => !staged.has(path)))
+        return { status: "rejected", reason: "unlisted-path" };
+      return this.#mutation.unstage(
         { checkoutRoot: current.checkoutRoot, paths: input.paths },
         signal,
       );

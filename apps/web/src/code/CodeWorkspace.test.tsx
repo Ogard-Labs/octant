@@ -293,6 +293,7 @@ function controller(
     pendingDraft: "",
     setPendingDraft: vi.fn(),
     conversation: [],
+    threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     providerRequests: [],
     answerProviderRequest: vi.fn(async () => true),
     cancelQueuedFollowUp: vi.fn(),

@@ -318,6 +318,35 @@ const StageGit = Schema.Struct({
   expectedStateToken: GitStateToken,
 }).annotations(strict);
 /**
+ * Take listed paths back out of the index, leaving the files themselves
+ * exactly as they are. Nothing is lost, so this is an ordinary index write
+ * rather than a destructive operation.
+ */
+const UnstageGit = Schema.Struct({
+  kind: Schema.Literal("unstage-git"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  paths: Schema.NonEmptyArray(GitStagePath).pipe(
+    Schema.filter(
+      (paths) => paths.length <= MAX_CODE_OPERATION_PATHS && new Set(paths).size === paths.length,
+    ),
+  ),
+  expectedStateToken: GitStateToken,
+}).annotations(strict);
+/**
+ * Ask this thread's own provider to draft delivery text from the change the
+ * checkout already shows.
+ *
+ * Reading a diff and writing a sentence changes nothing, so this needs no
+ * approval and never touches the checkout. The draft is a suggestion the user
+ * edits and sends themselves; nothing here commits, pushes, or opens anything.
+ */
+const DraftGitText = Schema.Struct({
+  kind: Schema.Literal("draft-git-text"),
+  ...OperationScope,
+  purpose: Schema.Literal("commit-message", "pull-request"),
+}).annotations(strict);
+/**
  * Throw away uncommitted work in the checkout. This is the one Git command
  * here that destroys content instead of recording it: what it removes was
  * never committed, so nothing in the repository can bring it back. It is
@@ -550,6 +579,8 @@ export const CodeOperationCommand = Schema.Union(
   DiscardGitChanges,
   CommitGit,
   PushGit,
+  UnstageGit,
+  DraftGitText,
   RestoreGitCheckpoint,
   CreatePullRequest,
   ObservePullRequest,
@@ -661,7 +692,15 @@ const GitMutationResult = Schema.Struct({
   kind: Schema.Literal("git-mutation-state"),
   operationId: CodeOperationId,
   gitOperationId: CodeGitOperationId,
-  mutation: Schema.Literal("stage", "discard", "commit", "push", "revert", "restore-checkpoint"),
+  mutation: Schema.Literal(
+    "stage",
+    "unstage",
+    "discard",
+    "commit",
+    "push",
+    "revert",
+    "restore-checkpoint",
+  ),
   state: Schema.Literal("completed", "rejected", "failed"),
   headOid: Schema.optional(GitObjectId),
   /**
@@ -838,12 +877,29 @@ const OperationFailed = Schema.Struct({
   failure: CodeOperationFailure,
 }).annotations(strict);
 
+/**
+ * Delivery text a provider drafted from the checkout's own change. Plain
+ * suggestion: the user reads it, edits it, and decides whether to use it, so
+ * nothing here has been committed, pushed, or opened.
+ */
+const GitDraftResult = Schema.Struct({
+  kind: Schema.Literal("git-draft-state"),
+  operationId: CodeOperationId,
+  purpose: Schema.Literal("commit-message", "pull-request"),
+  state: Schema.Literal("completed", "unavailable", "failed"),
+  /** The one-line subject. Absent unless the draft completed. */
+  title: Schema.optional(boundedNonEmptyText(512)),
+  /** The longer body, when the provider wrote one. */
+  body: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES)),
+}).annotations(strict);
+
 export const CodeOperationResult = Schema.Union(
   OperationAccepted,
   TerminalStateResult,
   RepositoryTestResult,
   GitObservation,
   GitMutationResult,
+  GitDraftResult,
   PullRequestResult,
   PullRequestReviewResult,
   ReviewFindingResult,

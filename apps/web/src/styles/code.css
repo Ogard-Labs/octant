@@ -559,6 +559,20 @@
   border-color: var(--octant-danger-border, var(--octant-border-strong));
 }
 
+.code-git-pane__confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--octant-danger-border, var(--octant-border-strong));
+  border-radius: 8px;
+  background: var(--octant-surface-raised, var(--octant-control));
+}
+
+.code-git-pane__confirm p {
+  margin: 0;
+  font-size: 11px;
+}
+
 .code-diff-pane__confirm {
   display: flex;
   flex-direction: column;

@@ -9,6 +9,7 @@ import {
   decodeCodeOperationCommand,
   decodeCodeRelativePath,
   decodeCodeReviewFindingId,
+  decodeProviderSessionId,
   type CodeCheckoutIdentity,
   type AppleActionRequest,
   type CodeOperationCommand,
@@ -65,6 +66,7 @@ import {
 import { TerminalProcessPort } from "./terminalProcessPort";
 import { TerminalService } from "./terminalService";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+import { boundedDiff, draftGitText, type CodeGitDraftResult } from "./codeGitDraftService";
 import { CodeTurnRunner, type CodeTurnEvent, type CodeTurnOutcome } from "./codeTurnRunner";
 import { createCodeAppManagedTools, type CodeAppManagedToolsOptions } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -127,6 +129,7 @@ export interface CodeOperationRuntimeOptions {
   readonly gitMutationPort?: Pick<
     GitMutationPort,
     | "stage"
+    | "unstage"
     | "discard"
     | "commit"
     | "push"
@@ -298,7 +301,14 @@ export function createCodeOperationRuntime(
   const observation = options.gitObservationPort ?? new GitObservationPort();
   const mutation = options.gitMutationPort ?? new GitMutationPort();
   const gitService = new GitService(observation, mutation);
-  const git = codeOperationGitPort(gitService);
+  const git = {
+    ...codeOperationGitPort(gitService),
+    draft: (input: {
+      readonly thread: CodeThread;
+      readonly checkoutRoot: string;
+      readonly purpose: "commit-message" | "pull-request";
+    }) => draftDeliveryText(options, gitService, input),
+  } satisfies CodeOperationGitPort;
   const pullRequests = options.pullRequestPort ?? createPullRequestPort(options);
   const reviewFindings = new ReviewFindingService({
     persistence: options.persistence,
@@ -1236,9 +1246,58 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
         })),
       }),
     push: (input) => git.push(input),
+    unstage: (input) => git.unstage(input),
     checkpoint: (input) => git.checkpoint(input),
     restoreCheckpoint: (input) => git.restoreCheckpoint(input),
   } as CodeOperationGitPort;
+}
+
+/**
+ * Draft delivery text from the change the checkout already shows.
+ *
+ * The diff is read here rather than trusted from the renderer, so the model
+ * only ever sees what this host observed. A checkout with nothing to describe,
+ * or a thread whose provider cannot be resolved, reports unavailable instead
+ * of asking a model to invent a message.
+ */
+async function draftDeliveryText(
+  options: CodeOperationRuntimeOptions,
+  git: GitService,
+  input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly purpose: "commit-message" | "pull-request";
+  },
+): Promise<CodeGitDraftResult> {
+  const observed = await git.observe(input.checkoutRoot);
+  if (observed.status !== "ready") return { status: "unavailable" };
+  // A commit describes what is staged; a pull request describes the branch's
+  // whole change, which is every change the checkout reports.
+  const paths =
+    input.purpose === "commit-message"
+      ? observed.stagedSummary.map((entry) => entry.path)
+      : observed.changedPaths;
+  if (paths.length === 0 || observed.diff.text.trim().length === 0)
+    return { status: "unavailable" };
+  const driver = await options.resolveProviderDriver(input.thread);
+  if (driver === undefined) return { status: "unavailable" };
+  const diff = boundedDiff(observed.diff.text);
+  return draftGitText(
+    {
+      driver,
+      instanceId: input.thread.providerInstanceId,
+      modelId: input.thread.modelId,
+      sessionId: options.uuid() as ReturnType<typeof decodeProviderSessionId>,
+      projectRoot: input.checkoutRoot,
+    },
+    {
+      purpose: input.purpose,
+      ...(observed.head.branch.kind === "named" ? { branch: observed.head.branch.name } : {}),
+      diff: diff.text,
+      diffTruncated: diff.truncated || observed.diff.truncated,
+      paths,
+    },
+  );
 }
 
 function mapGitObservation(

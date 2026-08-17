@@ -118,6 +118,22 @@ export class GitMutationPort {
   }
 
   /**
+   * Take the listed paths back out of the index without touching the files.
+   * The change stays in the working tree exactly as it was, so nothing the
+   * user wrote can be lost here.
+   */
+  async unstage(
+    input: { readonly checkoutRoot: string; readonly paths: readonly string[] },
+    signal?: AbortSignal,
+  ): Promise<GitMutationResult> {
+    if (!validPaths(input.paths)) return { status: "rejected", reason: "invalid-paths" };
+    const lock = await this.#lockState(input.checkoutRoot, signal);
+    if (lock === "failed") return { status: "failed" };
+    if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    return this.#apply(input.checkoutRoot, ["restore", "--staged", "--", ...input.paths], signal);
+  }
+
+  /**
    * Restore the index and working tree of the given paths from HEAD, throwing
    * away uncommitted work. Tracked paths only: `git restore` cannot remove an
    * untracked file, and deleting one is not something this port will do

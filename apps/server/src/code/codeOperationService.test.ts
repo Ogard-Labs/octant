@@ -134,6 +134,7 @@ describe("CodeOperationService", () => {
     const git = {
       observe: vi.fn(),
       stage: vi.fn(),
+      unstage: vi.fn(),
       discard: vi.fn(),
       commit: vi.fn(),
       push: vi.fn(),

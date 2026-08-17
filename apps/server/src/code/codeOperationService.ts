@@ -249,6 +249,12 @@ export interface CodeOperationGitPort {
     readonly paths: readonly string[];
     readonly expectedStateToken: string;
   }) => Promise<GitMutationOutcome>;
+  readonly unstage: (input: {
+    readonly checkoutId: string;
+    readonly checkoutRoot: string;
+    readonly paths: readonly string[];
+    readonly expectedStateToken: string;
+  }) => Promise<GitMutationOutcome>;
   readonly discard: (input: {
     readonly checkoutId: string;
     readonly checkoutRoot: string;
@@ -288,6 +294,18 @@ export interface CodeOperationGitPort {
   }) => Promise<
     | { readonly status: "captured"; readonly snapshot: CodeCheckpoint }
     | { readonly status: "unavailable" }
+  >;
+  /**
+   * Asks the thread's own provider for delivery text. Optional so a host with
+   * no provider for the thread simply reports the draft unavailable.
+   */
+  readonly draft?: (input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly purpose: "commit-message" | "pull-request";
+  }) => Promise<
+    | { readonly status: "drafted"; readonly title: string; readonly body?: string }
+    | { readonly status: "unavailable" | "failed" }
   >;
   readonly restoreCheckpoint?: (input: {
     readonly checkoutId: string;
@@ -1141,6 +1159,20 @@ export class CodeOperationService {
             expectedStateToken: command.expectedStateToken,
           }),
         );
+      case "unstage-git":
+        return this.#gitMutation(
+          command.operationId,
+          command.gitOperationId,
+          "unstage",
+          await this.#options.git.unstage({
+            checkoutId: checkout.id,
+            checkoutRoot: root.checkoutRoot,
+            paths: command.paths,
+            expectedStateToken: command.expectedStateToken,
+          }),
+        );
+      case "draft-git-text":
+        return this.#gitDraft(command, thread, root.checkoutRoot);
       case "discard-git-changes":
         return this.#gitMutation(
           command.operationId,
@@ -1436,7 +1468,7 @@ export class CodeOperationService {
   #gitMutation(
     operationId: CodeOperationCommand["operationId"],
     gitOperationId: string,
-    mutation: "stage" | "discard" | "commit" | "push" | "restore-checkpoint",
+    mutation: "stage" | "unstage" | "discard" | "commit" | "push" | "restore-checkpoint",
     result: GitMutationOutcome & { readonly undo?: CodeCheckpoint },
   ): CodeOperationResult {
     if (result.status === "unavailable")
@@ -1454,6 +1486,27 @@ export class CodeOperationService {
             : "failed",
       ...(result.status === "applied" && result.oid !== undefined ? { headOid: result.oid } : {}),
       ...(result.status === "applied" && result.undo !== undefined ? { undo: result.undo } : {}),
+    });
+  }
+
+  async #gitDraft(
+    command: Extract<CodeOperationCommand, { readonly kind: "draft-git-text" }>,
+    thread: CodeThread,
+    checkoutRoot: string,
+  ): Promise<CodeOperationResult> {
+    const draft = this.#options.git.draft;
+    const result =
+      draft === undefined
+        ? ({ status: "unavailable" } as const)
+        : await draft({ thread, checkoutRoot, purpose: command.purpose });
+    return decodeCodeOperationResult({
+      kind: "git-draft-state",
+      operationId: command.operationId,
+      purpose: command.purpose,
+      state: result.status === "drafted" ? "completed" : result.status,
+      ...(result.status === "drafted"
+        ? { title: result.title, ...(result.body === undefined ? {} : { body: result.body }) }
+        : {}),
     });
   }
 
@@ -1902,6 +1955,12 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
       return "test";
     case "stage-git":
       return "stage";
+    case "unstage-git":
+      return "unstage";
+    // Drafting reads the checkout's own diff and writes a sentence. It
+    // changes nothing, so it is an ordinary read.
+    case "draft-git-text":
+      return "read";
     case "discard-git-changes":
       return "discard";
     case "restore-git-checkpoint":

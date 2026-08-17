@@ -208,6 +208,21 @@ describe("GitMutationPort", () => {
     expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("initial\n");
   });
 
+  it("takes a path back out of the index while its edit survives in the working tree", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "README.md"), "staged edit\n");
+    git(repository, "add", "--", "README.md");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(port.unstage({ checkoutRoot: repository, paths: ["README.md"] })).resolves.toEqual(
+      { status: "applied" },
+    );
+
+    expect(gitOutput(repository, "diff", "--cached", "--name-only").trim()).toBe("");
+    expect(gitOutput(repository, "status", "--porcelain").trimEnd()).toBe(" M README.md");
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("staged edit\n");
+  });
+
   it("rejects a discard path shaped like a Git option", async () => {
     const repository = createRepository(temporaryDirectory());
     const port = new GitMutationPort(undefined, confinedOptions());

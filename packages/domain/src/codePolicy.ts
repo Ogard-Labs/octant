@@ -13,6 +13,7 @@ export type CodeOperation =
   | "terminal"
   | "test"
   | "stage"
+  | "unstage"
   | "discard"
   | "restore-checkpoint"
   | "commit"
@@ -64,6 +65,9 @@ export function approvalClassForCodeOperation(
   switch (operation) {
     case "edit":
     case "stage":
+    // Unstaging only moves paths out of the index; the files keep every
+    // change they had, so it sits with the ordinary writes.
+    case "unstage":
     case "commit":
       return "project-file-writes";
     case "terminal":

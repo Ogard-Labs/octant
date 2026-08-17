@@ -599,6 +599,7 @@ function runtimeFixture(options: {
     },
     gitMutationPort: {
       stage: async () => ({ status: "failed" as const }),
+      unstage: async () => ({ status: "failed" as const }),
       commit: async () => ({ status: "failed" as const }),
       push: async () => ({ status: "failed" as const }),
       discard: async () => ({ status: "failed" as const }),

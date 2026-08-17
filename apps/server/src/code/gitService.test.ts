@@ -79,6 +79,43 @@ describe("GitService", () => {
     );
   });
 
+  it("only unstages a path the observation reports as staged", async () => {
+    const observation = {
+      ...readyObservation(),
+      statusEntries: [
+        { path: "file.txt", index: "M", worktree: " " },
+        { path: "unstaged.txt", index: " ", worktree: "M" },
+      ],
+      changedPaths: ["file.txt", "unstaged.txt"],
+      stagedSummary: [{ path: "file.txt", index: "M", worktree: " " }],
+    };
+    const mutation = mutationPort();
+    const service = new GitService({ observe: vi.fn(async () => observation) }, mutation);
+    const base = { checkoutId: "checkout-1", checkoutRoot: "/repo" } as const;
+
+    await expect(
+      service.unstage({ ...base, paths: ["file.txt"], expectedStateToken: "stale" }),
+    ).resolves.toEqual({ status: "rejected", reason: "stale-state" });
+    // Changed but not staged: taking it out of the index would be a no-op that
+    // reads to the user as if something happened.
+    await expect(
+      service.unstage({
+        ...base,
+        paths: ["unstaged.txt"],
+        expectedStateToken: observation.stateToken,
+      }),
+    ).resolves.toEqual({ status: "rejected", reason: "unlisted-path" });
+    expect(mutation.unstage).not.toHaveBeenCalled();
+
+    await expect(
+      service.unstage({ ...base, paths: ["file.txt"], expectedStateToken: observation.stateToken }),
+    ).resolves.toEqual({ status: "applied" });
+    expect(mutation.unstage).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", paths: ["file.txt"] },
+      undefined,
+    );
+  });
+
   it("requires approval or Full access and a named branch with an observed confirmed remote", async () => {
     const observation = readyObservation();
     const mutation = mutationPort();
@@ -234,6 +271,7 @@ function readyObservation(): GitObservation {
 function mutationPort() {
   return {
     stage: vi.fn(async () => ({ status: "applied" as const })),
+    unstage: vi.fn(async () => ({ status: "applied" as const })),
     commit: vi.fn(async () => ({
       status: "applied" as const,
       oid: "b".repeat(40),
