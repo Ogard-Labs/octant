@@ -143,4 +143,34 @@ describe("importing an avatar from Gravatar", () => {
       vi.useRealTimers();
     }
   });
+
+  // Headers arriving and the stream then stalling is the same hang, so the
+  // deadline has to outlast the response, not end when it resolves.
+  it("gives up on a Gravatar whose body never finishes arriving", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = importAvatarFromGravatar(
+        "ada@example.com",
+        environment({
+          fetch: vi.fn(
+            async (_input, init) =>
+              ({
+                status: 200,
+                ok: true,
+                blob: async () =>
+                  await new Promise<Blob>((_resolve, reject) => {
+                    init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+                  }),
+              }) as unknown as Response,
+          ),
+        }),
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(await pending).toMatchObject({ failure: { kind: "gravatar-unreachable" } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

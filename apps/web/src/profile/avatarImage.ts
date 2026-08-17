@@ -95,41 +95,51 @@ export async function importAvatarFromGravatar(
   const hash = await environment.digest(normalizeGravatarEmail(email));
   const abandon = new AbortController();
   const bound = setTimeout(() => abandon.abort(), GRAVATAR_TIMEOUT_MS);
-  let response: Response;
+  const unreachable = failed({
+    kind: "gravatar-unreachable",
+    message: "Octant could not reach gravatar.com. Check the connection, or upload a photo.",
+  });
+  // The deadline has to cover reading the body too. Headers that arrive and
+  // then a stream that stalls is the same hang as a request that is never
+  // answered, and the profile step disables its rail, Escape, and Skip for the
+  // whole of it. Encoding afterwards is local work and needs no deadline.
   try {
-    response = await environment.fetch(gravatarImageUrl(hash, GRAVATAR_REQUEST_PIXELS), {
-      signal: abandon.signal,
-    });
-  } catch {
-    return failed({
-      kind: "gravatar-unreachable",
-      message: "Octant could not reach gravatar.com. Check the connection, or upload a photo.",
-    });
+    let response: Response;
+    try {
+      response = await environment.fetch(gravatarImageUrl(hash, GRAVATAR_REQUEST_PIXELS), {
+        signal: abandon.signal,
+      });
+    } catch {
+      return unreachable;
+    }
+    if (response.status === 404) {
+      return failed({
+        kind: "gravatar-missing",
+        message: "That address has no Gravatar. Upload a photo, or keep your initials.",
+      });
+    }
+    if (!response.ok) {
+      return failed({
+        kind: "gravatar-unreachable",
+        message: `gravatar.com answered ${String(response.status)}. Try again, or upload a photo.`,
+      });
+    }
+    const unreadable = "The Gravatar came back in a format this Mac could not read.";
+    let body: Blob;
+    try {
+      body = await response.blob();
+    } catch {
+      // A body that cannot even be read is still a failed import, and has to be
+      // reported as one — never left as a button that quietly did nothing. A
+      // body given up on is the connection failing, not an unreadable format.
+      return abandon.signal.aborted
+        ? unreachable
+        : failed({ kind: "unreadable", message: unreadable });
+    }
+    return encodeBlob(body, environment, unreadable);
   } finally {
     clearTimeout(bound);
   }
-  if (response.status === 404) {
-    return failed({
-      kind: "gravatar-missing",
-      message: "That address has no Gravatar. Upload a photo, or keep your initials.",
-    });
-  }
-  if (!response.ok) {
-    return failed({
-      kind: "gravatar-unreachable",
-      message: `gravatar.com answered ${String(response.status)}. Try again, or upload a photo.`,
-    });
-  }
-  const unreadable = "The Gravatar came back in a format this Mac could not read.";
-  let body: Blob;
-  try {
-    body = await response.blob();
-  } catch {
-    // A body that cannot even be read is still a failed import, and has to be
-    // reported as one — never left as a button that quietly did nothing.
-    return failed({ kind: "unreadable", message: unreadable });
-  }
-  return encodeBlob(body, environment, unreadable);
 }
 
 async function encodeBlob(
