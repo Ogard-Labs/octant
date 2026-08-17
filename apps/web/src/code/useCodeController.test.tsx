@@ -276,7 +276,11 @@ describe("useCodeController", () => {
       String(ids.thread),
     );
     // Forking is additive: the source thread is never commanded.
-    expect(execute.mock.calls.every(([command]) => command.threadId === undefined)).toBe(true);
+    expect(
+      execute.mock.calls.every(
+        ([command]) => !("threadId" in command) || command.threadId !== ids.thread,
+      ),
+    ).toBe(true);
   });
 
   it("bootstraps authoritative navigation and activates a thread through codeClient only", async () => {
