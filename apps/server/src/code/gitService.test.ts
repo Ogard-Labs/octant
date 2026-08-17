@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GitObservation } from "./gitObservationPort";
+import type { GitMutationResult } from "./gitMutationPort";
 import { GitService } from "./gitService";
 
 describe("GitService", () => {
@@ -237,6 +238,41 @@ describe("GitService", () => {
       { checkoutRoot: "/repo", snapshot },
       undefined,
     );
+  });
+
+  it("hands back the undo point when a restore fails part-way, but not when it is refused", async () => {
+    const observation = readyObservation();
+    const undo = { worktree: "d".repeat(40), index: "e".repeat(40), head: "a".repeat(40) };
+    const base = { checkoutId: "checkout-1", checkoutRoot: "/repo" } as const;
+    const snapshot = { worktree: "f".repeat(40), index: "0".repeat(40) };
+
+    // A command the timeout killed may already have moved files, so the only
+    // recovery point has to travel with the failure.
+    const failing = {
+      ...mutationPort(),
+      restoreWorkingTree: vi.fn(async (): Promise<GitMutationResult> => ({ status: "failed" })),
+    };
+    await expect(
+      new GitService({ observe: vi.fn(async () => observation) }, failing).restoreCheckpoint({
+        ...base,
+        snapshot,
+      }),
+    ).resolves.toEqual({ status: "failed", undo });
+
+    // A rejection is refused before anything is written, so there is nothing
+    // to undo and offering one would invite an unnecessary overwrite.
+    const rejecting = {
+      ...mutationPort(),
+      restoreWorkingTree: vi.fn(
+        async (): Promise<GitMutationResult> => ({ status: "rejected", reason: "invalid-commit" }),
+      ),
+    };
+    await expect(
+      new GitService({ observe: vi.fn(async () => observation) }, rejecting).restoreCheckpoint({
+        ...base,
+        snapshot,
+      }),
+    ).resolves.toEqual({ status: "rejected", reason: "invalid-commit" });
   });
 
   it("only reverts an explicit commit from a clean expected state", async () => {

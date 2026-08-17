@@ -274,7 +274,12 @@ export class GitService {
         { checkoutRoot: current.checkoutRoot, snapshot: input.snapshot },
         signal,
       );
-      return restored.status === "applied" ? { ...restored, undo: undo.snapshot } : restored;
+      // A rejection is refused before the checkout is touched, so it alone
+      // carries no undo point. Every other outcome — including a command the
+      // timeout killed part-way through `read-tree -u` — may have already moved
+      // files, and withholding the pre-restore checkpoint there would strand
+      // the only way back.
+      return restored.status === "rejected" ? restored : { ...restored, undo: undo.snapshot };
     });
   }
 

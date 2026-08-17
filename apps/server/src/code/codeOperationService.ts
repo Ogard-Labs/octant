@@ -1542,7 +1542,9 @@ export class CodeOperationService {
             ? "rejected"
             : "failed",
       ...(result.status === "applied" && result.oid !== undefined ? { headOid: result.oid } : {}),
-      ...(result.status === "applied" && result.undo !== undefined ? { undo: result.undo } : {}),
+      // A failed restore may have moved files before it stopped, so its undo
+      // point travels with it too; only a rejection is certainly untouched.
+      ...(result.status !== "rejected" && result.undo !== undefined ? { undo: result.undo } : {}),
     });
   }
 

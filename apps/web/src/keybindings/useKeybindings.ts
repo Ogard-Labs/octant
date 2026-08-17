@@ -26,10 +26,13 @@ export function createKeybindingStore(
   storage: Pick<Storage, "getItem" | "setItem"> | undefined = globalThis.localStorage,
 ): KeybindingStore {
   const listeners = new Set<() => void>();
-  // Read through rather than caching: the snapshot is a string, so an unchanged
-  // document compares equal and `useSyncExternalStore` stays quiet, while a
-  // document written before this store existed is still picked up.
+  // Held only while storage refuses the document. Reading through otherwise is
+  // what keeps the snapshot a plain string — an unchanged document compares
+  // equal and `useSyncExternalStore` stays quiet — and what picks up a document
+  // written before this store existed.
+  let unpersisted: string | undefined;
   function read(): string {
+    if (unpersisted !== undefined) return unpersisted;
     if (storage === undefined) return "";
     try {
       return storage.getItem(KEYBINDINGS_STORAGE_KEY) ?? "";
@@ -42,10 +45,14 @@ export function createKeybindingStore(
     getSnapshot: read,
     write: (document) => {
       try {
-        storage?.setItem(KEYBINDINGS_STORAGE_KEY, document);
+        if (storage === undefined) throw new Error("No storage.");
+        storage.setItem(KEYBINDINGS_STORAGE_KEY, document);
+        unpersisted = undefined;
       } catch {
-        // Persistence is best-effort: the chord still takes effect for this
-        // sitting rather than the change appearing not to happen at all.
+        // Persistence is best-effort, but the chord still has to take effect
+        // for this sitting: without the document in hand the next read would
+        // return the old one and the change would appear not to have happened.
+        unpersisted = document;
       }
       for (const listener of listeners) listener();
     },

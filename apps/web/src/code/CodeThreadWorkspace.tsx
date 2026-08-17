@@ -376,6 +376,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         // Keeping what the host replaced is what makes the overwrite reversible;
         // dropping it here would strand the only copy of the previous state.
         if (result.undo !== undefined) setRestoreUndo(result.undo);
+      } else if (result.kind === "git-mutation-state" && result.undo !== undefined) {
+        // A failed restore reports the state it replaced, which means it may
+        // have moved files before it stopped. Saying "untouched" here would be
+        // a guess, and it would bury the only way back.
+        setRestoreMessage(`The restore ${result.state}. Some files may already have changed.`);
+        setRestoreUndo(result.undo);
       } else if (result.kind === "git-mutation-state")
         setRestoreMessage(`The restore was ${result.state}. The checkout is untouched.`);
       else setRestoreMessage("The restore did not report a result.");

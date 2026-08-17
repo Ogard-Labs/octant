@@ -38,6 +38,29 @@ describe("KeybindingSettings", () => {
     ).toHaveTextContent(/J/);
   });
 
+  it("keeps a chord for this sitting when storage refuses to persist it", async () => {
+    const user = userEvent.setup();
+    const refusing = createKeybindingStore({
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("Storage is full.");
+      },
+    });
+    const { hook, rerender } = renderSettings(refusing);
+
+    const zen = screen.getByRole("button", { name: "Change the chord for Toggle Zen mode" });
+    await user.click(zen);
+    fireEvent.keyDown(zen, { key: "j", metaKey: true, altKey: true });
+
+    // Persistence is best-effort, but the chord the user just pressed has to
+    // take effect now rather than reading back as if nothing happened.
+    expect(JSON.parse(hook.result.current.document)).toEqual({ "zen-mode": "Mod+Alt+J" });
+    rerender();
+    expect(
+      screen.getByRole("button", { name: "Change the chord for Toggle Zen mode" }),
+    ).toHaveTextContent(/J/);
+  });
+
   it("refuses a chord that would swallow ordinary typing and changes nothing", async () => {
     const user = userEvent.setup();
     const store = memoryStore();

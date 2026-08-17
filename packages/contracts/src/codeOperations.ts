@@ -705,7 +705,8 @@ const GitMutationResult = Schema.Struct({
   headOid: Schema.optional(GitObjectId),
   /**
    * The state this mutation replaced, recorded before it ran. Present on a
-   * completed restore, which is what makes undoing one possible.
+   * completed restore, which is what makes undoing one possible, and on a
+   * failed one, which may have moved files before it stopped.
    */
   undo: Schema.optional(CodeCheckpoint),
 }).annotations(strict);
