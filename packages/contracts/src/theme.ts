@@ -209,7 +209,11 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
       ligatures: true,
     },
     terminal: {
-      family: "'JetBrains Mono', 'SF Mono', Menlo, monospace",
+      // Nerd Font families sit after the text faces so prompt glyphs (starship,
+      // powerlevel10k, lsd) resolve per character on machines that have one
+      // installed, without changing how ordinary text renders.
+      family:
+        "'JetBrains Mono', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', 'MesloLGS NF', 'Hack Nerd Font Mono', monospace",
       size: 12,
       weight: 400,
       lineHeight: 1.4,

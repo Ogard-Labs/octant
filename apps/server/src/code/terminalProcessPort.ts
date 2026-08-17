@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as nodePty from "node-pty";
@@ -15,6 +16,21 @@ import {
 import type { OsNetworkEgress } from "../process/threadEgressPolicy";
 
 export const MAX_TERMINAL_INPUT_BYTES = 64 * 1024;
+
+/**
+ * Points the shell's own bookkeeping at the Octant-owned state directory so
+ * an interactive zsh (and common prompts such as starship) never try to write
+ * inside the real home the profile keeps read-only. Caller-supplied
+ * environment wins over these defaults.
+ */
+export function shellStateEnvironment(directory: string): Record<string, string> {
+  return {
+    HISTFILE: join(directory, "zsh_history"),
+    XDG_CACHE_HOME: join(directory, "cache"),
+    XDG_STATE_HOME: join(directory, "state"),
+    STARSHIP_CACHE: join(directory, "cache", "starship"),
+  };
+}
 export const MAX_TERMINAL_COLUMNS = 500;
 export const MAX_TERMINAL_ROWS = 500;
 
@@ -50,6 +66,13 @@ export interface TerminalProcessHandle {
 export interface TerminalLaunchInput {
   readonly shell: string;
   readonly cwd: string;
+  /**
+   * The authority this shell's state belongs to, normally the bound
+   * repository identity. A filesystem path is reusable — a repository can be
+   * removed and an unrelated one created at the same place — so the path alone
+   * is not a durable identity for history and prompt caches.
+   */
+  readonly stateScope: string;
   readonly environment: Readonly<Record<string, string>>;
   readonly columns: number;
   readonly rows: number;
@@ -68,6 +91,14 @@ interface TerminalProcessDependencies {
   readonly platform?: NodeJS.Platform;
   readonly sandboxPath?: string;
   readonly temporaryDirectory?: string;
+  /**
+   * Base of the Octant-owned directories the confined shells keep their own
+   * state in (history, prompt caches). The profile denies writes to the real
+   * home, so without this an interactive zsh spends its first seconds printing
+   * permission errors for `~/.zsh_history` and `~/.cache`. Each launch gets a
+   * subdirectory of its own bound root; the base is never itself exposed.
+   */
+  readonly shellStateDirectory?: string;
   readonly networkEgress?: OsNetworkEgress;
   readonly seatbeltHomeDirectory?: string;
   readonly seatbeltUsersDirectory?: string;
@@ -122,6 +153,7 @@ export class TerminalProcessPort {
     readonly ensurePtyHelperExecutable: () => void;
     readonly confinement: SeatbeltConfinementPort;
     readonly temporaryDirectory: string;
+    readonly shellStateDirectory: string;
     readonly networkEgress: OsNetworkEgress;
   };
 
@@ -156,6 +188,16 @@ export class TerminalProcessPort {
         process.env.TEMP ??
         "/tmp",
       networkEgress: dependencies.networkEgress ?? "allow",
+      shellStateDirectory:
+        dependencies.shellStateDirectory ??
+        join(
+          dependencies.temporaryDirectory ??
+            process.env.TMPDIR ??
+            process.env.TMP ??
+            process.env.TEMP ??
+            "/tmp",
+          "octant-terminal-shell",
+        ),
       confinement:
         dependencies.confinement ??
         makeSeatbeltConfinementLive({
@@ -176,6 +218,12 @@ export class TerminalProcessPort {
   start(input: TerminalLaunchInput): TerminalProcessHandle {
     validateLaunch(input);
     this.#dependencies.ensurePtyHelperExecutable();
+    const shellState = shellStateDirectoryForRoot(
+      this.#dependencies.shellStateDirectory,
+      input.cwd,
+      input.stateScope,
+    );
+    mkdirSync(shellState, { recursive: true, mode: 0o700 });
     let launch: { readonly command: string; readonly args: readonly string[] };
     try {
       const shellDirectory = dirname(input.shell);
@@ -184,11 +232,22 @@ export class TerminalProcessPort {
         args: [],
         boundRoot: input.cwd,
         temporaryDirectory: this.#dependencies.temporaryDirectory,
+        additionalWriteRoots: [shellState],
         networkEgress: this.#dependencies.networkEgress,
         allowFileReadStar: true,
+        // Deny the whole shared base, not the siblings that happen to exist
+        // now: another repository's state directory may be created after this
+        // profile is generated, and this shell must never gain it. The allow
+        // rules below re-grant only this launch's own subdirectory.
+        additionalDenyReadPaths: [this.#dependencies.shellStateDirectory],
+        // The base can sit under the temporary directory, whose write grant
+        // would otherwise reach every sibling through that ancestor. Deny the
+        // base for writes too; the own-directory grant below re-allows it.
+        additionalDenyWritePaths: [this.#dependencies.shellStateDirectory],
         readRoots: [
           input.cwd,
           this.#dependencies.temporaryDirectory,
+          shellState,
           shellDirectory,
           dirname(shellDirectory),
         ],
@@ -203,7 +262,7 @@ export class TerminalProcessPort {
     const pty = this.#dependencies.spawn(launch.command, launch.args, {
       name: "xterm-256color",
       cwd: input.cwd,
-      env: { ...input.environment },
+      env: { ...shellStateEnvironment(shellState), ...input.environment },
       cols: input.columns,
       rows: input.rows,
     });
@@ -332,6 +391,32 @@ export class TerminalProcessPort {
     }
     return true;
   }
+}
+
+/**
+ * Derives the shell-state directory of one bound root. Shell history and prompt
+ * caches carry the command lines typed against that root, so they belong to the
+ * authority scope that produced them: a shell confined to one repository must
+ * not read or write the state of a shell confined to another. Only this
+ * subdirectory is granted to the launch; the shared base never is.
+ *
+ * The key combines the caller's authority scope with the resolved path. The
+ * path alone is reusable — remove a repository and create an unrelated one in
+ * its place and the new shell would inherit the old one's history — so the
+ * scope is what makes the identity durable.
+ */
+function shellStateDirectoryForRoot(base: string, cwd: string, scope: string): string {
+  const resolved = resolve(cwd);
+  let identity = resolved;
+  try {
+    identity = realpathSync(resolved);
+  } catch {
+    // A root the Seatbelt profile will reject anyway still gets its own scope.
+  }
+  return join(
+    base,
+    createHash("sha256").update(scope).update("\u0000").update(identity).digest("hex").slice(0, 16),
+  );
 }
 
 function spawnBunPty(shell: string, args: readonly string[], options: PtyForkOptions): PtyProcess {
