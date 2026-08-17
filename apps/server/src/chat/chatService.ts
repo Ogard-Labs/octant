@@ -192,7 +192,15 @@ function threadAsRoutedFor(thread: ChatThread, attempt: ChatAttempt): ChatThread
     providerInstanceId: attempt.providerInstanceId,
     modelId: attempt.modelId,
   };
-  if (String(attempt.modelId) === String(thread.modelId)) return routed;
+  // Model options are declared against one provider instance's model. Two
+  // compatible endpoints commonly expose the same model id, so the whole
+  // routing identity has to match before the selected options travel with it.
+  if (
+    String(attempt.modelId) === String(thread.modelId) &&
+    String(attempt.providerInstanceId) === String(thread.providerInstanceId)
+  ) {
+    return routed;
+  }
   const { modelOptionValues: _selectedModelOptions, ...withoutOptions } = routed;
   return withoutOptions;
 }

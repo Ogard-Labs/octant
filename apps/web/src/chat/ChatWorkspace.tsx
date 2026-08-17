@@ -696,9 +696,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             // Behind the same queue as a model or option change: a turn sent
             // in the same breath as one of those must run the settings the
             // person just chose, not the ones the composer last rendered. The
-            // turn moves the thread's version itself, so it carries no base
-            // forward.
-            sent = await enqueueThreadCommand(async () => ({
+            // version the earlier command reached travels with the send, since
+            // this closure still holds the view from the render that made it.
+            // The turn moves the version itself, so it carries no base forward.
+            sent = await enqueueThreadCommand(async (previous) => ({
               value: await props.controller.sendTurn(
                 draft,
                 claimedAttachments.map((attachment) => attachment.id),
@@ -708,6 +709,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   item.selection === undefined ? [] : [item.selection],
                 ),
                 threadMentionIds,
+                // Only a send that follows one of this composer's own commands
+                // knows a newer version; every other send leaves the
+                // controller's own rendered version alone.
+                ...(previous !== undefined && previous.threadId === String(thread.id)
+                  ? ([previous.version] as const)
+                  : ([] as const)),
               ),
             }));
           } catch (error) {

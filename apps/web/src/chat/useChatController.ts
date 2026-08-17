@@ -11,6 +11,7 @@ import type {
   ChatCommand,
   ChatCommandResult,
   ChatEventFrame,
+  ChatThread,
   ChatThreadId,
   ChatThreadView,
 } from "@octant/contracts/chat";
@@ -413,6 +414,13 @@ export function useChatController(options: ChatControllerOptions) {
      * mention is context for this turn and never part of the message.
      */
     threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
+    /**
+     * The version a caller already knows the thread reached, for a send that
+     * follows another command it issued. This closure holds the view from the
+     * render that made it, so without this the send would present a version
+     * the earlier command has already moved past and be refused as stale.
+     */
+    expectedVersion?: ChatThread["version"],
   ): Promise<boolean> {
     if (
       activeView === undefined ||
@@ -425,7 +433,7 @@ export function useChatController(options: ChatControllerOptions) {
     const result = await execute({
       kind: "send-chat-turn",
       threadId: activeView.thread.id,
-      expectedVersion: activeView.thread.version,
+      expectedVersion: expectedVersion ?? activeView.thread.version,
       prompt,
       ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
       ...(previewSelections.length === 0 ? {} : { previewSelections: [...previewSelections] }),

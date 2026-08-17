@@ -870,6 +870,10 @@ describe("ChatWorkspace", () => {
 
     releaseChange();
     await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    // Waiting is not enough: the composer's closure still holds the version
+    // from before the option change, so the send must carry the version that
+    // change reached or the host refuses it as stale.
+    expect(sendTurn).toHaveBeenCalledWith("Think hard", [], [], [], [], [], 4);
   });
 
   it("keeps unavailable provider and model selections visible and fail closed", () => {
