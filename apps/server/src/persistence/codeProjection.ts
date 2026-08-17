@@ -18,6 +18,9 @@ import {
   decodeCodeReviewFindingUpdated,
   decodeCodeThreadFollowUp,
   decodeCodeThreadFollowUpUpdated,
+  decodeCodeOperationEventFrame,
+  decodeCodeThreadActivity,
+  type CodeThreadActivity,
   type CodeThreadFollowUp,
   type CodeCheckoutId,
   type CodeCheckoutIdentity,
@@ -44,6 +47,7 @@ import {
   type CodeRuntimeProjectionRow,
   type CodeReviewProjectionRow,
   type CodeSettingsProjectionRow,
+  type CodeThreadActivityProjectionRow,
   type CodeThreadProjectionRow,
   type ProjectedCodeSettings,
 } from "./codePersistenceSchema";
@@ -56,9 +60,11 @@ const codeEventNames = new Set<string>([
   ...CODE_EVENT_NAMES,
   "code.review-finding-updated@1",
   "code.follow-up-updated@1",
+  "code.operation-event-recorded@1",
 ]);
 
 export const CODE_FOLLOW_UP_AGGREGATE_TYPE = "code-thread-follow-up";
+export const CODE_OPERATION_AGGREGATE_TYPE = "code-operation";
 
 export class CodeProjection implements Projection {
   readonly name = "code";
@@ -66,6 +72,7 @@ export class CodeProjection implements Projection {
 
   reset(connection: SqliteConnection): void {
     connection.exec(`
+      DELETE FROM code_thread_activity_projection;
       DELETE FROM code_thread_follow_up_projection;
       DELETE FROM code_review_projection;
       DELETE FROM code_runtime_projection;
@@ -169,6 +176,16 @@ export class CodeProjection implements Projection {
         upsertReviewFinding(connection, finding, event);
         return;
       }
+      case "code.operation-event-recorded@1": {
+        assertEnvelope(event.aggregateType === CODE_OPERATION_AGGREGATE_TYPE);
+        const frame = decodeProjection(() => decodeCodeOperationEventFrame(event.payload));
+        assertEnvelope(String(frame.operationId) === String(event.aggregateId));
+        // The operation aggregate is per turn, so its version says nothing about
+        // the thread. The journal's global sequence is what orders one thread's
+        // turns against each other, and it only ever grows.
+        upsertThreadActivity(connection, frame.threadId, event.globalSequence);
+        return;
+      }
       case "code.follow-up-updated@1": {
         assertEnvelope(event.aggregateType === CODE_FOLLOW_UP_AGGREGATE_TYPE);
         const followUp = decodeProjection(
@@ -179,6 +196,23 @@ export class CodeProjection implements Projection {
       }
     }
   }
+}
+
+function upsertThreadActivity(
+  connection: SqliteConnection,
+  threadId: CodeThreadId,
+  globalSequence: number,
+): void {
+  connection
+    .prepare(`
+      INSERT INTO code_thread_activity_projection (thread_id, schema_version, last_sequence)
+      VALUES (?, ?, ?)
+      ON CONFLICT (thread_id) DO UPDATE SET
+        schema_version = excluded.schema_version,
+        last_sequence = excluded.last_sequence
+      WHERE excluded.last_sequence > code_thread_activity_projection.last_sequence
+    `)
+    .run(threadId, CODE_PROJECTION_SCHEMA_VERSION, globalSequence);
 }
 
 function upsertFollowUp(
@@ -496,6 +530,27 @@ export function readCodeThreads(connection: SqliteConnection): ReadonlyArray<Cod
       .prepare("SELECT * FROM code_thread_projection ORDER BY updated_at DESC, thread_id ASC")
       .all() as ReadonlyArray<CodeThreadProjectionRow>
   ).map(decodeThreadRow);
+}
+
+/**
+ * Every thread that has journaled operation activity, with the global sequence
+ * of its latest operation event. Threads that have never run one are absent, so
+ * a caller can tell "nothing has happened" from "sequence zero".
+ */
+export function readCodeThreadActivity(
+  connection: SqliteConnection,
+): ReadonlyArray<CodeThreadActivity> {
+  return (
+    connection
+      .prepare("SELECT * FROM code_thread_activity_projection ORDER BY thread_id ASC")
+      .all() as ReadonlyArray<CodeThreadActivityProjectionRow>
+  ).map((row) => {
+    assertCodeProjectionSchema(row.schema_version);
+    return decodeCodeThreadActivity({
+      threadId: row.thread_id,
+      lastSequence: row.last_sequence,
+    });
+  });
 }
 
 export function readCodeCheckout(

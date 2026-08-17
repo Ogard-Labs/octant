@@ -12,7 +12,7 @@ import type {
 import { decodeProjectId } from "@octant/contracts/projects";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useCodeController } from "./useCodeController";
+import { createCodeReadCursorStore, useCodeController } from "./useCodeController";
 
 const now = "2026-07-21T12:00:00.000Z";
 const ids = {
@@ -1375,6 +1375,39 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.navigation[0]?.followUp).toBe(true));
   });
 
+  it("marks a thread unread when a background turn advances its activity sequence", async () => {
+    // A provider turn is journaled on the `code-operation` aggregate, so the
+    // thread's own version is identical before and after it runs. Only the
+    // activity sequence moves, and comparing the version instead is exactly the
+    // bug: the thread stays read forever.
+    const readCursorStore = createCodeReadCursorStore();
+    let activitySequence = 4;
+    const client = fakeClient({ bootstrap: vi.fn(async () => bootstrap(1, activitySequence)) });
+
+    // The user opens the thread and reads it.
+    const opened = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, readCursorStore }),
+    );
+    await waitFor(() => expect(opened.result.current.navigation[0]?.unread).toBe(false));
+    opened.unmount();
+
+    // A turn runs to completion while the thread is not on screen. Same
+    // version, higher activity sequence.
+    activitySequence = 9;
+    const closed = renderHook(() => useCodeController({ client, readCursorStore }));
+
+    await waitFor(() => expect(closed.result.current.navigation[0]?.unread).toBe(true));
+    expect(closed.result.current.navigation[0]?.threadId).toBe(ids.thread);
+  });
+
+  it("leaves a thread with no journaled activity read", async () => {
+    const client = fakeClient({ bootstrap: vi.fn(async () => bootstrap(1, 0)) });
+    const { result } = renderHook(() => useCodeController({ client }));
+
+    await waitFor(() => expect(result.current.navigation).toHaveLength(1));
+    expect(result.current.navigation[0]?.unread).toBe(false);
+  });
+
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
     const executeFollowUp = vi.fn(async () => ({ kind: "code-follow-up-updated" }) as never);
     const client = fakeClient({
@@ -1498,7 +1531,7 @@ function openFollowUp() {
   };
 }
 
-function bootstrap(version = 1): CodeBootstrap {
+function bootstrap(version = 1, activitySequence = 0): CodeBootstrap {
   return {
     checkouts: [checkout()],
     settings: {
@@ -1508,6 +1541,10 @@ function bootstrap(version = 1): CodeBootstrap {
       version: 1 as never,
     },
     threads: [thread(version)],
+    activity:
+      activitySequence === 0
+        ? []
+        : [{ threadId: ids.thread as never, lastSequence: activitySequence as never }],
   };
 }
 

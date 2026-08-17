@@ -721,6 +721,22 @@ CREATE INDEX code_thread_follow_up_open_idx
   WHERE state = 'open';
 `;
 
+const CODE_THREAD_ACTIVITY_PROJECTION_SQL = `
+CREATE TABLE code_thread_activity_projection (
+  thread_id TEXT PRIMARY KEY CHECK(length(trim(thread_id)) > 0),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+
+-- An upgraded database has a Code checkpoint sitting at the journal head, so
+-- catch-up would never replay the operation events this new table is derived
+-- from, and every thread that already exists would report no activity at all.
+-- Rewinding the checkpoint replays them. The projection's writes are idempotent
+-- and its other tables are guarded by aggregate version, so the replay fills
+-- this table without disturbing what they already hold.
+DELETE FROM projection_checkpoints WHERE projection_name = 'code';
+`;
+
 const ADD_EVENT_JOURNAL_HOST_ID_SQL = `
 ALTER TABLE event_journal
   ADD COLUMN host_id TEXT NOT NULL DEFAULT 'local'
@@ -1398,6 +1414,11 @@ ALTER TABLE code_runtime_projection
   },
   {
     version: 46,
+    name: "create_code_thread_activity_projection",
+    sql: CODE_THREAD_ACTIVITY_PROJECTION_SQL,
+  },
+  {
+    version: 47,
     name: "add_grok_provider_projection",
     sql: ADD_GROK_PROVIDER_PROJECTION_SQL,
   },
