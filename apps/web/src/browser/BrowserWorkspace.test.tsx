@@ -6,7 +6,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { BrowserWorkspace } from "./BrowserWorkspace";
+import { BrowserWorkspace, boundsInsideViewport } from "./BrowserWorkspace";
 
 const threadId = "10000000-0000-4000-8000-000000000001";
 const authority = {
@@ -847,5 +847,20 @@ describe("BrowserWorkspace", () => {
         expect.objectContaining({ kind: "navigate", target: "https://example.com/committed" }),
       ),
     );
+  });
+
+  it("keeps native surface bounds inside the window even when the pane edges are fractional", () => {
+    // Rounding left up and width up used to overflow the window by one pixel,
+    // which the host rejects as bounds outside the owning window.
+    expect(
+      boundsInsideViewport({ left: 1146.5, top: 60.5, right: 2000, bottom: 982 }, 2000, 982),
+    ).toEqual({ x: 1146, y: 60, width: 854, height: 922 });
+    // A pane flush with the top stays below the host's reserved strip.
+    const top = boundsInsideViewport({ left: 0, top: 10, right: 800, bottom: 600 }, 800, 600);
+    expect(top).toEqual({ x: 0, y: 36, width: 800, height: 564 });
+    // Overflowing edges are clamped rather than reported past the window.
+    const over = boundsInsideViewport({ left: 10, top: 40, right: 810.7, bottom: 620 }, 800, 600);
+    expect(over.x + over.width).toBe(800);
+    expect(over.y + over.height).toBe(600);
   });
 });
