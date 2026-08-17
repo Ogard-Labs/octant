@@ -138,6 +138,7 @@ function harness(options: { readonly fetch?: "fetched" | "failed" | "interrupted
     addWorktree: vi.fn(async () => ({ status: "created" as const })),
     isDirty: vi.fn(async () => ({ status: "observed" as const, dirty: false })),
     removeWorktree: vi.fn(async () => ({ status: "removed" as const })),
+    removeCheckpointRefs: vi.fn(async () => {}),
   };
   const authority: ManagedWorktreeAuthorityPort = {
     observeCleanupEligibility: vi.fn(async () => ({

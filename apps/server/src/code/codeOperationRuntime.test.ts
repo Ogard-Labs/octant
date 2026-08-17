@@ -752,6 +752,7 @@ function runtimeFixture(options: {
       revertCommit: async () => ({ status: "failed" as const }),
       snapshotWorkingTree: async () => ({ status: "failed" as const }),
       restoreWorkingTree: async () => ({ status: "failed" as const }),
+      releaseCheckpoint: async () => {},
     },
   });
   return {
