@@ -83,6 +83,16 @@ test count.
 - Do not increase mixed ownership or architectural coupling. Split a module only
   when the requested change would otherwise make its responsibilities materially
   less clear or violate an explicit repository boundary.
+- Editing existing code is a ratchet on reach: the surface you touch may keep the
+  reach it has or lose some, never gain more. New calls into host internals from
+  a feature that `docs/decisions/0001` lists as separable are a boundary
+  violation even when the surrounding code already makes them.
+- When a change shows that a feature belongs behind a seam, judge it against that
+  record's candidate table and record the extraction as a follow-up. Extracting
+  is its own deliverable with its own evidence, sequenced by that record; folding
+  it into an unrelated fix or feature is the migration risk the record warns
+  about, not an early payment against it. Features the table keeps in the host
+  are not candidates.
 - Record worthwhile adjacent improvements as follow-ups. Include them now only
   when inseparable from correctness, security, privacy, accessibility, data-loss
   protection, or the stated acceptance criteria.
