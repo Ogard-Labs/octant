@@ -1,5 +1,5 @@
 import type { WorkspaceTab, WorkspaceTabId } from "@octant/contracts/shell";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CodeWorkspace } from "./CodeWorkspace";
@@ -101,6 +101,38 @@ describe("CodeWorkspace", () => {
     // The person asking for it explicitly still gets one.
     (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce(terminalResult);
     fireEvent.click(screen.getByRole("button", { name: "Start terminal" }));
+    expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
+    expect(client.executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "start-terminal", terminalId: ids.thread }),
+    );
+  });
+
+  it("opens a terminal when a restored tab is activated while already mounted", async () => {
+    const client = codeClient();
+    (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
+    const registry = createTabActivationRegistry();
+
+    render(
+      <TabActivationProvider registry={registry}>
+        <CodeWorkspace
+          client={client}
+          controller={controller("full-access")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />
+      </TabActivationProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: "Start terminal" })).toBeVisible();
+    expect(client.executeOperation).not.toHaveBeenCalled();
+
+    // Clicking the restored tab is the person asking for it. The pane is
+    // already mounted, so activation has to reach it without a remount.
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce(terminalResult);
+    act(() => {
+      registry.noteActivated(TAB_ID);
+    });
+
     expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
     expect(client.executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "start-terminal", terminalId: ids.thread }),

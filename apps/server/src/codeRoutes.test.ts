@@ -8,6 +8,8 @@ import {
   type CodeOperationEventFrame,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 import {
   MAX_CODE_FILE_BODY_SIZE,
@@ -150,6 +152,38 @@ describe("Code routes", () => {
     // The route speaks for the person at the window, never for an agent.
     expect(executeOperation).toHaveBeenCalledWith(windowId, operation, { initiator: "user" });
     expect(execute).not.toHaveBeenCalled();
+
+    // The same chain serves the authenticated remote gateway. A paired device
+    // is never the person at the window, so it stays gated as an agent.
+    executeOperation.mockClear();
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000912";
+    const remoteRequest = request("/api/code/commands", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...operation,
+        operationId: "00000000-0000-4000-8000-000000000913",
+      }),
+    });
+    bindPrincipalRouteContext(remoteRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000914" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+
+    expect((await route(remoteRequest))?.status).toBe(200);
+    expect(executeOperation).toHaveBeenCalledWith(
+      remoteDeviceId,
+      expect.objectContaining({ kind: "start-terminal" }),
+      { initiator: "agent" },
+    );
 
     const forged = await route(
       request("/api/code/commands", {

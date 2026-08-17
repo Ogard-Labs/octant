@@ -65,7 +65,7 @@ import {
 import { Schema } from "effect";
 import type { FileIdentity } from "./code/fileOperationPort";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./code/codeFileService";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isLoopbackHostname } from "./shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -295,15 +295,22 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
     if (route === undefined) return undefined;
 
     let authenticatedWindowId: WindowId;
+    // Only the person at a local desktop window speaks as `user`. The same
+    // route chain serves the authenticated remote gateway, so a paired device
+    // stays gated as an agent and cannot skip a Code approval by reaching the
+    // route directly.
+    let operationInitiator: "user" | "agent";
     try {
       if (url.searchParams.has("windowId")) {
         throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
       }
-      authenticatedWindowId = authenticateRouteWindowId({
+      const principalContext = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
+      authenticatedWindowId = principalContext.scopeId;
+      operationInitiator = principalContext.principal.kind === "local-window" ? "user" : "agent";
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failureResponse(
@@ -372,10 +379,8 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             );
           }
           const operationResult = decodeCodeOperationResult(
-            // The route only ever carries the person at the window; agents and
-            // automations reach the runtime directly and stay gated as agents.
             await dependencies.service.executeOperation(authenticatedWindowId, operation, {
-              initiator: "user",
+              initiator: operationInitiator,
             }),
           );
           if (operationResult.operationId !== operation.operationId) {

@@ -11,7 +11,7 @@ import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { LoaderCircle } from "lucide-react";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
-import { useTabActivation } from "../shell/TabActivation";
+import { useTabActivatedThisSession } from "../shell/TabActivation";
 import { CodeGitPane } from "./CodeGitPane";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";
@@ -551,7 +551,7 @@ function TerminalWorkspaceSurface(
   // process on first view; they asked for a terminal. A tab that only came
   // back with a restored layout, and a process that later exited, wait for an
   // explicit Start instead of launching a shell nobody asked for.
-  const { wasActivatedThisSession } = useTabActivation();
+  const activatedThisSession = useTabActivatedThisSession(props.tab.id);
   const autoStarted = useRef(false);
   const startRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
@@ -620,7 +620,7 @@ function TerminalWorkspaceSurface(
         absent &&
         !autoStarted.current &&
         props.threadPolicy !== "plan" &&
-        wasActivatedThisSession(props.tab.id)
+        activatedThisSession
       ) {
         autoStarted.current = true;
         void startRef.current();
@@ -644,7 +644,7 @@ function TerminalWorkspaceSurface(
     props.terminal,
     props.terminalId,
     props.threadPolicy,
-    wasActivatedThisSession,
+    activatedThisSession,
   ]);
 
   const start = async () => {
