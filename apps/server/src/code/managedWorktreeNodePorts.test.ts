@@ -88,12 +88,35 @@ describe("managed worktree Node ports", () => {
     if (created.status !== "ready") throw new Error("expected ready worktree");
     expect((await ports.repository.observe(created.targetPath, signal)).status).toBe("available");
 
+    // Checkpoint anchors of both this checkout and a sibling sharing the
+    // repository's one ref store, which is the arrangement a wholesale cleanup
+    // has to be careful with.
+    const sibling = "80000000-0000-4000-8000-000000000008";
+    const tree = (
+      await execFileAsync("git", ["-C", created.targetPath, "write-tree"])
+    ).stdout.trim();
+    for (const id of [checkoutId, sibling]) {
+      await execFileAsync("git", [
+        "-C",
+        fixture.repository,
+        "update-ref",
+        `refs/octant/checkpoints/${id}/80000000-0000-4000-8000-000000000009/worktree`,
+        tree,
+      ]);
+    }
+
     const cleaned = await service.cleanup(
       { receiptId: created.receipt.receiptId, confirmedByLocalUser: true },
       signal,
     );
     expect(cleaned.status).toBe("removed");
     expect(await ports.filesystem.pathExists(created.targetPath, signal)).toBe(false);
+    // Removing the worktree does not reach the refs, so cleanup must: the
+    // gone checkout's anchors go, and only its own.
+    expect(await refs(fixture.repository, `refs/octant/checkpoints/${checkoutId}`)).toEqual([]);
+    expect(await refs(fixture.repository, `refs/octant/checkpoints/${sibling}`)).toEqual([
+      `refs/octant/checkpoints/${sibling}/80000000-0000-4000-8000-000000000009/worktree`,
+    ]);
   });
 
   it("rejects invalid branch names before invoking worktree mutation", async () => {
@@ -106,6 +129,17 @@ describe("managed worktree Node ports", () => {
 });
 
 const signal = new AbortController().signal;
+
+async function refs(repository: string, namespace: string): Promise<string[]> {
+  const listed = await execFileAsync("git", [
+    "-C",
+    repository,
+    "for-each-ref",
+    "--format=%(refname)",
+    namespace,
+  ]);
+  return listed.stdout.split("\n").filter((name) => name.length > 0);
+}
 
 async function createRepository() {
   const root = await mkdtemp(join(tmpdir(), "octant-managed-worktree-"));

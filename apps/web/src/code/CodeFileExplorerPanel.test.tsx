@@ -24,10 +24,78 @@ function listing(entries: ReadonlyArray<unknown>, truncated = false): CodeFileLi
 function client(result: CodeFileListingResult | (() => Promise<never>)) {
   return {
     list: vi.fn(typeof result === "function" ? result : async () => result),
+    // A host that reports nothing is the quiet case every other test wants.
+    watch: vi.fn(async function* () {}),
+  } as never;
+}
+
+/**
+ * A client whose watch hands out the given notices one at a time, so a test
+ * drives the explorer exactly as the host would when the agent edits a file.
+ */
+function watchingClient(notices: ReadonlyArray<unknown>) {
+  const listings: CodeFileListingResult[] = [
+    listing([
+      {
+        kind: "file",
+        fileId,
+        path: "src/main.ts",
+        byteLength: 12,
+        availability: { status: "available" },
+      },
+    ]),
+    listing([
+      {
+        kind: "file",
+        fileId,
+        path: "src/main.ts",
+        byteLength: 12,
+        availability: { status: "available" },
+      },
+      {
+        kind: "file",
+        fileId,
+        path: "src/added.ts",
+        byteLength: 4,
+        availability: { status: "available" },
+      },
+    ]),
+  ];
+  let call = 0;
+  return {
+    list: vi.fn(async () => listings[Math.min(call++, listings.length - 1)]!),
+    watch: vi.fn(async function* () {
+      for (const notice of notices) yield notice;
+      // Staying open is what the host does; ending here would only make the
+      // hook reconnect on a timer the test does not need.
+      await new Promise(() => undefined);
+    }),
   } as never;
 }
 
 describe("CodeFileExplorerPanel", () => {
+  it("relists the repository when the host reports that files changed", async () => {
+    render(
+      <CodeFileExplorerPanel
+        checkoutId={checkoutId}
+        client={watchingClient([
+          {
+            kind: "code-file-change",
+            threadId,
+            checkoutId,
+            paths: ["src/added.ts"],
+            truncated: false,
+            observedAt: "2026-08-14T08:00:01.000Z",
+          },
+        ])}
+        onOpenFile={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByRole("treeitem", { name: /src\/added\.ts/ })).toBeVisible();
+  });
+
   it("renders the host's listing as a repository tree", async () => {
     render(
       <CodeFileExplorerPanel

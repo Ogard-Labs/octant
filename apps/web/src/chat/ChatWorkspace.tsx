@@ -27,6 +27,7 @@ import {
   ChatComposer,
   type ChatComposerAttachmentCapability,
   type ChatComposerExtensionSelection,
+  type ChatComposerModelOption,
   type ChatComposerOption,
   type ChatComposerProps,
   type ChatComposerResearchBackend,
@@ -92,6 +93,13 @@ interface PendingAttachment {
   readonly displayName: string;
 }
 
+/** The authoritative thread state a queued model option change builds on. */
+interface ModelOptionBase {
+  readonly threadId: string;
+  readonly version: ChatThread["version"];
+  readonly values: Readonly<Record<string, string>>;
+}
+
 export function ChatWorkspace(props: ChatWorkspaceProps) {
   const view = props.controller.activeView;
   const [pendingAttachments, setPendingAttachments] = useState<ReadonlyArray<PendingAttachment>>(
@@ -125,6 +133,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const followsConversationRef = useRef(true);
   const followedThreadRef = useRef<string | undefined>(undefined);
   const pendingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
+  // Every composer command that carries the thread's expected version shares
+  // one queue. Two of them dispatched before the first round trip returns
+  // would otherwise both send the rendered version, so the second is rejected
+  // as stale and its payload omits the first choice. Queued instead, each one
+  // waits for the previous command's authoritative thread and builds on it.
+  const threadCommandQueueRef = useRef<Promise<ModelOptionBase | undefined>>(
+    Promise.resolve(undefined),
+  );
   const discardAttachmentRef = useRef(props.controller.discard);
   const mountedRef = useRef(true);
   const activeThreadIdRef = useRef<string | undefined>(
@@ -290,17 +306,113 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         ? `Uploading ${firstUpload.displayName}.`
         : `Uploading ${uploadingAttachments.length} attachments.`;
 
+  /**
+   * Run one thread command after every command already queued.
+   *
+   * `run` receives the authoritative thread state the previous command
+   * reported, when it reported one, and returns the state the next command
+   * should build on. A command that moves the thread's version for a reason
+   * this queue cannot describe returns no base, so the next one starts from
+   * the rendered thread instead of a version the server has moved past.
+   */
+  function enqueueThreadCommand<T>(
+    run: (previous: ModelOptionBase | undefined) => Promise<{
+      readonly value: T;
+      readonly base?: ModelOptionBase | undefined;
+    }>,
+  ): Promise<T> {
+    const queued = threadCommandQueueRef.current;
+    const settled = (async () => {
+      const previous = await queued;
+      return await run(previous);
+    })();
+    // A refused command leaves the queue empty so the next one starts from the
+    // reloaded thread rather than a version the server rejected.
+    threadCommandQueueRef.current = settled.then(
+      (outcome) => outcome.base,
+      () => undefined,
+    );
+    return settled.then((outcome) => outcome.value);
+  }
+
+  function baseFromResult(
+    result: Awaited<ReturnType<typeof props.controller.execute>>,
+  ): ModelOptionBase | undefined {
+    return result?.kind === "thread-updated"
+      ? {
+          threadId: String(result.thread.id),
+          version: result.thread.version,
+          values: result.thread.modelOptionValues ?? {},
+        }
+      : undefined;
+  }
+
+  function changeModelOption(optionId: string, value: string | undefined) {
+    void enqueueThreadCommand(async (previous) => {
+      const base: ModelOptionBase =
+        previous !== undefined && previous.threadId === String(thread.id)
+          ? previous
+          : {
+              threadId: String(thread.id),
+              version: thread.version,
+              values: thread.modelOptionValues ?? {},
+            };
+      const { [optionId]: _cleared, ...rest } = base.values;
+      const result = await props.controller.execute({
+        kind: "change-chat-provider",
+        threadId: thread.id,
+        expectedVersion: base.version,
+        providerInstanceId: thread.providerInstanceId,
+        modelId: thread.modelId,
+        modelOptionValues: value === undefined ? rest : { ...rest, [optionId]: value },
+      });
+      return { value: undefined, base: baseFromResult(result) };
+    }).catch(() => undefined);
+  }
+
+  /**
+   * The version the next queued command builds on: the one a command already in
+   * flight produced, or the rendered thread's when the queue is empty. Reading
+   * the rendered version while another command is settling is what makes the
+   * second command stale, so every versioned thread mutation goes through here.
+   */
+  function queuedVersion(previous: ModelOptionBase | undefined): ChatThread["version"] {
+    return previous !== undefined && previous.threadId === String(thread.id)
+      ? previous.version
+      : thread.version;
+  }
+
+  /** Select a provider/model behind the same queue an option change uses. */
+  function selectProviderModel(selection: {
+    readonly providerInstanceId: ChatThread["providerInstanceId"];
+    readonly modelId: ChatThread["modelId"];
+  }) {
+    void enqueueThreadCommand(async (previous) => {
+      const result = await props.controller.execute({
+        kind: "change-chat-provider",
+        threadId: thread.id,
+        expectedVersion: queuedVersion(previous),
+        providerInstanceId: selection.providerInstanceId,
+        modelId: selection.modelId,
+      });
+      return { value: undefined, base: baseFromResult(result) };
+    }).catch(() => undefined);
+  }
+
   async function changeResearch(input: {
     readonly enabled: boolean;
     readonly routing: ChatResearchRouting;
   }) {
-    await props.controller.execute({
-      kind: "change-chat-research",
-      threadId: thread.id,
-      expectedVersion: thread.version,
-      researchEnabled: input.enabled,
-      researchRouting: input.routing,
-    });
+    await enqueueThreadCommand(async (previous) => {
+      const result = await props.controller.execute({
+        kind: "change-chat-research",
+        threadId: thread.id,
+        expectedVersion: queuedVersion(previous),
+        researchEnabled: input.enabled,
+        researchRouting: input.routing,
+      });
+      return { value: undefined, base: baseFromResult(result) };
+    }).catch(() => undefined);
   }
 
   return (
@@ -549,6 +661,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             modelId: decodeProviderModelId(modelId),
           });
         }}
+        modelOptions={providerState.declaredModelOptions}
+        onModelOptionChange={changeModelOption}
         {...(props.providerGroups === undefined
           ? {}
           : {
@@ -558,15 +672,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               onSelectModel: (selection: {
                 readonly providerInstanceId: (typeof view.thread)["providerInstanceId"];
                 readonly modelId: (typeof view.thread)["modelId"];
-              }) => {
-                void props.controller.execute({
-                  kind: "change-chat-provider",
-                  threadId: view.thread.id,
-                  expectedVersion: view.thread.version,
-                  providerInstanceId: selection.providerInstanceId,
-                  modelId: selection.modelId,
-                });
-              },
+              }) => selectProviderModel(selection),
             })}
         onProviderChange={(providerId) => {
           const selection = providerState.available.find(
@@ -574,10 +680,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           );
           const model = selection?.observation.models[0];
           if (selection === undefined || model === undefined) return;
-          void props.controller.execute({
-            kind: "change-chat-provider",
-            threadId: view.thread.id,
-            expectedVersion: view.thread.version,
+          selectProviderModel({
             providerInstanceId: selection.instance.id,
             modelId: model.id,
           });
@@ -601,16 +704,30 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           const threadMentionIds = await threadMentions.resolveForSend();
           let sent = false;
           try {
-            sent = await props.controller.sendTurn(
-              draft,
-              claimedAttachments.map((attachment) => attachment.id),
-              pendingPreviewSelections,
-              pendingCanvasSelections,
-              pendingExtensionSelections.flatMap((item) =>
-                item.selection === undefined ? [] : [item.selection],
+            // Behind the same queue as a model or option change: a turn sent
+            // in the same breath as one of those must run the settings the
+            // person just chose, not the ones the composer last rendered. The
+            // version the earlier command reached travels with the send, since
+            // this closure still holds the view from the render that made it.
+            // The turn moves the version itself, so it carries no base forward.
+            sent = await enqueueThreadCommand(async (previous) => ({
+              value: await props.controller.sendTurn(
+                draft,
+                claimedAttachments.map((attachment) => attachment.id),
+                pendingPreviewSelections,
+                pendingCanvasSelections,
+                pendingExtensionSelections.flatMap((item) =>
+                  item.selection === undefined ? [] : [item.selection],
+                ),
+                threadMentionIds,
+                // Only a send that follows one of this composer's own commands
+                // knows a newer version; every other send leaves the
+                // controller's own rendered version alone.
+                ...(previous !== undefined && previous.threadId === String(thread.id)
+                  ? ([previous.version] as const)
+                  : ([] as const)),
               ),
-              threadMentionIds,
-            );
+            }));
           } catch (error) {
             recoverClaimedAttachments(
               claimedAttachments,
@@ -721,14 +838,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           <ComposerPoolControl
             model={composerPoolModel}
             onApply={async (pool) =>
-              (
-                await props.controller.execute({
+              await enqueueThreadCommand(async (previous) => {
+                const result = await props.controller.execute({
                   kind: "select-chat-multi-model-pool",
                   threadId: view.thread.id,
-                  expectedVersion: view.thread.version,
+                  expectedVersion: queuedVersion(previous),
                   pool,
-                })
-              )?.kind === "thread-updated"
+                });
+                return {
+                  value: result?.kind === "thread-updated",
+                  base: baseFromResult(result),
+                };
+              }).catch(() => false)
             }
             pool={view.thread.multiModelPool}
           />
@@ -838,8 +959,26 @@ function providerPresentation(
   const modelOptions: ReadonlyArray<ChatComposerOption> = (selected?.observation.models ?? []).map(
     (model) => ({ id: model.id, label: model.displayName }),
   );
+  const modelOptionValues = view.thread.modelOptionValues ?? {};
+  const declaredModelOptions: ReadonlyArray<ChatComposerModelOption> = (
+    selectedModel?.options ?? []
+  ).flatMap((option) =>
+    option.kind === "selection"
+      ? [
+          {
+            id: option.id,
+            displayName: option.displayName,
+            values: option.values,
+            ...(modelOptionValues[option.id] === undefined
+              ? {}
+              : { value: modelOptionValues[option.id] }),
+          },
+        ]
+      : [],
+  );
   return {
     available,
+    declaredModelOptions,
     observation: selectedModel === undefined ? undefined : selected?.observation,
     providerLabel:
       selected?.instance.displayName ?? configuredSelected?.displayName ?? "Provider unavailable",

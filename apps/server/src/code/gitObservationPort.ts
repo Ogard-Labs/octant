@@ -62,6 +62,15 @@ export type GitObservationResult =
   | { readonly status: "unavailable" }
   | { readonly status: "failed" };
 
+/** One named slice of a checkout's changes: the paths in it, and its diff. */
+export type GitScopedDiffResult =
+  | {
+      readonly status: "ready";
+      readonly paths: readonly string[];
+      readonly diff: GitObservation["diff"];
+    }
+  | { readonly status: "unavailable" };
+
 interface CommandResult {
   readonly exitCode: number;
   readonly stdout: string;
@@ -249,6 +258,55 @@ export class GitObservationPort {
       };
     } catch {
       return signal?.aborted ? { status: "unavailable" } : { status: "failed" };
+    }
+  }
+
+  /**
+   * Read one named slice of the checkout's changes.
+   *
+   * `observe` reports the working tree against HEAD, which is the right answer
+   * for a diff pane and the wrong one for anything that describes a specific
+   * set of changes: a commit describes what is staged, and a pull request
+   * describes what the branch committed. Both are read-only; the scope names
+   * which question is being asked rather than leaving the caller to reinterpret
+   * a single diff.
+   */
+  async readDiff(
+    input: {
+      readonly checkoutRoot: string;
+      readonly scope:
+        | { readonly kind: "staged" }
+        | { readonly kind: "branch"; readonly baseRef: string };
+    },
+    signal?: AbortSignal,
+  ): Promise<GitScopedDiffResult> {
+    if (!Number.isSafeInteger(this.#maxDiffBytes) || this.#maxDiffBytes < 1)
+      return { status: "unavailable" };
+    let checkoutRoot: string;
+    try {
+      checkoutRoot = await this.#dependencies.realpath(input.checkoutRoot);
+    } catch {
+      return { status: "unavailable" };
+    }
+    // `A...B` is what the branch changed since it diverged, not what has since
+    // happened on the base — a plain two-dot diff would describe other people's
+    // work as this pull request's.
+    const revisions =
+      input.scope.kind === "staged" ? ["--cached"] : [`${input.scope.baseRef}...HEAD`];
+    const run = (args: readonly string[]) => this.#run(["-C", checkoutRoot, ...args], signal);
+    try {
+      const base = ["diff", "--no-ext-diff", "--no-color", ...revisions];
+      const names = await run([...base, "--name-only", "--"]);
+      if (names.exitCode !== 0) return { status: "unavailable" };
+      const text = await run([...base, "--"]);
+      if (text.exitCode !== 0) return { status: "unavailable" };
+      return {
+        status: "ready",
+        paths: names.stdout.split("\n").filter((path) => path.length > 0),
+        diff: boundUtf8(text.stdout, this.#maxDiffBytes),
+      };
+    } catch {
+      return { status: "unavailable" };
     }
   }
 

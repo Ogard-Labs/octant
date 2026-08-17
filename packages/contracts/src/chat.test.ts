@@ -579,6 +579,40 @@ describe("chat contracts", () => {
     ).toThrow();
   });
 
+  it("carries bounded model option values on the thread and the provider command", () => {
+    const thread = decodeChatThread({
+      ...threadFixture,
+      modelOptionValues: { effort: "high", "service-tier": "fast" },
+    });
+    expect(thread.modelOptionValues).toEqual({ effort: "high", "service-tier": "fast" });
+    expect(decodeChatThread(threadFixture).modelOptionValues).toBeUndefined();
+    expect(() =>
+      decodeChatThread({ ...threadFixture, modelOptionValues: { effort: " " } }),
+    ).toThrow();
+
+    const command = decodeChatCommand({
+      kind: "change-chat-provider",
+      threadId: ids.thread,
+      expectedVersion: 1,
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      modelOptionValues: { effort: "low" },
+    });
+    expect(command.kind === "change-chat-provider" && command.modelOptionValues).toEqual({
+      effort: "low",
+    });
+    expect(() =>
+      decodeChatCommand({
+        kind: "change-chat-provider",
+        threadId: ids.thread,
+        expectedVersion: 1,
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        modelOptionValues: { effort: "x".repeat(65) },
+      }),
+    ).toThrow();
+  });
+
   it("keeps raw message bodies out of public events and uses bounded ChatContentReference", () => {
     const turnCreated = {
       kind: "turn-created",

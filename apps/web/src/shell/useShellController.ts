@@ -1407,18 +1407,24 @@ function createWorkspaceMutation(
       }
       const existing = findCodeSurfaceTab(latest.workspace.layouts.code, intent.tab);
       const group = preferredGroup(latest.workspace, "code");
+      // A second terminal for the same thread would otherwise arrive with the
+      // same title as the first, leaving two tabs nobody can tell apart.
+      const title =
+        intent.tab.kind === "code-terminal"
+          ? unusedCodeTerminalTitle(latest.workspace.layouts.code, intent.tab.threadId)
+          : intent.tab.title;
       return existing === undefined
         ? {
             operation: {
               kind: "open-tab",
               mode: "code",
               groupId: group.groupId,
-              tab: { ...intent.tab, id: newTabId(), mode: "code" } as Extract<
+              tab: { ...intent.tab, title, id: newTabId(), mode: "code" } as Extract<
                 WorkspaceTab,
                 { readonly mode: "code" }
               >,
             },
-            message: `${intent.tab.title} opened.`,
+            message: `${title} opened.`,
           }
         : {
             operation: {
@@ -1934,11 +1940,49 @@ function findCodeSurfaceTab(
       if (candidate.kind === "code-diff" && target.kind === "code-diff") {
         return candidate.relativePath === target.relativePath;
       }
+      if (candidate.kind === "code-terminal" && target.kind === "code-terminal") {
+        // Two terminal tabs are the same tab only when they show the same
+        // process. Opening a terminal without naming one still reuses the
+        // thread's original terminal tab.
+        return candidate.terminalId === target.terminalId;
+      }
       return true;
     });
     return tab === undefined ? undefined : { groupId: layout.groupId, tabId: tab.id };
   }
   return findCodeSurfaceTab(layout.first, target) ?? findCodeSurfaceTab(layout.second, target);
+}
+
+/**
+ * A terminal tab title for this thread that no open terminal tab already uses.
+ *
+ * The first terminal is simply "Terminal"; the next free ordinal names each
+ * one after it. Closing a terminal returns its number to the pool, which is
+ * what a user reading the tab strip expects — the numbers describe the tabs
+ * that are open, not how many have ever existed.
+ */
+function unusedCodeTerminalTitle(layout: WorkspaceLayoutNode, threadId: CodeThreadId): string {
+  const used = new Set(codeTerminalTitles(layout, threadId));
+  for (let ordinal = 1; ordinal <= used.size + 1; ordinal += 1) {
+    const title = ordinal === 1 ? "Terminal" : `Terminal ${ordinal}`;
+    if (!used.has(title)) return title;
+  }
+  return "Terminal";
+}
+
+function codeTerminalTitles(
+  layout: WorkspaceLayoutNode,
+  threadId: CodeThreadId,
+): ReadonlyArray<string> {
+  if (layout.kind === "group") {
+    return layout.tabs
+      .filter((tab) => tab.kind === "code-terminal" && tab.threadId === threadId)
+      .map((tab) => tab.title);
+  }
+  return [
+    ...codeTerminalTitles(layout.first, threadId),
+    ...codeTerminalTitles(layout.second, threadId),
+  ];
 }
 
 function findProjectTab(

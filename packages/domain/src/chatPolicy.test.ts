@@ -186,6 +186,66 @@ describe("chat thread lifecycle", () => {
     });
   });
 
+  it("keeps only model option values the selected model declares and rejects undeclared ones", () => {
+    const original = makeThread();
+    const effortOptions = [
+      { id: "effort", displayName: "Effort", kind: "selection" as const, values: ["low", "high"] },
+    ] as const;
+    const withEffort = changeChatProvider(original, {
+      providerInstanceId: ids.provider,
+      modelId: ids.model,
+      expectedVersion: 1 as AggregateVersion,
+      updatedAt: later,
+      modelOptions: effortOptions,
+      modelOptionValues: { effort: "high" },
+    });
+    expect(withEffort.modelOptionValues).toEqual({ effort: "high" });
+
+    // Switching models without an explicit payload carries over only values
+    // the new model still declares.
+    const switched = changeChatProvider(withEffort, {
+      providerInstanceId: ids.newProvider,
+      modelId: ids.newModel,
+      expectedVersion: 2 as AggregateVersion,
+      updatedAt: later,
+      modelOptions: [
+        { id: "reasoning", displayName: "Reasoning", kind: "selection", values: ["low"] },
+      ],
+    });
+    expect(switched.modelOptionValues).toBeUndefined();
+    const kept = changeChatProvider(withEffort, {
+      providerInstanceId: ids.provider,
+      modelId: ids.newModel,
+      expectedVersion: 2 as AggregateVersion,
+      updatedAt: later,
+      modelOptions: effortOptions,
+    });
+    expect(kept.modelOptionValues).toEqual({ effort: "high" });
+
+    // Explicit empty clears; explicit undeclared option or value is rejected.
+    const cleared = changeChatProvider(withEffort, {
+      providerInstanceId: ids.provider,
+      modelId: ids.model,
+      expectedVersion: 2 as AggregateVersion,
+      updatedAt: later,
+      modelOptions: effortOptions,
+      modelOptionValues: {},
+    });
+    expect(cleared.modelOptionValues).toBeUndefined();
+    for (const modelOptionValues of [{ effort: "max" }, { speed: "fast" }]) {
+      expect(() =>
+        changeChatProvider(original, {
+          providerInstanceId: ids.provider,
+          modelId: ids.model,
+          expectedVersion: 1 as AggregateVersion,
+          updatedAt: later,
+          modelOptions: effortOptions,
+          modelOptionValues,
+        }),
+      ).toThrow(ChatPolicyRejected);
+    }
+  });
+
   it("changes research settings with a fresh version", () => {
     const original = makeThread();
     const updated = changeChatResearch(original, {
