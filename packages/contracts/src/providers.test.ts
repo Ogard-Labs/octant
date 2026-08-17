@@ -527,7 +527,13 @@ describe("provider registry contracts", () => {
       }),
     ).toMatchObject({ kind: "change-grok-configuration" });
 
-    for (const excessField of ["apiKey", "oauthToken", "account", "grokHome", "sessionId"] as const) {
+    for (const excessField of [
+      "apiKey",
+      "oauthToken",
+      "account",
+      "grokHome",
+      "sessionId",
+    ] as const) {
       expect(() => decodeProviderInstance({ ...grok, [excessField]: "must-not-cross" })).toThrow();
       expect(() =>
         decodeProviderInstance({

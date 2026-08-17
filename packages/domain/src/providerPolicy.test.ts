@@ -951,12 +951,7 @@ describe("provider instance policy", () => {
       }),
     ).toThrow("Grok Build authentication must be subscription or api-key.");
     expect(() =>
-      policy.changeGrokConfiguration(
-        grokProvider(),
-        grokProvider().configuration,
-        updatedAt,
-        1,
-      ),
+      policy.changeGrokConfiguration(grokProvider(), grokProvider().configuration, updatedAt, 1),
     ).toThrow("Stop active sessions before changing this provider runtime.");
   });
 

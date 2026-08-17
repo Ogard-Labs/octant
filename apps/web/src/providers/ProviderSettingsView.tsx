@@ -209,8 +209,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
     useState<ClaudeAuthentication>("subscription");
   const [vibeAuthentication, setVibeAuthentication] =
     useState<MistralVibeAuthentication>("subscription");
-  const [grokAuthentication, setGrokAuthentication] =
-    useState<GrokAuthentication>("subscription");
+  const [grokAuthentication, setGrokAuthentication] = useState<GrokAuthentication>("subscription");
   const credentialInput = useRef<HTMLInputElement>(null);
   const selectedDriverLabel = driverLabel(providerType);
   const selectedBinaryName =
@@ -2837,10 +2836,10 @@ function guidance(
                               ? "Add or replace the xAI API key in the Octant host, then check the connection again."
                               : "Use the xAI browser sign-in action below, then check the connection again."
                             : driverKind === "anthropic-compatible"
-                            ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
-                            : driverKind === "azure-foundry"
-                              ? "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again."
-                              : "Add a bearer API key in the Octant host, then check the connection again."}
+                              ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
+                              : driverKind === "azure-foundry"
+                                ? "Add or replace the Azure AI Foundry API key in the Octant host. It is stored in Keychain and sent as the api-key header, then check the connection again."
+                                : "Add a bearer API key in the Octant host, then check the connection again."}
       </p>
     );
   if (readiness === "incompatible")
