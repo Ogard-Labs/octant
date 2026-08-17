@@ -3281,7 +3281,14 @@ function LaunchedShell(
                 </div>
               ) : (
                 <ProjectSidebarSection
-                  {...(activeMode === "code" ? { projectViewsEnabled: true } : {})}
+                  {...(activeMode === "code"
+                    ? {
+                        projectViewsEnabled: true,
+                        projectViewSwitcherPresentation: (
+                          presentedShellSettings ?? controller.settings
+                        ).projectViewSwitcherPresentation,
+                      }
+                    : {})}
                   activityMode={activeMode}
                   {...(activeProjectId === undefined ? {} : { activeProjectId })}
                   {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined

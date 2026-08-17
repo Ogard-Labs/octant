@@ -74,6 +74,7 @@ function renderSettings(overrides: Partial<SettingsViewProps> = {}) {
       "sidebar-material",
       "sidebar-background",
       "mode-switcher",
+      "project-view-switcher",
       "reset-layout",
       "reset-window-bounds",
     ],
@@ -126,6 +127,7 @@ function defaultProps(): SettingsViewProps {
       "sidebar-material",
       "sidebar-background",
       "mode-switcher",
+      "project-view-switcher",
       "reset-layout",
       "reset-window-bounds",
     ],
@@ -412,6 +414,18 @@ describe("SettingsView", () => {
     // With a query active, the search results panel replaces section content.
     expect(screen.getByRole("listbox", { name: "Settings search results" })).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Mode switcher" })).not.toBeInTheDocument();
+  });
+
+  it("changes the project view switcher presentation", () => {
+    const { props } = renderSettings();
+    navigateTo("Appearance");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Project view switcher" }), {
+      target: { value: "inline" },
+    });
+    expect(props.onSettingsChange).toHaveBeenCalledWith({
+      projectViewSwitcherPresentation: "inline",
+    });
   });
 
   it("search returns precise settings and deep-links to the focused control", async () => {

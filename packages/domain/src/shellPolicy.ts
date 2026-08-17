@@ -144,6 +144,7 @@ export function defaultShellSettings(): ShellSettings {
     lastContextSurface: null,
     sidebarMaterial: "system",
     modeSwitcherPresentation: "buttons",
+    projectViewSwitcherPresentation: "dropdown",
     sidebarBackground: DEFAULT_SIDEBAR_BACKGROUND,
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),
     firstRunOnboarding: "pending",
