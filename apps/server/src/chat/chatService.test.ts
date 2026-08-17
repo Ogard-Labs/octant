@@ -3225,6 +3225,18 @@ describe("ChatService", () => {
       modelOptionValues: { effort: "high" },
     });
 
+    // A branch runs the same model, so it keeps the settings chosen for it.
+    const afterSend = service.read(created.thread.id);
+    const branched = await service.execute({
+      kind: "branch-chat-thread",
+      threadId: created.thread.id,
+      expectedVersion: afterSend.thread.version,
+      turnId: afterSend.turns[0]!.id,
+      title: "Same effort",
+    });
+    if (branched.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    expect(service.read(branched.thread.id).thread.modelOptionValues).toEqual({ effort: "high" });
+
     // Switching to a model that declares no such option drops the stale value.
     const afterTurn = service.read(created.thread.id);
     const switched = await service.execute({
@@ -4912,7 +4924,16 @@ describe("ChatService", () => {
             contextLimit: 8_000,
             reasoning: "supported",
             inputModalities: ["text", "document"],
-            options: [],
+            // Only the requested candidate declares an option, so a turn that
+            // falls back must not carry this model's settings with it.
+            options: [
+              {
+                id: "effort",
+                displayName: "Effort",
+                kind: "selection" as const,
+                values: ["low", "high"] as [string, ...string[]],
+              },
+            ],
             source: "discovered",
             verification: "verified",
           },
@@ -5029,10 +5050,21 @@ describe("ChatService", () => {
           ),
         ),
       );
+      // Settings chosen for the requested model. The fallback model declares
+      // no such option, so it must run on provider defaults instead.
+      const withEffort = await service.execute({
+        kind: "change-chat-provider",
+        threadId: thread.id,
+        expectedVersion: thread.version,
+        providerInstanceId: ids.provider,
+        modelId: "model-a",
+        modelOptionValues: { effort: "high" },
+      });
+      if (withEffort.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
       const sent = await service.execute({
         kind: "send-chat-turn",
         threadId: thread.id,
-        expectedVersion: thread.version,
+        expectedVersion: withEffort.thread.version,
         prompt: "Hello fallback",
       });
       if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
@@ -5046,6 +5078,8 @@ describe("ChatService", () => {
         expect(view.routeDecisions[0].decision.selectedCandidate.modelId).toBe(fallbackModelId);
       }
       expect(fakeDriver.sentTurns).toHaveLength(1);
+      expect(fakeDriver.startInputs[0]).toMatchObject({ modelId: fallbackModelId });
+      expect(fakeDriver.startInputs[0]).not.toHaveProperty("modelOptionValues");
     });
 
     it("rejects the command with a durable, actionable Waiting decision and never starts provider execution when no candidate is eligible", async () => {

@@ -177,6 +177,26 @@ const CHAT_EVENT_NAMES = new Set([
   "chat.deleted@1",
 ]);
 
+/**
+ * The thread as one attempt actually runs it.
+ *
+ * Multi-model pool routing can send an attempt to a different provider
+ * instance or model than the thread selected. Model option values belong to
+ * the selected model and are validated against its declared options, so an
+ * alternate candidate runs on provider defaults instead of inheriting settings
+ * it never declared.
+ */
+function threadAsRoutedFor(thread: ChatThread, attempt: ChatAttempt): ChatThread {
+  const routed: ChatThread = {
+    ...thread,
+    providerInstanceId: attempt.providerInstanceId,
+    modelId: attempt.modelId,
+  };
+  if (String(attempt.modelId) === String(thread.modelId)) return routed;
+  const { modelOptionValues: _selectedModelOptions, ...withoutOptions } = routed;
+  return withoutOptions;
+}
+
 function poolCandidateKey(candidate: MultiModelPoolCandidate): string {
   return `${candidate.hostId}:${candidate.providerInstanceId}:${candidate.modelId}`;
 }
@@ -1526,11 +1546,7 @@ export class ChatService {
       return { thread: updatedThread, turn, attempt: turn.attempts[0]!, prepared };
     });
     await this.#runAttempt({
-      thread: {
-        ...accepted.thread,
-        providerInstanceId: accepted.attempt.providerInstanceId,
-        modelId: accepted.attempt.modelId,
-      },
+      thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
       turn: accepted.turn,
       attempt: accepted.attempt,
       prompt: command.prompt,
@@ -1660,11 +1676,7 @@ export class ChatService {
       return { thread: updatedThread, turn, attempt: turn.attempts[0]!, prepared };
     });
     await this.#runAttempt({
-      thread: {
-        ...accepted.thread,
-        providerInstanceId: accepted.attempt.providerInstanceId,
-        modelId: accepted.attempt.modelId,
-      },
+      thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
       turn: accepted.turn,
       attempt: accepted.attempt,
       prompt: command.prompt,
@@ -1787,6 +1799,11 @@ export class ChatService {
       ...(source.projectId === undefined ? {} : { projectId: source.projectId }),
       providerInstanceId: source.providerInstanceId,
       modelId: source.modelId,
+      // The branch runs the same model, so it keeps the settings the person
+      // chose for it rather than silently reverting to provider defaults.
+      ...(source.modelOptionValues === undefined
+        ? {}
+        : { modelOptionValues: source.modelOptionValues }),
       researchEnabled: source.researchEnabled,
       researchRouting: source.researchRouting,
       personalityInstructions: source.personalityInstructions,
@@ -1919,11 +1936,7 @@ export class ChatService {
       return { thread: updatedThread, turn: updatedTurn, attempt: nextAttempt, prompt, prepared };
     });
     await this.#runAttempt({
-      thread: {
-        ...accepted.thread,
-        providerInstanceId: accepted.attempt.providerInstanceId,
-        modelId: accepted.attempt.modelId,
-      },
+      thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
       turn: accepted.turn,
       attempt: accepted.attempt,
       prompt: accepted.prompt,
@@ -2037,11 +2050,7 @@ export class ChatService {
       return { thread: updatedThread, turn: updatedTurn, attempt: nextAttempt, prompt, prepared };
     });
     await this.#runAttempt({
-      thread: {
-        ...accepted.thread,
-        providerInstanceId: accepted.attempt.providerInstanceId,
-        modelId: accepted.attempt.modelId,
-      },
+      thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
       turn: accepted.turn,
       attempt: accepted.attempt,
       prompt: accepted.prompt,

@@ -829,6 +829,49 @@ describe("ChatWorkspace", () => {
     });
   });
 
+  it("sends a turn only after an option change already in flight has settled", async () => {
+    const user = userEvent.setup();
+    let releaseChange: () => void = () => undefined;
+    const changeSettles = new Promise<void>((resolve) => {
+      releaseChange = resolve;
+    });
+    const execute = vi.fn(async () => {
+      await changeSettles;
+      return {
+        kind: "thread-updated",
+        thread: { id: threadId, version: 4, modelOptionValues: { effort: "high" } },
+      } as never;
+    });
+    const sendTurn = vi.fn(async () => true);
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            execute,
+            pendingDraft: draft,
+            sendTurn,
+            setPendingDraft: setDraft,
+          })}
+          providerSnapshot={providerSnapshotWithModelOptions()}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.type(screen.getByRole("textbox", { name: "Message" }), "Think hard{Enter}");
+
+    // The turn must run the setting the person just chose, so it waits for the
+    // option command rather than racing it to the host.
+    expect(execute).toHaveBeenCalledOnce();
+    expect(sendTurn).not.toHaveBeenCalled();
+
+    releaseChange();
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+  });
+
   it("keeps unavailable provider and model selections visible and fail closed", () => {
     const snapshot = providerSnapshot();
     render(

@@ -94,6 +94,8 @@ export interface CreateChatThreadInput {
   readonly researchEnabled: boolean;
   readonly researchRouting: ChatResearchRouting;
   readonly personalityInstructions: string;
+  /** Option values already validated against the selected model's options. */
+  readonly modelOptionValues?: ProviderModelOptionValues;
   readonly branchedFrom?: ChatThreadBranchOrigin;
   readonly createdAt: UtcTimestamp;
 }
@@ -112,6 +114,9 @@ export function createChatThread(input: CreateChatThreadInput): ChatThread {
     researchEnabled: input.researchEnabled,
     researchRouting: input.researchRouting,
     personalityInstructions: instructions,
+    ...(input.modelOptionValues === undefined || Object.keys(input.modelOptionValues).length === 0
+      ? {}
+      : { modelOptionValues: input.modelOptionValues }),
     ...(input.branchedFrom === undefined ? {} : { branchedFrom: input.branchedFrom }),
     version: 1 as AggregateVersion,
     createdAt: input.createdAt,
