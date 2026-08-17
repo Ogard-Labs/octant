@@ -401,23 +401,27 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         },
       ]);
       expect(client.newSession).toHaveBeenCalledWith(expectedRoot);
-      const expectedModelRequest = profile.setModelCall?.("agent-session-1", modelId) ?? {
-        method: "session/set_config_option",
-        params: { sessionId: "agent-session-1", configId: "model", value: modelId },
-      };
-      expect(client.call).toHaveBeenCalledWith(
-        expectedModelRequest.method,
-        expectedModelRequest.params,
-      );
+      // A profile without its own request shape is standard ACP, and has to go
+      // through the call that decodes the reply rather than the untyped one.
+      const expectedModelRequest = profile.setModelCall?.("agent-session-1", modelId);
+      if (expectedModelRequest === undefined) {
+        expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-1", "model", modelId);
+      } else {
+        expect(client.call).toHaveBeenCalledWith(
+          expectedModelRequest.method,
+          expectedModelRequest.params,
+        );
+      }
       const modeValue = profile.sessionMode(productMode, executionPolicy);
-      const expectedModeRequest = profile.setModeCall?.("agent-session-1", modeValue) ?? {
-        method: "session/set_config_option",
-        params: { sessionId: "agent-session-1", configId: "mode", value: modeValue },
-      };
-      expect(client.call).toHaveBeenCalledWith(
-        expectedModeRequest.method,
-        expectedModeRequest.params,
-      );
+      const expectedModeRequest = profile.setModeCall?.("agent-session-1", modeValue);
+      if (expectedModeRequest === undefined) {
+        expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-1", "mode", modeValue);
+      } else {
+        expect(client.call).toHaveBeenCalledWith(
+          expectedModeRequest.method,
+          expectedModeRequest.params,
+        );
+      }
       expect(active()).toBe(0);
       expect(registry.activeSessionCount(instanceId)).toBe(0);
     },

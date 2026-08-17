@@ -684,17 +684,24 @@ function makeConnection(
               : profile.resumeMethod === "session/resume"
                 ? await client.resumeSession(input.sourceSessionId, runtimeRoot)
                 : await client.loadSession(input.sourceSessionId, runtimeRoot);
-          const modelRequest = profile.setModelCall?.(source.sessionId, input.modelId) ?? {
-            method: "session/set_config_option",
-            params: { sessionId: source.sessionId, configId: "model", value: input.modelId },
-          };
-          await client.call(modelRequest.method, modelRequest.params);
+          // A profile that supplies its own request shape is describing an agent
+          // whose reply the standard result schema does not fit, so that reply is
+          // taken as-is. Everything else is standard ACP and stays validated: a
+          // malformed success there would otherwise register a session whose
+          // model and authority mode were never confirmed.
+          const setModelCall = profile.setModelCall?.(source.sessionId, input.modelId);
+          if (setModelCall === undefined) {
+            await client.setConfigOption(source.sessionId, "model", input.modelId);
+          } else {
+            await client.call(setModelCall.method, setModelCall.params);
+          }
           const modeValue = profile.sessionMode(mode, input.executionPolicy);
-          const modeRequest = profile.setModeCall?.(source.sessionId, modeValue) ?? {
-            method: "session/set_config_option",
-            params: { sessionId: source.sessionId, configId: "mode", value: modeValue },
-          };
-          await client.call(modeRequest.method, modeRequest.params);
+          const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
+          if (setModeCall === undefined) {
+            await client.setConfigOption(source.sessionId, "mode", modeValue);
+          } else {
+            await client.call(setModeCall.method, setModeCall.params);
+          }
           return await register(input, source, scope, client);
         } catch (error) {
           await Effect.runPromise(Scope.close(scope, Exit.void));
