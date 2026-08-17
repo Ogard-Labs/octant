@@ -89,6 +89,24 @@ describe("ProfileEditor", () => {
     expect(onCommit).not.toHaveBeenCalled();
   });
 
+  it("keeps a name the contract refuses on screen, so it can be fixed", async () => {
+    const user = userEvent.setup();
+    const stored: UserProfile = {
+      displayName: "A".repeat(64),
+      accent: "indigo",
+      avatar: { kind: "initials" },
+    };
+    render(<Harness initial={stored} />);
+
+    // Refusing the name means reporting no name, which the owner echoes back
+    // as a profile without one. Reading that echo as an external update wiped
+    // the field and the message with it, leaving nothing to correct.
+    await user.type(screen.getByLabelText("Name"), "B");
+
+    expect(screen.getByLabelText("Name")).toHaveValue(`${"A".repeat(64)}B`);
+    expect(screen.getByText("That name is 65 characters. Octant stores at most 64.")).toBeVisible();
+  });
+
   it("adopts a profile that arrives after the fields were first shown", () => {
     const stored: UserProfile = {
       displayName: "Ada",
