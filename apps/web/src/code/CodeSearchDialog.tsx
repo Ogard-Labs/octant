@@ -8,7 +8,9 @@ import type {
 } from "@octant/contracts";
 import { CornerDownLeft, FileText, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { matchKeybinding, resolveKeybindings, type OctantKeybindings } from "@octant/domain";
 import { isApplePlatform } from "../platform";
+import { useKeybindings } from "../keybindings/useKeybindings";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 
@@ -24,19 +26,22 @@ function optionId(index: number): string {
 /**
  * Report whether a keyboard event opens quick open by file name.
  *
- * `Cmd+P` on Apple hardware and `Ctrl+P` elsewhere. Shift must be absent so the
- * chord cannot collide with content search, and Alt must be absent so it cannot
- * collide with an Alt-qualified editor binding.
+ * The chord is whatever the user has bound `code-file-search` to, defaulting to
+ * `Cmd+P` on Apple hardware and `Ctrl+P` elsewhere.
  */
-export function isCodePathSearchEvent(event: globalThis.KeyboardEvent): boolean {
-  if (event.shiftKey || event.altKey || event.key.toLowerCase() !== "p") return false;
-  return isApplePlatform() ? event.metaKey : event.metaKey || event.ctrlKey;
+export function isCodePathSearchEvent(
+  event: globalThis.KeyboardEvent,
+  keybindings: OctantKeybindings = resolveKeybindings(),
+): boolean {
+  return matchKeybinding(keybindings, event, isApplePlatform()) === "code-file-search";
 }
 
 /** Report whether a keyboard event opens search across file contents. */
-export function isCodeContentSearchEvent(event: globalThis.KeyboardEvent): boolean {
-  if (!event.shiftKey || event.altKey || event.key.toLowerCase() !== "f") return false;
-  return isApplePlatform() ? event.metaKey : event.metaKey || event.ctrlKey;
+export function isCodeContentSearchEvent(
+  event: globalThis.KeyboardEvent,
+  keybindings: OctantKeybindings = resolveKeybindings(),
+): boolean {
+  return matchKeybinding(keybindings, event, isApplePlatform()) === "code-content-search";
 }
 
 export interface CodeSearchDialogProps {
@@ -66,6 +71,7 @@ export interface CodeSearchDialogProps {
 export function CodeSearchDialog(props: CodeSearchDialogProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const { keybindings } = useKeybindings();
   const [scope, setScope] = useState<CodeSearchScope | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -86,9 +92,9 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
 
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent): void {
-      const next = isCodePathSearchEvent(event)
+      const next = isCodePathSearchEvent(event, keybindings)
         ? "path"
-        : isCodeContentSearchEvent(event)
+        : isCodeContentSearchEvent(event, keybindings)
           ? "content"
           : undefined;
       if (next === undefined) return;
@@ -112,7 +118,7 @@ export function CodeSearchDialog(props: CodeSearchDialogProps) {
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [scope]);
+  }, [keybindings, scope]);
 
   const trimmed = query.trim();
   const { threadId, checkoutId } = props;

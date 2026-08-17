@@ -7203,3 +7203,53 @@ dialog.project-dialog {
     grid-template-columns: 1fr;
   }
 }
+
+.keybinding-settings {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.keybinding-settings__list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.keybinding-settings__list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.keybinding-settings__action {
+  display: grid;
+  flex: 1;
+  min-width: 160px;
+  gap: 2px;
+}
+
+.keybinding-settings__area,
+.keybinding-settings__warning {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.keybinding-settings__warning {
+  color: var(--octant-warning-text);
+}
+
+.keybinding-settings__json {
+  display: grid;
+  gap: 4px;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.keybinding-settings__actions {
+  display: flex;
+  gap: 8px;
+}
