@@ -1002,6 +1002,43 @@ describe("WorkspaceView tab isolation", () => {
     );
   });
 
+  it("stops the shell a closing terminal tab owns, and leaves the thread's own terminal running", async () => {
+    const terminalId = "b0000000-0000-4000-8000-000000000001";
+    const secondary = { ...codeTab("code-terminal", "Terminal 2"), terminalId } as WorkspaceTab;
+    const secondaryProps = propsFor(secondary);
+    const executeOperation = secondaryProps.codeController.client!.executeOperation as ReturnType<
+      typeof vi.fn
+    >;
+    render(<WorkspaceView {...secondaryProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal 2" }));
+
+    // This tab minted the identity and is the only thing that carries it, so
+    // closing it without stopping the shell would strand a running process.
+    await waitFor(() =>
+      expect(executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "stop-terminal",
+          terminalId,
+          threadId: codeIds.thread,
+          checkoutId: codeIds.checkout,
+        }),
+      ),
+    );
+
+    const sharedProps = propsFor(codeTab("code-terminal", "Terminal"));
+    const shared = sharedProps.codeController.client!.executeOperation as ReturnType<typeof vi.fn>;
+    render(<WorkspaceView {...sharedProps} />);
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal" }));
+
+    // A tab with no identity of its own only views the thread's original
+    // terminal, which stays reachable from the thread's Terminal surface.
+    await waitFor(() => expect(sharedProps.onClose).toHaveBeenCalled());
+    expect(shared).not.toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "stop-terminal" as const }),
+    );
+  });
+
   it("closes one local server's tab without releasing the thread's other contexts", async () => {
     // Releasing the thread would stop every context it owns, taking the other
     // local servers' sessions down with this one.

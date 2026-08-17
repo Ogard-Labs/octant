@@ -282,6 +282,19 @@ export function useCodeController(options: CodeControllerOptions) {
   // is left. Both are the provider's own figures; nothing here is derived from
   // a price list or a limit Octant assumed.
   const [threadUsage, setThreadUsage] = useState<CodeThreadUsage>(EMPTY_THREAD_USAGE);
+  // The way back from this thread's last restore, as the host recorded it. It
+  // lives here rather than in the surface that ran the restore because that
+  // surface is unmounted the moment the user opens another tab, and the only
+  // copy of the state the restore overwrote would go with it.
+  const [restoreUndo, setRestoreUndo] = useState<CodeCheckpoint>();
+  /**
+   * Carry what a restore just replaced, so the offer appears without waiting
+   * for the thread to be reopened. The host has already recorded it; this only
+   * keeps the renderer level with the journal it will read back next time.
+   */
+  const noteRestoreUndo = useCallback((checkpoint: CodeCheckpoint | undefined) => {
+    setRestoreUndo(checkpoint);
+  }, []);
   const usageByOperation = useRef(new Map<string, CodeTurnUsage>());
   const noteUsage = useCallback((operationId: CodeOperationId, event: CodeOperationEvent) => {
     if (event.kind === "usage") {
@@ -453,12 +466,14 @@ export function useCodeController(options: CodeControllerOptions) {
       let pageCount = 0;
       const turns: CodeConversationTurn[] = [];
       let pageLimits: ReadonlyArray<CodeProviderLimit> = [];
+      let pageRestoreUndo: CodeCheckpoint | undefined;
       for (;;) {
         const page = await client.conversation(threadId, cursor, 50);
         if (!isActive(request, threadGeneration, mounted) || page.threadId !== threadId)
           return undefined;
         turns.push(...page.turns);
         if (page.limits !== undefined) pageLimits = page.limits;
+        pageRestoreUndo = page.restoreUndo;
         nextCursor = page.nextCursor;
         if (!page.hasMore) break;
         if (page.nextCursor <= cursor || (pageCount += 1) >= 100) {
@@ -549,6 +564,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ),
       );
       setThreadUsage({ ...totalTurnUsage(usageByOperation.current), limits: pageLimits });
+      setRestoreUndo(pageRestoreUndo);
       setConversation(messages);
       if (replayedActivity.size > 0) {
         setTurnActivity((current) => new Map([...current, ...replayedActivity]));
@@ -589,6 +605,10 @@ export function useCodeController(options: CodeControllerOptions) {
       // new thread would keep showing the previous thread's totals and limits.
       usageByOperation.current = new Map();
       setThreadUsage(EMPTY_THREAD_USAGE);
+      // The restore point belongs to the thread being left, for the same
+      // reason: hydration may fail, and offering one thread's way back on
+      // another thread's checkout would overwrite files nobody asked about.
+      setRestoreUndo(undefined);
       try {
         const initial = await client.thread(threadId);
         if (!isActive(request, threadGeneration, mounted)) return;
@@ -1664,6 +1684,8 @@ export function useCodeController(options: CodeControllerOptions) {
     renameThread,
     providerRequests,
     refreshFollowUp,
+    restoreUndo,
+    noteRestoreUndo,
     retry: () => loadBootstrap("retry"),
     sendFollowUp,
     setPendingDraft,

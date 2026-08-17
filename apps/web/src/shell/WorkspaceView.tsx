@@ -349,8 +349,29 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             : props.browserAutomationClient.stop({ contextId, threadId })
         ).catch(() => undefined);
       }
+      // A terminal tab that carries an identity of its own is the only thing
+      // that knows it: the identity was minted for that tab and is recorded
+      // nowhere else, so closing the tab would leave the shell running with
+      // nothing able to reach, watch, or stop it for the rest of the session.
+      // A tab with no identity of its own only views the thread's original
+      // terminal, which the thread's own Terminal surface still reaches, so it
+      // is left running.
+      if (tab?.kind === "code-terminal" && tab.terminalId !== undefined) {
+        const checkoutId = resolveCodeTabCheckoutId(tab, props.codeController);
+        if (checkoutId !== undefined) {
+          await props.codeController.client
+            .executeOperation({
+              kind: "stop-terminal",
+              operationId: globalThis.crypto.randomUUID() as never,
+              terminalId: tab.terminalId,
+              threadId: tab.threadId,
+              checkoutId,
+            })
+            .catch(() => undefined);
+        }
+      }
     },
-    [props.browserAutomationClient, props.onClose, props.workspace],
+    [props.browserAutomationClient, props.codeController, props.onClose, props.workspace],
   );
 
   return (
