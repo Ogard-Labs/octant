@@ -176,8 +176,22 @@ describe("TerminalProcessPort", () => {
           `(allow ${permission} (subpath "${realpathSync(other.stateDirectory)}"))`,
         );
       }
-      // The shared base is never itself a read or write root.
-      expect(own.profile).not.toContain(`(subpath "${realpathSync(shellStateDirectory)}")`);
+      // The shared base is never itself an allow root, and it is denied as a
+      // whole so a sibling created after this profile was generated is out of
+      // reach too — not just the siblings that existed at generation time.
+      for (const permission of ["file-read*", "file-write*"]) {
+        expect(own.profile).not.toContain(
+          `(allow ${permission} (subpath "${realpathSync(shellStateDirectory)}"))`,
+        );
+      }
+      expect(own.profile).toContain(
+        `(deny file-read* (subpath "${realpathSync(shellStateDirectory)}"))`,
+      );
+      expect(
+        own.profile.indexOf(`(deny file-read* (subpath "${realpathSync(shellStateDirectory)}"))`),
+      ).toBeLessThan(
+        own.profile.indexOf(`(allow file-read* (subpath "${realpathSync(own.stateDirectory)}"))`),
+      );
     }
 
     // A path is reusable: remove a repository and create an unrelated one in

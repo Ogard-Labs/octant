@@ -235,6 +235,11 @@ export class TerminalProcessPort {
         additionalWriteRoots: [shellState],
         networkEgress: this.#dependencies.networkEgress,
         allowFileReadStar: true,
+        // Deny the whole shared base, not the siblings that happen to exist
+        // now: another repository's state directory may be created after this
+        // profile is generated, and this shell must never gain it. The allow
+        // rules below re-grant only this launch's own subdirectory.
+        additionalDenyReadPaths: [this.#dependencies.shellStateDirectory],
         readRoots: [
           input.cwd,
           this.#dependencies.temporaryDirectory,
