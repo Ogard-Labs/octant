@@ -180,6 +180,30 @@ function providerSnapshot(
   };
 }
 
+/** Provider snapshot whose first model declares two selectable options. */
+function providerSnapshotWithModelOptions(): ProviderRegistrySnapshot {
+  const snapshot = providerSnapshot();
+  const baseModel = snapshot.observedStates[0]!.models[0]!;
+  return {
+    ...snapshot,
+    observedStates: [
+      {
+        ...snapshot.observedStates[0]!,
+        models: [
+          {
+            ...baseModel,
+            options: [
+              { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
+              { id: "service-tier", displayName: "Speed", kind: "selection", values: ["fast"] },
+            ],
+          },
+          { ...baseModel, id: "model-b" as never, displayName: "Model B" },
+        ],
+      },
+    ],
+  };
+}
+
 function extensionClient(): ExtensionClient {
   const digest = `sha256:${"a".repeat(64)}`;
   const catalogEpoch = `sha256:${"c".repeat(64)}`;
@@ -726,26 +750,7 @@ describe("ChatWorkspace", () => {
 
   it("offers the selected model's declared options and issues change-chat-provider with the values", async () => {
     const user = userEvent.setup();
-    const snapshot = providerSnapshot();
-    const baseModel = snapshot.observedStates[0]!.models[0]!;
-    const withOptions: ProviderRegistrySnapshot = {
-      ...snapshot,
-      observedStates: [
-        {
-          ...snapshot.observedStates[0]!,
-          models: [
-            {
-              ...baseModel,
-              options: [
-                { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
-                { id: "service-tier", displayName: "Speed", kind: "selection", values: ["fast"] },
-              ],
-            },
-            { ...baseModel, id: "model-b" as never, displayName: "Model B" },
-          ],
-        },
-      ],
-    };
+    const withOptions = providerSnapshotWithModelOptions();
     const controller = controllerFixture({}, { modelOptionValues: { "service-tier": "fast" } });
     const { rerender } = render(
       <ChatWorkspace controller={controller} providerSnapshot={withOptions} />,
@@ -774,6 +779,54 @@ describe("ChatWorkspace", () => {
     rerender(<ChatWorkspace controller={onModelB} providerSnapshot={withOptions} />);
     expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Speed" })).toBeNull();
+  });
+
+  it("applies a second option change made before the first command's thread arrives", async () => {
+    const user = userEvent.setup();
+    const commands: ChatCommand[] = [];
+    let releaseFirst: () => void = () => undefined;
+    const firstSettles = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const execute = vi.fn(async (command: ChatCommand) => {
+      commands.push(command);
+      const issued = commands.length;
+      if (issued === 1) await firstSettles;
+      return {
+        kind: "thread-updated",
+        thread: {
+          id: threadId,
+          version: 3 + issued,
+          modelOptionValues: (command as { readonly modelOptionValues?: Record<string, string> })
+            .modelOptionValues,
+        },
+      } as never;
+    });
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({ execute })}
+        providerSnapshot={providerSnapshotWithModelOptions()}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.click(screen.getByRole("combobox", { name: "Speed" }));
+    await user.click(await screen.findByRole("option", { name: "Speed: fast" }));
+    // The rendered thread is still at version 3: the second change waits for
+    // the first command's authoritative thread instead of racing it.
+    expect(commands).toHaveLength(1);
+
+    releaseFirst();
+    await waitFor(() => expect(commands).toHaveLength(2));
+    expect(commands[0]).toMatchObject({
+      expectedVersion: 3,
+      modelOptionValues: { effort: "high" },
+    });
+    expect(commands[1]).toMatchObject({
+      expectedVersion: 4,
+      modelOptionValues: { effort: "high", "service-tier": "fast" },
+    });
   });
 
   it("keeps unavailable provider and model selections visible and fail closed", () => {

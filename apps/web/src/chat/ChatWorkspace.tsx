@@ -93,6 +93,13 @@ interface PendingAttachment {
   readonly displayName: string;
 }
 
+/** The authoritative thread state a queued model option change builds on. */
+interface ModelOptionBase {
+  readonly threadId: string;
+  readonly version: ChatThread["version"];
+  readonly values: Readonly<Record<string, string>>;
+}
+
 export function ChatWorkspace(props: ChatWorkspaceProps) {
   const view = props.controller.activeView;
   const [pendingAttachments, setPendingAttachments] = useState<ReadonlyArray<PendingAttachment>>(
@@ -126,6 +133,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const followsConversationRef = useRef(true);
   const followedThreadRef = useRef<string | undefined>(undefined);
   const pendingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
+  // Each option selector dispatches its own command. Two changes made before
+  // the first round trip returns would otherwise both send the rendered
+  // version and values, so the second is rejected as stale and its payload
+  // omits the first choice. Queue them instead: every change waits for the
+  // previous command's authoritative thread and builds on it.
+  const modelOptionQueueRef = useRef<Promise<ModelOptionBase | undefined>>(
+    Promise.resolve(undefined),
+  );
   const discardAttachmentRef = useRef(props.controller.discard);
   const mountedRef = useRef(true);
   const activeThreadIdRef = useRef<string | undefined>(
@@ -290,6 +305,39 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       : uploadingAttachments.length === 1
         ? `Uploading ${firstUpload.displayName}.`
         : `Uploading ${uploadingAttachments.length} attachments.`;
+
+  function changeModelOption(optionId: string, value: string | undefined) {
+    const queued = modelOptionQueueRef.current;
+    modelOptionQueueRef.current = (async () => {
+      const previous = await queued;
+      const base: ModelOptionBase =
+        previous !== undefined && previous.threadId === String(thread.id)
+          ? previous
+          : {
+              threadId: String(thread.id),
+              version: thread.version,
+              values: thread.modelOptionValues ?? {},
+            };
+      const { [optionId]: _cleared, ...rest } = base.values;
+      const result = await props.controller.execute({
+        kind: "change-chat-provider",
+        threadId: thread.id,
+        expectedVersion: base.version,
+        providerInstanceId: thread.providerInstanceId,
+        modelId: thread.modelId,
+        modelOptionValues: value === undefined ? rest : { ...rest, [optionId]: value },
+      });
+      // A refused command leaves the queue empty so the next change starts
+      // from the reloaded thread rather than a version the server rejected.
+      return result?.kind === "thread-updated"
+        ? {
+            threadId: String(result.thread.id),
+            version: result.thread.version,
+            values: result.thread.modelOptionValues ?? {},
+          }
+        : undefined;
+    })().catch(() => undefined);
+  }
 
   async function changeResearch(input: {
     readonly enabled: boolean;
@@ -551,17 +599,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           });
         }}
         modelOptions={providerState.declaredModelOptions}
-        onModelOptionChange={(optionId, value) => {
-          const { [optionId]: _previous, ...rest } = view.thread.modelOptionValues ?? {};
-          void props.controller.execute({
-            kind: "change-chat-provider",
-            threadId: view.thread.id,
-            expectedVersion: view.thread.version,
-            providerInstanceId: view.thread.providerInstanceId,
-            modelId: view.thread.modelId,
-            modelOptionValues: value === undefined ? rest : { ...rest, [optionId]: value },
-          });
-        }}
+        onModelOptionChange={changeModelOption}
         {...(props.providerGroups === undefined
           ? {}
           : {
