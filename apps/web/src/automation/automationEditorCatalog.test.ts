@@ -109,6 +109,7 @@ function managedCodeBootstrap(): CodeBootstrap {
         observedAt: now as never,
       },
     ],
+    activity: [],
   } as unknown as CodeBootstrap;
 }
 
@@ -366,6 +367,7 @@ describe("automationEditorCatalog", () => {
             observedAt: now as never,
           },
         ],
+        activity: [],
       } as unknown as CodeBootstrap,
     });
     expect(catalog.projects).toHaveLength(0);

@@ -25,6 +25,7 @@ import {
   decodeCodeRepositoryTestListing,
   decodeCodeSettings,
   decodeCodeThread,
+  decodeCodeThreadActivity,
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
   decodeCodeAttachmentReference,
@@ -948,14 +949,21 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
 }
 
 function decodeBootstrap(value: unknown): CodeBootstrap {
-  if (!isRecord(value) || !exactKeys(value, ["settings", "threads", "checkouts"])) {
+  if (!isRecord(value) || !exactKeys(value, ["settings", "threads", "checkouts", "activity"])) {
     throw new Error("invalid");
   }
-  if (!Array.isArray(value.threads) || !Array.isArray(value.checkouts)) throw new Error("invalid");
+  if (
+    !Array.isArray(value.threads) ||
+    !Array.isArray(value.checkouts) ||
+    !Array.isArray(value.activity)
+  ) {
+    throw new Error("invalid");
+  }
   return {
     settings: decodeCodeSettings(value.settings),
     threads: value.threads.map((thread) => decodeCodeThread(thread)),
     checkouts: value.checkouts.map((checkout) => decodeCodeCheckoutIdentity(checkout)),
+    activity: value.activity.map((entry) => decodeCodeThreadActivity(entry)),
   };
 }
 
