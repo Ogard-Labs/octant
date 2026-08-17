@@ -746,17 +746,12 @@ export function normalizeOpenCodeProbe(
         imageInput: model.capabilities.input.image
           ? ("supported" as const)
           : ("unsupported" as const),
-        options:
-          model.variants === undefined || Object.keys(model.variants).length === 0
-            ? []
-            : [
-                {
-                  id: "reasoning",
-                  displayName: "Reasoning",
-                  kind: "selection" as const,
-                  values: Object.keys(model.variants) as [string, ...string[]],
-                },
-              ],
+        // Variants are reported by OpenCode but not selectable through it here:
+        // this driver creates a session and prompts with provider and model ids
+        // only, never `modelOptionValues`. A declared option would save the
+        // user's choice and drop it on the next turn, so nothing is declared
+        // until the value reaches the prompt.
+        options: [],
       })),
     );
   return decodeProviderProbeResult({
