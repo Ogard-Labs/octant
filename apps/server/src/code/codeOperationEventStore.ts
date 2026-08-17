@@ -342,6 +342,10 @@ export class CodeOperationEventStore {
     let afterSequence = 0;
     let scannedEvents = 0;
     let hasMore = false;
+    // The way back from this thread's last restore. A restore is its own
+    // operation with no conversation turn of its own, so it is read straight
+    // from the journal rather than folded into a turn.
+    let restoreUndo: CodeConversationPage["restoreUndo"];
 
     for (;;) {
       const batch = this.#journal.replay(
@@ -404,6 +408,25 @@ export class CodeOperationEventStore {
           turns.push(builder);
           byOperation.set(key, builder);
           continue;
+        }
+        if (
+          frame.threadId === threadId &&
+          frame.event.kind === "operation-result" &&
+          frame.event.result.kind === "git-mutation-state" &&
+          frame.event.result.mutation === "restore-checkpoint"
+        ) {
+          // Only the newest restore is undoable: undoing is itself a restore,
+          // and its own undo point is what one more step back means. A restore
+          // that replaced nothing carries none, which retracts the offer rather
+          // than leaving an older one pointing at a state that has since moved.
+          // A rejected restore is refused before the checkout is touched, so
+          // the way back from the last restore that did run is still valid and
+          // still points at a state the checkout actually left. Only a restore
+          // that ran replaces it — completed, or failed after it may already
+          // have moved files.
+          if (frame.event.result.state !== "rejected") {
+            restoreUndo = frame.event.result.undo;
+          }
         }
         const builder = byOperation.get(key);
         if (builder === undefined || frame.threadId !== threadId) continue;
@@ -493,6 +516,7 @@ export class CodeOperationEventStore {
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,
       ...(currentLimits.length === 0 ? {} : { limits: currentLimits.slice(0, 8) }),
+      ...(restoreUndo === undefined ? {} : { restoreUndo }),
     });
   }
 }
