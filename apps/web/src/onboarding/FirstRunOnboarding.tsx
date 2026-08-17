@@ -41,24 +41,33 @@ export interface FirstRunOnboardingProps {
   /** The profile the host currently holds. The step edits a draft of it. */
   readonly profile: UserProfile;
   /** Persist the edited profile. Called when the profile step is left, not per keystroke. */
-  readonly onSaveProfile: (profile: UserProfile) => void;
+  readonly onSaveProfile: SetupWrite<UserProfile>;
   readonly avatarEnvironment?: AvatarImageEnvironment;
 
   readonly chatModelGroups: ReadonlyArray<PickerGroup>;
   readonly chatDefault?: FirstRunChatDefault | undefined;
-  readonly onSelectChatDefault: (selection: ModelPickerSelection) => void;
+  readonly onSelectChatDefault: SetupWrite<ModelPickerSelection>;
 
   readonly navigatorModelGroups: ReadonlyArray<PickerGroup>;
   readonly navigatorDefault?: NavigatorAssistantModelRef | undefined;
-  readonly onSelectNavigatorDefault: (selection: ModelPickerSelection) => void;
-  readonly onClearNavigatorDefault: () => void;
+  readonly onSelectNavigatorDefault: SetupWrite<ModelPickerSelection>;
+  readonly onClearNavigatorDefault: () => Promise<boolean>;
 
   readonly workspace: WorkspaceChoices;
-  readonly onSelectColorScheme: (scheme: "system" | "light" | "dark") => void;
-  readonly onToggleChat: (enabled: boolean) => void;
-  readonly onToggleWork: (enabled: boolean) => void;
-  readonly onSelectModeSwitcher: (presentation: "buttons" | "dropdown") => void;
+  readonly onSelectColorScheme: SetupWrite<"system" | "light" | "dark">;
+  readonly onToggleChat: SetupWrite<boolean>;
+  readonly onToggleWork: SetupWrite<boolean>;
+  readonly onSelectModeSwitcher: SetupWrite<"buttons" | "dropdown">;
 }
+
+/**
+ * A setup answer written straight through to the settings that own it.
+ *
+ * Each resolves to whether the host accepted the write. First run's own
+ * outcome is durable and hides this surface for good, so it may only be
+ * recorded once every answer taken here has actually landed.
+ */
+type SetupWrite<Answer> = (answer: Answer) => Promise<boolean>;
 
 /**
  * Octant's first-run surface (`BOOT-01`).
@@ -89,6 +98,8 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const [profileEdited, setProfileEdited] = useState(false);
   const [syncedProfile, setSyncedProfile] = useState<UserProfile>(props.profile);
   const [importing, setImporting] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const unsettledWrites = useRef<Array<Promise<boolean>>>([]);
   const nameField = useRef<HTMLInputElement>(null);
   const providerAction = useRef<HTMLButtonElement>(null);
   const blocked = controller.blockedMessage !== undefined;
@@ -103,9 +114,12 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     if (!profileEdited) setProfileDraft(props.profile);
   }
 
-  // An avatar import reports its result as a later change. Resolving first run
-  // while one is in flight would drop a picture the user explicitly chose.
-  const busy = controller.submitting !== undefined || importing;
+  // An avatar import reports its result as a later change, and the answers
+  // themselves are written by three independent controllers rather than one
+  // queue. Resolving first run while any of that is in flight would drop a
+  // picture or a model the user explicitly chose, so an answer stays busy from
+  // the click until the last of those writes has been accepted.
+  const busy = controller.submitting !== undefined || importing || resolving;
 
   if (!controller.visible) return null;
 
@@ -117,6 +131,31 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     chatDefaultConfigured: props.chatDefault !== undefined,
     navigatorConfigured: props.navigatorDefault !== undefined,
   });
+
+  /**
+   * Collect a setup write so the outcome can be withheld if it does not land.
+   *
+   * Deliberately not held in render state: the blur that settles a field
+   * issues its write in the same gesture as the click on Skip, so a write that
+   * disabled the buttons would swallow the very click it needs to wait for.
+   */
+  function track(write: Promise<boolean>): void {
+    unsettledWrites.current.push(write.catch(() => false));
+  }
+
+  /**
+   * Wait for every answer written since the last attempt, and report whether
+   * all of them landed.
+   *
+   * The list is drained whether or not they did, so a user who answers again
+   * after a conflict is not held by the write the conflict discarded.
+   */
+  async function settleWrites(): Promise<boolean> {
+    const writes = unsettledWrites.current;
+    unsettledWrites.current = [];
+    const results = await Promise.all(writes);
+    return results.every((accepted) => accepted);
+  }
 
   /**
    * Commit the draft, once, if there is anything to commit.
@@ -131,7 +170,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   function flushProfile() {
     if (!profileEdited) return;
     setProfileEdited(false);
-    props.onSaveProfile(profileDraft);
+    track(props.onSaveProfile(profileDraft));
   }
 
   function goTo(target: FirstRunStepId) {
@@ -147,16 +186,29 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   // picture as a later change, and once this surface is gone that change has
   // nowhere to land — so Escape, a backdrop press, and the deferral that sends
   // the user to provider settings all wait for it too.
+  //
+  // The outcome is recorded last, and only once every answer has been
+  // accepted. A rejected write is recovered by reloading the host, which
+  // leaves the surface able to record an outcome against state that never
+  // took the answer — and because the outcome is durable, the user would
+  // never be asked again. Leaving first run pending is the honest result:
+  // the surface returns on the next launch, still holding the question.
   function finish() {
-    if (importing) return;
-    flushProfile();
-    controller.complete();
+    void resolveWith(controller.complete);
   }
 
   function skip() {
-    if (importing) return;
+    void resolveWith(controller.skip);
+  }
+
+  async function resolveWith(record: () => void) {
+    if (importing || resolving) return;
     flushProfile();
-    controller.skip();
+    setResolving(true);
+    const accepted = await settleWrites();
+    setResolving(false);
+    if (!accepted) return;
+    record();
   }
 
   function leaveForProviderSettings() {
@@ -228,7 +280,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                 // character.
                 onCommit={(next) => {
                   setProfileEdited(false);
-                  props.onSaveProfile(next);
+                  track(props.onSaveProfile(next));
                 }}
                 profile={profileDraft}
                 {...(props.avatarEnvironment === undefined
@@ -241,10 +293,12 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           {step === "workspace" ? (
             <FirstRunWorkspaceStep
               choices={props.workspace}
-              onSelectColorScheme={props.onSelectColorScheme}
-              onSelectModeSwitcher={props.onSelectModeSwitcher}
-              onToggleChat={props.onToggleChat}
-              onToggleWork={props.onToggleWork}
+              onSelectColorScheme={(scheme) => track(props.onSelectColorScheme(scheme))}
+              onSelectModeSwitcher={(presentation) =>
+                track(props.onSelectModeSwitcher(presentation))
+              }
+              onToggleChat={(enabled) => track(props.onToggleChat(enabled))}
+              onToggleWork={(enabled) => track(props.onToggleWork(enabled))}
             />
           ) : null}
 
@@ -267,7 +321,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               groups={props.chatModelGroups}
               intro="New Chat threads start with this model. Existing threads always keep whatever they were given."
               onOpenProviderSettings={leaveForProviderSettings}
-              onSelect={props.onSelectChatDefault}
+              onSelect={(selection) => track(props.onSelectChatDefault(selection))}
               unsetNote="No default is set. Octant will pick a ready model for each new thread and show you which one it chose."
               {...(props.chatDefault === undefined
                 ? {}
@@ -284,9 +338,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               clearLabel="Leave Navigator off"
               groups={props.navigatorModelGroups}
               intro="Navigator is the optional assistant in the sidebar. It answers questions about Octant itself and never changes anything without asking you first."
-              onClear={props.onClearNavigatorDefault}
+              onClear={() => track(props.onClearNavigatorDefault())}
               onOpenProviderSettings={leaveForProviderSettings}
-              onSelect={props.onSelectNavigatorDefault}
+              onSelect={(selection) => track(props.onSelectNavigatorDefault(selection))}
               unsetNote="Navigator stays unavailable until a model is chosen. Nothing else is affected, and you can turn it on later in Settings."
               {...(props.navigatorDefault === undefined
                 ? {}

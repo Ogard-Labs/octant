@@ -64,6 +64,23 @@ function readyGroups(): ReadonlyArray<PickerGroup> {
   });
 }
 
+/** An enabled provider the host reached, which offered nothing usable. */
+function readyGroupsWithoutModels(): ReadonlyArray<PickerGroup> {
+  const observed = {
+    instanceId,
+    readiness: "ready",
+    processState: "running",
+    models: [],
+    capabilities: {},
+    observedAt: now,
+  } as unknown as ProviderObservedState;
+  return buildModelPickerGroups({
+    instances: [instance],
+    observedByInstance: new Map([[instanceId, observed]]),
+    mode: "chat",
+  });
+}
+
 function controller(
   overrides: Partial<FirstRunOnboardingController> = {},
 ): FirstRunOnboardingController {
@@ -99,17 +116,17 @@ function mount(overrides: Partial<FirstRunOnboardingProps> = {}) {
     onRescan: vi.fn(),
     scanning: false,
     profile: emptyProfile,
-    onSaveProfile: vi.fn(),
+    onSaveProfile: vi.fn(async () => true),
     chatModelGroups: [],
-    onSelectChatDefault: vi.fn(),
+    onSelectChatDefault: vi.fn(async () => true),
     navigatorModelGroups: [],
-    onSelectNavigatorDefault: vi.fn(),
-    onClearNavigatorDefault: vi.fn(),
+    onSelectNavigatorDefault: vi.fn(async () => true),
+    onClearNavigatorDefault: vi.fn(async () => true),
     workspace: defaultWorkspace,
-    onSelectColorScheme: vi.fn(),
-    onToggleChat: vi.fn(),
-    onToggleWork: vi.fn(),
-    onSelectModeSwitcher: vi.fn(),
+    onSelectColorScheme: vi.fn(async () => true),
+    onToggleChat: vi.fn(async () => true),
+    onToggleWork: vi.fn(async () => true),
+    onSelectModeSwitcher: vi.fn(async () => true),
     ...overrides,
   };
   const view = render(<FirstRunOnboarding {...props} />);
@@ -251,6 +268,101 @@ describe("FirstRunOnboarding", () => {
     expect(props.controller.complete).not.toHaveBeenCalled();
   });
 
+  it("points back at providers when a reachable provider offered no models", async () => {
+    const user = userEvent.setup();
+    const props = mount({ chatModelGroups: readyGroupsWithoutModels() });
+
+    await user.click(screen.getByRole("button", { name: /Default model/ }));
+
+    // The provider is enabled and answered, so it still gets a picker group.
+    // What decides this step is whether there is a model to choose.
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "No provider on this Mac is ready, so there is nothing to choose from yet.",
+    );
+    expect(screen.queryByRole("listbox")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Open provider settings" }));
+    expect(props.onOpenProviderSettings).toHaveBeenCalledOnce();
+  });
+
+  it("keeps first run pending when a settled profile answer is discarded", async () => {
+    const user = userEvent.setup();
+    // Another window changed shell settings, so the profile write conflicts.
+    // The host recovers by reloading, which would leave the queued outcome
+    // free to succeed against state that never took the name.
+    const props = mount({ onSaveProfile: vi.fn(async () => false) });
+
+    await user.type(screen.getByLabelText("Name"), "Ada");
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    expect(props.onSaveProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: "Ada" }),
+    );
+    // Recording the outcome here would hide first run for good, and the name
+    // would be gone with no way to give it again.
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
+    expect(props.controller.skip).not.toHaveBeenCalled();
+  });
+
+  it("waits for a model choice to land before recording completion", async () => {
+    const user = userEvent.setup();
+    let acceptSelection!: (accepted: boolean) => void;
+    const onSelectChatDefault = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          acceptSelection = resolve;
+        }),
+    );
+    const props = mount({ chatModelGroups: readyGroups(), onSelectChatDefault });
+
+    await user.click(screen.getByRole("button", { name: /Default model/ }));
+    await user.click(screen.getByRole("option", { name: /Llama Test/ }));
+    // Chat settings are a separate controller, so this write is still running.
+    await user.click(screen.getByRole("button", { name: /Navigator/ }));
+    await user.click(screen.getByRole("button", { name: "Start using Octant" }));
+
+    expect(props.controller.complete).not.toHaveBeenCalled();
+
+    acceptSelection(true);
+    await waitFor(() => expect(props.controller.complete).toHaveBeenCalledOnce());
+  });
+
+  it("keeps first run pending when a model choice is rejected", async () => {
+    const user = userEvent.setup();
+    const props = mount({
+      chatModelGroups: readyGroups(),
+      onSelectChatDefault: vi.fn(async () => false),
+    });
+
+    await user.click(screen.getByRole("button", { name: /Default model/ }));
+    await user.click(screen.getByRole("option", { name: /Llama Test/ }));
+    await user.click(screen.getByRole("button", { name: /Navigator/ }));
+    await user.click(screen.getByRole("button", { name: "Start using Octant" }));
+
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
+    expect(props.controller.complete).not.toHaveBeenCalled();
+  });
+
+  it("lets the user answer again after a rejected write, without being held by it", async () => {
+    const user = userEvent.setup();
+    const onSelectColorScheme = vi
+      .fn<(scheme: "system" | "light" | "dark") => Promise<boolean>>()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    const props = mount({ onSelectColorScheme });
+
+    await user.click(screen.getByRole("button", { name: /Workspace/ }));
+    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(props.controller.skip).not.toHaveBeenCalled();
+
+    // The discarded write must not hold the surface shut for the rest of the
+    // session; answering again has to be able to resolve first run.
+    await user.click(screen.getByRole("radio", { name: "Light" }));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
+  });
+
   it("says what staying without Navigator costs, and lets the user turn it off", async () => {
     const user = userEvent.setup();
     const props = mount({
@@ -288,7 +400,8 @@ describe("FirstRunOnboarding", () => {
     expect(props.onSaveProfile).toHaveBeenCalledWith(
       expect.objectContaining({ displayName: "Ada" }),
     );
-    expect(props.controller.skip).toHaveBeenCalledOnce();
+    // The outcome waits for that save, so it lands a turn later than the click.
+    await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
   });
 
   it("shows the profile the host turns out to hold, not the one it started with", () => {
@@ -377,16 +490,16 @@ describe("FirstRunOnboarding", () => {
           chatModelGroups={[]}
           controller={live}
           navigatorModelGroups={[]}
-          onClearNavigatorDefault={vi.fn()}
+          onClearNavigatorDefault={vi.fn(async () => true)}
           onOpenProviderSettings={onOpenProviderSettings}
           onRescan={vi.fn()}
-          onSaveProfile={vi.fn()}
-          onSelectChatDefault={vi.fn()}
-          onSelectColorScheme={vi.fn()}
-          onSelectModeSwitcher={vi.fn()}
-          onSelectNavigatorDefault={vi.fn()}
-          onToggleChat={vi.fn()}
-          onToggleWork={vi.fn()}
+          onSaveProfile={vi.fn(async () => true)}
+          onSelectChatDefault={vi.fn(async () => true)}
+          onSelectColorScheme={vi.fn(async () => true)}
+          onSelectModeSwitcher={vi.fn(async () => true)}
+          onSelectNavigatorDefault={vi.fn(async () => true)}
+          onToggleChat={vi.fn(async () => true)}
+          onToggleWork={vi.fn(async () => true)}
           profile={emptyProfile}
           readiness={summarizeFirstRunReadiness({
             providerStatus: "ready",

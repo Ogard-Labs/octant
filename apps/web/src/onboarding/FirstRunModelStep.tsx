@@ -27,7 +27,14 @@ export interface FirstRunModelStepProps {
  * says exactly what stays unavailable as a result.
  */
 export function FirstRunModelStep(props: FirstRunModelStepProps) {
-  const empty = props.groups.length === 0;
+  // A provider that is enabled and reachable still gets a group even when it
+  // offered no usable models, so counting groups would draw an empty picker
+  // for the state the provider step already reports as "no models". What
+  // decides this is whether there is a model to choose, not a provider to
+  // list.
+  const empty = !props.groups.some((group) =>
+    group.sections.some((section) => section.models.length > 0),
+  );
   const chosen =
     props.selectedProviderInstanceId !== undefined && props.selectedModelId !== undefined;
 

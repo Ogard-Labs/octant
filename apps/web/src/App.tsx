@@ -1461,25 +1461,22 @@ function LaunchedShell(
     [controller],
   );
   const saveUserProfile = useCallback(
-    (profile: UserProfile) => {
-      void controller.updateSettings({ userProfile: profile });
-    },
+    (profile: UserProfile) => controller.updateSettings({ userProfile: profile }),
     [controller],
   );
   const selectNavigatorDefault = useCallback(
-    (selection: ModelPickerSelection) => {
-      void controller.updateSettings({
+    (selection: ModelPickerSelection) =>
+      controller.updateSettings({
         navigatorAssistant: {
           ...(controller.settings?.navigatorAssistant ?? {}),
           defaultProvider: selection,
         },
-      });
-    },
+      }),
     [controller],
   );
   const clearNavigatorDefault = useCallback(() => {
     const { defaultProvider: _cleared, ...rest } = controller.settings?.navigatorAssistant ?? {};
-    void controller.updateSettings({ navigatorAssistant: rest });
+    return controller.updateSettings({ navigatorAssistant: rest });
   }, [controller]);
   // The workspace step writes through to the same settings Settings owns:
   // appearance lives in theme settings, the modes and switcher in shell
@@ -1501,16 +1498,16 @@ function LaunchedShell(
     ],
   );
   const selectColorScheme = useCallback(
-    (scheme: "system" | "light" | "dark") => {
-      void themeController.applyPatch({ mode: scheme });
-    },
+    (scheme: "system" | "light" | "dark") => themeController.applyPatch({ mode: scheme }),
     [themeController],
   );
   const selectChatDefaultModel = useCallback(
-    (selection: ModelPickerSelection) => {
+    async (selection: ModelPickerSelection) => {
       const settings = chatController.bootstrap?.settings;
-      if (settings === undefined) return;
-      void chatController.updateSettings(chatDefaultModelCommand(settings, selection));
+      // Without Chat's own settings there is no version to write against, so
+      // the choice has not been taken rather than merely deferred.
+      if (settings === undefined) return false;
+      return await chatController.updateSettings(chatDefaultModelCommand(settings, selection));
     },
     [chatController],
   );
@@ -4035,11 +4032,11 @@ function LaunchedShell(
           onSelectChatDefault={selectChatDefaultModel}
           onSelectColorScheme={selectColorScheme}
           onSelectModeSwitcher={(modeSwitcherPresentation) =>
-            void controller.updateSettings({ modeSwitcherPresentation })
+            controller.updateSettings({ modeSwitcherPresentation })
           }
           onSelectNavigatorDefault={selectNavigatorDefault}
-          onToggleChat={(chatEnabled) => void controller.updateSettings({ chatEnabled })}
-          onToggleWork={(workEnabled) => void controller.updateSettings({ workEnabled })}
+          onToggleChat={(chatEnabled) => controller.updateSettings({ chatEnabled })}
+          onToggleWork={(workEnabled) => controller.updateSettings({ workEnabled })}
           workspace={firstRunWorkspace}
           profile={controller.settings?.userProfile ?? defaultShellSettings().userProfile}
           readiness={firstRunReadiness}
