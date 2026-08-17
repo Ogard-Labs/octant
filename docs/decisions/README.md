@@ -36,4 +36,5 @@ distilled successor of the earlier long-form design specifications.
   `Accepted` (implemented and enforced), `Superseded by 00NN`, or `Deprecated`.
 - To change a decision, write a new ADR and add `**Status:** Superseded by 00NN`
   to the old one; do not edit history in place.
-- Add the record to the index above in the same change.
+- Add the record to the index above in the same change. `bun run decisions:check`
+  gates numbering, status, required sections, and index agreement.

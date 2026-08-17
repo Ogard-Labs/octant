@@ -31,6 +31,29 @@ architecture, security, privacy, release, or destructive decision.
 - Planning lives in Linear. Do not put issue numbers, phase names, or tracker
   state into code, comments, test titles, or documentation.
 
+Read the record that owns your change before editing, not all of them:
+
+| Change area                                         | Owning record                                |
+| --------------------------------------------------- | -------------------------------------------- |
+| Journal, projections, replay, migrations            | `docs/decisions/0002`                        |
+| Modes, Projects, thread authority, checkout binding | `docs/decisions/0003`, `docs/decisions/0017` |
+| Package layering and dependency direction           | `docs/decisions/0004`                        |
+| Provider drivers, capabilities, registry, harness   | `docs/decisions/0005`–`docs/decisions/0007`  |
+| Context limits, capacity, scheduling                | `docs/decisions/0008`                        |
+| Sandbox, approvals, Plan mode, access postures      | `docs/decisions/0009`, `docs/decisions/0018` |
+| File preview and canvas artifacts                   | `docs/decisions/0010`                        |
+| Extensions, skills, plugin host                     | `docs/decisions/0011`, `docs/decisions/0001` |
+| Subagents and agent runs                            | `docs/decisions/0012`                        |
+| Remote clients and mobile                           | `docs/decisions/0013`                        |
+| Apple build and validation                          | `docs/decisions/0014`                        |
+| Shell, navigation, workspace layout                 | `docs/decisions/0015`                        |
+| Components and theme                                | `docs/decisions/0016`                        |
+
+A change that contradicts an `Accepted` record is not a code change. Supersede
+the record first, in the same pull request, per `docs/decisions/README.md`. A
+`Proposed` record states the agreed direction and constrains the shape of new
+work even before it is implemented.
+
 ## Implementation Discipline
 
 Quality means correct, secure, clear, maintainable behavior with useful evidence;
@@ -83,6 +106,13 @@ test count.
 - Browser/computer use, tests, Apple validation, approvals, memory, and subagents
   are app-managed, provider-neutral capabilities. Core Apple development cannot
   depend on an optional extension.
+- New providers, tools, and capabilities are built plugin-shaped: they reach the
+  system through the published seams (`@octant/provider-sdk`,
+  `@octant/plugin-api`, `@octant/plugin-host`) and take no shortcut a third-party
+  plugin could not take. Shipping in-tree is allowed; wiring a provider or tool
+  directly into server internals, or widening a seam for one vendor, is not. A
+  capability that cannot be expressed through a seam is a reason to extend the
+  seam in its own change, not to bypass it.
 - Extension installation never implies trust, activation, enablement, or
   authority. Disabled components contribute no context; executable components
   remain quarantined and subject to ordinary sandbox and approval policy.
@@ -112,6 +142,34 @@ test count.
 - Keep contracts schema-only and domain logic pure. Use Effect when lifecycle,
   concurrency, resource safety, typed failure, or service composition materially
   benefits from it; keep simple synchronous or pure behavior direct.
+
+## Code Style And Semantics
+
+`oxfmt` owns formatting and `oxlint` owns lint; never hand-format or reformat
+code a change does not otherwise touch. The rules below are semantics the
+formatter cannot express.
+
+- TypeScript runs with `strict`, `exactOptionalPropertyTypes`, and
+  `noUncheckedIndexedAccess`. Satisfy them by modelling the value honestly, not
+  by casting. `as` narrows a value the compiler cannot see into; it never
+  invents one. `any` and non-null `!` do not appear in shipped code.
+- Data crossing a boundary is `readonly`, and collections are `ReadonlyArray<T>`.
+  Mutation stays inside the function that owns the value.
+- Class state is `#private`. A field is exposed only when a caller needs it.
+- Identifiers are branded (`CodeThreadId`, `WindowId`). Compare them with
+  `String(a) === String(b)` rather than unbranding them into a shared type.
+- Expected failure is a value, not an exception: return a discriminated union
+  (`status`, `kind`) so every caller must handle the refused, failed, and
+  truncated cases. Throw only for a broken invariant a caller cannot act on.
+- Name things for what they mean to the product, not for their mechanism.
+  `refuses`, `revoked`, `truncated`, and `approval-gated` are the vocabulary;
+  `handler`, `manager`, `helper`, and `util` are not.
+- Comments explain why a rule exists or what a reader would otherwise get wrong,
+  and cite the observed behavior that motivated them. Do not restate the code,
+  and do not leave commented-out code behind.
+- Test titles are sentences about behavior a user or caller could observe
+  ("refuses to fork a thread that lives on its own worktree"), never about the
+  function under test or a tracker item.
 
 ## Repository Ownership
 
