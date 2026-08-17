@@ -34,6 +34,7 @@ describe("TerminalProcessPort", () => {
     const handle = new TerminalProcessPort(confinedOptions()).start({
       shell: process.platform === "darwin" ? "/bin/zsh" : "/bin/sh",
       cwd: tmpdir(),
+      stateScope: "repo_test",
       environment: {
         HOME: process.env.HOME ?? tmpdir(),
         PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -97,6 +98,7 @@ describe("TerminalProcessPort", () => {
     port.start({
       shell: "/bin/zsh",
       cwd: "/private/repo",
+      stateScope: "repo_test",
       environment: { PATH: "/usr/bin", OCTANT_TOKEN: "secret" },
       columns: 120,
       rows: 40,
@@ -135,7 +137,7 @@ describe("TerminalProcessPort", () => {
     const shellStateDirectory = join(fake.root, "terminal-shell");
     const first = await mkdtemp(join(fake.root, "checkout-a-"));
     const second = await mkdtemp(join(fake.root, "checkout-b-"));
-    const launch = (cwd: string) => {
+    const launch = (cwd: string, stateScope = "repo_a") => {
       const spawn = vi.fn(() => fakePty());
       new TerminalProcessPort({
         spawn,
@@ -143,7 +145,7 @@ describe("TerminalProcessPort", () => {
         confinement: fake.confinement,
         temporaryDirectory: fake.temporaryDirectory,
         shellStateDirectory,
-      }).start({ shell: "/bin/zsh", cwd, environment: {}, columns: 80, rows: 24 });
+      }).start({ shell: "/bin/zsh", cwd, stateScope, environment: {}, columns: 80, rows: 24 });
       return {
         stateDirectory: launchedStateDirectory(spawn),
         profile: launchedProfile(spawn),
@@ -177,6 +179,11 @@ describe("TerminalProcessPort", () => {
       // The shared base is never itself a read or write root.
       expect(own.profile).not.toContain(`(subpath "${realpathSync(shellStateDirectory)}")`);
     }
+
+    // A path is reusable: remove a repository and create an unrelated one in
+    // its place and the new shell must not inherit the old one's history.
+    expect(launch(first, "repo_b").stateDirectory).not.toBe(a.stateDirectory);
+    expect(launch(first).stateDirectory).toBe(a.stateDirectory);
   });
 
   it("fails closed when Seatbelt confinement is unavailable", () => {
@@ -187,6 +194,7 @@ describe("TerminalProcessPort", () => {
       }).start({
         shell: "/bin/sh",
         cwd: tmpdir(),
+        stateScope: "repo_test",
         environment: {},
         columns: 80,
         rows: 24,
@@ -199,6 +207,7 @@ describe("TerminalProcessPort", () => {
     const handle = new TerminalProcessPort(confinedOptions({ spawn: () => pty })).start({
       shell: "/bin/zsh",
       cwd: "/repo",
+      stateScope: "repo_test",
       environment: {},
       columns: 80,
       rows: 24,
@@ -224,6 +233,7 @@ describe("TerminalProcessPort", () => {
     const handle = port.start({
       shell: "/bin/zsh",
       cwd: "/repo",
+      stateScope: "repo_test",
       environment: {},
       columns: 80,
       rows: 24,
@@ -249,6 +259,7 @@ describe("TerminalProcessPort", () => {
     ).start({
       shell: "/bin/zsh",
       cwd: "/repo",
+      stateScope: "repo_test",
       environment: {},
       columns: 80,
       rows: 24,
@@ -273,6 +284,7 @@ describe("TerminalProcessPort", () => {
     ).start({
       shell: "/bin/zsh",
       cwd: "/repo",
+      stateScope: "repo_test",
       environment: {},
       columns: 80,
       rows: 24,
@@ -299,6 +311,7 @@ describe("TerminalProcessPort", () => {
     ).start({
       shell: "/bin/zsh",
       cwd: "/repo",
+      stateScope: "repo_test",
       environment: {},
       columns: 80,
       rows: 24,
@@ -321,6 +334,7 @@ describe("TerminalProcessPort", () => {
       ).start({
         shell: "/bin/zsh",
         cwd: "/repo",
+        stateScope: "repo_test",
         environment: {},
         columns: 80,
         rows: 24,
@@ -350,6 +364,7 @@ describe("TerminalProcessPort", () => {
       ).start({
         shell: "/bin/zsh",
         cwd: "/repo",
+        stateScope: "repo_test",
         environment: {},
         columns: 80,
         rows: 24,
@@ -384,6 +399,7 @@ describe("TerminalProcessPort", () => {
       ).start({
         shell: "/bin/zsh",
         cwd: "/repo",
+        stateScope: "repo_test",
         environment: {},
         columns: 80,
         rows: 24,
@@ -417,6 +433,7 @@ describe("TerminalProcessPort", () => {
       ).start({
         shell: "/bin/zsh",
         cwd: "/repo",
+        stateScope: "repo_test",
         environment: {},
         columns: 80,
         rows: 24,

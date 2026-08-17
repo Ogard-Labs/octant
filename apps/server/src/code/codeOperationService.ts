@@ -132,6 +132,8 @@ export interface CodeOperationTerminalPort {
     readonly terminalId: string;
     readonly shell: string;
     readonly cwd: string;
+    /** Authority this shell's persisted state belongs to; see TerminalLaunchInput. */
+    readonly stateScope: string;
     readonly columns: number;
     readonly rows: number;
     readonly credentialReferences: readonly {
@@ -920,11 +922,17 @@ export class CodeOperationService {
     initiator: CodeOperationInitiator = "agent",
   ): Promise<"allow" | "waiting" | "unauthorized"> {
     const operation = operationFor(command.kind);
+    // Opening the person's own confined shell is the only operation this seam
+    // lets a caller vouch for. Every other class — including the durable
+    // mutations `operationFor` classifies as `edit` — keeps its ordinary gate,
+    // so labelling a command user-initiated can never widen its authority.
+    const vouchedInitiator: CodeOperationInitiator =
+      initiator === "user" && operation === "terminal" ? "user" : "agent";
     const policy = authorizeCodeOperation({
       actor: "local-user",
       posture: thread.executionPolicy,
       operation,
-      initiator,
+      initiator: vouchedInitiator,
     });
     if (policy.decision === "deny") return "unauthorized";
     if (
@@ -1011,6 +1019,8 @@ export class CodeOperationService {
           terminalId: command.terminalId,
           shell: root.shell,
           cwd: workingDirectory,
+          // The repository this checkout belongs to, not the path it sits at.
+          stateScope: String(checkout.repositoryId),
           columns: command.columns,
           rows: command.rows,
           credentialReferences,

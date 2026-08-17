@@ -66,6 +66,13 @@ export interface TerminalProcessHandle {
 export interface TerminalLaunchInput {
   readonly shell: string;
   readonly cwd: string;
+  /**
+   * The authority this shell's state belongs to, normally the bound
+   * repository identity. A filesystem path is reusable — a repository can be
+   * removed and an unrelated one created at the same place — so the path alone
+   * is not a durable identity for history and prompt caches.
+   */
+  readonly stateScope: string;
   readonly environment: Readonly<Record<string, string>>;
   readonly columns: number;
   readonly rows: number;
@@ -214,6 +221,7 @@ export class TerminalProcessPort {
     const shellState = shellStateDirectoryForRoot(
       this.#dependencies.shellStateDirectory,
       input.cwd,
+      input.stateScope,
     );
     mkdirSync(shellState, { recursive: true, mode: 0o700 });
     let launch: { readonly command: string; readonly args: readonly string[] };
@@ -382,8 +390,13 @@ export class TerminalProcessPort {
  * authority scope that produced them: a shell confined to one repository must
  * not read or write the state of a shell confined to another. Only this
  * subdirectory is granted to the launch; the shared base never is.
+ *
+ * The key combines the caller's authority scope with the resolved path. The
+ * path alone is reusable — remove a repository and create an unrelated one in
+ * its place and the new shell would inherit the old one's history — so the
+ * scope is what makes the identity durable.
  */
-function shellStateDirectoryForRoot(base: string, cwd: string): string {
+function shellStateDirectoryForRoot(base: string, cwd: string, scope: string): string {
   const resolved = resolve(cwd);
   let identity = resolved;
   try {
@@ -391,7 +404,10 @@ function shellStateDirectoryForRoot(base: string, cwd: string): string {
   } catch {
     // A root the Seatbelt profile will reject anyway still gets its own scope.
   }
-  return join(base, createHash("sha256").update(identity).digest("hex").slice(0, 16));
+  return join(
+    base,
+    createHash("sha256").update(scope).update("\u0000").update(identity).digest("hex").slice(0, 16),
+  );
 }
 
 function spawnBunPty(shell: string, args: readonly string[], options: PtyForkOptions): PtyProcess {

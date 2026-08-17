@@ -175,6 +175,8 @@ describe("CodeOperationService", () => {
       terminalId: ids.terminal,
       shell: "/bin/zsh",
       cwd: "/private/exact-checkout/packages/app",
+      // The bound repository, not the path, scopes this shell's saved state.
+      stateScope: `repo_${"8".repeat(64)}`,
       columns: 120,
       rows: 40,
       credentialReferences: [{ environmentName: "TOKEN", reference: "keychain:token" }],
@@ -583,6 +585,37 @@ describe("CodeOperationService", () => {
     ).resolves.toMatchObject({ kind: "terminal-state", state: "running" });
     expect(terminals.launch).toHaveBeenCalledTimes(launchesBeforeUser + 1);
     expect(approvals.validate).toHaveBeenCalledTimes(approvalChecksBeforeUser);
+
+    // Vouching for a command is authority to open a shell and nothing else.
+    // A durable mutation the classifier calls an edit keeps its ordinary gate
+    // even when the caller labels it user-initiated.
+    const findingOperation = decodeCodeOperationId("49494949-4949-4494-8494-494949494949");
+    events.replay.mockReturnValue({ status: "ok", frames: [], nextCursor: 0 });
+    await expect(
+      service.execute(
+        ids.window,
+        {
+          kind: "create-review-finding",
+          operationId: findingOperation,
+          threadId: ids.thread,
+          checkoutId: ids.checkout,
+          findingId: "51515151-5151-4515-8515-515151515151",
+          fileId: "52525252-5252-4525-8525-525252525252",
+          path: "src/index.ts",
+          fileDigest: "d".repeat(64),
+          location: {
+            kind: "selection",
+            startLine: 4,
+            startColumn: 1,
+            endLine: 4,
+            endColumn: 12,
+          },
+          severity: "warning",
+          summary: "Keep this boundary strict.",
+        } as never,
+        { initiator: "user" },
+      ),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "waiting" } });
 
     approved = true;
     events.replay.mockReturnValue({
