@@ -39,6 +39,7 @@ import {
   type AcpServerNotification,
   type AcpServerRequest,
   type AcpSessionConfigOption,
+  type AcpSessionModelState,
 } from "./acpProtocol";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { type ProviderRuntimeRegistry, trackProviderProcess } from "./providerRuntimeRegistry";
@@ -169,11 +170,19 @@ function providerFailure(profile: AcpProviderProfile, error: unknown): ProviderF
 function normalizeModels(
   profile: AcpProviderProfile,
   options: ReadonlyArray<AcpSessionConfigOption>,
+  models: AcpSessionModelState | undefined,
 ) {
   const model = options.find((option) => option.id === "model");
-  if (model === undefined) return [];
+  // The config option and the session's model state are two ACP spellings of
+  // the same list. Reading only the first reported an agent that speaks the
+  // second as having nothing selectable, which left it unusable in every mode.
+  const selectable =
+    model !== undefined
+      ? model.options.map((item) => ({ value: item.value, name: item.name }))
+      : (models?.availableModels.map((item) => ({ value: item.modelId, name: item.name })) ?? []);
+  if (selectable.length === 0) return [];
   const reasoning = options.find((option) => option.id === profile.reasoningOptionId);
-  return model.options.map((item) => ({
+  return selectable.map((item) => ({
     id: decodeProviderModelId(item.value),
     displayName: item.name,
     source: "discovered" as const,
@@ -196,6 +205,7 @@ function normalizeProbe(
   version: string,
   initialized: AcpConnection["initialized"],
   options: ReadonlyArray<AcpSessionConfigOption>,
+  sessionModels: AcpSessionModelState | undefined,
   observedAt: string,
   credentialStatus?: "stored",
 ): ProviderProbeResult {
@@ -207,7 +217,7 @@ function normalizeProbe(
     initialized.agentCapabilities.sessionCapabilities?.resume !== undefined
       ? ("supported" as const)
       : ("unsupported" as const);
-  const models = normalizeModels(profile, options);
+  const models = normalizeModels(profile, options, sessionModels);
   return decodeProviderProbeResult({
     instanceId,
     readiness: models.length === 0 ? "degraded" : "ready",
@@ -432,6 +442,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           connection.version,
           connection.initialized,
           scratch.configOptions ?? [],
+          scratch.models,
           factories.clock(),
           options.authentication === "api-key" ? "stored" : undefined,
         );

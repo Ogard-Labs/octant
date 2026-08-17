@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpDriver";
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpProviderProfile } from "./acpProfiles";
-import { AcpFailure } from "./acpProtocol";
+import { AcpFailure, type AcpNewSessionResult } from "./acpProtocol";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000311");
@@ -42,7 +42,7 @@ class FakeClient implements AcpClientPort {
   }));
   readonly completeBrowserAuthentication = vi.fn(async () => undefined);
   availableCommands: string[];
-  readonly newSession = vi.fn(async () => {
+  readonly newSession = vi.fn(async (): Promise<AcpNewSessionResult> => {
     this.emitCommands("agent-session-1");
     return { sessionId: "agent-session-1", configOptions: this.configOptions };
   });
@@ -329,6 +329,35 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
     expect(result.capabilities.reasoning).toBe("unavailable");
     expect(result.models.every((model) => model.reasoning === "unavailable")).toBe(true);
+  });
+
+  // ACP lets an agent report its models either as a `model` config option or as
+  // the session's own model state. An agent that only does the latter was read
+  // as having none, so the picker offered nothing and no session could start.
+  it("discovers the models an agent reports as session state rather than a config option", async () => {
+    const { driver, client } = fixture(profile);
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-models");
+      return {
+        sessionId: "agent-session-models",
+        models: {
+          currentModelId: "agent-fast",
+          availableModels: [
+            { modelId: "agent-fast", name: "Agent Fast" },
+            { modelId: "agent-deep", name: "Agent Deep" },
+          ],
+        },
+      };
+    });
+
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(result).toMatchObject({
+      readiness: "ready",
+      models: [
+        { id: "agent-fast", displayName: "Agent Fast", source: "discovered" },
+        { id: "agent-deep", displayName: "Agent Deep", source: "discovered" },
+      ],
+    });
   });
 
   it("reports degraded readiness when ACP exposes no selectable models", async () => {
