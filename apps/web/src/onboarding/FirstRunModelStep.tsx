@@ -35,6 +35,10 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
   const empty = !props.groups.some((group) =>
     group.sections.some((section) => section.models.length > 0),
   );
+  // A provider that answered with no models is not an unready one, and telling
+  // the user to go check readiness would send them after a problem that is not
+  // there. What is missing differs, so the two states say so differently.
+  const listed = props.groups.length > 0;
   const chosen =
     props.selectedProviderInstanceId !== undefined && props.selectedModelId !== undefined;
 
@@ -45,7 +49,9 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
       {empty ? (
         <div className="first-run__notice" data-tone="attention" role="status">
           <p className="first-run__intro">
-            No provider on this Mac is ready, so there is nothing to choose from yet.
+            {listed
+              ? "No provider on this Mac offered a model, so there is nothing to choose from yet."
+              : "No provider on this Mac is ready, so there is nothing to choose from yet."}
           </p>
           <OctantButton onClick={props.onOpenProviderSettings} type="button" variant="ghost">
             Open provider settings

@@ -275,9 +275,11 @@ describe("FirstRunOnboarding", () => {
     await user.click(screen.getByRole("button", { name: /Default model/ }));
 
     // The provider is enabled and answered, so it still gets a picker group.
-    // What decides this step is whether there is a model to choose.
+    // What decides this step is whether there is a model to choose — and the
+    // provider is ready, so saying otherwise would send the user after a
+    // readiness problem that is not there.
     expect(screen.getByRole("status")).toHaveTextContent(
-      "No provider on this Mac is ready, so there is nothing to choose from yet.",
+      "No provider on this Mac offered a model, so there is nothing to choose from yet.",
     );
     expect(screen.queryByRole("listbox")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Open provider settings" }));
@@ -361,6 +363,57 @@ describe("FirstRunOnboarding", () => {
     await user.click(screen.getByRole("button", { name: "Skip for now" }));
 
     await waitFor(() => expect(props.controller.skip).toHaveBeenCalledOnce());
+  });
+
+  it("keeps first run pending when the user clicks again without answering again", async () => {
+    const user = userEvent.setup();
+    const props = mount({ onSelectColorScheme: vi.fn(async () => false) });
+
+    await user.click(screen.getByRole("button", { name: /Workspace/ }));
+    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(props.controller.skip).not.toHaveBeenCalled();
+
+    // The refused answer is gone, so a second click has nothing left to wait
+    // for. Reading that as consent would record the outcome over the answer
+    // the user never got to give again.
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
+    expect(props.controller.skip).not.toHaveBeenCalled();
+  });
+
+  it("waits for an answer given while the first ones are still settling", async () => {
+    const user = userEvent.setup();
+    let acceptScheme!: (accepted: boolean) => void;
+    const onSelectColorScheme = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          acceptScheme = resolve;
+        }),
+    );
+    const onSelectChatDefault = vi.fn(async () => false);
+    const props = mount({
+      chatModelGroups: readyGroups(),
+      onSelectChatDefault,
+      onSelectColorScheme,
+    });
+
+    await user.click(screen.getByRole("button", { name: /Workspace/ }));
+    await user.click(screen.getByRole("radio", { name: "Dark" }));
+    await user.click(screen.getByRole("button", { name: /Navigator/ }));
+    await user.click(screen.getByRole("button", { name: "Start using Octant" }));
+
+    // Only the footer is disabled while this settles, so the rail and the
+    // pickers still answer. A choice made here is written after the wait
+    // started, and completing without it would lose it for good.
+    await user.click(screen.getByRole("button", { name: /Chat/ }));
+    await user.click(screen.getByRole("button", { name: /Default model/ }));
+    await user.click(screen.getByRole("option", { name: /Llama Test/ }));
+    acceptScheme(true);
+
+    await waitFor(() => expect(onSelectChatDefault).toHaveBeenCalledOnce());
+    expect(props.controller.complete).not.toHaveBeenCalled();
   });
 
   it("says what staying without Navigator costs, and lets the user turn it off", async () => {

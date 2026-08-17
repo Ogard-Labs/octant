@@ -100,6 +100,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const [importing, setImporting] = useState(false);
   const [resolving, setResolving] = useState(false);
   const unsettledWrites = useRef<Array<Promise<boolean>>>([]);
+  const answerLost = useRef(false);
   const nameField = useRef<HTMLInputElement>(null);
   const providerAction = useRef<HTMLButtonElement>(null);
   const blocked = controller.blockedMessage !== undefined;
@@ -148,13 +149,24 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
    * all of them landed.
    *
    * The list is drained whether or not they did, so a user who answers again
-   * after a conflict is not held by the write the conflict discarded.
+   * after a conflict is not held by the write the conflict discarded. What a
+   * rejection leaves behind is the refusal itself: only the footer is disabled
+   * while this runs, so a field settled during the wait appends its write
+   * afterwards, and clicking again without answering again must not read the
+   * emptied list as consent. The outcome waits for an answer that is accepted.
    */
   async function settleWrites(): Promise<boolean> {
-    const writes = unsettledWrites.current;
-    unsettledWrites.current = [];
-    const results = await Promise.all(writes);
-    return results.every((accepted) => accepted);
+    let settled = false;
+    let landed = true;
+    while (unsettledWrites.current.length > 0) {
+      const writes = unsettledWrites.current;
+      unsettledWrites.current = [];
+      settled = true;
+      const results = await Promise.all(writes);
+      landed = landed && results.every((accepted) => accepted);
+    }
+    if (settled) answerLost.current = !landed;
+    return !answerLost.current;
   }
 
   /**
