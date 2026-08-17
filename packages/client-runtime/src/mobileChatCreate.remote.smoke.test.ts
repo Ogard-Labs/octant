@@ -120,6 +120,7 @@ describe("mobile chat create over remote session", () => {
             },
             threads: [],
             checkouts: [],
+            activity: [],
           });
         }
         if (method === "POST" && path === "/api/code/board") {
