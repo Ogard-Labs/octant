@@ -11,12 +11,12 @@ import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { LoaderCircle } from "lucide-react";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
+import { useTabActivatedThisSession } from "../shell/TabActivation";
 import { CodeGitPane } from "./CodeGitPane";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import { CodeOverview, type CodeOverviewSurfaceKind } from "./CodeOverview";
 import { CodePullRequestPane } from "./CodePullRequestPane";
 import { CodeReviewPane, type CodeReviewTarget } from "./CodeReviewPane";
-import type { CodeTerminalPaneProps } from "./CodeTerminalPane";
 import { CodeTestPane } from "./CodeTestPane";
 import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
@@ -64,7 +64,6 @@ export interface CodeWorkspaceApprovals {
   readonly git?: React.ComponentProps<typeof CodeGitPane>["requestApproval"];
   readonly pullRequest?: React.ComponentProps<typeof CodePullRequestPane>["requestApproval"];
   readonly review?: React.ComponentProps<typeof CodeReviewPane>["requestApproval"];
-  readonly terminal?: CodeTerminalPaneProps["requestApproval"];
   readonly test?: React.ComponentProps<typeof CodeTestPane>["requestApproval"];
 }
 
@@ -83,12 +82,24 @@ export interface CodeWorkspaceProps {
   readonly onOpenFile?: (relativePath: string) => void;
   /** Re-opens the file projection so the editor can leave a stale revision. */
   readonly onRequestFileRefresh?: () => void;
-  readonly onOpenSurface?: (kind: CodeOverviewSurfaceKind) => void;
+  readonly onOpenSurface?: (
+    kind: CodeOverviewSurfaceKind,
+    options?: { readonly terminalId?: CodeTerminalId },
+  ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly tab: CodeTab;
   readonly canvasClient?: CanvasClient;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /**
+   * Opens a Code thread this workspace started, such as a fork of the one in
+   * view. Absent on a surface with no tab of its own.
+   */
+  readonly onOpenCodeThread?: (
+    threadId: import("@octant/contracts/code").CodeThreadId,
+    title: string,
+    projectId: import("@octant/contracts/projects").ProjectId,
+  ) => void;
   /** Reaches the host's `#thread` mention surface from the Code composer. */
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -128,6 +139,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
+        {...(props.onOpenCodeThread === undefined
+          ? {}
+          : { onOpenCodeThread: props.onOpenCodeThread })}
         {...(props.approvals?.access === undefined
           ? {}
           : { requestFullAccessApproval: props.approvals.access })}
@@ -135,7 +149,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.windowCapability === undefined
           ? {}
           : { windowCapability: props.windowCapability })}
+        {...(props.approvals?.git === undefined ? {} : { requestApproval: props.approvals.git })}
         attachmentClient={props.client}
+        nextUuid={nextUuid}
+        operationClient={props.client}
         threadId={props.tab.threadId}
       />
     );
@@ -180,7 +197,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           {...props}
           nextUuid={nextUuid}
           scope={scope}
-          terminalId={scope.threadId as unknown as CodeTerminalId}
+          // A tab journaled before terminals carried identities of their own
+          // stays bound to the thread's original terminal, so an existing
+          // session reattaches to the same process it had.
+          terminalId={props.tab.terminalId ?? (scope.threadId as unknown as CodeTerminalId)}
           {...(props.projections?.terminal === undefined
             ? {}
             : { terminal: props.projections.terminal })}
@@ -527,6 +547,30 @@ function GitObservationLoading() {
   );
 }
 
+/**
+ * The composer draft with terminal output appended as a fenced block.
+ *
+ * The selection is quoted rather than pasted in as prose: terminal output is
+ * full of characters a model would otherwise read as instructions, and the
+ * fence keeps what the user is asking about separate from what they are asking.
+ *
+ * The fence outruns the longest backtick run in the selection, because a fixed
+ * one closes on any output that prints a fence of its own. Everything after that
+ * line would arrive as the user's own request, which is exactly the confusion
+ * the quoting exists to prevent and the worst case for a full-access provider.
+ */
+export function appendTerminalSelection(draft: string, selection: string): string {
+  const body = selection.replace(/\s+$/, "");
+  const longestRun = [...body.matchAll(/`+/g)].reduce(
+    (longest, match) => Math.max(longest, match[0].length),
+    0,
+  );
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  const block = [fence, body, fence, ""].join("\n");
+  const existing = draft.replace(/\s+$/, "");
+  return existing === "" ? block : `${existing}\n\n${block}`;
+}
+
 function TerminalWorkspaceSurface(
   props: CodeWorkspaceProps & {
     readonly nextUuid: () => string;
@@ -548,6 +592,13 @@ function TerminalWorkspaceSurface(
   );
   const [starting, setStarting] = useState(false);
   const startInFlight = useRef(false);
+  // A tab the person activated, opened, or created in this session opens a
+  // process on first view; they asked for a terminal. A tab that only came
+  // back with a restored layout, and a process that later exited, wait for an
+  // explicit Start instead of launching a shell nobody asked for.
+  const activatedThisSession = useTabActivatedThisSession(props.tab.id);
+  const autoStarted = useRef(false);
+  const startRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     if (props.terminal !== undefined) {
       setTerminal(props.terminal);
@@ -566,6 +617,7 @@ function TerminalWorkspaceSurface(
         refreshTimer = setTimeout(() => void reattach(false), terminalRefreshIntervalMs);
         return;
       }
+      let absent = false;
       try {
         const inspection = await props.client.inspectTerminal({
           terminalId: props.terminalId,
@@ -595,6 +647,7 @@ function TerminalWorkspaceSurface(
           setFailure(result.failure.message);
           return;
         }
+        absent = result.kind === "operation-failed";
       } catch (error) {
         if (active && terminalInspectionFailureCategory(error) !== "unavailable") {
           setFailure(
@@ -602,8 +655,20 @@ function TerminalWorkspaceSurface(
           );
           return;
         }
+        absent = true;
       } finally {
         if (active && initial) setReattaching(false);
+      }
+      if (
+        active &&
+        initial &&
+        absent &&
+        !autoStarted.current &&
+        props.threadPolicy !== "plan" &&
+        activatedThisSession
+      ) {
+        autoStarted.current = true;
+        void startRef.current();
       }
       if (active) {
         refreshTimer = setTimeout(() => void reattach(false), terminalRefreshIntervalMs);
@@ -620,9 +685,42 @@ function TerminalWorkspaceSurface(
     props.nextUuid,
     props.scope.checkoutId,
     props.scope.threadId,
+    props.tab.id,
     props.terminal,
     props.terminalId,
+    props.threadPolicy,
+    activatedThisSession,
   ]);
+
+  const start = async () => {
+    if (startInFlight.current) return;
+    startInFlight.current = true;
+    setStarting(true);
+    const operationId = props.nextUuid() as never;
+    const command = {
+      kind: "start-terminal",
+      operationId,
+      terminalId: props.terminalId,
+      columns: 100,
+      rows: 30,
+      credentialRefs: [],
+      ...props.scope,
+    } as const;
+    setFailure(undefined);
+    try {
+      // Opening a terminal is the user's own act; the host authorizes it as
+      // user-initiated without a prompt (Plan mode still refuses).
+      const result = await props.client.executeOperation(command);
+      if (result.kind === "terminal-state") setTerminal(result);
+      else if (result.kind === "operation-failed") setFailure(result.failure.message);
+    } catch {
+      setFailure("Terminal start or approval failed. Reconnect, verify the checkout, and retry.");
+    } finally {
+      startInFlight.current = false;
+      setStarting(false);
+    }
+  };
+  startRef.current = start;
 
   if (props.checkoutAvailability === "waiting") {
     return (
@@ -664,9 +762,19 @@ function TerminalWorkspaceSurface(
         client={props.client}
         createOperationId={() => props.nextUuid() as never}
         executionPolicy={props.threadPolicy}
-        {...(props.approvals?.terminal === undefined
+        onAddSelectionToChat={(selection) =>
+          props.controller.setPendingDraft(
+            appendTerminalSelection(props.controller.pendingDraft, selection),
+          )
+        }
+        {...(props.onOpenSurface === undefined
           ? {}
-          : { requestApproval: props.approvals.terminal })}
+          : {
+              onOpenAnotherTerminal: () =>
+                props.onOpenSurface?.("code-terminal", {
+                  terminalId: props.nextUuid() as unknown as CodeTerminalId,
+                }),
+            })}
         restart={{
           columns: 100,
           createTerminalId: () => props.terminalId,
@@ -678,42 +786,6 @@ function TerminalWorkspaceSurface(
       />
     );
   }
-  if (decidesCodeEffectsByApproval(props.threadPolicy) && props.approvals?.terminal === undefined) {
-    return <ApprovalUnavailable surface="Terminal" />;
-  }
-  const start = async () => {
-    if (startInFlight.current) return;
-    startInFlight.current = true;
-    setStarting(true);
-    const operationId = props.nextUuid() as never;
-    const command = {
-      kind: "start-terminal",
-      operationId,
-      terminalId: props.terminalId,
-      columns: 100,
-      rows: 30,
-      credentialRefs: [],
-      ...props.scope,
-    } as const;
-    setFailure(undefined);
-    try {
-      if (
-        decidesCodeEffectsByApproval(props.threadPolicy) &&
-        (await props.approvals?.terminal?.({ command })) !== true
-      ) {
-        setFailure("Terminal approval was not granted. Review the checkout state and try again.");
-        return;
-      }
-      const result = await props.client.executeOperation(command);
-      if (result.kind === "terminal-state") setTerminal(result);
-      else if (result.kind === "operation-failed") setFailure(result.failure.message);
-    } catch {
-      setFailure("Terminal start or approval failed. Reconnect, verify the checkout, and retry.");
-    } finally {
-      startInFlight.current = false;
-      setStarting(false);
-    }
-  };
   return (
     <ShellState
       {...(props.threadPolicy === "plan"

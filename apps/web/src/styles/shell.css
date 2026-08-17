@@ -55,6 +55,33 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   pointer-events: none;
 }
 
+.shell.shell-frame.shell--sidebar-collapsed {
+  --octant-rendered-sidebar-width: 0px;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shell--sidebar-collapsed.shell-frame > .window-chrome,
+.shell--sidebar-collapsed.shell-frame > .workspace-layer {
+  grid-column: 1;
+}
+
+.window-chrome__leading {
+  display: flex;
+  flex: 0 0 auto;
+  height: 100%;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  pointer-events: auto;
+}
+
+/* Same reserve the sidebar keeps for the macOS traffic lights (see
+   .sidebar__traffic-light-space); it moves here while the sidebar is hidden. */
+.window-chrome__traffic-light-space {
+  flex: 0 0 76px;
+  height: 100%;
+}
+
 .window-chrome__drag-space {
   align-self: stretch;
   flex: 1 1 auto;
@@ -389,6 +416,45 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 .sidebar-navigation__thread-follow-up[data-indicator="follow-up"]::before {
   content: "◆ ";
+}
+
+/*
+ * New-activity marker. Like the follow-up marker it is distinguished by more
+ * than colour: a leading dot glyph and the visible "New activity" label, so it
+ * stays legible without relying on hue.
+ */
+.sidebar-navigation__thread-unread[data-indicator="unread"] {
+  color: var(--octant-text-primary);
+  border-color: var(--octant-border-strong, var(--octant-border));
+}
+
+.sidebar-navigation__thread-unread[data-indicator="unread"]::before {
+  content: "\25CF ";
+}
+
+.sidebar-navigation__thread-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-navigation__thread-row > .sidebar-navigation__thread {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sidebar-navigation__thread-pin {
+  flex: 0 0 auto;
+  padding: 2px 4px;
+  color: var(--octant-text-muted);
+}
+
+.sidebar-navigation__thread-pin[aria-pressed="true"] {
+  color: var(--octant-text-primary);
+}
+
+.sidebar-navigation__thread-rename {
+  width: 100%;
 }
 
 .sidebar-navigation__thread-filter {

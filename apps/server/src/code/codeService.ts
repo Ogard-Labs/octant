@@ -40,6 +40,9 @@ import {
   type CodeEventFrame,
   type CodeFailure,
   type CodeFileId,
+  type CodeFileChangeNotice,
+  type CodeSearchResult,
+  type CodeSearchScope,
   type CodeFileListingResult,
   type CodeFileOpenResultEnvelope,
   type CodeFileReference,
@@ -76,6 +79,8 @@ import {
   CodeAttachmentTooLarge,
 } from "./codeAttachmentStore";
 import type { CodeFileService, CodeFileOpenResult, CodeFileSaveResult } from "./codeFileService";
+import type { CodeFileWatchService } from "./codeFileWatchService";
+import type { CodeSearchService } from "./codeSearchService";
 import type { FileIdentity } from "./fileOperationPort";
 import {
   approvalContextDigest,
@@ -109,6 +114,14 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "invalid-intent": "Managed Code worktree creation is invalid.",
   "invalid-grant": "Managed Code worktree creation is invalid.",
 };
+
+/**
+ * An authorized watch that has nothing to report, because this host wired no
+ * watcher or the checkout no longer resolves. It ends rather than refuses: the
+ * client keeps its manual refresh instead of treating a missing capability as
+ * lost access.
+ */
+async function* noNotices(): AsyncGenerator<CodeFileChangeNotice> {}
 
 function stripProposedOutcome(
   deliveryTarget: CodeThread["deliveryTarget"],
@@ -328,6 +341,19 @@ export interface CodeServiceOptions {
    * empty list instead of pretending the repository has tests it cannot name.
    */
   readonly tests?: CodeRepositoryTestDiscoveryPort;
+  /**
+   * Live observation of the bound checkout. Optional for the same reason as
+   * `files.list`: a host that wired no watcher ends the stream immediately, so
+   * the renderer keeps its manual refresh instead of waiting on notices that
+   * will never come.
+   */
+  readonly watcher?: Pick<CodeFileWatchService, "watch">;
+  /**
+   * Bounded search of the bound checkout. Optional for the same reason as
+   * `files.list`: a host that wired no searcher answers `unavailable` rather
+   * than an empty result, which would read as "the repository has no match".
+   */
+  readonly searcher?: Pick<CodeSearchService, "search">;
   readonly content: CodeContentStore;
   readonly evidence?: {
     readonly put: (
@@ -395,6 +421,26 @@ export interface CodeListFilesInput {
   readonly signal?: AbortSignal | undefined;
 }
 
+/** One thread with its pin removed, so unpinning erases the field entirely. */
+function withoutPinned(thread: CodeThread): Omit<CodeThread, "pinned"> {
+  const { pinned: _pinned, ...rest } = thread;
+  return rest;
+}
+
+export interface CodeSearchFilesInput {
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: CodeCheckoutId;
+  readonly scope: CodeSearchScope;
+  readonly query: string;
+  readonly signal?: AbortSignal | undefined;
+}
+
+export interface CodeWatchFilesInput {
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: CodeCheckoutId;
+  readonly signal?: AbortSignal | undefined;
+}
+
 export interface CodeListTestsInput {
   readonly threadId: CodeThreadId;
   readonly checkoutId: CodeCheckoutId;
@@ -431,6 +477,14 @@ export class CodeService {
   readonly #roots: CodeFileRootAuthorityPort;
   readonly #files: Pick<CodeFileService, "open" | "save"> & Partial<Pick<CodeFileService, "list">>;
   readonly #tests: CodeRepositoryTestDiscoveryPort | undefined;
+  readonly #watcher: Pick<CodeFileWatchService, "watch"> | undefined;
+  /**
+   * Open file watches, by the window that opened them. A watch is the one Code
+   * read that outlives the request that authorized it, so revoking a window has
+   * to reach the streams it left running rather than only the next reconnect.
+   */
+  readonly #openWatches = new Map<string, Set<AbortController>>();
+  readonly #searcher: Pick<CodeSearchService, "search"> | undefined;
   readonly #content: CodeContentStore;
   readonly #evidence: CodeServiceOptions["evidence"];
   readonly #attachments: CodeServiceOptions["attachments"];
@@ -467,6 +521,8 @@ export class CodeService {
     this.#roots = options.roots;
     this.#files = options.files;
     this.#tests = options.tests;
+    this.#watcher = options.watcher;
+    this.#searcher = options.searcher;
     this.#content = options.content;
     this.#evidence = options.evidence;
     this.#attachments = options.attachments;
@@ -1103,72 +1159,83 @@ export class CodeService {
         }
       }
       const requestedNext = decodeCodeThread(
-        command.kind === "change-code-thread-lifecycle"
-          ? {
-              ...current,
-              lifecycle: command.lifecycle,
-              version: command.expectedVersion + 1,
-              updatedAt,
-            }
-          : command.kind === "change-code-thread-access"
-            ? {
-                ...current,
-                executionPolicy: command.executionPolicy,
-                permissionPersistence: command.permissionPersistence,
+        command.kind === "rename-code-thread"
+          ? { ...current, title: command.title, version: command.expectedVersion + 1, updatedAt }
+          : command.kind === "pin-code-thread"
+            ? // Unpinning drops the field rather than storing `false`, so a
+              // never-pinned thread and an unpinned one are the same record.
+              {
+                ...withoutPinned(current),
+                ...(command.pinned ? { pinned: true } : {}),
                 version: command.expectedVersion + 1,
                 updatedAt,
               }
-            : command.kind === "change-code-thread-provider"
+            : command.kind === "change-code-thread-lifecycle"
               ? {
                   ...current,
-                  providerInstanceId: command.providerInstanceId,
-                  modelId: command.modelId,
-                  providerHandoff: {
-                    previousProviderInstanceId: current.providerInstanceId,
-                    previousModelId: current.modelId,
-                    nextProviderInstanceId: command.providerInstanceId,
-                    nextModelId: command.modelId,
-                    changedAt: updatedAt,
-                  },
+                  lifecycle: command.lifecycle,
                   version: command.expectedVersion + 1,
                   updatedAt,
                 }
-              : command.kind === "propose-code-delivery-outcome"
+              : command.kind === "change-code-thread-access"
                 ? {
                     ...current,
-                    deliveryTarget: {
-                      ...current.deliveryTarget,
-                      proposedOutcome: {
-                        outcomeKind: command.outcomeKind,
-                        ...(command.rationale === undefined
-                          ? {}
-                          : { rationale: command.rationale }),
-                        proposedAt: updatedAt,
-                      },
-                    },
+                    executionPolicy: command.executionPolicy,
+                    permissionPersistence: command.permissionPersistence,
                     version: command.expectedVersion + 1,
                     updatedAt,
                   }
-                : command.kind === "confirm-code-delivery-outcome"
+                : command.kind === "change-code-thread-provider"
                   ? {
                       ...current,
-                      // The user confirms the outcome kind: the Git-level
-                      // delivery fields stay immutable and any pending agent
-                      // proposal is cleared once resolved.
-                      deliveryTarget: {
-                        ...stripProposedOutcome(current.deliveryTarget),
-                        outcomeKind: command.outcomeKind,
-                        confirmedAt: updatedAt,
+                      providerInstanceId: command.providerInstanceId,
+                      modelId: command.modelId,
+                      providerHandoff: {
+                        previousProviderInstanceId: current.providerInstanceId,
+                        previousModelId: current.modelId,
+                        nextProviderInstanceId: command.providerInstanceId,
+                        nextModelId: command.modelId,
+                        changedAt: updatedAt,
                       },
                       version: command.expectedVersion + 1,
                       updatedAt,
                     }
-                  : {
-                      ...current,
-                      workingDirectory: command.workingDirectory,
-                      version: command.expectedVersion + 1,
-                      updatedAt,
-                    },
+                  : command.kind === "propose-code-delivery-outcome"
+                    ? {
+                        ...current,
+                        deliveryTarget: {
+                          ...current.deliveryTarget,
+                          proposedOutcome: {
+                            outcomeKind: command.outcomeKind,
+                            ...(command.rationale === undefined
+                              ? {}
+                              : { rationale: command.rationale }),
+                            proposedAt: updatedAt,
+                          },
+                        },
+                        version: command.expectedVersion + 1,
+                        updatedAt,
+                      }
+                    : command.kind === "confirm-code-delivery-outcome"
+                      ? {
+                          ...current,
+                          // The user confirms the outcome kind: the Git-level
+                          // delivery fields stay immutable and any pending agent
+                          // proposal is cleared once resolved.
+                          deliveryTarget: {
+                            ...stripProposedOutcome(current.deliveryTarget),
+                            outcomeKind: command.outcomeKind,
+                            confirmedAt: updatedAt,
+                          },
+                          version: command.expectedVersion + 1,
+                          updatedAt,
+                        }
+                      : {
+                          ...current,
+                          workingDirectory: command.workingDirectory,
+                          version: command.expectedVersion + 1,
+                          updatedAt,
+                        },
       );
       const next =
         command.kind === "change-code-thread-access" &&
@@ -1457,6 +1524,126 @@ export class CodeService {
       ...(input.directory === undefined ? {} : { directory: input.directory }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
+  }
+
+  /**
+   * Search the checkout bound to a Code thread by path or by content.
+   *
+   * Search is a read under the same checkout authority the listing uses, so
+   * every posture including Plan may run one. The searcher owns confinement
+   * and every bound; this method owns only the authority and the root.
+   */
+  async searchFiles(
+    authenticatedWindowId: WindowId,
+    input: CodeSearchFilesInput,
+  ): Promise<CodeSearchResult> {
+    const authorized = await this.#authorizeCheckoutRead(
+      authenticatedWindowId,
+      input.threadId,
+      input.checkoutId,
+      "Code search is unauthorized.",
+    );
+    const searcher = this.#searcher;
+    if (searcher === undefined) {
+      return {
+        status: "failed",
+        failure: { category: "unavailable", message: "Code search is unavailable." },
+      };
+    }
+    const root = await this.#roots.resolve(
+      authenticatedWindowId,
+      authorized.effectiveThread,
+      authorized.checkout,
+      CODE_LISTING_ROOT_PROBE_PATH,
+    );
+    if (root === undefined) {
+      return {
+        status: "failed",
+        failure: { category: "unavailable", message: "Code file authority is unavailable." },
+      };
+    }
+    return await searcher.search({
+      threadId: authorized.thread.id,
+      checkoutId: authorized.checkout.id,
+      rootPath: root.rootPath,
+      scope: input.scope,
+      query: input.query,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+  }
+
+  /**
+   * Watch the checkout bound to a Code thread for changes.
+   *
+   * Authority is resolved once, before the subscription exists, through the
+   * same checkout read the listing uses, and the stream is then registered
+   * against the window that opened it so `revokeWindow` ends it. A watch
+   * therefore cannot outlive its grant, rather than only being refused on the
+   * next reconnect. The notices carry paths only; every refetch they provoke is
+   * authorized again.
+   *
+   * The authorization is awaited before the stream exists rather than inside a
+   * generator body, which does not run until its first `next()`. A refusal has
+   * to reach the caller while it can still become a status code; deferred, it
+   * would arrive as a stream that opened and immediately closed, which reads
+   * as a dropped watch and gets retried instead of shown.
+   */
+  async watchFiles(
+    authenticatedWindowId: WindowId,
+    input: CodeWatchFilesInput,
+  ): Promise<AsyncIterable<CodeFileChangeNotice>> {
+    const authorized = await this.#authorizeCheckoutRead(
+      authenticatedWindowId,
+      input.threadId,
+      input.checkoutId,
+      "Code file watching is unauthorized.",
+    );
+    const watcher = this.#watcher;
+    if (watcher === undefined) return noNotices();
+    const root = await this.#roots.resolve(
+      authenticatedWindowId,
+      authorized.effectiveThread,
+      authorized.checkout,
+      CODE_LISTING_ROOT_PROBE_PATH,
+    );
+    if (root === undefined) return noNotices();
+    const revocation = new AbortController();
+    const abort = () => revocation.abort();
+    input.signal?.addEventListener("abort", abort, { once: true });
+    if (input.signal?.aborted === true) revocation.abort();
+    const open = this.#openWatches.get(String(authenticatedWindowId)) ?? new Set();
+    open.add(revocation);
+    this.#openWatches.set(String(authenticatedWindowId), open);
+    const notices = watcher.watch({
+      threadId: authorized.thread.id,
+      checkoutId: authorized.checkout.id,
+      rootPath: root.rootPath,
+      signal: revocation.signal,
+    });
+    const openWatches = this.#openWatches;
+    const windowKey = String(authenticatedWindowId);
+    return (async function* () {
+      try {
+        yield* notices;
+      } finally {
+        input.signal?.removeEventListener("abort", abort);
+        const remaining = openWatches.get(windowKey);
+        remaining?.delete(revocation);
+        if (remaining?.size === 0) openWatches.delete(windowKey);
+      }
+    })();
+  }
+
+  /**
+   * End every file watch a window left open. Called when its capability is
+   * revoked, so a retained connection cannot keep reporting repository paths
+   * after the authority that opened it is gone.
+   */
+  revokeWindow(windowId: WindowId): void {
+    const open = this.#openWatches.get(String(windowId));
+    if (open === undefined) return;
+    this.#openWatches.delete(String(windowId));
+    for (const controller of open) controller.abort();
   }
 
   /**

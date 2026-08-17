@@ -54,6 +54,7 @@ const settings = {
   lastContextSurface: "project-memory",
   sidebarMaterial: "system",
   modeSwitcherPresentation: "dropdown",
+  projectViewSwitcherPresentation: "dropdown",
   sidebarBackground: {
     kind: "none",
     overlayColor: "#1a1a1c",
@@ -153,6 +154,17 @@ describe("shell bootstrap contracts", () => {
     );
     expect(decodeShellSettings(settings).modeSwitcherPresentation).toBe("dropdown");
     expect(() => decodeShellSettings({ ...settings, modeSwitcherPresentation: "tabs" })).toThrow();
+    const { projectViewSwitcherPresentation: _omitted, ...withoutProjectViewSwitcher } = settings;
+    expect(decodeShellSettings(withoutProjectViewSwitcher).projectViewSwitcherPresentation).toBe(
+      "dropdown",
+    );
+    expect(
+      decodeShellSettings({ ...settings, projectViewSwitcherPresentation: "inline" })
+        .projectViewSwitcherPresentation,
+    ).toBe("inline");
+    expect(() =>
+      decodeShellSettings({ ...settings, projectViewSwitcherPresentation: "tabs" }),
+    ).toThrow();
     expect(() => decodeShellSettings({ ...settings, future: true })).toThrow();
   });
 

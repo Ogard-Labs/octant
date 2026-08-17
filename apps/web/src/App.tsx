@@ -193,6 +193,7 @@ import { ContextTabWarning } from "./context/ContextTabWarning";
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { useCodeController } from "./code/useCodeController";
+import { CodeSearchDialog } from "./code/CodeSearchDialog";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
 import { CodeThreadBoard } from "./code/CodeThreadBoard";
 import type { ZenClient } from "@octant/client-runtime/zen-client";
@@ -685,6 +686,24 @@ function LaunchedShell(
   const [dockSurface, setDockSurface] = useState<RightUtilityDockSurfaceId>();
   const [dockProjectId, setDockProjectId] = useState<ProjectId>();
   const [previewSidebarWidth, setPreviewSidebarWidth] = useState<number>();
+  // Presentation-only: whether the person hid the navigation sidebar. Kept in
+  // local storage so a reload does not surprise them with it back.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => readSidebarCollapsed(globalThis));
+  // Toggling unmounts the button that was activated, so a keyboard user would
+  // otherwise be dropped on the document body. Remember which control replaces
+  // it and focus that one once the new layout has rendered.
+  const sidebarToggleFocusRef = useRef<"Hide sidebar" | "Show sidebar" | undefined>(undefined);
+  const setSidebarCollapsedPersistent = useCallback((collapsed: boolean) => {
+    sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
+    setSidebarCollapsed(collapsed);
+    writeSidebarCollapsed(globalThis, collapsed);
+  }, []);
+  useLayoutEffect(() => {
+    const label = sidebarToggleFocusRef.current;
+    if (label === undefined) return;
+    sidebarToggleFocusRef.current = undefined;
+    document.querySelector<HTMLElement>(`button[aria-label="${label}"]`)?.focus();
+  }, [sidebarCollapsed]);
   const [previewContextWidth, setPreviewContextWidth] = useState<number>();
   const [pendingCodeDeepLink, setPendingCodeDeepLink] = useState<CodeDeepLink>();
   const [computerUseSessionRepresentationCounts, setComputerUseSessionRepresentationCounts] =
@@ -2060,6 +2079,8 @@ function LaunchedShell(
           projectId: String(thread.projectId),
           meta: thread.lifecycle,
           ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
+          ...(thread.unread === undefined ? {} : { unread: thread.unread }),
+          ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
           ...(thread.updatedAt === undefined ? {} : { updatedAt: thread.updatedAt }),
         }))
       : [];
@@ -3181,6 +3202,9 @@ function LaunchedShell(
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             isNarrow={isNarrow}
             material={material}
+            {...(sidebarCollapsed && !isNarrow
+              ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
+              : {})}
             onOpenZen={() => void zen.enterZen()}
             onRecoverZen={() => void zen.recoverZen()}
             onResetLayout={controller.resetActiveLayout}
@@ -3198,6 +3222,7 @@ function LaunchedShell(
           void controller.updateSettings({ sidebarWidth: width });
         }}
         onPreviewSidebarWidth={setPreviewSidebarWidth}
+        sidebarCollapsed={sidebarCollapsed && !isNarrow}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         sidebar={
           <ShellSidebar
@@ -3260,6 +3285,7 @@ function LaunchedShell(
               : {})}
             onAddFolder={() => setCreateOpen(true)}
             onOpenSearch={openThreadSearch}
+            {...(isNarrow ? {} : { onCollapseSidebar: () => setSidebarCollapsedPersistent(true) })}
             onOpenSettings={controller.openSettings}
             onRetryChat={() => void chatController.retry()}
             onSelectMode={handleSelectMode}
@@ -3281,7 +3307,14 @@ function LaunchedShell(
                 </div>
               ) : (
                 <ProjectSidebarSection
-                  {...(activeMode === "code" ? { projectViewsEnabled: true } : {})}
+                  {...(activeMode === "code"
+                    ? {
+                        projectViewsEnabled: true,
+                        projectViewSwitcherPresentation: (
+                          presentedShellSettings ?? controller.settings
+                        ).projectViewSwitcherPresentation,
+                      }
+                    : {})}
                   activityMode={activeMode}
                   {...(activeProjectId === undefined ? {} : { activeProjectId })}
                   {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
@@ -3478,6 +3511,7 @@ function LaunchedShell(
                   hostId={createHostId}
                   hidden={railPlaceholder !== undefined || codeBoardOpen || automationCenterVisible}
                   onActivate={controller.activateTab}
+                  tabActivation={controller.tabActivation}
                   onClearFocus={controller.clearFocus}
                   onClose={controller.closeTab}
                   onCommitResize={controller.commitSplitResize}
@@ -3556,8 +3590,17 @@ function LaunchedShell(
                   onToggleCanvasPin={(groupId, tab) => {
                     if (tab.kind === "canvas") void controller.toggleCanvasTabPin(groupId, tab);
                   }}
-                  onOpenCodeSurface={(kind, threadId, title) =>
-                    void controller.openCodeSurface({ kind, threadId, title })
+                  onOpenCodeSurface={(kind, threadId, title, terminalId) =>
+                    void controller.openCodeSurface(
+                      kind === "code-terminal"
+                        ? {
+                            kind,
+                            threadId,
+                            title,
+                            ...(terminalId === undefined ? {} : { terminalId }),
+                          }
+                        : { kind, threadId, title },
+                    )
                   }
                   onPreviewResize={controller.previewSplitResize}
                   onReorder={controller.reorderTab}
@@ -3888,6 +3931,27 @@ function LaunchedShell(
         {/* One palette for the window. Zen is a deliberate full-surface focus
           mode, so the chord stays inert while it is active. */}
         {zen.active ? null : <CommandPalette />}
+        {/* One quick-open for the window, scoped to the Code thread currently
+          in view. Mounting it per tab would make one chord open a dialog for
+          every split pane at once. */}
+        {zen.active || codeController.activeView === undefined ? null : (
+          <CodeSearchDialog
+            checkoutId={codeController.activeView.checkout.id}
+            onOpenFile={(relativePath) => {
+              void controller.openCodeSurface({
+                kind: "code-file",
+                threadId: codeController.activeView!.thread.id,
+                title: relativePath,
+                relativePath,
+              });
+            }}
+            {...(props.launch.serverUrl === undefined ? {} : { serverUrl: props.launch.serverUrl })}
+            {...(props.projectWindowCapability === undefined
+              ? {}
+              : { windowCapability: props.projectWindowCapability })}
+            threadId={codeController.activeView.thread.id}
+          />
+        )}
         <FirstRunOnboarding
           controller={firstRunController}
           readiness={firstRunReadiness}
@@ -4220,4 +4284,23 @@ export function launchFromLocation(href: string): ShellLaunch | undefined {
 
 function isProjectWindowCapability(value: string | undefined): value is string {
   return value !== undefined && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
+
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "octant.shell.sidebar-collapsed.v1";
+
+function readSidebarCollapsed(scope: { readonly localStorage?: Storage }): boolean {
+  try {
+    return scope.localStorage?.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function writeSidebarCollapsed(scope: { readonly localStorage?: Storage }, collapsed: boolean) {
+  try {
+    if (collapsed) scope.localStorage?.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, "true");
+    else scope.localStorage?.removeItem(SIDEBAR_COLLAPSED_STORAGE_KEY);
+  } catch {
+    // Presentation persistence is best-effort.
+  }
 }

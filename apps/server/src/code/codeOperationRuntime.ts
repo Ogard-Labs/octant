@@ -9,6 +9,7 @@ import {
   decodeCodeOperationCommand,
   decodeCodeRelativePath,
   decodeCodeReviewFindingId,
+  decodeProviderSessionId,
   type CodeCheckoutIdentity,
   type AppleActionRequest,
   type CodeOperationCommand,
@@ -20,6 +21,7 @@ import {
   type CodeOperationApprovalConfirmation,
   type CodeEvidenceContentId,
   type CodeOperationEvent,
+  type CodeOperationEventFrame,
   type CodeOperationId,
   type CodeOperationResult,
   type CodeThread,
@@ -33,7 +35,11 @@ import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/dr
 import type { Journal } from "../persistence/journal";
 import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
-import { GitObservationPort, type GitObservationResult } from "./gitObservationPort";
+import {
+  GitObservationPort,
+  type GitObservationResult,
+  type GitScopedDiffResult,
+} from "./gitObservationPort";
 import { GitService } from "./gitService";
 import { CodeOperationEventStore } from "./codeOperationEventStore";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
@@ -47,6 +53,7 @@ import {
   CodeOperationServiceError,
   type CodeOperationAuthorityPort,
   type CodeOperationEvidencePort,
+  type CodeOperationExecuteOptions,
   type CodeOperationGitPort,
   type CodeOperationPullRequestPort,
   type CodeOperationServiceOptions,
@@ -64,6 +71,7 @@ import {
 import { TerminalProcessPort } from "./terminalProcessPort";
 import { TerminalService } from "./terminalService";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
+import { boundedDiff, draftGitText, type CodeGitDraftResult } from "./codeGitDraftService";
 import { CodeTurnRunner, type CodeTurnEvent, type CodeTurnOutcome } from "./codeTurnRunner";
 import { createCodeAppManagedTools, type CodeAppManagedToolsOptions } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -122,10 +130,19 @@ export interface CodeOperationRuntimeOptions {
    * the instance it already built for the listing surface.
    */
   readonly repositoryTestDiscovery?: Pick<RepositoryTestDiscoveryService, "discover">;
-  readonly gitObservationPort?: Pick<GitObservationPort, "observe">;
+  readonly gitObservationPort?: Pick<GitObservationPort, "observe"> &
+    Partial<Pick<GitObservationPort, "readDiff">>;
   readonly gitMutationPort?: Pick<
     GitMutationPort,
-    "stage" | "discard" | "commit" | "push" | "revertCommit"
+    | "stage"
+    | "unstage"
+    | "discard"
+    | "commit"
+    | "push"
+    | "revertCommit"
+    | "snapshotWorkingTree"
+    | "restoreWorkingTree"
+    | "releaseCheckpoint"
   >;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   /**
@@ -143,10 +160,15 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
+  readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
 }
 
 export interface CodeOperationRuntime {
-  execute(windowId: WindowId, command: unknown): Promise<CodeOperationResult>;
+  execute(
+    windowId: WindowId,
+    command: unknown,
+    options?: CodeOperationExecuteOptions,
+  ): Promise<CodeOperationResult>;
   inspectTerminal(
     windowId: WindowId,
     input: import("@octant/contracts").CodeTerminalInspectionRequest,
@@ -291,7 +313,14 @@ export function createCodeOperationRuntime(
   const observation = options.gitObservationPort ?? new GitObservationPort();
   const mutation = options.gitMutationPort ?? new GitMutationPort();
   const gitService = new GitService(observation, mutation);
-  const git = codeOperationGitPort(gitService);
+  const git = {
+    ...codeOperationGitPort(gitService),
+    draft: (input: {
+      readonly thread: CodeThread;
+      readonly checkoutRoot: string;
+      readonly purpose: "commit-message" | "pull-request";
+    }) => draftDeliveryText(options, gitService, input),
+  } satisfies CodeOperationGitPort;
   const pullRequests = options.pullRequestPort ?? createPullRequestPort(options);
   const reviewFindings = new ReviewFindingService({
     persistence: options.persistence,
@@ -326,6 +355,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveThreadMentionContext === undefined
       ? {}
       : { resolveThreadMentionContext: options.resolveThreadMentionContext }),
+    ...(options.resolveForkHandoff === undefined
+      ? {}
+      : { resolveForkHandoff: options.resolveForkHandoff }),
   });
   turns.bindService(service);
 
@@ -425,11 +457,11 @@ export function createCodeOperationRuntime(
       });
     },
     revokeApprovals: (windowId) => approvalStore?.revokeWindow(windowId),
-    execute: async (windowId, rawCommand) => {
+    execute: async (windowId, rawCommand, options) => {
       const command = decodeCodeOperationCommand(rawCommand);
       if (command.kind === "start-provider-turn") turns.noteStart(command);
       try {
-        const result = await service.execute(windowId, command);
+        const result = await service.execute(windowId, command, options);
         if (
           command.kind === "start-provider-turn" &&
           result.kind === "provider-turn-state" &&
@@ -456,7 +488,12 @@ export function createCodeOperationRuntime(
       if (!(await options.windowAccess.canAccessProject(windowId, thread.projectId))) {
         throw new CodeOperationServiceError("unauthorized");
       }
-      return events.conversation({ threadId, afterCursor, limit });
+      return events.conversation({
+        threadId,
+        afterCursor,
+        limit,
+        providerInstanceId: thread.providerInstanceId,
+      });
     },
     readEvidence: async (windowId, threadId, operationId, contentId) => {
       try {
@@ -624,6 +661,23 @@ function approvalPrompt(
       case "stage-git":
         message = "Allow Code stage operation?";
         effectDetail = command.paths.join("\n");
+        break;
+      case "unstage-git":
+        message = "Allow Code unstage operation?";
+        effectDetail = `These files leave the index:\n${command.paths.join("\n")}`;
+        break;
+      case "restore-git-checkpoint":
+        message = "Restore the checkout to this checkpoint?";
+        // The one Git effect that destroys work the user never staged, so the
+        // prompt names what is at risk before naming the point restored to.
+        effectDetail = [
+          "Uncommitted work not saved in this checkpoint is overwritten.",
+          `Worktree: ${command.checkpoint.worktree}`,
+          `Index: ${command.checkpoint.index}`,
+          ...(command.checkpoint.head === undefined
+            ? ["HEAD: no commits"]
+            : [`HEAD: ${command.checkpoint.head}`]),
+        ].join("\n");
         break;
       case "discard-git-changes":
         message = "Discard uncommitted changes?";
@@ -1115,6 +1169,17 @@ function normalizedOperationEvent(
       kind: "usage",
       inputTokens: event.inputTokens ?? 0,
       outputTokens: event.outputTokens ?? 0,
+      ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+    };
+  if (event.category === "provider-limit" && event.text !== undefined)
+    return {
+      kind: "provider-limit",
+      window: event.text,
+      status: (event.status ?? "allowed") as "allowed" | "warning" | "exhausted",
+      ...(event.utilization === undefined ? {} : { utilization: event.utilization }),
+      ...(event.resetsAt === undefined
+        ? {}
+        : { resetsAt: event.resetsAt as CodeOperationEventFrame["occurredAt"] }),
     };
   if (event.category === "task-progress")
     return {
@@ -1218,7 +1283,90 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
         })),
       }),
     push: (input) => git.push(input),
+    unstage: (input) => git.unstage(input),
+    checkpoint: (input) => git.checkpoint(input),
+    restoreCheckpoint: (input) => git.restoreCheckpoint(input),
   } as CodeOperationGitPort;
+}
+
+/**
+ * Draft delivery text from the change the checkout already shows.
+ *
+ * The diff is read here rather than trusted from the renderer, so the model
+ * only ever sees what this host observed. A checkout with nothing to describe,
+ * or a thread whose provider cannot be resolved, reports unavailable instead
+ * of asking a model to invent a message.
+ */
+async function draftDeliveryText(
+  options: CodeOperationRuntimeOptions,
+  git: GitService,
+  input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly purpose: "commit-message" | "pull-request";
+  },
+): Promise<CodeGitDraftResult> {
+  const observed = await git.observe(input.checkoutRoot);
+  if (observed.status !== "ready") return { status: "unavailable" };
+  // Each purpose gets the changes it is actually about. The working-tree diff
+  // is neither: it would let a commit message describe unstaged work that the
+  // commit will not carry, and it would call a branch whose changes are already
+  // committed empty.
+  const scoped = await readDraftDiff(git, observed, input);
+  if (scoped.status !== "ready" || scoped.paths.length === 0) return { status: "unavailable" };
+  if (scoped.diff.text.trim().length === 0) return { status: "unavailable" };
+  const driver = await options.resolveProviderDriver(input.thread);
+  if (driver === undefined) return { status: "unavailable" };
+  const diff = boundedDiff(scoped.diff.text);
+  const paths = scoped.paths;
+  return draftGitText(
+    {
+      driver,
+      instanceId: input.thread.providerInstanceId,
+      modelId: input.thread.modelId,
+      sessionId: options.uuid() as ReturnType<typeof decodeProviderSessionId>,
+      projectRoot: input.checkoutRoot,
+    },
+    {
+      purpose: input.purpose,
+      ...(observed.head.branch.kind === "named" ? { branch: observed.head.branch.name } : {}),
+      diff: diff.text,
+      diffTruncated: diff.truncated || scoped.diff.truncated,
+      paths,
+    },
+  );
+}
+
+/**
+ * The slice of the checkout each kind of draft describes.
+ *
+ * A commit describes the index. A pull request describes what the branch has
+ * committed since it left its base, which is why the base is tried as a
+ * remote-tracking ref first and as a local branch second: the remote's copy is
+ * what the pull request will actually be opened against, and the local branch
+ * is the honest fallback on a checkout that has never fetched.
+ */
+async function readDraftDiff(
+  git: GitService,
+  observed: Extract<GitObservationResult, { readonly status: "ready" }>,
+  input: {
+    readonly thread: CodeThread;
+    readonly checkoutRoot: string;
+    readonly purpose: "commit-message" | "pull-request";
+  },
+): Promise<GitScopedDiffResult> {
+  const checkoutRoot = observed.checkoutRoot;
+  if (input.purpose === "commit-message")
+    return await git.readDiff({ checkoutRoot, scope: { kind: "staged" } });
+  const target = input.thread.deliveryTarget;
+  for (const baseRef of [
+    `${target.remoteName}/${target.proposedBaseBranch}`,
+    target.proposedBaseBranch,
+  ]) {
+    const result = await git.readDiff({ checkoutRoot, scope: { kind: "branch", baseRef } });
+    if (result.status === "ready") return result;
+  }
+  return { status: "unavailable" };
 }
 
 function mapGitObservation(

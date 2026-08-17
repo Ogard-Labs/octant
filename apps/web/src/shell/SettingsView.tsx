@@ -53,6 +53,7 @@ import {
   settingId,
 } from "../settings/registry";
 import { octantSettingsRegistry } from "../settings/octantSettingsRegistry";
+import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
 import { SettingRow } from "../settings/primitives";
 import { SettingsSearchResults } from "../settings/SettingsSearchResults";
@@ -525,6 +526,15 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
           onCheckedChange={(checked) => props.onSettingsChange({ workEnabled: checked })}
         />
       </SettingRow>
+      <SettingRow
+        description="The chords that reach Octant's global surfaces on this machine."
+        focused={focusedSetting === settingId("keybindings")}
+        label="Keyboard shortcuts"
+        scope="app"
+        settingId="keybindings"
+      >
+        <KeybindingSettings />
+      </SettingRow>
     </section>
   );
 }
@@ -618,6 +628,30 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
           >
             <option value="buttons">Compact buttons</option>
             <option value="dropdown">Dropdown</option>
+          </OctantNativeSelect>
+        </SettingRow>
+      ) : null}
+      {isAvailable("project-view-switcher") ? (
+        <SettingRow
+          description="How the Code sidebar offers saved project views."
+          focused={focusedSetting === settingId("project-view-switcher")}
+          label="Project view switcher"
+          scope="app"
+          settingId="project-view-switcher"
+        >
+          <OctantNativeSelect
+            aria-label="Project view switcher"
+            className="settings-view__select"
+            onChange={(event) =>
+              props.onSettingsChange({
+                projectViewSwitcherPresentation: event.currentTarget
+                  .value as ShellSettings["projectViewSwitcherPresentation"],
+              })
+            }
+            value={props.settings.projectViewSwitcherPresentation}
+          >
+            <option value="dropdown">Dropdown</option>
+            <option value="inline">Icon buttons</option>
           </OctantNativeSelect>
         </SettingRow>
       ) : null}

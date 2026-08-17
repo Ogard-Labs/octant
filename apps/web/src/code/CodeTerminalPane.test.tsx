@@ -62,17 +62,15 @@ describe("CodeTerminalPane", () => {
     expect(client.executeOperation).not.toHaveBeenCalled();
   });
 
-  it("keeps an approved running terminal interactive without re-prompting for input or resize", async () => {
+  it("keeps a running terminal interactive for input and resize", async () => {
     const client = codeClient({ evidence: "ready" });
     const runtime = xtermRuntime();
-    const requestApproval = vi.fn(async () => false);
     render(
       <CodeTerminalPane
         client={client}
         createOperationId={() => ids.operation as never}
         executionPolicy="approval-gated"
         loadRuntime={runtime.loadRuntime}
-        requestApproval={requestApproval}
         result={terminalResult}
         scope={scope}
       />,
@@ -81,7 +79,6 @@ describe("CodeTerminalPane", () => {
     runtime.options?.onData("pwd\r");
     runtime.options?.onResize(120, 40);
     await waitFor(() => expect(client.executeOperation).toHaveBeenCalledTimes(2));
-    expect(requestApproval).not.toHaveBeenCalled();
   });
 
   it("keeps the terminal adapter mounted when an authoritative resize result arrives", async () => {
@@ -418,9 +415,73 @@ describe("CodeTerminalPane", () => {
       }),
     );
   });
+
+  it("adds the text selected in the terminal to the chat, fenced", async () => {
+    const onAddSelectionToChat = vi.fn();
+    const runtime = xtermRuntime("error: missing token\n");
+    render(
+      <CodeTerminalPane
+        client={codeClient({ evidence: "ready" })}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={runtime.loadRuntime}
+        onAddSelectionToChat={onAddSelectionToChat}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    await waitFor(() => expect(runtime.options).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Add selection to chat" }));
+
+    expect(onAddSelectionToChat).toHaveBeenCalledWith("error: missing token\n");
+  });
+
+  it("says nothing is selected instead of adding an empty block to the chat", async () => {
+    const onAddSelectionToChat = vi.fn();
+    const runtime = xtermRuntime("   ");
+    render(
+      <CodeTerminalPane
+        client={codeClient({ evidence: "ready" })}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={runtime.loadRuntime}
+        onAddSelectionToChat={onAddSelectionToChat}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    await waitFor(() => expect(runtime.options).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: "Add selection to chat" }));
+
+    expect(onAddSelectionToChat).not.toHaveBeenCalled();
+    expect(await screen.findByRole("status")).toHaveTextContent(/Select terminal output first/i);
+  });
+
+  it("opens another terminal without disturbing this one", async () => {
+    const onOpenAnotherTerminal = vi.fn();
+    const client = codeClient({ evidence: "ready" });
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={xtermRuntime().loadRuntime}
+        onOpenAnotherTerminal={onOpenAnotherTerminal}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "New terminal" }));
+
+    expect(onOpenAnotherTerminal).toHaveBeenCalledTimes(1);
+    expect(client.executeOperation).not.toHaveBeenCalled();
+  });
 });
 
-function xtermRuntime() {
+function xtermRuntime(selection = "") {
   let options: Parameters<XtermAdapterRuntime["mount"]>[1] | undefined;
   const setOutput = vi.fn();
   const loadRuntime = vi.fn(
@@ -430,6 +491,7 @@ function xtermRuntime() {
         return {
           dispose: vi.fn(),
           focus: vi.fn(),
+          readSelection: () => selection,
           setInteractive: vi.fn(),
           setOutput,
         };

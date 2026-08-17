@@ -8,6 +8,7 @@ import { ProjectId } from "./projects";
 import {
   ProviderInstanceId,
   ProviderModelId,
+  ProviderModelOptionValues,
   ProviderResumeCursor,
   ProviderSessionId,
 } from "./providers";
@@ -231,6 +232,13 @@ export const ChatThread = Schema.Struct({
   lifecycle: Schema.Literal("active", "archived", "deleting", "deleted"),
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
+  /**
+   * Chosen values for options the selected model declares (effort, reasoning,
+   * speed tier). Absent or empty means provider defaults. The server keeps only
+   * values valid for the current model and hands them to the provider harness
+   * on session start.
+   */
+  modelOptionValues: Schema.optional(ProviderModelOptionValues),
   researchEnabled: Schema.Boolean,
   researchRouting: ChatResearchRouting,
   personalityInstructions: Schema.NonEmptyTrimmedString,
@@ -308,11 +316,19 @@ export const ChangeChatThreadLifecycleCommand = Schema.Struct({
   lifecycle: Schema.Literal("active", "archived"),
 }).annotations(strict);
 
+/**
+ * Selects the thread's provider/model and, optionally, its model option values.
+ * When `modelOptionValues` is present it replaces the thread's values and every
+ * entry must name an option and value the selected model declares; when it is
+ * absent the server carries over the current values that still apply to the
+ * selected model and drops the rest.
+ */
 export const ChangeChatProviderCommand = Schema.Struct({
   kind: Schema.Literal("change-chat-provider"),
   ...ChatThreadCommandFields,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,
+  modelOptionValues: Schema.optional(ProviderModelOptionValues),
 }).annotations(strict);
 
 /**

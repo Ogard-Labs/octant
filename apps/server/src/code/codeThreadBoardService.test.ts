@@ -9,6 +9,7 @@ import {
   type CodeBoardCard,
   type CodeBoardQuery,
   type CodeDeliveryOutcomeKind,
+  type CodeRuntimeWork,
   type CodeThread,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
@@ -19,6 +20,7 @@ import {
   type CodeThreadOperationHistory,
 } from "./codeThreadMetadataService";
 import {
+  boardRuntimeActivityFromWorks,
   CodeThreadBoardService,
   type CodeBoardRuntimeActivity,
   type CodeBoardThread,
@@ -328,5 +330,106 @@ describe("CodeThreadBoardService filters", () => {
     expect(only.cards.map((card) => card.threadId)).toEqual([ids.done]);
     const excluded = await board.query(decodeCodeBoardQuery({ version: 1, followUp: "excluded" }));
     expect(excluded.cards.map((card) => card.threadId)).toEqual([ids.ready]);
+  });
+});
+
+describe("boardRuntimeActivityFromWorks", () => {
+  const work = (
+    kind: CodeRuntimeWork["kind"],
+    state: CodeRuntimeWork["state"],
+    updatedAt: string,
+  ): CodeRuntimeWork =>
+    ({
+      id: `${kind}-${updatedAt}`,
+      threadId: ids.done,
+      kind,
+      state,
+      updatedAt,
+    }) as never;
+
+  it("ignores restart-frozen tool work and superseded turns", () => {
+    // A restart marked an old terminal and test run interrupted because their
+    // processes are gone, and the previous turn's wait was superseded by a
+    // newer completed turn. Nothing here still needs the person.
+    expect(
+      boardRuntimeActivityFromWorks([
+        work("terminal", "interrupted", "2026-07-22T09:00:00.000Z"),
+        work("test", "interrupted", "2026-07-22T09:01:00.000Z"),
+        work("provider-turn", "interrupted", "2026-07-22T09:02:00.000Z"),
+        work("provider-turn", "completed", "2026-07-22T09:30:00.000Z"),
+      ]),
+    ).toEqual({ executing: false, waiting: false });
+  });
+
+  it("ignores a superseded provider turn still frozen in running or waiting", () => {
+    // A newer turn finished; whatever state the older row was frozen in, it no
+    // longer speaks for the thread.
+    for (const stale of ["running", "waiting", "ambiguous"] as const) {
+      expect(
+        boardRuntimeActivityFromWorks([
+          work("provider-turn", stale, "2026-07-22T09:00:00.000Z"),
+          work("provider-turn", "completed", "2026-07-22T09:30:00.000Z"),
+        ]),
+      ).toEqual({ executing: false, waiting: false });
+    }
+  });
+
+  it("breaks a same-millisecond turn tie toward the turn that still owes something", () => {
+    const tie = "2026-07-22T09:00:00.000Z";
+    const settled = { ...work("provider-turn", "completed", tie), id: "turn-z" } as CodeRuntimeWork;
+    const running = { ...work("provider-turn", "running", tie), id: "turn-a" } as CodeRuntimeWork;
+
+    // Records written in the same millisecond carry no chronology, so the
+    // answer must not depend on which one the projection returns first.
+    for (const order of [
+      [settled, running],
+      [running, settled],
+    ]) {
+      expect(boardRuntimeActivityFromWorks(order)).toEqual({ executing: true, waiting: false });
+    }
+  });
+
+  it("keeps the thread Waiting for the latest interrupted provider turn", () => {
+    expect(
+      boardRuntimeActivityFromWorks([
+        work("provider-turn", "completed", "2026-07-22T09:00:00.000Z"),
+        work("provider-turn", "interrupted", "2026-07-22T09:30:00.000Z"),
+      ]),
+    ).toEqual({
+      executing: false,
+      waiting: true,
+      blockingReason: "The last agent turn was interrupted.",
+    });
+  });
+
+  it("preserves an authoritative wait from every runtime work kind", () => {
+    // Git, delivery, review, and file work that genuinely reports `waiting` or
+    // `ambiguous` still owes the person a decision, even though the thread's
+    // latest provider turn has finished.
+    for (const kind of ["git", "delivery", "review", "file"] as const) {
+      expect(
+        boardRuntimeActivityFromWorks([
+          work("provider-turn", "completed", "2026-07-22T09:30:00.000Z"),
+          work(kind, "waiting", "2026-07-22T09:10:00.000Z"),
+        ]),
+      ).toEqual({
+        executing: false,
+        waiting: true,
+        blockingReason: "Runtime work is waiting for a decision or input.",
+      });
+    }
+
+    expect(
+      boardRuntimeActivityFromWorks([work("test", "ambiguous", "2026-07-22T09:10:00.000Z")]),
+    ).toMatchObject({ executing: false, waiting: true });
+  });
+
+  it("reports executing work without a blocking reason", () => {
+    expect(
+      boardRuntimeActivityFromWorks([
+        work("provider-turn", "interrupted", "2026-07-22T09:00:00.000Z"),
+        work("terminal", "running", "2026-07-22T09:30:00.000Z"),
+      ]),
+    ).toEqual({ executing: true, waiting: true });
   });
 });

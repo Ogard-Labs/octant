@@ -7,12 +7,12 @@
  *   3. Launch Electron pointed at it via `OCTANT_WEB_URL`.
  *
  * The desktop shell spawns the server from source, so server edits only need
- * an app relaunch. Renderer edits hot-reload. Only `apps/desktop/src` edits
- * need `bun run --cwd apps/desktop build` (this script runs it once when the
- * bundle is missing).
+ * an app relaunch. Renderer edits hot-reload. `apps/desktop/src` edits are
+ * bundled here on launch whenever a source file is newer than the bundle, so a
+ * relaunch always runs the desktop code that is checked out.
  */
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -34,8 +34,22 @@ process.on("SIGINT", () => shutdown(130));
 process.on("SIGTERM", () => shutdown(143));
 
 const desktopBundle = resolve(root, "apps/desktop/dist/main.mjs");
-if (!existsSync(desktopBundle)) {
-  console.log("[dev] building desktop shell once (apps/desktop/dist missing)…");
+const desktopSource = resolve(root, "apps/desktop/src");
+
+function newestModifiedAt(directory: string): number {
+  let newest = 0;
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    const modifiedAt = entry.isDirectory() ? newestModifiedAt(path) : statSync(path).mtimeMs;
+    if (modifiedAt > newest) newest = modifiedAt;
+  }
+  return newest;
+}
+
+const desktopBundleStale =
+  !existsSync(desktopBundle) || statSync(desktopBundle).mtimeMs < newestModifiedAt(desktopSource);
+if (desktopBundleStale) {
+  console.log("[dev] building desktop shell (apps/desktop/src is newer than the bundle)…");
   const build = Bun.spawnSync(["bun", "run", "--cwd", "apps/desktop", "build"], {
     cwd: root,
     stdio: ["inherit", "inherit", "inherit"],

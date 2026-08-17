@@ -644,6 +644,27 @@ export const ProviderModelOption = Schema.Union(
 );
 export type ProviderModelOption = typeof ProviderModelOption.Type;
 
+export const MAX_PROVIDER_MODEL_OPTION_VALUES = 16;
+const ProviderModelOptionKey = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+
+/**
+ * A user's chosen value per declared model option (e.g. `effort`,
+ * `reasoning`, `service-tier`), keyed by `ProviderModelOption.id`. Absent keys
+ * mean the provider default. Only values the selected model actually declares
+ * are meaningful; the server validates against the current catalog.
+ */
+export const ProviderModelOptionValues = Schema.Record({
+  key: ProviderModelOptionKey,
+  value: ProviderModelOptionKey,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((values) => Object.keys(values).length <= MAX_PROVIDER_MODEL_OPTION_VALUES, {
+      message: () => `At most ${MAX_PROVIDER_MODEL_OPTION_VALUES} model option values`,
+    }),
+  );
+export type ProviderModelOptionValues = typeof ProviderModelOptionValues.Type;
+
 const ProviderModelFields = {
   id: ProviderModelId,
   displayName: Schema.NonEmptyTrimmedString,
@@ -1143,6 +1164,13 @@ export const ProviderRuntimeEvent = Schema.Union(
     cacheReadInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
     cacheWriteInputTokens: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
     providerExecutionDurationMs: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
+    /**
+     * What the provider says this turn cost, in US dollars. Only ever the
+     * provider's own figure: Octant holds no price list and never multiplies
+     * tokens by a rate it guessed, so a provider that reports no cost leaves
+     * this absent rather than showing an invented number.
+     */
+    costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -1154,6 +1182,25 @@ export const ProviderRuntimeEvent = Schema.Union(
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("diff"),
     diff: Schema.NonEmptyString,
+  }).annotations(strict),
+  /**
+   * How much of a provider's usage window this account has spent.
+   *
+   * Providers that meter by rolling window (a five-hour and a weekly one, for
+   * example) say so during a turn. Passing it through is what lets a thread
+   * warn before the window closes instead of the user meeting the limit as a
+   * failed turn. `window` is the provider's own name for the window, kept
+   * verbatim because only the provider defines what it covers.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("rate-limit-window"),
+    window: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+    status: Schema.Literal("allowed", "warning", "exhausted"),
+    /** Share of the window spent, 0 to 1. Absent when the provider gives none. */
+    utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+    /** When the window next resets. Absent when the provider gives none. */
+    resetsAt: Schema.optional(UtcTimestamp),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
@@ -1256,6 +1303,7 @@ export const decodeProviderDefaultsUpdated = Schema.decodeUnknownSync(ProviderDe
 export const decodeProviderCatalogSnapshot = Schema.decodeUnknownSync(ProviderCatalogSnapshot);
 export const decodeProviderCatalogUpdated = Schema.decodeUnknownSync(ProviderCatalogUpdated);
 export const decodeProviderModelOption = Schema.decodeUnknownSync(ProviderModelOption);
+export const decodeProviderModelOptionValues = Schema.decodeUnknownSync(ProviderModelOptionValues);
 export const decodeProviderModel = Schema.decodeUnknownSync(ProviderModel);
 export const decodeProviderCapabilities = Schema.decodeUnknownSync(ProviderCapabilities);
 export const decodeProviderObservedState = Schema.decodeUnknownSync(ProviderObservedState);

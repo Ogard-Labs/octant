@@ -180,17 +180,13 @@ function normalizeModels(
     verification: "verified" as const,
     reasoning: reasoning === undefined ? ("unavailable" as const) : ("supported" as const),
     inputModalities: textOnlyInputModalities,
-    options:
-      reasoning === undefined
-        ? []
-        : [
-            {
-              id: profile.reasoningOptionId,
-              displayName: reasoning.name,
-              kind: "selection" as const,
-              values: reasoning.options.map((item) => item.value) as [string, ...string[]],
-            },
-          ],
+    // The agent reasons, and that capability is reported above. Choosing how
+    // hard is a different claim: this driver starts sessions with `model` and
+    // `mode` only and never sends `modelOptionValues` back, so declaring a
+    // selectable option would put a control in the composer that saves the
+    // user's choice and silently drops it on the next turn. Declaring nothing
+    // is the honest report until the value reaches the session.
+    options: [],
   }));
 }
 

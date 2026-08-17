@@ -342,6 +342,40 @@ function CreatePullRequest(
   const [body, setBody] = useState("");
   const [result, setResult] = useState<PullRequestResult>();
   const [failure, setFailure] = useState<string>();
+  const [suggesting, setSuggesting] = useState(false);
+
+  /**
+   * Ask the thread's provider to describe the branch's change. Reading a diff
+   * and writing prose changes nothing, so this needs no approval; opening the
+   * pull request stays a separate, deliberate action on edited text.
+   */
+  const suggest = async () => {
+    setFailure(undefined);
+    setSuggesting(true);
+    try {
+      const draft = await props.client.executeOperation({
+        kind: "draft-git-text",
+        operationId: props.createOperationId(),
+        purpose: "pull-request",
+        ...props.scope,
+      });
+      if (draft.kind === "operation-failed") setFailure(draft.failure.message);
+      else if (
+        draft.kind !== "git-draft-state" ||
+        draft.state !== "completed" ||
+        draft.title === undefined
+      )
+        setFailure("No pull request text was drafted. Write it yourself.");
+      else {
+        setTitle(draft.title);
+        if (draft.body !== undefined) setBody(draft.body);
+      }
+    } catch {
+      setFailure("Drafting pull request text failed. Write it yourself.");
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const create = async () => {
     try {
@@ -412,6 +446,14 @@ function CreatePullRequest(
             Pull request body
             <OctantTextarea value={body} onChange={(event) => setBody(event.target.value)} />
           </label>
+          <OctantButton
+            disabled={suggesting}
+            onClick={() => void suggest()}
+            type="button"
+            variant="ghost"
+          >
+            {suggesting ? "Drafting…" : "Suggest title and description"}
+          </OctantButton>
           <OctantButton
             disabled={title.trim().length === 0}
             onClick={() => void create()}

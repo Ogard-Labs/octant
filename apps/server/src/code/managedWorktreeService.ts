@@ -78,6 +78,15 @@ export interface ManagedWorktreeGitPort {
     input: Readonly<{ repositoryRoot: string; targetPath: string }>,
     signal: AbortSignal,
   ): Promise<Readonly<{ status: "removed" | "rejected" }>>;
+  /**
+   * Drop the checkpoint anchors of a checkout that is gone. The anchors live in
+   * the repository's shared ref store, not in the worktree, so removing the
+   * worktree does not take them with it.
+   */
+  removeCheckpointRefs(
+    input: Readonly<{ repositoryRoot: string; checkoutId: string }>,
+    signal: AbortSignal,
+  ): Promise<void>;
 }
 
 export interface ManagedWorktreeAuthorityPort {
@@ -512,6 +521,7 @@ export class ManagedWorktreeService {
         return { status: "interrupted" };
       }
       if (removed.status !== "removed") return { status: "waiting" };
+      await this.#releaseCheckpoints(observation.repositoryRoot, receipt.checkoutId, signal);
     }
     try {
       await this.#receipts.transition(receiptId, "removed");
@@ -519,6 +529,27 @@ export class ManagedWorktreeService {
       return { status: "interrupted" };
     }
     return { status: "removed" };
+  }
+
+  /**
+   * Retire the checkpoint anchors of a checkout that has just been removed.
+   *
+   * Best effort, and deliberately after the removal rather than before it: a
+   * removal that gets refused leaves the checkout alive, and its checkpoints
+   * have to stay restorable. Anchors that survive this cost disk in a
+   * repository the user still has; failing an otherwise complete cleanup over
+   * them would leave a worktree the user asked to be rid of.
+   */
+  async #releaseCheckpoints(
+    repositoryRoot: string,
+    checkoutId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      await this.#git.removeCheckpointRefs({ repositoryRoot, checkoutId }, signal);
+    } catch {
+      // Nothing the caller can act on: the checkout is already gone.
+    }
   }
 
   async #resumeCreation(
@@ -693,6 +724,7 @@ export class ManagedWorktreeService {
     } catch {
       return { status: "interrupted", receipt };
     }
+    await this.#releaseCheckpoints(observation.repositoryRoot, receipt.checkoutId, signal);
 
     let confirmation: RepositoryIdentityObservation;
     try {

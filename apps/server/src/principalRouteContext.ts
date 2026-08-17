@@ -74,13 +74,16 @@ export function resolvePrincipalRouteContext(
 }
 
 /**
- * Compatibility helper for existing services that still accept a WindowId.
- * The identity has already been resolved by the shared principal context; the
- * helper only exposes its opaque service scope to the legacy service seam.
+ * Resolve one route context, translating principal failures into the window
+ * authority error shape that existing route handlers already catch. Routes
+ * that must distinguish a person at a local window from a paired remote device
+ * read `principal.kind` from the returned context.
  */
-export function authenticateRouteWindowId(input: ResolvePrincipalRouteContextInput): WindowId {
+export function authenticateRoutePrincipal(
+  input: ResolvePrincipalRouteContextInput,
+): PrincipalRouteContext {
   try {
-    return resolvePrincipalRouteContext(input).scopeId;
+    return resolvePrincipalRouteContext(input);
   } catch (error) {
     if (error instanceof ClientPrincipalError) {
       throw new WindowAuthorityError(
@@ -94,6 +97,15 @@ export function authenticateRouteWindowId(input: ResolvePrincipalRouteContextInp
     }
     throw error;
   }
+}
+
+/**
+ * Compatibility helper for existing services that still accept a WindowId.
+ * The identity has already been resolved by the shared principal context; the
+ * helper only exposes its opaque service scope to the legacy service seam.
+ */
+export function authenticateRouteWindowId(input: ResolvePrincipalRouteContextInput): WindowId {
+  return authenticateRoutePrincipal(input).scopeId;
 }
 
 function makeContext(

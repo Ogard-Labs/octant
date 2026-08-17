@@ -559,6 +559,71 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("forwards only declared reasoning and service tier selections to thread/start", async () => {
+    const f = fixture();
+    const registry = new ProviderRuntimeRegistry();
+    const driver = makeCodexDriver(f.options({ runtimeRegistry: registry }));
+    // A fresh server with no Settings check behind it: the probe Chat runs
+    // before the turn is what publishes the catalog the driver validates
+    // option values against. Nothing else installs an observed state here.
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const acquired = await acquireConnection(driver);
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        modelOptionValues: { reasoning: "low", "service-tier": "fast", effort: "high" },
+      }),
+    );
+    // "medium" is not a reasoning level this model advertised; "slow" is not
+    // one of its tiers. Neither may reach Codex.
+    await Effect.runPromise(
+      acquired.connection.start({
+        sessionId: secondSessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        modelOptionValues: { reasoning: "medium", "service-tier": "slow" },
+      }),
+    );
+    const starts = f.calls.filter(({ method }) => method === "thread/start");
+    expect(starts[0]?.input).toEqual({
+      cwd: projectRoot,
+      model: "gpt-5.4",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      serviceTier: "fast",
+      config: { model_reasoning_effort: "low" },
+    });
+    expect(starts[1]?.input).toEqual({
+      cwd: projectRoot,
+      model: "gpt-5.4",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+    });
+    await acquired.close();
+  });
+
+  it("fails a start that declares option values instead of dropping them without a catalog", async () => {
+    const f = fixture();
+    const registry = new ProviderRuntimeRegistry();
+    const acquired = await acquireConnection(
+      makeCodexDriver(f.options({ runtimeRegistry: registry })),
+    );
+    const exit = await Effect.runPromiseExit(
+      acquired.connection.start({
+        sessionId,
+        modelId: "gpt-5.4" as never,
+        executionPolicy: "approval-gated",
+        modelOptionValues: { reasoning: "low" },
+      }),
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("invalid-configuration");
+    expect(f.calls.filter(({ method }) => method === "thread/start")).toHaveLength(0);
+    await acquired.close();
+  });
+
   it("starts a thread with root/model/policy, subscribes before a text turn, and interrupts exact IDs", async () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));

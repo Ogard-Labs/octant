@@ -49,10 +49,8 @@ describe("native Code workspace approvals", () => {
       credentialRefs: [],
     } as never;
     expect(await approvals?.git?.(terminal)).toBe(approvalId);
-    expect(await approvals?.terminal?.({ command: terminal })).toBe(true);
     expect(await approvals?.pullRequest?.(terminal)).toBe(approvalId);
     expect(requestCodeOperationApproval.mock.calls).toEqual([
-      [{ effect: { kind: "operation", command: terminal } }],
       [{ effect: { kind: "operation", command: terminal } }],
       [{ effect: { kind: "operation", command: terminal } }],
     ]);

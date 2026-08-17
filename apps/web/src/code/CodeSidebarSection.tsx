@@ -1,15 +1,22 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Pin, PinOff } from "lucide-react";
 import type { CodeThreadNavigationItem } from "./useCodeController";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 
 export interface CodeSidebarSectionProps {
   readonly activeThreadId?: string;
   readonly onSelectThread: (threadId: string) => void;
   readonly threads: ReadonlyArray<CodeThreadNavigationItem>;
+  /** Absent when the host cannot accept a rename, which hides the affordance. */
+  readonly onRenameThread?: (threadId: string, title: string) => void;
+  /** Absent when the host cannot accept a pin, which hides the affordance. */
+  readonly onPinThread?: (threadId: string, pinned: boolean) => void;
 }
 
 export function CodeSidebarSection(props: CodeSidebarSectionProps) {
   const [followUpOnly, setFollowUpOnly] = useState(false);
+  const [renamingThreadId, setRenamingThreadId] = useState<string>();
   if (props.threads.length === 0) {
     return <p className="project-nav__status">No Code threads in this Project.</p>;
   }
@@ -32,36 +39,141 @@ export function CodeSidebarSection(props: CodeSidebarSectionProps) {
       {visible.length === 0 ? (
         <p className="project-nav__status">No Code threads need follow-up.</p>
       ) : null}
-      {visible.map((thread) => (
-        <OctantButton
-          aria-current={props.activeThreadId === String(thread.threadId) ? "page" : undefined}
-          className="sidebar-navigation__thread"
-          data-code-lifecycle={thread.lifecycle}
-          data-execution-policy={thread.executionPolicy}
-          data-follow-up={
-            thread.followUp === undefined ? undefined : thread.followUp ? "true" : "false"
-          }
-          data-thread-id={thread.threadId}
-          key={thread.threadId}
-          onClick={() => props.onSelectThread(String(thread.threadId))}
-          type="button"
-          variant="ghost"
-        >
-          <span className="sidebar-navigation__thread-title">{thread.title}</span>
-          <span className="sidebar-navigation__thread-meta">
-            {lifecycleLabel(thread.lifecycle)}
-          </span>
-          <span className="sidebar-navigation__thread-meta">
-            {policyLabel(thread.executionPolicy)}
-          </span>
-          {thread.followUp ? (
-            <span className="sidebar-navigation__thread-follow-up" data-indicator="follow-up">
-              Follow-up
-            </span>
-          ) : null}
-        </OctantButton>
-      ))}
+      {visible.map((thread) => {
+        const threadId = String(thread.threadId);
+        if (props.onRenameThread !== undefined && renamingThreadId === threadId) {
+          return (
+            <ThreadRename
+              key={threadId}
+              onCancel={() => setRenamingThreadId(undefined)}
+              onRename={(title) => {
+                setRenamingThreadId(undefined);
+                props.onRenameThread?.(threadId, title);
+              }}
+              title={thread.title}
+            />
+          );
+        }
+        return (
+          <div className="sidebar-navigation__thread-row" key={threadId}>
+            <OctantButton
+              aria-current={props.activeThreadId === threadId ? "page" : undefined}
+              className="sidebar-navigation__thread"
+              data-code-lifecycle={thread.lifecycle}
+              data-execution-policy={thread.executionPolicy}
+              data-follow-up={
+                thread.followUp === undefined ? undefined : thread.followUp ? "true" : "false"
+              }
+              data-pinned={thread.pinned === true ? "true" : undefined}
+              data-thread-id={thread.threadId}
+              // Renaming from the keyboard needs no pointer; F2 is the platform
+              // convention and the double-click is the pointer equivalent.
+              onDoubleClick={() => setRenamingThreadId(threadId)}
+              onKeyDown={(event) => {
+                if (event.key !== "F2" || props.onRenameThread === undefined) return;
+                event.preventDefault();
+                setRenamingThreadId(threadId);
+              }}
+              onClick={() => props.onSelectThread(threadId)}
+              type="button"
+              variant="ghost"
+            >
+              <span className="sidebar-navigation__thread-title">{thread.title}</span>
+              <span className="sidebar-navigation__thread-meta">
+                {lifecycleLabel(thread.lifecycle)}
+              </span>
+              <span className="sidebar-navigation__thread-meta">
+                {policyLabel(thread.executionPolicy)}
+              </span>
+              {thread.pinned === true ? (
+                <span className="sidebar-navigation__thread-meta" data-indicator="pinned">
+                  Pinned
+                </span>
+              ) : null}
+              {/* Stated in words, not by a coloured dot alone, so the mark
+                survives a reader who cannot see the colour. */}
+              {thread.unread === true ? (
+                <span className="sidebar-navigation__thread-unread" data-indicator="unread">
+                  New activity
+                </span>
+              ) : null}
+              {thread.followUp ? (
+                <span className="sidebar-navigation__thread-follow-up" data-indicator="follow-up">
+                  Follow-up
+                </span>
+              ) : null}
+            </OctantButton>
+            {props.onPinThread === undefined ? null : (
+              <OctantButton
+                aria-label={
+                  thread.pinned === true ? `Unpin ${thread.title}` : `Pin ${thread.title}`
+                }
+                aria-pressed={thread.pinned === true}
+                className="sidebar-navigation__thread-pin"
+                onClick={() => props.onPinThread?.(threadId, thread.pinned !== true)}
+                type="button"
+                variant="ghost"
+              >
+                {thread.pinned === true ? (
+                  <PinOff aria-hidden="true" size={13} strokeWidth={1.8} />
+                ) : (
+                  <Pin aria-hidden="true" size={13} strokeWidth={1.8} />
+                )}
+              </OctantButton>
+            )}
+          </div>
+        );
+      })}
     </nav>
+  );
+}
+
+/**
+ * The rename field for one thread.
+ *
+ * Enter commits and Escape abandons, and a blank title is abandoned rather than
+ * committed — a thread with no name is harder to find than one still carrying
+ * the name Octant gave it.
+ */
+function ThreadRename(props: {
+  readonly title: string;
+  readonly onRename: (title: string) => void;
+  readonly onCancel: () => void;
+}) {
+  const [value, setValue] = useState(props.title);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    inputRef.current?.select();
+  }, []);
+  const commit = (): void => {
+    const next = value.trim();
+    if (next === "" || next === props.title) {
+      props.onCancel();
+      return;
+    }
+    props.onRename(next);
+  };
+  return (
+    <OctantInput
+      aria-label="Rename Code thread"
+      autoFocus
+      className="sidebar-navigation__thread-rename"
+      onBlur={commit}
+      onChange={(event) => setValue(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+          return;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          props.onCancel();
+        }
+      }}
+      ref={inputRef}
+      value={value}
+    />
   );
 }
 

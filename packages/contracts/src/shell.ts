@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { AppleProjectPath } from "./appleToolchain";
 import { ChatThreadId } from "./chat";
-import { CodeRelativePath, CodeTestRunId, CodeThreadId } from "./code";
+import { CodeRelativePath, CodeTerminalId, CodeTestRunId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
 import { BrowserContextId, BrowserThreadId } from "./browserAutomation";
 import { AggregateVersion } from "./events";
@@ -106,6 +106,10 @@ export type SplitRatio = typeof SplitRatio.Type;
 
 export const ModeSwitcherPresentation = Schema.Literal("buttons", "dropdown");
 export type ModeSwitcherPresentation = typeof ModeSwitcherPresentation.Type;
+
+/** How the Code sidebar offers its saved project views: a dropdown or inline icon buttons. */
+export const ProjectViewSwitcherPresentation = Schema.Literal("dropdown", "inline");
+export type ProjectViewSwitcherPresentation = typeof ProjectViewSwitcherPresentation.Type;
 
 export const EnvironmentPresentation = Schema.Literal("floating", "pinned", "hidden");
 export type EnvironmentPresentation = typeof EnvironmentPresentation.Type;
@@ -218,6 +222,9 @@ export const ShellSettings = Schema.Struct({
   lastContextSurface: Schema.NullOr(ContextSurfaceId),
   sidebarMaterial: Schema.Literal("system", "opaque"),
   modeSwitcherPresentation: ModeSwitcherPresentation,
+  projectViewSwitcherPresentation: Schema.optionalWith(ProjectViewSwitcherPresentation, {
+    default: () => "dropdown" as const,
+  }),
   sidebarBackground: Schema.optionalWith(SidebarBackground, {
     default: () => DEFAULT_SIDEBAR_BACKGROUND,
   }),
@@ -317,7 +324,17 @@ const CodeDiffWorkspaceTab = Schema.Struct({
 const codeThreadSurface = <K extends string>(kind: K) =>
   Schema.Struct({ kind: Schema.Literal(kind), ...CodeWorkspaceTabFields }).annotations(strict);
 
-const CodeTerminalWorkspaceTab = codeThreadSurface("code-terminal");
+const CodeTerminalWorkspaceTab = Schema.Struct({
+  kind: Schema.Literal("code-terminal"),
+  ...CodeWorkspaceTabFields,
+  /**
+   * The one terminal process this tab shows. Each tab carries its own identity
+   * so a second terminal is a second shell rather than a second view of the
+   * first. Absent for a tab journaled before terminals had identities of their
+   * own, which stays bound to the thread's original terminal.
+   */
+  terminalId: Schema.optional(CodeTerminalId),
+}).annotations(strict);
 const CodeTestWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("code-test"),
   ...CodeWorkspaceTabFields,

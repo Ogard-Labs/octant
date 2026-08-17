@@ -844,6 +844,7 @@ describe("ShellProjection", () => {
         // A store persisted before Navigator shipped decodes to the empty
         // section: both roles absent, so Navigator reports unconfigured.
         navigatorAssistant: {},
+        projectViewSwitcherPresentation: "dropdown",
       },
       aggregateVersion: 1,
     });
@@ -934,6 +935,7 @@ describe("ShellProjection", () => {
         // A store persisted before Navigator shipped decodes to the empty
         // section: both roles absent, so Navigator reports unconfigured.
         navigatorAssistant: {},
+        projectViewSwitcherPresentation: "dropdown",
       },
       aggregateVersion: 1,
     });

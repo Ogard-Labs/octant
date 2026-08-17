@@ -718,13 +718,36 @@ function boundedWheelDelta(value: number): number {
 }
 
 function surfaceBounds(element: HTMLElement) {
-  const rect = element.getBoundingClientRect();
-  return {
-    x: Math.max(0, Math.round(rect.left)),
-    y: Math.max(36, Math.round(rect.top)),
-    width: Math.max(1, Math.round(Math.min(rect.width, window.innerWidth - rect.left))),
-    height: Math.max(1, Math.round(Math.min(rect.height, window.innerHeight - rect.top))),
-  };
+  return boundsInsideViewport(
+    element.getBoundingClientRect(),
+    window.innerWidth,
+    window.innerHeight,
+  );
+}
+
+/**
+ * Integer bounds for the native surface that never leave the window: the
+ * host refuses a view whose edge lies outside its content area, and rounding
+ * each side independently can push the right or bottom edge one pixel past it.
+ * The top stays below the traffic-light strip the host reserves.
+ */
+export function boundsInsideViewport(
+  rect: {
+    readonly left: number;
+    readonly top: number;
+    readonly right: number;
+    readonly bottom: number;
+  },
+  viewportWidth: number,
+  viewportHeight: number,
+) {
+  const maxRight = Math.max(1, Math.floor(viewportWidth));
+  const maxBottom = Math.max(37, Math.floor(viewportHeight));
+  const x = Math.min(Math.max(0, Math.floor(rect.left)), maxRight - 1);
+  const y = Math.min(Math.max(36, Math.floor(rect.top)), maxBottom - 1);
+  const right = Math.min(Math.max(x + 1, Math.floor(rect.right)), maxRight);
+  const bottom = Math.min(Math.max(y + 1, Math.floor(rect.bottom)), maxBottom);
+  return { x, y, width: right - x, height: bottom - y };
 }
 
 function normalizeBrowserUrl(value: string): string {

@@ -155,7 +155,11 @@ flowchart LR
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a
   migration runs. Restart integration tests prove replay per feature.
-- **Recovery.** Sequence-based reconnect replay for local clients, crash-safe
+- **Recovery.** Sequence-based reconnect replay for local and remote clients —
+  a dropped stream catches up from the authoritative snapshot before it reopens,
+  keeps retrying while the host is unreachable, and a remote session whose window
+  closed during sleep is renewed from the device key rather than re-paired —
+  crash-safe
   append, explicit terminal reasons for turns, tools, terminals, and subagents,
   preservation of partial provider output, and recovery of outstanding
   approvals and user-input requests after restart.
@@ -302,8 +306,11 @@ bun run verify     # wiring:check, fmt:check, lint, typecheck, test, build
 ```
 
 - `bun run dev` starts Vite for `apps/web` and launches Electron against it.
-  Renderer edits hot-reload; server edits apply on the next relaunch;
-  `apps/desktop/src` edits need `bun run --cwd apps/desktop build`.
+  Renderer edits hot-reload; server edits apply on the next relaunch. On
+  startup the dev script rebuilds `apps/desktop/dist/main.mjs` whenever
+  `apps/desktop/src` is newer, so `apps/desktop/src` edits need only a
+  restart of `bun run dev` rather than a manual
+  `bun run --cwd apps/desktop build`.
 - A headless host: `bun --cwd packages/cli src/bin.ts server run`, then
   `bun --cwd packages/cli src/bin.ts web` (or `web --dev` for Vite).
 - Focused checks: `bun run --filter <package> test|typecheck`; the store can be

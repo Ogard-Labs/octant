@@ -13,7 +13,9 @@ export type CodeOperation =
   | "terminal"
   | "test"
   | "stage"
+  | "unstage"
   | "discard"
+  | "restore-checkpoint"
   | "commit"
   | "push"
   | "create-pr"
@@ -42,9 +44,10 @@ export interface CodePolicyInput {
   /**
    * Who is asking. `agent` (default) is a provider acting on the user's
    * behalf and is what the approval-gated posture exists to gate. `user` is
-   * the local person acting directly (e.g. saving in the editor): their own
-   * action is the approval, so a plain edit needs no further prompt. Plan
-   * mode stays read-only for both.
+   * the local person acting directly (e.g. saving in the editor, opening a
+   * repository terminal): their own action is the approval, so a plain edit
+   * or their own confined shell needs no further prompt. Plan mode stays
+   * read-only for both.
    */
   readonly initiator?: "agent" | "user";
   /** When present, irreversible classes on tainted threads require fresh confirmation. */
@@ -63,6 +66,9 @@ export function approvalClassForCodeOperation(
   switch (operation) {
     case "edit":
     case "stage":
+    // Unstaging only moves paths out of the index; the files keep every
+    // change they had, so it sits with the ordinary writes.
+    case "unstage":
     case "commit":
       return "project-file-writes";
     case "terminal":
@@ -71,6 +77,10 @@ export function approvalClassForCodeOperation(
     // Discarding uncommitted work destroys content no commit can restore, so
     // it sits with push and merge rather than with the writes it undoes.
     case "discard":
+    // Restoring a checkpoint overwrites current files with older ones. The
+    // host records what it replaced, but the replacement itself is a wholesale
+    // overwrite of the checkout and is gated as one.
+    case "restore-checkpoint":
     case "push":
     case "create-pr":
     case "merge-pr":
@@ -94,6 +104,20 @@ export function approvalClassForCodeOperation(
  */
 export function decidesCodeEffectsByApproval(posture: ProviderExecutionPolicy): boolean {
   return posture === "approval-gated" || posture === "auto-accept-edits";
+}
+
+/**
+ * Whether a turn under this posture may leave the repository different than it
+ * found it.
+ *
+ * Plan is read-only, and read-only is a promise about the repository, not only
+ * about the working tree: a host that records a restore point by writing trees
+ * into the object database has still written to a repository the user was told
+ * nothing would be written to. Ask this before any preparatory write, not only
+ * before the effects a provider requests.
+ */
+export function mayWriteToRepository(posture: ProviderExecutionPolicy): boolean {
+  return posture !== "plan";
 }
 
 function standingGrantForPosture(posture: ProviderExecutionPolicy): StandingApprovalGrant {
@@ -154,7 +178,12 @@ function authorizeCodeOperationBase(input: CodePolicyInput): CodePolicyDecision 
 
   if (input.operation === "read") return { decision: "allow" };
   if (input.posture === "plan") return { decision: "deny" };
-  if (input.initiator === "user" && input.operation === "edit") return { decision: "allow" };
+  if (
+    input.initiator === "user" &&
+    (input.operation === "edit" || input.operation === "terminal")
+  ) {
+    return { decision: "allow" };
+  }
   // Auto-accept edits covers project file writes and nothing else: shell,
   // tests, and every Git effect keep prompting exactly as approval-gated does.
   if (input.posture === "auto-accept-edits" && input.operation === "edit") {

@@ -14,6 +14,7 @@ export interface ShellFrameProps {
   readonly onCommitSidebarWidth: (width: number) => void;
   readonly onPreviewSidebarWidth: (width: number) => void;
   readonly sidebar: ReactNode;
+  readonly sidebarCollapsed?: boolean;
   readonly sidebarResizable: boolean;
   readonly sidebarVibrancyMode?: SidebarVibrancyMode;
   readonly sidebarWidth: number;
@@ -66,7 +67,7 @@ export function ShellFrame(props: ShellFrameProps) {
         <div
           className={`shell shell-frame shell--material-${props.material}${
             props.wideContextOpen ? " shell--wide-context-open" : ""
-          }`}
+          }${props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""}`}
           data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
           style={
             {
@@ -76,8 +77,8 @@ export function ShellFrame(props: ShellFrameProps) {
           }
         >
           {props.chrome}
-          {props.sidebar}
-          {props.sidebarResizable ? (
+          {props.sidebarCollapsed ? null : props.sidebar}
+          {props.sidebarResizable && !props.sidebarCollapsed ? (
             <ShellResizeHandle
               accessibleName="Resize navigation sidebar"
               className="shell-frame__sidebar-resize window-no-drag"

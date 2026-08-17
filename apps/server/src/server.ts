@@ -33,6 +33,8 @@ import {
   type CanvasRefreshRequest,
   type CanvasRefreshSkill,
   type CapacityReservationId,
+  type CodeOperationId,
+  type CodeThreadForkOrigin,
   type CodeThreadId,
   type WorkThreadId,
 } from "@octant/contracts";
@@ -107,6 +109,8 @@ import { CodeEvidenceStore } from "./code/codeEvidenceStore";
 import { CodeAttachmentStore } from "./code/codeAttachmentStore";
 import { CodeFileService } from "./code/codeFileService";
 import { CodeFileListingService } from "./code/codeFileListingService";
+import { CodeFileWatchService } from "./code/codeFileWatchService";
+import { CodeSearchService } from "./code/codeSearchService";
 import { RepositoryTestDiscoveryService } from "./code/repositoryTestDiscoveryService";
 import {
   CodeService,
@@ -119,7 +123,11 @@ import {
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { CodeOperationEventStore } from "./code/codeOperationEventStore";
 import { CodeThreadMetadataService } from "./code/codeThreadMetadataService";
-import { CodeThreadBoardService, type CodeBoardThread } from "./code/codeThreadBoardService";
+import {
+  boardRuntimeActivityFromWorks,
+  CodeThreadBoardService,
+  type CodeBoardThread,
+} from "./code/codeThreadBoardService";
 import { CodeFollowUpService } from "./code/codeFollowUpService";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
@@ -304,6 +312,7 @@ import {
   createWorkThreadMentionDirectory,
   createChatSideChatThreadFactory,
 } from "./chat/threadMentionService";
+import { codeForkHandoffResolver } from "./code/codeForkHandoff";
 import { createThreadMentionRouteHandler } from "./threadMentionRoutes";
 import { createLocalServerRouteHandler } from "./localServerRoutes";
 import { createLiveLocalListenerPort } from "./localServers/localListenerPort";
@@ -936,6 +945,35 @@ function observedCheckoutHeadMatches(
  * The service is reached lazily so a mode wired before it exists can still
  * hold this: nothing is read until a turn actually runs.
  */
+/**
+ * Reach the Code service's conversation and evidence readers for the fork
+ * handoff. Lazy because the runtime that holds the resolver is composed before
+ * the service exists; the decision about when a handoff is owed lives with the
+ * handoff itself.
+ */
+function forkHandoffResolver(codeService: () => CodeRouteService) {
+  return codeForkHandoffResolver(() => {
+    const service = codeService();
+    const conversation = service.conversation;
+    const readEvidence = service.readOperationContent;
+    if (conversation === undefined || readEvidence === undefined) return undefined;
+    return {
+      conversation: async (...args) => await conversation(...args),
+      readEvidence: async (...args) => await readEvidence(...args),
+      projectOf: async (windowId, threadId) => {
+        try {
+          // `read` authorizes the window against the thread, so a thread this
+          // window may not observe is indistinguishable from one that is absent.
+          const view = await service.read(windowId, threadId);
+          return String(view.thread.projectId);
+        } catch {
+          return undefined;
+        }
+      },
+    };
+  });
+}
+
 function threadMentionContextResolver(threadMentions: () => ThreadMentionService) {
   return async ({
     threadMentionIds,
@@ -999,7 +1037,7 @@ function withCodeOperationRuntime(
     bootstrap: (windowId) => service.bootstrap(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
     execute: (windowId, command) => service.execute(windowId, command),
-    executeOperation: (windowId, command) => runtime.execute(windowId, command),
+    executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
     inspectTerminal: (windowId, input) => runtime.inspectTerminal(windowId, input),
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
@@ -1016,6 +1054,10 @@ function withCodeOperationRuntime(
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
+    ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
+    ...(service.searchFiles === undefined
+      ? {}
+      : { searchFiles: service.searchFiles.bind(service) }),
     ...(service.stageEvidence === undefined
       ? {}
       : { stageEvidence: service.stageEvidence.bind(service) }),
@@ -1046,6 +1088,10 @@ function withCodeBoard(
     openFile: (windowId, input) => service.openFile(windowId, input),
     ...(service.listFiles === undefined ? {} : { listFiles: service.listFiles.bind(service) }),
     ...(service.listTests === undefined ? {} : { listTests: service.listTests.bind(service) }),
+    ...(service.watchFiles === undefined ? {} : { watchFiles: service.watchFiles.bind(service) }),
+    ...(service.searchFiles === undefined
+      ? {}
+      : { searchFiles: service.searchFiles.bind(service) }),
     queryBoard,
     ...(service.executeOperation === undefined
       ? {}
@@ -1147,6 +1193,7 @@ export function startOctantServer(
       now: Date.now,
     });
     const codeSessionAuthority = new CodeSessionAuthorityStore();
+    let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
     let activeComputerUseRuntime: ComputerUseRuntime | undefined;
     let workRequestRuntime: WorkRequestRuntime | undefined;
@@ -1155,6 +1202,7 @@ export function startOctantServer(
         codeApprovalStore.revokeWindow(windowId);
         extensionToolApprovalService.revokeWindow(windowId);
         codeSessionAuthority.revokeWindow(windowId);
+        activeCodeService?.revokeWindow?.(windowId);
         void browserAutomationService?.revokeWindow(windowId);
         void activeComputerUseRuntime?.revokeWindow(windowId);
       },
@@ -1663,6 +1711,12 @@ export function startOctantServer(
     // Listing reads directory entries under the bound checkout and needs no
     // file helper, so it is available even when the helper transport is not.
     const codeFileListing = new CodeFileListingService();
+    // Watching needs no file helper either: it reports which paths changed and
+    // never reads one, so the explorer stays live even when mutations cannot.
+    const codeFileWatch = new CodeFileWatchService();
+    // Search reads directory entries and file bytes under the bound checkout
+    // through the confined ports, so it needs no file helper either.
+    const codeFileSearch = new CodeSearchService();
     // Discovery reads only the checkout's package.json and .octant/tests.json,
     // so it needs no file helper either. The same instance authorizes a run.
     const codeTestDiscovery = new RepositoryTestDiscoveryService();
@@ -1789,6 +1843,8 @@ export function startOctantServer(
         roots,
         files: codeFiles,
         tests: codeTestDiscovery,
+        watcher: codeFileWatch,
+        searcher: codeFileSearch,
         content: codeContent,
         evidence: codeEvidence,
         attachments: codeAttachments,
@@ -1824,6 +1880,8 @@ export function startOctantServer(
         onWorkingDirectoryChanged: async () => refreshStandaloneSkills(),
         probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
       });
+    // Revocation is wired at construction, before any window can hold a watch.
+    activeCodeService = codeService;
     let codeOperationRuntime = options.codeOperationRuntime;
     const providerDataDirectory = persistence.dataDirectory;
     const providerRuntimeRegistry =
@@ -2353,6 +2411,7 @@ export function startOctantServer(
     if (codeOperationRuntime === undefined && options.codeService === undefined) {
       const terminalProcessPort = new TerminalProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "terminal-receipts"),
+        shellStateDirectory: join(providerDataDirectory, "code", "terminal-shell"),
       });
       const repositoryTestProcessPort = new RepositoryTestProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "test-receipts"),
@@ -2432,6 +2491,7 @@ export function startOctantServer(
         },
         credentialResolver: { resolve: async () => undefined },
         resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+        resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
         githubReadTools: ({ windowId, thread, readThread }) =>
           githubReadToolService.createToolSet({ windowId, thread, readThread }),
         resolvePullRequestTarget: async (threadId) => {
@@ -2540,23 +2600,8 @@ export function startOctantServer(
           threads: { list: () => boardThreads },
           metadata: codeThreadMetadataService,
           runtime: {
-            observe: (threadId) => {
-              const works = persistence.readCodeRuntimeWorks(threadId);
-              const executing = works.some((work) => work.state === "running");
-              const waiting = works.some(
-                (work) =>
-                  work.state === "waiting" ||
-                  work.state === "ambiguous" ||
-                  work.state === "interrupted",
-              );
-              return {
-                executing,
-                waiting,
-                ...(waiting && !executing
-                  ? { blockingReason: "Runtime work is waiting or interrupted." }
-                  : {}),
-              };
-            },
+            observe: (threadId) =>
+              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId)),
           },
           clock: () => new Date().toISOString(),
         });
