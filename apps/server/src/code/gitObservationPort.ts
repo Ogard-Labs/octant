@@ -19,15 +19,20 @@ export interface GitStatusEntry {
   readonly worktree: string;
 }
 
+/**
+ * A checkout that has no commits yet still has a HEAD: it points at a branch
+ * that does not exist. That branch has a name but no object, so an unborn head
+ * carries no oid rather than a placeholder one.
+ */
+export type GitObservedHead =
+  | { readonly kind: "branch"; readonly name: string; readonly oid: string }
+  | { readonly kind: "detached"; readonly oid: string }
+  | { readonly kind: "unborn"; readonly name: string };
+
 export interface GitObservation {
   readonly status: "ready";
   readonly checkoutRoot: string;
-  readonly head: {
-    readonly oid: string;
-    readonly branch:
-      | { readonly kind: "named"; readonly name: string }
-      | { readonly kind: "detached" };
-  };
+  readonly head: GitObservedHead;
   readonly statusEntries: readonly GitStatusEntry[];
   readonly changedPaths: readonly string[];
   readonly stagedSummary: readonly GitStatusEntry[];
@@ -147,20 +152,29 @@ export class GitObservationPort {
       )
         return { status: "unavailable" };
       const headResult = await run(["rev-parse", "--verify", "HEAD"]);
-      if (
-        headResult.exitCode !== 0 ||
-        !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(headResult.stdout.trim())
-      )
-        return { status: "failed" };
-      const oid = headResult.stdout.trim();
+      const resolvedOid =
+        headResult.exitCode === 0 &&
+        /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(headResult.stdout.trim())
+          ? headResult.stdout.trim()
+          : undefined;
+      if (headResult.exitCode === 0 && resolvedOid === undefined) return { status: "failed" };
       const symbolic = await run(["symbolic-ref", "--quiet", "--short", "HEAD"]);
-      const branch =
-        symbolic.exitCode === 0 && symbolic.stdout.trim()
-          ? { kind: "named" as const, name: symbolic.stdout.trim() }
-          : symbolic.exitCode === 1
-            ? { kind: "detached" as const }
-            : undefined;
-      if (!branch) return { status: "failed" };
+      const branchName =
+        symbolic.exitCode === 0 && symbolic.stdout.trim() ? symbolic.stdout.trim() : undefined;
+      if (branchName === undefined && symbolic.exitCode !== 1) return { status: "failed" };
+      // HEAD not resolving means the branch has no commits yet. That is an
+      // observable checkout state, not a failure — but only when HEAD names a
+      // branch, because a detached HEAD without an object is broken.
+      if (resolvedOid === undefined && branchName === undefined) return { status: "failed" };
+      let head: GitObservedHead;
+      if (resolvedOid === undefined) {
+        if (branchName === undefined) return { status: "failed" };
+        head = { kind: "unborn", name: branchName };
+      } else if (branchName === undefined) {
+        head = { kind: "detached", oid: resolvedOid };
+      } else {
+        head = { kind: "branch", name: branchName, oid: resolvedOid };
+      }
       const statusResult = await run([
         "status",
         "--porcelain=v1",
@@ -170,7 +184,21 @@ export class GitObservationPort {
       if (statusResult.exitCode !== 0) return { status: "failed" };
       const statusEntries = parseStatus(statusResult.stdout);
       if (!statusEntries) return { status: "failed" };
-      const diffResult = await run(["diff", "--no-ext-diff", "--no-color", "HEAD", "--"]);
+      // An unborn head has no commit to diff against, so the empty tree stands
+      // in for one. It has to be a baseline rather than `--cached`, or a file
+      // that was staged and then edited again would show the pane its staged
+      // version while `git diff HEAD` on any other branch reaches the working
+      // tree. `hash-object` is asked for the empty tree rather than the value
+      // hardcoded, so a repository on a different hash algorithm still works.
+      let baseline = "HEAD";
+      if (head.kind === "unborn") {
+        const empty = await run(["hash-object", "-t", "tree", "/dev/null"]);
+        const emptyTree = empty.stdout.trim();
+        if (empty.exitCode !== 0 || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(emptyTree))
+          return { status: "failed" };
+        baseline = emptyTree;
+      }
+      const diffResult = await run(["diff", "--no-ext-diff", "--no-color", baseline, "--"]);
       if (diffResult.exitCode !== 0) return { status: "failed" };
       const diff = boundUtf8(diffResult.stdout, this.#maxDiffBytes);
       const remoteNamesResult = await run(["remote"]);
@@ -188,9 +216,9 @@ export class GitObservationPort {
         });
       }
       let upstream: GitObservation["upstream"] = null;
-      if (branch.kind === "named") {
-        const remote = await run(["config", "--get", `branch.${branch.name}.remote`]);
-        const merge = await run(["config", "--get", `branch.${branch.name}.merge`]);
+      if (head.kind !== "detached") {
+        const remote = await run(["config", "--get", `branch.${head.name}.remote`]);
+        const merge = await run(["config", "--get", `branch.${head.name}.merge`]);
         if (remote.exitCode === 0 && merge.exitCode === 0)
           upstream = {
             remote: remote.stdout.trim(),
@@ -233,8 +261,7 @@ export class GitObservationPort {
       const stateToken = createHash("sha256")
         .update(
           JSON.stringify({
-            oid,
-            branch,
+            head,
             statusEntries,
             contentObjects,
             remotes,
@@ -246,7 +273,7 @@ export class GitObservationPort {
       return {
         status: "ready",
         checkoutRoot,
-        head: { oid, branch },
+        head,
         statusEntries,
         changedPaths,
         stagedSummary,
