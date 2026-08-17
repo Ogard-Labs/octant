@@ -11,6 +11,7 @@ import { buildModelPickerGroups, type PickerGroup } from "@octant/domain";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { AvatarImageEnvironment } from "../profile/avatarImage";
 import { FirstRunOnboarding, type FirstRunOnboardingProps } from "./FirstRunOnboarding";
 import { summarizeFirstRunReadiness } from "./firstRunReadinessModel";
 import {
@@ -78,6 +79,7 @@ function controller(
 }
 
 const emptyProfile: UserProfile = { accent: "indigo", avatar: { kind: "initials" } };
+const encodedAvatar = "data:image/webp;base64,AAAA";
 const defaultWorkspace = {
   colorScheme: "system",
   chatEnabled: true,
@@ -110,8 +112,24 @@ function mount(overrides: Partial<FirstRunOnboardingProps> = {}) {
     onSelectModeSwitcher: vi.fn(),
     ...overrides,
   };
-  render(<FirstRunOnboarding {...props} />);
-  return props;
+  const view = render(<FirstRunOnboarding {...props} />);
+  return {
+    ...props,
+    rerender: (next: Partial<FirstRunOnboardingProps>) =>
+      view.rerender(<FirstRunOnboarding {...props} {...next} />),
+  };
+}
+
+function avatarEnvironment(
+  overrides: Partial<AvatarImageEnvironment> = {},
+): AvatarImageEnvironment {
+  return {
+    decode: vi.fn(async () => ({ width: 200, height: 200 })),
+    encode: vi.fn(async () => ({ dataUrl: encodedAvatar })),
+    fetch: vi.fn(async () => new Response("binary", { status: 200 })),
+    digest: vi.fn(async () => "hashed"),
+    ...overrides,
+  };
 }
 
 async function goToStep(user: ReturnType<typeof userEvent.setup>, name: string) {
@@ -257,6 +275,53 @@ describe("FirstRunOnboarding", () => {
       expect.objectContaining({ displayName: "Ada" }),
     );
     expect(props.controller.skip).toHaveBeenCalledOnce();
+  });
+
+  it("shows the profile the host turns out to hold, not the one it started with", () => {
+    const stored: UserProfile = {
+      displayName: "Ada",
+      accent: "indigo",
+      avatar: { kind: "initials" },
+    };
+    const view = mount();
+
+    // This surface can be up before the store has answered. Someone who filled
+    // in a name, quit part-way, and relaunched would otherwise be shown an
+    // empty field, and their next edit would overwrite the journaled answer.
+    view.rerender({ profile: stored });
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Ada");
+  });
+
+  it("waits for an avatar import before letting first run be answered", async () => {
+    const user = userEvent.setup();
+    let release: (response: Response) => void = () => undefined;
+    const props = mount({
+      avatarEnvironment: avatarEnvironment({
+        fetch: vi.fn(
+          async () => await new Promise<Response>((resolve) => (release = resolve)),
+        ) as unknown as typeof fetch,
+      }),
+    });
+
+    await user.type(screen.getByLabelText("Email (optional)"), "ada@example.com");
+    await user.click(screen.getByRole("button", { name: "Use Gravatar" }));
+
+    // The import reports its picture as a later change. Answering first run
+    // now would hide this surface before that change ever arrived.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled(),
+    );
+
+    release(new Response("binary", { status: 200 }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    expect(props.onSaveProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        avatar: { kind: "image", source: "gravatar", dataUrl: encodedAvatar },
+      }),
+    );
   });
 
   it("does not write a profile the user never touched", async () => {

@@ -10,7 +10,19 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
  * anywhere: it exists so threads, commits, and shared surfaces can name a
  * human instead of a placeholder. An empty profile is a valid profile.
  */
-export const UserDisplayName = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64));
+/**
+ * Upper bounds on the two typed fields, in characters.
+ *
+ * Exported because an editor that lets a longer value be typed and then refuses
+ * it at save time reports the refusal too late to act on. The schema below is
+ * still the authority; these let a surface say the same thing in place.
+ */
+export const MAX_USER_DISPLAY_NAME_CHARACTERS = 64;
+export const MAX_USER_EMAIL_CHARACTERS = 254;
+
+export const UserDisplayName = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_USER_DISPLAY_NAME_CHARACTERS),
+);
 export type UserDisplayName = typeof UserDisplayName.Type;
 
 /**
@@ -23,7 +35,7 @@ export type UserDisplayName = typeof UserDisplayName.Type;
  * nothing about this one.
  */
 export const UserEmailAddress = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(254),
+  Schema.maxLength(MAX_USER_EMAIL_CHARACTERS),
   Schema.pattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/),
 );
 export type UserEmailAddress = typeof UserEmailAddress.Type;

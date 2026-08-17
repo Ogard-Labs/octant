@@ -1,5 +1,7 @@
 import {
   AVATAR_ACCENTS,
+  MAX_USER_DISPLAY_NAME_CHARACTERS,
+  MAX_USER_EMAIL_CHARACTERS,
   type AvatarAccent,
   type UserAvatar as UserAvatarValue,
   type UserProfile,
@@ -28,6 +30,12 @@ export interface ProfileEditorProps {
    */
   readonly onCommit?: (next: UserProfile) => void;
   readonly disabled?: boolean;
+  /**
+   * Fires while an avatar import is in flight. A surface that can be dismissed
+   * needs this: the import's result arrives as a later `onChange`, which is
+   * lost if the surface resolved in the meantime.
+   */
+  readonly onBusyChange?: (busy: boolean) => void;
   /** Browser seam for image decoding and the Gravatar request. Tests supply their own. */
   readonly environment?: AvatarImageEnvironment;
   /** Lets a dialog put initial focus on the first field the user should fill. */
@@ -60,12 +68,29 @@ export function ProfileEditor(props: ProfileEditorProps) {
   const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<"upload" | "gravatar" | undefined>(undefined);
   const [notice, setNotice] = useState<{ tone: "info" | "attention"; message: string }>();
+  const [nameDraft, setNameDraft] = useState(props.profile.displayName ?? "");
   const [emailDraft, setEmailDraft] = useState(props.profile.email ?? "");
+  const [syncedProfile, setSyncedProfile] = useState(props.profile);
   const latestProfile = useRef(props.profile);
   latestProfile.current = props.profile;
   const pendingCommit = useRef(false);
 
+  // The typed fields keep their own text so a half-typed value survives
+  // normalization, which means an owner that replaces the profile — a store
+  // that finished loading, a surface reopened on a different one — would
+  // otherwise leave them showing the value from before. Adopt the incoming
+  // text only where it actually says something different: `Ada ` normalizes to
+  // the `Ada` the owner just echoed back, and must not lose its space.
+  if (syncedProfile !== props.profile) {
+    setSyncedProfile(props.profile);
+    const name = props.profile.displayName ?? "";
+    const email = props.profile.email ?? "";
+    if (name !== nameDraft.trim()) setNameDraft(name);
+    if (email !== emailDraft.trim()) setEmailDraft(email);
+  }
+
   const disabled = props.disabled === true || busy !== undefined;
+  const nameProblem = nameValidationMessage(nameDraft);
   const emailProblem = emailValidationMessage(emailDraft);
   const gravatarReady = emailProblem === undefined && canImportGravatar({ email: emailDraft });
 
@@ -89,8 +114,12 @@ export function ProfileEditor(props: ProfileEditorProps) {
   }
 
   function setName(value: string, settled: boolean) {
+    setNameDraft(value);
     const trimmed = value.trim();
     const { displayName: _cleared, ...rest } = props.profile;
+    // A name the contract would refuse is not written. Reporting it here, while
+    // the field still holds it, is the only point at which the user can fix it.
+    if (trimmed !== "" && nameValidationMessage(trimmed) !== undefined) return;
     apply(trimmed === "" ? rest : { ...rest, displayName: trimmed }, settled);
   }
 
@@ -116,6 +145,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
     run: (environment: AvatarImageEnvironment) => ReturnType<typeof importAvatarFromFile>,
   ) {
     setBusy(kind);
+    props.onBusyChange?.(true);
     setNotice(undefined);
     // An import that fails in an unforeseen way must still end as a message,
     // not as a button that spun and then said nothing.
@@ -128,6 +158,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
     }));
     setBusy(undefined);
     if (result.kind === "failed") {
+      props.onBusyChange?.(false);
       setNotice({ tone: "attention", message: result.failure.message });
       return;
     }
@@ -136,6 +167,9 @@ export function ProfileEditor(props: ProfileEditorProps) {
       source: kind === "upload" ? "upload" : "gravatar",
       dataUrl: result.dataUrl,
     });
+    // Released only after the avatar has been handed over, so an owner that was
+    // waiting on this import resolves with the picture rather than without it.
+    props.onBusyChange?.(false);
     setNotice(
       kind === "gravatar"
         ? { tone: "info", message: "Gravatar imported and saved on this Mac." }
@@ -216,6 +250,8 @@ export function ProfileEditor(props: ProfileEditorProps) {
           Name
         </label>
         <OctantInput
+          aria-describedby={nameProblem === undefined ? undefined : `${nameId}-problem`}
+          aria-invalid={nameProblem !== undefined}
           autoComplete="name"
           disabled={props.disabled === true}
           id={nameId}
@@ -223,8 +259,13 @@ export function ProfileEditor(props: ProfileEditorProps) {
           onChange={(event) => setName(event.target.value, false)}
           placeholder="How Octant should address you"
           {...(props.nameRef === undefined ? {} : { ref: props.nameRef })}
-          value={props.profile.displayName ?? ""}
+          value={nameDraft}
         />
+        {nameProblem === undefined ? null : (
+          <p className="profile-editor__hint" id={`${nameId}-problem`} role="alert">
+            {nameProblem}
+          </p>
+        )}
       </div>
 
       <div className="profile-editor__field">
@@ -289,6 +330,21 @@ function sameProfile(a: UserProfile, b: UserProfile): boolean {
 }
 
 /**
+ * What is wrong with the typed name, when something is.
+ *
+ * Empty is not wrong: the field is optional. Too long is, and saying so here
+ * beats letting the contract refuse the settings replacement after the user has
+ * moved on from the field that caused it.
+ */
+export function nameValidationMessage(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (trimmed.length > MAX_USER_DISPLAY_NAME_CHARACTERS) {
+    return `That name is ${String(trimmed.length)} characters. Octant stores at most ${String(MAX_USER_DISPLAY_NAME_CHARACTERS)}.`;
+  }
+  return undefined;
+}
+
+/**
  * What is wrong with the typed address, when something is.
  *
  * Empty is not wrong: the field is optional, and an empty profile is a valid
@@ -297,7 +353,7 @@ function sameProfile(a: UserProfile, b: UserProfile): boolean {
 export function emailValidationMessage(value: string): string | undefined {
   const trimmed = value.trim();
   if (trimmed === "") return undefined;
-  if (trimmed.length > 254) return "That address is too long to store.";
+  if (trimmed.length > MAX_USER_EMAIL_CHARACTERS) return "That address is too long to store.";
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
     return "That does not look like an email address yet.";
   }

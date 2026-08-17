@@ -59,6 +59,53 @@ describe("ProfileEditor", () => {
     expect(onCommit).toHaveBeenCalledWith(expect.objectContaining({ displayName: "Ada" }));
   });
 
+  it("lets an ordinary two-word name be typed", async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn();
+    render(<Harness onCommit={onCommit} />);
+
+    // The stored name is trimmed, so a field showing the stored value loses the
+    // space the moment it is typed and no multi-word name can be entered at all.
+    await user.type(screen.getByLabelText("Name"), "Ada Lovelace");
+    expect(screen.getByLabelText("Name")).toHaveValue("Ada Lovelace");
+
+    await user.tab();
+    expect(onCommit).toHaveBeenCalledWith(expect.objectContaining({ displayName: "Ada Lovelace" }));
+  });
+
+  it("will not store a name longer than the contract accepts, and says why", async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn();
+    render(<Harness onCommit={onCommit} />);
+
+    await user.click(screen.getByLabelText("Name"));
+    await user.paste("A".repeat(65));
+    await user.tab();
+
+    // Storing it would fail when the settings replacement is decoded, long
+    // after the user left the field that caused it.
+    expect(screen.getByText("That name is 65 characters. Octant stores at most 64.")).toBeVisible();
+    expect(screen.getByLabelText("Name")).toHaveAttribute("aria-invalid", "true");
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("adopts a profile that arrives after the fields were first shown", () => {
+    const stored: UserProfile = {
+      displayName: "Ada",
+      email: "ada@example.com",
+      accent: "indigo",
+      avatar: { kind: "initials" },
+    };
+    const view = render(<ProfileEditor onChange={vi.fn()} profile={empty} />);
+
+    // A store still loading hands over the empty profile first. Keeping the
+    // fields empty afterwards would show a name the host does not hold.
+    view.rerender(<ProfileEditor onChange={vi.fn()} profile={stored} />);
+
+    expect(screen.getByLabelText("Name")).toHaveValue("Ada");
+    expect(screen.getByLabelText("Email (optional)")).toHaveValue("ada@example.com");
+  });
+
   it("treats tabbing through an untouched field as no edit at all", async () => {
     const user = userEvent.setup();
     const onCommit = vi.fn();

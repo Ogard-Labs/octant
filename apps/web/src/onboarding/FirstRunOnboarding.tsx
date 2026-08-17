@@ -64,12 +64,12 @@ export interface FirstRunOnboardingProps {
  * Octant's first-run surface (`BOOT-01`).
  *
  * It exists to get a new user from a clean launch to an ordinary Chat composer
- * without a hidden prerequisite. Four steps — profile, providers, default
- * model, Navigator — and not one of them is a gate: any of them can be walked
- * past, and the surface states what stays unavailable rather than refusing to
- * continue. The steps are freely navigable in both directions, because a user
- * who sets up a provider on step two must be able to go back to step three's
- * model list without restarting.
+ * without a hidden prerequisite. Five steps — profile, workspace, providers,
+ * default model, Navigator — and not one of them is a gate: any of them can be
+ * walked past, and the surface states what stays unavailable rather than
+ * refusing to continue. The steps are freely navigable in both directions,
+ * because a user who sets up a provider must be able to go back to the model
+ * list without restarting.
  *
  * Answers are recorded as they are made, so quitting mid-way keeps what was
  * already chosen; only the first-run *outcome* is recorded at the end.
@@ -87,10 +87,25 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const [step, setStep] = useState<FirstRunStepId>("profile");
   const [profileDraft, setProfileDraft] = useState<UserProfile>(props.profile);
   const [profileEdited, setProfileEdited] = useState(false);
+  const [syncedProfile, setSyncedProfile] = useState<UserProfile>(props.profile);
+  const [importing, setImporting] = useState(false);
   const nameField = useRef<HTMLInputElement>(null);
   const providerAction = useRef<HTMLButtonElement>(null);
-  const busy = controller.submitting !== undefined;
   const blocked = controller.blockedMessage !== undefined;
+
+  // This surface mounts before the host's own settings have arrived, so the
+  // draft it started from can be the empty profile of a store that in fact
+  // holds a name from a launch the user quit part-way through. Adopting the
+  // real one late is what keeps that answer from being overwritten; an edit
+  // already in progress outranks it, because the user is looking at that.
+  if (syncedProfile !== props.profile) {
+    setSyncedProfile(props.profile);
+    if (!profileEdited) setProfileDraft(props.profile);
+  }
+
+  // An avatar import reports its result as a later change. Resolving first run
+  // while one is in flight would drop a picture the user explicitly chose.
+  const busy = controller.submitting !== undefined || importing;
 
   if (!controller.visible) return null;
 
@@ -179,6 +194,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               </p>
               <ProfileEditor
                 nameRef={nameField}
+                onBusyChange={setImporting}
                 onChange={(next) => {
                   setProfileEdited(true);
                   setProfileDraft(next);
@@ -282,7 +298,11 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             </OctantButton>
             {isLastFirstRunStep(step) || forward === undefined ? (
               <OctantButton disabled={busy || blocked} onClick={finish} type="button">
-                {controller.submitting === "completed" ? "Saving…" : "Start using Octant"}
+                {controller.submitting === "completed"
+                  ? "Saving…"
+                  : importing
+                    ? "Finishing your picture…"
+                    : "Start using Octant"}
               </OctantButton>
             ) : (
               <OctantButton onClick={() => goTo(forward)} type="button">
