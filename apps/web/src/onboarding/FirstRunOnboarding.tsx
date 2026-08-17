@@ -135,13 +135,18 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   }
 
   function goTo(target: FirstRunStepId) {
+    // Leaving the profile step flushes its draft, so walking away mid-import
+    // would flush the profile without the picture and unmount the editor that
+    // was going to report it.
+    if (importing) return;
     if (step === "profile" && target !== "profile") flushProfile();
     setStep(target);
   }
 
-  // Guarded here rather than only on the buttons: Escape and a backdrop press
-  // reach `skip` through the dialog's own close, and an import that has not
-  // reported its picture yet would be thrown away by either of them.
+  // Every way out is guarded, not just the buttons. An import reports its
+  // picture as a later change, and once this surface is gone that change has
+  // nowhere to land — so Escape, a backdrop press, and the deferral that sends
+  // the user to provider settings all wait for it too.
   function finish() {
     if (importing) return;
     flushProfile();
@@ -152,6 +157,16 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     if (importing) return;
     flushProfile();
     controller.skip();
+  }
+
+  function leaveForProviderSettings() {
+    if (importing) return;
+    props.onOpenProviderSettings();
+    // This modal must not stay over the settings it just opened, and it must
+    // not answer for the user either: deferring leaves the host's status
+    // `pending`, so someone who backs out of Settings still meets first run on
+    // the next launch.
+    controller.defer();
   }
 
   const back = previousFirstRunStep(step);
@@ -175,6 +190,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   aria-current={descriptor.current ? "step" : undefined}
                   className="first-run__rail-step"
                   data-configured={descriptor.configured}
+                  disabled={importing}
                   onClick={() => goTo(descriptor.id)}
                   type="button"
                 >
@@ -224,14 +240,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
 
           {step === "providers" ? (
             <FirstRunProviderStep
-              onOpenProviderSettings={() => {
-                props.onOpenProviderSettings();
-                // This modal must not stay over the settings it just opened,
-                // and it must not answer for the user either: deferring leaves
-                // the host's status `pending`, so someone who backs out of
-                // Settings still meets first run on the next launch.
-                controller.defer();
-              }}
+              onOpenProviderSettings={leaveForProviderSettings}
               onRescan={props.onRescan}
               readiness={props.readiness}
               ref={providerAction}
@@ -247,10 +256,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               ariaLabel="Default model for new Chat threads"
               groups={props.chatModelGroups}
               intro="New Chat threads start with this model. Existing threads always keep whatever they were given."
-              onOpenProviderSettings={() => {
-                props.onOpenProviderSettings();
-                controller.defer();
-              }}
+              onOpenProviderSettings={leaveForProviderSettings}
               onSelect={props.onSelectChatDefault}
               unsetNote="No default is set. Octant will pick a ready model for each new thread and show you which one it chose."
               {...(props.chatDefault === undefined
@@ -269,10 +275,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               groups={props.navigatorModelGroups}
               intro="Navigator is the optional assistant in the sidebar. It answers questions about Octant itself and never changes anything without asking you first."
               onClear={props.onClearNavigatorDefault}
-              onOpenProviderSettings={() => {
-                props.onOpenProviderSettings();
-                controller.defer();
-              }}
+              onOpenProviderSettings={leaveForProviderSettings}
               onSelect={props.onSelectNavigatorDefault}
               unsetNote="Navigator stays unavailable until a model is chosen. Nothing else is affected, and you can turn it on later in Settings."
               {...(props.navigatorDefault === undefined
@@ -294,7 +297,12 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
         <footer className="first-run__actions">
           <div className="first-run__buttons">
             {back === undefined ? null : (
-              <OctantButton onClick={() => goTo(back)} type="button" variant="ghost">
+              <OctantButton
+                disabled={importing}
+                onClick={() => goTo(back)}
+                type="button"
+                variant="ghost"
+              >
                 Back
               </OctantButton>
             )}
@@ -310,7 +318,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                     : "Start using Octant"}
               </OctantButton>
             ) : (
-              <OctantButton onClick={() => goTo(forward)} type="button">
+              <OctantButton disabled={importing} onClick={() => goTo(forward)} type="button">
                 Continue
               </OctantButton>
             )}

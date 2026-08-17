@@ -318,6 +318,13 @@ describe("FirstRunOnboarding", () => {
     await user.keyboard("{Escape}");
     expect(props.controller.skip).not.toHaveBeenCalled();
 
+    // So does walking the rail to a step that hands the user to Settings: it
+    // flushes the profile on the way out and unmounts the editor that was
+    // about to report the picture.
+    await user.click(screen.getByRole("button", { name: /Providers/ }));
+    expect(screen.getByLabelText("Email (optional)")).toBeVisible();
+    expect(props.controller.defer).not.toHaveBeenCalled();
+
     release(new Response("binary", { status: 200 }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Skip for now" }));

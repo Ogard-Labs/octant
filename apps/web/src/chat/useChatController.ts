@@ -78,6 +78,15 @@ export function useChatController(options: ChatControllerOptions) {
   );
   const [status, setStatus] = useState<ChatControllerStatus>("loading");
   const [bootstrap, setBootstrap] = useState<ChatBootstrap | undefined>(undefined);
+  // A settings write carries the version it expects, and callers build that
+  // command from a render. Two of them started before the first returns would
+  // both claim the same version, and the server would reject the second — so
+  // which one survived would be whichever arrived first, not the last choice
+  // the user made. Settings writes queue, and each reads the version here as
+  // it goes out. Updated wherever settings arrive, not during render, so a
+  // queued write sees the previous one's result without waiting for React.
+  const settingsVersion = useRef<ChatBootstrap["settings"]["version"] | undefined>(undefined);
+  const settingsQueue = useRef<Promise<unknown>>(Promise.resolve());
   const [activeView, setActiveView] = useState<ChatThreadView | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [settingsMessage, setSettingsMessage] = useState<string | undefined>(undefined);
@@ -166,6 +175,7 @@ export function useChatController(options: ChatControllerOptions) {
       const next = await client.bootstrap();
       if (!mounted.current || request !== bootstrapGeneration.current) return false;
       bootstrapped.current = true;
+      settingsVersion.current = next.settings.version;
       setBootstrap(next);
       setStatus("ready");
       return true;
@@ -350,6 +360,7 @@ export function useChatController(options: ChatControllerOptions) {
         recordFollowUp(result.followUp.threadId, result.followUp.state === "open");
       }
       if (result.kind === "settings-updated") {
+        settingsVersion.current = result.settings.version;
         setBootstrap((current) =>
           current === undefined || result.settings.version < current.settings.version
             ? current
@@ -442,7 +453,16 @@ export function useChatController(options: ChatControllerOptions) {
   async function updateSettings(
     command: Extract<ChatCommand, { kind: "update-chat-settings" }>,
   ): Promise<boolean> {
-    return (await execute(command))?.kind === "settings-updated";
+    const started = settingsQueue.current;
+    const write = started
+      .catch(() => undefined)
+      .then(async () => {
+        const expectedVersion = settingsVersion.current ?? command.expectedVersion;
+        const result = await execute({ ...command, expectedVersion });
+        return result?.kind === "settings-updated";
+      });
+    settingsQueue.current = write;
+    return await write;
   }
 
   async function upload(input: ChatAttachmentUpload) {
