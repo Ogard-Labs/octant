@@ -353,7 +353,14 @@ export function WorkspaceView(props: WorkspaceViewProps) {
             checkoutId,
           })
           .catch(() => undefined);
-        if (stopped?.kind !== "terminal-state") return;
+        // A terminal the host no longer owns has already stopped — the user
+        // pressed Stop inside it, or its shell exited on its own — so there is
+        // nothing left to strand and the tab may go. Every other answer keeps
+        // the tab, because the tab is the only thing that can retry.
+        const cleaned =
+          stopped?.kind === "terminal-state" ||
+          (stopped?.kind === "operation-failed" && stopped.failure.category === "unavailable");
+        if (!cleaned) return;
       }
       const closed = await props.onClose(groupId, tabId);
       if (closed === false) return;

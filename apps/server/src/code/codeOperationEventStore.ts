@@ -419,7 +419,14 @@ export class CodeOperationEventStore {
           // and its own undo point is what one more step back means. A restore
           // that replaced nothing carries none, which retracts the offer rather
           // than leaving an older one pointing at a state that has since moved.
-          restoreUndo = frame.event.result.undo;
+          // A rejected restore is refused before the checkout is touched, so
+          // the way back from the last restore that did run is still valid and
+          // still points at a state the checkout actually left. Only a restore
+          // that ran replaces it — completed, or failed after it may already
+          // have moved files.
+          if (frame.event.result.state !== "rejected") {
+            restoreUndo = frame.event.result.undo;
+          }
         }
         const builder = byOperation.get(key);
         if (builder === undefined || frame.threadId !== threadId) continue;

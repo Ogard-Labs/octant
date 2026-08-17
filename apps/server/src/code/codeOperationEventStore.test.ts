@@ -488,7 +488,7 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
-  it("reports the way back from the thread's last restore, and retracts it once nothing was replaced", () => {
+  it("keeps the way back from the last restore that ran, and retracts it once one replaced nothing", () => {
     const fixture = openJournal();
     const store = createStore(fixture.journal);
     const first = { worktree: "a".repeat(40), index: "b".repeat(40) };
@@ -517,14 +517,19 @@ describe("CodeOperationEventStore", () => {
     store.append({ threadId, operationId, expectedCursor: 1, event: restore(second) });
     expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).restoreUndo).toEqual(second);
 
-    // A rejected restore replaced nothing, so the offer is withdrawn rather
-    // than left pointing at a state the checkout has since moved past.
+    // A rejected restore is refused before the checkout is touched, so the way
+    // back from the last one that ran still points where it did.
     store.append({
       threadId,
       operationId,
       expectedCursor: 2,
       event: restore(undefined, "rejected"),
     });
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).restoreUndo).toEqual(second);
+
+    // A restore that ran and replaced nothing withdraws the offer, rather than
+    // leaving one pointing at a state the checkout has since moved past.
+    store.append({ threadId, operationId, expectedCursor: 3, event: restore(undefined) });
     expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).restoreUndo).toBeUndefined();
     fixture.connection.close();
   });

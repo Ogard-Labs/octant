@@ -1053,7 +1053,7 @@ describe("WorkspaceView tab isolation", () => {
         ? {
             kind: "operation-failed",
             operationId: command.operationId,
-            failure: { kind: "denied" },
+            failure: { category: "failed", message: "The terminal could not be stopped." },
           }
         : gitObservation,
     );
@@ -1067,6 +1067,32 @@ describe("WorkspaceView tab isolation", () => {
       ),
     );
     expect(secondaryProps.onClose).not.toHaveBeenCalled();
+  });
+
+  // A terminal the host no longer owns has already stopped, so there is nothing
+  // left to strand. Keeping the tab open would leave the user unable to close a
+  // shell they already ended from inside it.
+  it("closes a terminal tab whose shell has already stopped", async () => {
+    const terminalId = "b0000000-0000-4000-8000-000000000003";
+    const secondary = { ...codeTab("code-terminal", "Terminal 4"), terminalId } as WorkspaceTab;
+    const secondaryProps = propsFor(secondary);
+    const executeOperation = secondaryProps.codeController.client!.executeOperation as ReturnType<
+      typeof vi.fn
+    >;
+    executeOperation.mockImplementation(async (command) =>
+      command.kind === "stop-terminal"
+        ? {
+            kind: "operation-failed",
+            operationId: command.operationId,
+            failure: { category: "unavailable", message: "Terminal is unavailable." },
+          }
+        : gitObservation,
+    );
+    render(<WorkspaceView {...secondaryProps} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close Terminal 4" }));
+
+    await waitFor(() => expect(secondaryProps.onClose).toHaveBeenCalledWith(ids.group, ids.tab));
   });
 
   it("closes one local server's tab without releasing the thread's other contexts", async () => {
