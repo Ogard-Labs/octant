@@ -119,7 +119,11 @@ import {
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { CodeOperationEventStore } from "./code/codeOperationEventStore";
 import { CodeThreadMetadataService } from "./code/codeThreadMetadataService";
-import { CodeThreadBoardService, type CodeBoardThread } from "./code/codeThreadBoardService";
+import {
+  boardRuntimeActivityFromWorks,
+  CodeThreadBoardService,
+  type CodeBoardThread,
+} from "./code/codeThreadBoardService";
 import { CodeFollowUpService } from "./code/codeFollowUpService";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
@@ -2541,23 +2545,8 @@ export function startOctantServer(
           threads: { list: () => boardThreads },
           metadata: codeThreadMetadataService,
           runtime: {
-            observe: (threadId) => {
-              const works = persistence.readCodeRuntimeWorks(threadId);
-              const executing = works.some((work) => work.state === "running");
-              const waiting = works.some(
-                (work) =>
-                  work.state === "waiting" ||
-                  work.state === "ambiguous" ||
-                  work.state === "interrupted",
-              );
-              return {
-                executing,
-                waiting,
-                ...(waiting && !executing
-                  ? { blockingReason: "Runtime work is waiting or interrupted." }
-                  : {}),
-              };
-            },
+            observe: (threadId) =>
+              boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId)),
           },
           clock: () => new Date().toISOString(),
         });

@@ -1,5 +1,12 @@
 import { useEffect, useId, useRef, useState, type Ref } from "react";
-import { Frame, MoreHorizontal, PanelRight, RotateCcw, Sparkles } from "lucide-react";
+import {
+  Frame,
+  MoreHorizontal,
+  PanelLeftOpen,
+  PanelRight,
+  RotateCcw,
+  Sparkles,
+} from "lucide-react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
@@ -18,6 +25,8 @@ export interface WindowChromeProps {
   readonly onResetLayout: () => void;
   readonly onResetWindowBounds?: () => Promise<void> | void;
   readonly onToggleDock: () => void;
+  /** Present only while the sidebar is hidden: the chrome takes over the leading edge. */
+  readonly onExpandSidebar?: () => void;
   readonly zenRecoveryNeeded?: boolean;
 }
 
@@ -30,6 +39,17 @@ export function WindowChrome(props: WindowChromeProps) {
       aria-label={`Workspace actions for ${props.activeSurface}`}
       className={`window-chrome window-chrome--material-${props.material}`}
     >
+      {props.onExpandSidebar === undefined ? null : (
+        <div className="window-chrome__leading">
+          <span aria-hidden="true" className="window-chrome__traffic-light-space" />
+          <IconButton
+            className="window-chrome__button"
+            icon={PanelLeftOpen}
+            label="Show sidebar"
+            onClick={props.onExpandSidebar}
+          />
+        </div>
+      )}
       <span aria-hidden="true" className="window-chrome__drag-space window-drag-region" />
       {props.developmentAuthentication ? (
         <span className="window-chrome__development-auth window-no-drag" role="status">
