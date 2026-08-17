@@ -725,10 +725,38 @@ export const CodeThreadView = Schema.Struct({
 }).annotations(strict);
 export type CodeThreadView = typeof CodeThreadView.Type;
 
+/**
+ * How far a thread's own activity has advanced, as a journal position.
+ *
+ * A thread's aggregate version cannot answer this. Provider turns are journaled
+ * on the `code-operation` aggregate, so a turn that runs and finishes moves
+ * nothing on the `code-thread` aggregate: version and `updatedAt` both stand
+ * still. A client comparing those would report a thread that worked for an hour
+ * as untouched. This sequence moves with the operation events themselves, so it
+ * is the one a read cursor can be compared against.
+ */
+export const CodeThreadActivity = Schema.Struct({
+  threadId: CodeThreadId,
+  lastSequence: GlobalSequence,
+}).annotations(strict);
+export type CodeThreadActivity = typeof CodeThreadActivity.Type;
+
 export const CodeBootstrap = Schema.Struct({
   settings: CodeSettings,
   threads: Schema.Array(CodeThread),
   checkouts: Schema.Array(CodeCheckoutIdentity),
+  /**
+   * One entry per thread in `threads` that has journaled operation activity.
+   * A thread with none is absent rather than reported at zero, so "nothing has
+   * happened yet" and "the host did not say" stay distinguishable.
+   *
+   * The field itself is optional because a paired remote client and its host
+   * update on their own schedules. Requiring it would make an updated client
+   * refuse Code bootstrap from a host that predates this field, which fails the
+   * whole surface rather than the one thing the field feeds; an empty list
+   * degrades to the unread behavior that host already had.
+   */
+  activity: Schema.optionalWith(Schema.Array(CodeThreadActivity), { default: () => [] }),
 }).annotations(strict);
 export type CodeBootstrap = typeof CodeBootstrap.Type;
 
@@ -774,6 +802,7 @@ export const decodeCodeWorktreeRef = Schema.decodeUnknownSync(CodeWorktreeRef);
 export const decodeCodeWorktreeRefsListed = Schema.decodeUnknownSync(CodeWorktreeRefsListed);
 export const decodeCodeFailure = Schema.decodeUnknownSync(CodeFailure);
 export const decodeCodeBootstrap = Schema.decodeUnknownSync(CodeBootstrap);
+export const decodeCodeThreadActivity = Schema.decodeUnknownSync(CodeThreadActivity);
 export const decodeCodeThreadView = Schema.decodeUnknownSync(CodeThreadView);
 export const decodeCodeFileMetadata = Schema.decodeUnknownSync(CodeFileMetadata);
 export const decodeCodeFileSavePublicResult = Schema.decodeUnknownSync(CodeFileSavePublicResult);
