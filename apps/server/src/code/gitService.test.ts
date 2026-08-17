@@ -93,7 +93,7 @@ describe("GitService", () => {
         remote: "origin",
         refspec: "refs/heads/main:refs/heads/main",
       },
-      expectedHeadOid: observation.head.oid,
+      expectedHeadOid: headOid,
       expectedStateToken: observation.stateToken,
     } as const;
 
@@ -106,7 +106,7 @@ describe("GitService", () => {
     });
     const detached = {
       ...observation,
-      head: { ...observation.head, branch: { kind: "detached" as const } },
+      head: { kind: "detached" as const, oid: headOid },
     };
     const detachedService = new GitService(
       { observe: vi.fn(async () => detached) },
@@ -116,6 +116,17 @@ describe("GitService", () => {
       status: "rejected",
       reason: "detached-head",
     });
+
+    // A branch with no commits yet is refused for what it is, not reported as a
+    // stale observation because its head carries no object.
+    const unborn = { ...observation, head: { kind: "unborn" as const, name: "main" } };
+    const unbornMutation = mutationPort();
+    const unbornService = new GitService({ observe: vi.fn(async () => unborn) }, unbornMutation);
+    await expect(unbornService.push({ ...base, authority: "full-access" })).resolves.toEqual({
+      status: "rejected",
+      reason: "unborn-head",
+    });
+    expect(unbornMutation.push).not.toHaveBeenCalled();
   });
 
   it("serializes mutations for the same checkout", async () => {
@@ -169,7 +180,7 @@ describe("GitService", () => {
       service.revert({
         checkoutId: "checkout-1",
         checkoutRoot: "/repo",
-        oid: dirty.head.oid,
+        oid: headOid,
         expectedStateToken: dirty.stateToken,
       }),
     ).resolves.toEqual({ status: "rejected", reason: "dirty-checkout" });
@@ -187,23 +198,25 @@ describe("GitService", () => {
       cleanService.revert({
         checkoutId: "checkout-1",
         checkoutRoot: "/repo",
-        oid: clean.head.oid,
+        oid: headOid,
         expectedStateToken: clean.stateToken,
       }),
     ).resolves.toMatchObject({ status: "applied" });
     expect(cleanMutation.revertCommit).toHaveBeenCalledWith(
-      { checkoutRoot: "/repo", oid: clean.head.oid },
+      { checkoutRoot: "/repo", oid: headOid },
       undefined,
     );
   });
 });
+
+const headOid = "a".repeat(40);
 
 function readyObservation(): GitObservation {
   const staged = { path: "file.txt", index: "M", worktree: " " };
   return {
     status: "ready",
     checkoutRoot: "/repo",
-    head: { oid: "a".repeat(40), branch: { kind: "named", name: "main" } },
+    head: { kind: "branch", name: "main", oid: headOid },
     statusEntries: [staged],
     changedPaths: ["file.txt"],
     stagedSummary: [staged],

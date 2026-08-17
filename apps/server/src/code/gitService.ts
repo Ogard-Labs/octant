@@ -44,6 +44,7 @@ export type GitServiceResult =
         | "staged-summary-mismatch"
         | "approval-required"
         | "detached-head"
+        | "unborn-head"
         | "branch-mismatch"
         | "remote-unavailable"
         | "dirty-checkout";
@@ -213,14 +214,15 @@ export class GitService {
         return { status: "rejected", reason: "approval-required" };
       const current = await this.#ready(input.checkoutRoot, signal);
       if (!current) return { status: "unavailable" };
-      if (
-        current.stateToken !== input.expectedStateToken ||
-        current.head.oid !== input.expectedHeadOid
-      )
+      if (current.stateToken !== input.expectedStateToken)
         return { status: "rejected", reason: "stale-state" };
-      if (current.head.branch.kind === "detached")
-        return { status: "rejected", reason: "detached-head" };
-      if (input.localRef !== `refs/heads/${current.head.branch.name}`)
+      // An unborn branch has nothing to push, so it is refused before the head
+      // comparison rather than reported as a stale observation.
+      if (current.head.kind === "unborn") return { status: "rejected", reason: "unborn-head" };
+      if (current.head.oid !== input.expectedHeadOid)
+        return { status: "rejected", reason: "stale-state" };
+      if (current.head.kind === "detached") return { status: "rejected", reason: "detached-head" };
+      if (input.localRef !== `refs/heads/${current.head.name}`)
         return { status: "rejected", reason: "branch-mismatch" };
       if (!current.remotes.some((remote) => remote.name === input.remote))
         return { status: "rejected", reason: "remote-unavailable" };

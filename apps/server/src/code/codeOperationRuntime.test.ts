@@ -426,7 +426,7 @@ describe("CodeOperationRuntime", () => {
       gitObservation: {
         status: "ready",
         checkoutRoot: "/private/exact",
-        head: { oid: "a".repeat(40), branch: { kind: "named", name: "feature/runtime" } },
+        head: { kind: "branch", name: "feature/runtime", oid: "a".repeat(40) },
         statusEntries: [{ path: "src/a.ts", index: " ", worktree: "M" }],
         changedPaths: ["src/a.ts"],
         stagedSummary: [],
@@ -497,6 +497,54 @@ describe("CodeOperationRuntime", () => {
     await expect(
       fixture.runtime.readEvidence(windowId, threadId, operationId(31), result.diff.contentId),
     ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+    fixture.close();
+  });
+
+  // Without an unborn head the observation never decodes, so the renderer never
+  // receives a state token and every Git action stays unreachable in a checkout
+  // that has no commits yet.
+  it("reports a checkout with no commits yet as an unborn head with a usable state token", async () => {
+    const fixture = runtimeFixture({
+      gitObservation: {
+        status: "ready",
+        checkoutRoot: "/private/exact",
+        head: { kind: "unborn", name: "main" },
+        statusEntries: [{ path: "src/a.ts", index: "A", worktree: " " }],
+        changedPaths: ["src/a.ts"],
+        stagedSummary: [{ path: "src/a.ts", index: "A", worktree: " " }],
+        diff: { text: "+first", byteLength: 6, truncated: false },
+        remotes: [],
+        upstream: null,
+        worktrees: [
+          {
+            path: "/private/exact",
+            head: "0".repeat(40),
+            branch: "refs/heads/main",
+            detached: false,
+            bare: false,
+            locked: false,
+            prunable: false,
+          },
+        ],
+        stateToken: "b".repeat(64),
+      },
+    });
+
+    const result = await fixture.runtime.execute(windowId, {
+      kind: "observe-git",
+      operationId: operationId(33),
+      threadId,
+      checkoutId,
+      gitOperationId: operationId(34),
+      maxDiffBytes: 1_024,
+    });
+
+    expect(result).toMatchObject({
+      kind: "git-observed",
+      head: { kind: "unborn", name: "main" },
+      stateToken: "b".repeat(64),
+      worktrees: [{ head: { kind: "unborn", name: "main" }, state: "active" }],
+    });
     fixture.close();
   });
 });

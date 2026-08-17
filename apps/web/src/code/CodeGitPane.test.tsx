@@ -1,7 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { CodeGitPane } from "./CodeGitPane";
-import { codeClient, gitObservation, ids, scope } from "./CodeDeliveryPane.test-fixtures";
+import {
+  codeClient,
+  gitObservation,
+  ids,
+  scope,
+  unbornGitObservation,
+} from "./CodeDeliveryPane.test-fixtures";
 
 describe("CodeGitPane", () => {
   it("shows exact status and sends only explicitly selected stage paths", async () => {
@@ -18,6 +24,31 @@ describe("CodeGitPane", () => {
     );
 
     expect(screen.getByText("feature/delivery")).toBeVisible();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stage 1 path" }));
+    await waitFor(() =>
+      expect(client.executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "stage-git", paths: ["src/changed.ts"] }),
+      ),
+    );
+  });
+
+  it("names a branch with no commits yet and offers staging but not push", async () => {
+    const client = codeClient();
+    render(
+      <CodeGitPane
+        client={client}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        observation={unbornGitObservation}
+        scope={scope}
+      />,
+    );
+
+    expect(screen.getByText("main (no commits yet)")).toBeVisible();
+    // Nothing exists to push, but the first commit must still be reachable.
+    expect(screen.getByRole("button", { name: "Push exact branch" })).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox", { name: "Select src/changed.ts" }));
     fireEvent.click(screen.getByRole("button", { name: "Stage 1 path" }));
     await waitFor(() =>

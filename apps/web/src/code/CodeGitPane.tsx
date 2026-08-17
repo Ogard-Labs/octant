@@ -75,7 +75,13 @@ export function CodeGitPane(props: CodeGitPaneProps) {
           <h1>Checkout changes</h1>
         </div>
         <div className="code-git-pane__toolbar-meta">
-          <p>{head.kind === "branch" ? head.name : "Detached HEAD"}</p>
+          <p>
+            {head.kind === "detached"
+              ? "Detached HEAD"
+              : head.kind === "unborn"
+                ? `${head.name} (no commits yet)`
+                : head.name}
+          </p>
           {props.onReviewPullRequest === undefined ? null : (
             <OctantButton
               onClick={() => props.onReviewPullRequest?.()}

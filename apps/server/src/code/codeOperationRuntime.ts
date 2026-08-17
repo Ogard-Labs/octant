@@ -1234,10 +1234,7 @@ function mapGitObservation(
   const diff = Buffer.from(result.diff.text, "utf8").subarray(0, maxDiffBytes).toString("utf8");
   return {
     status: "ready",
-    head:
-      result.head.branch.kind === "named"
-        ? { kind: "branch", name: result.head.branch.name, oid: result.head.oid }
-        : { kind: "detached", oid: result.head.oid },
+    head: result.head,
     stateToken: result.stateToken,
     statusEntries: result.statusEntries,
     changedPaths: result.changedPaths,
@@ -1254,11 +1251,16 @@ function mapGitObservation(
       const branch = worktree.branch?.startsWith("refs/heads/")
         ? worktree.branch.slice("refs/heads/".length)
         : undefined;
+      // Git reports an all-zero object for a worktree whose branch has no
+      // commits yet; that is an unborn head, not an object anyone can resolve.
+      const unborn = /^0+$/.test(worktree.head);
+      if (unborn && branch === undefined) return [];
       return [
         {
           checkoutId: checkoutIdForPath(worktree.path),
-          head:
-            branch === undefined
+          head: unborn
+            ? { kind: "unborn" as const, name: branch! }
+            : branch === undefined
               ? { kind: "detached" as const, oid: worktree.head }
               : { kind: "branch" as const, name: branch, oid: worktree.head },
           state: worktree.locked
