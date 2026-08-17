@@ -117,10 +117,15 @@ export function ProfileEditor(props: ProfileEditorProps) {
     setNameDraft(value);
     const trimmed = value.trim();
     const { displayName: _cleared, ...rest } = props.profile;
-    // A name the contract would refuse is not written. Reporting it here, while
-    // the field still holds it, is the only point at which the user can fix it.
-    if (trimmed !== "" && nameValidationMessage(trimmed) !== undefined) return;
-    apply(trimmed === "" ? rest : { ...rest, displayName: trimmed }, settled);
+    // A name the contract would refuse is not written, and neither is the last
+    // one that would have been: a name typed past the limit one character at a
+    // time leaves the owner holding the prefix that was still valid, which the
+    // field no longer shows and the user never settled on. Clearing it keeps
+    // the owner's draft equal to what is on screen, so anything written later
+    // is something the user can see. Reporting the problem here, while the
+    // field still holds it, is the only point at which they can fix it.
+    const storable = trimmed !== "" && nameValidationMessage(trimmed) === undefined;
+    apply(storable ? { ...rest, displayName: trimmed } : rest, settled);
   }
 
   function setEmail(value: string, settled: boolean) {
@@ -128,9 +133,12 @@ export function ProfileEditor(props: ProfileEditorProps) {
     const trimmed = value.trim();
     const { email: _cleared, ...rest } = props.profile;
     // An address that cannot be an address is not written: the profile would
-    // then hold something no Gravatar lookup or display could ever use.
-    if (trimmed !== "" && emailValidationMessage(trimmed) !== undefined) return;
-    apply(trimmed === "" ? rest : { ...rest, email: trimmed }, settled);
+    // then hold something no Gravatar lookup or display could ever use. Nor is
+    // the last intermediate value that happened to parse — typing on past
+    // `ada@example.com` must not leave the owner holding that address while
+    // the field shows something else.
+    const storable = trimmed !== "" && emailValidationMessage(trimmed) === undefined;
+    apply(storable ? { ...rest, email: trimmed } : rest, settled);
   }
 
   function setAvatar(avatar: UserAvatarValue) {

@@ -133,6 +133,20 @@ describe("ProfileEditor", () => {
     expect(onCommit).not.toHaveBeenCalled();
   });
 
+  it("stops reporting an address once the user has typed on past it", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<ProfileEditor onChange={onChange} profile={{ ...empty, email: "ada@example.com" }} />);
+
+    await user.type(screen.getByLabelText("Email (optional)"), "@");
+
+    // An owner left holding the last value that happened to parse would persist
+    // an address the field no longer shows and the user did not choose.
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ email: expect.anything() }),
+    );
+  });
+
   it("offers Gravatar only once an address has been entered", async () => {
     const user = userEvent.setup();
     render(<Harness />);
