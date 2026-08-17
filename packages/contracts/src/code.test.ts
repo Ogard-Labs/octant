@@ -289,9 +289,12 @@ describe("Code aggregate contracts", () => {
     // A thread with no journaled operation event is absent, not reported at
     // zero, so the client can tell silence from "nothing has happened yet".
     expect(codeContracts.decodeCodeBootstrap({ ...bootstrap, activity: [] }).activity).toEqual([]);
-    expect(() =>
-      codeContracts.decodeCodeBootstrap({ settings, threads: [], checkouts: [] }),
-    ).toThrow();
+    // A host that predates the field says nothing rather than an empty list.
+    // Refusing that would fail Code bootstrap outright on a paired client that
+    // updated first, instead of losing only the unread mark it feeds.
+    expect(
+      codeContracts.decodeCodeBootstrap({ settings, threads: [], checkouts: [] }).activity,
+    ).toEqual([]);
     expect(() =>
       codeContracts.decodeCodeThreadActivity({ threadId: ids.thread, lastSequence: -1 }),
     ).toThrow();

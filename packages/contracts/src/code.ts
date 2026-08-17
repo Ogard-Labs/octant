@@ -749,8 +749,14 @@ export const CodeBootstrap = Schema.Struct({
    * One entry per thread in `threads` that has journaled operation activity.
    * A thread with none is absent rather than reported at zero, so "nothing has
    * happened yet" and "the host did not say" stay distinguishable.
+   *
+   * The field itself is optional because a paired remote client and its host
+   * update on their own schedules. Requiring it would make an updated client
+   * refuse Code bootstrap from a host that predates this field, which fails the
+   * whole surface rather than the one thing the field feeds; an empty list
+   * degrades to the unread behavior that host already had.
    */
-  activity: Schema.Array(CodeThreadActivity),
+  activity: Schema.optionalWith(Schema.Array(CodeThreadActivity), { default: () => [] }),
 }).annotations(strict);
 export type CodeBootstrap = typeof CodeBootstrap.Type;
 
