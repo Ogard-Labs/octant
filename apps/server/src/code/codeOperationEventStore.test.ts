@@ -10,6 +10,7 @@ import {
   decodeCodeOperationEvent,
   decodeCodeOperationId,
   decodeCodeThreadId,
+  decodeProviderInstanceId,
   type CodeOperationEvent,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -431,6 +432,59 @@ describe("CodeOperationEventStore", () => {
     // Reporting the old account's exhaustion would tell the user they are
     // blocked on a provider they already left.
     expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).limits).toBeUndefined();
+    fixture.connection.close();
+  });
+
+  it("scopes provider limits to the thread's selected provider before it runs a turn", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000033",
+      digest: "a".repeat(64),
+      byteLength: 4,
+    });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt,
+      }),
+    });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "provider-limit",
+        window: "weekly",
+        status: "exhausted",
+      }),
+    });
+
+    // The user changed the thread's provider and has not run a turn on it yet,
+    // so the newest turn still belongs to the account they left. Following the
+    // turn would report that account's exhaustion as the new one's.
+    expect(
+      store.conversation({
+        threadId,
+        afterCursor: 0,
+        limit: 10,
+        providerInstanceId: decodeProviderInstanceId("89000000-0000-4000-8000-000000000041"),
+      }).limits,
+    ).toBeUndefined();
+    expect(
+      store.conversation({
+        threadId,
+        afterCursor: 0,
+        limit: 10,
+        providerInstanceId: decodeProviderInstanceId("89000000-0000-4000-8000-000000000040"),
+      }).limits,
+    ).toMatchObject([{ window: "weekly", status: "exhausted" }]);
     fixture.connection.close();
   });
 
