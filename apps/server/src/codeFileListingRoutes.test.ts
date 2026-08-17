@@ -1,5 +1,6 @@
 import { decodeWindowId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { CodeServiceError } from "./code/codeService";
 import { createCodeRouteHandler, type CodeRouteService } from "./codeRoutes";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -198,6 +199,24 @@ describe("Code file watch route", () => {
       notice(["src/main.ts"]),
       notice([], true),
     ]);
+  });
+
+  it("answers a refused watch with its status instead of a stream that closes", async () => {
+    const { handler } = createRoute({
+      watchFiles: () =>
+        Promise.reject(
+          new CodeServiceError({
+            category: "unauthorized",
+            message: "Code file watching is unauthorized.",
+          }),
+        ),
+    });
+    const response = await handler(get(watchUrl));
+
+    // A 200 whose body ends immediately is indistinguishable from a dropped
+    // watch, so the client would retry forever instead of showing the refusal.
+    expect(response?.status).toBe(401);
+    expect(await response?.json()).toMatchObject({ category: "unauthorized" });
   });
 
   it("answers unavailable when the host wired no watcher", async () => {

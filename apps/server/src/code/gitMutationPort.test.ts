@@ -223,6 +223,23 @@ describe("GitMutationPort", () => {
     expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("staged edit\n");
   });
 
+  it("takes a path back out of the index before the first commit exists", async () => {
+    const repository = createEmptyRepository(temporaryDirectory());
+    writeFileSync(join(repository, "README.md"), "first draft\n");
+    git(repository, "add", "--", "README.md");
+    // An edit after staging is what makes the unborn case awkward: the index
+    // matches neither the file nor a HEAD that does not exist yet.
+    writeFileSync(join(repository, "README.md"), "still drafting\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    await expect(port.unstage({ checkoutRoot: repository, paths: ["README.md"] })).resolves.toEqual(
+      { status: "applied" },
+    );
+
+    expect(gitOutput(repository, "status", "--porcelain").trimEnd()).toBe("?? README.md");
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("still drafting\n");
+  });
+
   it("rejects a discard path shaped like a Git option", async () => {
     const repository = createRepository(temporaryDirectory());
     const port = new GitMutationPort(undefined, confinedOptions());
@@ -293,12 +310,17 @@ describe("GitMutationPort", () => {
   });
 });
 
-function createRepository(root: string): string {
+function createEmptyRepository(root: string): string {
   const repository = join(root, "repository");
   mkdirSync(repository);
   git(repository, "init", "--initial-branch=main");
   git(repository, "config", "user.name", "Octant Test");
   git(repository, "config", "user.email", "test@octant.local");
+  return repository;
+}
+
+function createRepository(root: string): string {
+  const repository = createEmptyRepository(root);
   writeFileSync(join(repository, "README.md"), "initial\n");
   git(repository, "add", "--", "README.md");
   git(repository, "commit", "-m", "initial");

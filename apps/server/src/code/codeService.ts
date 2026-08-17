@@ -115,6 +115,14 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "invalid-grant": "Managed Code worktree creation is invalid.",
 };
 
+/**
+ * An authorized watch that has nothing to report, because this host wired no
+ * watcher or the checkout no longer resolves. It ends rather than refuses: the
+ * client keeps its manual refresh instead of treating a missing capability as
+ * lost access.
+ */
+async function* noNotices(): AsyncGenerator<CodeFileChangeNotice> {}
+
 function stripProposedOutcome(
   deliveryTarget: CodeThread["deliveryTarget"],
 ): Omit<CodeThread["deliveryTarget"], "proposedOutcome"> {
@@ -1566,11 +1574,17 @@ export class CodeService {
    * grant that opened it by more than the connection itself, and a client that
    * loses access reconnects into a refusal rather than a live stream. The
    * notices carry paths only; every refetch they provoke is authorized again.
+   *
+   * The authorization is awaited before the stream exists rather than inside a
+   * generator body, which does not run until its first `next()`. A refusal has
+   * to reach the caller while it can still become a status code; deferred, it
+   * would arrive as a stream that opened and immediately closed, which reads
+   * as a dropped watch and gets retried instead of shown.
    */
-  async *watchFiles(
+  async watchFiles(
     authenticatedWindowId: WindowId,
     input: CodeWatchFilesInput,
-  ): AsyncGenerator<CodeFileChangeNotice> {
+  ): Promise<AsyncIterable<CodeFileChangeNotice>> {
     const authorized = await this.#authorizeCheckoutRead(
       authenticatedWindowId,
       input.threadId,
@@ -1578,15 +1592,15 @@ export class CodeService {
       "Code file watching is unauthorized.",
     );
     const watcher = this.#watcher;
-    if (watcher === undefined) return;
+    if (watcher === undefined) return noNotices();
     const root = await this.#roots.resolve(
       authenticatedWindowId,
       authorized.effectiveThread,
       authorized.checkout,
       CODE_LISTING_ROOT_PROBE_PATH,
     );
-    if (root === undefined) return;
-    yield* watcher.watch({
+    if (root === undefined) return noNotices();
+    return watcher.watch({
       threadId: authorized.thread.id,
       checkoutId: authorized.checkout.id,
       rootPath: root.rootPath,

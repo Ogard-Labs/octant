@@ -225,6 +225,25 @@ describe("CodeSearchService", () => {
     expect(result.search.truncated).toBe(true);
   });
 
+  it("stops a path search at the file budget and says so, as a content search does", async () => {
+    const result = await service(fakePort(smallRepository), { maxFiles: 2 }).search({
+      threadId,
+      checkoutId,
+      rootPath,
+      scope: "path",
+      query: ".",
+    });
+
+    expect(result.status).toBe("searched");
+    if (result.status !== "searched") return;
+    expect(result.search.matches.map((match) => String(match.path))).toEqual([
+      "README.md",
+      "src/helper.ts",
+    ]);
+    // The third file is never reached, so the budget bounded the walk itself.
+    expect(result.search.truncated).toBe(true);
+  });
+
   it("says the search is truncated when a file is too large to read", async () => {
     const result = await service(fakePort(smallRepository), { maxFileBytes: 4 }).search({
       threadId,

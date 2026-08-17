@@ -214,6 +214,10 @@ export class CodeSearchService {
         String(state.checkoutId),
         childRelative,
       );
+      // Both scopes pay the same file budget. Only a content search opens what
+      // it examines, but a path search still walks every directory, and that
+      // walk is the unbounded filesystem cost this budget exists to stop.
+      state.filesExamined += 1;
       if (state.scope === "path") {
         if (childRelative.toLowerCase().includes(state.needle)) {
           state.matches.push({ scope: "path", fileId, path: relativePath });
@@ -221,7 +225,6 @@ export class CodeSearchService {
         continue;
       }
 
-      state.filesExamined += 1;
       if (resolved.stat.size > this.#maxFileBytes) {
         // A file too large to read is not silently reported as containing
         // nothing; the search says it did not see everything.

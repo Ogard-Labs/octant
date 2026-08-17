@@ -130,7 +130,21 @@ export class GitMutationPort {
     const lock = await this.#lockState(input.checkoutRoot, signal);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
-    return this.#apply(input.checkoutRoot, ["restore", "--staged", "--", ...input.paths], signal);
+    const head = await this.#run(
+      ["-C", input.checkoutRoot, "rev-parse", "--verify", "--quiet", "HEAD"],
+      signal,
+    );
+    // Before the first commit there is no HEAD to restore the index from, so
+    // the entry is dropped from the index instead. `--cached` never touches the
+    // file on disk, and `--force` only waives Git's warning about discarding
+    // staged content, which is exactly what unstaging asks for.
+    return head.exitCode === 0
+      ? this.#apply(input.checkoutRoot, ["restore", "--staged", "--", ...input.paths], signal)
+      : this.#apply(
+          input.checkoutRoot,
+          ["rm", "--cached", "--force", "--", ...input.paths],
+          signal,
+        );
   }
 
   /**

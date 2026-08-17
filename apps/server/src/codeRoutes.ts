@@ -245,11 +245,14 @@ export interface CodeRouteService {
    * Live notices that files under the thread's checkout changed. Optional for
    * the same reason as `listFiles`: a host with no watcher answers
    * `unavailable` rather than 404, and the renderer keeps manual refresh.
+   *
+   * The stream may be promised so the host can authorize before handing one
+   * back; a rejection then still has a status code to become.
    */
   readonly watchFiles?: (
     authenticatedWindowId: WindowId,
     input: CodeFileWatchInput,
-  ) => AsyncIterable<CodeFileChangeNotice>;
+  ) => AsyncIterable<CodeFileChangeNotice> | Promise<AsyncIterable<CodeFileChangeNotice>>;
   /**
    * The repository tests the thread's checkout offers. Optional for the same
    * reason as `listFiles`: a host with no discovery answers `unavailable`
@@ -705,14 +708,15 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             );
           }
           const watchInput = decodeFileWatchQuery(url);
-          return noticeStreamResponse(
-            dependencies.service.watchFiles(authenticatedWindowId, {
-              ...watchInput,
-              signal: request.signal,
-            }),
-            request.signal,
-            origin,
-          );
+          // Awaited here, not inside the stream: a watch the host refuses must
+          // fail while this call can still answer with a status. Once the
+          // response exists the only thing left to say is "the stream ended",
+          // which the client cannot tell from a dropped connection.
+          const notices = await dependencies.service.watchFiles(authenticatedWindowId, {
+            ...watchInput,
+            signal: request.signal,
+          });
+          return noticeStreamResponse(notices, request.signal, origin);
         }
         case "test-listing": {
           if (request.method !== "GET") {
