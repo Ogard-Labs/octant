@@ -1,4 +1,14 @@
-# Octant
+<p align="center">
+  <a href="https://octant.sh">
+    <img src="apps/web/public/icon.png" alt="Octant logo" width="120" />
+  </a>
+</p>
+
+<h1 align="center">Octant</h1>
+
+<p align="center">
+  <a href="https://octant.sh">octant.sh</a>
+</p>
 
 Octant is a local-first macOS workspace for **Chat**, **Work**, and **Code**
 across many AI providers. One authoritative local server owns your Projects,
