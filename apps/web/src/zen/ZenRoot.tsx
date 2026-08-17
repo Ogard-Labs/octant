@@ -1,4 +1,7 @@
+import { matchKeybinding } from "@octant/domain";
 import { useEffect, useRef, type ReactNode } from "react";
+import { useKeybindings } from "../keybindings/useKeybindings";
+import { isApplePlatform } from "../platform";
 
 export interface ZenRootProps {
   readonly active: boolean;
@@ -22,19 +25,18 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 export function ZenRoot(props: ZenRootProps) {
   const shellRef = useRef<HTMLDivElement>(null);
+  const { keybindings } = useKeybindings();
 
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent): void {
-      const chord =
-        (event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === "z";
-      if (!chord) return;
+      if (matchKeybinding(keybindings, event, isApplePlatform()) !== "zen-mode") return;
       if (isEditableTarget(event.target) && props.active) return;
       event.preventDefault();
       props.onToggle();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [props]);
+  }, [keybindings, props]);
 
   return (
     <div className={`zen-root${props.active ? " zen-root--active" : ""}`}>

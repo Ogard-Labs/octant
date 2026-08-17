@@ -15,9 +15,13 @@ import {
   liveCodeDirectoryPort,
   type CodeDirectoryPort,
   type CodeDirectoryStat,
-  type CodeOpenDirectory,
 } from "./codeDirectoryPort";
-import { isAbsolutePosixPath, joinCodePath, resolveContainedPath } from "./codePathConfinement";
+import {
+  isAbsolutePosixPath,
+  joinCodePath,
+  readContainedDirectoryNames,
+  resolveContainedPath,
+} from "./codePathConfinement";
 import { deriveCodeFileId } from "./codeFileIdentity";
 import { MAX_EDITABLE_CODE_FILE_BYTES } from "./codeFileService";
 
@@ -232,49 +236,13 @@ export class CodeFileListingService {
     return truncated;
   }
 
-  /**
-   * Names of the one directory containment proved, read from a single handle.
-   *
-   * The handle refuses a symlinked final component, and the object it reports
-   * must be the object containment resolved, so a directory swapped in after
-   * that proof is refused rather than enumerated. `O_NOFOLLOW` alone would not
-   * catch a swapped *ancestor*, which is why the device and inode equality —
-   * not the open — is what closes that window.
-   *
-   * The port cannot make that guarantee absolute: enumerating and identifying
-   * are two path resolutions, so a precisely timed swap can still be identified
-   * as the resolved object while yielding another directory's names. Every name
-   * is re-resolved against the canonical directory below, which is what keeps a
-   * foreign entry out of the listing; the residual is that a name existing in
-   * both directories is indistinguishable from one that only exists here.
-   *
-   * The read is capped at the caller's remaining budget, so a directory far
-   * larger than the listing can report costs that budget rather than its own
-   * size, and a port that ignores the cap is refused rather than trusted.
-   */
+  /** Names of one proved directory, through the shared confined enumeration. */
   async #readNames(
     canonical: string,
     identity: CodeDirectoryStat,
     maximumNames: number,
   ): Promise<ReadonlyArray<string> | undefined> {
-    let directory: CodeOpenDirectory;
-    try {
-      directory = await this.#directory.openDirectory(canonical);
-    } catch {
-      return undefined;
-    }
-    try {
-      const opened = await directory.stat();
-      if (!opened.isDirectory) return undefined;
-      if (opened.device !== identity.device || opened.inode !== identity.inode) return undefined;
-      const children = await directory.read(maximumNames);
-      if (children.length > maximumNames) return undefined;
-      return children.map((child) => child.name).sort(compareNames);
-    } catch {
-      return undefined;
-    } finally {
-      await directory.close().catch(() => undefined);
-    }
+    return await readContainedDirectoryNames(this.#directory, canonical, identity, maximumNames);
   }
 
   /**
@@ -313,9 +281,4 @@ function failed(
 /** Read through a call so the check is never narrowed away between awaits. */
 function isAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
-}
-
-/** Directories before files at the same level, then case-insensitive by name. */
-function compareNames(left: string, right: string): number {
-  return left.localeCompare(right, "en", { sensitivity: "base" });
 }

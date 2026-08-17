@@ -1911,6 +1911,7 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
       sendFollowUp: vi.fn(async () => true),
       setPendingDraft: vi.fn(),
       status: "ready",
+      threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
       turnStatus: "idle",
     } as never,
     workPromotionController: {
