@@ -694,6 +694,14 @@ CREATE TABLE code_thread_activity_projection (
   schema_version INTEGER NOT NULL CHECK(schema_version > 0),
   last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
 ) STRICT;
+
+-- An upgraded database has a Code checkpoint sitting at the journal head, so
+-- catch-up would never replay the operation events this new table is derived
+-- from, and every thread that already exists would report no activity at all.
+-- Rewinding the checkpoint replays them. The projection's writes are idempotent
+-- and its other tables are guarded by aggregate version, so the replay fills
+-- this table without disturbing what they already hold.
+DELETE FROM projection_checkpoints WHERE projection_name = 'code';
 `;
 
 const ADD_EVENT_JOURNAL_HOST_ID_SQL = `

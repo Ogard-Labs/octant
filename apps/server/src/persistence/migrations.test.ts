@@ -100,6 +100,38 @@ describe("applyMigrations", () => {
     }
   });
 
+  it("rewinds the Code checkpoint so an upgraded store replays thread activity", () => {
+    const connection = openTemporaryDatabase();
+    try {
+      applyMigrations(connection, MIGRATIONS.slice(0, 44), clock);
+      // An upgraded store carries a Code checkpoint already at the journal head.
+      // Left there, catch-up replays nothing and the new activity table stays
+      // empty for every thread that already exists.
+      connection
+        .prepare(
+          `INSERT INTO projection_checkpoints (projection_name, last_sequence, updated_at)
+           VALUES ('code', 42, ?)`,
+        )
+        .run(clock());
+      connection
+        .prepare(
+          `INSERT INTO projection_checkpoints (projection_name, last_sequence, updated_at)
+           VALUES ('chat', 42, ?)`,
+        )
+        .run(clock());
+
+      applyMigrations(connection, MIGRATIONS, clock);
+
+      expect(
+        connection
+          .prepare("SELECT projection_name FROM projection_checkpoints ORDER BY projection_name")
+          .all(),
+      ).toEqual([{ projection_name: "chat" }]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("creates the event store and strict shell, Project, provider, and context projection tables on a fresh database", () => {
     const connection = openTemporaryDatabase();
 
