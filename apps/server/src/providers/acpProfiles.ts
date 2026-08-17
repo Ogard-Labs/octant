@@ -11,6 +11,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contracts";
+import type { AcpInitializeResult } from "./acpProtocol";
 
 export type AcpProviderKind = Extract<
   ProviderDriverKind,
@@ -60,6 +61,8 @@ export type AcpConfinementStrategy =
 export interface AcpProcessProfile {
   /** `agentInfo.name` the ACP `initialize` response must report. */
   readonly agentName: string;
+  /** Overrides the default `agentInfo.name` equality check when the agent's `initialize` response identifies itself differently (e.g. via `_meta`). */
+  readonly verifyAgentInfo?: (initialized: AcpInitializeResult) => boolean;
   /** `--version` output contract; groups 1-3 are major, minor, patch. */
   readonly versionPattern: RegExp;
   readonly minimumVersion: readonly [number, number, number];
@@ -89,6 +92,16 @@ export interface AcpProviderProfile {
   readonly reasoningOptionId: "effort" | "thinking";
   /** ACP `mode` config value for a product mode and execution policy. */
   readonly sessionMode: (mode: AcpSessionMode, policy: ProviderExecutionPolicy) => string;
+  /** Overrides the default `session/set_config_option` call for setting the model. */
+  readonly setModelCall?: (
+    sessionId: string,
+    modelId: string,
+  ) => { readonly method: string; readonly params: Readonly<Record<string, unknown>> };
+  /** Overrides the default `session/set_config_option` call for setting the session mode. */
+  readonly setModeCall?: (
+    sessionId: string,
+    mode: string,
+  ) => { readonly method: string; readonly params: Readonly<Record<string, unknown>> };
   /** Chat sessions run in the managed home unless the agent needs a real Project root. */
   readonly chatSessionRoot: "managed-home" | "project-root";
   readonly userQuestions: "supported" | "unsupported";
@@ -373,17 +386,26 @@ const grokProfile: AcpProviderProfile = {
   resumeMethod: "session/load",
   closesSessions: true,
   authenticateOnProbe: false,
+  setModelCall: (sessionId, modelId) => ({
+    method: "session/set_model",
+    params: { sessionId, modelId },
+  }),
+  setModeCall: (sessionId, mode) => ({
+    method: "session/set_mode",
+    params: { sessionId, modeId: mode },
+  }),
   authentication: { kind: "delegated-browser", apiKeyVariable: "XAI_API_KEY" },
   unauthenticatedMessage:
     "Grok Build is not authenticated. Sign in from Provider Settings, then retry.",
   process: {
-    // UNVERIFIED against the real `grok` binary (no CLI access in this
-    // environment): confirm/correct against a live `grok --version` and ACP
-    // `initialize` response before enabling this driver for real users.
+    // display-only now; identity is verified via verifyAgentInfo below (real
+    // initialize responses have no agentInfo field)
     agentName: "Grok Build",
+    verifyAgentInfo: (initialized) =>
+      (initialized._meta as Readonly<Record<string, unknown>> | undefined)?.grokShell === true,
     versionPattern:
-      /^(?:grok )?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)?\r?\n?$/,
-    minimumVersion: [0, 1, 0],
+      /^grok (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)? \([0-9a-f]+\)(?: \[[a-zA-Z]+\])?\r?\n?$/,
+    minimumVersion: [1, 0, 0],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: {
       GROK_TELEMETRY_ENABLED: "0",

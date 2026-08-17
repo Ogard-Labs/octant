@@ -38,6 +38,7 @@ const InitializeResult = Schema.Struct({
       version: Schema.NonEmptyTrimmedString,
     }),
   ),
+  _meta: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 });
 export type AcpInitializeResult = typeof InitializeResult.Type;
 
@@ -182,6 +183,8 @@ export interface AcpClient {
     configId: string,
     value: string,
   ): Promise<AcpConfigOptionsResult>;
+  /** Generic JSON-RPC call for profile-specific ACP methods (e.g. Grok's `session/set_mode`). */
+  call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T>;
   closeSession(sessionId: string): Promise<void>;
   onNotification(listener: (message: AcpServerNotification) => void): () => void;
   onRequest(listener: (message: AcpServerRequest) => void): () => void;
@@ -565,6 +568,8 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         { sessionId, configId, value },
         decode(ConfigOptionsResult),
       ),
+    call: <T>(method: string, params: Record<string, unknown>) =>
+      request<T>(method, params, decode(Schema.Unknown) as (value: unknown) => T),
     closeSession: (sessionId) =>
       request("session/close", { sessionId }, decode(EmptyResult)).then(() => undefined),
     onNotification: (listener) => {

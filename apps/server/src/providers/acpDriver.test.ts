@@ -31,6 +31,7 @@ class FakeClient implements AcpClientPort {
   readonly notifications = new Set<Parameters<AcpClientPort["onNotification"]>[0]>();
   readonly requests = new Set<Parameters<AcpClientPort["onRequest"]>[0]>();
   readonly setConfigOption = vi.fn(async () => ({ configOptions: this.configOptions }));
+  readonly call = vi.fn(async () => ({})) as unknown as AcpClientPort["call"];
   readonly respondPermission = vi.fn(async () => undefined);
   readonly closeSession = vi.fn(async () => undefined);
   readonly authenticate = vi.fn(async () => undefined);
@@ -400,11 +401,22 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         },
       ]);
       expect(client.newSession).toHaveBeenCalledWith(expectedRoot);
-      expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-1", "model", modelId);
-      expect(client.setConfigOption).toHaveBeenCalledWith(
-        "agent-session-1",
-        "mode",
-        profile.sessionMode(productMode, executionPolicy),
+      const expectedModelRequest = profile.setModelCall?.("agent-session-1", modelId) ?? {
+        method: "session/set_config_option",
+        params: { sessionId: "agent-session-1", configId: "model", value: modelId },
+      };
+      expect(client.call).toHaveBeenCalledWith(
+        expectedModelRequest.method,
+        expectedModelRequest.params,
+      );
+      const modeValue = profile.sessionMode(productMode, executionPolicy);
+      const expectedModeRequest = profile.setModeCall?.("agent-session-1", modeValue) ?? {
+        method: "session/set_config_option",
+        params: { sessionId: "agent-session-1", configId: "mode", value: modeValue },
+      };
+      expect(client.call).toHaveBeenCalledWith(
+        expectedModeRequest.method,
+        expectedModeRequest.params,
       );
       expect(active()).toBe(0);
       expect(registry.activeSessionCount(instanceId)).toBe(0);

@@ -58,6 +58,7 @@ export interface AcpClientPort {
     configId: string,
     value: string,
   ) => Promise<AcpConfigOptionsResult>;
+  readonly call: <T = unknown>(method: string, params: Record<string, unknown>) => Promise<T>;
   readonly onNotification: (listener: (message: AcpServerNotification) => void) => () => void;
   readonly onRequest: (listener: (message: AcpServerRequest) => void) => () => void;
   readonly respondPermission: (id: string | number, optionId?: string) => Promise<void>;
@@ -683,12 +684,17 @@ function makeConnection(
               : profile.resumeMethod === "session/resume"
                 ? await client.resumeSession(input.sourceSessionId, runtimeRoot)
                 : await client.loadSession(input.sourceSessionId, runtimeRoot);
-          await client.setConfigOption(source.sessionId, "model", input.modelId);
-          await client.setConfigOption(
-            source.sessionId,
-            "mode",
-            profile.sessionMode(mode, input.executionPolicy),
-          );
+          const modelRequest = profile.setModelCall?.(source.sessionId, input.modelId) ?? {
+            method: "session/set_config_option",
+            params: { sessionId: source.sessionId, configId: "model", value: input.modelId },
+          };
+          await client.call(modelRequest.method, modelRequest.params);
+          const modeValue = profile.sessionMode(mode, input.executionPolicy);
+          const modeRequest = profile.setModeCall?.(source.sessionId, modeValue) ?? {
+            method: "session/set_config_option",
+            params: { sessionId: source.sessionId, configId: "mode", value: modeValue },
+          };
+          await client.call(modeRequest.method, modeRequest.params);
           return await register(input, source, scope, client);
         } catch (error) {
           await Effect.runPromise(Scope.close(scope, Exit.void));
