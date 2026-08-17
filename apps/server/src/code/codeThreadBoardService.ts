@@ -4,7 +4,6 @@ import {
   type CodeBoardQuery,
   type CodeBoardStatus,
   type CodeBoardView,
-  type CodeRuntimeWork,
   type CodeThread,
   type CodeThreadId,
   type CodeThreadOperationalMetadata,
@@ -14,6 +13,7 @@ import {
   compareCodeBoardActivityDescending,
   deriveCodeBoardStatus,
 } from "@octant/domain/code-policy";
+import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import { CodeThreadMetadataService } from "./codeThreadMetadataService";
 
 const ALL_BOARD_STATUSES: readonly CodeBoardStatus[] = ["ready", "in-progress", "waiting", "done"];
@@ -72,46 +72,29 @@ export interface CodeBoardRuntimeSource {
  * because its process is gone, so only the latest provider turn can hold the
  * thread in Waiting from that state.
  */
-const SETTLED_RUNTIME_STATES: ReadonlySet<CodeRuntimeWork["state"]> = new Set([
-  "completed",
-  "failed",
-]);
-
-/**
- * Whether one provider turn supersedes another.
- *
- * `updatedAt` decides it whenever the two differ. Records written in the same
- * millisecond carry no chronology, so the tie is broken deliberately rather
- * than by whatever order the projection happened to return: a turn that still
- * owes the person something outranks a settled one, because reporting Ready on
- * the strength of record ordering would claim a thread is finished when the
- * evidence does not say so. A remaining tie falls back to the work id, which is
- * arbitrary but stable — the same input always yields the same status.
- */
-function supersedes(candidate: CodeRuntimeWork, incumbent: CodeRuntimeWork): boolean {
-  if (candidate.updatedAt !== incumbent.updatedAt) {
-    return candidate.updatedAt > incumbent.updatedAt;
-  }
-  const candidateSettled = SETTLED_RUNTIME_STATES.has(candidate.state);
-  const incumbentSettled = SETTLED_RUNTIME_STATES.has(incumbent.state);
-  if (candidateSettled !== incumbentSettled) return incumbentSettled;
-  return String(candidate.id) > String(incumbent.id);
-}
-
 export function boardRuntimeActivityFromWorks(
-  works: ReadonlyArray<CodeRuntimeWork>,
+  works: ReadonlyArray<ProjectedCodeRuntimeWork>,
 ): CodeBoardRuntimeActivity {
-  let latestTurn: CodeRuntimeWork | undefined;
-  for (const work of works) {
-    if (work.kind !== "provider-turn") continue;
-    if (latestTurn === undefined || supersedes(work, latestTurn)) latestTurn = work;
+  // The latest turn is the one that started last, read from the durable
+  // chronology the projection assigns each record. `updatedAt` cannot answer
+  // this: two turns can share a millisecond, and a record keeps the time it
+  // last moved rather than the time it began, so an older turn that a restart
+  // rewrote would otherwise outrank the turn that ran after it.
+  let latestTurn: ProjectedCodeRuntimeWork | undefined;
+  for (const entry of works) {
+    if (entry.work.kind !== "provider-turn") continue;
+    if (latestTurn === undefined || entry.firstSequence > latestTurn.firstSequence) {
+      latestTurn = entry;
+    }
   }
-  const contributing = works.filter((work) => work.kind !== "provider-turn" || work === latestTurn);
-  const executing = contributing.some((work) => work.state === "running");
-  const liveWait = contributing.some(
-    (work) => work.state === "waiting" || work.state === "ambiguous",
+  const contributing = works.filter(
+    (entry) => entry.work.kind !== "provider-turn" || entry === latestTurn,
   );
-  const interruptedTurn = latestTurn !== undefined && latestTurn.state === "interrupted";
+  const executing = contributing.some((entry) => entry.work.state === "running");
+  const liveWait = contributing.some(
+    (entry) => entry.work.state === "waiting" || entry.work.state === "ambiguous",
+  );
+  const interruptedTurn = latestTurn !== undefined && latestTurn.work.state === "interrupted";
   const waiting = liveWait || interruptedTurn;
   return {
     executing,
