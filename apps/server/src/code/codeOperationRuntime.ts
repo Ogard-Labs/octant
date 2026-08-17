@@ -487,7 +487,12 @@ export function createCodeOperationRuntime(
       if (!(await options.windowAccess.canAccessProject(windowId, thread.projectId))) {
         throw new CodeOperationServiceError("unauthorized");
       }
-      return events.conversation({ threadId, afterCursor, limit });
+      return events.conversation({
+        threadId,
+        afterCursor,
+        limit,
+        providerInstanceId: thread.providerInstanceId,
+      });
     },
     readEvidence: async (windowId, threadId, operationId, contentId) => {
       try {

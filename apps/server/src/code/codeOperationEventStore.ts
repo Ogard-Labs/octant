@@ -23,6 +23,7 @@ import {
   type CodeOperationId,
   type CodeThreadId,
   type EventEnvelope,
+  type ProviderInstanceId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -78,6 +79,13 @@ export interface ReadCodeConversationInput {
   readonly threadId: CodeThreadId;
   readonly afterCursor: number;
   readonly limit: number;
+  /**
+   * The provider the thread is bound to now, supplied by the caller that can
+   * read the thread projection. Only limits this provider reported are current;
+   * without it the page falls back to the newest turn's provider, which is all
+   * a replay-only caller can know.
+   */
+  readonly providerInstanceId?: ProviderInstanceId;
 }
 
 export type CodeOperationEventReplay =
@@ -463,8 +471,13 @@ export class CodeOperationEventStore {
 
     // Only the provider the thread is on now can speak for the account the page
     // reports. A limit an earlier provider left behind is history, not a
-    // remaining quota, so it is dropped rather than relabelled.
-    const currentProviderInstanceId = String(turns.at(-1)?.providerInstanceId ?? "");
+    // remaining quota, so it is dropped rather than relabelled. The thread's
+    // selection decides that, not the newest turn: a thread whose provider was
+    // just changed has not run a turn on the new one yet, and following the
+    // turn would report the account the user already left.
+    const currentProviderInstanceId = String(
+      input.providerInstanceId ?? turns.at(-1)?.providerInstanceId ?? "",
+    );
     const currentLimits = [...limits.values()]
       .filter((entry) => entry.providerInstanceId === currentProviderInstanceId)
       .map((entry) => entry.limit);
