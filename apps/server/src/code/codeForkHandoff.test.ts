@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildCodeForkHandoff, type CodeForkHandoffTurn } from "./codeForkHandoff";
+import {
+  buildCodeForkHandoff,
+  type CodeForkHandoffOptions,
+  type CodeForkHandoffTurn,
+} from "./codeForkHandoff";
 
 const windowId = "90000000-0000-4000-8000-000000000001" as never;
 const sourceThreadId = "90000000-0000-4000-8000-000000000002" as never;
@@ -18,10 +22,10 @@ function turn(index: number, status = "completed"): CodeForkHandoffTurn {
 function options(
   turns: ReadonlyArray<CodeForkHandoffTurn>,
   text: (contentId: string) => string | undefined = (contentId) => contentId,
-) {
+): CodeForkHandoffOptions {
   return {
     conversation: vi.fn(async () => ({ turns, nextCursor: 1, hasMore: false })),
-    readEvidence: vi.fn(async (_window: never, _thread: never, _operation: never, id: string) => {
+    readEvidence: vi.fn(async (_window, _thread, _operation, id) => {
       const value = text(id);
       if (value === undefined) throw new Error("unavailable");
       return { bytes: new TextEncoder().encode(value) };
