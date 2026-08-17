@@ -179,6 +179,7 @@ describe("Journal", () => {
         sidebarMaterial: "system",
         modeSwitcherPresentation: "dropdown",
         navigatorAssistant: {},
+        projectViewSwitcherPresentation: "dropdown",
         sidebarBackground: {
           kind: "none",
           overlayColor: "#1a1a1c",

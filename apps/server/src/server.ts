@@ -1003,7 +1003,7 @@ function withCodeOperationRuntime(
     bootstrap: (windowId) => service.bootstrap(windowId),
     read: (windowId, threadId) => service.read(windowId, threadId),
     execute: (windowId, command) => service.execute(windowId, command),
-    executeOperation: (windowId, command) => runtime.execute(windowId, command),
+    executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
     inspectTerminal: (windowId, input) => runtime.inspectTerminal(windowId, input),
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
@@ -2357,6 +2357,7 @@ export function startOctantServer(
     if (codeOperationRuntime === undefined && options.codeService === undefined) {
       const terminalProcessPort = new TerminalProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "terminal-receipts"),
+        shellStateDirectory: join(providerDataDirectory, "code", "terminal-shell"),
       });
       const repositoryTestProcessPort = new RepositoryTestProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "test-receipts"),

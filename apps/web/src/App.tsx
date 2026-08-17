@@ -3293,7 +3293,14 @@ function LaunchedShell(
                 </div>
               ) : (
                 <ProjectSidebarSection
-                  {...(activeMode === "code" ? { projectViewsEnabled: true } : {})}
+                  {...(activeMode === "code"
+                    ? {
+                        projectViewsEnabled: true,
+                        projectViewSwitcherPresentation: (
+                          presentedShellSettings ?? controller.settings
+                        ).projectViewSwitcherPresentation,
+                      }
+                    : {})}
                   activityMode={activeMode}
                   {...(activeProjectId === undefined ? {} : { activeProjectId })}
                   {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
@@ -3490,6 +3497,7 @@ function LaunchedShell(
                   hostId={createHostId}
                   hidden={railPlaceholder !== undefined || codeBoardOpen || automationCenterVisible}
                   onActivate={controller.activateTab}
+                  tabActivation={controller.tabActivation}
                   onClearFocus={controller.clearFocus}
                   onClose={controller.closeTab}
                   onCommitResize={controller.commitSplitResize}

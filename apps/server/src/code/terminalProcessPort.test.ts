@@ -1,11 +1,15 @@
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { rmSync } from "node:fs";
+import { existsSync, realpathSync, rmSync } from "node:fs";
 import { createFakeSandboxConfinement } from "../process/fakeSandboxConfinement";
 import { SeatbeltConfinementError } from "../process/seatbeltProfile";
-import { ensureNodePtySpawnHelperExecutable, TerminalProcessPort } from "./terminalProcessPort";
+import {
+  ensureNodePtySpawnHelperExecutable,
+  shellStateEnvironment,
+  TerminalProcessPort,
+} from "./terminalProcessPort";
 
 const directories: string[] = [];
 
@@ -30,6 +34,7 @@ describe("TerminalProcessPort", () => {
     const handle = new TerminalProcessPort(confinedOptions()).start({
       shell: process.platform === "darwin" ? "/bin/zsh" : "/bin/sh",
       cwd: tmpdir(),
+      stateScope: "repo_test",
       environment: {
         HOME: process.env.HOME ?? tmpdir(),
         PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -80,37 +85,129 @@ describe("TerminalProcessPort", () => {
     const spawn = vi.fn(() => pty);
     const fake = createFakeSandboxConfinement();
     directories.push(fake.root);
+    const shellStateDirectory = join(fake.root, "terminal-shell");
     const port = new TerminalProcessPort({
       spawn,
       killProcessGroup: vi.fn(),
       confinement: fake.confinement,
       temporaryDirectory: fake.temporaryDirectory,
+      shellStateDirectory,
       networkEgress: "none",
     });
 
     port.start({
       shell: "/bin/zsh",
       cwd: "/private/repo",
+      stateScope: "repo_test",
       environment: { PATH: "/usr/bin", OCTANT_TOKEN: "secret" },
       columns: 120,
       rows: 40,
     });
 
+    // The shell keeps its history and prompt caches in the Octant-owned state
+    // directory of its own bound root instead of failing against the read-only
+    // home or sharing one history with every other repository.
+    const stateDirectory = launchedStateDirectory(spawn);
+    expect(dirname(stateDirectory)).toBe(shellStateDirectory);
     expect(spawn).toHaveBeenCalledWith(
       fake.sandboxPath,
       expect.arrayContaining(["-p", "--", "/bin/zsh"]),
       {
         name: "xterm-256color",
         cwd: "/private/repo",
-        env: { PATH: "/usr/bin", OCTANT_TOKEN: "secret" },
+        env: {
+          ...shellStateEnvironment(stateDirectory),
+          PATH: "/usr/bin",
+          OCTANT_TOKEN: "secret",
+        },
         cols: 120,
         rows: 40,
       },
     );
-    const firstCall = spawn.mock.calls[0] as unknown as [string, string[], unknown?];
-    const profile = String(firstCall[1][1]);
+    expect(existsSync(stateDirectory)).toBe(true);
+    const profile = launchedProfile(spawn);
     expect(profile).toContain("(deny default)");
+    expect(profile).toContain(`(allow file-write* (subpath "${realpathSync(stateDirectory)}"))`);
     expect(profile).not.toContain("(allow network*)");
+  });
+
+  it("keeps shell history and caches separate for every bound root", async () => {
+    const fake = createFakeSandboxConfinement();
+    directories.push(fake.root);
+    const shellStateDirectory = join(fake.root, "terminal-shell");
+    const first = await mkdtemp(join(fake.root, "checkout-a-"));
+    const second = await mkdtemp(join(fake.root, "checkout-b-"));
+    const launch = (cwd: string, stateScope = "repo_a") => {
+      const spawn = vi.fn(() => fakePty());
+      new TerminalProcessPort({
+        spawn,
+        killProcessGroup: vi.fn(),
+        confinement: fake.confinement,
+        temporaryDirectory: fake.temporaryDirectory,
+        shellStateDirectory,
+      }).start({ shell: "/bin/zsh", cwd, stateScope, environment: {}, columns: 80, rows: 24 });
+      return {
+        stateDirectory: launchedStateDirectory(spawn),
+        profile: launchedProfile(spawn),
+        environment: (spawn.mock.calls[0] as unknown as [string, string[], { env: EnvRecord }])[2]
+          .env,
+      };
+    };
+
+    const a = launch(first);
+    const b = launch(second);
+
+    // One Project's confined shell can neither read nor write the other's
+    // history, where command lines can carry secrets.
+    expect(a.stateDirectory).not.toBe(b.stateDirectory);
+    expect(dirname(a.stateDirectory)).toBe(shellStateDirectory);
+    expect(dirname(b.stateDirectory)).toBe(shellStateDirectory);
+    expect(a.environment.HISTFILE).toBe(join(a.stateDirectory, "zsh_history"));
+    expect(b.environment.HISTFILE).toBe(join(b.stateDirectory, "zsh_history"));
+    for (const [own, other] of [
+      [a, b],
+      [b, a],
+    ] as const) {
+      expect(own.profile).toContain(
+        `(allow file-write* (subpath "${realpathSync(own.stateDirectory)}"))`,
+      );
+      for (const permission of ["file-read*", "file-write*"]) {
+        expect(own.profile).not.toContain(
+          `(allow ${permission} (subpath "${realpathSync(other.stateDirectory)}"))`,
+        );
+      }
+      // The shared base is never itself an allow root, and it is denied as a
+      // whole so a sibling created after this profile was generated is out of
+      // reach too — not just the siblings that existed at generation time.
+      for (const permission of ["file-read*", "file-write*"]) {
+        expect(own.profile).not.toContain(
+          `(allow ${permission} (subpath "${realpathSync(shellStateDirectory)}"))`,
+        );
+      }
+      expect(own.profile).toContain(
+        `(deny file-read* (subpath "${realpathSync(shellStateDirectory)}"))`,
+      );
+      // The base can sit under an ancestor that is itself writable, so the
+      // write side needs the same stable denial.
+      expect(own.profile).toContain(
+        `(deny file-write* (subpath "${realpathSync(shellStateDirectory)}"))`,
+      );
+      expect(
+        own.profile.indexOf(`(deny file-write* (subpath "${realpathSync(shellStateDirectory)}"))`),
+      ).toBeLessThan(
+        own.profile.indexOf(`(allow file-write* (subpath "${realpathSync(own.stateDirectory)}"))`),
+      );
+      expect(
+        own.profile.indexOf(`(deny file-read* (subpath "${realpathSync(shellStateDirectory)}"))`),
+      ).toBeLessThan(
+        own.profile.indexOf(`(allow file-read* (subpath "${realpathSync(own.stateDirectory)}"))`),
+      );
+    }
+
+    // A path is reusable: remove a repository and create an unrelated one in
+    // its place and the new shell must not inherit the old one's history.
+    expect(launch(first, "repo_b").stateDirectory).not.toBe(a.stateDirectory);
+    expect(launch(first).stateDirectory).toBe(a.stateDirectory);
   });
 
   it("fails closed when Seatbelt confinement is unavailable", () => {
@@ -121,6 +218,7 @@ describe("TerminalProcessPort", () => {
       }).start({
         shell: "/bin/sh",
         cwd: tmpdir(),
+        stateScope: "repo_test",
         environment: {},
         columns: 80,
         rows: 24,
@@ -133,6 +231,7 @@ describe("TerminalProcessPort", () => {
     const handle = new TerminalProcessPort(confinedOptions({ spawn: () => pty })).start({
       shell: "/bin/zsh",
       cwd: "/repo",
+      stateScope: "repo_test",
       environment: {},
       columns: 80,
       rows: 24,
@@ -158,6 +257,7 @@ describe("TerminalProcessPort", () => {
     const handle = port.start({
       shell: "/bin/zsh",
       cwd: "/repo",
+      stateScope: "repo_test",
       environment: {},
       columns: 80,
       rows: 24,
@@ -183,6 +283,7 @@ describe("TerminalProcessPort", () => {
     ).start({
       shell: "/bin/zsh",
       cwd: "/repo",
+      stateScope: "repo_test",
       environment: {},
       columns: 80,
       rows: 24,
@@ -207,6 +308,7 @@ describe("TerminalProcessPort", () => {
     ).start({
       shell: "/bin/zsh",
       cwd: "/repo",
+      stateScope: "repo_test",
       environment: {},
       columns: 80,
       rows: 24,
@@ -233,6 +335,7 @@ describe("TerminalProcessPort", () => {
     ).start({
       shell: "/bin/zsh",
       cwd: "/repo",
+      stateScope: "repo_test",
       environment: {},
       columns: 80,
       rows: 24,
@@ -255,6 +358,7 @@ describe("TerminalProcessPort", () => {
       ).start({
         shell: "/bin/zsh",
         cwd: "/repo",
+        stateScope: "repo_test",
         environment: {},
         columns: 80,
         rows: 24,
@@ -284,6 +388,7 @@ describe("TerminalProcessPort", () => {
       ).start({
         shell: "/bin/zsh",
         cwd: "/repo",
+        stateScope: "repo_test",
         environment: {},
         columns: 80,
         rows: 24,
@@ -318,6 +423,7 @@ describe("TerminalProcessPort", () => {
       ).start({
         shell: "/bin/zsh",
         cwd: "/repo",
+        stateScope: "repo_test",
         environment: {},
         columns: 80,
         rows: 24,
@@ -351,6 +457,7 @@ describe("TerminalProcessPort", () => {
       ).start({
         shell: "/bin/zsh",
         cwd: "/repo",
+        stateScope: "repo_test",
         environment: {},
         columns: 80,
         rows: 24,
@@ -364,6 +471,22 @@ describe("TerminalProcessPort", () => {
     }
   });
 });
+
+type EnvRecord = Record<string, string>;
+type SpawnMock = { readonly mock: { readonly calls: ReadonlyArray<unknown> } };
+
+function launchedCall(spawn: SpawnMock): [string, string[], { env: EnvRecord }] {
+  return spawn.mock.calls[0] as [string, string[], { env: EnvRecord }];
+}
+
+/** The state directory one launch actually pointed its shell at. */
+function launchedStateDirectory(spawn: SpawnMock): string {
+  return dirname(String(launchedCall(spawn)[2].env.HISTFILE));
+}
+
+function launchedProfile(spawn: SpawnMock): string {
+  return String(launchedCall(spawn)[1][1]);
+}
 
 function fakePty() {
   return {

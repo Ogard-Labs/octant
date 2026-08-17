@@ -1,15 +1,28 @@
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import type { ProjectViewSwitcherPresentation } from "@octant/contracts/shell";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import {
+  Box,
+  Briefcase,
+  Bug,
   ChevronDown,
   ChevronRight,
   Clock3,
+  Code,
+  Flag,
   Folder,
+  FolderGit,
   Inbox,
+  Layers,
   ListTree,
   MoreHorizontal,
   Plus,
+  Rocket,
+  Sparkles,
   SquarePen,
+  Star,
+  Terminal,
+  type LucideIcon,
 } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
@@ -18,6 +31,11 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import {
   ALL_CODE_PROJECTS_VIEW_ID,
+  ALL_CODE_PROJECTS_VIEW_NAME,
+  CODE_PROJECT_VIEW_COLORS,
+  CODE_PROJECT_VIEW_ICONS,
+  DEFAULT_CODE_PROJECT_VIEW_COLOR,
+  DEFAULT_CODE_PROJECT_VIEW_ICON,
   createCodeProjectView,
   createCodeProjectViewId,
   deleteCodeProjectView,
@@ -26,6 +44,10 @@ import {
   updateCodeProjectView,
   visibleCodeProjects,
   writeCodeProjectViewState,
+  type CodeProjectView,
+  type CodeProjectViewColor,
+  type CodeProjectViewIcon,
+  type CodeProjectViewInput,
   type CodeProjectViewState,
 } from "../code/codeProjectViewModel";
 import {
@@ -44,6 +66,61 @@ import { createPortal } from "react-dom";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
 type ProjectSort = "manual" | "updated" | "name";
+
+const CODE_PROJECT_VIEW_ICON_COMPONENTS: Readonly<Record<CodeProjectViewIcon, LucideIcon>> = {
+  folder: Folder,
+  "folder-git": FolderGit,
+  code: Code,
+  terminal: Terminal,
+  box: Box,
+  layers: Layers,
+  rocket: Rocket,
+  star: Star,
+  flag: Flag,
+  bug: Bug,
+  briefcase: Briefcase,
+  sparkles: Sparkles,
+};
+
+const CODE_PROJECT_VIEW_ICON_LABELS: Readonly<Record<CodeProjectViewIcon, string>> = {
+  folder: "Folder",
+  "folder-git": "Folder with Git",
+  code: "Code",
+  terminal: "Terminal",
+  box: "Box",
+  layers: "Layers",
+  rocket: "Rocket",
+  star: "Star",
+  flag: "Flag",
+  bug: "Bug",
+  briefcase: "Briefcase",
+  sparkles: "Sparkles",
+};
+
+const CODE_PROJECT_VIEW_COLOR_LABELS: Readonly<Record<CodeProjectViewColor, string>> = {
+  neutral: "Neutral",
+  red: "Red",
+  orange: "Orange",
+  yellow: "Yellow",
+  green: "Green",
+  teal: "Teal",
+  blue: "Blue",
+  purple: "Purple",
+  pink: "Pink",
+};
+
+function CodeProjectViewGlyph(props: {
+  readonly color: CodeProjectViewColor;
+  readonly icon: CodeProjectViewIcon;
+  readonly size?: number;
+}) {
+  const Icon = CODE_PROJECT_VIEW_ICON_COMPONENTS[props.icon];
+  return (
+    <span className="code-project-views__glyph" data-view-color={props.color}>
+      <Icon aria-hidden="true" size={props.size ?? 14} strokeWidth={1.7} />
+    </span>
+  );
+}
 
 const PROJECT_SORT_ITEMS: ReadonlyArray<OctantMenuItem> = [
   {
@@ -100,6 +177,7 @@ export interface ProjectSidebarSectionProps {
   readonly threadErrorMessage?: string;
   readonly onRetryThreads?: () => void;
   readonly projectViewsEnabled?: boolean;
+  readonly projectViewSwitcherPresentation?: ProjectViewSwitcherPresentation;
   readonly now?: Date;
   readonly activityMode?: SidebarActivityMode;
 }
@@ -232,6 +310,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           onSelect={(viewId) =>
             persistProjectViewState(selectCodeProjectView(projectViewState, viewId))
           }
+          presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
           projectCount={visibleProjects.length}
           state={projectViewState}
         />
@@ -736,46 +815,78 @@ function CodeProjectViewSwitcher(props: {
   readonly onDelete: (viewId: string) => void;
   readonly onEdit: (viewId: string) => void;
   readonly onSelect: (viewId: string) => void;
+  readonly presentation: ProjectViewSwitcherPresentation;
   readonly projectCount: number;
   readonly state: CodeProjectViewState;
 }) {
-  const items: ReadonlyArray<OctantMenuItem> = [
-    { label: "All Projects", value: ALL_CODE_PROJECTS_VIEW_ID },
-    ...props.state.views.map((view) => ({ label: view.name, value: view.id })),
+  const allProjectsView = {
+    id: ALL_CODE_PROJECTS_VIEW_ID,
+    name: ALL_CODE_PROJECTS_VIEW_NAME,
+    icon: DEFAULT_CODE_PROJECT_VIEW_ICON,
+    color: DEFAULT_CODE_PROJECT_VIEW_COLOR,
+  } as const;
+  const options: ReadonlyArray<Pick<CodeProjectView, "id" | "name" | "icon" | "color">> = [
+    allProjectsView,
+    ...props.state.views,
   ];
-  const activeName =
-    props.state.activeViewId === ALL_CODE_PROJECTS_VIEW_ID
-      ? "All Projects"
-      : (props.state.views.find((view) => view.id === props.state.activeViewId)?.name ??
-        "All Projects");
+  const active =
+    options.find((option) => option.id === props.state.activeViewId) ?? allProjectsView;
   const canEdit = props.state.activeViewId !== ALL_CODE_PROJECTS_VIEW_ID;
+  const newViewButton = (
+    <OctantButton
+      aria-label="New project view"
+      className="code-project-views__new"
+      onClick={props.onCreate}
+      size="icon"
+      title="New project view"
+      type="button"
+      variant="ghost"
+    >
+      <Plus aria-hidden="true" size={14} strokeWidth={1.7} />
+    </OctantButton>
+  );
   return (
     <div className="code-project-views">
-      <div className="code-project-views__row">
-        <OctantMenu
-          items={items}
-          onValueChange={props.onSelect}
-          trigger={
-            <span className="code-project-views__trigger">
-              <Folder aria-hidden="true" size={14} strokeWidth={1.7} />
-              <span>{activeName}</span>
-            </span>
-          }
-          triggerLabel="Project view"
-          value={props.state.activeViewId}
-        />
-        <OctantButton
-          aria-label="New project view"
-          className="code-project-views__new"
-          onClick={props.onCreate}
-          size="icon"
-          title="New project view"
-          type="button"
-          variant="ghost"
-        >
-          <Plus aria-hidden="true" size={14} strokeWidth={1.7} />
-        </OctantButton>
-      </div>
+      {props.presentation === "inline" ? (
+        <div aria-label="Project views" className="code-project-views__inline" role="group">
+          {options.map((option) => (
+            <OctantButton
+              aria-label={option.name}
+              aria-pressed={option.id === active.id}
+              className="code-project-views__inline-button"
+              key={option.id}
+              onClick={() => props.onSelect(option.id)}
+              size="icon"
+              title={option.name}
+              type="button"
+              variant="ghost"
+            >
+              <CodeProjectViewGlyph color={option.color} icon={option.icon} />
+            </OctantButton>
+          ))}
+          {newViewButton}
+        </div>
+      ) : (
+        <div className="code-project-views__row">
+          <OctantMenu
+            items={options.map((option) => ({
+              icon: <CodeProjectViewGlyph color={option.color} icon={option.icon} />,
+              label: option.name,
+              value: option.id,
+            }))}
+            onValueChange={props.onSelect}
+            trigger={
+              <span className="code-project-views__trigger">
+                <CodeProjectViewGlyph color={active.color} icon={active.icon} />
+                <span>{active.name}</span>
+              </span>
+            }
+            triggerLabel="Project view"
+            value={props.state.activeViewId}
+          />
+          {newViewButton}
+        </div>
+      )}
       <div className="code-project-views__meta">
         <span>Projects {props.projectCount}</span>
         {canEdit ? (
@@ -804,20 +915,18 @@ function CodeProjectViewSwitcher(props: {
 function CodeProjectViewEditorDialog(props: {
   readonly mode: "create" | "edit";
   readonly onClose: () => void;
-  readonly onSave: (input: {
-    readonly id: string;
-    readonly name: string;
-    readonly projectIds: ReadonlyArray<string>;
-  }) => void;
+  readonly onSave: (input: CodeProjectViewInput) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
-  readonly view?: {
-    readonly id: string;
-    readonly name: string;
-    readonly projectIds: ReadonlyArray<string>;
-  };
+  readonly view?: CodeProjectView;
 }) {
   const nameInputRef = useRef<HTMLInputElement>(null);
   const [name, setName] = useState(props.view?.name ?? "");
+  const [icon, setIcon] = useState<CodeProjectViewIcon>(
+    props.view?.icon ?? DEFAULT_CODE_PROJECT_VIEW_ICON,
+  );
+  const [color, setColor] = useState<CodeProjectViewColor>(
+    props.view?.color ?? DEFAULT_CODE_PROJECT_VIEW_COLOR,
+  );
   const [selected, setSelected] = useState<ReadonlySet<string>>(
     () => new Set(props.view?.projectIds ?? []),
   );
@@ -840,6 +949,8 @@ function CodeProjectViewEditorDialog(props: {
       id: props.view?.id ?? createCodeProjectViewId(),
       name: normalized,
       projectIds: [...selected],
+      icon,
+      color,
     });
   }
 
@@ -881,6 +992,50 @@ function CodeProjectViewEditorDialog(props: {
           required
           value={name}
         />
+        <fieldset className="code-project-views__fieldset">
+          <legend>Icon</legend>
+          <div className="code-project-views__swatches">
+            {CODE_PROJECT_VIEW_ICONS.map((candidate) => (
+              <OctantButton
+                aria-label={CODE_PROJECT_VIEW_ICON_LABELS[candidate]}
+                aria-pressed={candidate === icon}
+                className="code-project-views__swatch"
+                key={candidate}
+                onClick={() => setIcon(candidate)}
+                size="icon"
+                title={CODE_PROJECT_VIEW_ICON_LABELS[candidate]}
+                type="button"
+                variant="ghost"
+              >
+                <CodeProjectViewGlyph color={color} icon={candidate} size={16} />
+              </OctantButton>
+            ))}
+          </div>
+        </fieldset>
+        <fieldset className="code-project-views__fieldset">
+          <legend>Color</legend>
+          <div className="code-project-views__swatches">
+            {CODE_PROJECT_VIEW_COLORS.map((candidate) => (
+              <OctantButton
+                aria-label={CODE_PROJECT_VIEW_COLOR_LABELS[candidate]}
+                aria-pressed={candidate === color}
+                className="code-project-views__swatch"
+                key={candidate}
+                onClick={() => setColor(candidate)}
+                size="icon"
+                title={CODE_PROJECT_VIEW_COLOR_LABELS[candidate]}
+                type="button"
+                variant="ghost"
+              >
+                <span
+                  aria-hidden="true"
+                  className="code-project-views__color-dot"
+                  data-view-color={candidate}
+                />
+              </OctantButton>
+            ))}
+          </div>
+        </fieldset>
         <fieldset className="code-project-views__fieldset">
           <legend>Projects</legend>
           {props.projects.map((project) => (
