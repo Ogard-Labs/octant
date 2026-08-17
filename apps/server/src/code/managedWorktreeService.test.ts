@@ -196,6 +196,9 @@ function harness(
         status: options.remove === "rejected" ? ("rejected" as const) : ("removed" as const),
       };
     }),
+    removeCheckpointRefs: vi.fn(async () => {
+      events.push("git:release-checkpoints");
+    }),
   };
   const authority: ManagedWorktreeAuthorityPort = {
     observeCleanupEligibility: vi.fn(async () => {
@@ -637,6 +640,67 @@ describe("ManagedWorktreeService", () => {
       ),
     ).resolves.toMatchObject({ status: "refused", reason });
     expect(git.removeWorktree).not.toHaveBeenCalled();
+    // A checkout that is still there keeps every restore point it recorded.
+    expect(git.removeCheckpointRefs).not.toHaveBeenCalled();
+  });
+
+  it("retires the checkout's checkpoint anchors once, and only after it is really gone", async () => {
+    const removed = harness({ observations: [repositoryObservation({ target: "ready" })] });
+    const receipt = await removed.receipts.create({
+      repositoryId,
+      threadId,
+      checkoutId,
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: targetPath,
+      branchIntent,
+      refIntent: branchRef,
+      expectedHead: head,
+    });
+    await removed.receipts.transition(receipt.receiptId, "ready");
+
+    await expect(
+      removed.service.cleanup(
+        { receiptId: receipt.receiptId, confirmedByLocalUser: true },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "removed" });
+
+    // The anchors live in the repository's shared ref store, so removing the
+    // worktree does not take them with it. They are scoped to this checkout,
+    // which is what keeps a sibling worktree's checkpoints out of reach.
+    expect(removed.git.removeCheckpointRefs).toHaveBeenCalledWith(
+      { repositoryRoot, checkoutId },
+      expect.any(AbortSignal),
+    );
+    // Released after the removal, never before: a refused removal leaves the
+    // checkout alive and still owed its restore points.
+    expect(removed.events.indexOf("git:release-checkpoints")).toBeGreaterThan(
+      removed.events.indexOf("git:remove"),
+    );
+
+    const refused = harness({
+      observations: [repositoryObservation({ target: "ready" })],
+      remove: "rejected",
+    });
+    const pending = await refused.receipts.create({
+      repositoryId,
+      threadId,
+      checkoutId,
+      canonicalRepositoryPath: repositoryRoot,
+      canonicalWorktreePath: targetPath,
+      branchIntent,
+      refIntent: branchRef,
+      expectedHead: head,
+    });
+    await refused.receipts.transition(pending.receiptId, "ready");
+
+    await expect(
+      refused.service.cleanup(
+        { receiptId: pending.receiptId, confirmedByLocalUser: true },
+        new AbortController().signal,
+      ),
+    ).resolves.toMatchObject({ status: "waiting" });
+    expect(refused.git.removeCheckpointRefs).not.toHaveBeenCalled();
   });
 
   it("persists cleanup-pending for interruption and completes an idempotent safe retry", async () => {

@@ -52,6 +52,10 @@ interface MutationPort {
     input: Parameters<GitMutationPort["restoreWorkingTree"]>[0],
     signal?: AbortSignal,
   ): Promise<GitMutationResult>;
+  releaseCheckpoint(
+    input: Parameters<GitMutationPort["releaseCheckpoint"]>[0],
+    signal?: AbortSignal,
+  ): Promise<void>;
 }
 
 export type GitServiceResult =
@@ -228,10 +232,14 @@ export class GitService {
   /**
    * Record the checkout's current content so it can be put back later.
    *
-   * This writes Git objects and nothing else: no commit, no branch, no change
-   * the user can see. Taking a checkpoint therefore never needs a state token
-   * and never fails a turn — a checkout that cannot be read simply produces no
-   * checkpoint, and the turn runs without one.
+   * This writes Git objects and a ref anchoring them, and nothing else: no
+   * commit, no branch, no change the user can see. Taking a checkpoint
+   * therefore never needs a state token and never fails a turn — a checkout
+   * that cannot be read simply produces no checkpoint, and the turn runs
+   * without one.
+   *
+   * The anchor is kept for as long as the checkout is, because every journaled
+   * turn stays restorable; only removing the checkout retires them.
    */
   checkpoint(
     input: { readonly checkoutId: string; readonly checkoutRoot: string },
@@ -239,10 +247,12 @@ export class GitService {
   ): Promise<GitCheckpointResult> {
     return this.#serialized(input.checkoutId, async () => {
       const snapshot = await this.#mutation.snapshotWorkingTree(
-        { checkoutRoot: input.checkoutRoot },
+        { checkoutRoot: input.checkoutRoot, checkoutId: input.checkoutId },
         signal,
       );
-      return snapshot.status === "captured" ? snapshot : { status: "unavailable" };
+      return snapshot.status === "captured"
+        ? { status: "captured", snapshot: snapshot.snapshot }
+        : { status: "unavailable" };
     });
   }
 
@@ -266,7 +276,7 @@ export class GitService {
       const current = await this.#ready(input.checkoutRoot, signal);
       if (!current) return { status: "unavailable" };
       const undo = await this.#mutation.snapshotWorkingTree(
-        { checkoutRoot: current.checkoutRoot },
+        { checkoutRoot: current.checkoutRoot, checkoutId: input.checkoutId },
         signal,
       );
       if (undo.status !== "captured") return { status: "unavailable" };
@@ -279,7 +289,18 @@ export class GitService {
       // timeout killed part-way through `read-tree -u` — may have already moved
       // files, and withholding the pre-restore checkpoint there would strand
       // the only way back.
-      return restored.status === "rejected" ? restored : { ...restored, undo: undo.snapshot };
+      if (restored.status !== "rejected") return { ...restored, undo: undo.snapshot };
+      // Nobody will ever be handed this capture, so its anchor is released
+      // rather than left pinning a tree for the life of the checkout.
+      await this.#mutation.releaseCheckpoint(
+        {
+          checkoutRoot: current.checkoutRoot,
+          checkoutId: input.checkoutId,
+          anchorId: undo.anchorId,
+        },
+        signal,
+      );
+      return restored;
     });
   }
 

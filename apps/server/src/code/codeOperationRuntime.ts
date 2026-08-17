@@ -142,6 +142,7 @@ export interface CodeOperationRuntimeOptions {
     | "revertCommit"
     | "snapshotWorkingTree"
     | "restoreWorkingTree"
+    | "releaseCheckpoint"
   >;
   readonly supportsAppManagedTools?: (thread: CodeThread) => boolean;
   /**

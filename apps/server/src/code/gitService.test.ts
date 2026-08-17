@@ -227,6 +227,14 @@ describe("GitService", () => {
     // A checkpoint records content and nothing else: it must not produce a
     // commit, which would put a turn's undo point into the branch history.
     expect(mutation.commit).not.toHaveBeenCalled();
+    // The checkout names the anchors, so one checkout's cleanup cannot reach a
+    // sibling worktree's checkpoints in the ref store they share.
+    expect(mutation.snapshotWorkingTree).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", checkoutId: "checkout-1" },
+      undefined,
+    );
+    // A turn's checkpoint stays anchored for as long as the checkout does.
+    expect(mutation.releaseCheckpoint).not.toHaveBeenCalled();
 
     // The state a restore overwrites is checkpointed first and handed back, so
     // the user can undo the restore itself.
@@ -258,6 +266,9 @@ describe("GitService", () => {
         snapshot,
       }),
     ).resolves.toEqual({ status: "failed", undo });
+    // The undo point travels back, so its anchor has to stay: releasing it
+    // would hand the caller a restore point Git is free to collect.
+    expect(failing.releaseCheckpoint).not.toHaveBeenCalled();
 
     // A rejection is refused before anything is written, so there is nothing
     // to undo and offering one would invite an unnecessary overwrite.
@@ -273,6 +284,16 @@ describe("GitService", () => {
         snapshot,
       }),
     ).resolves.toEqual({ status: "rejected", reason: "invalid-commit" });
+    // Nobody was handed that capture, so it must not keep pinning trees for
+    // the rest of the checkout's life.
+    expect(rejecting.releaseCheckpoint).toHaveBeenCalledWith(
+      {
+        checkoutRoot: "/repo",
+        checkoutId: "checkout-1",
+        anchorId: "3f1b0c9a-5d42-4e77-9a1c-6b2e8f0d4c31",
+      },
+      undefined,
+    );
   });
 
   it("only reverts an explicit commit from a clean expected state", async () => {
@@ -344,7 +365,9 @@ function mutationPort() {
     snapshotWorkingTree: vi.fn(async () => ({
       status: "captured" as const,
       snapshot: { worktree: "d".repeat(40), index: "e".repeat(40), head: "a".repeat(40) },
+      anchorId: "3f1b0c9a-5d42-4e77-9a1c-6b2e8f0d4c31",
     })),
     restoreWorkingTree: vi.fn(async () => ({ status: "applied" as const })),
+    releaseCheckpoint: vi.fn(async () => {}),
   };
 }

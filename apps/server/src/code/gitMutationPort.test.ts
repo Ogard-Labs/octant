@@ -22,6 +22,9 @@ afterEach(() => {
     rmSync(directory, { recursive: true, force: true });
 });
 
+/** A checkout id shaped the way the host mints them: a UUID. */
+const checkoutId = "1e4d8b52-0c37-4a91-9f26-8b3d5c7e0a14";
+
 function confinedOptions() {
   const fake = createFakeSandboxConfinement();
   directories.push(fake.root);
@@ -285,7 +288,7 @@ describe("GitMutationPort", () => {
     git(repository, "add", "--", "README.md");
     const port = new GitMutationPort(undefined, confinedOptions());
 
-    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository });
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
     expect(captured).toMatchObject({ status: "captured" });
     if (captured.status !== "captured") return;
     // Taking a checkpoint must leave the checkout exactly as the user had it,
@@ -324,7 +327,7 @@ describe("GitMutationPort", () => {
   it("leaves the checkout untouched when a snapshot tree cannot be read", async () => {
     const repository = createRepository(temporaryDirectory());
     const port = new GitMutationPort(undefined, confinedOptions());
-    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository });
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
     expect(captured).toMatchObject({ status: "captured" });
     if (captured.status !== "captured") return;
     writeFileSync(join(repository, "README.md"), "edited after the checkpoint\n");
@@ -350,7 +353,7 @@ describe("GitMutationPort", () => {
     writeFileSync(join(repository, "secrets.env"), "checkpointed\n");
     git(repository, "add", "--", "secrets.env");
     git(repository, "commit", "-m", "secrets");
-    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository });
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
     expect(captured).toMatchObject({ status: "captured" });
     if (captured.status !== "captured") return;
 
@@ -377,7 +380,7 @@ describe("GitMutationPort", () => {
     writeFileSync(join(repository, "secrets.env"), "checkpointed\n");
     git(repository, "add", "--", "secrets.env");
     git(repository, "commit", "-m", "secrets");
-    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository });
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
     expect(captured).toMatchObject({ status: "captured" });
     if (captured.status !== "captured") return;
 
@@ -391,6 +394,84 @@ describe("GitMutationPort", () => {
     ).resolves.toEqual({ status: "applied" });
 
     expect(readFileSync(join(repository, "secrets.env"), "utf8")).toBe("checkpointed\n");
+  });
+
+  it("keeps a checkpoint restorable across a pruning garbage collection", async () => {
+    const repository = createRepository(temporaryDirectory());
+    writeFileSync(join(repository, "README.md"), "checkpointed\n");
+    writeFileSync(join(repository, "untracked.txt"), "untracked\n");
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
+    expect(captured).toMatchObject({ status: "captured" });
+    if (captured.status !== "captured") return;
+    expect(checkpointRefs(repository, checkoutId)).toEqual([
+      `refs/octant/checkpoints/${checkoutId}/${captured.anchorId}/index`,
+      `refs/octant/checkpoints/${checkoutId}/${captured.anchorId}/worktree`,
+    ]);
+
+    // Move the checkout on so nothing but the anchors can reach the recorded
+    // trees, then run the collection that used to eat them.
+    git(repository, "checkout", "--", "README.md");
+    rmSync(join(repository, "untracked.txt"));
+    git(repository, "gc", "--prune=now");
+
+    // Restoring a checkpoint from before the collection is the whole point.
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: repository, snapshot: captured.snapshot }),
+    ).resolves.toEqual({ status: "applied" });
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe("checkpointed\n");
+    expect(readFileSync(join(repository, "untracked.txt"), "utf8")).toBe("untracked\n");
+  });
+
+  it("releases only the capture it is asked to release, and scopes anchors to one checkout", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const port = new GitMutationPort(undefined, confinedOptions());
+    const sibling = "9c2f7a10-4d3b-4f61-8e05-1a7b6c3d2e94";
+
+    // Two captures of an unchanged checkout record the identical trees. Each
+    // still has to own its anchors, or releasing one strips the other.
+    const first = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
+    const second = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId });
+    const other = await port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId: sibling });
+    expect(first).toMatchObject({ status: "captured" });
+    expect(second).toMatchObject({ status: "captured" });
+    expect(other).toMatchObject({ status: "captured" });
+    if (first.status !== "captured" || second.status !== "captured") return;
+    expect(second.snapshot).toEqual(first.snapshot);
+
+    await port.releaseCheckpoint({
+      checkoutRoot: repository,
+      checkoutId,
+      anchorId: second.anchorId,
+    });
+
+    expect(checkpointRefs(repository, checkoutId)).toEqual([
+      `refs/octant/checkpoints/${checkoutId}/${first.anchorId}/index`,
+      `refs/octant/checkpoints/${checkoutId}/${first.anchorId}/worktree`,
+    ]);
+    // A checkout sharing this object database keeps its own anchors.
+    expect(checkpointRefs(repository, sibling)).toHaveLength(2);
+    // The released capture's trees are still reachable through the anchors the
+    // first capture kept, so the surviving checkpoint still restores.
+    git(repository, "gc", "--prune=now");
+    await expect(
+      port.restoreWorkingTree({ checkoutRoot: repository, snapshot: first.snapshot }),
+    ).resolves.toEqual({ status: "applied" });
+  });
+
+  it("refuses to capture against a checkout id it cannot name a ref from", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const port = new GitMutationPort(undefined, confinedOptions());
+
+    // A snapshot with nowhere to anchor would be collected out from under the
+    // turn that advertised it, so no snapshot is better than that one.
+    await expect(
+      port.snapshotWorkingTree({ checkoutRoot: repository, checkoutId: "../../refs/heads/main" }),
+    ).resolves.toEqual({ status: "failed" });
+    expect(gitOutput(repository, "for-each-ref", "--format=%(refname)", "refs/octant").trim()).toBe(
+      "",
+    );
   });
 
   it("fails closed when Seatbelt confinement is unavailable", async () => {
@@ -430,6 +511,12 @@ function temporaryDirectory(): string {
 
 function git(root: string, ...args: string[]): void {
   execFileSync("git", ["-C", root, ...args], { stdio: "ignore" });
+}
+
+function checkpointRefs(root: string, id: string): string[] {
+  return gitOutput(root, "for-each-ref", "--format=%(refname)", `refs/octant/checkpoints/${id}`)
+    .split("\n")
+    .filter((name) => name.length > 0);
 }
 
 function gitOutput(root: string, ...args: string[]): string {

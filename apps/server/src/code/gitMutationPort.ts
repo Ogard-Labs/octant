@@ -271,18 +271,29 @@ export class GitMutationPort {
    *
    * Staging happens in a throwaway index copied from the real one, so the
    * user's staged set survives untouched and the copy's stat cache keeps
-   * `add -A` cheap on a large repository. The trees are written into the
-   * object database but referenced by nothing, so a `git gc` that prunes
-   * unreachable objects can eventually collect them; that is the intended
-   * lifetime for an in-session undo.
+   * `add -A` cheap on a large repository. Both trees are then anchored under
+   * this checkout's checkpoint refs, because a tree nothing points at is
+   * precisely what `git gc` and `git maintenance` exist to collect — and a
+   * checkpoint the user can still see listed has to still be restorable.
+   *
+   * A capture that cannot be anchored is reported as failed rather than handed
+   * back: a snapshot that outlives the next repack is worse than no snapshot,
+   * because the turn it belongs to would advertise a restore point that is not
+   * there. The returned `anchorId` names the refs so an unused capture can
+   * release exactly its own, never a neighbour's.
    */
   async snapshotWorkingTree(
-    input: { readonly checkoutRoot: string },
+    input: { readonly checkoutRoot: string; readonly checkoutId: string },
     signal?: AbortSignal,
   ): Promise<
-    | { readonly status: "captured"; readonly snapshot: GitTreeSnapshot }
+    | {
+        readonly status: "captured";
+        readonly snapshot: GitTreeSnapshot;
+        readonly anchorId: string;
+      }
     | { readonly status: "failed" }
   > {
+    if (checkpointRefNamespace(input.checkoutId) === undefined) return { status: "failed" };
     const scratch = await this.#gitPath(input.checkoutRoot, checkpointIndexName(), signal);
     if (scratch === undefined) return { status: "failed" };
     const environment = { GIT_INDEX_FILE: scratch };
@@ -304,17 +315,63 @@ export class GitMutationPort {
         signal,
       );
       const headOid = head.stdout.trim();
-      return {
-        status: "captured",
-        snapshot: {
-          worktree,
-          index,
-          ...(head.exitCode === 0 && isObjectId(headOid) ? { head: headOid } : {}),
-        },
+      const snapshot: GitTreeSnapshot = {
+        worktree,
+        index,
+        ...(head.exitCode === 0 && isObjectId(headOid) ? { head: headOid } : {}),
       };
+      const anchorId = randomUUID();
+      if (!(await this.#anchor(input.checkoutRoot, input.checkoutId, anchorId, snapshot, signal))) {
+        await this.releaseCheckpoint({ ...input, anchorId }, signal);
+        return { status: "failed" };
+      }
+      return { status: "captured", snapshot, anchorId };
     } finally {
       await this.#discardScratchIndex(scratch);
     }
+  }
+
+  /**
+   * Drop one capture's anchors, freeing its trees to be collected again.
+   *
+   * For a capture no result will ever name — the pre-restore undo point of a
+   * restore that was refused before it touched anything. Best effort: a ref
+   * that will not delete costs disk, never correctness, and is not worth
+   * failing the operation that asked for the release.
+   */
+  async releaseCheckpoint(
+    input: {
+      readonly checkoutRoot: string;
+      readonly checkoutId: string;
+      readonly anchorId: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const names = checkpointRefNames(input.checkoutId, input.anchorId);
+    if (names === undefined) return;
+    for (const name of names) {
+      await this.#run(["-C", input.checkoutRoot, "update-ref", "-d", name], signal);
+    }
+  }
+
+  /** Point this checkout's checkpoint refs at the trees a capture just wrote. */
+  async #anchor(
+    checkoutRoot: string,
+    checkoutId: string,
+    anchorId: string,
+    snapshot: GitTreeSnapshot,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const names = checkpointRefNames(checkoutId, anchorId);
+    if (names === undefined) return false;
+    for (const [name, oid] of [
+      [names[0], snapshot.worktree],
+      [names[1], snapshot.index],
+    ] as const) {
+      const result = await this.#run(["-C", checkoutRoot, "update-ref", name, oid], signal);
+      if (result.exitCode !== 0) return false;
+    }
+    return true;
   }
 
   /**
@@ -579,6 +636,39 @@ function splitNulPaths(output: string): ReadonlyArray<string> {
 
 function checkpointIndexName(): string {
   return `octant-checkpoint-index-${randomUUID()}`;
+}
+
+/**
+ * Where one checkout's checkpoint anchors live, or `undefined` for an id this
+ * port will not build a ref name from.
+ *
+ * Scoping by checkout is what makes removal safe to do wholesale: linked
+ * worktrees of the same repository share one ref store, so a namespace shared
+ * between them would let one checkout's cleanup prune another's restore points.
+ * The id is required to be a host-generated UUID, which is both what every
+ * caller has and already a valid Git ref component.
+ */
+export function checkpointRefNamespace(checkoutId: string): string | undefined {
+  return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(checkoutId)
+    ? `refs/octant/checkpoints/${checkoutId}`
+    : undefined;
+}
+
+/**
+ * The two refs one capture owns, worktree tree first.
+ *
+ * Each capture gets its own pair rather than a ref named after the tree it
+ * points at. Two checkpoints of an unchanged checkout record the identical
+ * tree, and a shared ref would let releasing the newer one silently strip the
+ * older one's only anchor.
+ */
+function checkpointRefNames(
+  checkoutId: string,
+  anchorId: string,
+): readonly [string, string] | undefined {
+  const namespace = checkpointRefNamespace(checkoutId);
+  if (namespace === undefined || checkpointRefNamespace(anchorId) === undefined) return undefined;
+  return [`${namespace}/${anchorId}/worktree`, `${namespace}/${anchorId}/index`];
 }
 
 function isObjectId(value: string): boolean {
