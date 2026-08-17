@@ -442,6 +442,7 @@ describe("database CLI runtime composition", () => {
       lastContextSurface: null,
       modeSwitcherPresentation: "buttons",
       navigatorAssistant: {},
+      projectViewSwitcherPresentation: "dropdown",
       sidebarBackground: {
         kind: "none",
         overlayColor: "#1a1a1c",
