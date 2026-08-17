@@ -233,6 +233,52 @@ describe("useCodeController", () => {
     expect(result.current.bootstrap?.checkouts).toContainEqual(prepared);
   });
 
+  it("forks a thread onto a freshly prepared checkout and records where it branched from", async () => {
+    const prepared = { ...checkout(), id: "40000000-0000-4000-8000-000000000009" as never };
+    const execute = vi.fn(async (command: CodeCommand) =>
+      command.kind === "prepare-code-project-checkout"
+        ? ({
+            kind: "checkout-prepared",
+            bindingRevisionId: ids.bindingRevision,
+            checkout: prepared,
+          } as never)
+        : ({ kind: "unhandled" } as never),
+    );
+    const client = fakeClient({ execute });
+    const { result } = renderHook(() => useCodeController({ client }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await result.current.forkThread({
+        threadId: ids.thread,
+        throughOperationId: "70000000-0000-4000-8000-000000000001",
+        title: "Controller foundation (fork)",
+      });
+    });
+
+    const created = execute.mock.calls
+      .map(([command]) => command)
+      .find((command) => command.kind === "create-code-thread");
+    expect(created).toMatchObject({
+      thread: {
+        title: "Controller foundation (fork)",
+        // The fork binds the checkout the server just prepared, not the
+        // identity this renderer happened to be holding.
+        checkoutId: prepared.id,
+        version: 1,
+        forkedFrom: {
+          threadId: ids.thread,
+          throughOperationId: "70000000-0000-4000-8000-000000000001",
+        },
+      },
+    });
+    expect(String((created as never as { thread: { id: string } }).thread.id)).not.toBe(
+      String(ids.thread),
+    );
+    // Forking is additive: the source thread is never commanded.
+    expect(execute.mock.calls.every(([command]) => command.threadId === undefined)).toBe(true);
+  });
+
   it("bootstraps authoritative navigation and activates a thread through codeClient only", async () => {
     const client = fakeClient();
     const { result, unmount } = renderHook(() =>

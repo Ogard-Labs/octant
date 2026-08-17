@@ -5665,6 +5665,7 @@ dialog.project-dialog {
   color: var(--octant-danger-text);
 }
 
+.code-thread-workspace__fork,
 .code-thread-workspace__restore {
   display: flex;
   align-items: center;

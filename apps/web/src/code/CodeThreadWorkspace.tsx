@@ -1,4 +1,9 @@
-import type { CodeApprovalId, CodeThreadId } from "@octant/contracts/code";
+import {
+  MAX_CODE_THREAD_TITLE_LENGTH,
+  type CodeApprovalId,
+  type CodeThread,
+  type CodeThreadId,
+} from "@octant/contracts/code";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { decidesCodeEffectsByApproval, type PickerGroup } from "@octant/domain";
@@ -97,6 +102,16 @@ export interface CodeThreadWorkspaceProps {
   readonly requestApproval?: (
     command: Parameters<CodeClient["executeOperation"]>[0],
   ) => Promise<CodeApprovalId | undefined>;
+  /**
+   * Opens a thread this workspace started. Absent on a host with no tab
+   * surface, which keeps the fork control off the transcript rather than
+   * creating a thread the user would then have to go looking for.
+   */
+  readonly onOpenCodeThread?: (
+    threadId: CodeThreadId,
+    title: string,
+    projectId: CodeThread["projectId"],
+  ) => void;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -119,6 +134,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
   const [restoring, setRestoring] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<string>();
+  const [forking, setForking] = useState(false);
+  const [forkMessage, setForkMessage] = useState<string>();
 
   useEffect(() => {
     setDraft(props.controller.pendingDraft);
@@ -343,6 +360,36 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setRestoreMessage("The restore failed. The checkout is untouched.");
     } finally {
       setRestoring(false);
+    }
+  }
+
+  /**
+   * Start a second thread that continues this conversation from this answer.
+   *
+   * Nothing here changes: the fork is a new thread on the same checkout, and
+   * the original keeps every turn it already has. The host decides what
+   * history the fork's first turn carries, so this only names the point.
+   */
+  async function forkFrom(message: CodeConversationMessage) {
+    const operationId = message.operationId;
+    if (operationId === undefined || view === undefined) return;
+    setForkMessage(undefined);
+    setForking(true);
+    try {
+      const forked = await props.controller.forkThread({
+        threadId: view.thread.id,
+        throughOperationId: String(operationId),
+        title: forkTitle(view.thread.title),
+      });
+      if (forked === undefined) {
+        setForkMessage("The thread could not be forked. This thread is unchanged.");
+        return;
+      }
+      props.onOpenCodeThread?.(forked.id, forked.title, forked.projectId);
+    } catch {
+      setForkMessage("The thread could not be forked. This thread is unchanged.");
+    } finally {
+      setForking(false);
     }
   }
 
@@ -640,6 +687,21 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     />
                   )}
                   <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
+                  {message.role === "assistant" &&
+                  message.operationId !== undefined &&
+                  message.status === "completed" &&
+                  props.onOpenCodeThread !== undefined ? (
+                    <footer className="code-thread-workspace__fork">
+                      <OctantButton
+                        disabled={forking}
+                        onClick={() => void forkFrom(message)}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        {forking ? "Forking…" : "Fork from here"}
+                      </OctantButton>
+                    </footer>
+                  ) : null}
                   {message.role === "user" && message.checkpoint !== undefined && mayRestore ? (
                     <footer className="code-thread-workspace__restore">
                       {confirmingRestore === message.id ? (
@@ -861,6 +923,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {restoreMessage}
               </span>
             )}
+            {forkMessage === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="alert">
+                {forkMessage}
+              </span>
+            )}
             <span className="code-thread-workspace__hint" aria-label="Thread usage">
               {threadUsageLabel(props.controller.threadUsage)}
             </span>
@@ -895,6 +962,18 @@ function previousAssistantMessage(
  * reports no tokens says so plainly rather than reading as a free thread, and
  * a cost appears only when the provider stated one.
  */
+/**
+ * Name a fork after the thread it came from, without stacking one suffix on
+ * another when a fork is itself forked.
+ */
+function forkTitle(sourceTitle: string): string {
+  const base = sourceTitle.replace(/ \(fork(?: \d+)?\)$/, "").trim();
+  const title = `${base.length === 0 ? "Code thread" : base} (fork)`;
+  return title.length > MAX_CODE_THREAD_TITLE_LENGTH
+    ? `${title.slice(0, MAX_CODE_THREAD_TITLE_LENGTH - 7).trimEnd()} (fork)`
+    : title;
+}
+
 function threadUsageLabel(usage: CodeController["threadUsage"]): string {
   if (usage.inputTokens === 0 && usage.outputTokens === 0) {
     return "This thread's provider has reported no usage yet.";

@@ -309,6 +309,7 @@ function controller(): CodeController {
     activeView: { checkout, lastSequence: 1, thread } as never,
     answerProviderRequest: vi.fn(async () => true),
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
+    forkThread: vi.fn(async () => undefined),
     renameThread: vi.fn(async () => true),
     pinThread: vi.fn(async () => true),
     cancelQueuedFollowUp: vi.fn(),

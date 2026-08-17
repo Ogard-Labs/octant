@@ -92,6 +92,15 @@ export interface CodeWorkspaceProps {
   readonly canvasClient?: CanvasClient;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /**
+   * Opens a Code thread this workspace started, such as a fork of the one in
+   * view. Absent on a surface with no tab of its own.
+   */
+  readonly onOpenCodeThread?: (
+    threadId: import("@octant/contracts/code").CodeThreadId,
+    title: string,
+    projectId: import("@octant/contracts/projects").ProjectId,
+  ) => void;
   /** Reaches the host's `#thread` mention surface from the Code composer. */
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -131,6 +140,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
+        {...(props.onOpenCodeThread === undefined
+          ? {}
+          : { onOpenCodeThread: props.onOpenCodeThread })}
         {...(props.approvals?.access === undefined
           ? {}
           : { requestFullAccessApproval: props.approvals.access })}

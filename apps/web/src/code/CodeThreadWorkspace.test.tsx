@@ -102,6 +102,86 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Files restored to this point.")).toBeVisible();
   });
 
+  it("forks a new thread from a finished answer and opens it, leaving this one alone", async () => {
+    const user = userEvent.setup();
+    const forkThread = vi.fn(async () => ({
+      id: "10000000-0000-4000-8000-0000000000aa",
+      title: "find bugs in this repo (fork)",
+      projectId: "10000000-0000-4000-8000-0000000000bb",
+    }));
+    const onOpenCodeThread = vi.fn();
+    const conversation = [
+      { id: "turn-1:user", role: "user" as const, text: "rewrite the parser" },
+      {
+        id: "turn-1:assistant",
+        role: "assistant" as const,
+        text: "done",
+        operationId: "50000000-0000-4000-8000-000000000001",
+        status: "completed" as const,
+      },
+      // A turn still running has no answer to branch from yet.
+      {
+        id: "turn-2:assistant",
+        role: "assistant" as const,
+        text: "working",
+        operationId: "50000000-0000-4000-8000-000000000002",
+        status: "incomplete" as const,
+      },
+    ];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ conversation, forkThread } as never)}
+        onOpenCodeThread={onOpenCodeThread}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getAllByRole("button", { name: "Fork from here" })).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Fork from here" }));
+
+    await waitFor(() =>
+      expect(forkThread).toHaveBeenCalledWith({
+        threadId,
+        throughOperationId: "50000000-0000-4000-8000-000000000001",
+        title: "find bugs in this repo (fork)",
+      }),
+    );
+    expect(onOpenCodeThread).toHaveBeenCalledWith(
+      "10000000-0000-4000-8000-0000000000aa",
+      "find bugs in this repo (fork)",
+      "10000000-0000-4000-8000-0000000000bb",
+    );
+  });
+
+  it("says the fork failed instead of opening a thread that was never created", async () => {
+    const user = userEvent.setup();
+    const onOpenCodeThread = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:assistant",
+              role: "assistant" as const,
+              text: "done",
+              operationId: "50000000-0000-4000-8000-000000000001",
+              status: "completed" as const,
+            },
+          ],
+          forkThread: vi.fn(async () => undefined),
+        } as never)}
+        onOpenCodeThread={onOpenCodeThread}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Fork from here" }));
+    expect(
+      await screen.findByText("The thread could not be forked. This thread is unchanged."),
+    ).toBeVisible();
+    expect(onOpenCodeThread).not.toHaveBeenCalled();
+  });
+
   it("shows the provider's own token, cost, and usage-window figures", () => {
     render(
       <CodeThreadWorkspace

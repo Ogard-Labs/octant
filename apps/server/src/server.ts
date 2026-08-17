@@ -33,6 +33,7 @@ import {
   type CanvasRefreshRequest,
   type CanvasRefreshSkill,
   type CapacityReservationId,
+  type CodeThreadForkOrigin,
   type CodeThreadId,
   type WorkThreadId,
 } from "@octant/contracts";
@@ -306,6 +307,7 @@ import {
   createWorkThreadMentionDirectory,
   createChatSideChatThreadFactory,
 } from "./chat/threadMentionService";
+import { buildCodeForkHandoff } from "./code/codeForkHandoff";
 import { createThreadMentionRouteHandler } from "./threadMentionRoutes";
 import { createLocalServerRouteHandler } from "./localServerRoutes";
 import { createLiveLocalListenerPort } from "./localServers/localListenerPort";
@@ -938,6 +940,46 @@ function observedCheckoutHeadMatches(
  * The service is reached lazily so a mode wired before it exists can still
  * hold this: nothing is read until a turn actually runs.
  */
+/**
+ * The conversation a forked Code thread inherits, for its own first turn only.
+ *
+ * A fork that has already answered has its own transcript to work from, so the
+ * handoff is resolved once and never repeated — a later turn would be paying
+ * for history the thread already carries. The Code service is reached lazily
+ * because the runtime that holds this is composed before it exists.
+ */
+function forkHandoffResolver(codeService: () => CodeRouteService) {
+  return async ({
+    threadId,
+    origin,
+    windowId,
+  }: {
+    readonly threadId: CodeThreadId;
+    readonly origin: CodeThreadForkOrigin;
+    readonly windowId: WindowId;
+  }): Promise<string | undefined> => {
+    const service = codeService();
+    const conversation = service.conversation;
+    const readEvidence = service.readOperationContent;
+    if (conversation === undefined || readEvidence === undefined) return undefined;
+    try {
+      const own = await conversation(windowId, threadId, 0, 1);
+      if (own.turns.length > 0) return undefined;
+    } catch {
+      // A thread whose own transcript cannot be read may already have turns, so
+      // the handoff is withheld rather than risking a repeat of it.
+      return undefined;
+    }
+    return await buildCodeForkHandoff(
+      {
+        conversation: async (...args) => await conversation(...args),
+        readEvidence: async (...args) => await readEvidence(...args),
+      },
+      { windowId, origin },
+    );
+  };
+}
+
 function threadMentionContextResolver(threadMentions: () => ThreadMentionService) {
   return async ({
     threadMentionIds,
@@ -2450,6 +2492,7 @@ export function startOctantServer(
         },
         credentialResolver: { resolve: async () => undefined },
         resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+        resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
         githubReadTools: ({ windowId, thread, readThread }) =>
           githubReadToolService.createToolSet({ windowId, thread, readThread }),
         resolvePullRequestTarget: async (threadId) => {

@@ -17,6 +17,7 @@ import {
   type CodeRepositoryTestRun,
   type CodeReviewFinding,
   type CodeThread,
+  type CodeThreadForkOrigin,
   type CodeThreadId,
   type MentionableThreadId,
   type ProviderAttachmentInput,
@@ -554,6 +555,19 @@ export interface CodeOperationServiceOptions {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
     readonly windowId: WindowId;
   }) => Promise<ReadonlyArray<CodeThreadMentionContext>>;
+  /**
+   * Reads the conversation a forked thread inherits, for its first turn only.
+   *
+   * A fork's own transcript starts empty, so without this its provider would be
+   * answering from nothing while the user believes it continues a conversation.
+   * The host reads the source thread itself and bounds what it hands over; a
+   * source it cannot read contributes nothing rather than a claimed history.
+   */
+  readonly resolveForkHandoff?: (input: {
+    readonly threadId: CodeThreadId;
+    readonly origin: CodeThreadForkOrigin;
+    readonly windowId: WindowId;
+  }) => Promise<string | undefined>;
 }
 
 export class CodeOperationService {
@@ -1651,7 +1665,10 @@ export class CodeOperationService {
         "unavailable",
         "Provider prompt evidence is unavailable.",
       );
-    const context = await this.#resolveThreadMentions(command.threadMentionIds, windowId);
+    const context = [
+      ...(await this.#resolveForkHandoff(thread, windowId)),
+      ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
+    ];
     // A model that cannot read a picture is told so plainly rather than sent
     // the turn with its images quietly removed.
     if (references.length > 0 && this.#options.supportsAttachments?.(thread) !== true) {
@@ -1737,6 +1754,33 @@ export class CodeOperationService {
       });
     }
     return inputs;
+  }
+
+  /**
+   * Resolve the conversation a forked thread carries into its first turn.
+   *
+   * The thread record names its own origin, so the renderer never chooses what
+   * history a turn is given. The resolver decides whether this turn is the
+   * fork's first — a later turn has the fork's own transcript to work from —
+   * and a source it cannot read contributes nothing rather than a claimed
+   * history the model would treat as real.
+   */
+  async #resolveForkHandoff(
+    thread: CodeThread,
+    windowId: WindowId,
+  ): Promise<ReadonlyArray<ProviderContextBlock>> {
+    const origin = thread.forkedFrom;
+    const resolve = this.#options.resolveForkHandoff;
+    if (origin === undefined || resolve === undefined) return [];
+    let text: string | undefined;
+    try {
+      text = await resolve({ threadId: thread.id, origin, windowId });
+    } catch {
+      return [];
+    }
+    return text === undefined || text.trim().length === 0
+      ? []
+      : [{ kind: "user-message", text } as const];
   }
 
   /**

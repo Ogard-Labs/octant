@@ -153,6 +153,7 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
+  readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
 }
 
 export interface CodeOperationRuntime {
@@ -343,6 +344,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveThreadMentionContext === undefined
       ? {}
       : { resolveThreadMentionContext: options.resolveThreadMentionContext }),
+    ...(options.resolveForkHandoff === undefined
+      ? {}
+      : { resolveForkHandoff: options.resolveForkHandoff }),
   });
   turns.bindService(service);
 

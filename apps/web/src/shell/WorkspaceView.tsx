@@ -497,6 +497,7 @@ function renderTab(
             ? {}
             : { appleToolchainClient: props.appleToolchainClient })}
           controller={props.codeController}
+          onOpenCodeThread={props.onOpenCodeThread}
           {...(props.onOpenSurface === undefined
             ? {}
             : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}

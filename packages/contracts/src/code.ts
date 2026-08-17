@@ -200,6 +200,22 @@ export const MAX_CODE_THREAD_TITLE_LENGTH = 200;
 export const CodeThreadLifecycle = Schema.Literal("active", "archived", "waiting", "interrupted");
 export type CodeThreadLifecycle = typeof CodeThreadLifecycle.Type;
 
+/**
+ * Where a forked thread branched from: the thread it came out of, and the last
+ * turn of that thread it inherits.
+ *
+ * A fork carries the source conversation through this turn as read-only context
+ * on its own first turn, so its provider genuinely knows the history the
+ * transcript implies rather than only appearing to. The operation id is a plain
+ * UUID rather than the branded `CodeOperationId` because operations import
+ * threads, not the other way round; every comparison against it is by string.
+ */
+export const CodeThreadForkOrigin = Schema.Struct({
+  threadId: CodeThreadId,
+  throughOperationId: Schema.UUID,
+}).annotations(strict);
+export type CodeThreadForkOrigin = typeof CodeThreadForkOrigin.Type;
+
 export const CodeThread = Schema.Struct({
   id: CodeThreadId,
   projectId: ProjectId,
@@ -213,6 +229,12 @@ export const CodeThread = Schema.Struct({
    * than being rejected; absent and `false` mean the same thing.
    */
   pinned: Schema.optional(Schema.Boolean),
+  /**
+   * Set only on a thread that was forked from another one. Optional so a
+   * journal written before forking existed replays unchanged; absent means this
+   * thread started on its own.
+   */
+  forkedFrom: Schema.optional(CodeThreadForkOrigin),
   lifecycle: CodeThreadLifecycle,
   providerInstanceId: ProviderInstanceId,
   modelId: ProviderModelId,

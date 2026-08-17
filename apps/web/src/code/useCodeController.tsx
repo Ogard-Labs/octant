@@ -11,6 +11,7 @@ import type {
   CodeThreadId,
   CodeThreadView,
 } from "@octant/contracts/code";
+import { decodeCodeThread } from "@octant/contracts/code";
 import {
   decodeCodeOperationId,
   decodeProviderSessionId,
@@ -1116,6 +1117,58 @@ export function useCodeController(options: CodeControllerOptions) {
     [execute],
   );
 
+  /**
+   * Start a new thread that continues an existing one from a chosen answer.
+   *
+   * The fork binds the same checkout, provider, model, and posture as its
+   * source, and records where it branched from so the host — not this
+   * renderer — decides what history its first turn carries. Nothing about the
+   * source thread changes: a fork is a second direction, not a rewrite.
+   */
+  const forkThread = useCallback(
+    async (input: {
+      readonly threadId: CodeThreadId;
+      readonly throughOperationId: string;
+      readonly title: string;
+    }): Promise<CodeThread | undefined> => {
+      const source = bootstrapRef.current?.threads.find(
+        (candidate) => String(candidate.id) === String(input.threadId),
+      );
+      if (source === undefined) return undefined;
+      // The server refuses a thread whose checkout does not match the one it
+      // just prepared, so the fork binds a freshly observed checkout rather
+      // than the identity this renderer happens to be holding.
+      const prepared = await execute({
+        kind: "prepare-code-project-checkout",
+        projectId: source.projectId,
+      });
+      if (prepared?.kind !== "checkout-prepared") return undefined;
+      const timestamp = new Date().toISOString();
+      let thread: CodeThread;
+      try {
+        thread = decodeCodeThread({
+          ...source,
+          id: globalThis.crypto.randomUUID(),
+          bindingRevisionId: prepared.bindingRevisionId,
+          repositoryId: prepared.checkout.repositoryId,
+          checkoutId: prepared.checkout.id,
+          title: input.title,
+          lifecycle: "active",
+          pinned: false,
+          forkedFrom: { threadId: input.threadId, throughOperationId: input.throughOperationId },
+          version: 1,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      } catch {
+        return undefined;
+      }
+      const created = await execute({ kind: "create-code-thread", thread });
+      return created?.kind === "thread-created" ? created.thread : undefined;
+    },
+    [execute],
+  );
+
   const pinThread = useCallback(
     async (threadId: CodeThreadId, pinned: boolean): Promise<boolean> => {
       const thread = bootstrapRef.current?.threads.find(
@@ -1537,6 +1590,7 @@ export function useCodeController(options: CodeControllerOptions) {
     errorCategory,
     errorMessage,
     followUps,
+    forkThread,
     lastExecuteError,
     editorDrafts,
     execute,
