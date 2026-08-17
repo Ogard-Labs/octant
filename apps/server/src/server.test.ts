@@ -814,7 +814,8 @@ describe("startOctantServer", () => {
           );
           expect(response.status).toBe(200);
           expect(yield* Effect.promise(() => response.json())).toEqual(result);
-          expect(runtime.execute).toHaveBeenCalledWith(windowId, command);
+          // The HTTP route speaks for the person at the window.
+          expect(runtime.execute).toHaveBeenCalledWith(windowId, command, { initiator: "user" });
 
           const replay = yield* Effect.promise(() =>
             Promise.resolve(

@@ -31,7 +31,7 @@ const codeTabs: ReadonlyArray<
 > = [
   ["code-overview", "Overview", undefined, "Composition"],
   ["code-diff", "README.md changes", "monaco", "Checkout changes"],
-  ["code-terminal", "Terminal", "xterm", "Terminal approval unavailable"],
+  ["code-terminal", "Terminal", "xterm", "No terminal attached"],
   ["code-test", "Tests", undefined, "Repository test approval unavailable"],
   ["code-git", "Git", undefined, "Git mutation approval unavailable"],
   ["code-pr", "Pull request", undefined, "Pull request approval unavailable"],

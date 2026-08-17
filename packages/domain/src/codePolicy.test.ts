@@ -95,6 +95,25 @@ describe("Code authority policy", () => {
     expect(userEdit("approval-gated")).toBe("allow");
     expect(userEdit("full-access")).toBe("allow");
     expect(userEdit("plan")).toBe("deny");
+    // Opening their own confined repository terminal is likewise the user's
+    // own act; the agent's terminal use stays gated.
+    const terminal = (initiator: "user" | "agent") =>
+      authorizeCodeOperation({
+        actor: "local-user",
+        posture: "approval-gated",
+        operation: "terminal",
+        initiator,
+      }).decision;
+    expect(terminal("user")).toBe("allow");
+    expect(terminal("agent")).toBe("prompt");
+    expect(
+      authorizeCodeOperation({
+        actor: "local-user",
+        posture: "plan",
+        operation: "terminal",
+        initiator: "user",
+      }).decision,
+    ).toBe("deny");
     // A user-initiated edit is still not authority for other operations…
     expect(
       authorizeCodeOperation({

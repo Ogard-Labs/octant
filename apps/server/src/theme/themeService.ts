@@ -10,6 +10,7 @@ import {
   type ThemeBootstrap,
   type ThemeCommandResult,
   type ThemeFailure,
+  type ThemeSettings,
 } from "@octant/contracts";
 import { resolveEffectiveTokens } from "@octant/theme";
 import { Schema } from "effect";
@@ -49,7 +50,10 @@ export class ThemeService implements ThemeServiceApi {
     this.assertReady();
     const projected = this.options.persistence.readThemeSettings();
     return decodeThemeBootstrap({
-      settings: projected?.settings ?? DEFAULT_THEME_SETTINGS,
+      settings:
+        projected === undefined
+          ? DEFAULT_THEME_SETTINGS
+          : withCurrentTerminalFontDefault(projected.settings),
       version: projected?.aggregateVersion ?? 0,
     });
   }
@@ -138,4 +142,28 @@ export class ThemeService implements ThemeServiceApi {
       });
     }
   }
+}
+
+/**
+ * The terminal font stack persisted before Nerd Font fallbacks were added.
+ *
+ * The projection stores the whole settings object, so anyone who ever saved an
+ * appearance setting kept this exact stack even though they never chose it.
+ * Only this one literal is replaced; a family the person actually typed is
+ * theirs and is left alone.
+ */
+const LEGACY_DEFAULT_TERMINAL_FONT_FAMILY = "'JetBrains Mono', 'SF Mono', Menlo, monospace";
+
+function withCurrentTerminalFontDefault(settings: ThemeSettings): ThemeSettings {
+  if (settings.typography.terminal.family !== LEGACY_DEFAULT_TERMINAL_FONT_FAMILY) return settings;
+  return {
+    ...settings,
+    typography: {
+      ...settings.typography,
+      terminal: {
+        ...settings.typography.terminal,
+        family: DEFAULT_THEME_SETTINGS.typography.terminal.family,
+      },
+    },
+  };
 }
