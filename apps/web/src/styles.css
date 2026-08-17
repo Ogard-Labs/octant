@@ -85,6 +85,14 @@
   --octant-danger-text: #ee5c61;
   --octant-addition-text: #8fd8ab;
   --octant-deletion-text: #ee5c61;
+  --octant-palette-red: #ee5c61;
+  --octant-palette-orange: #f0954a;
+  --octant-palette-yellow: #f0c383;
+  --octant-palette-green: #8fd8ab;
+  --octant-palette-teal: #5ccfc9;
+  --octant-palette-blue: #3d9aff;
+  --octant-palette-purple: #b48cf2;
+  --octant-palette-pink: #f08ac0;
   --octant-ui-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   --octant-ui-font-size: 13px;
   --octant-ui-font-weight: 400;
@@ -842,35 +850,35 @@ button:focus-visible {
 }
 
 [data-view-color="red"] {
-  --octant-project-view-color: #ee5c61;
+  --octant-project-view-color: var(--octant-palette-red);
 }
 
 [data-view-color="orange"] {
-  --octant-project-view-color: #f0954a;
+  --octant-project-view-color: var(--octant-palette-orange);
 }
 
 [data-view-color="yellow"] {
-  --octant-project-view-color: #f0c383;
+  --octant-project-view-color: var(--octant-palette-yellow);
 }
 
 [data-view-color="green"] {
-  --octant-project-view-color: #8fd8ab;
+  --octant-project-view-color: var(--octant-palette-green);
 }
 
 [data-view-color="teal"] {
-  --octant-project-view-color: #5ccfc9;
+  --octant-project-view-color: var(--octant-palette-teal);
 }
 
 [data-view-color="blue"] {
-  --octant-project-view-color: var(--octant-accent);
+  --octant-project-view-color: var(--octant-palette-blue);
 }
 
 [data-view-color="purple"] {
-  --octant-project-view-color: #b48cf2;
+  --octant-project-view-color: var(--octant-palette-purple);
 }
 
 [data-view-color="pink"] {
-  --octant-project-view-color: #f08ac0;
+  --octant-project-view-color: var(--octant-palette-pink);
 }
 
 .project-nav__activity-toggle {
