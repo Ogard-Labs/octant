@@ -16,10 +16,15 @@ import { fileURLToPath } from "node:url";
  *
  * Rule A: a record's heading number matches its filename.
  * Rule B: a record declares a status the conventions allow, and a superseding
- *         number resolves to a record that exists.
+ *         number resolves to a later record that exists.
  * Rule C: a record carries the required sections.
- * Rule D: the index and the records agree on number, title, and status.
- * Rule E: every record `AGENTS.md` routes to exists.
+ * Rule D: the index and the records agree on number, title, and status, and
+ *         names each number once.
+ * Rule E: every record `AGENTS.md` routes to exists, including the numbers a
+ *         written range only implies.
+ * Rule F: every Markdown file in the directory is either the index or a record
+ *         named the way the conventions require, and the numbers run without
+ *         gaps.
  *
  * It cannot enforce that an agent read the record it was routed to. That stays a
  * review question; the gate's job is to make sure the record it would read says
@@ -64,6 +69,8 @@ export function findDecisionViolations(
   const records = collectRecords(files);
   const numbers = new Set(records.map((record) => record.number));
   return [
+    ...findMisnamedFiles(files),
+    ...findNumberingGaps(records),
     ...findMalformedRecords(records, numbers),
     ...findIndexDisagreements(
       records,
@@ -74,6 +81,54 @@ export function findDecisionViolations(
       files.find((file) => file.path === CONTRACT_PATH),
     ),
   ];
+}
+
+/**
+ * Rule F, first half: a Markdown file in the directory is the index or a record.
+ *
+ * Without this the gate is weakest exactly where it is needed most. A file named
+ * `0019-new_feature.md` is invisible to every other rule, so the coupled mistake
+ * this gate exists to catch — a record added without its index row — passes.
+ */
+function findMisnamedFiles(files: ReadonlyArray<ScannedFile>): ReadonlyArray<DecisionViolation> {
+  return files
+    .filter(
+      (file) =>
+        file.path.startsWith(`${DECISIONS_DIRECTORY}/`) &&
+        file.path.endsWith(".md") &&
+        file.path !== INDEX_PATH &&
+        !/^docs\/decisions\/\d{4}-[a-z0-9-]+\.md$/.test(file.path),
+    )
+    .map((file) => ({
+      path: file.path,
+      reason: "is not named `00NN-short-slug.md`, so no rule here can see it",
+    }));
+}
+
+/**
+ * Rule F, second half: the numbers run without gaps.
+ *
+ * "Take the next number" is only checkable against what the next number is. A
+ * skipped number reads as a record someone deleted rather than one never
+ * written, which is the ambiguity this removes.
+ */
+function findNumberingGaps(
+  records: ReadonlyArray<DecisionRecord>,
+): ReadonlyArray<DecisionViolation> {
+  const present = new Set(records.map((record) => Number(record.number)));
+  const highest = Math.max(0, ...present);
+  const missing: string[] = [];
+  for (let number = 1; number <= highest; number += 1) {
+    if (!present.has(number)) missing.push(String(number).padStart(4, "0"));
+  }
+  return missing.length === 0
+    ? []
+    : [
+        {
+          path: DECISIONS_DIRECTORY,
+          reason: `numbering skips ${missing.join(", ")} before reaching ${String(highest).padStart(4, "0")}`,
+        },
+      ];
 }
 
 function collectRecords(files: ReadonlyArray<ScannedFile>): ReadonlyArray<DecisionRecord> {
@@ -125,6 +180,14 @@ function findMalformedRecords(
           path: record.path,
           reason: `superseded by ${superseded[1]}, which does not exist`,
         });
+      } else if (Number(superseded[1]) <= Number(record.number)) {
+        // Supersession names the record that replaced this decision, so it
+        // always points forward. Itself or an earlier record identifies nothing,
+        // and a pair pointing at each other leaves no live decision at all.
+        violations.push({
+          path: record.path,
+          reason: `superseded by ${superseded[1]}, which is not a later record`,
+        });
       }
     }
     for (const section of REQUIRED_SECTIONS) {
@@ -142,8 +205,19 @@ function findIndexDisagreements(
   index: ScannedFile | undefined,
 ): ReadonlyArray<DecisionViolation> {
   if (index === undefined) return [{ path: INDEX_PATH, reason: "the decision index is missing" }];
-  const rows = new Map(parseIndexRows(index.content).map((row) => [row.number, row]));
+  const parsed = parseIndexRows(index.content);
   const violations: Array<DecisionViolation> = [];
+  // Collapsing the rows into a map keeps only the last of a repeated number, so
+  // a duplicate whose title or status has drifted would agree with the record by
+  // being discarded. Say so before the map hides it.
+  const seen = new Set<string>();
+  for (const row of parsed) {
+    if (seen.has(row.number)) {
+      violations.push({ path: INDEX_PATH, reason: `${row.number} is indexed more than once` });
+    }
+    seen.add(row.number);
+  }
+  const rows = new Map(parsed.map((row) => [row.number, row]));
   for (const record of records) {
     const row = rows.get(record.number);
     if (row === undefined) {
@@ -201,6 +275,18 @@ function findUnroutableReferences(
   const referenced = new Set(
     [...contract.content.matchAll(/docs\/decisions\/(\d{4})/g)].map((match) => match[1] ?? ""),
   );
+  // A written range routes an agent to every record between its ends, so those
+  // are references too. Checking only the two written numbers would let the
+  // middle of a range be deleted without the gate noticing.
+  for (const range of contract.content.matchAll(
+    /docs\/decisions\/(\d{4})`?\s*[–—-]\s*`?docs\/decisions\/(\d{4})/g,
+  )) {
+    const from = Number(range[1]);
+    const to = Number(range[2]);
+    for (let number = from + 1; number < to; number += 1) {
+      referenced.add(String(number).padStart(4, "0"));
+    }
+  }
   return [...referenced]
     .filter((number) => !numbers.has(number))
     .map((number) => ({

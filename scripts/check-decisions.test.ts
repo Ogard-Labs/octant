@@ -125,3 +125,72 @@ describe("findDecisionViolations", () => {
     ).toEqual(["routes to decision record 0009, which does not exist"]);
   });
 });
+
+describe("findDecisionViolations, on the gaps a weaker gate leaves", () => {
+  it("sees a record whose filename does not match the convention", () => {
+    // The dangerous case: a misnamed record is invisible to every other rule, so
+    // the missing index row this gate exists to catch would pass unnoticed.
+    expect(
+      reasons([
+        { path: "docs/decisions/0001-first.md", content: wellFormed("0001", "First") },
+        { path: "docs/decisions/0002-new_feature.md", content: wellFormed("0002", "Second") },
+        index(row("0001", "first", "First")),
+      ]),
+    ).toContain("is not named `00NN-short-slug.md`, so no rule here can see it");
+  });
+
+  it("sees a number skipped between records", () => {
+    expect(
+      reasons([
+        record("0001", "first", wellFormed("0001", "First")),
+        record("0003", "third", wellFormed("0003", "Third")),
+        index(row("0001", "first", "First"), row("0003", "third", "Third")),
+      ]),
+    ).toContain("numbering skips 0002 before reaching 0003");
+  });
+
+  it("sees the same number indexed twice, even when the last row agrees", () => {
+    // The last row wins when the rows collapse into a map, so a stale earlier
+    // duplicate would otherwise be hidden by the very row that agrees.
+    expect(
+      reasons([
+        record("0001", "first", wellFormed("0001", "First")),
+        index(row("0001", "first", "Stale Title"), row("0001", "first", "First")),
+      ]),
+    ).toContain("0001 is indexed more than once");
+  });
+
+  it("refuses a supersession that points at itself or backwards", () => {
+    expect(
+      reasons([
+        record("0001", "first", wellFormed("0001", "First", "Superseded by 0001")),
+        record("0002", "second", wellFormed("0002", "Second", "Superseded by 0001")),
+        index(
+          row("0001", "first", "First", "Superseded by 0001"),
+          row("0002", "second", "Second", "Superseded by 0001"),
+        ),
+      ]),
+    ).toEqual(
+      expect.arrayContaining([
+        "superseded by 0001, which is not a later record",
+        "superseded by 0001, which is not a later record",
+      ]),
+    );
+  });
+
+  it("checks the numbers a written range only implies", () => {
+    // Both written ends exist, so only the implied middle can fail here. That is
+    // exactly the reference the plain matcher cannot see.
+    expect(
+      reasons([
+        record("0001", "first", wellFormed("0001", "First")),
+        record("0003", "third", wellFormed("0003", "Third")),
+        index(row("0001", "first", "First"), row("0003", "third", "Third")),
+        {
+          path: "AGENTS.md",
+          content: "| Area | `docs/decisions/0001`–`docs/decisions/0003` |\n",
+        },
+      ]),
+    ).toContain("routes to decision record 0002, which does not exist");
+  });
+});
