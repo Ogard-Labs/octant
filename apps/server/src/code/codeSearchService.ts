@@ -52,6 +52,7 @@ export interface CodeSearchServiceOptions {
   readonly sourcePort?: CodeTestSourcePort;
   readonly clock?: () => string;
   readonly maxMatches?: number;
+  /** Bounds every entry the walk resolves, directories included. */
   readonly maxFiles?: number;
   readonly maxDepth?: number;
   readonly maxFileBytes?: number;
@@ -123,7 +124,7 @@ export class CodeSearchService {
       needle: query.toLowerCase(),
       scope: request.scope,
       matches: [],
-      filesExamined: 0,
+      entriesExamined: 0,
       truncated: false,
       visited: new Set([root.canonical]),
       threadId: request.threadId,
@@ -199,6 +200,12 @@ export class CodeSearchService {
       );
       if (resolved === undefined) continue;
 
+      // Every entry the walk resolves costs the same budget, directories
+      // included. A wide tree of empty directories is filesystem work whether
+      // or not it ever reaches a file, and that walk is the unbounded cost this
+      // budget exists to stop.
+      state.entriesExamined += 1;
+
       if (resolved.stat.isDirectory) {
         // A directory symlink can resolve into a subtree the walk is already
         // inside, which would otherwise repeat it until the budget is spent.
@@ -214,10 +221,6 @@ export class CodeSearchService {
         String(state.checkoutId),
         childRelative,
       );
-      // Both scopes pay the same file budget. Only a content search opens what
-      // it examines, but a path search still walks every directory, and that
-      // walk is the unbounded filesystem cost this budget exists to stop.
-      state.filesExamined += 1;
       if (state.scope === "path") {
         if (childRelative.toLowerCase().includes(state.needle)) {
           state.matches.push({ scope: "path", fileId, path: relativePath });
@@ -294,7 +297,7 @@ export class CodeSearchService {
   /** Whether the search has spent a budget, recording that it stopped early. */
   #exhausted(state: SearchState): boolean {
     if (state.signal?.aborted === true) return true;
-    if (state.matches.length >= this.#maxMatches || state.filesExamined >= this.#maxFiles) {
+    if (state.matches.length >= this.#maxMatches || state.entriesExamined >= this.#maxFiles) {
       state.truncated = true;
       return true;
     }
@@ -307,7 +310,7 @@ interface SearchState {
   readonly needle: string;
   readonly scope: CodeSearchScope;
   readonly matches: CodeSearchMatch[];
-  filesExamined: number;
+  entriesExamined: number;
   truncated: boolean;
   readonly visited: Set<string>;
   readonly threadId: CodeThreadId;

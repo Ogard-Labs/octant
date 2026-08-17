@@ -1,4 +1,5 @@
 import { execFile as nodeExecFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { access, copyFile, rm } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { createGitCommandEnvironment } from "../gitEnvironmentPort";
@@ -268,7 +269,7 @@ export class GitMutationPort {
     | { readonly status: "captured"; readonly snapshot: GitTreeSnapshot }
     | { readonly status: "failed" }
   > {
-    const scratch = await this.#gitPath(input.checkoutRoot, CHECKPOINT_INDEX_NAME, signal);
+    const scratch = await this.#gitPath(input.checkoutRoot, checkpointIndexName(), signal);
     if (scratch === undefined) return { status: "failed" };
     const environment = { GIT_INDEX_FILE: scratch };
     try {
@@ -305,12 +306,16 @@ export class GitMutationPort {
   /**
    * Put the checkout's files back the way a snapshot recorded them.
    *
-   * The working tree is moved through a throwaway index that first records the
-   * current content, which is what lets `read-tree -u` remove files the
-   * snapshot did not have instead of leaving them behind. The real index is
-   * then set to the snapshot's staged content, so the checkout comes back with
-   * the same staged/unstaged split it had. Ignored files are in neither tree
-   * and are never touched.
+   * Both trees are proven to exist before anything is written, and the real
+   * index is reset before the working tree. Every realistic failure — an
+   * unreadable tree, or the index lock being taken after the initial check —
+   * therefore happens while the checkout is still untouched, so a `failed`
+   * result never means files were already overwritten.
+   *
+   * The working tree is then moved through a throwaway index that first records
+   * the current content, which is what lets `read-tree -u` remove files the
+   * snapshot did not have instead of leaving them behind. Ignored files are in
+   * neither tree and are never touched.
    */
   async restoreWorkingTree(
     input: { readonly checkoutRoot: string; readonly snapshot: GitTreeSnapshot },
@@ -321,7 +326,7 @@ export class GitMutationPort {
     const lock = await this.#lockState(input.checkoutRoot, signal);
     if (lock === "failed") return { status: "failed" };
     if (lock === "locked") return { status: "rejected", reason: "index-locked" };
-    const scratch = await this.#gitPath(input.checkoutRoot, CHECKPOINT_INDEX_NAME, signal);
+    const scratch = await this.#gitPath(input.checkoutRoot, checkpointIndexName(), signal);
     if (scratch === undefined) return { status: "failed" };
     const environment = { GIT_INDEX_FILE: scratch };
     try {
@@ -333,20 +338,35 @@ export class GitMutationPort {
         environment,
       );
       if (staged.exitCode !== 0) return { status: "failed" };
+      if (
+        !(await this.#treeExists(input.checkoutRoot, input.snapshot.worktree, signal)) ||
+        !(await this.#treeExists(input.checkoutRoot, input.snapshot.index, signal))
+      ) {
+        return { status: "rejected", reason: "invalid-commit" };
+      }
+      const index = await this.#run(
+        ["-C", input.checkoutRoot, "read-tree", "--reset", input.snapshot.index],
+        signal,
+      );
+      if (index.exitCode !== 0) return { status: "failed" };
       const worktree = await this.#run(
         ["-C", input.checkoutRoot, "read-tree", "-u", "--reset", input.snapshot.worktree],
         signal,
         environment,
       );
-      if (worktree.exitCode !== 0) return { status: "failed" };
-      const index = await this.#run(
-        ["-C", input.checkoutRoot, "read-tree", "--reset", input.snapshot.index],
-        signal,
-      );
-      return index.exitCode === 0 ? { status: "applied" } : { status: "failed" };
+      return worktree.exitCode === 0 ? { status: "applied" } : { status: "failed" };
     } finally {
       await this.#discardScratchIndex(scratch);
     }
+  }
+
+  /** Prove a snapshot tree is readable before any part of the checkout moves. */
+  async #treeExists(checkoutRoot: string, oid: string, signal?: AbortSignal): Promise<boolean> {
+    const result = await this.#run(
+      ["-C", checkoutRoot, "rev-parse", "--verify", "--quiet", `${oid}^{tree}`],
+      signal,
+    );
+    return result.exitCode === 0;
   }
 
   async #writeTree(
@@ -472,8 +492,15 @@ export class GitMutationPort {
   }
 }
 
-/** The throwaway index a checkpoint stages into, kept inside the Git directory. */
-const CHECKPOINT_INDEX_NAME = "octant-checkpoint-index";
+/**
+ * The throwaway index a checkpoint stages into, kept inside the Git directory.
+ * Each operation gets its own name: forked and ordinary threads can share one
+ * checkout, so a fixed path would let concurrent checkpoints overwrite or
+ * delete each other's scratch index.
+ */
+function checkpointIndexName(): string {
+  return `octant-checkpoint-index-${randomUUID()}`;
+}
 
 function isObjectId(value: string): boolean {
   return /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(value);

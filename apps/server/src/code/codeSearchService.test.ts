@@ -225,7 +225,7 @@ describe("CodeSearchService", () => {
     expect(result.search.truncated).toBe(true);
   });
 
-  it("stops a path search at the file budget and says so, as a content search does", async () => {
+  it("stops a path search at the walk budget and says so, as a content search does", async () => {
     const result = await service(fakePort(smallRepository), { maxFiles: 2 }).search({
       threadId,
       checkoutId,
@@ -236,12 +236,38 @@ describe("CodeSearchService", () => {
 
     expect(result.status).toBe("searched");
     if (result.status !== "searched") return;
-    expect(result.search.matches.map((match) => String(match.path))).toEqual([
-      "README.md",
-      "src/helper.ts",
-    ]);
-    // The third file is never reached, so the budget bounded the walk itself.
+    // The budget is spent on the file and the directory beside it, so the
+    // directory's contents are never reached.
+    expect(result.search.matches.map((match) => String(match.path))).toEqual(["README.md"]);
     expect(result.search.truncated).toBe(true);
+  });
+
+  it("spends the walk budget on directories, so an empty tree cannot be walked without limit", async () => {
+    const emptyDirectories: Record<string, FakeNode> = {
+      "/repo": { kind: "dir", children: ["a", "match.txt"] },
+      "/repo/match.txt": { kind: "file", text: "" },
+    };
+    let parent = "/repo/a";
+    for (let depth = 0; depth < 6; depth += 1) {
+      emptyDirectories[parent] = { kind: "dir", children: ["a"] };
+      parent = `${parent}/a`;
+    }
+    emptyDirectories[parent] = { kind: "dir", children: [] };
+
+    const result = await service(fakePort(emptyDirectories), { maxFiles: 3 }).search({
+      threadId,
+      checkoutId,
+      rootPath,
+      scope: "path",
+      query: "a",
+    });
+
+    expect(result.status).toBe("searched");
+    if (result.status !== "searched") return;
+    // The empty directories spend the budget, so the walk stops before the file
+    // that would otherwise have matched.
+    expect(result.search.truncated).toBe(true);
+    expect(result.search.matches).toEqual([]);
   });
 
   it("says the search is truncated when a file is too large to read", async () => {

@@ -146,6 +146,32 @@ describe("CodeGitPane", () => {
     );
   });
 
+  it("sends both halves of a staged rename so the rename cannot half-apply", async () => {
+    const client = codeClient();
+    const renamed = {
+      ...gitObservation,
+      status: [{ path: "src/new.ts", originalPath: "src/old.ts", index: "R", worktree: " " }],
+    } as typeof gitObservation;
+    render(
+      <CodeGitPane
+        client={client}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        observation={renamed}
+        scope={scope}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select src/new.ts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Unstage 2 paths" }));
+    await waitFor(() =>
+      expect(client.executeOperation).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "unstage-git", paths: ["src/new.ts", "src/old.ts"] }),
+      ),
+    );
+  });
+
   it("asks before discarding and sends nothing if the answer is to keep the changes", async () => {
     const client = codeClient();
     render(

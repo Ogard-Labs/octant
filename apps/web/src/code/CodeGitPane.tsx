@@ -40,13 +40,24 @@ export function CodeGitPane(props: CodeGitPaneProps) {
   const remote = props.observation.upstream?.remote ?? props.observation.remotes[0]?.name;
   // Unstaging and discarding each answer to a different half of the status: one
   // needs the path to be in the index, the other needs it to be tracked at all.
-  const selectedStaged = staged
-    .map((entry) => entry.path)
-    .filter((path) => selectedPaths.has(path));
-  const selectedTracked = props.observation.status
-    .filter((entry) => entry.index !== "?" && entry.worktree !== "?")
-    .map((entry) => entry.path)
-    .filter((path) => selectedPaths.has(path));
+  // A rename occupies two paths, and Git's pathspec applies only to the ones it
+  // is given, so both sides travel together or the rename half-applies.
+  type StatusEntry = (typeof props.observation.status)[number];
+  const withRenameSource = (
+    entries: ReadonlyArray<StatusEntry>,
+  ): ReadonlyArray<StatusEntry["path"]> => [
+    ...new Set(
+      entries.flatMap((entry) =>
+        entry.originalPath === undefined ? [entry.path] : [entry.path, entry.originalPath],
+      ),
+    ),
+  ];
+  const selectedStaged = withRenameSource(staged.filter((entry) => selectedPaths.has(entry.path)));
+  const selectedTracked = withRenameSource(
+    props.observation.status.filter(
+      (entry) => entry.index !== "?" && entry.worktree !== "?" && selectedPaths.has(entry.path),
+    ),
+  );
 
   const authorization = async (command: Parameters<CodeClient["executeOperation"]>[0]) => {
     if (props.executionPolicy === "full-access") return { kind: "full-access" } as const;

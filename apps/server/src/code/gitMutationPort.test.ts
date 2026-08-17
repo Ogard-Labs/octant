@@ -298,6 +298,29 @@ describe("GitMutationPort", () => {
     ]);
   });
 
+  it("leaves the checkout untouched when a snapshot tree cannot be read", async () => {
+    const repository = createRepository(temporaryDirectory());
+    const port = new GitMutationPort(undefined, confinedOptions());
+    const captured = await port.snapshotWorkingTree({ checkoutRoot: repository });
+    expect(captured).toMatchObject({ status: "captured" });
+    if (captured.status !== "captured") return;
+    writeFileSync(join(repository, "README.md"), "edited after the checkpoint\n");
+
+    await expect(
+      port.restoreWorkingTree({
+        checkoutRoot: repository,
+        // Well-formed but absent, which is what a pruned or foreign snapshot
+        // looks like by the time a restore is attempted.
+        snapshot: { ...captured.snapshot, index: "a".repeat(40) },
+      }),
+    ).resolves.toEqual({ status: "rejected", reason: "invalid-commit" });
+
+    // A refused restore must not have already overwritten the working tree.
+    expect(readFileSync(join(repository, "README.md"), "utf8")).toBe(
+      "edited after the checkpoint\n",
+    );
+  });
+
   it("fails closed when Seatbelt confinement is unavailable", async () => {
     const port = new GitMutationPort(undefined, {
       platform: "linux",

@@ -584,6 +584,11 @@ export function useCodeController(options: CodeControllerOptions) {
       streamAbort.current?.abort();
       streamAbort.current = undefined;
       clearFailure();
+      // Usage belongs to the thread being left. Hydration may fail, so it is
+      // cleared on the way in rather than replaced on the way out; otherwise the
+      // new thread would keep showing the previous thread's totals and limits.
+      usageByOperation.current = new Map();
+      setThreadUsage(EMPTY_THREAD_USAGE);
       try {
         const initial = await client.thread(threadId);
         if (!isActive(request, threadGeneration, mounted)) return;
@@ -1186,6 +1191,11 @@ export function useCodeController(options: CodeControllerOptions) {
           title: input.title,
           lifecycle: "active",
           pinned: false,
+          // A fork is a new thread, and the server requires a native approval
+          // bound to that thread before it may hold Full access. Inheriting the
+          // source's posture here would carry no receipt, so the fork starts
+          // approval-gated and is raised the same way any thread is.
+          executionPolicy: "approval-gated",
           forkedFrom: { threadId: input.threadId, throughOperationId: input.throughOperationId },
           version: 1,
           createdAt: timestamp,
