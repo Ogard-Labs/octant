@@ -1221,6 +1221,36 @@ describe("useShellController", () => {
       }),
     );
   });
+  it("gives a second terminal its own tab and a title that tells it from the first", async () => {
+    const server = statefulClient();
+    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000898");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () =>
+      result.current.openCodeSurface({ kind: "code-terminal", threadId, title: "Terminal" }),
+    );
+    await act(async () =>
+      result.current.openCodeSurface({
+        kind: "code-terminal",
+        threadId,
+        title: "Terminal",
+        terminalId: "80000000-0000-4000-8000-000000000042" as never,
+      }),
+    );
+    // Reopening the surface without naming a terminal returns to the first tab
+    // rather than starting a third shell.
+    await act(async () =>
+      result.current.openCodeSurface({ kind: "code-terminal", threadId, title: "Terminal" }),
+    );
+
+    const terminals = groups(result.current.workspace!.layouts.code)
+      .flatMap((group) => group.tabs)
+      .filter((tab) => tab.kind === "code-terminal");
+    expect(terminals.map((tab) => tab.title)).toEqual(["Terminal", "Terminal 2"]);
+  });
+
   it("holds loading until authoritative bootstrap completes and retries disconnection", async () => {
     const first = deferred<ShellBootstrap>();
     const client: ShellClient = {

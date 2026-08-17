@@ -1016,6 +1016,10 @@ describe("mapClaudeMessage", () => {
     expect(results).toMatchObject([
       {
         kind: "event",
+        event: { kind: "rate-limit-window", window: "five_hour", status: "exhausted" },
+      },
+      {
+        kind: "event",
         event: {
           kind: "failed",
           failure: {
@@ -1027,7 +1031,35 @@ describe("mapClaudeMessage", () => {
       },
     ]);
     expect(ctx.terminal).toBe(true);
-    expect(JSON.stringify(results)).not.toMatch(/five_hour|utilization/);
+  });
+
+  it("reports a usage window that is filling up without failing the turn", () => {
+    const ctx = context();
+    const resetsAt = Date.parse(occurredAt) + 3_600_000;
+    const results = mapped(ctx, {
+      kind: "rate-limit",
+      sessionId: claudeSessionId,
+      status: "allowed_warning",
+      resetsAt,
+      rateLimitType: "seven_day",
+      utilization: 0.87,
+    });
+
+    // A warning is a fact about the account, not a turn outcome: the thread
+    // must learn the window is closing in and keep running.
+    expect(results).toMatchObject([
+      {
+        kind: "event",
+        event: {
+          kind: "rate-limit-window",
+          window: "seven_day",
+          status: "warning",
+          utilization: 0.87,
+          resetsAt: new Date(resetsAt).toISOString(),
+        },
+      },
+    ]);
+    expect(ctx.terminal).toBe(false);
   });
 
   it.each([
@@ -1113,6 +1145,28 @@ describe("mapClaudeMessage", () => {
     ]);
     expect(ctx.sequence).toBe(sequenceBefore);
     expect(ctx.taskIds.get("sdk-task-unsafe-usage")).toEqual(stateBefore);
+  });
+
+  it("carries Claude's own turn cost onto the usage event", () => {
+    const ctx = context();
+
+    const results = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage,
+      totalCostUsd: 0.0421,
+      permissionDenials: [],
+    });
+
+    // The price is Claude's figure. Octant holds no price list, so this is the
+    // only way a cost can reach the thread at all.
+    expect(results[0]).toMatchObject({
+      kind: "event",
+      event: { kind: "usage", inputTokens: 12, outputTokens: 7, costUsd: 0.0421 },
+    });
   });
 
   it("maps interruption and successful completion as exactly one terminal transition", () => {

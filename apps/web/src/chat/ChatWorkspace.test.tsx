@@ -20,7 +20,10 @@ const providerId = "10000000-0000-4000-8000-000000000001";
 const turnId = "00000000-0000-4000-8000-000000000931";
 const contentId = "00000000-0000-4000-8000-000000000932";
 
-function controllerFixture(overrides: Partial<ChatController> = {}): ChatController {
+function controllerFixture(
+  overrides: Partial<ChatController> = {},
+  thread: Record<string, unknown> = {},
+): ChatController {
   const view = decodeChatThreadView({
     thread: {
       id: threadId,
@@ -34,6 +37,7 @@ function controllerFixture(overrides: Partial<ChatController> = {}): ChatControl
       version: 3,
       createdAt: now,
       updatedAt: now,
+      ...thread,
     },
     turns: [],
     lastSequence: 4,
@@ -171,6 +175,30 @@ function providerSnapshot(
           citations: capability,
         },
         observedAt: now as never,
+      },
+    ],
+  };
+}
+
+/** Provider snapshot whose first model declares two selectable options. */
+function providerSnapshotWithModelOptions(): ProviderRegistrySnapshot {
+  const snapshot = providerSnapshot();
+  const baseModel = snapshot.observedStates[0]!.models[0]!;
+  return {
+    ...snapshot,
+    observedStates: [
+      {
+        ...snapshot.observedStates[0]!,
+        models: [
+          {
+            ...baseModel,
+            options: [
+              { id: "effort", displayName: "Effort", kind: "selection", values: ["low", "high"] },
+              { id: "service-tier", displayName: "Speed", kind: "selection", values: ["fast"] },
+            ],
+          },
+          { ...baseModel, id: "model-b" as never, displayName: "Model B" },
+        ],
       },
     ],
   };
@@ -718,6 +746,171 @@ describe("ChatWorkspace", () => {
 
     expect(screen.getByText(/Disconnected — reconnecting/)).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent("Connection lost.");
+  });
+
+  it("offers the selected model's declared options and issues change-chat-provider with the values", async () => {
+    const user = userEvent.setup();
+    const withOptions = providerSnapshotWithModelOptions();
+    const controller = controllerFixture({}, { modelOptionValues: { "service-tier": "fast" } });
+    const { rerender } = render(
+      <ChatWorkspace controller={controller} providerSnapshot={withOptions} />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Speed" })).toHaveTextContent("Speed: fast");
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    expect(controller.execute).toHaveBeenCalledWith({
+      kind: "change-chat-provider",
+      threadId,
+      expectedVersion: 3,
+      providerInstanceId: providerId,
+      modelId: "model-a",
+      modelOptionValues: { "service-tier": "fast", effort: "high" },
+    });
+
+    await user.click(screen.getByRole("combobox", { name: "Speed" }));
+    await user.click(await screen.findByRole("option", { name: "Speed: Default" }));
+    expect(controller.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "change-chat-provider", modelOptionValues: {} }),
+    );
+
+    // A model that declares no options gets no option controls.
+    const onModelB = controllerFixture({}, { modelId: "model-b" });
+    rerender(<ChatWorkspace controller={onModelB} providerSnapshot={withOptions} />);
+    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Speed" })).toBeNull();
+  });
+
+  it("applies a second option change made before the first command's thread arrives", async () => {
+    const user = userEvent.setup();
+    const commands: ChatCommand[] = [];
+    let releaseFirst: () => void = () => undefined;
+    const firstSettles = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const execute = vi.fn(async (command: ChatCommand) => {
+      commands.push(command);
+      const issued = commands.length;
+      if (issued === 1) await firstSettles;
+      return {
+        kind: "thread-updated",
+        thread: {
+          id: threadId,
+          version: 3 + issued,
+          modelOptionValues: (command as { readonly modelOptionValues?: Record<string, string> })
+            .modelOptionValues,
+        },
+      } as never;
+    });
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({ execute })}
+        providerSnapshot={providerSnapshotWithModelOptions()}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.click(screen.getByRole("combobox", { name: "Speed" }));
+    await user.click(await screen.findByRole("option", { name: "Speed: fast" }));
+    // The rendered thread is still at version 3: the second change waits for
+    // the first command's authoritative thread instead of racing it.
+    expect(commands).toHaveLength(1);
+
+    releaseFirst();
+    await waitFor(() => expect(commands).toHaveLength(2));
+    expect(commands[0]).toMatchObject({
+      expectedVersion: 3,
+      modelOptionValues: { effort: "high" },
+    });
+    expect(commands[1]).toMatchObject({
+      expectedVersion: 4,
+      modelOptionValues: { effort: "high", "service-tier": "fast" },
+    });
+  });
+
+  it("toggles web research on the version an option change already in flight reached", async () => {
+    const user = userEvent.setup();
+    let releaseChange: () => void = () => undefined;
+    const changeSettles = new Promise<void>((resolve) => {
+      releaseChange = resolve;
+    });
+    const execute = vi.fn(async (command: { readonly kind: string }) => {
+      if (command.kind === "change-chat-provider") await changeSettles;
+      return {
+        kind: "thread-updated",
+        thread: { id: threadId, version: 4, modelOptionValues: { effort: "high" } },
+      } as never;
+    });
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({ execute })}
+        providerSnapshot={providerSnapshotWithModelOptions()}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.click(screen.getByRole("button", { name: "Enable web research" }));
+
+    // Both settings were requested, so both have to survive. Sending the
+    // research toggle on the rendered version would race the option change and
+    // whichever arrived second would be refused as stale, silently discarding
+    // one of the two choices the person made.
+    expect(execute).toHaveBeenCalledOnce();
+
+    releaseChange();
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "change-chat-research", expectedVersion: 4 }),
+    );
+  });
+
+  it("sends a turn only after an option change already in flight has settled", async () => {
+    const user = userEvent.setup();
+    let releaseChange: () => void = () => undefined;
+    const changeSettles = new Promise<void>((resolve) => {
+      releaseChange = resolve;
+    });
+    const execute = vi.fn(async () => {
+      await changeSettles;
+      return {
+        kind: "thread-updated",
+        thread: { id: threadId, version: 4, modelOptionValues: { effort: "high" } },
+      } as never;
+    });
+    const sendTurn = vi.fn(async () => true);
+    function Harness() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ChatWorkspace
+          controller={controllerFixture({
+            execute,
+            pendingDraft: draft,
+            sendTurn,
+            setPendingDraft: setDraft,
+          })}
+          providerSnapshot={providerSnapshotWithModelOptions()}
+        />
+      );
+    }
+    render(<Harness />);
+
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.type(screen.getByRole("textbox", { name: "Message" }), "Think hard{Enter}");
+
+    // The turn must run the setting the person just chose, so it waits for the
+    // option command rather than racing it to the host.
+    expect(execute).toHaveBeenCalledOnce();
+    expect(sendTurn).not.toHaveBeenCalled();
+
+    releaseChange();
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    // Waiting is not enough: the composer's closure still holds the version
+    // from before the option change, so the send must carry the version that
+    // change reached or the host refuses it as stale.
+    expect(sendTurn).toHaveBeenCalledWith("Think hard", [], [], [], [], [], 4);
   });
 
   it("keeps unavailable provider and model selections visible and fail closed", () => {

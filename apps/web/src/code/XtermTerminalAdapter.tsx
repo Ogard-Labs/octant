@@ -5,6 +5,8 @@ import { useTypographyProjection } from "../theme/TypographyProvider";
 export interface XtermAdapterSession {
   readonly dispose: () => void;
   readonly focus: () => void;
+  /** The text the user has selected in the terminal, empty when none is. */
+  readonly readSelection?: () => string;
   readonly setInteractive: (interactive: boolean) => void;
   readonly setOutput: (output: string) => void;
   readonly setTypography?: (typography: TerminalTypographyProjection) => void;
@@ -29,6 +31,13 @@ export interface XtermTerminalAdapterProps {
   readonly loadRuntime?: () => Promise<XtermAdapterRuntime>;
   readonly onData: (data: string) => void;
   readonly onResize: (columns: number, rows: number) => void;
+  /**
+   * Hands the caller a way to read the terminal's current selection, and
+   * `undefined` once the session is gone. The selection lives in the terminal
+   * engine, so nothing above this adapter can observe it without being given a
+   * reader.
+   */
+  readonly onSelectionReader?: (read: (() => string) | undefined) => void;
   readonly output: string;
   readonly typography?: TerminalTypographyProjection;
 }
@@ -64,8 +73,13 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
           output: latestProps.current.output,
           typography: latestTypography.current,
         });
-        if (disposed) mounted.dispose();
-        else session.current = mounted;
+        if (disposed) {
+          mounted.dispose();
+          return;
+        }
+        session.current = mounted;
+        const read = mounted.readSelection;
+        latestProps.current.onSelectionReader?.(read === undefined ? undefined : () => read());
       })
       .catch(() => {
         if (!disposed) setRuntimeUnavailable(true);
@@ -74,6 +88,7 @@ export function XtermTerminalAdapter(props: XtermTerminalAdapterProps) {
       disposed = true;
       session.current?.dispose();
       session.current = undefined;
+      latestProps.current.onSelectionReader?.(undefined);
     };
   }, [loader]);
 

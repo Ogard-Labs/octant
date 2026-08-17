@@ -82,12 +82,24 @@ export interface CodeWorkspaceProps {
   readonly onOpenFile?: (relativePath: string) => void;
   /** Re-opens the file projection so the editor can leave a stale revision. */
   readonly onRequestFileRefresh?: () => void;
-  readonly onOpenSurface?: (kind: CodeOverviewSurfaceKind) => void;
+  readonly onOpenSurface?: (
+    kind: CodeOverviewSurfaceKind,
+    options?: { readonly terminalId?: CodeTerminalId },
+  ) => void;
   readonly providerGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly tab: CodeTab;
   readonly canvasClient?: CanvasClient;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
+  /**
+   * Opens a Code thread this workspace started, such as a fork of the one in
+   * view. Absent on a surface with no tab of its own.
+   */
+  readonly onOpenCodeThread?: (
+    threadId: import("@octant/contracts/code").CodeThreadId,
+    title: string,
+    projectId: import("@octant/contracts/projects").ProjectId,
+  ) => void;
   /** Reaches the host's `#thread` mention surface from the Code composer. */
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -127,6 +139,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
+        {...(props.onOpenCodeThread === undefined
+          ? {}
+          : { onOpenCodeThread: props.onOpenCodeThread })}
         {...(props.approvals?.access === undefined
           ? {}
           : { requestFullAccessApproval: props.approvals.access })}
@@ -134,7 +149,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.windowCapability === undefined
           ? {}
           : { windowCapability: props.windowCapability })}
+        {...(props.approvals?.git === undefined ? {} : { requestApproval: props.approvals.git })}
         attachmentClient={props.client}
+        nextUuid={nextUuid}
+        operationClient={props.client}
         threadId={props.tab.threadId}
       />
     );
@@ -179,7 +197,10 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           {...props}
           nextUuid={nextUuid}
           scope={scope}
-          terminalId={scope.threadId as unknown as CodeTerminalId}
+          // A tab journaled before terminals carried identities of their own
+          // stays bound to the thread's original terminal, so an existing
+          // session reattaches to the same process it had.
+          terminalId={props.tab.terminalId ?? (scope.threadId as unknown as CodeTerminalId)}
           {...(props.projections?.terminal === undefined
             ? {}
             : { terminal: props.projections.terminal })}
@@ -526,6 +547,30 @@ function GitObservationLoading() {
   );
 }
 
+/**
+ * The composer draft with terminal output appended as a fenced block.
+ *
+ * The selection is quoted rather than pasted in as prose: terminal output is
+ * full of characters a model would otherwise read as instructions, and the
+ * fence keeps what the user is asking about separate from what they are asking.
+ *
+ * The fence outruns the longest backtick run in the selection, because a fixed
+ * one closes on any output that prints a fence of its own. Everything after that
+ * line would arrive as the user's own request, which is exactly the confusion
+ * the quoting exists to prevent and the worst case for a full-access provider.
+ */
+export function appendTerminalSelection(draft: string, selection: string): string {
+  const body = selection.replace(/\s+$/, "");
+  const longestRun = [...body.matchAll(/`+/g)].reduce(
+    (longest, match) => Math.max(longest, match[0].length),
+    0,
+  );
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  const block = [fence, body, fence, ""].join("\n");
+  const existing = draft.replace(/\s+$/, "");
+  return existing === "" ? block : `${existing}\n\n${block}`;
+}
+
 function TerminalWorkspaceSurface(
   props: CodeWorkspaceProps & {
     readonly nextUuid: () => string;
@@ -717,6 +762,19 @@ function TerminalWorkspaceSurface(
         client={props.client}
         createOperationId={() => props.nextUuid() as never}
         executionPolicy={props.threadPolicy}
+        onAddSelectionToChat={(selection) =>
+          props.controller.setPendingDraft(
+            appendTerminalSelection(props.controller.pendingDraft, selection),
+          )
+        }
+        {...(props.onOpenSurface === undefined
+          ? {}
+          : {
+              onOpenAnotherTerminal: () =>
+                props.onOpenSurface?.("code-terminal", {
+                  terminalId: props.nextUuid() as unknown as CodeTerminalId,
+                }),
+            })}
         restart={{
           columns: 100,
           createTerminalId: () => props.terminalId,

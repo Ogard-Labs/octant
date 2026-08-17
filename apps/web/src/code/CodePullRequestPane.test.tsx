@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { CodePullRequestReview } from "@octant/contracts/code-operations";
 import { describe, expect, it, vi } from "vitest";
 import { CodePullRequestPane } from "./CodePullRequestPane";
@@ -194,5 +194,40 @@ describe("CodePullRequestPane", () => {
     );
     expect(screen.getByText(/No linked pull request yet/i)).toBeVisible();
     expect(screen.getByRole("button", { name: "Create pull request" })).toBeVisible();
+  });
+
+  it("fills the title and description from a provider draft without creating anything", async () => {
+    const client = codeClient();
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValue({
+      kind: "git-draft-state",
+      operationId: ids.operation,
+      purpose: "pull-request",
+      state: "completed",
+      title: "Deliver the Git pane controls",
+      body: "Adds unstage, discard, and drafted delivery text.",
+    });
+    render(
+      <CodePullRequestPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        idempotencyKey="thread-delivery-v1"
+        scope={scope}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Suggest title and description" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Pull request title")).toHaveValue(
+        "Deliver the Git pane controls",
+      ),
+    );
+    expect(screen.getByLabelText("Pull request body")).toHaveValue(
+      "Adds unstage, discard, and drafted delivery text.",
+    );
+    expect(client.executeOperation).toHaveBeenCalledTimes(1);
+    expect(client.executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "draft-git-text", purpose: "pull-request" }),
+    );
   });
 });

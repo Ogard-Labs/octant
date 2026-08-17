@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { GitObservation } from "./gitObservationPort";
+import type { GitMutationResult } from "./gitMutationPort";
 import { GitService } from "./gitService";
 
 describe("GitService", () => {
@@ -75,6 +76,69 @@ describe("GitService", () => {
     ).resolves.toEqual({ status: "applied" });
     expect(mutation.discard).toHaveBeenCalledWith(
       { checkoutRoot: "/repo", paths: ["file.txt"] },
+      undefined,
+    );
+  });
+
+  it("only unstages a path the observation reports as staged", async () => {
+    const observation = {
+      ...readyObservation(),
+      statusEntries: [
+        { path: "file.txt", index: "M", worktree: " " },
+        { path: "unstaged.txt", index: " ", worktree: "M" },
+      ],
+      changedPaths: ["file.txt", "unstaged.txt"],
+      stagedSummary: [{ path: "file.txt", index: "M", worktree: " " }],
+    };
+    const mutation = mutationPort();
+    const service = new GitService({ observe: vi.fn(async () => observation) }, mutation);
+    const base = { checkoutId: "checkout-1", checkoutRoot: "/repo" } as const;
+
+    await expect(
+      service.unstage({ ...base, paths: ["file.txt"], expectedStateToken: "stale" }),
+    ).resolves.toEqual({ status: "rejected", reason: "stale-state" });
+    // Changed but not staged: taking it out of the index would be a no-op that
+    // reads to the user as if something happened.
+    await expect(
+      service.unstage({
+        ...base,
+        paths: ["unstaged.txt"],
+        expectedStateToken: observation.stateToken,
+      }),
+    ).resolves.toEqual({ status: "rejected", reason: "unlisted-path" });
+    expect(mutation.unstage).not.toHaveBeenCalled();
+
+    await expect(
+      service.unstage({ ...base, paths: ["file.txt"], expectedStateToken: observation.stateToken }),
+    ).resolves.toEqual({ status: "applied" });
+    expect(mutation.unstage).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", paths: ["file.txt"] },
+      undefined,
+    );
+  });
+
+  it("accepts both halves of a staged rename when unstaging", async () => {
+    const observation = {
+      ...readyObservation(),
+      statusEntries: [{ path: "new.txt", originalPath: "old.txt", index: "R", worktree: " " }],
+      changedPaths: ["new.txt", "old.txt"],
+      stagedSummary: [{ path: "new.txt", originalPath: "old.txt", index: "R", worktree: " " }],
+    };
+    const mutation = mutationPort();
+    const service = new GitService({ observe: vi.fn(async () => observation) }, mutation);
+
+    // One staged entry occupies two paths, and Git needs both to take the
+    // rename out of the index instead of half-applying it.
+    await expect(
+      service.unstage({
+        checkoutId: "checkout-1",
+        checkoutRoot: "/repo",
+        paths: ["new.txt", "old.txt"],
+        expectedStateToken: observation.stateToken,
+      }),
+    ).resolves.toEqual({ status: "applied" });
+    expect(mutation.unstage).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", paths: ["new.txt", "old.txt"] },
       undefined,
     );
   });
@@ -162,20 +226,92 @@ describe("GitService", () => {
     expect(maximumActive).toBe(1);
   });
 
-  it("uses commits for checkpoints and only reverts an explicit commit from a clean expected state", async () => {
+  it("checkpoints the working tree without committing, and records what a restore replaced", async () => {
+    const observation = readyObservation();
+    const mutation = mutationPort();
+    const service = new GitService({ observe: vi.fn(async () => observation) }, mutation);
+    const base = { checkoutId: "checkout-1", checkoutRoot: "/repo" } as const;
+    const snapshot = { worktree: "f".repeat(40), index: "0".repeat(40) };
+
+    const captured = await service.checkpoint(base);
+    expect(captured).toMatchObject({ status: "captured" });
+    // A checkpoint records content and nothing else: it must not produce a
+    // commit, which would put a turn's undo point into the branch history.
+    expect(mutation.commit).not.toHaveBeenCalled();
+    // The checkout names the anchors, so one checkout's cleanup cannot reach a
+    // sibling worktree's checkpoints in the ref store they share.
+    expect(mutation.snapshotWorkingTree).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", checkoutId: "checkout-1" },
+      undefined,
+    );
+    // A turn's checkpoint stays anchored for as long as the checkout does.
+    expect(mutation.releaseCheckpoint).not.toHaveBeenCalled();
+
+    // The state a restore overwrites is checkpointed first and handed back, so
+    // the user can undo the restore itself.
+    await expect(service.restoreCheckpoint({ ...base, snapshot })).resolves.toEqual({
+      status: "applied",
+      undo: { worktree: "d".repeat(40), index: "e".repeat(40), head: "a".repeat(40) },
+    });
+    expect(mutation.restoreWorkingTree).toHaveBeenCalledWith(
+      { checkoutRoot: "/repo", snapshot },
+      undefined,
+    );
+  });
+
+  it("hands back the undo point when a restore fails part-way, but not when it is refused", async () => {
+    const observation = readyObservation();
+    const undo = { worktree: "d".repeat(40), index: "e".repeat(40), head: "a".repeat(40) };
+    const base = { checkoutId: "checkout-1", checkoutRoot: "/repo" } as const;
+    const snapshot = { worktree: "f".repeat(40), index: "0".repeat(40) };
+
+    // A command the timeout killed may already have moved files, so the only
+    // recovery point has to travel with the failure.
+    const failing = {
+      ...mutationPort(),
+      restoreWorkingTree: vi.fn(async (): Promise<GitMutationResult> => ({ status: "failed" })),
+    };
+    await expect(
+      new GitService({ observe: vi.fn(async () => observation) }, failing).restoreCheckpoint({
+        ...base,
+        snapshot,
+      }),
+    ).resolves.toEqual({ status: "failed", undo });
+    // The undo point travels back, so its anchor has to stay: releasing it
+    // would hand the caller a restore point Git is free to collect.
+    expect(failing.releaseCheckpoint).not.toHaveBeenCalled();
+
+    // A rejection is refused before anything is written, so there is nothing
+    // to undo and offering one would invite an unnecessary overwrite.
+    const rejecting = {
+      ...mutationPort(),
+      restoreWorkingTree: vi.fn(
+        async (): Promise<GitMutationResult> => ({ status: "rejected", reason: "invalid-commit" }),
+      ),
+    };
+    await expect(
+      new GitService({ observe: vi.fn(async () => observation) }, rejecting).restoreCheckpoint({
+        ...base,
+        snapshot,
+      }),
+    ).resolves.toEqual({ status: "rejected", reason: "invalid-commit" });
+    // Nobody was handed that capture, so it must not keep pinning trees for
+    // the rest of the checkout's life.
+    expect(rejecting.releaseCheckpoint).toHaveBeenCalledWith(
+      {
+        checkoutRoot: "/repo",
+        checkoutId: "checkout-1",
+        anchorId: "3f1b0c9a-5d42-4e77-9a1c-6b2e8f0d4c31",
+      },
+      undefined,
+    );
+  });
+
+  it("only reverts an explicit commit from a clean expected state", async () => {
     const dirty = readyObservation();
     const mutation = mutationPort();
     const service = new GitService({ observe: vi.fn(async () => dirty) }, mutation);
 
-    await expect(
-      service.checkpoint({
-        checkoutId: "checkout-1",
-        checkoutRoot: "/repo",
-        message: "Checkpoint",
-        expectedStateToken: dirty.stateToken,
-        stagedSummary: dirty.stagedSummary,
-      }),
-    ).resolves.toMatchObject({ status: "applied" });
     await expect(
       service.revert({
         checkoutId: "checkout-1",
@@ -231,6 +367,7 @@ function readyObservation(): GitObservation {
 function mutationPort() {
   return {
     stage: vi.fn(async () => ({ status: "applied" as const })),
+    unstage: vi.fn(async () => ({ status: "applied" as const })),
     commit: vi.fn(async () => ({
       status: "applied" as const,
       oid: "b".repeat(40),
@@ -238,5 +375,12 @@ function mutationPort() {
     push: vi.fn(async () => ({ status: "applied" as const })),
     discard: vi.fn(async () => ({ status: "applied" as const })),
     revertCommit: vi.fn(async () => ({ status: "applied" as const, oid: "c".repeat(40) })),
+    snapshotWorkingTree: vi.fn(async () => ({
+      status: "captured" as const,
+      snapshot: { worktree: "d".repeat(40), index: "e".repeat(40), head: "a".repeat(40) },
+      anchorId: "3f1b0c9a-5d42-4e77-9a1c-6b2e8f0d4c31",
+    })),
+    restoreWorkingTree: vi.fn(async () => ({ status: "applied" as const })),
+    releaseCheckpoint: vi.fn(async () => {}),
   };
 }

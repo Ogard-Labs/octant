@@ -19,9 +19,11 @@ import {
   type CodeConversationPage,
   type CodeConversationStep,
   type CodeConversationTurn,
+  type CodeProviderLimit,
   type CodeOperationId,
   type CodeThreadId,
   type EventEnvelope,
+  type ProviderInstanceId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import type { Journal } from "../persistence/journal";
@@ -77,6 +79,13 @@ export interface ReadCodeConversationInput {
   readonly threadId: CodeThreadId;
   readonly afterCursor: number;
   readonly limit: number;
+  /**
+   * The provider the thread is bound to now, supplied by the caller that can
+   * read the thread projection. Only limits this provider reported are current;
+   * without it the page falls back to the newest turn's provider, which is all
+   * a replay-only caller can know.
+   */
+  readonly providerInstanceId?: ProviderInstanceId;
 }
 
 export type CodeOperationEventReplay =
@@ -326,6 +335,10 @@ export class CodeOperationEventStore {
 
     const turns: Array<CodeConversationBuilder> = [];
     const byOperation = new Map<string, CodeConversationBuilder>();
+    const limits = new Map<
+      string,
+      { readonly providerInstanceId: string; readonly limit: CodeProviderLimit }
+    >();
     let afterSequence = 0;
     let scannedEvents = 0;
     let hasMore = false;
@@ -380,6 +393,7 @@ export class CodeOperationEventStore {
             modelId: frame.event.modelId,
             sessionId: frame.event.sessionId,
             prompt: frame.event.prompt,
+            ...(frame.event.checkpoint === undefined ? {} : { checkpoint: frame.event.checkpoint }),
             assistant: [],
             steps: [],
             stepsTruncated: false,
@@ -417,6 +431,31 @@ export class CodeOperationEventStore {
           };
           if (existing === -1) appendStep(builder, step);
           else builder.steps[existing] = step;
+        } else if (frame.event.kind === "usage") {
+          // A provider may report usage more than once in a turn; the last
+          // report is the turn's own figure, not a running sum to add to.
+          builder.usage = {
+            inputTokens: frame.event.inputTokens,
+            outputTokens: frame.event.outputTokens,
+            ...(frame.event.costUsd === undefined ? {} : { costUsd: frame.event.costUsd }),
+          };
+        } else if (frame.event.kind === "provider-limit") {
+          // Window names are the provider's own, so two providers routinely
+          // report the same one. Keying by name alone lets a thread that
+          // changed providers show the previous account's remaining quota as
+          // the current one's, decided by nothing but journal order.
+          const providerInstanceId = String(builder.providerInstanceId);
+          limits.set(`${providerInstanceId}\n${frame.event.window}`, {
+            providerInstanceId,
+            limit: {
+              window: frame.event.window,
+              status: frame.event.status,
+              ...(frame.event.utilization === undefined
+                ? {}
+                : { utilization: frame.event.utilization }),
+              ...(frame.event.resetsAt === undefined ? {} : { resetsAt: frame.event.resetsAt }),
+            },
+          });
         } else if (frame.event.kind === "operation-state") {
           builder.status = conversationStatus(frame.event.state);
         } else if (frame.event.kind === "operation-result") {
@@ -430,6 +469,19 @@ export class CodeOperationEventStore {
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
 
+    // Only the provider the thread is on now can speak for the account the page
+    // reports. A limit an earlier provider left behind is history, not a
+    // remaining quota, so it is dropped rather than relabelled. The thread's
+    // selection decides that, not the newest turn: a thread whose provider was
+    // just changed has not run a turn on the new one yet, and following the
+    // turn would report the account the user already left.
+    const currentProviderInstanceId = String(
+      input.providerInstanceId ?? turns.at(-1)?.providerInstanceId ?? "",
+    );
+    const currentLimits = [...limits.values()]
+      .filter((entry) => entry.providerInstanceId === currentProviderInstanceId)
+      .map((entry) => entry.limit);
+
     return decodeCodeConversationPage({
       version: 2,
       threadId,
@@ -440,6 +492,7 @@ export class CodeOperationEventStore {
       })),
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,
+      ...(currentLimits.length === 0 ? {} : { limits: currentLimits.slice(0, 8) }),
     });
   }
 }
@@ -451,6 +504,8 @@ type CodeConversationBuilder = {
   modelId: CodeConversationTurn["modelId"];
   sessionId: CodeConversationTurn["sessionId"];
   prompt: CodeConversationTurn["prompt"];
+  checkpoint?: CodeConversationTurn["checkpoint"];
+  usage?: CodeConversationTurn["usage"];
   assistant: Array<CodeConversationTurn["assistant"][number]>;
   steps: Array<CodeConversationStep>;
   stepsTruncated: boolean;

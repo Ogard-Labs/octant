@@ -76,6 +76,12 @@ export interface CodeRuntimeProjectionRow {
   readonly aggregate_version: number;
   readonly updated_at: string;
   readonly last_sequence: number;
+  /**
+   * Journal position of the event that first projected this work. Written once
+   * at insert and never rewritten, so it is the record's durable chronology.
+   * Null only for rows projected before the column existed.
+   */
+  readonly first_sequence: number | null;
 }
 
 export interface CodeReviewProjectionRow {
