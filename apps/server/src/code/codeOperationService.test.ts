@@ -175,6 +175,8 @@ describe("CodeOperationService", () => {
       terminalId: ids.terminal,
       shell: "/bin/zsh",
       cwd: "/private/exact-checkout/packages/app",
+      // The bound repository, not the path, scopes this shell's saved state.
+      stateScope: `repo_${"8".repeat(64)}`,
       columns: 120,
       rows: 40,
       credentialReferences: [{ environmentName: "TOKEN", reference: "keychain:token" }],
@@ -559,6 +561,62 @@ describe("CodeOperationService", () => {
       event: { kind: "operation-state", state: "waiting" },
     });
 
+    // The same terminal opened by the person at the window is their own act:
+    // it starts without a prompt while the agent's request above stays gated.
+    const userTerminalOperation = decodeCodeOperationId("48484848-4848-4484-8484-484848484848");
+    const userTerminal = "58585858-5858-4585-8585-585858585858" as CodeTerminalId;
+    const launchesBeforeUser = terminals.launch.mock.calls.length;
+    const approvalChecksBeforeUser = approvals.validate.mock.calls.length;
+    await expect(
+      service.execute(
+        ids.window,
+        {
+          kind: "start-terminal",
+          operationId: userTerminalOperation,
+          threadId: ids.thread,
+          checkoutId: ids.checkout,
+          terminalId: userTerminal,
+          columns: 120,
+          rows: 40,
+          credentialRefs: [],
+        },
+        { initiator: "user" },
+      ),
+    ).resolves.toMatchObject({ kind: "terminal-state", state: "running" });
+    expect(terminals.launch).toHaveBeenCalledTimes(launchesBeforeUser + 1);
+    expect(approvals.validate).toHaveBeenCalledTimes(approvalChecksBeforeUser);
+
+    // Vouching for a command is authority to open a shell and nothing else.
+    // A durable mutation the classifier calls an edit keeps its ordinary gate
+    // even when the caller labels it user-initiated.
+    const findingOperation = decodeCodeOperationId("49494949-4949-4494-8494-494949494949");
+    events.replay.mockReturnValue({ status: "ok", frames: [], nextCursor: 0 });
+    await expect(
+      service.execute(
+        ids.window,
+        {
+          kind: "create-review-finding",
+          operationId: findingOperation,
+          threadId: ids.thread,
+          checkoutId: ids.checkout,
+          findingId: "51515151-5151-4515-8515-515151515151",
+          fileId: "52525252-5252-4525-8525-525252525252",
+          path: "src/index.ts",
+          fileDigest: "d".repeat(64),
+          location: {
+            kind: "selection",
+            startLine: 4,
+            startColumn: 1,
+            endLine: 4,
+            endColumn: 12,
+          },
+          severity: "warning",
+          summary: "Keep this boundary strict.",
+        } as never,
+        { initiator: "user" },
+      ),
+    ).resolves.toMatchObject({ kind: "operation-failed", failure: { category: "waiting" } });
+
     approved = true;
     events.replay.mockReturnValue({
       status: "ok",
@@ -589,7 +647,7 @@ describe("CodeOperationService", () => {
       expectedCursor: 1,
       event: { kind: "operation-result", result: resumed },
     });
-    expect(terminals.launch).toHaveBeenCalledTimes(2);
+    expect(terminals.launch).toHaveBeenCalledTimes(3);
 
     approved = false;
     terminals.attach.mockReturnValue({
@@ -647,7 +705,7 @@ describe("CodeOperationService", () => {
         credentialRefs: ["TOKEN"],
       }),
     ).resolves.toEqual(resumed);
-    expect(terminals.launch).toHaveBeenCalledTimes(2);
+    expect(terminals.launch).toHaveBeenCalledTimes(3);
 
     events.append.mockImplementationOnce(() => {
       throw new Error("event journal unavailable");

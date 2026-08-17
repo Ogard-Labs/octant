@@ -62,17 +62,15 @@ describe("CodeTerminalPane", () => {
     expect(client.executeOperation).not.toHaveBeenCalled();
   });
 
-  it("keeps an approved running terminal interactive without re-prompting for input or resize", async () => {
+  it("keeps a running terminal interactive for input and resize", async () => {
     const client = codeClient({ evidence: "ready" });
     const runtime = xtermRuntime();
-    const requestApproval = vi.fn(async () => false);
     render(
       <CodeTerminalPane
         client={client}
         createOperationId={() => ids.operation as never}
         executionPolicy="approval-gated"
         loadRuntime={runtime.loadRuntime}
-        requestApproval={requestApproval}
         result={terminalResult}
         scope={scope}
       />,
@@ -81,7 +79,6 @@ describe("CodeTerminalPane", () => {
     runtime.options?.onData("pwd\r");
     runtime.options?.onResize(120, 40);
     await waitFor(() => expect(client.executeOperation).toHaveBeenCalledTimes(2));
-    expect(requestApproval).not.toHaveBeenCalled();
   });
 
   it("keeps the terminal adapter mounted when an authoritative resize result arrives", async () => {
