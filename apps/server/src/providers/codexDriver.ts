@@ -8,6 +8,8 @@ import {
   type ProviderFailure,
   type ProviderCapabilities,
   type ProviderInstanceId,
+  type ProviderModel,
+  type ProviderModelOptionValues,
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
@@ -51,6 +53,10 @@ export interface CodexThreadStartInput {
   readonly model: string;
   readonly approvalPolicy: "never" | "on-request";
   readonly sandbox: "danger-full-access" | "workspace-write" | "read-only";
+  /** app-server `thread/start` `serviceTier`: the model's declared speed tier. */
+  readonly serviceTier?: string;
+  /** app-server config overrides; `model_reasoning_effort` carries the reasoning selection. */
+  readonly config?: { readonly model_reasoning_effort: string };
 }
 
 export interface CodexThreadResumeInput {
@@ -200,6 +206,33 @@ export function codexExecutionSettings(
   return { approvalPolicy: "never", sandbox: "read-only" };
 }
 
+/**
+ * Maps Octant option values onto Codex thread settings. Only values the
+ * observed model declares are forwarded (`reasoning` -> config
+ * `model_reasoning_effort`, `service-tier` -> `serviceTier`); anything else is
+ * dropped so the Codex default applies. The caller supplies the model from the
+ * observed catalog: a value is only ever dropped against a known catalog, never
+ * because none was available.
+ */
+export function codexModelOptionSettings(
+  model: ProviderModel,
+  values: ProviderModelOptionValues,
+): Pick<CodexThreadStartInput, "serviceTier" | "config"> {
+  const declared = (optionId: string): string | undefined => {
+    const value = values[optionId];
+    const option = model.options.find((candidate) => candidate.id === optionId);
+    return value !== undefined && option?.kind === "selection" && option.values.includes(value)
+      ? value
+      : undefined;
+  };
+  const reasoning = declared("reasoning");
+  const serviceTier = declared("service-tier");
+  return {
+    ...(serviceTier === undefined ? {} : { serviceTier }),
+    ...(reasoning === undefined ? {} : { config: { model_reasoning_effort: reasoning } }),
+  };
+}
+
 export function makeCodexClient(connection: CodexAppServerConnection): CodexClientPort {
   const { rpc } = connection;
   return {
@@ -248,7 +281,19 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             const runtime = yield* acquireRuntime(options, clientFactory);
             const accountResult = yield* request(runtime.client.accountRead);
             const models = yield* readModels(runtime.client);
-            return normalizeProbe(instanceId, runtime.version, accountResult, models, clock());
+            const result = normalizeProbe(
+              instanceId,
+              runtime.version,
+              accountResult,
+              models,
+              clock(),
+            );
+            // Publish the fresh catalog like the other drivers do, so a caller
+            // that probes before opening a session (Chat probes before every
+            // turn) validates model options and turn input against it even
+            // when no Settings check ran on this server yet.
+            options.runtimeRegistry.setObservedState(result);
+            return result;
           }),
     acquire: ({ instanceId, projectRoot }) => {
       if (instanceId !== options.instanceId) {
@@ -690,11 +735,31 @@ function makeConnection(
           Effect.gen(function* () {
             ensureSubscribed();
             const settings = codexExecutionSettings(input.executionPolicy);
+            const requestedOptions = input.modelOptionValues;
+            let optionSettings: Pick<CodexThreadStartInput, "serviceTier" | "config"> = {};
+            if (requestedOptions !== undefined && Object.keys(requestedOptions).length > 0) {
+              const observedModel = options.runtimeRegistry
+                .observedState(options.instanceId)
+                ?.models.find((candidate) => candidate.id === input.modelId);
+              if (observedModel === undefined) {
+                // Without the catalog the declared values can be neither
+                // verified nor honestly dropped, so fail instead of quietly
+                // running the turn on Codex defaults.
+                return yield* Effect.fail(
+                  failure(
+                    "invalid-configuration",
+                    "Codex model is not available in the observed provider catalog.",
+                  ),
+                );
+              }
+              optionSettings = codexModelOptionSettings(observedModel, requestedOptions);
+            }
             const thread = yield* request(() =>
               client.threadStart({
                 cwd: projectRoot,
                 model: input.modelId,
                 ...settings,
+                ...optionSettings,
               }),
             );
             if (

@@ -10,6 +10,7 @@ import {
   decodeProviderInstanceConfigurationChanged,
   decodeOllamaHistoryRecorded,
   decodeProviderModel,
+  decodeProviderModelOptionValues,
   decodeProviderObservedState,
   decodeProviderProbeResult,
   decodeProviderRegistryCommand,
@@ -1458,6 +1459,25 @@ describe("provider registry contracts", () => {
     expect(decodeProviderProbeResult(observed)).toEqual(observed);
     expect(() =>
       decodeProviderObservedState({ ...observed, rawDiagnostics: { port: 1234 } }),
+    ).toThrow();
+  });
+});
+
+describe("provider model option values", () => {
+  it("decodes bounded option-id to value records and rejects oversized ones", () => {
+    expect(decodeProviderModelOptionValues({})).toEqual({});
+    expect(decodeProviderModelOptionValues({ effort: "high" })).toEqual({ effort: "high" });
+    expect(() => decodeProviderModelOptionValues({ effort: "" })).toThrow();
+    expect(() => decodeProviderModelOptionValues({ "": "high" })).toThrow();
+    expect(() =>
+      decodeProviderModelOptionValues(
+        Object.fromEntries(
+          Array.from(
+            { length: providerContracts.MAX_PROVIDER_MODEL_OPTION_VALUES + 1 },
+            (_, index) => [`option-${index}`, "value"],
+          ),
+        ),
+      ),
     ).toThrow();
   });
 });

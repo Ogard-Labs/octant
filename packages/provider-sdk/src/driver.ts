@@ -6,6 +6,7 @@ import type {
   ProjectId,
   ProviderAuthenticationAttempt,
   ProviderModelId,
+  ProviderModelOptionValues,
   ProviderProbeResult,
   ProviderResumeCursor,
   ProviderRuntimeEvent,
@@ -45,6 +46,12 @@ export interface ProviderSessionStart {
   readonly sessionId: ProviderSessionId;
   readonly modelId: ProviderModelId;
   readonly executionPolicy: ProviderExecutionPolicy;
+  /**
+   * User-chosen values for options the model declares (`ProviderModel.options`),
+   * keyed by option id. Drivers apply the ids they understand and ignore the
+   * rest; absent means provider defaults.
+   */
+  readonly modelOptionValues?: ProviderModelOptionValues;
 }
 
 export interface ProviderSessionHandle {
@@ -56,6 +63,7 @@ export interface ProviderSessionResume {
   readonly sessionId: ProviderSessionId;
   readonly resumeCursor: ProviderResumeCursor;
   readonly executionPolicy: ProviderExecutionPolicy;
+  readonly modelOptionValues?: ProviderModelOptionValues;
 }
 
 export interface ProviderApprovalAnswer {

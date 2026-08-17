@@ -170,6 +170,41 @@ describe("ChatComposer", () => {
     );
   });
 
+  it("offers one select per declared model option with Default first and reports changes", async () => {
+    const user = userEvent.setup();
+    const onModelOptionChange = vi.fn();
+    const { rerender, props } = renderComposer({
+      modelOptions: [
+        { id: "effort", displayName: "Effort", values: ["low", "high"], value: "high" },
+        { id: "service-tier", displayName: "Service tier", values: ["fast"] },
+      ],
+      onModelOptionChange,
+    });
+
+    expect(screen.getByRole("combobox", { name: "Effort" })).toHaveTextContent("Effort: high");
+    expect(screen.getByRole("combobox", { name: "Service tier" })).toHaveTextContent(
+      "Service tier: Default",
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
+      "Effort: Default",
+      "Effort: low",
+      "Effort: high",
+    ]);
+    await user.click(screen.getByRole("option", { name: "Effort: Default" }));
+    expect(onModelOptionChange).toHaveBeenCalledWith("effort", undefined);
+
+    await user.click(screen.getByRole("combobox", { name: "Service tier" }));
+    await user.click(await screen.findByRole("option", { name: "Service tier: fast" }));
+    expect(onModelOptionChange).toHaveBeenCalledWith("service-tier", "fast");
+
+    rerender(<ChatComposer {...props} modelOptions={[]} />);
+    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+    rerender(<ChatComposer {...props} isSending />);
+    expect(screen.getByRole("combobox", { name: "Effort" })).toBeDisabled();
+  });
+
   it("makes disabled reasons available without relying on color", async () => {
     renderComposer({
       draft: "Can I send?",

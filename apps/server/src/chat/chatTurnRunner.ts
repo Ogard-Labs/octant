@@ -363,17 +363,27 @@ export class ChatTurnRunner {
         }).pipe(Effect.catchAll(() => Effect.void)),
       );
 
+      // Option values belong to the thread's selected model; a pool candidate
+      // running a different model gets provider defaults.
+      const modelOptionValues =
+        input.attempt.modelId === input.thread.modelId &&
+        input.thread.modelOptionValues !== undefined &&
+        Object.keys(input.thread.modelOptionValues).length > 0
+          ? { modelOptionValues: input.thread.modelOptionValues }
+          : {};
       const startHandle = yield* (
         input.mode === "resume" && input.resumeCursor !== undefined
           ? connection.resume({
               sessionId: input.attempt.providerSessionId,
               resumeCursor: input.resumeCursor,
               executionPolicy: "approval-gated",
+              ...modelOptionValues,
             })
           : connection.start({
               sessionId: input.attempt.providerSessionId,
               modelId: input.attempt.modelId,
               executionPolicy: "approval-gated",
+              ...modelOptionValues,
             })
       ).pipe(Effect.catchAll(persistProviderFailure));
 

@@ -79,6 +79,18 @@ turn. Readiness is validated before the change is recorded, thread identity
 and history are preserved with change provenance, and an active provider turn
 ends with the honest state **"Provider turn interrupted."**
 
+## Effort, reasoning and speed
+
+When a provider declares per-model options, the Chat composer shows one
+compact selector per option right after the model picker: **Effort** for
+Claude models that support effort levels, and **Reasoning** and **Service
+tier** (speed) for Codex models that advertise them. Each selector starts at
+**Default**, meaning the provider's own default. Your choice is stored on the
+thread and handed to the provider when the next turn's session starts. Only
+values the selected model actually declares are accepted; switching to a model
+that does not offer an option clears that option back to Default. Models that
+declare no options show no selectors.
+
 ## Readiness and capabilities
 
 Readiness states are `ready`, `unavailable`, `unauthenticated`,
