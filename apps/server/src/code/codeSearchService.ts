@@ -182,6 +182,16 @@ export class CodeSearchService {
       if (name === "." || name === "..") continue;
       if (SKIPPED_DIRECTORIES.has(name)) continue;
 
+      // Every entry the walk enumerates costs the same budget: directories,
+      // names the relative-path contract turns away, and names that never
+      // resolve at all. Deciding any of that is work, so charging only the
+      // entries that survive it lets a tree of rejected names, or of dangling
+      // or escaping symlinks, buy an unbounded walk for free. A wide tree of
+      // empty directories is the same cost in a different shape, and that walk
+      // is the unbounded cost this budget exists to stop. The charge is taken
+      // before the first decision so that no path out of this loop is free.
+      state.entriesExamined += 1;
+
       const childRelative = relative === "" ? name : `${relative}/${name}`;
       let relativePath: CodeRelativePath;
       try {
@@ -192,14 +202,6 @@ export class CodeSearchService {
         // differently.
         continue;
       }
-
-      // Every entry the walk enumerates costs the same budget: directories, and
-      // names that never resolve at all. Confinement is itself filesystem work,
-      // so charging only the entries that survive it lets a tree of dangling or
-      // escaping symlinks buy unbounded resolutions for free. A wide tree of
-      // empty directories is the same cost in a different shape, and that walk
-      // is the unbounded cost this budget exists to stop.
-      state.entriesExamined += 1;
 
       const resolved = await resolveContainedPath(
         this.#directory,

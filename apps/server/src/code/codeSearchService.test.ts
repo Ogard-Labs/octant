@@ -294,6 +294,29 @@ describe("CodeSearchService", () => {
     expect(result.search.matches).toEqual([]);
   });
 
+  it("spends the walk budget on names the relative-path contract turns away", async () => {
+    // The other half of a hostile tree: names that never become a path at all.
+    // Deciding that is still work, so a directory of them must not be free —
+    // otherwise the budget never trips and the walk runs to the end of the tree.
+    const rejectedNames: Record<string, FakeNode> = {
+      "/repo": { kind: "dir", children: ["../a", "../b", "a\\b", "match.txt"] },
+      "/repo/match.txt": { kind: "file", text: "" },
+    };
+
+    const result = await service(fakePort(rejectedNames), { maxFiles: 3 }).search({
+      threadId,
+      checkoutId,
+      rootPath,
+      scope: "path",
+      query: "match",
+    });
+
+    expect(result.status).toBe("searched");
+    if (result.status !== "searched") return;
+    expect(result.search.truncated).toBe(true);
+    expect(result.search.matches).toEqual([]);
+  });
+
   it("says the search is truncated when a file is too large to read", async () => {
     const result = await service(fakePort(smallRepository), { maxFileBytes: 4 }).search({
       threadId,
