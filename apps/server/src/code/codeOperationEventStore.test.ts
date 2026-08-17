@@ -387,6 +387,53 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("drops a provider limit the thread's previous provider left behind", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000032",
+      digest: "f".repeat(64),
+      byteLength: 4,
+    });
+    const started = (providerInstanceId: string, modelId: string) =>
+      decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId,
+        modelId,
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt,
+      });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: started("89000000-0000-4000-8000-000000000040", "model-one"),
+    });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 1,
+      event: decodeCodeOperationEvent({
+        kind: "provider-limit",
+        window: "weekly",
+        status: "exhausted",
+      }),
+    });
+    store.append({
+      threadId,
+      operationId: otherOperationId,
+      expectedCursor: 0,
+      event: started("89000000-0000-4000-8000-000000000041", "model-two"),
+    });
+
+    // Window names belong to the provider that reported them, so a thread that
+    // moved providers has an old "weekly" and a new one under the same name.
+    // Reporting the old account's exhaustion would tell the user they are
+    // blocked on a provider they already left.
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).limits).toBeUndefined();
+    fixture.connection.close();
+  });
+
   it("requires a snapshot when operation cursors or aggregate versions contain a gap", () => {
     const fixture = openJournal();
     appendRaw(fixture.journal, operationId, 0, frame(2, threadId, operationId));

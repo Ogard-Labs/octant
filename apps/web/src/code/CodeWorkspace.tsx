@@ -553,9 +553,20 @@ function GitObservationLoading() {
  * The selection is quoted rather than pasted in as prose: terminal output is
  * full of characters a model would otherwise read as instructions, and the
  * fence keeps what the user is asking about separate from what they are asking.
+ *
+ * The fence outruns the longest backtick run in the selection, because a fixed
+ * one closes on any output that prints a fence of its own. Everything after that
+ * line would arrive as the user's own request, which is exactly the confusion
+ * the quoting exists to prevent and the worst case for a full-access provider.
  */
 export function appendTerminalSelection(draft: string, selection: string): string {
-  const block = ["```", selection.replace(/\s+$/, ""), "```", ""].join("\n");
+  const body = selection.replace(/\s+$/, "");
+  const longestRun = [...body.matchAll(/`+/g)].reduce(
+    (longest, match) => Math.max(longest, match[0].length),
+    0,
+  );
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  const block = [fence, body, fence, ""].join("\n");
   const existing = draft.replace(/\s+$/, "");
   return existing === "" ? block : `${existing}\n\n${block}`;
 }

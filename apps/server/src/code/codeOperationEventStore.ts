@@ -327,7 +327,10 @@ export class CodeOperationEventStore {
 
     const turns: Array<CodeConversationBuilder> = [];
     const byOperation = new Map<string, CodeConversationBuilder>();
-    const limits = new Map<string, CodeProviderLimit>();
+    const limits = new Map<
+      string,
+      { readonly providerInstanceId: string; readonly limit: CodeProviderLimit }
+    >();
     let afterSequence = 0;
     let scannedEvents = 0;
     let hasMore = false;
@@ -429,13 +432,21 @@ export class CodeOperationEventStore {
             ...(frame.event.costUsd === undefined ? {} : { costUsd: frame.event.costUsd }),
           };
         } else if (frame.event.kind === "provider-limit") {
-          limits.set(frame.event.window, {
-            window: frame.event.window,
-            status: frame.event.status,
-            ...(frame.event.utilization === undefined
-              ? {}
-              : { utilization: frame.event.utilization }),
-            ...(frame.event.resetsAt === undefined ? {} : { resetsAt: frame.event.resetsAt }),
+          // Window names are the provider's own, so two providers routinely
+          // report the same one. Keying by name alone lets a thread that
+          // changed providers show the previous account's remaining quota as
+          // the current one's, decided by nothing but journal order.
+          const providerInstanceId = String(builder.providerInstanceId);
+          limits.set(`${providerInstanceId}\n${frame.event.window}`, {
+            providerInstanceId,
+            limit: {
+              window: frame.event.window,
+              status: frame.event.status,
+              ...(frame.event.utilization === undefined
+                ? {}
+                : { utilization: frame.event.utilization }),
+              ...(frame.event.resetsAt === undefined ? {} : { resetsAt: frame.event.resetsAt }),
+            },
           });
         } else if (frame.event.kind === "operation-state") {
           builder.status = conversationStatus(frame.event.state);
@@ -450,6 +461,14 @@ export class CodeOperationEventStore {
       if (batch.length < JOURNAL_REPLAY_BATCH_SIZE) break;
     }
 
+    // Only the provider the thread is on now can speak for the account the page
+    // reports. A limit an earlier provider left behind is history, not a
+    // remaining quota, so it is dropped rather than relabelled.
+    const currentProviderInstanceId = String(turns.at(-1)?.providerInstanceId ?? "");
+    const currentLimits = [...limits.values()]
+      .filter((entry) => entry.providerInstanceId === currentProviderInstanceId)
+      .map((entry) => entry.limit);
+
     return decodeCodeConversationPage({
       version: 2,
       threadId,
@@ -460,7 +479,7 @@ export class CodeOperationEventStore {
       })),
       nextCursor: turns.at(-1)?.startCursor ?? input.afterCursor,
       hasMore,
-      ...(limits.size === 0 ? {} : { limits: [...limits.values()].slice(0, 8) }),
+      ...(currentLimits.length === 0 ? {} : { limits: currentLimits.slice(0, 8) }),
     });
   }
 }

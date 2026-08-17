@@ -270,6 +270,30 @@ describe("CodeSearchService", () => {
     expect(result.search.matches).toEqual([]);
   });
 
+  it("spends the walk budget on names that never resolve, not only on the ones that do", async () => {
+    // Dangling and escaping links are the cheap half of a hostile tree: each
+    // one costs a real confinement attempt and used to cost no budget at all,
+    // so a directory could buy unbounded resolutions by listing names that
+    // resolve to nothing.
+    const danglingNames: Record<string, FakeNode> = {
+      "/repo": { kind: "dir", children: ["gone-1", "gone-2", "gone-3", "match.txt"] },
+      "/repo/match.txt": { kind: "file", text: "" },
+    };
+
+    const result = await service(fakePort(danglingNames), { maxFiles: 3 }).search({
+      threadId,
+      checkoutId,
+      rootPath,
+      scope: "path",
+      query: "match",
+    });
+
+    expect(result.status).toBe("searched");
+    if (result.status !== "searched") return;
+    expect(result.search.truncated).toBe(true);
+    expect(result.search.matches).toEqual([]);
+  });
+
   it("says the search is truncated when a file is too large to read", async () => {
     const result = await service(fakePort(smallRepository), { maxFileBytes: 4 }).search({
       threadId,

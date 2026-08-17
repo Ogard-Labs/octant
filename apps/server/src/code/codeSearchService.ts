@@ -193,18 +193,20 @@ export class CodeSearchService {
         continue;
       }
 
+      // Every entry the walk enumerates costs the same budget: directories, and
+      // names that never resolve at all. Confinement is itself filesystem work,
+      // so charging only the entries that survive it lets a tree of dangling or
+      // escaping symlinks buy unbounded resolutions for free. A wide tree of
+      // empty directories is the same cost in a different shape, and that walk
+      // is the unbounded cost this budget exists to stop.
+      state.entriesExamined += 1;
+
       const resolved = await resolveContainedPath(
         this.#directory,
         state.canonicalRoot,
         joinCodePath(absolute, name),
       );
       if (resolved === undefined) continue;
-
-      // Every entry the walk resolves costs the same budget, directories
-      // included. A wide tree of empty directories is filesystem work whether
-      // or not it ever reaches a file, and that walk is the unbounded cost this
-      // budget exists to stop.
-      state.entriesExamined += 1;
 
       if (resolved.stat.isDirectory) {
         // A directory symlink can resolve into a subtree the walk is already
