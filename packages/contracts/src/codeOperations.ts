@@ -158,6 +158,9 @@ const CodeOperationCheckoutHead = Schema.Union(
     oid: GitObjectId,
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("detached"), oid: GitObjectId }).annotations(strict),
+  // A checkout with no commits yet points HEAD at a branch that does not exist,
+  // so it has a name but no object to identify.
+  Schema.Struct({ kind: Schema.Literal("unborn"), name: GitBranchName }).annotations(strict),
 );
 const GitStatusCode = Schema.String.pipe(Schema.pattern(/^[ MADRCUT?!]$/));
 const GitStatusEntry = Schema.Struct({

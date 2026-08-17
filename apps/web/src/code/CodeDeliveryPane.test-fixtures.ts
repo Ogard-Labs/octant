@@ -112,6 +112,12 @@ export const gitObservation = {
   worktrees: [],
 } as unknown as Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
 
+export const unbornGitObservation = {
+  ...gitObservation,
+  head: { kind: "unborn", name: "main" },
+  upstream: null,
+} as unknown as Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
+
 export const pullRequestReviewNone = {
   kind: "pull-request-review",
   operationId: ids.operation,

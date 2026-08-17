@@ -220,9 +220,9 @@ export interface CodeOperationGitPort {
   }) => Promise<{
     readonly status: "ready" | "unavailable" | "failed";
     readonly head?: {
-      readonly kind: "branch" | "detached";
+      readonly kind: "branch" | "detached" | "unborn";
       readonly name?: string;
-      readonly oid: string;
+      readonly oid?: string;
     };
     readonly stateToken?: string;
     readonly statusEntries?: readonly {
@@ -243,9 +243,9 @@ export interface CodeOperationGitPort {
     readonly worktrees?: readonly {
       readonly checkoutId: string;
       readonly head: {
-        readonly kind: "branch" | "detached";
+        readonly kind: "branch" | "detached" | "unborn";
         readonly name?: string;
-        readonly oid: string;
+        readonly oid?: string;
       };
       readonly state: "active" | "locked" | "prunable" | "unavailable";
     }[];
@@ -1501,7 +1501,9 @@ export class CodeOperationService {
       head:
         result.head.kind === "branch"
           ? { kind: "branch", name: result.head.name!, oid: result.head.oid }
-          : { kind: "detached", oid: result.head.oid },
+          : result.head.kind === "unborn"
+            ? { kind: "unborn", name: result.head.name! }
+            : { kind: "detached", oid: result.head.oid },
       stateToken: result.stateToken,
       status: result.statusEntries,
       changedPaths: result.changedPaths,

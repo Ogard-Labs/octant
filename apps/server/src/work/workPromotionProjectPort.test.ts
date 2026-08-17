@@ -157,10 +157,7 @@ describe("createWorkPromotionProjectPort", () => {
         observe: async () =>
           ({
             status: "ready",
-            head: {
-              oid: "a".repeat(40),
-              branch: { kind: "named", name: "feature/work-promotion" },
-            },
+            head: { kind: "branch", name: "feature/work-promotion", oid: "a".repeat(40) },
             remotes: [
               {
                 name: "origin",
