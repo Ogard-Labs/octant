@@ -370,20 +370,28 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     }).catch(() => undefined);
   }
 
+  /**
+   * The version the next queued command builds on: the one a command already in
+   * flight produced, or the rendered thread's when the queue is empty. Reading
+   * the rendered version while another command is settling is what makes the
+   * second command stale, so every versioned thread mutation goes through here.
+   */
+  function queuedVersion(previous: ModelOptionBase | undefined): ChatThread["version"] {
+    return previous !== undefined && previous.threadId === String(thread.id)
+      ? previous.version
+      : thread.version;
+  }
+
   /** Select a provider/model behind the same queue an option change uses. */
   function selectProviderModel(selection: {
     readonly providerInstanceId: ChatThread["providerInstanceId"];
     readonly modelId: ChatThread["modelId"];
   }) {
     void enqueueThreadCommand(async (previous) => {
-      const expectedVersion =
-        previous !== undefined && previous.threadId === String(thread.id)
-          ? previous.version
-          : thread.version;
       const result = await props.controller.execute({
         kind: "change-chat-provider",
         threadId: thread.id,
-        expectedVersion,
+        expectedVersion: queuedVersion(previous),
         providerInstanceId: selection.providerInstanceId,
         modelId: selection.modelId,
       });
@@ -395,13 +403,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     readonly enabled: boolean;
     readonly routing: ChatResearchRouting;
   }) {
-    await props.controller.execute({
-      kind: "change-chat-research",
-      threadId: thread.id,
-      expectedVersion: thread.version,
-      researchEnabled: input.enabled,
-      researchRouting: input.routing,
-    });
+    await enqueueThreadCommand(async (previous) => {
+      const result = await props.controller.execute({
+        kind: "change-chat-research",
+        threadId: thread.id,
+        expectedVersion: queuedVersion(previous),
+        researchEnabled: input.enabled,
+        researchRouting: input.routing,
+      });
+      return { value: undefined, base: baseFromResult(result) };
+    }).catch(() => undefined);
   }
 
   return (
@@ -827,14 +838,18 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           <ComposerPoolControl
             model={composerPoolModel}
             onApply={async (pool) =>
-              (
-                await props.controller.execute({
+              await enqueueThreadCommand(async (previous) => {
+                const result = await props.controller.execute({
                   kind: "select-chat-multi-model-pool",
                   threadId: view.thread.id,
-                  expectedVersion: view.thread.version,
+                  expectedVersion: queuedVersion(previous),
                   pool,
-                })
-              )?.kind === "thread-updated"
+                });
+                return {
+                  value: result?.kind === "thread-updated",
+                  base: baseFromResult(result),
+                };
+              }).catch(() => false)
             }
             pool={view.thread.multiModelPool}
           />

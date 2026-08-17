@@ -829,6 +829,43 @@ describe("ChatWorkspace", () => {
     });
   });
 
+  it("toggles web research on the version an option change already in flight reached", async () => {
+    const user = userEvent.setup();
+    let releaseChange: () => void = () => undefined;
+    const changeSettles = new Promise<void>((resolve) => {
+      releaseChange = resolve;
+    });
+    const execute = vi.fn(async (command: { readonly kind: string }) => {
+      if (command.kind === "change-chat-provider") await changeSettles;
+      return {
+        kind: "thread-updated",
+        thread: { id: threadId, version: 4, modelOptionValues: { effort: "high" } },
+      } as never;
+    });
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({ execute })}
+        providerSnapshot={providerSnapshotWithModelOptions()}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await user.click(screen.getByRole("button", { name: "Enable web research" }));
+
+    // Both settings were requested, so both have to survive. Sending the
+    // research toggle on the rendered version would race the option change and
+    // whichever arrived second would be refused as stale, silently discarding
+    // one of the two choices the person made.
+    expect(execute).toHaveBeenCalledOnce();
+
+    releaseChange();
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "change-chat-research", expectedVersion: 4 }),
+    );
+  });
+
   it("sends a turn only after an option change already in flight has settled", async () => {
     const user = userEvent.setup();
     let releaseChange: () => void = () => undefined;
