@@ -744,6 +744,7 @@ function createEvidenceFixture(options: {
         },
         threads: [],
         checkouts: [],
+        activity: [],
       });
     }
     if (method === "POST" && path === "/api/code/commands") {

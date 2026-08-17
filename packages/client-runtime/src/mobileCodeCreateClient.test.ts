@@ -96,6 +96,7 @@ describe("mobile Code creation", () => {
             },
             threads: [],
             checkouts: [checkout],
+            activity: [],
           });
         }
         if (request.method === "POST" && request.path === "/api/code/commands") {
@@ -263,6 +264,7 @@ describe("mobile Code creation", () => {
           },
           threads: createCount === 0 ? [] : [createdThread],
           checkouts: [checkout],
+          activity: [],
         });
       }
       if (request.method === "GET" && request.path === `/api/code/threads/${threadId}`) {
@@ -420,6 +422,7 @@ describe("mobile Code creation", () => {
           },
           threads: [createdThread],
           checkouts: [checkout],
+          activity: [],
         });
       }
       if (request.method === "GET" && request.path === `/api/code/threads/${threadId}`) {

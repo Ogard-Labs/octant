@@ -30,6 +30,7 @@ const emptyCode = decodeCodeBootstrap({
   },
   threads: [],
   checkouts: [],
+  activity: [],
 });
 
 const emptyCodeBoard = decodeCodeBoardView({
