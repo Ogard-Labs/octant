@@ -58,26 +58,33 @@ export interface CodeBoardRuntimeSource {
 /**
  * Derive a thread's board activity from its runtime work records.
  *
- * `executing` is any work still running. `waiting` is narrower than "some
- * record is not finished". A record in `waiting` or `ambiguous` is an
- * authoritative live wait whatever its kind: a Git push awaiting credentials, a
- * delivery or review step awaiting a decision, or an unresolved file write all
- * genuinely owe the person something. `interrupted` is different — restart
- * reconciliation marks every non-provider work interrupted because its process
- * is gone, so only the thread's latest provider turn can hold the thread in
- * Waiting from that state. Older provider turns are superseded by the newer
- * one, whatever state the restart froze them in.
+ * Only the thread's latest provider turn speaks for provider activity. A newer
+ * turn supersedes every older one whatever state it was frozen in, so a stale
+ * `running` or `waiting` row cannot pin an idle thread in In progress or
+ * Waiting. Non-provider work is aggregated across every record.
+ *
+ * `executing` is any contributing work still running. `waiting` is narrower
+ * than "some record is not finished". A record in `waiting` or `ambiguous` is
+ * an authoritative live wait whatever its kind: a Git push awaiting
+ * credentials, a delivery or review step awaiting a decision, or an unresolved
+ * file write all genuinely owe the person something. `interrupted` is
+ * different — restart reconciliation marks every non-provider work interrupted
+ * because its process is gone, so only the latest provider turn can hold the
+ * thread in Waiting from that state.
  */
 export function boardRuntimeActivityFromWorks(
   works: ReadonlyArray<CodeRuntimeWork>,
 ): CodeBoardRuntimeActivity {
-  const executing = works.some((work) => work.state === "running");
-  const liveWait = works.some((work) => work.state === "waiting" || work.state === "ambiguous");
   let latestTurn: CodeRuntimeWork | undefined;
   for (const work of works) {
     if (work.kind !== "provider-turn") continue;
     if (latestTurn === undefined || work.updatedAt >= latestTurn.updatedAt) latestTurn = work;
   }
+  const contributing = works.filter((work) => work.kind !== "provider-turn" || work === latestTurn);
+  const executing = contributing.some((work) => work.state === "running");
+  const liveWait = contributing.some(
+    (work) => work.state === "waiting" || work.state === "ambiguous",
+  );
   const interruptedTurn = latestTurn !== undefined && latestTurn.state === "interrupted";
   const waiting = liveWait || interruptedTurn;
   return {

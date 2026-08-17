@@ -81,6 +81,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   );
   const [board, setBoard] = useState<BoardState>({ status: "loading" });
   const filtersRootRef = useRef<HTMLDivElement>(null);
+  const filtersToggleRef = useRef<HTMLButtonElement>(null);
 
   const query = useMemo(() => buildQuery(filters), [filters]);
   const queryKey = JSON.stringify(query);
@@ -120,7 +121,12 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
       setFiltersOpen(false);
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setFiltersOpen(false);
+      if (event.key !== "Escape") return;
+      setFiltersOpen(false);
+      // Escape closes the dialog the person was typing in. Without this the
+      // focus falls to the document body and they lose their place in the
+      // toolbar, so send it back to the control that opened the dialog.
+      filtersToggleRef.current?.focus();
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -195,6 +201,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
 
           <div className="code-board__filters" ref={filtersRootRef}>
             <OctantButton
+              ref={filtersToggleRef}
               aria-controls={FILTERS_PANEL_ID}
               aria-expanded={filtersOpen}
               aria-haspopup="dialog"

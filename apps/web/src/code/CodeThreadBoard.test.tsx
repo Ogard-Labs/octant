@@ -255,6 +255,9 @@ describe("CodeThreadBoard", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Filters" })).not.toBeInTheDocument();
+    // Escape unmounts the dialog the person was in, so focus goes back to the
+    // control that opened it rather than falling to the document body.
+    expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
   });
 
   it("keeps secondary card metadata collapsed until Details is opened", async () => {

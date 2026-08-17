@@ -361,6 +361,19 @@ describe("boardRuntimeActivityFromWorks", () => {
     ).toEqual({ executing: false, waiting: false });
   });
 
+  it("ignores a superseded provider turn still frozen in running or waiting", () => {
+    // A newer turn finished; whatever state the older row was frozen in, it no
+    // longer speaks for the thread.
+    for (const stale of ["running", "waiting", "ambiguous"] as const) {
+      expect(
+        boardRuntimeActivityFromWorks([
+          work("provider-turn", stale, "2026-07-22T09:00:00.000Z"),
+          work("provider-turn", "completed", "2026-07-22T09:30:00.000Z"),
+        ]),
+      ).toEqual({ executing: false, waiting: false });
+    }
+  });
+
   it("keeps the thread Waiting for the latest interrupted provider turn", () => {
     expect(
       boardRuntimeActivityFromWorks([
