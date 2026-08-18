@@ -307,11 +307,16 @@ const vibeProfile: AcpProviderProfile = {
   kind: "mistral-vibe",
   displayName: "Mistral Vibe",
   reasoningOptionId: "thinking",
+  // Vibe's ACP mode ids are its agent profile names, and those names moved:
+  // `chat` was removed in 2.23.3 and `default` became `ask` in 2.24.1, so the
+  // names below and the version floor have to agree. `accept-edits` is never
+  // selected: it auto-approves edits inside the agent, which would bypass
+  // Octant's approval bridge.
   sessionMode: (mode, policy) => {
-    if (mode === "chat") return "chat";
+    if (mode === "chat") return "ask";
     if (policy === "plan") return "plan";
     if (policy === "full-access") return "auto-approve";
-    return "default";
+    return "ask";
   },
   chatSessionRoot: "managed-home",
   userQuestions: "unsupported",
@@ -325,7 +330,7 @@ const vibeProfile: AcpProviderProfile = {
     agentName: "@mistralai/mistral-vibe",
     versionPattern:
       /^vibe-acp (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?\r?\n?$/,
-    minimumVersion: [2, 19, 0],
+    minimumVersion: [2, 24, 1],
     passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
     guards: {
       VIBE_ENABLE_TELEMETRY: "false",
@@ -343,7 +348,15 @@ const vibeProfile: AcpProviderProfile = {
       VIBE_AGENT_PATHS: "[]",
       VIBE_SKILL_PATHS: "[]",
       VIBE_INSTALLED_AGENTS: "[]",
-      VIBE_DISABLED_AGENTS: '["*"]',
+      // An allowlist, not `disabled_agents: ["*"]`: Vibe resolves `default_agent`
+      // against the disable list before a session exists, so disabling every
+      // agent makes `session/new` fail outright (-31002). `enabled_agents` takes
+      // precedence over `disabled_agents` and still excludes every discovered
+      // third-party agent, and pinning the default to the approval-gated agent
+      // keeps a session from opening on an edit-approving one.
+      VIBE_ENABLED_AGENTS: '["ask","plan","auto-approve"]',
+      VIBE_DEFAULT_AGENT: "ask",
+      // Skills have no `default_skill` to resolve, so the deny-all form is safe here.
       VIBE_DISABLED_SKILLS: '["*"]',
     },
     environment: ({ managedHome, apiKey }) => ({
