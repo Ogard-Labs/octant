@@ -30,6 +30,7 @@ export * from "./hostClient";
 export * from "./hostControlClient";
 export * from "./hostFederationRegistry";
 export * from "./hostFederationTransports";
+export * from "./environmentSelection";
 export * from "./hostFederationMergedReads";
 export * from "./hostFederationLifecycle";
 export * from "./linkedThreadClient";
