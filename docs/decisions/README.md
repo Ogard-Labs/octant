@@ -33,6 +33,7 @@ distilled successor of the earlier long-form design specifications.
 | [0023](0023-bringing-a-run-home.md)                     | Bringing a run home                                               | Accepted |
 | [0024](0024-curated-project-scaffolds.md)               | Curated project scaffolds                                         | Accepted |
 | [0025](0025-long-running-goal-loops.md)                 | Long-running goal loops                                           | Proposed |
+| [0026](0026-shipping-to-a-user-owned-target.md)         | Shipping to a user-owned target                                   | Proposed |
 
 ## Adding an ADR
 
