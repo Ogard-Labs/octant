@@ -402,12 +402,22 @@ describe("RootlessTurnRuntime", () => {
       } as unknown as ProviderDriver;
 
       const outcome = await settlesWithin(
-        new RootlessTurnRuntime({ dataDirectory, timeoutMs: 50 }).run({
+        // The provider hangs forever, so cancellation is the only thing that
+        // should settle this run. A short idle timeout does not leave it that
+        // way: acquiring scratch is real filesystem work, and on a loaded
+        // machine it can outlast the timeout, which then settles the run as
+        // `waiting` before the driver ever aborts. A timeout far longer than
+        // any setup leaves the abort as the only possible outcome. The
+        // settle budget grows with it because the runtime bounds its own
+        // cleanup by the same timeout; the timeout path itself is asserted on
+        // its own above.
+        new RootlessTurnRuntime({ dataDirectory, timeoutMs: 5_000 }).run({
           command: commandFixture("code"),
           providerSessionId: sessionId,
           driver,
           signal: controller.signal,
         }),
+        10_000,
       );
 
       expect(outcome).toEqual({ kind: "cancelled" });
@@ -420,11 +430,12 @@ describe("RootlessTurnRuntime", () => {
   );
 });
 
-async function settlesWithin<T>(promise: Promise<T>): Promise<T> {
+/** Fails the test rather than hanging it when a lifecycle never settles. */
+async function settlesWithin<T>(promise: Promise<T>, budgetMs = 250): Promise<T> {
   return await Promise.race([
     promise,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Rootless provider lifecycle did not settle.")), 250),
+      setTimeout(() => reject(new Error("Rootless provider lifecycle did not settle.")), budgetMs),
     ),
   ]);
 }
