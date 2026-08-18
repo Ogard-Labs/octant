@@ -456,6 +456,37 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     },
   );
 
+  it("tells the user to sign in again when a turn is refused for a stale credential", async () => {
+    // A managed home holding an expired credential passes the probe: the agent
+    // opens the session and reports its models, and only the turn is refused.
+    // Reporting that as a generic provider failure left the user with nothing
+    // to act on.
+    const { driver, client } = fixture(profile);
+    client.prompt.mockRejectedValueOnce(
+      new AcpFailure("remote", "ACP authentication is required."),
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            Effect.promise(() => collectTerminal(connection.events)),
+          );
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          const events = yield* Fiber.join(collected);
+          const last = events.at(-1);
+          expect(last?.kind).toBe("failed");
+          expect(last?.kind === "failed" ? last.failure : undefined).toEqual({
+            category: "unauthenticated",
+            message: profile.unauthenticatedMessage,
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  });
+
   it("normalizes a streamed turn and returns an exact opaque resume cursor", async () => {
     const { driver } = fixture(profile);
     await Effect.runPromise(
