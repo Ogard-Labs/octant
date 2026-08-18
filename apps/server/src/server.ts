@@ -452,6 +452,8 @@ import {
 } from "@octant/domain";
 import { ZenThreadCatalog } from "./zen/zenThreadCatalog";
 import { ZenAssistantTools } from "./zen/zenAssistantTools";
+import { createCanvasAgentTools, type CanvasAgentToolPort } from "./canvas/canvasAgentTools";
+import { combineAppManagedToolSets } from "./providers/appManagedToolSet";
 import {
   isPrivateListenerFailureCode,
   type PrivateListener,
@@ -2994,6 +2996,8 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
     });
     let zenAssistantTools: ZenAssistantTools | undefined;
+    // Composed after the Canvas service exists, the same way Zen's tools are.
+    let canvasAgentToolPort: CanvasAgentToolPort | undefined;
     // Side Chat sidecars are ordinary Chat threads that must not appear in
     // Recents/Unfiled/Project listings; the store is the single source of which
     // ids stay hidden, while read() still opens them for the Side Chat tab.
@@ -3066,7 +3070,16 @@ export function startOctantServer(
       threadWork,
       providerRuntimeRegistry: providerRuntimeRegistry,
       resolveAppManagedTools: ({ windowId, thread }) =>
-        zenAssistantTools?.forThread(windowId, thread),
+        combineAppManagedToolSets(
+          zenAssistantTools?.forThread(windowId, thread),
+          canvasAgentToolPort === undefined
+            ? undefined
+            : createCanvasAgentTools({
+                windowId,
+                thread,
+                port: canvasAgentToolPort,
+              }),
+        ),
       resolveExtensionSelectionContext: createExtensionChatResolver({
         snapshot: () => extensionApiService.snapshot(),
         resolveEffectiveState: (snapshot, query) =>
@@ -3987,6 +4000,23 @@ export function startOctantServer(
         authorize: authorizeCanvas,
       },
     );
+    // What a Chat thread's agent may do with a Canvas: write blocks into one,
+    // through the same service and the same Project the person clicking New
+    // Canvas reaches. The Project and workspace are resolved from the window
+    // here, never taken from the agent.
+    canvasAgentToolPort = {
+      activeContext: (windowId) => resolveCanvasActiveContext(shellService.bootstrap(windowId)),
+      project: async (windowId, projectId) => {
+        const bootstrap = await projectService.bootstrap(windowId);
+        const project = bootstrap.active.find((candidate) => String(candidate.id) === projectId);
+        return project === undefined
+          ? undefined
+          : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
+      },
+      canvas: canvasService,
+      uuid: randomUUID,
+      hostId: LOCAL_HOST_ID,
+    };
     // Canvas sharing is local-only: a snapshot is served over the loopback
     // Canvas API to a principal this host authenticates, never uploaded or
     // linked. Lifecycle is journaled, so revocation survives restart and the

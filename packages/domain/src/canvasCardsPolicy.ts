@@ -303,30 +303,34 @@ export interface BuildCreateVersionInput {
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
   readonly createdAt: UtcTimestamp;
+  /**
+   * The document an author wrote, when one did.
+   *
+   * A canvas opened from the shell has no author yet and starts as its title.
+   * A canvas an agent wrote arrives with its blocks, and those blocks are the
+   * document — the prompt that asked for it is provenance, not content, and is
+   * never echoed back into the page as though it were.
+   */
+  readonly blocks?: ReadonlyArray<CanvasBlock>;
 }
 
 export function buildCreateVersion(input: BuildCreateVersionInput): CanvasVersion {
-  const blocks: CanvasBlock[] = [
-    {
-      blockId: decodeCanvasBlockId("create-heading"),
-      schemaVersion: CANVAS_SCHEMA_VERSION,
-      kind: "heading",
-      level: 1,
-      text: input.request.title,
-    },
-  ];
-  if (input.request.intent === "prompt") {
-    const prompt = input.request.prompt;
-    if (prompt === undefined) reject("invalid-prompt", "Canvas prompt is required.");
-    blocks.push({
-      blockId: decodeCanvasBlockId("create-prompt"),
-      schemaVersion: CANVAS_SCHEMA_VERSION,
-      kind: "callout",
-      tone: "info",
-      title: "Creation prompt",
-      text: prompt,
-    });
+  const authored = input.blocks;
+  if (input.request.intent === "prompt" && input.request.prompt === undefined) {
+    reject("invalid-prompt", "Canvas prompt is required.");
   }
+  const blocks: CanvasBlock[] =
+    authored !== undefined && authored.length > 0
+      ? [...authored]
+      : [
+          {
+            blockId: decodeCanvasBlockId("create-heading"),
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            kind: "heading",
+            level: 1,
+            text: input.request.title,
+          },
+        ];
   const definition = {
     schemaVersion: CANVAS_SCHEMA_VERSION,
     title: input.request.title,

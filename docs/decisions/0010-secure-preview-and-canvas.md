@@ -63,6 +63,16 @@ Canvas:
   that draws a diagram draws the same one and none of them is handed markup.
   A node's own position is the author's, which is the seam a direct-manipulation
   editor would write into without changing what a diagram is.
+- An agent authors a Canvas by writing blocks through an app-managed tool, not
+  by returning a document. Every block is decoded against the closed catalog
+  before it reaches a definition, so authorship can never widen what a Canvas
+  may contain, and the Project, workspace, and authority a Canvas carries are
+  resolved from the thread rather than taken from the author. An authored
+  Canvas asks for no filesystem, shell, Git, network, tool, or subagent
+  authority: a document reads nothing and runs nothing.
+- A prompt is provenance, not content. A Canvas nobody has authored is its
+  title; the request that asked for it is never echoed onto the page as though
+  it were the answer.
 - A Canvas appears as a card in its thread and opens as an ordinary workspace
   tab. Refinement creates a new immutable version; refresh is a server command
   that re-authorizes every source against current policy and never replaces

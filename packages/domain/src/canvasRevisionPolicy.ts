@@ -113,6 +113,22 @@ export function clampRevisionProvenance(input: ClampRevisionProvenanceInput): Ca
 }
 
 /**
+ * Replace a canvas's blocks with the ones an author wrote.
+ *
+ * The author hands over the whole document rather than a patch, because a
+ * revision is a new immutable version either way and a whole document is the
+ * thing the closed catalog can check. Every block goes through the same
+ * validation the shell's own blocks do, so authorship reaches no further into
+ * the page than a first-party block already does.
+ */
+export function applyAuthoredRevision(
+  definition: CanvasDefinition,
+  blocks: ReadonlyArray<CanvasDefinition["blocks"][number]>,
+): CanvasDefinition {
+  return validateCanvasDefinition({ ...definition, blocks: [...blocks] });
+}
+
+/**
  * Deterministic prompt refinement for tests and bounded local revision. Appends
  * a first-party callout carrying the bounded prompt without granting new
  * authority or persisting secrets.
@@ -141,6 +157,11 @@ export interface BuildRevisionVersionInput {
   readonly current: CanvasVersion;
   readonly nextVersionId: CanvasVersionId;
   readonly prompt: string;
+  /**
+   * The document an author wrote for this revision, when one did. Without it
+   * the prompt is recorded as a note rather than answered.
+   */
+  readonly blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>;
   readonly actor: CanvasActor;
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;
@@ -148,16 +169,17 @@ export interface BuildRevisionVersionInput {
 }
 
 export function buildRevisionVersion(input: BuildRevisionVersionInput): CanvasVersion {
-  const refinedDefinition = applyPromptRefinement(
-    clampRevisionProvenance({
-      current: input.current.definition,
-      actor: input.actor,
-      providerInstanceId: input.providerInstanceId,
-      modelId: input.modelId,
-      createdAt: input.createdAt,
-    }),
-    input.prompt,
-  );
+  const reprovenanced = clampRevisionProvenance({
+    current: input.current.definition,
+    actor: input.actor,
+    providerInstanceId: input.providerInstanceId,
+    modelId: input.modelId,
+    createdAt: input.createdAt,
+  });
+  const refinedDefinition =
+    input.blocks === undefined
+      ? applyPromptRefinement(reprovenanced, input.prompt)
+      : applyAuthoredRevision(reprovenanced, input.blocks);
   const nextEnvelope = {
     schemaVersion: CANVAS_SCHEMA_VERSION,
     canvasId: input.canvasId,
@@ -218,6 +240,8 @@ export interface AdmitCanvasReviseInput {
   readonly receiptId: unknown;
   readonly nextVersionId: unknown;
   readonly now: UtcTimestamp;
+  /** The document an author wrote for this revision, when one did. */
+  readonly blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>;
 }
 
 export function admitCanvasRevise(input: AdmitCanvasReviseInput): {
@@ -283,6 +307,7 @@ export function admitCanvasRevise(input: AdmitCanvasReviseInput): {
     providerInstanceId: request.providerInstanceId,
     modelId: request.modelId,
     createdAt: input.now,
+    ...(input.blocks === undefined ? {} : { blocks: input.blocks }),
   });
   const receipt = {
     schemaVersion: 1 as const,

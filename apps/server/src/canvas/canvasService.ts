@@ -356,10 +356,18 @@ export class CanvasService {
     };
   }
 
+  /**
+   * Append a new version to a canvas.
+   *
+   * `blocks` is the document an author wrote. Without it the prompt is recorded
+   * as a note on the page rather than answered, which is all a revision with
+   * nobody to write it can honestly do.
+   */
   revise(
     requestInput: unknown,
     context: CanvasAuthorizationContext,
     project: CanvasProjectRecord | undefined,
+    blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>,
   ): CanvasReviseResult {
     let request;
     try {
@@ -396,6 +404,7 @@ export class CanvasService {
         receiptId: this.#uuid(),
         nextVersionId: this.#uuid(),
         now: this.#clock(),
+        ...(blocks === undefined ? {} : { blocks }),
       });
       this.#eventStore.appendVersion({
         canvasId,
@@ -421,10 +430,12 @@ export class CanvasService {
     }
   }
 
+  /** Open a canvas. `blocks` is the document an author wrote, when one did. */
   create(
     requestInput: unknown,
     context: CanvasAuthorizationContext,
     project: CanvasProjectRecord | undefined,
+    blocks?: ReadonlyArray<CanvasDefinition["blocks"][number]>,
   ): CanvasCreateResult {
     let request;
     try {
@@ -469,6 +480,7 @@ export class CanvasService {
         providerInstanceId: this.#providerInstanceId,
         modelId: this.#modelId,
         createdAt: admitted.receipt.createdAt,
+        ...(blocks === undefined ? {} : { blocks }),
       });
       this.#eventStore.appendCreate({
         canvasId,
