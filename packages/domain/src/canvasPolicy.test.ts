@@ -199,6 +199,73 @@ describe("Canvas validation policy", () => {
     );
   });
 
+  it("refuses a diagram that groups a node it does not hold", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...diagram("grouped-diagram", 2, 1),
+              groups: [{ groupId: "backend", label: "Backend", nodeIds: ["missing"] }],
+            },
+          ]),
+        ),
+      "dangling-group-member",
+    );
+  });
+
+  it("refuses a diagram that puts one node inside two boundaries", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...diagram("grouped-diagram", 2, 1),
+              groups: [
+                { groupId: "one", label: "One", nodeIds: ["node-grouped-diagram-0"] },
+                { groupId: "two", label: "Two", nodeIds: ["node-grouped-diagram-0"] },
+              ],
+            },
+          ]),
+        ),
+      "overlapping-groups",
+    );
+  });
+
+  it("refuses a diagram with two groups of the same identity", () => {
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...diagram("grouped-diagram", 2, 1),
+              groups: [
+                { groupId: "one", label: "One", nodeIds: ["node-grouped-diagram-0"] },
+                { groupId: "one", label: "Again", nodeIds: ["node-grouped-diagram-1"] },
+              ],
+            },
+          ]),
+        ),
+      "duplicate-group-id",
+    );
+  });
+
+  it("accepts a diagram whose groups each hold nodes of their own", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([
+          {
+            ...diagram("grouped-diagram", 2, 1),
+            groups: [
+              { groupId: "one", label: "One", nodeIds: ["node-grouped-diagram-0"] },
+              { groupId: "two", label: "Two", nodeIds: ["node-grouped-diagram-1"] },
+            ],
+          },
+        ]),
+      ),
+    ).not.toThrow();
+  });
+
   it("rejects dangling diagram edges and duplicate chart series", () => {
     expectPolicyCode(
       () =>

@@ -1,5 +1,6 @@
 import type { CanvasBlock, CanvasChartSeries } from "@octant/contracts/canvas";
 import { computeYDomain, scaleX, scaleY, type ChartSeriesData } from "../chartGeometry";
+import { layoutCanvasDiagram } from "@octant/domain";
 import { formatScalar } from "../canvasRuntime";
 import { formatTableCell } from "./DataBlocks";
 
@@ -170,65 +171,94 @@ function TimelineBlock({
 }
 
 function DiagramBlock({ block }: { readonly block: Extract<Block, { readonly kind: "diagram" }> }) {
-  const positions = new Map<string, { x: number; y: number }>();
-  block.nodes.forEach((node, index) => {
-    positions.set(node.nodeId, {
-      x: node.x ?? scaleX(index, block.nodes.length, 280, 20),
-      y: node.y ?? 60 + (index % 3) * 28,
-    });
-  });
+  const layout = layoutCanvasDiagram(block);
 
   return (
-    <figure
-      role="img"
-      aria-label={`Diagram with ${block.nodes.length} nodes and ${block.edges.length} edges`}
-      className="canvas-block__diagram"
-    >
-      <svg role="presentation" width={280} height={140} viewBox="0 0 280 140">
-        {block.edges.map((edge) => {
-          const source = positions.get(edge.source);
-          const target = positions.get(edge.target);
-          if (source === undefined || target === undefined) return null;
-          return (
-            <g key={edge.edgeId}>
-              <line
-                x1={source.x}
-                y1={source.y}
-                x2={target.x}
-                y2={target.y}
-                className="canvas-block__diagram-edge"
-              />
-              {edge.label !== undefined ? (
-                <text
-                  x={(source.x + target.x) / 2}
-                  y={(source.y + target.y) / 2}
-                  className="canvas-block__diagram-edge-label"
-                >
-                  {edge.label}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-        {block.nodes.map((node) => {
-          const position = positions.get(node.nodeId);
-          if (position === undefined) return null;
-          return (
-            <g key={node.nodeId} className="canvas-block__diagram-node">
-              <circle cx={position.x} cy={position.y} r={14} />
-            </g>
-          );
-        })}
+    <figure role="img" aria-label={diagramLabel(block)} className="canvas-block__diagram">
+      <svg
+        role="presentation"
+        className="canvas-block__diagram-svg"
+        viewBox={`0 0 ${String(layout.width)} ${String(layout.height)}`}
+      >
+        {/* Groups first, so a boundary sits behind what it contains. */}
+        {layout.groups.map((group) => (
+          <g key={group.groupId} className="canvas-block__diagram-group">
+            <rect x={group.x} y={group.y} width={group.width} height={group.height} rx={8} />
+            <text x={group.x + 10} y={group.y + 15}>
+              {group.label}
+            </text>
+          </g>
+        ))}
+        {layout.edges.map((edge) => (
+          <g key={edge.edgeId}>
+            <line
+              x1={edge.x1}
+              y1={edge.y1}
+              x2={edge.x2}
+              y2={edge.y2}
+              className="canvas-block__diagram-edge"
+            />
+            {edge.label === undefined ? null : (
+              <text x={edge.labelX} y={edge.labelY} className="canvas-block__diagram-edge-label">
+                {edge.label}
+              </text>
+            )}
+          </g>
+        ))}
+        {layout.nodes.map((node) => (
+          <g key={node.nodeId} className="canvas-block__diagram-node">
+            <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={6} />
+            <text x={node.x + node.width / 2} y={node.y + node.height / 2}>
+              {node.label}
+            </text>
+          </g>
+        ))}
       </svg>
-      <figcaption className="canvas-block__diagram-fallback">
+      {/* The drawing said in words, for a reader who cannot see it. The labels
+        are already on the boxes, so this describes what connects to what rather
+        than repeating the names on their own. */}
+      <figcaption className="canvas-block__diagram-fallback visually-hidden">
         <ul>
-          {block.nodes.map((node) => (
-            <li key={node.nodeId}>{node.label}</li>
+          {(block.groups ?? []).map((group) => (
+            <li key={group.groupId}>{`${group.label}: ${groupMembers(block, group.nodeIds)}`}</li>
+          ))}
+          {block.edges.map((edge) => (
+            <li key={edge.edgeId}>{describeEdge(block, edge)}</li>
           ))}
         </ul>
       </figcaption>
     </figure>
   );
+}
+
+function nodeLabel(block: Extract<Block, { readonly kind: "diagram" }>, nodeId: string): string {
+  return (
+    block.nodes.find((node) => String(node.nodeId) === String(nodeId))?.label ?? String(nodeId)
+  );
+}
+
+function groupMembers(
+  block: Extract<Block, { readonly kind: "diagram" }>,
+  nodeIds: ReadonlyArray<string>,
+): string {
+  return nodeIds.map((nodeId) => nodeLabel(block, nodeId)).join(", ");
+}
+
+function describeEdge(
+  block: Extract<Block, { readonly kind: "diagram" }>,
+  edge: Extract<Block, { readonly kind: "diagram" }>["edges"][number],
+): string {
+  const relation = edge.label === undefined ? "to" : edge.label;
+  return `${nodeLabel(block, edge.source)} ${relation} ${nodeLabel(block, edge.target)}`;
+}
+
+function diagramLabel(block: Extract<Block, { readonly kind: "diagram" }>): string {
+  const groups = block.groups ?? [];
+  const parts = [
+    `Diagram with ${String(block.nodes.length)} nodes and ${String(block.edges.length)} edges`,
+  ];
+  if (groups.length > 0) parts.push(`in ${String(groups.length)} groups`);
+  return parts.join(" ");
 }
 
 function formatDate(timestamp: string): string {

@@ -16,6 +16,7 @@ export * from "./mobileHardeningPolicy";
 export * from "./codeWorktreeSourcePolicy";
 export * from "./deliveryTargetPolicy";
 export * from "./canvasPolicy";
+export * from "./canvasDiagramLayout";
 export * from "./canvasActionPolicy";
 export * from "./canvasActionExecutionPolicy";
 export * from "./canvasActionAvailabilityPolicy";

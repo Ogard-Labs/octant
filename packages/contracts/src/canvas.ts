@@ -36,6 +36,7 @@ export const CANVAS_MAX_TABLE_ROWS = 1_024;
 export const CANVAS_MAX_SERIES = 64;
 export const CANVAS_MAX_DIAGRAM_NODES = 512;
 export const CANVAS_MAX_DIAGRAM_EDGES = 1_024;
+export const CANVAS_MAX_DIAGRAM_GROUPS = 64;
 export const CANVAS_MAX_IMAGES = 64;
 export const CANVAS_MAX_PAYLOAD_BYTES = 1024 * 1024;
 export const CANVAS_MAX_SOURCE_ENTRIES = 128;
@@ -396,11 +397,34 @@ export const CanvasDiagramEdge = Schema.Struct({
 }).annotations(strict);
 export type CanvasDiagramEdge = typeof CanvasDiagramEdge.Type;
 
+/**
+ * A named box drawn around some of a diagram's nodes.
+ *
+ * Groups are what turn a graph into an architecture sketch: the boundary
+ * between a client and a server is the point of the drawing, not decoration on
+ * top of it. A node may sit in at most one group, so the boundary a reader sees
+ * is the one the author meant.
+ */
+export const CanvasDiagramGroup = Schema.Struct({
+  groupId: boundedToken("CanvasGroupId"),
+  label: CanvasLabel,
+  nodeIds: Schema.Array(CanvasNodeId).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
+}).annotations(strict);
+export type CanvasDiagramGroup = typeof CanvasDiagramGroup.Type;
+
+/** Which way the diagram reads. Layout follows it; it is never inferred. */
+export const CanvasDiagramFlow = Schema.Literal("down", "right");
+export type CanvasDiagramFlow = typeof CanvasDiagramFlow.Type;
+
 export const CanvasDiagramBlock = Schema.Struct({
   ...CanvasBlockFields,
   kind: Schema.Literal("diagram"),
   nodes: Schema.Array(CanvasDiagramNode).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
   edges: Schema.Array(CanvasDiagramEdge).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_EDGES)),
+  groups: Schema.optional(
+    Schema.Array(CanvasDiagramGroup).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_GROUPS)),
+  ),
+  flow: Schema.optional(CanvasDiagramFlow),
 }).annotations(strict);
 export type CanvasDiagramBlock = typeof CanvasDiagramBlock.Type;
 

@@ -38,7 +38,10 @@ export type CanvasPolicyRejectionCode =
   | "duplicate-series-id"
   | "duplicate-node-id"
   | "duplicate-edge-id"
-  | "dangling-edge";
+  | "dangling-edge"
+  | "duplicate-group-id"
+  | "dangling-group-member"
+  | "overlapping-groups";
 
 export class CanvasPolicyRejected extends Error {
   override readonly name = "CanvasPolicyRejected";
@@ -347,6 +350,31 @@ function validateCrossReferences(definition: CanvasDefinition): void {
           reject("dangling-edge", `Canvas diagram ${block.blockId} has an edge to a missing node.`);
         }
         edges.add(edge.edgeId);
+      }
+      const groups = new Set<string>();
+      const grouped = new Set<string>();
+      for (const group of block.groups ?? []) {
+        if (groups.has(group.groupId)) {
+          reject("duplicate-group-id", `Canvas diagram ${block.blockId} has duplicate groups.`);
+        }
+        groups.add(group.groupId);
+        for (const nodeId of group.nodeIds) {
+          if (!nodes.has(nodeId)) {
+            reject(
+              "dangling-group-member",
+              `Canvas diagram ${block.blockId} groups a node it does not hold.`,
+            );
+          }
+          // One boundary per node, so the grouping a reader sees is the one the
+          // author meant rather than whichever frame happened to be drawn last.
+          if (grouped.has(nodeId)) {
+            reject(
+              "overlapping-groups",
+              `Canvas diagram ${block.blockId} puts one node in more than one group.`,
+            );
+          }
+          grouped.add(nodeId);
+        }
       }
     }
   }

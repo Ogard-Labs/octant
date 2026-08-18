@@ -186,14 +186,52 @@
   color: #7bc47f;
 }
 
+.canvas-block__diagram-svg {
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
 .canvas-block__diagram-edge {
   stroke: var(--octant-border-strong);
   stroke-width: 1.5;
 }
 
-.canvas-block__diagram-node circle {
-  fill: #8ab4f8;
-  opacity: 0.85;
+.canvas-block__diagram-edge-label {
+  fill: var(--octant-text-primary-muted);
+  font-size: 11px;
+  text-anchor: middle;
+  /* The label sits on top of the line it names, so it is painted with a halo
+     of the page behind it rather than being nudged off the line it belongs
+     to. */
+  stroke: var(--octant-surface-canvas, #1e1e1e);
+  stroke-width: 3;
+  paint-order: stroke;
+}
+
+.canvas-block__diagram-node rect {
+  fill: var(--octant-surface-muted, #2a2a2a);
+  stroke: #8ab4f8;
+  stroke-width: 1.5;
+}
+
+.canvas-block__diagram-node text {
+  fill: var(--octant-text-primary);
+  font-size: 13px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+.canvas-block__diagram-group rect {
+  fill: none;
+  stroke: var(--octant-border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+
+.canvas-block__diagram-group text {
+  fill: var(--octant-text-primary-muted);
+  font-size: 11px;
 }
 
 .canvas-block__code-head {
