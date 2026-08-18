@@ -39,7 +39,7 @@ const denyDefaultProfiles = [kilo, devin, vibe, grok];
 const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, string, string]> = {
   kilo: ["7.4.11", "0.9.9", "kilo release 7.4.11 extra"],
   devin: ["devin 3000.1.27 (0d4bf12e)", "devin 3000.1.26 (0d4bf12e)", "devin release 3000.1.27"],
-  "mistral-vibe": ["vibe-acp 2.19.0", "vibe-acp 2.18.9", "mistral vibe release 2.19.0 extra"],
+  "mistral-vibe": ["vibe-acp 2.24.1", "vibe-acp 2.24.0", "mistral vibe release 2.24.1 extra"],
   "kimi-code": ["0.27.0", "0.25.9", "Kimi Code build 0.27.0 private-noise"],
   grok: [
     "grok 1.0.4 (d846eb93d94d)",
@@ -50,7 +50,7 @@ const versionOutputs: Record<AcpProviderProfile["kind"], readonly [string, strin
 const readyVersions: Record<AcpProviderProfile["kind"], string> = {
   kilo: "7.4.11",
   devin: "3000.1.27",
-  "mistral-vibe": "2.19.0",
+  "mistral-vibe": "2.24.1",
   "kimi-code": "0.27.0",
   grok: "1.0.4",
 };
