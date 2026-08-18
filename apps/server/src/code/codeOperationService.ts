@@ -177,14 +177,41 @@ interface TerminalOutputEmission {
   readonly snapshot: CodeOperationTerminalSnapshot;
 }
 
+/**
+ * One surface following a terminal, and how far its journal has been written.
+ *
+ * A terminal can be open in more than one place at once — a workspace tab and
+ * a pinned card are two windows onto the same shell — and each of them reads
+ * its own operation, so each needs its own cursor.
+ */
+interface TerminalOutputReader {
+  readonly operationId: CodeOperationId;
+  nextCursor: number;
+  /**
+   * When this reader last read its operation. A surface that has gone — closed,
+   * unpinned, or taken down with its window — stops reading but cannot say so,
+   * so reading is the only honest evidence that anyone is still there.
+   */
+  lastReadTick: number;
+  lastTerminalStatus?: CodeOperationTerminalSnapshot["status"];
+  lastExitCode?: number;
+}
+
+/**
+ * How many surfaces may follow one terminal at once.
+ *
+ * Comfortably above the surfaces a person opens on one shell, and low enough
+ * that readers left behind by a surface that never said goodbye are collected
+ * instead of accumulating for as long as the shell lives.
+ */
+const MAX_TERMINAL_READERS = 4;
+
 interface TerminalOwner {
   readonly windowId: string;
   readonly threadId: string;
   readonly checkoutId: string;
-  operationId?: CodeOperationId;
-  nextCursor?: number;
-  lastTerminalStatus?: CodeOperationTerminalSnapshot["status"];
-  lastExitCode?: number;
+  /** Every surface currently following this terminal, keyed by its operation. */
+  readonly readers: Map<string, TerminalOutputReader>;
   removeOutputListener?: () => void;
   outputBaseline?: string;
 }
@@ -696,6 +723,8 @@ export interface CodeOperationServiceOptions {
 export class CodeOperationService {
   readonly #options: CodeOperationServiceOptions;
   readonly #terminalOwners = new Map<string, TerminalOwner>();
+  /** Counts reads, so the least recently read terminal reader is identifiable. */
+  #terminalReadTick = 0;
 
   constructor(options: CodeOperationServiceOptions) {
     this.#options = options;
@@ -1007,7 +1036,19 @@ export class CodeOperationService {
       throw new CodeOperationServiceError("invalid");
     if (!(await this.#options.authority.canAccessProject(windowId, thread.projectId)))
       throw new CodeOperationServiceError("unauthorized");
+    this.#noteTerminalRead(operationId);
     return this.#replay(threadId, operationId, afterCursor, limit).frames;
+  }
+
+  /** Record that whoever follows this operation is still reading it. */
+  #noteTerminalRead(operationId: CodeOperationId): void {
+    for (const owner of this.#terminalOwners.values()) {
+      const reader = owner.readers.get(String(operationId));
+      if (reader !== undefined) {
+        reader.lastReadTick = ++this.#terminalReadTick;
+        return;
+      }
+    }
   }
 
   async readEvidence(
@@ -1193,6 +1234,7 @@ export class CodeOperationService {
           windowId: String(windowId),
           threadId: thread.id,
           checkoutId: checkout.id,
+          readers: new Map(),
           outputBaseline: snapshot.transcript.chunks.join(""),
         });
         return this.#terminal(command.operationId, snapshot);
@@ -1505,6 +1547,16 @@ export class CodeOperationService {
       : decodeCodeOperationResult(base);
   }
 
+  /**
+   * Start journaling this terminal for one more surface.
+   *
+   * The readers already following the terminal keep their own operations: a
+   * second surface opening the same shell is another window onto it, not a
+   * handover, so output after this point is written to every reader's journal.
+   * The observer is re-armed against the transcript the joining reader was
+   * handed, which is exactly where every existing reader had been written up
+   * to, so nobody is sent the same output twice.
+   */
   #activateTerminalOutput(
     terminalId: string,
     operationId: CodeOperationId,
@@ -1513,70 +1565,134 @@ export class CodeOperationService {
     const owner = this.#terminalOwners.get(terminalId);
     if (owner === undefined || this.#options.terminals.observe === undefined) return;
     owner.removeOutputListener?.();
-    owner.operationId = operationId;
-    owner.nextCursor = nextCursor;
-    owner.lastTerminalStatus = "running";
-    delete owner.lastExitCode;
+    this.#admitTerminalReader(owner, operationId, nextCursor);
     const outputBaseline = owner.outputBaseline;
     delete owner.outputBaseline;
     owner.removeOutputListener = this.#options.terminals.observe(
       terminalId,
       (emission) => {
-        if (owner.operationId === undefined || owner.nextCursor === undefined) return;
+        let content: CodeEvidenceReference | undefined;
         try {
-          if (emission.text.length > 0) {
-            const content = this.#options.evidence.put(emission.text, {
-              truncated: emission.replace && emission.snapshot.transcript.truncated,
-            });
-            this.#options.events.append({
-              threadId: owner.threadId as CodeThreadId,
-              operationId: owner.operationId,
-              expectedCursor: owner.nextCursor,
-              event: {
-                kind: "terminal-output",
-                terminalId: terminalId as never,
-                content,
-                replace: emission.replace,
-              },
-            });
-            owner.nextCursor += 1;
-          }
-          if (
-            emission.snapshot.status !== owner.lastTerminalStatus ||
-            emission.snapshot.exitCode !== owner.lastExitCode
-          ) {
-            this.#options.events.append({
-              threadId: owner.threadId as CodeThreadId,
-              operationId: owner.operationId,
-              expectedCursor: owner.nextCursor,
-              event: {
-                kind: "terminal-state-changed",
-                terminalId: terminalId as never,
-                state: emission.snapshot.status,
-                ...(emission.snapshot.status === "exited"
-                  ? { exitCode: emission.snapshot.exitCode ?? null }
-                  : {}),
-              },
-            });
-            owner.nextCursor += 1;
-            owner.lastTerminalStatus = emission.snapshot.status;
-            if (emission.snapshot.exitCode === undefined) delete owner.lastExitCode;
-            else owner.lastExitCode = emission.snapshot.exitCode;
-            if (emission.snapshot.status !== "running") this.#deactivateTerminalOutput(terminalId);
-          }
+          content =
+            emission.text.length > 0
+              ? this.#options.evidence.put(emission.text, {
+                  truncated: emission.replace && emission.snapshot.transcript.truncated,
+                })
+              : undefined;
         } catch {
+          // Output that cannot be stored cannot be journaled for anyone, so the
+          // shell must not stay interactive behind an unrecorded transcript.
+          this.#abandonTerminal(terminalId);
+          return;
+        }
+        for (const reader of [...owner.readers.values()]) {
+          this.#journalTerminalEmission(terminalId, owner, reader, emission, content);
+        }
+        // The process outlives any one surface, so it is only torn down once
+        // nothing is journaling it any more.
+        if (owner.readers.size === 0) this.#abandonTerminal(terminalId);
+        else if (emission.snapshot.status !== "running") {
           this.#deactivateTerminalOutput(terminalId);
-          try {
-            const termination = this.#options.terminals.terminate(terminalId);
-            void Promise.resolve(termination).catch(() => undefined);
-          } catch {
-            // Ownership is already revoked. A transport-level close failure is
-            // contained here so an unjournaled PTY can never remain interactive.
-          }
         }
       },
       outputBaseline === undefined ? undefined : { afterTranscript: outputBaseline },
     );
+  }
+
+  /**
+   * Seat one more reader on a terminal, making room if the seats are full.
+   *
+   * The reader evicted is the one that has gone longest without reading, which
+   * is the surface most likely to be gone; a surface that is still on screen
+   * reads every couple of seconds and cannot be the oldest while a departed
+   * one is still seated.
+   */
+  #admitTerminalReader(
+    owner: TerminalOwner,
+    operationId: CodeOperationId,
+    nextCursor: number,
+  ): void {
+    owner.readers.delete(String(operationId));
+    while (owner.readers.size >= MAX_TERMINAL_READERS) {
+      const quietest = [...owner.readers.values()].reduce((oldest, candidate) =>
+        candidate.lastReadTick < oldest.lastReadTick ? candidate : oldest,
+      );
+      owner.readers.delete(String(quietest.operationId));
+    }
+    owner.readers.set(String(operationId), {
+      operationId,
+      nextCursor,
+      lastReadTick: ++this.#terminalReadTick,
+      lastTerminalStatus: "running",
+    });
+  }
+
+  /**
+   * Write one emission into one reader's journal.
+   *
+   * A reader whose journal refuses the write is dropped rather than taken as a
+   * reason to stop journaling for everyone else; an unjournaled PTY is only
+   * reached when the last reader has gone.
+   */
+  #journalTerminalEmission(
+    terminalId: string,
+    owner: TerminalOwner,
+    reader: TerminalOutputReader,
+    emission: TerminalOutputEmission,
+    content: CodeEvidenceReference | undefined,
+  ): void {
+    try {
+      if (content !== undefined) {
+        this.#options.events.append({
+          threadId: owner.threadId as CodeThreadId,
+          operationId: reader.operationId,
+          expectedCursor: reader.nextCursor,
+          event: {
+            kind: "terminal-output",
+            terminalId: terminalId as never,
+            content,
+            replace: emission.replace,
+          },
+        });
+        reader.nextCursor += 1;
+      }
+      if (
+        emission.snapshot.status !== reader.lastTerminalStatus ||
+        emission.snapshot.exitCode !== reader.lastExitCode
+      ) {
+        this.#options.events.append({
+          threadId: owner.threadId as CodeThreadId,
+          operationId: reader.operationId,
+          expectedCursor: reader.nextCursor,
+          event: {
+            kind: "terminal-state-changed",
+            terminalId: terminalId as never,
+            state: emission.snapshot.status,
+            ...(emission.snapshot.status === "exited"
+              ? { exitCode: emission.snapshot.exitCode ?? null }
+              : {}),
+          },
+        });
+        reader.nextCursor += 1;
+        reader.lastTerminalStatus = emission.snapshot.status;
+        if (emission.snapshot.exitCode === undefined) delete reader.lastExitCode;
+        else reader.lastExitCode = emission.snapshot.exitCode;
+      }
+    } catch {
+      owner.readers.delete(String(reader.operationId));
+    }
+  }
+
+  /** Close a terminal nothing is journaling any more. */
+  #abandonTerminal(terminalId: string): void {
+    this.#deactivateTerminalOutput(terminalId);
+    try {
+      const termination = this.#options.terminals.terminate(terminalId);
+      void Promise.resolve(termination).catch(() => undefined);
+    } catch {
+      // Ownership is already revoked. A transport-level close failure is
+      // contained here so an unjournaled PTY can never remain interactive.
+    }
   }
 
   #deactivateTerminalOutput(terminalId: string): void {
