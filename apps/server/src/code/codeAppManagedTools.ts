@@ -9,7 +9,10 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
-import { MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS } from "@octant/contracts";
+import {
+  MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS,
+  MAX_BROWSER_TABS_PER_CONTEXT,
+} from "@octant/contracts";
 import type {
   AppleActionRequest,
   AppleBuildEvidence,
@@ -168,7 +171,7 @@ export interface CodeAppManagedToolsOptions {
         readonly profileMode: "isolated";
         readonly allowedOrigins: readonly string[];
         readonly credentialFieldProtection: true;
-        readonly maxConcurrentTabs: 1;
+        readonly maxConcurrentTabs: number;
         readonly sessionTimeoutMs: number;
       };
     }) => Promise<BrowserAutomationSnapshot>;
@@ -416,7 +419,7 @@ async function browserTool(
           profileMode: "isolated",
           allowedOrigins: [origin],
           credentialFieldProtection: true,
-          maxConcurrentTabs: 1,
+          maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
           sessionTimeoutMs: 600_000,
         },
       }),

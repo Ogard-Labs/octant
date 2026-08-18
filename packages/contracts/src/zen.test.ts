@@ -28,6 +28,8 @@ import {
   ZenAssistantAppearanceInput,
   ZenAssistantCreateWidgetInput,
   ZenAssistantToolResult,
+  ZenResearchDock,
+  MIN_ZEN_RESEARCH_DOCK_WIDTH,
 } from "./zen";
 
 const decodeSpace = Schema.decodeUnknownSync(ZenSpace);
@@ -46,6 +48,7 @@ const decodeAssistantPlacement = Schema.decodeUnknownSync(ZenAssistantPlacementI
 const decodeAssistantAppearance = Schema.decodeUnknownSync(ZenAssistantAppearanceInput);
 const decodeAssistantCreateWidget = Schema.decodeUnknownSync(ZenAssistantCreateWidgetInput);
 const decodeAssistantToolResult = Schema.decodeUnknownSync(ZenAssistantToolResult);
+const decodeResearchDock = Schema.decodeUnknownSync(ZenResearchDock);
 
 function makeId(prefix: string): string {
   return `${prefix}-0000-4000-8000-000000000000`;
@@ -730,6 +733,69 @@ describe("ZenWidgetRecipe", () => {
   });
 });
 
+describe("ZenResearchDock", () => {
+  const codeSource = {
+    hostId: "local",
+    mode: "code",
+    projectId: projectId(),
+    threadKind: "code",
+    threadId: chatThreadId(),
+  };
+
+  it("docks onto the browsing context of a Work or Code thread", () => {
+    const dock = decodeResearchDock({
+      sourceContext: codeSource,
+      width: 480,
+      collapsed: false,
+    });
+    expect(dock.sourceContext.threadKind).toBe("code");
+    expect(dock.collapsed).toBe(false);
+  });
+
+  it("refuses to dock onto a Chat thread, which has no browsing context", () => {
+    expect(() =>
+      decodeResearchDock({
+        sourceContext: {
+          hostId: "local",
+          mode: "chat",
+          projectId: null,
+          threadKind: "chat",
+          threadId: chatThreadId(),
+        },
+        width: 480,
+        collapsed: false,
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a dock narrower than a page can be read in", () => {
+    expect(() =>
+      decodeResearchDock({
+        sourceContext: codeSource,
+        width: MIN_ZEN_RESEARCH_DOCK_WIDTH - 1,
+        collapsed: false,
+      }),
+    ).toThrow();
+  });
+
+  it("leaves a space that predates the dock with none", () => {
+    // Spaces already in the journal carry no dock, and replay must not turn
+    // that into an invalid space.
+    const space = decodeSpace({
+      spaceId: spaceId(),
+      windowId: windowId(),
+      version: 0,
+      elements: [],
+      viewport: DEFAULT_ZEN_VIEWPORT,
+      appearance: DEFAULT_ZEN_APPEARANCE,
+      assistant: null,
+      createdAt: "2026-07-24T10:00:00.000Z",
+      updatedAt: "2026-07-24T10:00:00.000Z",
+    });
+    expect(space.research).toBeNull();
+  });
+});
+
 describe("ZenSpace", () => {
   it("defaults active and barCollapsed to false when omitted", () => {
     const space = decodeSpace({
@@ -740,6 +806,7 @@ describe("ZenSpace", () => {
       viewport: DEFAULT_ZEN_VIEWPORT,
       appearance: DEFAULT_ZEN_APPEARANCE,
       assistant: null,
+      research: null,
       createdAt: "2026-07-24T10:00:00.000Z",
       updatedAt: "2026-07-24T10:00:00.000Z",
     });
@@ -760,6 +827,7 @@ describe("ZenSpace", () => {
       active: true,
       barCollapsed: true,
       assistant: null,
+      research: null,
       createdAt: "2026-07-24T10:00:00.000Z",
       updatedAt: "2026-07-24T10:00:00.000Z",
     });
@@ -830,6 +898,7 @@ describe("ZenSpace", () => {
         viewport: DEFAULT_ZEN_VIEWPORT,
         appearance: DEFAULT_ZEN_APPEARANCE,
         assistant: null,
+        research: null,
         createdAt: "2026-07-24T10:00:00.000Z",
         updatedAt: "2026-07-24T10:00:00.000Z",
       }),
@@ -867,6 +936,7 @@ describe("ZenSpace", () => {
         viewport: DEFAULT_ZEN_VIEWPORT,
         appearance: DEFAULT_ZEN_APPEARANCE,
         assistant: null,
+        research: null,
         createdAt: "2026-07-24T10:00:00.000Z",
         updatedAt: "2026-07-24T10:00:00.000Z",
       }),
@@ -1233,6 +1303,7 @@ describe("ZenBootstrapResponse", () => {
         viewport: DEFAULT_ZEN_VIEWPORT,
         appearance: DEFAULT_ZEN_APPEARANCE,
         assistant: null,
+        research: null,
         createdAt: "2026-07-24T10:00:00.000Z",
         updatedAt: "2026-07-24T10:00:00.000Z",
       },

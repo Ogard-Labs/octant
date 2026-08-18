@@ -215,6 +215,7 @@ import { CodeThreadBoard } from "./code/CodeThreadBoard";
 import type { ZenClient } from "@octant/client-runtime/zen-client";
 import { ZenRoot } from "./zen/ZenRoot";
 import { ZenSurface } from "./zen/ZenSurface";
+import { ZenResearchDock } from "./zen/ZenResearchDock";
 import { ZenTerminalCard } from "./zen/ZenTerminalCard";
 import { useZenController } from "./zen/useZenController";
 import { resolveZenLiveThreadCard, type ZenLiveThreadClients } from "./zen/ZenLiveThreadCards";
@@ -3322,6 +3323,34 @@ function LaunchedShell(
                 />
               );
             }}
+            renderResearchDock={({ dock }) => {
+              // The dock shows the bound thread's own browsing context. Zen
+              // holds no browser client of its own; it hands over the binding
+              // and the shell's client, and the server decides what that
+              // thread's context may reach.
+              if (browserAutomationClient === undefined) return undefined;
+              return (
+                <ZenResearchDock
+                  client={browserAutomationClient}
+                  dock={dock}
+                  {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                  onCollapse={(collapsed) =>
+                    void zen.dockResearch({
+                      thread: {
+                        threadId:
+                          dock.sourceContext.threadKind === "code"
+                            ? decodeCodeThreadId(String(dock.sourceContext.threadId))
+                            : decodeWorkThreadId(String(dock.sourceContext.threadId)),
+                        mode: dock.sourceContext.threadKind === "code" ? "code" : "work",
+                      },
+                      width: dock.width,
+                      collapsed,
+                    })
+                  }
+                  onUndock={() => void zen.dockResearch({ thread: null })}
+                />
+              );
+            }}
             spacesBusy={zen.panelBusy}
             onAddSpace={(name) => void zen.addSpace(name)}
             onRemoveSpace={(spaceId) => void zen.removeSpace(spaceId)}
@@ -3723,6 +3752,17 @@ function LaunchedShell(
                   chatController={chatController}
                   chatReadCursorStore={chatReadCursorStore}
                   onPinTerminal={(request) => void zen.pinTerminal(request)}
+                  onDockResearch={(request) =>
+                    void zen.dockResearch({
+                      thread: {
+                        threadId:
+                          request.mode === "code"
+                            ? decodeCodeThreadId(request.threadId)
+                            : decodeWorkThreadId(request.threadId),
+                        mode: request.mode,
+                      },
+                    })
+                  }
                   codeController={codeController}
                   codeControllers={codeThreadControllers}
                   extensionClient={extensionClient}

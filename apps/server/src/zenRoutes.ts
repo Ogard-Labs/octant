@@ -1,6 +1,7 @@
 import {
   decodeZenCommand,
   decodeZenFocusZoneCommand,
+  decodeZenResearchDockRequest,
   decodeZenTerminalAttachRequest,
   decodeZenThreadAttachRequest,
   decodeZenThreadCatalogRef,
@@ -76,6 +77,9 @@ export function createZenRouteHandler(dependencies: ZenRouteDependencies) {
     }
     if (url.pathname === "/api/zen/terminals/attach" && request.method === "POST") {
       return await handleZenTerminalAttach(request, url, origin, dependencies, now);
+    }
+    if (url.pathname === "/api/zen/research/dock" && request.method === "POST") {
+      return await handleZenResearchDock(request, url, origin, dependencies, now);
     }
     if (url.pathname === "/api/zen/threads/continue" && request.method === "GET") {
       return await handleZenThreadContinue(request, url, origin, dependencies, now);
@@ -211,6 +215,13 @@ async function handleZenCommand(
   }
   if (command.command === "bind-assistant") {
     return failureResponse("Navigator binding is server-authoritative.", 400, origin);
+  }
+  if (command.command === "dock-research") {
+    return failureResponse(
+      "Zen does not accept caller-supplied research docks; a browser is docked by naming its thread.",
+      400,
+      origin,
+    );
   }
   if (
     command.command === "add-element" &&
@@ -348,6 +359,38 @@ async function handleZenTerminalAttach(
   } catch (error) {
     if (error instanceof ZenError) return zenFailureResponse(error, origin);
     return failureResponse("Zen terminal attachment is invalid.", 400, origin);
+  }
+}
+
+/**
+ * Dock a research browser onto a Work or Code thread this window may see.
+ *
+ * Separate from the generic command route for the same reason a pinned terminal
+ * is: the caller names a thread and the server resolves the source context, so
+ * no body here can describe authority into the dock.
+ */
+async function handleZenResearchDock(
+  request: Request,
+  url: URL,
+  origin: string | null,
+  deps: ZenRouteDependencies,
+  now: () => number,
+): Promise<Response> {
+  let windowId: WindowId;
+  try {
+    if (url.search !== "") {
+      return failureResponse("Zen research dock is invalid.", 400, origin);
+    }
+    windowId = authenticateWindow(request, deps.windowAuthorityStore, now());
+  } catch (error) {
+    return authenticationFailure(error, "Zen research dock", origin);
+  }
+  try {
+    const body = decodeZenResearchDockRequest(await request.json());
+    return jsonResponse(await deps.zenService.dockResearch(windowId, body, request.signal), origin);
+  } catch (error) {
+    if (error instanceof ZenError) return zenFailureResponse(error, origin);
+    return failureResponse("Zen research dock is invalid.", 400, origin);
   }
 }
 

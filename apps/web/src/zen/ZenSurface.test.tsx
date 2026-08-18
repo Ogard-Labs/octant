@@ -52,12 +52,52 @@ function makeSpace(elements: ZenElementPayload[] = []): ZenSpace {
     active: false,
     barCollapsed: false,
     assistant: null,
+    research: null,
     createdAt: "2026-07-26T12:00:00.000Z" as ZenSpace["createdAt"],
     updatedAt: "2026-07-26T12:00:00.000Z" as ZenSpace["updatedAt"],
   };
 }
 
 describe("ZenSurface", () => {
+  it("keeps the docked research browser out of the transformed canvas", () => {
+    // The docked page is a native view the host places by absolute window
+    // bounds. Inside the canvas it would be positioned by however far the
+    // canvas last panned and zoomed, so the dock is a sibling of the canvas,
+    // not a card on it.
+    const base = makeSpace();
+    const space = {
+      ...base,
+      research: {
+        sourceContext: {
+          hostId: "local",
+          mode: "work" as const,
+          projectId: null,
+          threadKind: "work" as const,
+          threadId: "10000000-0000-4000-8000-000000000001",
+        },
+        width: 480,
+        collapsed: false,
+      },
+    } as ZenSpace;
+
+    const { container } = render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        renderResearchDock={() => <aside data-testid="research-dock" />}
+        space={space}
+      />,
+    );
+
+    const docked = container.querySelector("[data-testid='research-dock']");
+    expect(docked).not.toBeNull();
+    expect(docked?.closest(".zen-surface__canvas")).toBeNull();
+  });
+
   it("renders a capability-fetched object URL and retains a safe fallback for unavailable media", () => {
     const base = makeSpace();
     const space = {

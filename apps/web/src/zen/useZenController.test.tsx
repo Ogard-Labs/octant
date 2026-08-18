@@ -5,6 +5,8 @@ import type {
   ZenFocusZone,
   ZenFocusZoneCommand,
   ZenFocusZoneResult,
+  ZenResearchDockRequest,
+  ZenResearchDockResult,
   ZenTerminalAttachRequest,
   ZenTerminalAttachResult,
   ZenResult,
@@ -38,6 +40,7 @@ function makeSpace(overrides: Partial<ZenSpace> = {}): ZenSpace {
     active: false,
     barCollapsed: false,
     assistant: null,
+    research: null,
     createdAt: "2026-07-26T12:00:00.000Z" as ZenSpace["createdAt"],
     updatedAt: "2026-07-26T12:00:00.000Z" as ZenSpace["updatedAt"],
     ...overrides,
@@ -65,6 +68,12 @@ function createClient(overrides: Partial<ZenClient> = {}): ZenClient {
         overrides.attachTerminal !== undefined
           ? await overrides.attachTerminal(request)
           : Promise.reject(new Error("This window pins no terminals.")),
+    ),
+    dockResearch: vi.fn(
+      async (request: ZenResearchDockRequest): Promise<ZenResearchDockResult> =>
+        overrides.dockResearch !== undefined
+          ? await overrides.dockResearch(request)
+          : Promise.reject(new Error("This window docks no research browser.")),
     ),
     space: vi.fn(
       async (command: ZenFocusZoneCommand): Promise<ZenFocusZoneResult> =>

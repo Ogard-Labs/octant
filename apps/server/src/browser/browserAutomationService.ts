@@ -14,7 +14,7 @@ import type {
   ToolEvidence,
   WindowId,
 } from "@octant/contracts";
-import { sameToolActionAuthority } from "@octant/contracts";
+import { MAX_BROWSER_TABS_PER_CONTEXT, sameToolActionAuthority } from "@octant/contracts";
 import {
   authorizeToolAction,
   canRequestToolCancellation,
@@ -71,7 +71,7 @@ const hostPolicy: BrowserContextPolicy = {
   profileMode: "isolated",
   allowedOrigins: [],
   credentialFieldProtection: true,
-  maxConcurrentTabs: 1,
+  maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
   sessionTimeoutMs: 600_000,
 };
 const MAX_RETAINED_BROWSER_EVIDENCE = 32;

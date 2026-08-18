@@ -95,6 +95,7 @@ describe("desktop preload bridge", () => {
       "subscribeCodeDeepLinks",
       "subscribeResolvedMaterial",
       "subscribeStartNewAgent",
+      "tabBrowserSurface",
       "updateBrowserSurfaceBounds",
     ]);
     expect(bridge).not.toHaveProperty("invoke");

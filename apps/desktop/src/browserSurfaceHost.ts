@@ -18,6 +18,13 @@ export interface BrowserSurfaceOwner {
   readonly threadId: BrowserThreadId | string;
 }
 
+/** One tab as the rail shows it. */
+export interface BrowserSurfaceTabState {
+  readonly tabId: string;
+  readonly url: string;
+  readonly title: string;
+}
+
 export interface BrowserSurfaceState {
   readonly contextId: string;
   readonly url: string;
@@ -26,7 +33,15 @@ export interface BrowserSurfaceState {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
   readonly control: "idle" | "user" | "agent";
+  readonly tabs: ReadonlyArray<BrowserSurfaceTabState>;
+  readonly activeTabId: string;
 }
+
+/** What the person asked of the tab rail. */
+export type BrowserSurfaceTabCommand =
+  | { readonly kind: "open" }
+  | { readonly kind: "select"; readonly tabId: string }
+  | { readonly kind: "close"; readonly tabId: string };
 
 export interface BrowserSurfaceShellWindowPort {
   readonly contentView: {
@@ -121,10 +136,38 @@ export interface BrowserSurfaceHostOptions {
   readonly isOwnerWindowAvailable?: (windowId: string) => boolean;
 }
 
+/** One page of a context. Tabs share the context's session and its guards. */
+interface OwnedTab {
+  readonly tabId: string;
+  readonly view: BrowserSurfaceViewPort;
+}
+
 interface OwnedSurface {
   readonly owner: BrowserSurfaceOwner;
   readonly policy: BrowserContextPolicy;
-  readonly view: BrowserSurfaceViewPort;
+  /** Every open tab, in the order the person opened them. */
+  tabs: OwnedTab[];
+  activeTabId: string;
+  /**
+   * Ordinal for the next tab this context opens.
+   *
+   * Monotonic rather than derived from the open tabs, so closing the second of
+   * three tabs cannot hand a later tab an identifier the renderer still holds.
+   */
+  nextTabOrdinal: number;
+  /**
+   * Bounds the surface was last placed at, so a tab brought to the front lands
+   * where the outgoing one sat. Native views are positioned in window
+   * coordinates, and a tab that is only made visible has no bounds of its own.
+   */
+  lastBounds: BrowserSurfaceBounds | undefined;
+  /**
+   * Origins the person reached for themselves, kept apart from the policy's
+   * allowlist. The policy says what the agent may act on and grows only by
+   * approval; this grows as the person browses and is never consulted when an
+   * action is authorized.
+   */
+  userGrantedOrigins: string[];
   actionTail: Promise<void>;
   control: BrowserSurfaceState["control"];
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
@@ -157,6 +200,15 @@ export interface BrowserSurfaceRuntimeObservation {
 
 const ISOLATED_WORLD_ID = 1_001;
 
+/**
+ * How many origins one context remembers the person having visited.
+ *
+ * A research session wanders; the oldest grant is given up rather than letting
+ * the set grow without end. Nothing here reaches the agent, so the bound costs
+ * a re-grant on revisit and nothing else.
+ */
+const MAX_USER_GRANTED_ORIGINS = 128;
+
 export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const surfaces = new Map<string, OwnedSurface>();
   const goneListeners = new Set<(contextId: string) => void>();
@@ -176,11 +228,164 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
   const markGone = (contextId: string, owned: OwnedSurface): void => {
     if (surfaces.get(contextId) !== owned) return;
     surfaces.delete(contextId);
-    owned.view.setVisible(false);
-    owned.shellWindow?.contentView.removeChildView(owned.view);
+    // Emptied before anything is closed: closing a page can report the page
+    // gone, and a report that arrives while this list is still being walked
+    // would take a tab out from under the walk.
+    const closing = owned.tabs;
+    owned.tabs = [];
+    for (const tab of closing) {
+      tab.view.setVisible(false);
+      owned.shellWindow?.contentView.removeChildView(tab.view);
+      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+    }
     owned.shellWindow = undefined;
-    if (!owned.view.webContents.isDestroyed()) owned.view.webContents.close();
     for (const listener of goneListeners) listener(contextId);
+  };
+
+  /**
+   * Bring one tab to the front of its context.
+   *
+   * Native views are siblings placed by absolute window bounds, so the ones
+   * behind are not merely hidden but taken out of the window: an invisible
+   * child view still occupies the same rectangle and still receives the
+   * window's attention. The incoming tab is given the bounds the outgoing one
+   * held, because a view that has only ever been created has none.
+   */
+  const showTab = (owned: OwnedSurface, incoming: OwnedTab): void => {
+    for (const tab of owned.tabs) {
+      if (tab === incoming) continue;
+      tab.view.setVisible(false);
+      owned.shellWindow?.contentView.removeChildView(tab.view);
+    }
+    owned.activeTabId = incoming.tabId;
+    if (owned.shellWindow === undefined || owned.shellWindow.isDestroyed()) return;
+    owned.shellWindow.contentView.addChildView(incoming.view);
+    if (owned.lastBounds !== undefined) incoming.view.setBounds(owned.lastBounds);
+    incoming.view.setVisible(true);
+  };
+
+  /**
+   * Take one tab out of its context, whether the person closed it or its
+   * renderer went away on its own.
+   *
+   * Only the last tab standing ends the context. Before tabs, one destroyed
+   * view was the whole surface, and carrying that forward would let a crash in
+   * one research page throw away the session in the others. A tab already
+   * taken out is absent here and reports nothing, so a close a caller asked
+   * for does not come back around as a second, involuntary one.
+   */
+  const forgetTab = (contextId: string, owned: OwnedSurface, tab: OwnedTab): void => {
+    const index = owned.tabs.indexOf(tab);
+    if (index === -1) return;
+    owned.tabs.splice(index, 1);
+    tab.view.setVisible(false);
+    owned.shellWindow?.contentView.removeChildView(tab.view);
+    if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+    if (owned.tabs.length === 0) return markGone(contextId, owned);
+    const successor = owned.tabs[Math.min(index, owned.tabs.length - 1)];
+    if (owned.activeTabId === tab.tabId && successor !== undefined) showTab(owned, successor);
+    publish(contextId, owned);
+  };
+
+  /**
+   * Open one more page inside a context, wired to that context's own guards.
+   *
+   * Every tab of a context is built here, so a second tab is protected by the
+   * same permission refusals, download block, popup denial, navigation
+   * admission, and input gate as the first. A tab that skipped any of them
+   * would be a hole in the context rather than a page in it.
+   */
+  const openTabView = (
+    contextId: BrowserContextId | string,
+    owned: OwnedSurface,
+    tabId: string,
+  ): OwnedTab => {
+    const view = options.createView({
+      partition: `octant-browser-${contextId}`,
+      webPreferences: {
+        allowRunningInsecureContent: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true,
+      },
+    });
+    view.setVisible(false);
+    view.webContents.session.setPermissionCheckHandler(() => false);
+    view.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) =>
+      callback(false),
+    );
+    view.webContents.session.setDevicePermissionHandler(() => false);
+    view.webContents.session.setDisplayMediaRequestHandler((_request, callback) => callback({}));
+    view.webContents.session.on("will-download", (event) => event.preventDefault?.());
+    // `policy.acceptsLocalCertificate` relaxes nothing here. That acceptance
+    // is bounded to the one origin this surface opened, and Electron's
+    // certificate verify proc reports only `request.hostname` — no scheme, no
+    // port, no URL — because Chromium verifies a certificate against a host
+    // and caches the verdict in the network service. Accepting by hostname
+    // would also trust a different self-signed service on another port of the
+    // same loopback host, including for subresource requests that never reach
+    // the navigation guard below, so this surface leaves Chromium's own
+    // verification in force and installs no trust root.
+    view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    for (const event of [
+      "did-start-loading",
+      "did-stop-loading",
+      "did-navigate",
+      "did-navigate-in-page",
+      "page-title-updated",
+    ]) {
+      view.webContents.on(event, () => publish(contextId, owned));
+    }
+    const guardNavigation = (event: unknown, ...details: readonly unknown[]) => {
+      const target = navigationUrl(event, details);
+      if (typeof target === "string" && admitNavigation(owned, target)) return;
+      (event as { preventDefault?: () => void }).preventDefault?.();
+      return target;
+    };
+    // Only a refused top-level move explains a failed navigate action to the
+    // user; a cancelled frame navigation is the allowlist working as intended.
+    const guardTopLevelNavigation = (event: unknown, ...details: readonly unknown[]) => {
+      const refused = guardNavigation(event, ...details);
+      if (typeof refused === "string") owned.blockedNavigationUrl = refused;
+    };
+    view.webContents.on("will-navigate", guardTopLevelNavigation);
+    view.webContents.on("will-redirect", guardTopLevelNavigation);
+    view.webContents.on("will-frame-navigate", guardNavigation);
+    view.webContents.on("login", (event: unknown, ...details: readonly unknown[]) => {
+      (event as { preventDefault?: () => void }).preventDefault?.();
+      const callback = details.find((detail): detail is () => void => typeof detail === "function");
+      callback?.();
+    });
+    view.webContents.on(
+      "select-client-certificate",
+      (event: unknown, ...details: readonly unknown[]) => {
+        (event as { preventDefault?: () => void }).preventDefault?.();
+        const callback = details.find(
+          (detail): detail is () => void => typeof detail === "function",
+        );
+        callback?.();
+      },
+    );
+    view.webContents.on("focus", () => {
+      owned.control = "user";
+      publish(contextId, owned);
+    });
+    const gateUserInput = (event: unknown) => {
+      if (owned.control === "agent") {
+        (event as { preventDefault?: () => void }).preventDefault?.();
+        return;
+      }
+      owned.control = "user";
+      publish(contextId, owned);
+    };
+    view.webContents.on("before-input-event", gateUserInput);
+    view.webContents.on("before-mouse-event", gateUserInput);
+    const tab: OwnedTab = { tabId, view };
+    owned.tabs.push(tab);
+    view.webContents.on("render-process-gone", () => forgetTab(String(contextId), owned, tab));
+    view.webContents.on("destroyed", () => forgetTab(String(contextId), owned, tab));
+    return tab;
   };
 
   return Object.freeze({
@@ -201,101 +406,21 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (options.isOwnerWindowAvailable?.(input.owner.windowId) === false) {
         throw new Error("Octant Browser owner is not a native Project window.");
       }
-      const view = options.createView({
-        partition: `octant-browser-${input.contextId}`,
-        webPreferences: {
-          allowRunningInsecureContent: false,
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true,
-          webSecurity: true,
-        },
-      });
-      view.setVisible(false);
-      view.webContents.session.setPermissionCheckHandler(() => false);
-      view.webContents.session.setPermissionRequestHandler((_contents, _permission, callback) =>
-        callback(false),
-      );
-      view.webContents.session.setDevicePermissionHandler(() => false);
-      view.webContents.session.setDisplayMediaRequestHandler((_request, callback) => callback({}));
-      view.webContents.session.on("will-download", (event) => event.preventDefault?.());
-      // `policy.acceptsLocalCertificate` relaxes nothing here. That acceptance
-      // is bounded to the one origin this surface opened, and Electron's
-      // certificate verify proc reports only `request.hostname` — no scheme, no
-      // port, no URL — because Chromium verifies a certificate against a host
-      // and caches the verdict in the network service. Accepting by hostname
-      // would also trust a different self-signed service on another port of the
-      // same loopback host, including for subresource requests that never reach
-      // the navigation guard below, so this surface leaves Chromium's own
-      // verification in force and installs no trust root.
-      view.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+      const firstTabId = `${String(input.contextId)}:1`;
       const owned: OwnedSurface = {
         owner: input.owner,
         policy: input.policy,
-        view,
+        tabs: [],
+        activeTabId: firstTabId,
+        nextTabOrdinal: 2,
+        lastBounds: undefined,
+        userGrantedOrigins: [],
         actionTail: Promise.resolve(),
         control: "idle",
         shellWindow: undefined,
         blockedNavigationUrl: undefined,
       };
-      for (const event of [
-        "did-start-loading",
-        "did-stop-loading",
-        "did-navigate",
-        "did-navigate-in-page",
-        "page-title-updated",
-      ]) {
-        view.webContents.on(event, () => publish(input.contextId, owned));
-      }
-      const guardNavigation = (event: unknown, ...details: readonly unknown[]) => {
-        const target = navigationUrl(event, details);
-        if (typeof target === "string" && originAllowed(target, owned.policy.allowedOrigins))
-          return;
-        (event as { preventDefault?: () => void }).preventDefault?.();
-        return target;
-      };
-      // Only a refused top-level move explains a failed navigate action to the
-      // user; a cancelled frame navigation is the allowlist working as intended.
-      const guardTopLevelNavigation = (event: unknown, ...details: readonly unknown[]) => {
-        const refused = guardNavigation(event, ...details);
-        if (typeof refused === "string") owned.blockedNavigationUrl = refused;
-      };
-      view.webContents.on("will-navigate", guardTopLevelNavigation);
-      view.webContents.on("will-redirect", guardTopLevelNavigation);
-      view.webContents.on("will-frame-navigate", guardNavigation);
-      view.webContents.on("login", (event: unknown, ...details: readonly unknown[]) => {
-        (event as { preventDefault?: () => void }).preventDefault?.();
-        const callback = details.find(
-          (detail): detail is () => void => typeof detail === "function",
-        );
-        callback?.();
-      });
-      view.webContents.on(
-        "select-client-certificate",
-        (event: unknown, ...details: readonly unknown[]) => {
-          (event as { preventDefault?: () => void }).preventDefault?.();
-          const callback = details.find(
-            (detail): detail is () => void => typeof detail === "function",
-          );
-          callback?.();
-        },
-      );
-      view.webContents.on("focus", () => {
-        owned.control = "user";
-        publish(input.contextId, owned);
-      });
-      const gateUserInput = (event: unknown) => {
-        if (owned.control === "agent") {
-          (event as { preventDefault?: () => void }).preventDefault?.();
-          return;
-        }
-        owned.control = "user";
-        publish(input.contextId, owned);
-      };
-      view.webContents.on("before-input-event", gateUserInput);
-      view.webContents.on("before-mouse-event", gateUserInput);
-      view.webContents.on("render-process-gone", () => markGone(input.contextId, owned));
-      view.webContents.on("destroyed", () => markGone(input.contextId, owned));
+      openTabView(input.contextId, owned, firstTabId);
       surfaces.set(input.contextId, owned);
     },
     attach: (
@@ -309,12 +434,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         throw new Error("Octant Browser can attach only to its owning Project window.");
       }
       if (owned.shellWindow !== undefined && owned.shellWindow !== shellWindow) {
-        owned.shellWindow.contentView.removeChildView(owned.view);
+        for (const tab of owned.tabs) owned.shellWindow.contentView.removeChildView(tab.view);
       }
       owned.shellWindow = shellWindow;
-      shellWindow.contentView.addChildView(owned.view);
-      owned.view.setBounds(normalizeBounds(bounds));
-      owned.view.setVisible(true);
+      owned.lastBounds = normalizeBounds(bounds);
+      shellWindow.contentView.addChildView(contentsView(owned));
+      contentsView(owned).setBounds(owned.lastBounds);
+      contentsView(owned).setVisible(true);
       const state = readState(contextId, owned);
       publish(contextId, owned);
       return state;
@@ -328,21 +454,24 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       if (owned.owner.windowId !== owner.windowId || owned.owner.threadId !== owner.threadId) {
         throw new Error("Octant Browser can resize only inside its owning Project window.");
       }
-      owned.view.setBounds(normalizeBounds(bounds));
+      owned.lastBounds = normalizeBounds(bounds);
+      contentsView(owned).setBounds(owned.lastBounds);
     },
     detach: (contextId: BrowserContextId | string, owner: BrowserSurfaceOwner): void => {
       const owned = surface(contextId);
       if (owned.owner.windowId !== owner.windowId || owned.owner.threadId !== owner.threadId) {
         throw new Error("Octant Browser can detach only from its owning Project window.");
       }
-      owned.view.setVisible(false);
-      owned.shellWindow?.contentView.removeChildView(owned.view);
+      for (const tab of owned.tabs) {
+        tab.view.setVisible(false);
+        owned.shellWindow?.contentView.removeChildView(tab.view);
+      }
       owned.shellWindow = undefined;
     },
     inspectTarget: async (contextId: BrowserContextId | string, selector: string) => {
       const owned = surface(contextId);
       const result = await execute(
-        owned.view,
+        contentsView(owned),
         `(() => {
         const element = document.querySelector(${JSON.stringify(selector)});
         if (!(element instanceof HTMLInputElement)) return false;
@@ -365,7 +494,15 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         owned.blockedNavigationUrl = undefined;
         publish(contextId, owned);
         try {
-          const contents = owned.view.webContents;
+          const contents = contentsView(owned).webContents;
+          // Reading or driving a page is authorized by the origin approval put
+          // on this context, and the page in front is not always one approval
+          // covered: the person can take their own view somewhere else, and
+          // tabs of a context share its session. Navigating is exempt because
+          // it reads nothing — its own target check is the guard — but its
+          // result is checked below, so a navigation that fails cannot leave
+          // the agent extracting the page it did not manage to leave.
+          if (request.kind !== "navigate") refuseUnapprovedPage(owned, contents);
           switch (request.kind) {
             case "navigate": {
               if (
@@ -418,6 +555,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               await contents.loadURL("about:blank");
               break;
           }
+          refuseUnapprovedPage(owned, contents);
           const extractedText = await execute(
             contentsView(owned),
             "document.body?.innerText?.slice(0, 65536) ?? ''",
@@ -468,7 +606,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
       }
       await queueSurfaceAction(owned, async () => {
         owned.control = "user";
-        const contents = owned.view.webContents;
+        const contents = contentsView(owned).webContents;
         if (command === "back" && contents.navigationHistory.canGoBack()) {
           contents.navigationHistory.goBack();
         } else if (command === "forward" && contents.navigationHistory.canGoForward()) {
@@ -479,6 +617,51 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           contents.stop();
         }
         publish(contextId, owned);
+      });
+    },
+    tabCommand: async (
+      contextId: BrowserContextId | string,
+      owner: BrowserSurfaceOwner,
+      command: BrowserSurfaceTabCommand,
+    ): Promise<BrowserSurfaceState> => {
+      const owned = surface(contextId);
+      if (owned.owner.windowId !== owner.windowId || owned.owner.threadId !== owner.threadId) {
+        throw new Error("Octant Browser tab command does not own this context.");
+      }
+      return queueSurfaceAction(owned, async () => {
+        // Opening, selecting, and closing a tab are all the person acting on
+        // their own view, so the surface is theirs to drive afterwards. It
+        // grants no origin on its own: a new tab starts blank and reaches an
+        // origin only through the navigation guard.
+        owned.control = "user";
+        if (command.kind === "open") {
+          if (owned.tabs.length >= owned.policy.maxConcurrentTabs) {
+            throw new Error("Octant Browser context is already at its tab limit.");
+          }
+          const tabId = `${String(contextId)}:${owned.nextTabOrdinal}`;
+          owned.nextTabOrdinal += 1;
+          const opened = openTabView(contextId, owned, tabId);
+          await opened.view.webContents.loadURL("about:blank");
+          showTab(owned, opened);
+        } else {
+          const index = owned.tabs.findIndex((tab) => tab.tabId === command.tabId);
+          const tab = owned.tabs[index];
+          if (tab === undefined) throw new Error("Octant Browser tab is unknown.");
+          if (command.kind === "select") {
+            showTab(owned, tab);
+          } else {
+            // The context is the tab: closing the only page would leave a
+            // surface with nothing to show, which is a context close and the
+            // caller's decision, not this command's.
+            if (owned.tabs.length === 1) {
+              throw new Error("Octant Browser cannot close a context's only tab.");
+            }
+            forgetTab(String(contextId), owned, tab);
+          }
+        }
+        const state = readState(contextId, owned);
+        publish(contextId, owned);
+        return state;
       });
     },
     state: (contextId: BrowserContextId | string): BrowserSurfaceState =>
@@ -504,9 +687,13 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
     const owned = surfaces.get(contextId);
     if (owned === undefined) return;
     surfaces.delete(contextId);
-    owned.view.setVisible(false);
-    owned.shellWindow?.contentView.removeChildView(owned.view);
-    if (!owned.view.webContents.isDestroyed()) owned.view.webContents.close();
+    const closing = owned.tabs;
+    owned.tabs = [];
+    for (const tab of closing) {
+      tab.view.setVisible(false);
+      owned.shellWindow?.contentView.removeChildView(tab.view);
+      if (!tab.view.webContents.isDestroyed()) tab.view.webContents.close();
+    }
   }
 }
 
@@ -532,11 +719,67 @@ async function queueSurfaceAction<T>(owned: OwnedSurface, action: () => Promise<
 }
 
 function contentsView(owned: OwnedSurface): BrowserSurfaceViewPort {
-  return owned.view;
+  return activeTab(owned).view;
+}
+
+function activeTab(owned: OwnedSurface): OwnedTab {
+  const tab = owned.tabs.find((candidate) => candidate.tabId === owned.activeTabId);
+  if (tab === undefined) throw new Error("Octant Browser context has no open tab.");
+  return tab;
+}
+
+/**
+ * May this navigation proceed, and does it grant its origin?
+ *
+ * A person following a link or typing an address is browsing, so the origin
+ * they reach joins the origins their own view may show. Nothing else grants:
+ * while the agent drives, or while nobody has touched the surface at all, the
+ * allowlist is exactly what approval made it and a page cannot widen it by
+ * navigating itself.
+ */
+function admitNavigation(owned: OwnedSurface, target: string): boolean {
+  if (originAllowed(target, owned.policy.allowedOrigins)) return true;
+  if (originAllowed(target, owned.userGrantedOrigins)) return true;
+  // Only while the person is demonstrably driving. "idle" is nobody's action:
+  // a surface nobody has touched must not grant itself an origin because a
+  // page redirected on load.
+  if (owned.control !== "user") return false;
+  const origin = originOf(target);
+  if (origin === undefined) return false;
+  if (owned.userGrantedOrigins.length >= MAX_USER_GRANTED_ORIGINS) {
+    owned.userGrantedOrigins.shift();
+  }
+  owned.userGrantedOrigins.push(origin);
+  return true;
+}
+
+/**
+ * Refuse to let the agent touch a page approval never covered.
+ *
+ * Only `policy.allowedOrigins` counts. The origins the person reached for
+ * themselves are deliberately not consulted: browsing somewhere is the user's
+ * action, and treating it as approval would let any link the user follows hand
+ * the agent a page it was never granted.
+ */
+function refuseUnapprovedPage(
+  owned: OwnedSurface,
+  contents: BrowserSurfaceViewPort["webContents"],
+): void {
+  const showing = contents.getURL();
+  if (showing === "" || originAllowed(showing, owned.policy.allowedOrigins)) return;
+  throw new Error("Octant Browser will not act on a page outside this context's allowed origins.");
+}
+
+function originOf(target: string): string | undefined {
+  try {
+    return new URL(normalizeUrl(target)).origin;
+  } catch {
+    return undefined;
+  }
 }
 
 function readState(contextId: string, owned: OwnedSurface): BrowserSurfaceState {
-  const contents = owned.view.webContents;
+  const contents = contentsView(owned).webContents;
   return {
     contextId,
     url: contents.getURL().slice(0, 4_096),
@@ -545,6 +788,12 @@ function readState(contextId: string, owned: OwnedSurface): BrowserSurfaceState 
     canGoBack: contents.navigationHistory.canGoBack(),
     canGoForward: contents.navigationHistory.canGoForward(),
     control: owned.control,
+    tabs: owned.tabs.map((tab) => ({
+      tabId: tab.tabId,
+      url: tab.view.webContents.getURL().slice(0, 4_096),
+      title: tab.view.webContents.getTitle().slice(0, 1_024),
+    })),
+    activeTabId: owned.activeTabId,
   };
 }
 
