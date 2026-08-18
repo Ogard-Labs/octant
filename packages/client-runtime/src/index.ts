@@ -68,3 +68,4 @@ export * from "./mobilePushTokenClient";
 export * from "./mobileProviderClient";
 export * from "./mobileWorkClient";
 export * from "./zenClient";
+export * from "./workspacePresetClient";

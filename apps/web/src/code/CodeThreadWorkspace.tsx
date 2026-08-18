@@ -38,6 +38,8 @@ import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControl
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
 import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
+import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
+import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
 import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
@@ -147,6 +149,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const scaffolds = useScaffoldCatalog({
     threadId: String(props.threadId),
     checkoutId: String(view?.checkout.id ?? ""),
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  // The preset needs the checkout the thread is bound to. A thread without one
+  // yet has nothing to arrange around, so the picker offers nothing.
+  const presets = useWorkspacePresets({
+    threadId: props.threadId,
+    ...(view === undefined ? {} : { checkoutId: view.checkout.id }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
@@ -679,6 +689,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               {/* A thread on an empty checkout has nothing to talk about yet.
                   Offering the curated scaffolds here, and only here, keeps the
                   choice next to the moment it matters. */}
+              {presets.available ? (
+                <WorkspacePresetPicker
+                  busy={presets.busy}
+                  {...(presets.message === undefined ? {} : { message: presets.message })}
+                  onApply={(preset) => void presets.apply(preset)}
+                  presets={presets.presets}
+                  skills={presets.skills}
+                />
+              ) : null}
               {scaffolds.available ? (
                 <ScaffoldPicker
                   busy={scaffolds.busy}
