@@ -432,6 +432,23 @@ export class AppleToolchainService {
           request.timeoutMs,
           signal,
         );
+      } else if (request.kind === "screenshot") {
+        this.#advance(active, "capturing-screen");
+        terminal = await this.#command(
+          ["xcrun", "simctl", "io", request.simulatorId, "screenshot", "--type", "png", "-"],
+          context,
+          request.timeoutMs,
+          signal,
+        );
+        if (succeeded(terminal)) {
+          const screenshotReference = `apple-screenshot-${request.actionId}`;
+          await this.#writeArtifact(screenshotReference, [terminal.stdout]);
+          artifacts = [{ kind: "screenshot", reference: screenshotReference }];
+          // The captured screen is PNG bytes on stdout. They belong to the
+          // screenshot artifact; folding them into the log would make the log
+          // unreadable and tell a reader nothing.
+          terminal = { ...terminal, stdout: new Uint8Array() };
+        }
       } else if (request.kind === "logs") {
         this.#advance(active, "collecting-logs");
         terminal = await this.#command(

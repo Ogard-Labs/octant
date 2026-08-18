@@ -84,7 +84,13 @@ export type AppleSimulatorRecord = typeof AppleSimulatorRecord.Type;
 export const AppleBuildActionKind = Schema.Literal("build", "test", "run", "clean", "archive");
 export type AppleBuildActionKind = typeof AppleBuildActionKind.Type;
 
-export const AppleSimulatorActionKind = Schema.Literal("boot", "shutdown", "terminate", "logs");
+export const AppleSimulatorActionKind = Schema.Literal(
+  "boot",
+  "shutdown",
+  "terminate",
+  "logs",
+  "screenshot",
+);
 export type AppleSimulatorActionKind = typeof AppleSimulatorActionKind.Type;
 
 export const AppleActionKind = Schema.Literal(
@@ -97,6 +103,7 @@ export const AppleActionKind = Schema.Literal(
   "shutdown",
   "terminate",
   "logs",
+  "screenshot",
 );
 export type AppleActionKind = typeof AppleActionKind.Type;
 
@@ -242,6 +249,7 @@ export const AppleActionProgress = Schema.Struct({
     "launching",
     "terminating",
     "collecting-logs",
+    "capturing-screen",
     "cleaning-up",
     "completed",
   ),

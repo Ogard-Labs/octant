@@ -160,6 +160,8 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly supportsAttachments?: (thread: CodeThread) => boolean;
   readonly browserAutomation?: CodeAppManagedToolsOptions["browser"];
+  /** The app-managed Apple capability, when this host has an Apple toolchain. */
+  readonly appleToolchain?: CodeAppManagedToolsOptions["apple"];
   /** Optional Project-fixed, read-only GitHub tools composed per active turn. */
   readonly githubReadTools?: (input: {
     readonly windowId: WindowId;
@@ -1082,6 +1084,9 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                     ...(this.#options.browserAutomation === undefined
                       ? {}
                       : { browser: this.#options.browserAutomation }),
+                    ...(this.#options.appleToolchain === undefined
+                      ? {}
+                      : { apple: this.#options.appleToolchain }),
                   }),
                   this.#options.githubReadTools?.({
                     windowId: active.windowId,

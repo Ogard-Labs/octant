@@ -3,6 +3,7 @@ import type {
   AppleActionProgress,
   AppleBuildEvidence,
   AppleRuntimeSnapshot,
+  AppleSimulatorId,
   AppleSimulatorRecord,
 } from "@octant/contracts/apple-toolchain";
 
@@ -14,12 +15,33 @@ export type AppleWorkbenchStatus =
   | "failed"
   | "ready";
 
+/**
+ * What the reader asked the workbench to do.
+ *
+ * A build or test names no destination; everything else names the exact
+ * Simulator it acts on. The pane never invents that identity — it offers only
+ * the actions a Simulator in its reported state can actually perform, and hands
+ * back the one the reader chose for the surface above to authorize.
+ */
+export type AppleWorkbenchIntent =
+  | { readonly kind: "build" | "test" }
+  | {
+      readonly kind: "run" | "boot" | "shutdown" | "screenshot";
+      readonly simulatorId: AppleSimulatorId;
+    };
+
 export interface AppleWorkbenchPaneProps {
   readonly status: AppleWorkbenchStatus;
   readonly discovery?: AppleDiscoverySnapshot;
   readonly runtime?: AppleRuntimeSnapshot;
   readonly errorMessage?: string;
   readonly onRetry?: () => void;
+  /** Absent when this surface may only read: no control is offered at all. */
+  readonly onRun?: (intent: AppleWorkbenchIntent) => void;
+  readonly onCancel?: (actionId: AppleActionProgress["actionId"]) => void;
+  /** True while a request this pane started is still in flight. */
+  readonly busy?: boolean;
+  readonly actionMessage?: string;
 }
 
 export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
@@ -44,8 +66,29 @@ export function AppleWorkbenchPane(props: AppleWorkbenchPaneProps) {
         <Fact label="SDKs" value={String(props.discovery.toolchain.sdks.length)} />
         <Fact label="Simulators" value={String(props.discovery.simulators.length)} />
       </dl>
-      <SimulatorList simulators={props.discovery.simulators} />
-      <ProgressList progress={props.runtime.active} />
+      {props.onRun === undefined ? null : (
+        <WorkspaceActions
+          busy={props.busy === true}
+          onRun={props.onRun}
+          scheme={props.discovery.workspace.schemes[0]}
+        />
+      )}
+      {props.actionMessage === undefined ? null : (
+        <p className="apple-workbench__action-message" role="alert">
+          {props.actionMessage}
+        </p>
+      )}
+      <SimulatorList
+        busy={props.busy === true}
+        {...(props.onRun === undefined ? {} : { onRun: props.onRun })}
+        scheme={props.discovery.workspace.schemes[0]}
+        simulators={props.discovery.simulators}
+      />
+      <ProgressList
+        busy={props.busy === true}
+        {...(props.onCancel === undefined ? {} : { onCancel: props.onCancel })}
+        progress={props.runtime.active}
+      />
       <EvidenceList evidence={props.runtime.recentEvidence} />
     </section>
   );
@@ -101,7 +144,57 @@ function Fact(props: { readonly label: string; readonly value: string }) {
   );
 }
 
-function SimulatorList(props: { readonly simulators: ReadonlyArray<AppleSimulatorRecord> }) {
+/**
+ * Build and test, which name no destination.
+ *
+ * A workspace with no scheme has nothing to build, and the pane says so rather
+ * than offering a button that would be refused.
+ */
+function WorkspaceActions(props: {
+  readonly busy: boolean;
+  readonly onRun: (intent: AppleWorkbenchIntent) => void;
+  readonly scheme: string | undefined;
+}) {
+  const scheme = props.scheme;
+  if (scheme === undefined) {
+    return (
+      <section aria-labelledby="apple-actions-heading" className="apple-workbench__section">
+        <h2 id="apple-actions-heading">Actions</h2>
+        <p>This workspace reports no scheme to build.</p>
+      </section>
+    );
+  }
+  return (
+    <section aria-labelledby="apple-actions-heading" className="apple-workbench__section">
+      <h2 id="apple-actions-heading">Actions</h2>
+      <div className="apple-workbench__actions">
+        <button
+          aria-label={`Build ${scheme}`}
+          disabled={props.busy}
+          onClick={() => props.onRun({ kind: "build" })}
+          type="button"
+        >
+          Build
+        </button>
+        <button
+          aria-label={`Test ${scheme}`}
+          disabled={props.busy}
+          onClick={() => props.onRun({ kind: "test" })}
+          type="button"
+        >
+          Test
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function SimulatorList(props: {
+  readonly busy: boolean;
+  readonly onRun?: (intent: AppleWorkbenchIntent) => void;
+  readonly scheme: string | undefined;
+  readonly simulators: ReadonlyArray<AppleSimulatorRecord>;
+}) {
   return (
     <section aria-labelledby="apple-simulators-heading" className="apple-workbench__section">
       <h2 id="apple-simulators-heading">Simulator destinations</h2>
@@ -115,6 +208,14 @@ function SimulatorList(props: { readonly simulators: ReadonlyArray<AppleSimulato
               <span>
                 {simulator.platform} {simulator.runtimeVersion} · {simulatorState(simulator.state)}
               </span>
+              {props.onRun === undefined ? null : (
+                <SimulatorActions
+                  busy={props.busy}
+                  onRun={props.onRun}
+                  scheme={props.scheme}
+                  simulator={simulator}
+                />
+              )}
             </li>
           ))}
         </ul>
@@ -123,7 +224,72 @@ function SimulatorList(props: { readonly simulators: ReadonlyArray<AppleSimulato
   );
 }
 
-function ProgressList(props: { readonly progress: ReadonlyArray<AppleActionProgress> }) {
+/**
+ * The actions this Simulator can take from the state the host reports.
+ *
+ * A shutdown Simulator has no screen to capture and no app to run; a booted one
+ * cannot be booted again. Offering either would be a control the host refuses.
+ */
+function SimulatorActions(props: {
+  readonly busy: boolean;
+  readonly onRun: (intent: AppleWorkbenchIntent) => void;
+  readonly scheme: string | undefined;
+  readonly simulator: AppleSimulatorRecord;
+}) {
+  const { simulator } = props;
+  const booted = simulator.state === "booted";
+  const disabled = props.busy || simulator.state === "unavailable";
+  return (
+    <span className="apple-workbench__actions">
+      {booted ? null : (
+        <button
+          aria-label={`Boot ${simulator.name}`}
+          disabled={disabled || simulator.state !== "shutdown"}
+          onClick={() => props.onRun({ kind: "boot", simulatorId: simulator.simulatorId })}
+          type="button"
+        >
+          Boot
+        </button>
+      )}
+      {!booted ? null : (
+        <>
+          {props.scheme === undefined ? null : (
+            <button
+              aria-label={`Run ${props.scheme} on ${simulator.name}`}
+              disabled={disabled}
+              onClick={() => props.onRun({ kind: "run", simulatorId: simulator.simulatorId })}
+              type="button"
+            >
+              Run
+            </button>
+          )}
+          <button
+            aria-label={`Capture the ${simulator.name} screen`}
+            disabled={disabled}
+            onClick={() => props.onRun({ kind: "screenshot", simulatorId: simulator.simulatorId })}
+            type="button"
+          >
+            Capture screen
+          </button>
+          <button
+            aria-label={`Shut down ${simulator.name}`}
+            disabled={disabled}
+            onClick={() => props.onRun({ kind: "shutdown", simulatorId: simulator.simulatorId })}
+            type="button"
+          >
+            Shut down
+          </button>
+        </>
+      )}
+    </span>
+  );
+}
+
+function ProgressList(props: {
+  readonly busy: boolean;
+  readonly onCancel?: (actionId: AppleActionProgress["actionId"]) => void;
+  readonly progress: ReadonlyArray<AppleActionProgress>;
+}) {
   return (
     <section aria-labelledby="apple-progress-heading" className="apple-workbench__section">
       <h2 id="apple-progress-heading">Current progress</h2>
@@ -135,6 +301,16 @@ function ProgressList(props: { readonly progress: ReadonlyArray<AppleActionProgr
             <li key={progress.actionId}>
               <strong>{actionLabel(progress.kind)}</strong>
               <span>{stepLabel(progress.step)}</span>
+              {props.onCancel === undefined || progress.state === "completed" ? null : (
+                <button
+                  aria-label={`Cancel ${actionLabel(progress.kind)}`}
+                  disabled={props.busy}
+                  onClick={() => props.onCancel?.(progress.actionId)}
+                  type="button"
+                >
+                  Cancel
+                </button>
+              )}
             </li>
           ))}
         </ol>

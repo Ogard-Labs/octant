@@ -38,9 +38,23 @@ survives restart.
   threads cannot reset, erase, shut down, or take over a destination owned by
   another workflow. Erase, content reset, runtime installation, and other
   destructive destination changes are never implicit recovery steps.
-- Build, run, install, launch, terminate, log capture, and crash capture are
-  structured actions bound to a run configuration; Octant stops only the
-  process it owns and never kills by broad name.
+- Build, run, install, launch, terminate, log capture, crash capture, and
+  screen capture are structured actions bound to a run configuration; Octant
+  stops only the process it owns and never kills by broad name.
+- Reading a running destination — its logs, its screen — is not an effect on
+  the checkout, so it stays available under a read-only posture and asks for no
+  approval. Changing one — booting, shutting down, terminating an app,
+  building, running, testing — does, and goes through ordinary Code approval.
+  Either way the destination must actually be in a state that can answer:
+  a Simulator that is not booted has no screen to capture and no logs to read.
+- A captured screen is evidence, held by the host and referenced by the
+  `screenshot` artifact kind. Actions report references, never image bytes, so
+  a Simulator's screen never enters a provider transcript as a side effect of
+  running an action.
+- The workbench offers only the actions its reported state can perform, and the
+  agent reaches the same actions through one app-managed Apple tool. Both build
+  the same request against the same thread and checkout; nothing about being an
+  agent widens what may run.
 - The Simulator is a first-class pane in the split-tree workspace with live
   frame, accessibility hierarchy, screenshot, recording, logs, and validation
   state. Users can attach a selected element's crop, accessibility identity,

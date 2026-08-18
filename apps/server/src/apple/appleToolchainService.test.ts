@@ -639,4 +639,83 @@ describe("AppleToolchainService lifecycle", () => {
     );
     expect(service.snapshot(context).simulators[0]?.state).toBe("shutdown");
   });
+
+  it("captures the Simulator screen as its own evidence artifact, keeping the log readable", async () => {
+    const execute = discoveryExecutor();
+    const artifacts = new Map<string, Uint8Array>();
+    const writeArtifact = vi.fn(async (reference: string, bytes: Uint8Array) => {
+      artifacts.set(reference, bytes);
+    });
+    const service = new AppleToolchainService({
+      execute,
+      writeArtifact,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff]);
+    execute.mockResolvedValue({
+      termination: "exited" as const,
+      exitCode: 0,
+      stdout: png,
+      stderr: new TextEncoder().encode(""),
+      parserFailed: false,
+      cleanupUncertain: false,
+    });
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).toBe("succeeded");
+    expect(evidence.kind).toBe("screenshot");
+    const screenshot = evidence.artifacts.find(
+      (artifact: { readonly kind: string }) => artifact.kind === "screenshot",
+    );
+    expect(screenshot).toBeDefined();
+    expect(artifacts.get(screenshot!.reference)).toEqual(png);
+    const command = execute.mock.calls.at(-1)?.[0] as { readonly argv: ReadonlyArray<string> };
+    expect(command.argv).toEqual([
+      "xcrun",
+      "simctl",
+      "io",
+      ids.simulator,
+      "screenshot",
+      "--type",
+      "png",
+      "-",
+    ]);
+    // The screen is bytes, not text: putting it in the log would make the log
+    // unreadable and would say nothing a reader could act on.
+    const log = evidence.artifacts.find(
+      (artifact: { readonly kind: string }) => artifact.kind === "log",
+    );
+    expect(artifacts.get(log!.reference)).toEqual(new Uint8Array());
+  });
+
+  it("records a failed capture without inventing a screenshot artifact", async () => {
+    const execute = discoveryExecutor();
+    const writeArtifact = vi.fn(async () => undefined);
+    const service = new AppleToolchainService({
+      execute,
+      writeArtifact,
+      realpath: async (path: string) => path,
+      now: () => "2026-07-27T20:00:00.000Z",
+      newId: () => "30000000-0000-4000-8000-000000000012",
+    });
+    await service.discover(discoveryRequest, context);
+    execute.mockResolvedValue(processResult("", { exitCode: 1, stderr: "Invalid device state\n" }));
+
+    const evidence = await service.execute(
+      simulatorRequest({ kind: "screenshot", bundleIdentifier: undefined }),
+      context,
+    );
+
+    expect(evidence.outcome).toBe("failed");
+    expect(evidence.artifacts.map((artifact: { readonly kind: string }) => artifact.kind)).toEqual([
+      "log",
+    ]);
+  });
 });
