@@ -45,6 +45,32 @@ labels are **Succeeded**, **Failed**, **Cancelled**, **Timed out**,
 **Interrupted**, **Unavailable**, **Unauthorized**, **Invalid destination**,
 and **Process died**.
 
+## Running actions
+
+**Build** and **Test** run against the workspace scheme. Each Simulator
+destination offers only what its reported state can do: a shut-down Simulator
+offers **Boot**; a booted one offers **Run**, **Capture screen**, and **Shut
+down**. Anything already running can be **Cancel**led from **Current
+progress**.
+
+An approval-gated Code thread asks for confirmation before each of these, the
+same confirmation the rest of Code uses. **Capture screen** does not: reading
+a booted Simulator's screen changes nothing, so it works under Plan mode too.
+A capture is recorded as a **screenshot** artifact in **Validation evidence**
+— a durable reference to a local file, never image bytes copied into the
+conversation.
+
+Open the workbench from the command palette: **Open Apple workbench for
+&lt;project&gt;** appears for each `.xcodeproj` or `.xcworkspace` the host
+finds at the root of the Code thread's checkout. A checkout with none offers
+no such command.
+
+A Code thread on **Full access** also reaches the same actions through the
+app-managed `octant_apple` tool, so an agent can discover the toolchain, read
+Simulator state, build, test, run, boot, shut down, and capture the screen.
+It sends the same requests the workbench sends and is refused by the same
+policy; it is unavailable under Plan and approval-gated postures.
+
 ## Honest verification
 
 A coding agent may claim verification only when the surface was actually

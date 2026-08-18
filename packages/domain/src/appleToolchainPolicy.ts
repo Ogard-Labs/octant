@@ -57,7 +57,12 @@ export function evaluateAppleSimulatorRequest(
   scope: AppleExecutionScope,
   simulators: ReadonlyArray<AppleSimulatorRecord>,
 ): AppleToolchainPolicyDecision {
-  const scoped = evaluateScope(request, scope, request.kind !== "logs");
+  // Reading a running Simulator's logs or its screen changes nothing, so both
+  // stay available under a read-only posture. Booting, shutting down, and
+  // terminating an app do change it, and go through approval like any other
+  // Code effect.
+  const readOnly = request.kind === "logs" || request.kind === "screenshot";
+  const scoped = evaluateScope(request, scope, !readOnly);
   if (scoped.kind === "denied") return scoped;
   const simulator = simulators.find((candidate) => candidate.simulatorId === request.simulatorId);
   if (simulator === undefined) return { kind: "denied", reason: "invalid-destination" };
@@ -68,7 +73,10 @@ export function evaluateAppleSimulatorRequest(
     return { kind: "denied", reason: "destination-not-shutdown" };
   }
   if (
-    (request.kind === "shutdown" || request.kind === "terminate" || request.kind === "logs") &&
+    (request.kind === "shutdown" ||
+      request.kind === "terminate" ||
+      request.kind === "logs" ||
+      request.kind === "screenshot") &&
     simulator.state !== "booted"
   ) {
     return { kind: "denied", reason: "destination-not-booted" };

@@ -39,7 +39,12 @@ approval categories that stay independent of which provider is running.
 - Server-side tool-call policy is one choke point: a closed tool catalog, a
   declared-capability ceiling per tool or extension component, mode and
   posture rules, and decision receipts. Every surface that dispatches a tool
-  calls it before side effects.
+  calls it before side effects. The catalog is app-managed and named for what
+  it operates — the thread's terminal, its isolated browser, its Apple
+  toolchain — and every entry is offered only where the host actually holds
+  that capability. A tool takes no shortcut the equivalent visible control
+  could not take: it carries the same request, resolves the same thread,
+  checkout, and posture, and is refused by the same policy.
 - Approval categories are independent and scoped: Project file writes, shell
   commands, network access, external application observation or control,
   destructive or irreversible actions, credential access, access outside the

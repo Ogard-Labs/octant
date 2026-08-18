@@ -22,6 +22,13 @@ export interface OctantCommandSources {
   readonly profiles: ReadonlyArray<CommandAgentProfile>;
   readonly onSelectProfile: (profile: CommandAgentProfile) => void;
   readonly skills: ReadonlyArray<CommandSkill>;
+  /**
+   * Apple projects the host listed in the active Code thread's checkout. A
+   * thread with none contributes no workbench command, because there would be
+   * nothing for the workbench to open.
+   */
+  readonly appleProjects: ReadonlyArray<CommandAppleProject>;
+  readonly onOpenAppleProject: (project: CommandAppleProject) => void;
 }
 
 export interface CommandThread {
@@ -47,6 +54,12 @@ export interface CommandAgentProfile {
   readonly displayName: string;
   /** Words for the policy this profile defaults to; never a colour. */
   readonly executionPolicyLabel: string;
+}
+
+export interface CommandAppleProject {
+  /** Checkout-relative path to the `.xcodeproj` or `.xcworkspace`. */
+  readonly projectPath: string;
+  readonly name: string;
 }
 
 export interface CommandSkill {
@@ -146,6 +159,17 @@ export function buildOctantCommands(sources: OctantCommandSources): ReadonlyArra
       detail: "Skill",
       keywords: ["skill", skill.skillId],
       action: { kind: "address", reference: `$${skill.skillId}` },
+    });
+  }
+
+  for (const project of sources.appleProjects.slice(0, MAX_NAVIGATION_ENTRIES)) {
+    commands.push({
+      id: `apple:${project.projectPath}`,
+      title: `Open Apple workbench for ${project.name}`,
+      group: "Workspace",
+      detail: "Build, run, and Simulator destinations",
+      keywords: ["apple", "xcode", "simulator", "build", "run", project.name],
+      action: { kind: "run", run: () => sources.onOpenAppleProject(project) },
     });
   }
 

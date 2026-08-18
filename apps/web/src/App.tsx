@@ -215,6 +215,7 @@ import { ZenRoot } from "./zen/ZenRoot";
 import { ZenSurface } from "./zen/ZenSurface";
 import { useZenController } from "./zen/useZenController";
 import { resolveZenLiveThreadCard, type ZenLiveThreadClients } from "./zen/ZenLiveThreadCards";
+import { useAppleProjects } from "./apple/useAppleProjects";
 import { useThemeController } from "./theme/useThemeController";
 import { ExecutionProfileWorkflow } from "./agentProfile/ExecutionProfileWorkflow";
 import { useExecutionProfileController } from "./agentProfile/useExecutionProfileController";
@@ -1155,6 +1156,20 @@ function LaunchedShell(
     activeCodeThreadId,
   );
   const activeCodeThreadView = activeCodeThreadController?.activeView;
+  // The Apple projects the host lists at the root of the Code thread in view.
+  // The window's own Code reader binds to no thread, so the root comes from
+  // that thread's own controller. Nothing is inferred from the Project name: a
+  // checkout with no Xcode project simply offers no workbench entry point.
+  const appleProjects = useAppleProjects({
+    ...(activeCodeThreadView === undefined
+      ? {}
+      : {
+          threadId: activeCodeThreadView.thread.id,
+          checkoutId: activeCodeThreadView.checkout.id,
+        }),
+    serverUrl: props.launch.serverUrl,
+    windowCapability: props.projectWindowCapability,
+  });
   const watchedThreadId =
     activeMode === "code"
       ? activeCodeThreadId === undefined
@@ -3149,6 +3164,19 @@ function LaunchedShell(
       executionProfileController.selectProfile(target.id);
     },
     skills: commandSkills,
+    appleProjects,
+    onOpenAppleProject: (project) => {
+      // The thread's own controller, not the window's reader: the window's
+      // reader binds to no thread and so knows no checkout to open against.
+      const view = activeCodeThreadView;
+      if (view === undefined) return;
+      void controller.openCodeSurface({
+        kind: "apple-workbench",
+        threadId: view.thread.id,
+        title: "Apple workbench",
+        projectPath: project.projectPath as never,
+      });
+    },
   });
 
   const usageSurface = (

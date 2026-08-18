@@ -106,6 +106,100 @@ describe("AppleWorkbenchPane", () => {
     expect(html).toContain("apple-log-safe");
   });
 
+  it("runs and cancels Apple actions from the workbench itself", async () => {
+    const { fireEvent, render, screen } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    const onRun = vi.fn();
+    const onCancel = vi.fn();
+    const runtime: AppleRuntimeSnapshot = {
+      sequence: 1,
+      snapshotAt: "2026-07-27T20:00:03.000Z" as never,
+      toolchain: toolchain as never,
+      simulators: discovery.simulators,
+      active: [
+        {
+          actionId: "90000000-0000-4000-8000-000000000007" as never,
+          correlationId: "90000000-0000-4000-8000-000000000008" as never,
+          authority: authority as never,
+          kind: "test",
+          state: "running",
+          step: "testing",
+          sequence: 2,
+          updatedAt: "2026-07-27T20:00:02.000Z" as never,
+        },
+      ],
+      recentEvidence: [],
+    };
+    render(
+      <AppleWorkbenchPane
+        discovery={discovery}
+        onCancel={onCancel}
+        onRun={onRun}
+        runtime={runtime}
+        status="ready"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Build Fixture" }));
+    expect(onRun).toHaveBeenCalledWith({ kind: "build" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Run Fixture on iPhone 16" }));
+    expect(onRun).toHaveBeenCalledWith({
+      kind: "run",
+      simulatorId: discovery.simulators[0]!.simulatorId,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Capture the iPhone 16 screen" }));
+    expect(onRun).toHaveBeenCalledWith({
+      kind: "screenshot",
+      simulatorId: discovery.simulators[0]!.simulatorId,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Shut down iPhone 16" }));
+    expect(onRun).toHaveBeenCalledWith({
+      kind: "shutdown",
+      simulatorId: discovery.simulators[0]!.simulatorId,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Test" }));
+    expect(onCancel).toHaveBeenCalledWith(runtime.active[0]!.actionId);
+  });
+
+  it("offers only what a Simulator in that state can actually do", async () => {
+    const { render, screen } = await import("@testing-library/react");
+    const { vi } = await import("vitest");
+    const shutdown = {
+      ...discovery,
+      simulators: [{ ...discovery.simulators[0]!, state: "shutdown" as const }],
+    };
+    render(
+      <AppleWorkbenchPane
+        discovery={shutdown}
+        onRun={vi.fn()}
+        runtime={
+          {
+            sequence: 1,
+            snapshotAt: "2026-07-27T20:00:03.000Z",
+            toolchain,
+            simulators: shutdown.simulators,
+            active: [],
+            recentEvidence: [],
+          } as never
+        }
+        status="ready"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Boot iPhone 16" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Capture the iPhone 16 screen" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Shut down iPhone 16" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Run Fixture on iPhone 16" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders unavailable and interrupted states without claiming success", () => {
     expect(renderToStaticMarkup(<AppleWorkbenchPane status="unavailable" />)).toContain(
       "Apple toolchain unavailable",

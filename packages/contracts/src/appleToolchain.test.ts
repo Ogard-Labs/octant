@@ -344,4 +344,65 @@ describe("Apple runtime contracts", () => {
     expect(result.schemes).toEqual(["Fixture"]);
     expect(JSON.stringify(result)).not.toContain("/Users/");
   });
+
+  it("accepts a Simulator screen capture that names no application", () => {
+    const decode = contracts.decodeAppleSimulatorRequest as (value: unknown) => any;
+    const request = {
+      actionId: "20000000-0000-4000-8000-000000000001",
+      correlationId: "20000000-0000-4000-8000-000000000002",
+      authority: {
+        hostId: "20000000-0000-4000-8000-000000000003",
+        mode: "code",
+        projectId: "20000000-0000-4000-8000-000000000004",
+        providerInstanceId: "20000000-0000-4000-8000-000000000005",
+        extension: { kind: "core" },
+      },
+      threadId: "20000000-0000-4000-8000-000000000006",
+      checkoutId: "20000000-0000-4000-8000-000000000007",
+      kind: "screenshot",
+      simulatorId: "20000000-0000-4000-8000-000000000008",
+      timeoutMs: 30_000,
+      approval: { kind: "not-required" },
+    };
+
+    expect(decode(request).kind).toBe("screenshot");
+    // Terminating an app or reading its logs still has to name one.
+    expect(() => decode({ ...request, kind: "logs" })).toThrow();
+  });
+
+  it("records a captured screen as evidence of a screenshot action", () => {
+    const decode = contracts.decodeAppleBuildEvidence as (value: unknown) => any;
+    const evidence = decode({
+      actionId: "20000000-0000-4000-8000-000000000001",
+      correlationId: "20000000-0000-4000-8000-000000000002",
+      authority: {
+        hostId: "20000000-0000-4000-8000-000000000003",
+        mode: "code",
+        projectId: "20000000-0000-4000-8000-000000000004",
+        providerInstanceId: "20000000-0000-4000-8000-000000000005",
+        extension: { kind: "core" },
+      },
+      kind: "screenshot",
+      outcome: "succeeded",
+      diagnostics: [],
+      artifacts: [{ kind: "screenshot", reference: "apple-screenshot-1" }],
+      cleanup: "not-required",
+      durationMs: 120,
+      completedAt: "2026-07-27T20:00:00.000Z",
+    });
+
+    expect(evidence.artifacts[0].kind).toBe("screenshot");
+    expect(
+      (contracts.decodeAppleActionProgress as (value: unknown) => any)({
+        actionId: evidence.actionId,
+        correlationId: evidence.correlationId,
+        authority: evidence.authority,
+        kind: "screenshot",
+        state: "running",
+        step: "capturing-screen",
+        sequence: 1,
+        updatedAt: "2026-07-27T20:00:00.000Z",
+      }).step,
+    ).toBe("capturing-screen");
+  });
 });

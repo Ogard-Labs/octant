@@ -740,6 +740,182 @@ describe("Code app-managed tools", () => {
   });
 });
 
+describe("the Apple capability as an agent tool", () => {
+  function appleTools(
+    apple: Partial<Parameters<typeof createCodeAppManagedTools>[0]["apple"]> = {},
+    threadOverrides: Partial<CodeThread> = {},
+  ) {
+    const execute = vi.fn(async (..._args: ReadonlyArray<unknown>) => appleEvidence());
+    const snapshot = vi.fn(async () => appleSnapshot());
+    const discover = vi.fn(async () => appleDiscovery());
+    const port = {
+      resolveAuthority: () => appleAuthority,
+      discover,
+      execute,
+      snapshot,
+      ...apple,
+    } as never;
+    return {
+      discover,
+      execute,
+      snapshot,
+      tools: createCodeAppManagedTools({
+        windowId,
+        thread: thread(threadOverrides),
+        readThread: () => thread(threadOverrides),
+        uuid: uuidFactory(),
+        executeOperation: async () => ({}) as never,
+        terminal: { read: async () => ({}) as never },
+        apple: port,
+      }),
+    };
+  }
+
+  it("offers the Apple tool only where the host has an Apple capability to lend", () => {
+    expect(appleTools().tools.definitions.map((definition) => definition.name)).toContain(
+      "octant_apple",
+    );
+    expect(
+      createCodeAppManagedTools({
+        windowId,
+        thread: thread(),
+        readThread: () => thread(),
+        uuid: uuidFactory(),
+        executeOperation: async () => ({}) as never,
+        terminal: { read: async () => ({}) as never },
+      }).definitions.map((definition) => definition.name),
+    ).not.toContain("octant_apple");
+  });
+
+  it("captures the Simulator screen as a reference, never as bytes in the transcript", async () => {
+    const { execute, tools } = appleTools();
+
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({
+        operation: "screenshot",
+        simulatorId: "80000000-0000-4000-8000-000000000001",
+      }),
+    } as never);
+
+    const request = execute.mock.calls[0]?.[1] as unknown as {
+      readonly kind: string;
+      readonly approval: { readonly kind: string };
+      readonly threadId: string;
+      readonly checkoutId: string;
+    };
+    expect(request.kind).toBe("screenshot");
+    expect(request.threadId).toBe(threadId);
+    expect(request.checkoutId).toBe(checkoutId);
+    // The host decides; the tool never claims an approval of its own.
+    expect(request.approval.kind).toBe("not-required");
+    expect(outcome.result).toMatchObject({
+      outcome: "succeeded",
+      artifacts: [{ kind: "screenshot", reference: "apple-screenshot-1" }],
+    });
+    expect(JSON.stringify(outcome.result)).not.toContain("PNG");
+  });
+
+  it("refuses an action whose destination or project the caller did not name", async () => {
+    const { execute, tools } = appleTools();
+
+    expect(
+      (
+        await tools.execute({
+          name: "octant_apple",
+          inputJson: JSON.stringify({ operation: "run", projectPath: "App.xcodeproj" }),
+        } as never)
+      ).isError,
+    ).toBe(true);
+    expect(
+      (
+        await tools.execute({
+          name: "octant_apple",
+          inputJson: JSON.stringify({ operation: "build" }),
+        } as never)
+      ).isError,
+    ).toBe(true);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("stays unavailable to a thread that is not on full access", async () => {
+    const { execute, snapshot, tools } = appleTools({}, { executionPolicy: "plan" } as never);
+
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({ operation: "status" }),
+    } as never);
+
+    expect(outcome.isError).toBe(true);
+    expect(outcome.result).toMatchObject({ error: "full-access-required" });
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("reports a refused action as an error rather than a silent success", async () => {
+    const { tools } = appleTools({
+      execute: vi.fn(async () => ({
+        ...(appleEvidence() as unknown as Record<string, unknown>),
+        outcome: "unauthorized",
+      })) as never,
+    });
+
+    const outcome = await tools.execute({
+      name: "octant_apple",
+      inputJson: JSON.stringify({
+        operation: "boot",
+        simulatorId: "80000000-0000-4000-8000-000000000001",
+      }),
+    } as never);
+
+    expect(outcome.isError).toBe(true);
+    expect(outcome.result).toMatchObject({ outcome: "unauthorized" });
+  });
+});
+
+const appleAuthority: ToolActionAuthority = {
+  hostId: "4f70656e-4f72-4269-9474-4c6f63616c31" as never,
+  mode: "code",
+  projectId: "40000000-0000-4000-8000-000000000001" as never,
+  providerInstanceId: "60000000-0000-4000-8000-000000000001" as never,
+  extension: { kind: "core" },
+};
+
+function appleEvidence() {
+  return {
+    actionId: "90000000-0000-4000-8000-000000000001",
+    correlationId: "90000000-0000-4000-8000-000000000002",
+    authority: appleAuthority,
+    kind: "screenshot",
+    outcome: "succeeded",
+    diagnostics: [],
+    artifacts: [{ kind: "screenshot", reference: "apple-screenshot-1" }],
+    cleanup: "not-required",
+    durationMs: 90,
+    completedAt: "2026-08-06T08:00:01.000Z",
+  } as never;
+}
+
+function appleSnapshot() {
+  return {
+    sequence: 1,
+    snapshotAt: "2026-08-06T08:00:01.000Z",
+    toolchain: { toolchainId: "a", available: true, sdks: [], discoveredAt: "x" },
+    simulators: [],
+    active: [],
+    recentEvidence: [],
+  } as never;
+}
+
+function appleDiscovery() {
+  return {
+    kind: "discovered",
+    toolchain: { toolchainId: "a", xcodeVersion: "16.4", available: true, sdks: [] },
+    workspace: { schemes: ["App"], configurations: ["Debug"] },
+    simulators: [],
+  } as never;
+}
+
 function thread(overrides: Partial<CodeThread> = {}): CodeThread {
   return {
     id: threadId,

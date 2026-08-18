@@ -2604,6 +2604,56 @@ export function startOctantServer(
           releaseThread: (windowId, threadId) =>
             browserAutomationService!.releaseThread(windowId, threadId),
         },
+        // The agent's Apple capability resolves its execution context through
+        // exactly the resolver the workbench route uses, so a tool call and a
+        // click are the same request to the same policy.
+        appleToolchain: {
+          resolveAuthority: (_windowId, thread) => ({
+            hostId: LOCAL_TOOL_HOST_ID,
+            mode: "code" as const,
+            projectId: thread.projectId,
+            providerInstanceId: thread.providerInstanceId,
+            extension: { kind: "core" as const },
+          }),
+          discover: async (windowId, request) => {
+            const context = await resolveAppleContext(
+              windowId,
+              {
+                authority: request.authority,
+                threadId: request.threadId,
+                checkoutId: request.checkoutId,
+              },
+              { kind: "apple-discovery-request", request },
+            );
+            if (context === undefined) return undefined;
+            return await appleToolchainService.discover(request, context);
+          },
+          execute: async (windowId, request) => {
+            const startedAt = new Date().toISOString();
+            const context = await resolveAppleContext(
+              windowId,
+              {
+                authority: request.authority,
+                threadId: request.threadId,
+                checkoutId: request.checkoutId,
+              },
+              { kind: "apple-action-request", request },
+            );
+            if (context === undefined) return undefined;
+            const evidence = await appleToolchainService.execute(request, context);
+            await recordAppleEvidence(evidence, startedAt);
+            return evidence;
+          },
+          snapshot: async (windowId, scope) => {
+            const context = await resolveAppleContext(windowId, scope, {
+              kind: "apple-snapshot-request",
+              authority: scope.authority,
+              threadId: scope.threadId,
+              checkoutId: scope.checkoutId,
+            });
+            return context === undefined ? undefined : appleToolchainService.snapshot(context);
+          },
+        },
         credentialResolver: { resolve: async () => undefined },
         resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
         takeProductFeedbackForTurn: createProductFeedbackTurnPort({
