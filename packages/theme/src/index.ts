@@ -3,6 +3,7 @@ export * from "./contrast";
 export * from "./tokens";
 export * from "./fallback";
 export * from "./import";
+export * from "./export";
 export * from "./backgrounds";
 export * from "./typography";
 export * from "./presets";

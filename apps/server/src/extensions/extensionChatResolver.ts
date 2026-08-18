@@ -17,6 +17,7 @@ import type {
   SourceQualifiedSkillId,
 } from "@octant/contracts/extensions";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import type { OctantMode } from "@octant/contracts/modes";
 import {
   filterSkillCatalogForScope,
   sourceQualifiedSkillId,
@@ -120,6 +121,34 @@ export function createStoredExtensionMaterialLoader(
   };
 }
 
+/**
+ * The facts a selection resolves against, whatever mode the thread is in.
+ *
+ * Skills declare the modes they apply to, and the host filters the catalog by
+ * that declaration. Reading the mode from the thread rather than from a literal
+ * is what keeps that filter honest: a resolver that always says "chat" would
+ * hand a Work or Code thread the Chat catalog and call it scoped.
+ */
+export interface ExtensionSelectionSubject {
+  readonly mode: OctantMode;
+  readonly threadId: string;
+  readonly projectId: string | null;
+  readonly threadVersion: number;
+  readonly providerInstanceId: ChatThread["providerInstanceId"];
+  readonly modelId: ChatThread["modelId"];
+}
+
+export function chatSelectionSubject(thread: ChatThread): ExtensionSelectionSubject {
+  return {
+    mode: "chat",
+    threadId: String(thread.id),
+    projectId: thread.projectId === undefined ? null : String(thread.projectId),
+    threadVersion: Number(thread.version),
+    providerInstanceId: thread.providerInstanceId,
+    modelId: thread.modelId,
+  };
+}
+
 export function createExtensionChatResolver(options: {
   readonly snapshot: () => ExtensionSnapshot;
   readonly resolveEffectiveState: (
@@ -135,9 +164,10 @@ export function createExtensionChatResolver(options: {
 }): ChatExtensionSelectionContextResolver {
   return async ({ phase, thread, selections, windowId }) => {
     const snapshot = options.snapshot();
+    const subject = chatSelectionSubject(thread);
     const scope: ExtensionEffectiveStateQuery["scope"] = {
       hostId: LOCAL_HOST_ID,
-      mode: "chat",
+      mode: subject.mode,
       projectId: thread.projectId ?? null,
       threadId: thread.id,
       providerFamily: options.providerFamily(thread),
@@ -145,7 +175,7 @@ export function createExtensionChatResolver(options: {
     let effectiveSnapshot = options.resolveEffectiveState(snapshot, { scope });
     const reconciled = await options.reconcileEffectiveState?.(effectiveSnapshot);
     if (reconciled !== undefined) effectiveSnapshot = reconciled;
-    const catalogs = buildCatalogs(snapshot, effectiveSnapshot, thread);
+    const catalogs = buildCatalogs(snapshot, effectiveSnapshot, subject);
     const composed = await composeSelectedExtensionCapabilities({
       phase,
       selections,
@@ -197,23 +227,23 @@ function extensionToolSet(
   };
 }
 
-function buildCatalogs(
+export function buildCatalogs(
   snapshot: ExtensionSnapshot,
   effectiveSnapshot: ExtensionEffectiveSnapshot,
-  thread: ChatThread,
+  subject: ExtensionSelectionSubject,
 ): {
   readonly addressing: ExtensionAddressingCatalog;
   readonly capabilities: CapabilityCatalog;
   readonly request: CapabilitySelectionRequest;
 } {
   const activeScope: CapabilityActiveScope = {
-    mode: { referenceId: "mode:chat", revision: 1 },
+    mode: { referenceId: `mode:${subject.mode}`, revision: 1 },
     project: {
-      referenceId: thread.projectId === undefined ? "project:none" : `project:${thread.projectId}`,
-      revision: Number(thread.version),
+      referenceId: subject.projectId === null ? "project:none" : `project:${subject.projectId}`,
+      revision: subject.threadVersion,
     },
     host: { referenceId: `host:${LOCAL_HOST_ID}`, revision: 1 },
-    model: { referenceId: `model:${thread.modelId}`, revision: 1 },
+    model: { referenceId: `model:${subject.modelId}`, revision: 1 },
   };
   const entries: CapabilityCatalogEntry[] = [];
   const plugins = effectiveSnapshot.packages.flatMap((packageState) => {
@@ -243,7 +273,7 @@ function buildCatalogs(
                     component: componentState.component,
                     componentKind,
                     label: componentState.component.displayName,
-                    providerInstanceId: thread.providerInstanceId,
+                    providerInstanceId: subject.providerInstanceId,
                     activeScope,
                   }),
                 ];
@@ -275,11 +305,7 @@ function buildCatalogs(
   }
   const scopedSkills = filterSkillCatalogForScope(
     { skills: snapshot.skills ?? [], collisions: snapshot.collisions },
-    {
-      mode: "chat",
-      projectId: thread.projectId === undefined ? null : String(thread.projectId),
-      threadRef: String(thread.id),
-    },
+    { mode: subject.mode, projectId: subject.projectId, threadRef: subject.threadId },
   ).skills;
   const skills = scopedSkills.map((skill) => {
     const installed = installedSkills.get(skill.skill.qualifiedId);
@@ -296,7 +322,7 @@ function buildCatalogs(
               component: installed.component.component,
               componentKind: "plugin-instruction",
               label: skill.displayName,
-              providerInstanceId: thread.providerInstanceId,
+              providerInstanceId: subject.providerInstanceId,
               activeScope,
             }),
           ];
@@ -314,7 +340,7 @@ function buildCatalogs(
     entries,
     epoch: deriveCatalogEpoch({
       entries,
-      activeFacts: { providerInstanceId: thread.providerInstanceId, activeScope },
+      activeFacts: { providerInstanceId: subject.providerInstanceId, activeScope },
       invalidationFacts: [],
     }),
   };
@@ -322,7 +348,7 @@ function buildCatalogs(
     addressing: { epoch: effectiveSnapshot.catalogEpoch, plugins, skills },
     capabilities,
     request: {
-      providerInstanceId: thread.providerInstanceId,
+      providerInstanceId: subject.providerInstanceId,
       activeScope,
       nativeToolSearch: "unsupported",
       taskKeywords: [],

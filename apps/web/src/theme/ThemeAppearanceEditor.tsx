@@ -315,8 +315,14 @@ function SettingSwitch(props: {
 
 function ThemeTransfer(props: { readonly controller: ThemeController }) {
   const [value, setValue] = useState("");
+  const [dropped, setDropped] = useState<ReadonlyArray<string>>([]);
   return (
     <div className="settings-view__theme-transfer">
+      {dropped.length === 0 ? null : (
+        <p className="settings-view__error" role="alert">
+          {`The export left out ${String(dropped.length)} override this theme does not accept: ${[...new Set(dropped)].join(", ")}.`}
+        </p>
+      )}
       <label className="settings-view__field">
         <span>Theme JSON</span>
         <textarea
@@ -343,6 +349,33 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
           variant="secondary"
         >
           Export theme JSON
+        </OctantButton>
+        {/* Design tokens, for a project outside Octant to consume. Both
+          readings of the theme are written, and an override the theme refused
+          is reported rather than exported as if it had been kept. */}
+        <OctantButton
+          onClick={() => {
+            const exported = props.controller.exportTokens("css");
+            if (exported === undefined) return;
+            setValue(exported.content);
+            setDropped(exported.droppedOverrides.map((entry) => entry.role));
+          }}
+          type="button"
+          variant="secondary"
+        >
+          Export design tokens (CSS)
+        </OctantButton>
+        <OctantButton
+          onClick={() => {
+            const exported = props.controller.exportTokens("json");
+            if (exported === undefined) return;
+            setValue(exported.content);
+            setDropped(exported.droppedOverrides.map((entry) => entry.role));
+          }}
+          type="button"
+          variant="secondary"
+        >
+          Export design tokens (JSON)
         </OctantButton>
         <OctantButton onClick={props.controller.reset} type="button" variant="secondary">
           Reset appearance
