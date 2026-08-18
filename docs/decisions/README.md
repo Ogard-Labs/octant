@@ -35,6 +35,7 @@ distilled successor of the earlier long-form design specifications.
 | [0025](0025-long-running-goal-loops.md)                 | Long-running goal loops                                           | Proposed |
 | [0026](0026-shipping-to-a-user-owned-target.md)         | Shipping to a user-owned target                                   | Proposed |
 | [0027](0027-plans-as-journaled-artifacts.md)            | Plans as journaled artifacts                                      | Accepted |
+| [0028](0028-the-artifact-library.md)                    | The artifact library                                              | Accepted |
 
 ## Adding an ADR
 

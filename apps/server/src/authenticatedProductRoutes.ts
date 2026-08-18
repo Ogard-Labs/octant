@@ -100,6 +100,16 @@ export function classifyProductAction(request: Request): string | undefined {
   if (path.startsWith("/api/preview/")) {
     return method === "GET" || method === "HEAD" ? "preview.open-authorized" : undefined;
   }
+  if (path.startsWith("/api/artifacts")) {
+    // The library gathers artifacts across every Project on this host, which is
+    // wider than a window's own Project scope. A paired device is admitted to
+    // read it and to nothing else here: the service clamps which Projects it
+    // may see, and there is no write on this surface at all.
+    if (method === "POST" && path === "/api/artifacts/library") {
+      return "project.overview.read";
+    }
+    return undefined;
+  }
   if (path.startsWith("/api/canvas/")) {
     // Opening a shared snapshot is a read, and it is POST because the request
     // carries the snapshot it is opening. Denying it here made the audience

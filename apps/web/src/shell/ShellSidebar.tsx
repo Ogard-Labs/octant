@@ -33,6 +33,8 @@ export interface ShellSidebarProps {
    * Defaults to {@link AUTOMATION_CENTER_NAVIGATION_ENABLED}.
    */
   readonly automationsEnabled?: boolean;
+  /** Absent on a host that serves no library, which keeps the row off entirely. */
+  readonly artifactLibraryAvailable?: boolean;
   readonly chatErrorMessage?: string;
   /**
    * Mode navigation is actions only. Thread rows for every mode are rendered by
@@ -135,6 +137,10 @@ export function ShellSidebar(props: ShellSidebarProps) {
           }}
           input={{
             activeMode,
+            // The library is a host read, so it is offered wherever the shell
+            // can reach the host at all; an unreachable one shows no row rather
+            // than a destination that opens onto an error.
+            artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
             // Gated by A3/A4 integration: never expose a dead Automations destination.
             automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
             createThread:

@@ -7,6 +7,7 @@ import { SidebarNavigation } from "./SidebarNavigation";
 const truthfulInput = {
   activeMode: "code",
   automationsEnabled: false,
+  artifactLibrary: "unavailable",
   createThread: "unavailable",
   plugins: "unavailable",
   projects: "available",
@@ -30,6 +31,7 @@ describe("SidebarNavigation", () => {
         input={{
           ...truthfulInput,
           automationsEnabled: true,
+          artifactLibrary: "unavailable",
           createThread: "available",
           plugins: "available",
           pullRequests: "available",
@@ -137,6 +139,7 @@ describe("SidebarNavigation", () => {
         input={{
           activeMode: "chat",
           automationsEnabled: false,
+          artifactLibrary: "unavailable",
           createThread: "available",
           plugins: "available",
           projects: "available",
