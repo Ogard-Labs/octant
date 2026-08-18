@@ -3184,6 +3184,7 @@ function LaunchedShell(
   const shell = (
     <ZenRoot
       active={zen.active}
+      onCycleSpace={(step) => void zen.cycleSpace(step)}
       onExit={zen.exitZen}
       onToggle={() => {
         if (zen.active) zen.exitZen();
@@ -3197,6 +3198,12 @@ function LaunchedShell(
         ) : (
           <ZenSurface
             assistant={zen.assistant}
+            focusZone={zen.focusZone}
+            spacesBusy={zen.panelBusy}
+            onAddSpace={(name) => void zen.addSpace(name)}
+            onRemoveSpace={(spaceId) => void zen.removeSpace(spaceId)}
+            onRenameSpace={(spaceId, name) => void zen.renameSpace(spaceId, name)}
+            onShowSpace={(spaceId) => void zen.showSpace(spaceId)}
             {...(zen.backgroundObjectUrl === undefined
               ? {}
               : { backgroundImageUrl: zen.backgroundObjectUrl })}

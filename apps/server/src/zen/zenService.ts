@@ -27,11 +27,15 @@ import {
   type ZenRecipePreview,
   type ZenWidgetRecipe,
   type ZenWidgetRecipeDraft,
+  type ZenFailureReason,
+  type ZenFocusZone,
+  type ZenFocusZoneCommand,
+  type ZenFocusZoneResult,
   normalizeZenReferenceUrl,
 } from "@octant/contracts/zen";
 import type { ChatThread, ChatThreadId, ChatThreadView } from "@octant/contracts/chat";
 import type { WindowId, HostId } from "@octant/contracts/shell";
-import type { AggregateVersion } from "@octant/contracts/events";
+import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import {
   createZenSpace,
   addElement,
@@ -45,10 +49,33 @@ import {
   recoverSpace,
   validateWidgetRecipe,
   ZenPolicyRejected,
+  applyZenFocusZoneCommand,
+  createZenFocusZone,
+  ZenFocusZoneRejected,
+  type ZenFocusZoneRejectionCode,
 } from "@octant/domain";
+
 import { assistantTranscript } from "../chat/assistantTranscript";
 import type { ZenEventStore } from "./zenEventStore";
 import type { ZenThreadCatalog } from "./zenThreadCatalog";
+
+/** The name a window's first space carries until someone renames it. */
+export const DEFAULT_ZEN_SPACE_NAME = "Focus";
+
+function focusZoneReason(code: ZenFocusZoneRejectionCode): ZenFailureReason {
+  switch (code) {
+    case "stale-version":
+      return "stale-version";
+    case "duplicate-space":
+      return "duplicate-space";
+    case "space-limit-reached":
+    case "last-space":
+    case "invalid-position":
+      return "limit-exceeded";
+    case "unknown-space":
+      return "unknown-space";
+  }
+}
 
 export const ZEN_RECIPE_PREVIEW_TTL_MS = 10 * 60_000;
 export const MAX_ZEN_RECIPE_PREVIEWS = 16;
@@ -56,7 +83,18 @@ export const MAX_ZEN_RECIPE_PREVIEWS_PER_ASSISTANT = 4;
 
 export interface ZenServiceDependencies {
   readonly loadSpace: (spaceId: ZenSpaceId) => ZenSpace | null;
+  /**
+   * The one space a window had before it had a focus zone.
+   *
+   * Only the adoption path reads this: a window that opened Zen before spaces
+   * existed keeps its space as the first space of its zone. Everything after
+   * that resolves the active space through the zone.
+   */
   readonly loadSpaceByWindow: (windowId: WindowId) => ZenSpace | null;
+  readonly focusZone: {
+    readonly read: (windowId: WindowId) => ZenFocusZone | null;
+    readonly write: (zone: ZenFocusZone) => ZenFocusZone;
+  };
   readonly eventStore: ZenEventStore;
   readonly localHostId: HostId;
   readonly threadCatalog?: Pick<ZenThreadCatalog, "resolve" | "search">;
@@ -121,11 +159,119 @@ export class ZenService {
   }
 
   bootstrap(windowId: WindowId): ZenBootstrapResponse {
-    const existing = this.deps.loadSpaceByWindow(windowId);
-    if (existing === null) return { space: null, windowId };
+    const zone = this.#focusZone(windowId);
+    if (zone === null) return { space: null, focusZone: null, windowId };
+    const existing = this.deps.loadSpace(zone.activeSpaceId);
+    if (existing === null) return { space: null, focusZone: zone, windowId };
     const reconciled = this.#reconcileTimers(existing);
     this.#syncTimerSchedules(reconciled);
-    return { space: reconciled, windowId };
+    return { space: reconciled, focusZone: zone, windowId };
+  }
+
+  /**
+   * The window's focus zone, adopting a pre-spaces space if it finds one.
+   *
+   * Projections are rebuildable and the zone is forward-only: a window that
+   * already had a space keeps it as the first space of its zone rather than
+   * losing it to a model it predates.
+   */
+  #focusZone(windowId: WindowId): ZenFocusZone | null {
+    const stored = this.deps.focusZone.read(windowId);
+    if (stored !== null) return stored;
+    const legacy = this.deps.loadSpaceByWindow(windowId);
+    if (legacy === null) return null;
+    return this.deps.focusZone.write(
+      createZenFocusZone(windowId, legacy.spaceId, DEFAULT_ZEN_SPACE_NAME, this.#now()),
+    );
+  }
+
+  #now(): UtcTimestamp {
+    return new Date().toISOString() as UtcTimestamp;
+  }
+
+  /**
+   * The space in front of this window's focus zone.
+   *
+   * Every command that speaks of "the window's space" resolves through here, so
+   * pinning something lands on the space the user is looking at rather than on
+   * whichever space the window opened first.
+   */
+  #activeSpace(windowId: WindowId): ZenSpace | null {
+    const zone = this.#focusZone(windowId);
+    if (zone === null) return null;
+    return this.deps.loadSpace(zone.activeSpaceId);
+  }
+
+  /** The window's focus zone, or a refusal for a window that has never opened one. */
+  focusZoneOrFail(windowId: WindowId): ZenFocusZone {
+    const zone = this.#focusZone(windowId);
+    if (zone === null) throw new ZenError({ reason: "unknown-space" });
+    return zone;
+  }
+
+  /**
+   * Add, rename, reorder, remove, or switch to a space.
+   *
+   * The zone decides which space is in front; a space's own showing flag says
+   * whether the focus zone is replacing the shell, and only this service can
+   * move it, so a switch writes both — the zone first, because it is the
+   * authority a reader trusts if the second write never lands.
+   */
+  focusZoneCommand(command: ZenFocusZoneCommand, windowId: WindowId): ZenFocusZoneResult {
+    const zone = this.focusZoneOrFail(windowId);
+    let transition;
+    try {
+      transition = applyZenFocusZoneCommand(zone, command, {
+        now: this.#now(),
+        ...(command.command === "add-space"
+          ? { spaceId: (this.deps.uuid ?? crypto.randomUUID)() as ZenSpaceId }
+          : {}),
+      });
+    } catch (error) {
+      if (error instanceof ZenFocusZoneRejected) {
+        throw new ZenError({ reason: focusZoneReason(error.code) });
+      }
+      throw error;
+    }
+    const written = this.deps.focusZone.write(transition.zone);
+    if (command.command === "add-space") {
+      const created = createZenSpace(windowId, this.deps.localHostId);
+      this.deps.eventStore.append({ ...created, spaceId: transition.activated }, 0);
+    }
+    this.#moveShowingFlag(transition.activated, transition.deactivated);
+    const space = this.deps.loadSpace(written.activeSpaceId);
+    if (space === null) throw new ZenError({ reason: "unknown-space" });
+    const reconciled = this.#reconcileTimers(space);
+    this.#syncTimerSchedules(reconciled);
+    return { result: "focus-zone-updated", zone: written, space: reconciled };
+  }
+
+  /**
+   * Carry "the focus zone is replacing the shell" from the space being left to
+   * the one being shown.
+   *
+   * The zone's pointer already moved and is the authority for which space is in
+   * front; this flag only says whether the window is showing the zone at all,
+   * so a failure here leaves a stale flag on a space nobody is looking at
+   * rather than a lost switch.
+   */
+  #moveShowingFlag(activated: ZenSpaceId, deactivated: ZenSpaceId | undefined): void {
+    if (deactivated === undefined) return;
+    const leaving = this.deps.loadSpace(deactivated);
+    if (leaving === null) return;
+    const showing = leaving.active;
+    if (showing) this.#setShowing(leaving, false);
+    const arriving = this.deps.loadSpace(activated);
+    if (arriving !== null && arriving.active !== showing) this.#setShowing(arriving, showing);
+  }
+
+  #setShowing(space: ZenSpace, showing: boolean): void {
+    try {
+      this.deps.eventStore.append({ ...space, active: showing }, space.version);
+    } catch {
+      // Another command already moved this space on. The zone still names the
+      // space in front, which is what every reader trusts.
+    }
   }
 
   close(): void {
@@ -147,7 +293,7 @@ export class ZenService {
     request: ZenThreadAttachRequest,
     signal?: AbortSignal,
   ): Promise<ZenThreadAttachResult> {
-    const space = this.deps.loadSpaceByWindow(windowId);
+    const space = this.#activeSpace(windowId);
     if (space === null) throw new ZenError({ reason: "unknown-space" });
     if (space.windowId !== windowId) {
       throw new ZenError({ reason: "wrong-window", spaceId: space.spaceId });
@@ -360,7 +506,7 @@ export class ZenService {
    * assistant surface and gets nothing.
    */
   isAssistantThread(windowId: WindowId, threadId: ChatThreadId): boolean {
-    const space = this.deps.loadSpaceByWindow(windowId);
+    const space = this.#activeSpace(windowId);
     return (
       space !== null &&
       space.windowId === windowId &&
@@ -888,14 +1034,19 @@ export class ZenService {
       throw new ZenError({ reason: "wrong-window" });
     }
 
-    // Check if space already exists for this window
-    const existing = this.deps.loadSpaceByWindow(windowId);
-    if (existing) {
-      throw new ZenError({ reason: "duplicate-space", spaceId: existing.spaceId });
+    // A window opens exactly one focus zone, and the zone is what says whether
+    // it already has spaces.
+    const existing = this.#focusZone(windowId);
+    if (existing !== null) {
+      throw new ZenError({ reason: "duplicate-space", spaceId: existing.activeSpaceId });
     }
 
     const space = createZenSpace(windowId, this.deps.localHostId, command.appearance);
     const committed = this.deps.eventStore.append(space, 0);
+    // The zone is written second so it never names a space that was not stored.
+    this.deps.focusZone.write(
+      createZenFocusZone(windowId, committed.spaceId, DEFAULT_ZEN_SPACE_NAME, this.#now()),
+    );
     return { result: "create-space", space: committed };
   }
 
@@ -1027,7 +1178,7 @@ export class ZenService {
   }
 
   private spaceForWindow(windowId: WindowId): ZenSpace {
-    const space = this.deps.loadSpaceByWindow(windowId);
+    const space = this.#activeSpace(windowId);
     if (space === null) throw new ZenError({ reason: "unknown-space" });
     if (space.windowId !== windowId) {
       throw new ZenError({ reason: "wrong-window", spaceId: space.spaceId });

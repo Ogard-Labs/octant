@@ -81,6 +81,7 @@ export * from "./linkedThreadPromptPolicy";
 export * from "./linkedThreadAggregationPolicy";
 export * from "./rootlessThreadPolicy";
 export * from "./zenPolicy";
+export * from "./zenFocusZonePolicy";
 export * from "./cursorAcpPolicy";
 export * from "./cursorAcpRuntimePolicy";
 export * from "./cursorAcpSettingsPolicy";

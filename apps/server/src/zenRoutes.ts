@@ -1,5 +1,6 @@
 import {
   decodeZenCommand,
+  decodeZenFocusZoneCommand,
   decodeZenThreadAttachRequest,
   decodeZenThreadCatalogRef,
   ZenError,
@@ -62,6 +63,9 @@ export function createZenRouteHandler(dependencies: ZenRouteDependencies) {
     // Commands: POST /api/zen/command
     if (url.pathname === "/api/zen/command" && request.method === "POST") {
       return await handleZenCommand(request, url, origin, dependencies, now);
+    }
+    if (url.pathname === "/api/zen/spaces" && request.method === "POST") {
+      return await handleZenFocusZoneCommand(request, url, origin, dependencies, now);
     }
     if (url.pathname === "/api/zen/threads" && request.method === "GET") {
       return await handleZenThreadSearch(request, url, origin, dependencies, now);
@@ -210,6 +214,41 @@ async function handleZenCommand(
   } catch (error) {
     if (error instanceof ZenError) return zenFailureResponse(error, origin);
     return failureResponse("Zen command failed.", 500, origin);
+  }
+}
+
+/**
+ * Add, rename, reorder, remove, or switch the spaces one window holds.
+ *
+ * Separate from `/api/zen/command` because those commands act on the space in
+ * front, while these decide which space that is. Both authenticate the same
+ * way: the window proves its own identity and can only ever reach its own zone.
+ */
+async function handleZenFocusZoneCommand(
+  request: Request,
+  url: URL,
+  origin: string | null,
+  deps: ZenRouteDependencies,
+  now: () => number,
+): Promise<Response> {
+  let windowId: WindowId;
+  try {
+    if (url.search !== "") return failureResponse("Zen space command is invalid.", 400, origin);
+    windowId = authenticateWindow(request, deps.windowAuthorityStore, now());
+  } catch (error) {
+    return authenticationFailure(error, "Zen space command", origin);
+  }
+  let command;
+  try {
+    command = decodeZenFocusZoneCommand(await request.json());
+  } catch {
+    return failureResponse("Zen space command body is invalid.", 400, origin);
+  }
+  try {
+    return jsonResponse(deps.zenService.focusZoneCommand(command, windowId), origin);
+  } catch (error) {
+    if (error instanceof ZenError) return zenFailureResponse(error, origin);
+    return failureResponse("Zen space command failed.", 500, origin);
   }
 }
 

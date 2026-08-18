@@ -1132,20 +1132,102 @@ describe("Zen widget journal events", () => {
   });
 });
 
+describe("ZenFocusZone", () => {
+  const owner = makeId("33333333");
+  const first = makeId("11111111");
+  const second = makeId("11111112");
+
+  function zone(overrides: Record<string, unknown> = {}) {
+    return {
+      windowId: owner,
+      version: 2,
+      spaces: [
+        { spaceId: first, name: "Focus", position: 0 },
+        { spaceId: second, name: "Review", position: 1 },
+      ],
+      activeSpaceId: first,
+      createdAt: "2026-07-24T10:00:00.000Z",
+      updatedAt: "2026-07-24T10:05:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("accepts a window's named, ordered spaces with one of them in front", () => {
+    expect(zenContracts.decodeZenFocusZone(zone()).spaces).toHaveLength(2);
+  });
+
+  it("refuses a zone whose spaces are not one per identity", () => {
+    expect(() =>
+      zenContracts.decodeZenFocusZone(
+        zone({
+          spaces: [
+            { spaceId: first, name: "Focus", position: 0 },
+            { spaceId: first, name: "Review", position: 1 },
+          ],
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it("refuses a zone whose positions leave a gap, so the order is the positions", () => {
+    expect(() =>
+      zenContracts.decodeZenFocusZone(
+        zone({
+          spaces: [
+            { spaceId: first, name: "Focus", position: 0 },
+            { spaceId: second, name: "Review", position: 2 },
+          ],
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it("refuses a zone pointing at a space the window does not hold", () => {
+    expect(() =>
+      zenContracts.decodeZenFocusZone(zone({ activeSpaceId: makeId("11111113") })),
+    ).toThrow();
+  });
+
+  it("refuses a zone with no spaces at all", () => {
+    expect(() => zenContracts.decodeZenFocusZone(zone({ spaces: [] }))).toThrow();
+  });
+
+  it("refuses a space command that names no version to write against", () => {
+    expect(() =>
+      zenContracts.decodeZenFocusZoneCommand({ command: "add-space", name: "Review" }),
+    ).toThrow();
+  });
+
+  it("refuses a space name that is only whitespace", () => {
+    expect(() =>
+      zenContracts.decodeZenFocusZoneCommand({
+        command: "add-space",
+        name: "   ",
+        expectedVersion: 2,
+      }),
+    ).toThrow();
+  });
+});
+
 describe("ZenBootstrapResponse", () => {
-  it("accepts response with null space", () => {
+  it("reports a window that has never opened Zen as holding neither a space nor a zone", () => {
     const resp = decodeBootstrap({
       space: null,
+      focusZone: null,
       windowId: windowId(),
     });
     expect(resp.space).toBeNull();
+    expect(resp.focusZone).toBeNull();
   });
 
-  it("accepts response with space", () => {
+  it("reports the space in front alongside every space the window holds", () => {
+    const first = spaceId();
+    const second = makeId("11111112") as typeof ZenSpaceId.Type;
+    const owner = windowId();
     const resp = decodeBootstrap({
       space: {
-        spaceId: spaceId(),
-        windowId: windowId(),
+        spaceId: first,
+        windowId: owner,
         version: 0,
         elements: [],
         viewport: DEFAULT_ZEN_VIEWPORT,
@@ -1154,9 +1236,21 @@ describe("ZenBootstrapResponse", () => {
         createdAt: "2026-07-24T10:00:00.000Z",
         updatedAt: "2026-07-24T10:00:00.000Z",
       },
-      windowId: windowId(),
+      focusZone: {
+        windowId: owner,
+        version: 2,
+        spaces: [
+          { spaceId: first, name: "Focus", position: 0 },
+          { spaceId: second, name: "Review", position: 1 },
+        ],
+        activeSpaceId: first,
+        createdAt: "2026-07-24T10:00:00.000Z",
+        updatedAt: "2026-07-24T10:05:00.000Z",
+      },
+      windowId: owner,
     });
     expect(resp.space).not.toBeNull();
+    expect(resp.focusZone?.activeSpaceId).toBe(first);
   });
 });
 

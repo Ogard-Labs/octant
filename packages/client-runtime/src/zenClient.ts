@@ -9,6 +9,8 @@ import {
   decodeZenThreadContinuationTarget,
   decodeZenAssistantSnapshot,
   decodeZenSpace,
+  decodeZenFocusZoneCommand,
+  decodeZenFocusZoneResult,
   type ZenCommand,
   type ZenBootstrapResponse,
   type ZenResult,
@@ -21,6 +23,8 @@ import {
   type ZenBackgroundAssetId,
   type ZenSpace,
   type ZenSpaceId,
+  type ZenFocusZoneCommand,
+  type ZenFocusZoneResult,
 } from "@octant/contracts/zen";
 import { bindFetchPort } from "./bindFetchPort";
 
@@ -33,6 +37,11 @@ export interface ZenClientOptions {
 export interface ZenClient {
   bootstrap(): Promise<ZenBootstrapResponse>;
   command(command: ZenCommand): Promise<ZenResult>;
+  /**
+   * Adds, renames, reorders, removes, or switches the spaces this window holds.
+   * Separate from `command`, which acts on whichever space is in front.
+   */
+  space(command: ZenFocusZoneCommand): Promise<ZenFocusZoneResult>;
   searchThreads(query?: string): Promise<ZenThreadCatalogResponse>;
   attachThread(request: ZenThreadAttachRequest): Promise<ZenThreadAttachResult>;
   continueThread(catalogRef: ZenThreadCatalogRef): Promise<ZenThreadContinuationTarget>;
@@ -111,6 +120,17 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
       }
 
       return decodeZenResult(body);
+    },
+
+    async space(cmd: ZenFocusZoneCommand): Promise<ZenFocusZoneResult> {
+      const command = decodeZenFocusZoneCommand(cmd);
+      const url = new URL("/api/zen/spaces", options.baseUrl);
+      const body = await zenRequest(fetch, url, options.windowCapability, {
+        method: "POST",
+        body: JSON.stringify(command),
+        contentType: true,
+      });
+      return decodeZenFocusZoneResult(body);
     },
 
     async searchThreads(query = ""): Promise<ZenThreadCatalogResponse> {
