@@ -149,6 +149,31 @@ function declaresModelOptionValue(
   return option?.kind === "selection" && option.values.includes(value);
 }
 
+/** One persisted option value the model in hand no longer declares. */
+export interface UnsupportedModelOptionValue {
+  readonly optionId: string;
+  readonly value: string;
+}
+
+/**
+ * The persisted option values a model no longer declares.
+ *
+ * `changeChatProvider` validates a selection once, against the catalog
+ * observed at the moment of the change. A provider can retire a reasoning
+ * tier or an effort level after that, so a turn has to re-check the values it
+ * is about to run on: drivers drop what a model does not declare, and an
+ * unchecked stale value would run at the provider default while the picker
+ * still shows the retired one.
+ */
+export function unsupportedModelOptionValues(
+  values: ProviderModelOptionValues | undefined,
+  options: ReadonlyArray<ProviderModelOption>,
+): ReadonlyArray<UnsupportedModelOptionValue> {
+  return Object.entries(values ?? {})
+    .filter(([optionId, value]) => !declaresModelOptionValue(options, optionId, value))
+    .map(([optionId, value]) => ({ optionId, value }));
+}
+
 function resolveModelOptionValues(
   thread: ChatThread,
   input: ChangeChatProviderInput,

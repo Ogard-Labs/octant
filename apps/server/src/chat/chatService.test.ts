@@ -3250,6 +3250,70 @@ describe("ChatService", () => {
     expect(switched.thread.modelOptionValues).toBeUndefined();
   });
 
+  it("refuses the turn when the probed model no longer offers a persisted option value", async () => {
+    const baseModel = probeFixture().models[0]!;
+    const effortValues = (values: ReadonlyArray<string>): ProviderProbeResult =>
+      probeFixture({
+        models: [
+          {
+            ...baseModel,
+            options: [
+              {
+                id: "effort",
+                displayName: "Effort",
+                kind: "selection" as const,
+                values: values as [string, ...string[]],
+              },
+            ],
+          },
+        ],
+      });
+    let catalog = effortValues(["low", "high"]);
+    const acquireCalls: string[] = [];
+    const driver = {
+      probe: () => Effect.succeed(catalog),
+      acquire: () => {
+        acquireCalls.push("acquire");
+        throw new Error("A retired option must not reach the provider as a default.");
+      },
+    } as unknown as ProviderDriver;
+    const { service } = openFixture({ driver });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Retired effort",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+
+    const updated = await service.execute({
+      kind: "change-chat-provider",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      providerInstanceId: ids.provider,
+      modelId: "model-a",
+      modelOptionValues: { effort: "high" },
+    });
+    if (updated.kind !== "thread-updated") throw new Error("Expected thread-updated result.");
+    expect(updated.thread.modelOptionValues).toEqual({ effort: "high" });
+
+    // The provider retires the tier after the selection was persisted.
+    catalog = effortValues(["low"]);
+
+    await expect(
+      service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: updated.thread.version,
+        prompt: "Think hard",
+      }),
+    ).rejects.toMatchObject({
+      failure: { category: "unsupported", message: expect.stringContaining("effort=high") },
+    });
+    // Reported, not silently substituted: no turn ran on the provider default.
+    expect(acquireCalls).toEqual([]);
+    expect(service.read(created.thread.id).turns).toHaveLength(0);
+  });
+
   it("sends accepted prior transcript and unresolved work as provider context", async () => {
     const { service, fakeDriver } = openFixture();
     const created = await service.execute({
