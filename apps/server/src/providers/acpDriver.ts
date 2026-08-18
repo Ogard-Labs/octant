@@ -39,6 +39,7 @@ import {
   type AcpServerNotification,
   type AcpServerRequest,
   type AcpSessionConfigOption,
+  type AcpSessionModelState,
 } from "./acpProtocol";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { type ProviderRuntimeRegistry, trackProviderProcess } from "./providerRuntimeRegistry";
@@ -58,6 +59,7 @@ export interface AcpClientPort {
     configId: string,
     value: string,
   ) => Promise<AcpConfigOptionsResult>;
+  readonly call: <T = unknown>(method: string, params: Record<string, unknown>) => Promise<T>;
   readonly onNotification: (listener: (message: AcpServerNotification) => void) => () => void;
   readonly onRequest: (listener: (message: AcpServerRequest) => void) => () => void;
   readonly respondPermission: (id: string | number, optionId?: string) => Promise<void>;
@@ -168,11 +170,19 @@ function providerFailure(profile: AcpProviderProfile, error: unknown): ProviderF
 function normalizeModels(
   profile: AcpProviderProfile,
   options: ReadonlyArray<AcpSessionConfigOption>,
+  models: AcpSessionModelState | undefined,
 ) {
   const model = options.find((option) => option.id === "model");
-  if (model === undefined) return [];
+  // The config option and the session's model state are two ACP spellings of
+  // the same list. Reading only the first reported an agent that speaks the
+  // second as having nothing selectable, which left it unusable in every mode.
+  const selectable =
+    model !== undefined
+      ? model.options.map((item) => ({ value: item.value, name: item.name }))
+      : (models?.availableModels.map((item) => ({ value: item.modelId, name: item.name })) ?? []);
+  if (selectable.length === 0) return [];
   const reasoning = options.find((option) => option.id === profile.reasoningOptionId);
-  return model.options.map((item) => ({
+  return selectable.map((item) => ({
     id: decodeProviderModelId(item.value),
     displayName: item.name,
     source: "discovered" as const,
@@ -195,6 +205,7 @@ function normalizeProbe(
   version: string,
   initialized: AcpConnection["initialized"],
   options: ReadonlyArray<AcpSessionConfigOption>,
+  sessionModels: AcpSessionModelState | undefined,
   observedAt: string,
   credentialStatus?: "stored",
 ): ProviderProbeResult {
@@ -206,7 +217,7 @@ function normalizeProbe(
     initialized.agentCapabilities.sessionCapabilities?.resume !== undefined
       ? ("supported" as const)
       : ("unsupported" as const);
-  const models = normalizeModels(profile, options);
+  const models = normalizeModels(profile, options, sessionModels);
   return decodeProviderProbeResult({
     instanceId,
     readiness: models.length === 0 ? "degraded" : "ready",
@@ -431,6 +442,7 @@ export function makeAcpDriver(options: AcpDriverOptions): ProviderDriver {
           connection.version,
           connection.initialized,
           scratch.configOptions ?? [],
+          scratch.models,
           factories.clock(),
           options.authentication === "api-key" ? "stored" : undefined,
         );
@@ -679,12 +691,24 @@ function makeConnection(
               : profile.resumeMethod === "session/resume"
                 ? await client.resumeSession(input.sourceSessionId, runtimeRoot)
                 : await client.loadSession(input.sourceSessionId, runtimeRoot);
-          await client.setConfigOption(source.sessionId, "model", input.modelId);
-          await client.setConfigOption(
-            source.sessionId,
-            "mode",
-            profile.sessionMode(mode, input.executionPolicy),
-          );
+          // A profile that supplies its own request shape is describing an agent
+          // whose reply the standard result schema does not fit, so that reply is
+          // taken as-is. Everything else is standard ACP and stays validated: a
+          // malformed success there would otherwise register a session whose
+          // model and authority mode were never confirmed.
+          const setModelCall = profile.setModelCall?.(source.sessionId, input.modelId);
+          if (setModelCall === undefined) {
+            await client.setConfigOption(source.sessionId, "model", input.modelId);
+          } else {
+            await client.call(setModelCall.method, setModelCall.params);
+          }
+          const modeValue = profile.sessionMode(mode, input.executionPolicy);
+          const setModeCall = profile.setModeCall?.(source.sessionId, modeValue);
+          if (setModeCall === undefined) {
+            await client.setConfigOption(source.sessionId, "mode", modeValue);
+          } else {
+            await client.call(setModeCall.method, setModeCall.params);
+          }
           return await register(input, source, scope, client);
         } catch (error) {
           await Effect.runPromise(Scope.close(scope, Exit.void));

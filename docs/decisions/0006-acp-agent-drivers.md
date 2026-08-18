@@ -5,7 +5,7 @@
 ## Context
 
 Several installed coding agents (Kimi Code, Kilo Code, Devin CLI, Mistral
-Vibe, and, when its runtime qualifies, Cursor) expose the Agent Client
+Vibe, Grok Build, and, when its runtime qualifies, Cursor) expose the Agent Client
 Protocol: JSON-RPC over stdio with initialize, authenticate, session create,
 load and resume, prompt, cancel, mode and configuration options, session
 update notifications, permission requests, and client filesystem or terminal
@@ -68,7 +68,7 @@ framing, correlation, cancellation, and cleanup code and invited drift.
 - Some agents cannot meet the contract (no stable resume, no separable
   authentication, tools executing unconfined). Those stay reserved and
   unselectable rather than being approximated.
-- The four shipped ACP providers are profiles over one driver, process,
+- The five shipped ACP providers are profiles over one driver, process,
   protocol, and event-mapper module; the conformance suite runs once per
   profile.
 

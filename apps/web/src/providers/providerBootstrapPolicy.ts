@@ -8,6 +8,7 @@ const PREFERRED_DRIVERS: ReadonlyArray<ProviderDriverKind> = [
   "claude",
   "cursor",
   "kimi-code",
+  "grok",
 ];
 
 export function hasSelectableProviderModels(groups: ReadonlyArray<PickerGroup>): boolean {

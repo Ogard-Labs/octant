@@ -11,10 +11,11 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contracts";
+import type { AcpInitializeResult } from "./acpProtocol";
 
 export type AcpProviderKind = Extract<
   ProviderDriverKind,
-  "kilo" | "devin" | "mistral-vibe" | "kimi-code"
+  "kilo" | "devin" | "mistral-vibe" | "kimi-code" | "grok"
 >;
 export type AcpSessionMode = "chat" | "work" | "code";
 
@@ -60,6 +61,8 @@ export type AcpConfinementStrategy =
 export interface AcpProcessProfile {
   /** `agentInfo.name` the ACP `initialize` response must report. */
   readonly agentName: string;
+  /** Overrides the default `agentInfo.name` equality check when the agent's `initialize` response identifies itself differently (e.g. via `_meta`). */
+  readonly verifyAgentInfo?: (initialized: AcpInitializeResult) => boolean;
   /** `--version` output contract; groups 1-3 are major, minor, patch. */
   readonly versionPattern: RegExp;
   readonly minimumVersion: readonly [number, number, number];
@@ -89,6 +92,16 @@ export interface AcpProviderProfile {
   readonly reasoningOptionId: "effort" | "thinking";
   /** ACP `mode` config value for a product mode and execution policy. */
   readonly sessionMode: (mode: AcpSessionMode, policy: ProviderExecutionPolicy) => string;
+  /** Overrides the default `session/set_config_option` call for setting the model. */
+  readonly setModelCall?: (
+    sessionId: string,
+    modelId: string,
+  ) => { readonly method: string; readonly params: Readonly<Record<string, unknown>> };
+  /** Overrides the default `session/set_config_option` call for setting the session mode. */
+  readonly setModeCall?: (
+    sessionId: string,
+    mode: string,
+  ) => { readonly method: string; readonly params: Readonly<Record<string, unknown>> };
   /** Chat sessions run in the managed home unless the agent needs a real Project root. */
   readonly chatSessionRoot: "managed-home" | "project-root";
   readonly userQuestions: "supported" | "unsupported";
@@ -344,6 +357,82 @@ const vibeProfile: AcpProviderProfile = {
   },
 };
 
+const GROK_CONFIGURATION_TOML = [
+  "[cli]",
+  "auto_update = false",
+  "",
+  "[features]",
+  "telemetry = false",
+  "feedback = false",
+  "codebase_indexing = false",
+  "remote_fetch = false",
+  "",
+  "[session]",
+  "load_envrc = false",
+].join("\n");
+
+const grokProfile: AcpProviderProfile = {
+  kind: "grok",
+  displayName: "Grok Build",
+  reasoningOptionId: "thinking",
+  sessionMode: (mode, policy) => {
+    if (mode === "chat") return "default";
+    if (policy === "plan") return "plan";
+    if (policy === "full-access") return "bypassPermissions";
+    return "default";
+  },
+  chatSessionRoot: "managed-home",
+  userQuestions: "supported",
+  resumeMethod: "session/load",
+  closesSessions: true,
+  authenticateOnProbe: false,
+  setModelCall: (sessionId, modelId) => ({
+    method: "session/set_model",
+    params: { sessionId, modelId },
+  }),
+  setModeCall: (sessionId, mode) => ({
+    method: "session/set_mode",
+    params: { sessionId, modeId: mode },
+  }),
+  authentication: { kind: "delegated-browser", apiKeyVariable: "XAI_API_KEY" },
+  unauthenticatedMessage:
+    "Grok Build is not authenticated. Sign in from Provider Settings, then retry.",
+  process: {
+    // display-only now; identity is verified via verifyAgentInfo below (real
+    // initialize responses have no agentInfo field)
+    agentName: "Grok Build",
+    verifyAgentInfo: (initialized) =>
+      (initialized._meta as Readonly<Record<string, unknown>> | undefined)?.grokShell === true,
+    versionPattern:
+      /^grok (0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.-]+)? \([0-9a-f]+\)(?: \[[a-zA-Z]+\])?\r?\n?$/,
+    minimumVersion: [1, 0, 0],
+    passthroughVariables: HOST_PASSTHROUGH_VARIABLES,
+    guards: {
+      GROK_TELEMETRY_ENABLED: "0",
+      GROK_TELEMETRY_TRACE_UPLOAD: "0",
+      GROK_TELEMETRY_MIXPANEL_ENABLED: "0",
+      GROK_FEEDBACK_ENABLED: "0",
+      GROK_MEMORY: "0",
+      GROK_SUBAGENTS: "0",
+      GROK_WORKFLOWS: "0",
+      GROK_SANDBOX: "off",
+      NO_COLOR: "1",
+    },
+    environment: ({ managedHome, apiKey }) => ({
+      GROK_HOME: managedHome,
+      ...(apiKey === undefined ? {} : { XAI_API_KEY: apiKey }),
+    }),
+    args: () => ["agent", "stdio"],
+    managedFiles: ({ managedHome }) => [
+      {
+        path: join(managedHome, "config.toml"),
+        content: `${GROK_CONFIGURATION_TOML}\n`,
+      },
+    ],
+    confinement: { kind: "deny-default-seatbelt" },
+  },
+};
+
 const KIMI_REVIEWED_COMMANDS = [
   "compact",
   "status",
@@ -441,6 +530,7 @@ export const acpProviderProfiles: Readonly<Record<AcpProviderKind, AcpProviderPr
   devin: devinProfile,
   "mistral-vibe": vibeProfile,
   "kimi-code": kimiProfile,
+  grok: grokProfile,
 };
 
 export function isAcpProviderKind(kind: ProviderDriverKind): kind is AcpProviderKind {

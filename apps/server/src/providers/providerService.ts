@@ -32,6 +32,7 @@ import {
   changeAzureFoundryConfiguration,
   changeClaudeConfiguration,
   changeDevinConfiguration,
+  changeGrokConfiguration,
   changeKiloConfiguration,
   changeMistralVibeConfiguration,
   changeOllamaConfiguration,
@@ -42,6 +43,7 @@ import {
   createAzureFoundryProvider,
   createClaudeProvider,
   createDevinProvider,
+  createGrokProvider,
   createKiloProvider,
   createOpenAiCompatibleProvider,
   createCodexProvider,
@@ -399,6 +401,7 @@ export class ProviderService implements ProviderServiceApi {
           command.kind === "create-oh-my-pi-provider" ||
           command.kind === "create-ollama-provider" ||
           command.kind === "create-mistral-vibe-provider" ||
+          command.kind === "create-grok-provider" ||
           command.kind === "create-openai-compatible-provider" ||
           command.kind === "create-anthropic-compatible-provider" ||
           command.kind === "create-azure-foundry-provider"
@@ -464,6 +467,12 @@ export class ProviderService implements ProviderServiceApi {
               break;
             case "create-mistral-vibe-provider":
               instance = createMistralVibeProvider({
+                ...common,
+                configuration: command.configuration,
+              });
+              break;
+            case "create-grok-provider":
+              instance = createGrokProvider({
                 ...common,
                 configuration: command.configuration,
               });
@@ -604,6 +613,18 @@ export class ProviderService implements ProviderServiceApi {
           );
           await this.#runtime.invalidateRuntime(current.id);
           eventName = "provider.instance-configuration-changed@1";
+        } else if (command.kind === "change-grok-configuration") {
+          if (current.driverKind !== "grok") {
+            throw this.#unsupported("This provider does not use Grok Build configuration.");
+          }
+          instance = changeGrokConfiguration(
+            current,
+            command.configuration,
+            updatedAt,
+            this.#runtime.activeSessionCount(current.id),
+          );
+          await this.#runtime.invalidateRuntime(current.id);
+          eventName = "provider.instance-configuration-changed@1";
         } else if (command.kind === "change-devin-configuration") {
           if (current.driverKind !== "devin") {
             throw this.#unsupported("This provider does not use Devin configuration.");
@@ -684,6 +705,7 @@ export class ProviderService implements ProviderServiceApi {
         if (
           command.kind === "change-claude-configuration" ||
           command.kind === "change-mistral-vibe-configuration" ||
+          command.kind === "change-grok-configuration" ||
           command.kind === "change-devin-configuration"
         ) {
           this.#publishSelectedAuthenticationObservation(authoritative);
@@ -989,6 +1011,7 @@ export class ProviderService implements ProviderServiceApi {
     if (
       instance.driverKind !== "claude" &&
       instance.driverKind !== "mistral-vibe" &&
+      instance.driverKind !== "grok" &&
       instance.driverKind !== "devin"
     ) {
       return;

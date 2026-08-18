@@ -5,6 +5,7 @@ import {
   type AzureFoundryProviderConfiguration,
   type ClaudeProviderConfiguration,
   type DevinProviderConfiguration,
+  type GrokProviderConfiguration,
   type KiloProviderConfiguration,
   type MistralVibeProviderConfiguration,
   type OpenAiCompatibleProviderConfiguration,
@@ -84,7 +85,9 @@ export function useProviderController(options: ProviderControllerOptions) {
     for (const instanceId of credentialStatusUnconfirmed.current) {
       const instance = findProvider(value, instanceId);
       if (
-        (instance?.driverKind !== "claude" && instance?.driverKind !== "mistral-vibe") ||
+        (instance?.driverKind !== "claude" &&
+          instance?.driverKind !== "mistral-vibe" &&
+          instance?.driverKind !== "grok") ||
         instance.configuration.authentication !== "subscription"
       ) {
         credentialStatusUnconfirmed.current.delete(instanceId);
@@ -128,7 +131,9 @@ export function useProviderController(options: ProviderControllerOptions) {
       if (hostBridge !== undefined) {
         const subscriptionProviders = loaded.instances.filter(
           (instance) =>
-            (instance.driverKind === "claude" || instance.driverKind === "mistral-vibe") &&
+            (instance.driverKind === "claude" ||
+              instance.driverKind === "mistral-vibe" ||
+              instance.driverKind === "grok") &&
             instance.configuration.authentication === "subscription",
         );
         const credentialStatuses = await Promise.all(
@@ -589,6 +594,62 @@ export function useProviderController(options: ProviderControllerOptions) {
     },
     [client, hostBridge, install, recoverRegistryFailure],
   );
+  const createGrok = useCallback(
+    (
+      displayName: string,
+      configuration: GrokProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) => {
+      const instanceId = decodeProviderInstanceId(crypto.randomUUID());
+      return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          if (configuration.authentication === "api-key" && hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
+            if (mounted.current) {
+              setMessage("Enter an xAI API key before creating this provider.");
+            }
+            return false;
+          }
+          const current = authoritative.current;
+          if (client === undefined || current === undefined) return false;
+          let created = false;
+          try {
+            applyResult(
+              await client.execute({
+                kind: "create-grok-provider",
+                instanceId,
+                expectedVersion: 0 as ProviderDefaults["version"],
+                displayName,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            created = true;
+            if (configuration.authentication === "api-key") {
+              await hostBridge!.setProviderCredential(instanceId, credentialValue);
+            }
+            return true;
+          } catch (error) {
+            if (configuration.authentication === "api-key" && created) {
+              if (mounted.current) {
+                setMessage("The provider was created, but its credential could not be stored.");
+              }
+            } else {
+              await recoverRegistryFailure(error, "Provider configuration could not be created.");
+            }
+            return false;
+          }
+        }),
+      );
+    },
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
 
   const beginProviderAuthentication = useCallback(
     async (instanceId: ProviderInstanceId): Promise<ProviderAuthenticationAttempt | undefined> => {
@@ -834,6 +895,102 @@ export function useProviderController(options: ProviderControllerOptions) {
               error,
               mustClear
                 ? "Provider configuration could not be updated after its credential was cleared."
+                : "Provider configuration could not be updated.",
+            );
+            return false;
+          }
+        }),
+      ),
+    [client, hostBridge, install, recoverRegistryFailure],
+  );
+  const changeGrokConfiguration = useCallback(
+    (
+      instanceId: ProviderInstanceId,
+      configuration: GrokProviderConfiguration,
+      credential: TransientProviderCredential,
+    ) =>
+      queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
+        withTransientCredential(credential, async (credentialValue) => {
+          const current = authoritative.current;
+          const instance = current === undefined ? undefined : findProvider(current, instanceId);
+          if (client === undefined || current === undefined || instance?.driverKind !== "grok") {
+            return false;
+          }
+          const previousAuthentication = instance.configuration.authentication;
+          const nextAuthentication = configuration.authentication;
+          if (
+            nextAuthentication === "api-key" &&
+            previousAuthentication === "subscription" &&
+            credentialValue.length === 0
+          ) {
+            if (mounted.current) {
+              setMessage("Enter an xAI API key before switching authentication modes.");
+            }
+            return false;
+          }
+          const mustClear =
+            previousAuthentication === "api-key" && nextAuthentication === "subscription";
+          const mustSet = nextAuthentication === "api-key" && credentialValue.length > 0;
+          if ((mustClear || mustSet) && hostBridge === undefined) {
+            if (mounted.current) {
+              setMessage("Provider credential management is unavailable on this host.");
+            }
+            return false;
+          }
+          // Only credential work needs the desktop bridge. A renderer without
+          // one can still edit a binary path or re-save an instance whose key
+          // is unchanged, so the requirement stays inside the branches that
+          // actually touch the Keychain.
+          const bridge = hostBridge;
+          // A key is stored before the change that starts using it, but cleared
+          // only after the change that stops. The server refuses this command
+          // while the instance has an active session, and clearing first left
+          // the instance still configured for API-key authentication with no
+          // key to connect with and nothing able to put it back.
+          if (mustSet && bridge !== undefined) {
+            try {
+              await bridge.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              if (mounted.current) {
+                setMessage(
+                  "The provider credential could not be stored, so the configuration was unchanged.",
+                );
+              }
+              return false;
+            }
+          }
+          try {
+            applyResult(
+              await client.execute({
+                kind: "change-grok-configuration",
+                instanceId,
+                expectedVersion: instance.version,
+                configuration,
+              }),
+              current,
+              install,
+            );
+            if (mustClear && bridge !== undefined) {
+              // The instance no longer uses the key. A clear that fails here
+              // leaves a secret behind rather than an unusable provider, so it
+              // is retried by the same deferred cleanup the other paths use.
+              await bridge
+                .clearProviderCredential(instanceId)
+                .catch(() => void credentialCleanupRequired.current.add(instanceId));
+            }
+            return true;
+          } catch (error) {
+            if (mustSet && previousAuthentication === "subscription" && bridge !== undefined) {
+              try {
+                await bridge.clearProviderCredential(instanceId);
+              } catch {
+                credentialCleanupRequired.current.add(instanceId);
+              }
+            }
+            await recoverRegistryFailure(
+              error,
+              mustClear
+                ? "Provider configuration could not be updated, so its credential was left in place."
                 : "Provider configuration could not be updated.",
             );
             return false;
@@ -1198,7 +1355,9 @@ export function useProviderController(options: ProviderControllerOptions) {
             (instance.configuration.authentication === "api-key" ||
               instance.configuration.authentication === "bearer" ||
               credentialCleanupRequired.current.has(instanceId))) ||
-          ((instance.driverKind === "claude" || instance.driverKind === "mistral-vibe") &&
+          ((instance.driverKind === "claude" ||
+            instance.driverKind === "mistral-vibe" ||
+            instance.driverKind === "grok") &&
             (instance.configuration.authentication === "api-key" ||
               credentialCleanupRequired.current.has(instanceId)))
         ) {
@@ -1422,6 +1581,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     create,
     createClaude,
     createMistralVibe,
+    createGrok,
     createOllama,
     createOpenAiCompatible,
     createAnthropicCompatible,
@@ -1435,6 +1595,7 @@ export function useProviderController(options: ProviderControllerOptions) {
     changeOhMyPiConfiguration,
     changeOllamaConfiguration,
     changeMistralVibeConfiguration,
+    changeGrokConfiguration,
     changeOpenAiCompatibleConfiguration,
     changeAnthropicCompatibleConfiguration,
     changeAzureFoundryConfiguration,

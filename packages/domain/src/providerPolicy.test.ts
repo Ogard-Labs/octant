@@ -211,6 +211,28 @@ function mistralVibeProvider(): Extract<ProviderInstance, { driverKind: "mistral
   return instance;
 }
 
+function grokProvider(): Extract<ProviderInstance, { driverKind: "grok" }> {
+  const instance = decodeProviderInstance({
+    id: ids.local,
+    displayName: "Grok Build local",
+    driverKind: "grok",
+    configuration: {
+      kind: "grok-acp",
+      binaryPath: "/Users/example/.local/bin/grok",
+      authentication: "subscription",
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt,
+    updatedAt: createdAt,
+  });
+  if (instance.driverKind !== "grok") {
+    throw new Error("expected Grok Build provider fixture");
+  }
+  return instance;
+}
+
 function devinProvider(): Extract<ProviderInstance, { driverKind: "devin" }> {
   const instance = decodeProviderInstance({
     id: ids.local,
@@ -839,6 +861,97 @@ describe("provider instance policy", () => {
         updatedAt,
         1,
       ),
+    ).toThrow("Stop active sessions before changing this provider runtime.");
+  });
+
+  it("creates and immutably updates Grok Build with explicit selected authentication", () => {
+    const policy = providerPolicy as unknown as {
+      createGrokProvider: (input: Record<string, unknown>) => ProviderInstance;
+      changeGrokConfiguration: (
+        provider: Extract<ProviderInstance, { driverKind: "grok" }>,
+        configuration: Record<string, unknown>,
+        updatedAt: UtcTimestamp,
+        activeSessionCount?: number,
+      ) => ProviderInstance;
+    };
+    const original = policy.createGrokProvider({
+      id: ids.local,
+      displayName: "  Grok Build local  ",
+      configuration: {
+        kind: "grok-acp",
+        binaryPath: " /Users/example/.local/bin/grok ",
+        authentication: "subscription",
+      },
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+
+    expect(original).toEqual(grokProvider());
+    expect(
+      policy.changeGrokConfiguration(
+        grokProvider(),
+        {
+          kind: "grok-acp",
+          binaryPath: "/opt/homebrew/bin/grok",
+          authentication: "api-key",
+        },
+        updatedAt,
+        0,
+      ),
+    ).toEqual({
+      ...grokProvider(),
+      configuration: {
+        kind: "grok-acp",
+        binaryPath: "/opt/homebrew/bin/grok",
+        authentication: "api-key",
+      },
+      version: 2,
+      updatedAt,
+    });
+    expect(grokProvider().configuration.authentication).toBe("subscription");
+  });
+
+  it("rejects invalid Grok Build authentication, relative binaries, and active updates", () => {
+    const policy = providerPolicy as unknown as {
+      createGrokProvider: (input: Record<string, unknown>) => ProviderInstance;
+      changeGrokConfiguration: (
+        provider: Extract<ProviderInstance, { driverKind: "grok" }>,
+        configuration: Record<string, unknown>,
+        updatedAt: UtcTimestamp,
+        activeSessionCount?: number,
+      ) => ProviderInstance;
+    };
+    expect(() =>
+      policy.createGrokProvider({
+        id: ids.local,
+        displayName: "Grok Build local",
+        configuration: {
+          kind: "grok-acp",
+          binaryPath: "bin/grok",
+          authentication: "subscription",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Provider binary path must be absolute.");
+    expect(() =>
+      policy.createGrokProvider({
+        id: ids.local,
+        displayName: "Grok Build local",
+        configuration: {
+          kind: "grok-acp",
+          binaryPath: "/Users/example/.local/bin/grok",
+          authentication: "automatic",
+        },
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      }),
+    ).toThrow("Grok Build authentication must be subscription or api-key.");
+    expect(() =>
+      policy.changeGrokConfiguration(grokProvider(), grokProvider().configuration, updatedAt, 1),
     ).toThrow("Stop active sessions before changing this provider runtime.");
   });
 

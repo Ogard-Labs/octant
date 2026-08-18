@@ -102,6 +102,7 @@ const nativeToolRuntimeDrivers: ReadonlySet<ProviderDriverKind> = new Set([
   "devin",
   "kimi-code",
   "mistral-vibe",
+  "grok",
 ]);
 
 export function isNativeToolRuntimeDriver(driverKind: ProviderDriverKind): boolean {
@@ -253,6 +254,8 @@ function authenticationOf(instance: ProviderInstance): string | undefined {
       return instance.configuration.authentication;
     case "mistral-vibe-acp":
       return instance.configuration.authentication;
+    case "grok-acp":
+      return instance.configuration.authentication;
     case "devin-acp":
       return instance.configuration.authentication;
     default:
@@ -269,6 +272,7 @@ function binaryOf(instance: ProviderInstance): string | undefined {
     case "devin-acp":
     case "pi-rpc":
     case "mistral-vibe-acp":
+    case "grok-acp":
     case "claude-agent-sdk":
       return instance.configuration.binaryPath;
     default:

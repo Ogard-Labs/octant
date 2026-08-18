@@ -830,10 +830,10 @@ function acquireConnection(
           .then(
             (initialized) => {
               if (settled || child.pid === undefined) return;
-              if (
-                initialized.protocolVersion !== 1 ||
-                initialized.agentInfo?.name !== profile.process.agentName
-              ) {
+              const identityMatches = profile.process.verifyAgentInfo
+                ? profile.process.verifyAgentInfo(initialized)
+                : initialized.agentInfo?.name === profile.process.agentName;
+              if (initialized.protocolVersion !== 1 || !identityMatches) {
                 finishFailure(failure("incompatible", `${name} ACP negotiation was incompatible.`));
                 return;
               }
