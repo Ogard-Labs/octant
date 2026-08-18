@@ -77,12 +77,10 @@ function AvailableEditor(
   const dirtyRef = useRef(false);
   const draftRef = useRef("");
   const metadataRef = useRef(props.file.metadata);
-  const observedRevision = useRef<string | undefined>(undefined);
   const requestGeneration = useRef(0);
   const mounted = useRef(true);
   // Manual edits are the user's own action; only Plan mode is read-only.
   const writable = props.file.executionPolicy !== "plan";
-  const revision = `${props.file.fileId}:${props.file.content.contentId}:${props.file.metadata.digest}`;
   const draftKey = modelUri(props.file.checkoutId, props.file.fileId);
 
   useEffect(() => {
@@ -94,21 +92,17 @@ function AvailableEditor(
   }, []);
 
   useEffect(() => {
-    metadataRef.current = props.file.metadata;
-  }, [props.file.metadata]);
-
-  useEffect(() => {
-    if (
-      observedRevision.current !== undefined &&
-      observedRevision.current !== revision &&
-      dirtyRef.current
-    ) {
-      observedRevision.current = revision;
+    // A watched change re-opens the file underneath a pane that stays mounted.
+    // While the user holds unsaved work, the pane keeps both the draft and the
+    // identity and digest that draft was based on: adopting the external
+    // revision here would let Save carry the new digest and overwrite the
+    // external edit without the host ever seeing a conflict.
+    if (dirtyRef.current && !sameRevision(metadataRef.current, props.file.metadata)) {
       setConflict("external");
       setMessage(undefined);
       return;
     }
-    observedRevision.current = revision;
+    metadataRef.current = props.file.metadata;
     const request = ++requestGeneration.current;
     setLoadState({ kind: "loading" });
     setConflict(undefined);
@@ -143,13 +137,8 @@ function AvailableEditor(
     props.client,
     props.draftStore,
     props.file.content.contentId,
-    props.file.metadata.byteLength,
-    props.file.metadata.digest,
-    props.file.metadata.identity.device,
-    props.file.metadata.identity.inode,
-    props.file.metadata.modifiedNanoseconds,
+    props.file.metadata,
     reloadGeneration,
-    revision,
     draftKey,
   ]);
 
@@ -326,6 +315,19 @@ function UnavailableFile(props: {
       <h1>{props.file.path}</h1>
       <p role="alert">{props.file.reason}</p>
     </section>
+  );
+}
+
+/**
+ * Whether two open answers describe the same bytes of the same file. A reopen
+ * restages the content under a fresh reference, so only the file's identity and
+ * digest say whether what is on disk still matches what a draft was based on.
+ */
+function sameRevision(observed: CodeFileMetadata, opened: CodeFileMetadata): boolean {
+  return (
+    observed.digest === opened.digest &&
+    observed.identity.device === opened.identity.device &&
+    observed.identity.inode === opened.identity.inode
   );
 }
 
