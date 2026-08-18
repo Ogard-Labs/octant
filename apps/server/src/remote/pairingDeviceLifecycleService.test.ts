@@ -151,6 +151,25 @@ function claimInput(ticketId: string, proof: string, overrides: Record<string, u
   };
 }
 
+/**
+ * Every property name in a payload, however deep.
+ *
+ * Leak checks read names rather than the whole serialization: a payload
+ * carries a freshly generated device key, and scanning its base64 for a short
+ * word like "csrf" fails whenever those four characters happen to land in the
+ * key. The rule being enforced is that no secret-bearing field is present, so
+ * the names are what to look at; an actual secret is checked by its value.
+ */
+function propertyNames(value: unknown): ReadonlyArray<string> {
+  if (Array.isArray(value)) return value.flatMap((entry) => propertyNames(entry));
+  if (value === null || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([name, nested]) => [name, ...propertyNames(nested)]);
+}
+
+function fieldsMatching(payload: unknown, pattern: RegExp): ReadonlyArray<string> {
+  return propertyNames(payload).filter((name) => pattern.test(name));
+}
+
 describe("PairingDeviceLifecycleService", () => {
   it("creates a single-use ticket and claims it once with comparison transcript facts", () => {
     const { service } = createService({
@@ -159,7 +178,8 @@ describe("PairingDeviceLifecycleService", () => {
     const ticket = service.createTicket({ sourceClass: "lan-private" });
     expect(ticket.expiresAt).toBe(nowMs + PAIRING_TICKET_TTL_MS);
     expect(ticket.ticketProof).toMatch(/^[A-Za-z0-9_-]+$/);
-    expect(JSON.stringify(ticket)).not.toMatch(/private key|cookie|csrf/i);
+    // The proof belongs to the ticket that carries it; nothing else does.
+    expect(fieldsMatching(ticket, /cookie|csrf|private ?key/i)).toEqual([]);
 
     const claim = service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
     expect(claim.kind).toBe("pending");
@@ -263,7 +283,8 @@ describe("PairingDeviceLifecycleService", () => {
         Math.min(nowMs + DEVICE_ABSOLUTE_TTL_MS, nowMs + DEVICE_INACTIVITY_TTL_MS),
       ).toISOString(),
     );
-    expect(JSON.stringify(approved)).not.toMatch(/ticketProof|cookie|csrf|private key/i);
+    expect(fieldsMatching(approved, /ticketProof|cookie|csrf|private ?key/i)).toEqual([]);
+    expect(JSON.stringify(approved)).not.toContain(ticket.ticketProof);
 
     const devices = readDeviceRegistrations(connection);
     expect(devices).toHaveLength(1);
@@ -525,7 +546,7 @@ describe("PairingDeviceLifecycleService", () => {
       credentialGeneration: approved.device.credentialGeneration,
     });
     expect(JSON.stringify(status)).not.toContain(ticket.ticketProof);
-    expect(JSON.stringify(status)).not.toMatch(/comparisonCode|devicePublicKey|private key/i);
+    expect(fieldsMatching(status, /comparisonCode|devicePublicKey|private ?key/i)).toEqual([]);
   });
 
   it("returns generic failure for unknown, denied, and expired tickets without state leaks", () => {
