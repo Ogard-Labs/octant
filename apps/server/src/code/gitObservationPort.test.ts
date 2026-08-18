@@ -50,10 +50,7 @@ describe("GitObservationPort", () => {
 
     expect(result.status).toBe("ready");
     if (result.status !== "ready") return;
-    expect(result.head).toEqual({
-      oid: beforeHead,
-      branch: { kind: "named", name: "main" },
-    });
+    expect(result.head).toEqual({ kind: "branch", name: "main", oid: beforeHead });
     expect(result.changedPaths).toEqual(["new file.txt", "tracked.txt"]);
     expect(result.statusEntries).toEqual([
       { path: "new file.txt", index: "?", worktree: "?" },
@@ -83,12 +80,65 @@ describe("GitObservationPort", () => {
 
     expect(result.status).toBe("ready");
     if (result.status !== "ready") return;
-    expect(result.head.branch).toEqual({ kind: "detached" });
+    expect(result.head).toEqual({
+      kind: "detached",
+      oid: gitOutput(repository, "rev-parse", "HEAD").trim(),
+    });
     expect(result.remotes[0]).toEqual({
       name: "origin",
       fetchUrl: "https://example.test/owner/repo.git",
       pushUrl: "https://example.test/owner/repo.git",
     });
+  });
+
+  it("observes a checkout whose branch has no commits yet", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Octant Test");
+    git(repository, "config", "user.email", "test@octant.local");
+    writeFileSync(join(repository, "staged.txt"), "first\n");
+    git(repository, "add", "--", "staged.txt");
+    writeFileSync(join(repository, "untracked.txt"), "loose\n");
+
+    const result = await new GitObservationPort(confinedOptions()).observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.head).toEqual({ kind: "unborn", name: "main" });
+    expect(result.statusEntries).toEqual([
+      { path: "staged.txt", index: "A", worktree: " " },
+      { path: "untracked.txt", index: "?", worktree: "?" },
+    ]);
+    // The empty tree is the only baseline an unborn branch has, so the staged
+    // addition is the whole diff.
+    expect(result.diff.text).toContain("+++ b/staged.txt");
+    expect(result.diff.truncated).toBe(false);
+    expect(result.upstream).toBeNull();
+    expect(result.stateToken).toMatch(/^[a-f0-9]{64}$/);
+  });
+
+  // On any other branch `git diff HEAD` reaches the working tree, so a file
+  // staged and then edited again shows its latest text. An unborn branch has to
+  // reach just as far, or the pane shows content the file no longer has.
+  it("shows the working-tree text of a file edited after staging on an unborn branch", async () => {
+    const root = temporaryDirectory();
+    const repository = join(root, "repository");
+    mkdirSync(repository);
+    git(repository, "init", "--initial-branch=main");
+    git(repository, "config", "user.name", "Octant Test");
+    git(repository, "config", "user.email", "test@octant.local");
+    writeFileSync(join(repository, "staged.txt"), "first\n");
+    git(repository, "add", "--", "staged.txt");
+    writeFileSync(join(repository, "staged.txt"), "first\nsecond\n");
+
+    const result = await new GitObservationPort(confinedOptions()).observe(repository);
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.statusEntries).toEqual([{ path: "staged.txt", index: "A", worktree: "M" }]);
+    expect(result.diff.text).toContain("+second");
   });
 
   it("reports both sides of a staged rename as explicit changed paths", async () => {
