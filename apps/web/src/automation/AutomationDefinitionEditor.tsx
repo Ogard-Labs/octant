@@ -4,6 +4,7 @@ import type {
   AutomationMissedRunPolicy,
   AutomationMode,
 } from "@octant/contracts";
+import { environmentLabel } from "@octant/client-runtime/environment-selection";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -25,6 +26,8 @@ import {
  */
 export interface AutomationDefinitionEditorProps {
   readonly catalog: AutomationEditorCatalog;
+  /** Which host this window runs on, so its row reads "Local" like everywhere else. */
+  readonly localHostId?: string;
   /** Present when editing an existing definition. */
   readonly initial?: AutomationDefinition;
   readonly onCancel: () => void;
@@ -393,12 +396,24 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       </div>
 
       <div className="automation-editor__field">
-        <label htmlFor={ids.host}>Host</label>
+        {/*
+          The environment that will own and run this routine. It is chosen
+          before anything else because everything below it — the Projects, the
+          profiles, the bindings — is a fact of that host and not of this
+          window. The names come from the shared environment vocabulary, so the
+          machine you are sitting at reads "Local" here exactly as it does in
+          the filter and on a row.
+        */}
+        <label htmlFor={ids.host}>Environment</label>
         <select id={ids.host} onChange={(event) => setHostId(event.target.value)} value={hostId}>
-          {catalog.hosts.length === 0 ? <option value="">No hosts available</option> : null}
+          {catalog.hosts.length === 0 ? <option value="">No environments available</option> : null}
           {catalog.hosts.map((host) => (
             <option key={String(host.hostId)} value={String(host.hostId)}>
-              {host.label}
+              {environmentLabel({
+                hostId: String(host.hostId),
+                hostDisplayName: host.label,
+                ...(props.localHostId === undefined ? {} : { localHostId: props.localHostId }),
+              })}
             </option>
           ))}
         </select>

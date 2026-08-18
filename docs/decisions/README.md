@@ -38,6 +38,7 @@ distilled successor of the earlier long-form design specifications.
 | [0028](0028-the-artifact-library.md)                    | The artifact library                                              | Accepted |
 | [0029](0029-artifact-storage-mirror.md)                 | The artifact storage mirror                                       | Accepted |
 | [0030](0030-routines-that-run-themselves.md)            | Routines that run themselves                                      | Accepted |
+| [0031](0031-hosts-as-environments.md)                   | Hosts as environments                                             | Accepted |
 
 ## Adding an ADR
 
