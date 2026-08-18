@@ -43,9 +43,15 @@ artifact is.
   its old files are removed, rather than leaving a second stale copy of the same
   document.
 - **A repository destination is written to the working tree only.** Committing
-  is the user's explicit act, or an optional auto-commit that is **off by
-  default** and still runs the ordinary approval-gated commit. Nothing is ever
-  pushed automatically, at any setting.
+  is a separate act. Auto-commit is **off by default**, and when it is on the
+  host commits the artifact files it just wrote and nothing else: anything else
+  already staged refuses the commit rather than being swept into a commit its
+  author never wrote. The commit is authorized against the index as it stands
+  at that moment, so a checkout that changed underneath refuses rather than
+  races. **Nothing is ever pushed, at any setting** — reaching a remote stays an
+  act the user takes. Auto-commit needs somewhere to commit: asking for it
+  without a repository destination is refused, and taking the last repository
+  away turns it off rather than leaving a setting that quietly does nothing.
 - **An externally edited file is never absorbed silently.** The host offers
   re-import, which **appends a version** carrying where it came from. The
   decision function that governs this cannot express "overwrite" — a function
@@ -82,6 +88,29 @@ artifact is.
 - Until the access-outside-project surface exists, a folder outside the user's
   home is refused rather than assumed. That is narrower than the final rule and
   fails in the safe direction.
+- Auto-commit refuses whenever the index holds anything else, so a person who
+  keeps work staged while artifacts revise will see it decline rather than
+  commit. That is the intended trade: a refused commit costs a click, and a
+  commit someone did not write costs their trust.
+- Re-import goes through the ordinary revise path, so an artifact whose thread
+  or Project is gone cannot be re-imported. Its file is still readable; what it
+  cannot do is rejoin a document that no longer has a home.
+
+## Future work
+
+Sharing an artifact with another **person** is the same problem one step out,
+and the bundle is already the unit that would travel: identity beside
+definition, diff-friendly, and refused when it names another artifact. The
+direction is a **store the user owns** — a Git remote they control, or a
+comparable self-hosted target — that Octant pushes bundles to and reads bundles
+from on their instruction, with each side's journal appending versions rather
+than adopting the other's.
+
+Nothing here is built, and one thing is settled in advance: **there is no
+Octant cloud, ever.** Cross-device and cross-user sharing reach a target the
+user already owns, or they do not happen. Whoever builds it owns the questions
+this record does not answer — how two people's versions of one artifact
+reconcile, and what a bundle proves about who wrote it.
 
 ## Related
 

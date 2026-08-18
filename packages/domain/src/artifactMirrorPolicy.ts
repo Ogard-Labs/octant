@@ -221,6 +221,21 @@ export function reimportRefusalText(reason: ReimportRefusal): string {
 }
 
 /**
+ * The subject line an auto-commit of mirrored files carries.
+ *
+ * A title is written by a person or a provider, so it arrives with newlines,
+ * runs of spaces, and any length at all. A commit subject is one bounded line,
+ * and a title that spilled into a body would put arbitrary text where a reader
+ * expects the host's own words.
+ */
+export function mirrorCommitMessage(title: string): string {
+  const collapsed = title.replace(/\s+/g, " ").trim();
+  if (collapsed.length === 0) return "Update mirrored artifact";
+  const bounded = collapsed.length > 60 ? `${collapsed.slice(0, 59).trimEnd()}…` : collapsed;
+  return `Update mirrored artifact: ${bounded}`;
+}
+
+/**
  * A filesystem-safe piece of a name.
  *
  * Titles are written by people and by providers, so they contain anything at

@@ -5,6 +5,7 @@ import {
   decodeArtifactMirrorReceipt,
   decodeArtifactMirrorResult,
   decodeArtifactMirrorSettings,
+  type ArtifactMirrorCommitOutcome,
   type ArtifactMirrorDestination,
   type ArtifactMirrorReceipt,
   type ArtifactMirrorResult,
@@ -15,6 +16,7 @@ import {
   artifactBundlePaths,
   decideArtifactReimport,
   decideMirrorWrite,
+  mirrorCommitMessage,
   mirrorRefusalText,
   reimportRefusalText,
   resolveArtifactDestination,
@@ -62,6 +64,17 @@ export interface ArtifactMirrorServiceDependencies {
   }) =>
     | { readonly kind: "accepted"; readonly versionId: string }
     | { readonly kind: "denied"; readonly message: string };
+  /**
+   * Commit the files just written into a repository destination.
+   *
+   * Optional: a host without it reports auto-commit unavailable rather than
+   * being unusable, and writing the working tree is unaffected either way.
+   */
+  readonly commitMirroredFiles?: (input: {
+    readonly checkoutRoot: string;
+    readonly paths: ReadonlyArray<string>;
+    readonly message: string;
+  }) => Promise<ArtifactMirrorCommitOutcome>;
   readonly journal: {
     readonly append: (input: {
       readonly aggregateType: string;
@@ -113,17 +126,37 @@ export class ArtifactMirrorService {
     if (command.expectedVersion !== this.#settings.version) {
       return this.#refused("stale-version", "The mirror settings changed since you read them.");
     }
+    const fallback =
+      command.kind === "set-artifact-mirror-fallback"
+        ? command.destination
+        : this.#settings.fallback;
+    const overrides = this.#nextOverrides(command);
+    const requestedAutoCommit =
+      command.kind === "set-artifact-mirror-auto-commit"
+        ? command.autoCommit
+        : this.#settings.autoCommit;
+    // Committing needs somewhere to commit. Asking for it without a repository
+    // is refused rather than stored, and taking the last repository away turns
+    // it off with the destination rather than leaving a setting that does
+    // nothing and surprises someone the next time a repository appears.
+    const commitsSomewhere =
+      fallback.kind === "project-repository" ||
+      overrides.some((override) => override.destination.kind === "project-repository");
+    if (
+      command.kind === "set-artifact-mirror-auto-commit" &&
+      command.autoCommit &&
+      !commitsSomewhere
+    ) {
+      return this.#refused(
+        "commit-needs-repository",
+        "Auto-commit needs a Project that mirrors into its repository.",
+      );
+    }
     const next = decodeArtifactMirrorSettings({
       kind: "artifact-mirror-settings",
-      fallback:
-        command.kind === "set-artifact-mirror-fallback"
-          ? command.destination
-          : this.#settings.fallback,
-      overrides: this.#nextOverrides(command),
-      autoCommit:
-        command.kind === "set-artifact-mirror-auto-commit"
-          ? command.autoCommit
-          : this.#settings.autoCommit,
+      fallback,
+      overrides,
+      autoCommit: requestedAutoCommit && commitsSomewhere,
       version: this.#settings.version + 1,
       updatedAt: this.#dependencies.clock(),
     });
@@ -223,7 +256,35 @@ export class ArtifactMirrorService {
     }
     this.#lastWrite.set(String(version.canvasId), { root, paths: written });
 
-    return this.#receipt(version, destination, written, "written");
+    const commit = await this.#commit(destination, root, written, version.definition.title);
+    return this.#receipt(version, destination, written, "written", undefined, commit);
+  }
+
+  /**
+   * Commit what was just written, when the person asked for that.
+   *
+   * Only a repository destination can be committed, and only with the setting
+   * on: writing the working tree and committing it are separate acts, and the
+   * default leaves the second one to the person. A commit that cannot be made
+   * is reported, never retried into something the user did not ask for, and
+   * nothing here can push.
+   */
+  async #commit(
+    destination: ArtifactMirrorDestination,
+    root: string,
+    paths: ReadonlyArray<string>,
+    title: string,
+  ): Promise<ArtifactMirrorCommitOutcome> {
+    if (!this.#settings.autoCommit || destination.kind !== "project-repository") {
+      return { status: "not-requested" };
+    }
+    const commit = this.#dependencies.commitMirroredFiles;
+    if (commit === undefined) return { status: "refused", reason: "commit-unavailable" };
+    try {
+      return await commit({ checkoutRoot: root, paths, message: mirrorCommitMessage(title) });
+    } catch {
+      return { status: "refused", reason: "commit-unavailable" };
+    }
   }
 
   async #reimport(command: {
@@ -324,6 +385,7 @@ export class ArtifactMirrorService {
     paths: ReadonlyArray<string>,
     outcome: ArtifactMirrorReceipt["outcome"],
     detail?: string,
+    commit: ArtifactMirrorCommitOutcome = { status: "not-requested" },
   ): ArtifactMirrorReceipt {
     const receipt = decodeArtifactMirrorReceipt({
       canvasId: version.canvasId,
@@ -332,6 +394,7 @@ export class ArtifactMirrorService {
       destination,
       paths,
       outcome,
+      commit,
       ...(detail === undefined ? {} : { detail }),
       observedAt: this.#dependencies.clock(),
     });

@@ -2,7 +2,6 @@ import type {
   ArtifactMirrorDestination,
   ArtifactMirrorSettings as MirrorSettings,
 } from "@octant/contracts/artifact-mirror";
-import { OctantButton } from "../ui/base/OctantButton";
 import { useState } from "react";
 
 export interface ArtifactMirrorSettingsProps {
@@ -114,8 +113,8 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
           type="checkbox"
         />
         <span>
-          Commit mirrored files automatically. Off by default; it still runs the ordinary
-          approval-gated commit, and never pushes.
+          Commit mirrored files automatically. Off by default. It commits the artifact files and
+          nothing else — if you have anything else staged it declines instead — and it never pushes.
         </span>
       </label>
 
@@ -125,9 +124,9 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
         </p>
       )}
 
-      <OctantButton disabled={props.busy} size="sm" type="button" variant="ghost">
+      <p aria-live="polite" className="artifact-mirror__saved">
         {props.busy ? "Saving…" : "Saved automatically"}
-      </OctantButton>
+      </p>
     </section>
   );
 }

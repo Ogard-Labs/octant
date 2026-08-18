@@ -1,4 +1,5 @@
 import type { CanvasVersion } from "@octant/contracts";
+import type { ArtifactMirrorCommitOutcome } from "@octant/contracts/artifact-mirror";
 import { describe, expect, it, vi } from "vitest";
 import { buildArtifactBundle } from "./artifactBundle";
 import {
@@ -43,6 +44,7 @@ function harness(
     readonly planMode?: boolean;
     readonly files?: Map<string, string>;
     readonly current?: CanvasVersion;
+    readonly commit?: ArtifactMirrorCommitOutcome | "unavailable";
   } = {},
 ) {
   const files = options.files ?? new Map<string, string>();
@@ -56,6 +58,16 @@ function harness(
   const appendVersionFromBundle = vi.fn(
     (_input: { readonly canvasId: unknown; readonly definition: unknown }) =>
       ({ kind: "accepted", versionId: "30000000-0000-4000-8000-0000000000ff" }) as const,
+  );
+  const commitMirroredFiles = vi.fn(
+    async (_input: {
+      readonly checkoutRoot: string;
+      readonly paths: ReadonlyArray<string>;
+      readonly message: string;
+    }): Promise<ArtifactMirrorCommitOutcome> =>
+      options.commit === undefined || options.commit === "unavailable"
+        ? { status: "not-requested" }
+        : options.commit,
   );
   const dependencies: ArtifactMirrorServiceDependencies = {
     files: {
@@ -74,6 +86,9 @@ function harness(
     outsideRootApproved: () => options.outsideRootApproved ?? true,
     planMode: () => options.planMode ?? false,
     appendVersionFromBundle,
+    ...(options.commit === undefined || options.commit === "unavailable"
+      ? {}
+      : { commitMirroredFiles: commitMirroredFiles }),
     journal,
     clock: () => "2026-08-18T10:00:00.000Z" as never,
   };
@@ -84,6 +99,7 @@ function harness(
     remove,
     journal,
     appendVersionFromBundle,
+    commitMirroredFiles,
   };
 }
 
@@ -177,6 +193,107 @@ describe("mirroring artifacts to files", () => {
     const receipt = await h.service.materialize(version());
 
     expect(receipt.detail).toContain("binds no repository");
+  });
+
+  it("leaves the commit to the person unless they turned auto-commit on", async () => {
+    const h = harness({ checkoutRoot: "/repos/storefront", commit: { status: "committed" } });
+    await h.service.execute({
+      kind: "set-artifact-mirror-fallback",
+      expectedVersion: 0,
+      destination: { kind: "project-repository", relativeDirectory: "docs/artifacts" },
+    });
+
+    const receipt = await h.service.materialize(version());
+
+    expect(receipt.outcome).toBe("written");
+    expect(receipt.commit).toEqual({ status: "not-requested" });
+    expect(h.commitMirroredFiles).not.toHaveBeenCalled();
+  });
+
+  it("commits only the files it wrote once auto-commit is on", async () => {
+    const h = harness({ checkoutRoot: "/repos/storefront", commit: { status: "committed" } });
+    await h.service.execute({
+      kind: "set-artifact-mirror-fallback",
+      expectedVersion: 0,
+      destination: { kind: "project-repository", relativeDirectory: "docs/artifacts" },
+    });
+    await h.service.execute({
+      kind: "set-artifact-mirror-auto-commit",
+      expectedVersion: 1,
+      autoCommit: true,
+    });
+
+    const receipt = await h.service.materialize(version());
+
+    expect(receipt.commit).toEqual({ status: "committed" });
+    const call = h.commitMirroredFiles.mock.calls[0]?.[0];
+    expect(call?.checkoutRoot).toBe("/repos/storefront");
+    expect(call?.paths).toEqual(receipt.paths);
+    expect(call?.message).toBe("Update mirrored artifact: Launch plan");
+  });
+
+  it("never commits a folder that is not a repository", async () => {
+    const h = await withGlobalFolder(
+      harness({ checkoutRoot: "/repos/storefront", commit: { status: "committed" } }),
+    );
+    await h.service.execute({
+      kind: "set-artifact-mirror-override",
+      expectedVersion: 1,
+      projectId,
+      destination: { kind: "project-repository", relativeDirectory: "docs/artifacts" },
+    });
+    await h.service.execute({
+      kind: "set-artifact-mirror-auto-commit",
+      expectedVersion: 2,
+      autoCommit: true,
+    });
+    await h.service.execute({
+      kind: "clear-artifact-mirror-override",
+      expectedVersion: 3,
+      projectId,
+    });
+
+    const receipt = await h.service.materialize(version());
+
+    expect(receipt.destination.kind).toBe("global-folder");
+    // Taking the repository away took auto-commit with it rather than leaving
+    // a setting that does nothing until a repository appears again.
+    expect(h.service.settings().autoCommit).toBe(false);
+    expect(receipt.commit).toEqual({ status: "not-requested" });
+    expect(h.commitMirroredFiles).not.toHaveBeenCalled();
+  });
+
+  it("refuses auto-commit when nothing mirrors into a repository", async () => {
+    const h = await withGlobalFolder(harness());
+
+    expect(
+      await h.service.execute({
+        kind: "set-artifact-mirror-auto-commit",
+        expectedVersion: 1,
+        autoCommit: true,
+      }),
+    ).toMatchObject({ kind: "mirror-refused", reason: "commit-needs-repository" });
+    expect(h.service.settings().autoCommit).toBe(false);
+  });
+
+  it("reports auto-commit unavailable on a host that cannot commit", async () => {
+    const h = harness({ checkoutRoot: "/repos/storefront", commit: "unavailable" });
+    await h.service.execute({
+      kind: "set-artifact-mirror-fallback",
+      expectedVersion: 0,
+      destination: { kind: "project-repository", relativeDirectory: "docs/artifacts" },
+    });
+    await h.service.execute({
+      kind: "set-artifact-mirror-auto-commit",
+      expectedVersion: 1,
+      autoCommit: true,
+    });
+
+    const receipt = await h.service.materialize(version());
+
+    // The files are still written: a host that cannot commit still mirrors.
+    expect(receipt.outcome).toBe("written");
+    expect(receipt.commit).toEqual({ status: "refused", reason: "commit-unavailable" });
   });
 
   it("refuses a settings change computed against a stale view", async () => {

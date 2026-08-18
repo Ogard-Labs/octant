@@ -97,9 +97,11 @@ export const ArtifactMirrorSettings = Schema.Struct({
   /**
    * Whether a repository destination commits what it writes.
    *
-   * Off by default, and on it still runs the ordinary approval-gated commit —
-   * it changes who starts the commit, never whether one is gated. Nothing is
-   * ever pushed automatically, at any setting.
+   * Off by default: a repository destination writes the working tree and stops
+   * there, leaving the commit to the person. On, the host commits the artifact
+   * files it just wrote and nothing else — anything else already staged refuses
+   * the commit instead of being swept into it. Nothing is ever pushed, at any
+   * setting; reaching a remote stays an act the user takes themselves.
    */
   autoCommit: Schema.Boolean,
   version: AggregateVersion,
@@ -119,6 +121,31 @@ export const ArtifactMirrorSettings = Schema.Struct({
   );
 export type ArtifactMirrorSettings = typeof ArtifactMirrorSettings.Type;
 
+/**
+ * What auto-commit did with the files a materialization just wrote.
+ *
+ * Writing and committing are separate acts: a repository destination always
+ * gets the working-tree write, and this records whether the host went on to
+ * commit it. There is no outcome here that reaches a remote, because nothing
+ * is ever pushed at any setting.
+ */
+export const ArtifactMirrorCommitOutcome = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("not-requested") }).annotations(strict),
+  Schema.Struct({ status: Schema.Literal("committed") }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: Schema.Literal(
+      // Committing with anything else staged would sweep someone's work into
+      // a commit they did not write. Refusing is the only safe answer.
+      "index-holds-other-work",
+      "nothing-to-commit",
+      "commit-unavailable",
+      "commit-rejected",
+    ),
+  }).annotations(strict),
+);
+export type ArtifactMirrorCommitOutcome = typeof ArtifactMirrorCommitOutcome.Type;
+
 /** What one materialization did, recorded so a file can be traced to a version. */
 export const ArtifactMirrorReceipt = Schema.Struct({
   canvasId: CanvasId,
@@ -130,13 +157,22 @@ export const ArtifactMirrorReceipt = Schema.Struct({
     Schema.filter((paths) => paths.length <= 8 && new Set(paths).size === paths.length),
   ),
   outcome: Schema.Literal("written", "skipped", "refused", "failed"),
+  /** Whether the files written were also committed, and why not when they were not. */
+  commit: ArtifactMirrorCommitOutcome,
   /** Present on anything but a plain write, in the words the user reads. */
   detail: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
   observedAt: UtcTimestamp,
 })
   .annotations(strict)
   .pipe(Schema.filter((receipt) => (receipt.outcome === "written") === receipt.paths.length > 0))
-  .pipe(Schema.filter((receipt) => receipt.outcome === "written" || receipt.detail !== undefined));
+  .pipe(Schema.filter((receipt) => receipt.outcome === "written" || receipt.detail !== undefined))
+  // Nothing was written, so there was nothing to commit: a receipt claiming
+  // otherwise would be describing a commit of files that do not exist.
+  .pipe(
+    Schema.filter(
+      (receipt) => receipt.commit.status === "not-requested" || receipt.outcome === "written",
+    ),
+  );
 export type ArtifactMirrorReceipt = typeof ArtifactMirrorReceipt.Type;
 
 /**
@@ -206,6 +242,7 @@ export const ArtifactMirrorResult = Schema.Union(
       "file-unreadable",
       "file-not-a-bundle",
       "file-unchanged",
+      "commit-needs-repository",
     ),
     message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
   }).annotations(strict),
@@ -224,3 +261,6 @@ export const decodeArtifactMirrorCommand = Schema.decodeUnknownSync(ArtifactMirr
 export const decodeArtifactMirrorResult = Schema.decodeUnknownSync(ArtifactMirrorResult);
 export const decodeArtifactMirrorReceipt = Schema.decodeUnknownSync(ArtifactMirrorReceipt);
 export const decodeArtifactMirrorDrift = Schema.decodeUnknownSync(ArtifactMirrorDrift);
+export const decodeArtifactMirrorCommitOutcome = Schema.decodeUnknownSync(
+  ArtifactMirrorCommitOutcome,
+);

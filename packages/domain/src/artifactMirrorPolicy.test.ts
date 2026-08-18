@@ -4,6 +4,7 @@ import {
   artifactBundlePaths,
   decideArtifactReimport,
   decideMirrorWrite,
+  mirrorCommitMessage,
   mirrorRefusalText,
   reimportRefusalText,
   resolveArtifactDestination,
@@ -232,5 +233,24 @@ describe("taking an edited file back in", () => {
     expect(decideArtifactReimport(reimportFacts({ file: { status } }))).toMatchObject({
       decision: "refuse",
     });
+  });
+});
+
+describe("the subject line an auto-commit carries", () => {
+  it("names the artifact on one line however the title was written", () => {
+    expect(mirrorCommitMessage("Launch\n  plan   2026")).toBe(
+      "Update mirrored artifact: Launch plan 2026",
+    );
+  });
+
+  it("stays a subject rather than spilling a long title into a body", () => {
+    const subject = mirrorCommitMessage("A".repeat(200));
+
+    expect(subject.length).toBeLessThanOrEqual(90);
+    expect(subject.includes("\n")).toBe(false);
+  });
+
+  it("still says what it did for an artifact with no usable title", () => {
+    expect(mirrorCommitMessage("   ")).toBe("Update mirrored artifact");
   });
 });
