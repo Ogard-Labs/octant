@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
-import type { CanvasDefinition, CanvasVersionId } from "@octant/contracts/canvas";
+import type { CanvasDefinition, CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
 import type {
   CanvasReviseRequest,
   CanvasVersionHistoryEntry,
@@ -43,6 +43,10 @@ export interface CanvasWorkspaceTabProps {
     tab: Extract<WorkspaceTab, { readonly kind: "canvas" }>,
   ) => void;
   readonly tab: Extract<WorkspaceTab, { readonly kind: "canvas" }>;
+  readonly onPinCanvasInFocusZone?: (request: {
+    readonly canvasId: CanvasId;
+    readonly title: string;
+  }) => void;
 }
 
 export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
@@ -354,6 +358,15 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
           displayName={definition.title}
           onAttachContext={props.onAttachContext}
           onTogglePin={() => props.onTogglePin?.(props.groupId, props.tab)}
+          {...(props.onPinCanvasInFocusZone === undefined
+            ? {}
+            : {
+                onPinInFocusZone: () =>
+                  props.onPinCanvasInFocusZone?.({
+                    canvasId: props.tab.canvasId,
+                    title: definition.title,
+                  }),
+              })}
           pinned={props.tab.pinned === true}
           tab={props.tab}
         />

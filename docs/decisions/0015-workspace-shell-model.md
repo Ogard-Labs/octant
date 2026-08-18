@@ -104,6 +104,16 @@ redesigns.
   Code thread's to do.
 - One budget covers every card that streams, whatever it streams. A pinned
   conversation and a pinned shell cost the same live slot and compete for it.
+- A card may be pinned to a canvas this window may already open. The card
+  addresses the document rather than describing it: it names the canvas, and
+  the server writes the card only after Canvas says this window may read it.
+  Every later read goes back through that same authorization, so a pinned
+  canvas reaches exactly as far as the tab already did and no further.
+- A canvas card holds no canvas state beyond where it sits — no copy of the
+  content, no pinned version, no separate history — so a card and a tab on one
+  canvas cannot come to disagree about what it says. It reads rather than
+  streams, so it takes none of the space's live slots, and it never revises:
+  revising belongs to the workspace tab.
 - A space may dock one research browser onto a Work or Code thread it is bound
   to, and shows that thread's browsing context. It is docked to the space's edge
   rather than pinned to the canvas because the page is a native view the host

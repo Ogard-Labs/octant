@@ -733,6 +733,31 @@ describe("ZenWidgetRecipe", () => {
   });
 });
 
+describe("ZenCanvasElementPayload", () => {
+  const card = {
+    elementId: elementId(),
+    kind: "canvas",
+    canvasId: makeId("77777777"),
+    geometry: { x: 100, y: 100, width: 400, height: 300 },
+    zIndex: 1,
+    minimized: false,
+    locked: false,
+  };
+
+  it("pins a canvas by naming it and nothing else about it", () => {
+    const element = decodeElement(card);
+    expect(element.kind).toBe("canvas");
+    expect("canvasId" in element ? element.canvasId : undefined).toBe(makeId("77777777"));
+  });
+
+  it("refuses a card carrying canvas state of its own", () => {
+    // A card that held a version, a copy of the content, or a history of its
+    // own could disagree with the tab on the same canvas.
+    expect(() => decodeElement({ ...card, versionId: makeId("88888888") })).toThrow();
+    expect(() => decodeElement({ ...card, blocks: [] })).toThrow();
+  });
+});
+
 describe("ZenResearchDock", () => {
   const codeSource = {
     hostId: "local",

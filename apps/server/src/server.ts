@@ -250,7 +250,11 @@ import { ProjectRootPort } from "./projectRootPort";
 import { createArtifactLibraryRouteHandler } from "./artifactLibraryRoutes";
 import { createArtifactMirrorRouteHandler } from "./artifactMirrorRoutes";
 import { ArtifactLibraryService } from "./canvas/artifactLibraryService";
-import { createCanvasRouteHandler, resolveCanvasActiveContext } from "./canvasRoutes";
+import {
+  createCanvasRouteHandler,
+  readCanvasForWindow,
+  resolveCanvasActiveContext,
+} from "./canvasRoutes";
 import { AutomationCommandService } from "./automation/automationCommandService";
 import {
   createAutomationCodeDispatchPort,
@@ -3344,6 +3348,21 @@ export function startOctantServer(
               read: (windowId, request) => codeOperationRuntime.inspectTerminal(windowId, request),
             },
           }),
+      // Pinning a canvas asks Canvas whether this window may read it, the same
+      // question the read route asks, so a card and a tab agree about what is
+      // reachable instead of each keeping an answer of its own.
+      canvases: {
+        read: (windowId, canvasId) =>
+          readCanvasForWindow(
+            {
+              canvasProjection: persistence.canvasProjection,
+              projects: projectService,
+              activeContextResolver: (id) => resolveCanvasActiveContext(shellService.bootstrap(id)),
+            },
+            windowId,
+            canvasId,
+          ),
+      },
       eventStore: zenEventStore,
       localHostId: LOCAL_HOST_ID,
       threadCatalog: zenThreadCatalog,

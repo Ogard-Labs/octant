@@ -799,3 +799,42 @@
   font-size: 13px;
   color: var(--octant-text-secondary, #c8c8c5);
 }
+
+/*
+ * A pinned canvas card. The document keeps the Canvas surface's own styling;
+ * the card only gives it a scrolling body and a small chrome strip, so a card
+ * and a workspace tab render the same document the same way.
+ */
+.zen-canvas-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.zen-canvas-card__chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+.zen-canvas-card__stale {
+  font-size: 11px;
+  color: var(--octant-text-secondary, #c8c8c5);
+}
+
+.zen-canvas-card__document {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 12px;
+  overflow: auto;
+}
+
+.zen-canvas-card__notice {
+  margin: 0;
+  padding: 12px;
+  font-size: 13px;
+  color: var(--octant-text-secondary, #c8c8c5);
+}

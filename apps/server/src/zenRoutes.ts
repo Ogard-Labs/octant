@@ -1,6 +1,7 @@
 import {
   decodeZenCommand,
   decodeZenFocusZoneCommand,
+  decodeZenCanvasAttachRequest,
   decodeZenResearchDockRequest,
   decodeZenTerminalAttachRequest,
   decodeZenThreadAttachRequest,
@@ -77,6 +78,9 @@ export function createZenRouteHandler(dependencies: ZenRouteDependencies) {
     }
     if (url.pathname === "/api/zen/terminals/attach" && request.method === "POST") {
       return await handleZenTerminalAttach(request, url, origin, dependencies, now);
+    }
+    if (url.pathname === "/api/zen/canvases/attach" && request.method === "POST") {
+      return await handleZenCanvasAttach(request, url, origin, dependencies, now);
     }
     if (url.pathname === "/api/zen/research/dock" && request.method === "POST") {
       return await handleZenResearchDock(request, url, origin, dependencies, now);
@@ -215,6 +219,13 @@ async function handleZenCommand(
   }
   if (command.command === "bind-assistant") {
     return failureResponse("Navigator binding is server-authoritative.", 400, origin);
+  }
+  if (command.command === "add-element" && command.element.kind === "canvas") {
+    return failureResponse(
+      "Zen does not accept caller-supplied canvas cards; a canvas is pinned by naming it.",
+      400,
+      origin,
+    );
   }
   if (command.command === "dock-research") {
     return failureResponse(
@@ -359,6 +370,38 @@ async function handleZenTerminalAttach(
   } catch (error) {
     if (error instanceof ZenError) return zenFailureResponse(error, origin);
     return failureResponse("Zen terminal attachment is invalid.", 400, origin);
+  }
+}
+
+/**
+ * Pin a canvas this window may already open.
+ *
+ * Separate from the generic command route for the same reason a pinned
+ * terminal is: the caller names a canvas and Canvas answers whether this
+ * window may read it, so no body here can describe a document into a card.
+ */
+async function handleZenCanvasAttach(
+  request: Request,
+  url: URL,
+  origin: string | null,
+  deps: ZenRouteDependencies,
+  now: () => number,
+): Promise<Response> {
+  let windowId: WindowId;
+  try {
+    if (url.search !== "") {
+      return failureResponse("Zen canvas attachment is invalid.", 400, origin);
+    }
+    windowId = authenticateWindow(request, deps.windowAuthorityStore, now());
+  } catch (error) {
+    return authenticationFailure(error, "Zen canvas attachment", origin);
+  }
+  try {
+    const body = decodeZenCanvasAttachRequest(await request.json());
+    return jsonResponse(await deps.zenService.attachCanvas(windowId, body, request.signal), origin);
+  } catch (error) {
+    if (error instanceof ZenError) return zenFailureResponse(error, origin);
+    return failureResponse("Zen canvas attachment is invalid.", 400, origin);
   }
 }
 

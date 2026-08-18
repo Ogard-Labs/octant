@@ -1,5 +1,6 @@
 import {
   LOCAL_HOST_ID,
+  decodeCanvasId,
   decodeChatThreadId,
   decodeCodeCheckoutId,
   decodeCodeThreadId,
@@ -1837,5 +1838,87 @@ describe("ZenService research dock", () => {
 
     expect(result.space.research).toBeNull();
     expect(append.mock.calls[0]?.[0].research).toBeNull();
+  });
+});
+
+describe("ZenService canvas cards", () => {
+  const canvasId = decodeCanvasId("00000000-0000-4000-8000-000000000090");
+
+  function canvasFixture(options: { readonly readable?: boolean } = {}) {
+    let current = space();
+    const append = vi.fn((next: ZenSpace, expectedVersion: number) => {
+      current = { ...next, version: (expectedVersion + 1) as AggregateVersion };
+      return current;
+    });
+    const read = vi.fn(async () =>
+      options.readable === false ? undefined : { title: "Release plan" },
+    );
+    const service = new ZenService({
+      focusZone: memoryFocusZone(),
+      loadSpace: () => current,
+      loadSpaceByWindow: () => current,
+      eventStore: { append, isConcurrencyConflict: () => false } as never,
+      localHostId: LOCAL_HOST_ID,
+      canvases: { read },
+      uuid: () => ids.element,
+    });
+    return { append, read, service };
+  }
+
+  const request = { canvasId, expectedVersion: 2 as AggregateVersion };
+
+  it("pins a canvas by naming it, and titles the card from what Canvas answered", async () => {
+    const { append, read, service } = canvasFixture();
+
+    const result = await service.attachCanvas(ids.window, request);
+
+    expect(read).toHaveBeenCalledWith(ids.window, canvasId);
+    expect(result.result).toBe("canvas-attached");
+    expect(append.mock.calls[0]?.[0].elements[0]).toMatchObject({
+      kind: "canvas",
+      canvasId,
+      title: "Release plan",
+    });
+  });
+
+  it("writes no canvas state into the card beyond where it sits", async () => {
+    const { append, service } = canvasFixture();
+
+    await service.attachCanvas(ids.window, request);
+
+    // A card that carried a version or a copy of the content could come to
+    // disagree with the tab on the same canvas.
+    expect(Object.keys(append.mock.calls[0]?.[0].elements[0] ?? {}).sort()).toEqual([
+      "canvasId",
+      "elementId",
+      "geometry",
+      "kind",
+      "locked",
+      "minimized",
+      "title",
+      "zIndex",
+    ]);
+  });
+
+  it("refuses to pin a canvas this window may not read", async () => {
+    const { append, service } = canvasFixture({ readable: false });
+
+    await expect(service.attachCanvas(ids.window, request)).rejects.toThrow(/unavailable-source/);
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to pin a canvas on a host that cannot answer for Canvas", async () => {
+    let current = space();
+    const service = new ZenService({
+      focusZone: memoryFocusZone(),
+      loadSpace: () => current,
+      loadSpaceByWindow: () => current,
+      eventStore: { append: vi.fn(), isConcurrencyConflict: () => false } as never,
+      localHostId: LOCAL_HOST_ID,
+      uuid: () => ids.element,
+    });
+
+    await expect(service.attachCanvas(ids.window, request)).rejects.toThrow(/missing-capability/);
+    expect(current.elements).toEqual([]);
   });
 });

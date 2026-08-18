@@ -2,6 +2,8 @@ import {
   decodeZenCommand,
   decodeZenBootstrapResponse,
   decodeZenResult,
+  decodeZenCanvasAttachRequest,
+  decodeZenCanvasAttachResult,
   decodeZenResearchDockRequest,
   decodeZenResearchDockResult,
   decodeZenTerminalAttachRequest,
@@ -18,6 +20,8 @@ import {
   type ZenCommand,
   type ZenBootstrapResponse,
   type ZenResult,
+  type ZenCanvasAttachRequest,
+  type ZenCanvasAttachResult,
   type ZenResearchDockRequest,
   type ZenResearchDockResult,
   type ZenTerminalAttachRequest,
@@ -57,6 +61,7 @@ export interface ZenClient {
    * the terminal; the card itself is written by the server.
    */
   attachTerminal(request: ZenTerminalAttachRequest): Promise<ZenTerminalAttachResult>;
+  attachCanvas(request: ZenCanvasAttachRequest): Promise<ZenCanvasAttachResult>;
   dockResearch(request: ZenResearchDockRequest): Promise<ZenResearchDockResult>;
   continueThread(catalogRef: ZenThreadCatalogRef): Promise<ZenThreadContinuationTarget>;
   assistant(): Promise<ZenAssistantSnapshot>;
@@ -174,6 +179,17 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
         contentType: true,
       });
       return decodeZenTerminalAttachResult(body);
+    },
+
+    async attachCanvas(request: ZenCanvasAttachRequest): Promise<ZenCanvasAttachResult> {
+      const input = decodeZenCanvasAttachRequest(request);
+      const url = new URL("/api/zen/canvases/attach", options.baseUrl);
+      const body = await zenRequest(fetch, url, options.windowCapability, {
+        method: "POST",
+        body: JSON.stringify(input),
+        contentType: true,
+      });
+      return decodeZenCanvasAttachResult(body);
     },
 
     async dockResearch(request: ZenResearchDockRequest): Promise<ZenResearchDockResult> {
