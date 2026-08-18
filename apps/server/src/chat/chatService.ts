@@ -88,6 +88,7 @@ import {
   retryChatTurn,
   resumeChatTurn,
   transitionChatAttempt,
+  unsupportedModelOptionValues,
 } from "@octant/domain/chat-policy";
 import { defaultShellSettings, THREAD_MENTION_UNREADABLE_CONTEXT } from "@octant/domain";
 import { Schema } from "effect";
@@ -178,26 +179,34 @@ const CHAT_EVENT_NAMES = new Set([
 ]);
 
 /**
- * The thread as one attempt actually runs it.
+ * The thread as one route actually runs it.
  *
- * Multi-model pool routing can send an attempt to a different provider
- * instance or model than the thread selected. Model option values belong to
- * the selected model and are validated against its declared options, so an
- * alternate candidate runs on provider defaults instead of inheriting settings
- * it never declared.
+ * Multi-model pool routing can send a turn to a different provider instance or
+ * model than the thread selected. Model option values belong to the selected
+ * model and are validated against its declared options, so an alternate
+ * candidate runs on provider defaults instead of inheriting settings it never
+ * declared. Every derivation of a routed thread — the turn's execution thread
+ * and each attempt's run — goes through here, so preflight and the driver
+ * agree on which options this route carries.
  */
-function threadAsRoutedFor(thread: ChatThread, attempt: ChatAttempt): ChatThread {
+function threadAsRoutedFor(
+  thread: ChatThread,
+  route: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly modelId: ProviderModelId;
+  },
+): ChatThread {
   const routed: ChatThread = {
     ...thread,
-    providerInstanceId: attempt.providerInstanceId,
-    modelId: attempt.modelId,
+    providerInstanceId: route.providerInstanceId,
+    modelId: route.modelId,
   };
   // Model options are declared against one provider instance's model. Two
   // compatible endpoints commonly expose the same model id, so the whole
   // routing identity has to match before the selected options travel with it.
   if (
-    String(attempt.modelId) === String(thread.modelId) &&
-    String(attempt.providerInstanceId) === String(thread.providerInstanceId)
+    String(route.modelId) === String(thread.modelId) &&
+    String(route.providerInstanceId) === String(thread.providerInstanceId)
   ) {
     return routed;
   }
@@ -635,11 +644,7 @@ export class ChatService {
 
     const executionThread: ChatThread =
       decision.decision.kind === "selected"
-        ? {
-            ...thread,
-            providerInstanceId: decision.decision.selectedCandidate.providerInstanceId,
-            modelId: decision.decision.selectedCandidate.modelId,
-          }
+        ? threadAsRoutedFor(thread, decision.decision.selectedCandidate)
         : thread;
 
     return { decision, executionThread };
@@ -2811,6 +2816,21 @@ export class ChatService {
         decodeChatFailure({
           category: "unavailable",
           message: "Selected Chat model is unavailable.",
+        }),
+      );
+    }
+    // The thread's option values were validated against the catalog observed
+    // when they were chosen, not the one this turn will run on. Re-check them
+    // against the freshly probed model so a retired tier is reported instead
+    // of being dropped by the driver into a silent provider default.
+    const unsupported = unsupportedModelOptionValues(thread.modelOptionValues, model.options);
+    if (unsupported.length > 0) {
+      throw new ChatServiceError(
+        decodeChatFailure({
+          category: "unsupported",
+          message: `Selected Chat model no longer offers ${unsupported
+            .map(({ optionId, value }) => `${optionId}=${value}`)
+            .join(", ")}. Choose an available option before sending.`,
         }),
       );
     }
