@@ -14,8 +14,9 @@ import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-libr
  * lets a card draw it inline and a sidecar be opened outside Octant.
  */
 
-const THUMBNAIL_WIDTH = 320;
-const THUMBNAIL_HEIGHT = 200;
+export const ARTIFACT_THUMBNAIL_SIZE = { width: 320, height: 200 } as const;
+/** A sidecar is read, not glanced at, so it gets room for more of the document. */
+export const ARTIFACT_SIDECAR_SIZE = { width: 640, height: 900 } as const;
 const PADDING = 12;
 const ROW_GAP = 8;
 
@@ -70,29 +71,68 @@ export const DEFAULT_ARTIFACT_PALETTE: ArtifactThumbnailPalette = {
  * recognisable part, like a chart's bars or a diagram's nodes. It stops when it
  * runs out of room, which is what a thumbnail is.
  */
+export interface ArtifactRenderOptions {
+  readonly width: number;
+  readonly height: number;
+  readonly palette?: ArtifactThumbnailPalette;
+  /**
+   * The largest markup this caller can carry. A picture over it is dropped
+   * rather than truncated — half an SVG is not a smaller picture. Omit for a
+   * sidecar, which is written to a file and has no such ceiling.
+   */
+  readonly maximumCharacters?: number;
+}
+
+/** The gallery's card-sized preview, bounded by what the listing contract accepts. */
 export function renderArtifactThumbnail(
   definition: Pick<CanvasDefinition, "title" | "blocks">,
   palette: ArtifactThumbnailPalette = DEFAULT_ARTIFACT_PALETTE,
 ): string {
+  return renderArtifactSvg(definition, {
+    ...ARTIFACT_THUMBNAIL_SIZE,
+    palette,
+    maximumCharacters: MAX_ARTIFACT_PREVIEW_CHARACTERS,
+  });
+}
+
+/** The page-sized render a mirrored sidecar carries. */
+export function renderArtifactSidecarSvg(
+  definition: Pick<CanvasDefinition, "title" | "blocks">,
+  palette: ArtifactThumbnailPalette = DEFAULT_ARTIFACT_PALETTE,
+): string {
+  return renderArtifactSvg(definition, { ...ARTIFACT_SIDECAR_SIZE, palette });
+}
+
+export function renderArtifactSvg(
+  definition: Pick<CanvasDefinition, "title" | "blocks">,
+  options: ArtifactRenderOptions,
+): string {
+  const palette = options.palette ?? DEFAULT_ARTIFACT_PALETTE;
+  const width = options.width;
+  const height = options.height;
   const parts: string[] = [
-    `<rect width="${String(THUMBNAIL_WIDTH)}" height="${String(THUMBNAIL_HEIGHT)}" fill="${palette.background}"/>`,
-    text(PADDING, PADDING + 11, clamp(definition.title, 34), 13, palette.ink, 600),
+    `<rect width="${String(width)}" height="${String(height)}" fill="${palette.background}"/>`,
+    text(PADDING, PADDING + 11, clamp(definition.title, titleLength(width)), 13, palette.ink, 600),
   ];
 
   let y = PADDING + 26;
   for (const block of definition.blocks) {
-    if (y > THUMBNAIL_HEIGHT - PADDING) break;
+    if (y > height - PADDING) break;
     if (!DRAWN_KINDS.has(block.kind)) continue;
-    const drawn = drawBlock(block, y, palette);
+    const drawn = drawBlock(block, y, palette, width);
     if (drawn === undefined) continue;
     parts.push(drawn.markup);
     y += drawn.height + ROW_GAP;
   }
 
-  const markup = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${String(THUMBNAIL_WIDTH)} ${String(THUMBNAIL_HEIGHT)}" width="${String(THUMBNAIL_WIDTH)}" height="${String(THUMBNAIL_HEIGHT)}" role="img" font-family="system-ui, sans-serif">${parts.join("")}</svg>`;
-  // A preview that would not decode is worse than no preview: the caller drops
-  // it and the card falls back to its kind badge.
-  return markup.length <= MAX_ARTIFACT_PREVIEW_CHARACTERS ? markup : "";
+  const markup = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${String(width)} ${String(height)}" width="${String(width)}" height="${String(height)}" role="img" font-family="system-ui, sans-serif">${parts.join("")}</svg>`;
+  const ceiling = options.maximumCharacters;
+  return ceiling === undefined || markup.length <= ceiling ? markup : "";
+}
+
+/** Roughly how many characters of title fit across a picture this wide. */
+function titleLength(width: number): number {
+  return Math.max(20, Math.floor((width - PADDING * 2) / 8));
 }
 
 interface DrawnBlock {
@@ -104,8 +144,9 @@ function drawBlock(
   block: CanvasBlock,
   y: number,
   palette: ArtifactThumbnailPalette,
+  canvasWidth: number,
 ): DrawnBlock | undefined {
-  const width = THUMBNAIL_WIDTH - PADDING * 2;
+  const width = canvasWidth - PADDING * 2;
   switch (block.kind) {
     case "heading":
       return {
@@ -119,7 +160,7 @@ function drawBlock(
       return {
         markup:
           `<rect x="${String(PADDING)}" y="${String(y)}" width="${String(width)}" height="20" rx="3" fill="none" stroke="${palette.muted}" stroke-width="1"/>` +
-          text(PADDING + 6, y + 13, clamp(block.text, 34), 8, palette.ink),
+          text(PADDING + 6, y + 13, clamp(block.text, titleLength(canvasWidth)), 8, palette.ink),
         height: 20,
       };
     case "metric":

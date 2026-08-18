@@ -175,6 +175,7 @@ import {
   CANVAS_REFRESH_RECEIPT_RECORDED,
   CANVAS_VERSION_APPENDED,
 } from "../canvas/canvasEventStore";
+import { registerArtifactMirrorEvents } from "../canvas/artifactMirrorEventStore";
 import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
 import type { HostIdentityMigrationRegistry } from "./hostIdentityMigration";
 import { createRuntimeHostIdentityMigrationRegistry } from "./hostIdentityTransforms";
@@ -328,6 +329,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(GITHUB_CLONE_TRANSITIONED, 1, GithubCloneTransitioned);
   registerAutomationEvents(events);
   registerCanvasShareEvents(events);
+  registerArtifactMirrorEvents(events);
 
   const hostIdentityMigrations = createRuntimeHostIdentityMigrationRegistry(events);
   const agentRunProjection = new AgentRunProjection();

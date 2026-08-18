@@ -24,6 +24,7 @@ export * from "./goalClient";
 export * from "./planClient";
 export * from "./productFeedbackClient";
 export * from "./artifactLibraryClient";
+export * from "./artifactMirrorClient";
 export * from "./scaffoldClient";
 export * from "./threadCheckpointClient";
 export * from "./hostClient";

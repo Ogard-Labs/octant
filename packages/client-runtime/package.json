@@ -38,6 +38,7 @@
     "./plan-client": "./src/planClient.ts",
     "./product-feedback-client": "./src/productFeedbackClient.ts",
     "./artifact-library-client": "./src/artifactLibraryClient.ts",
+    "./artifact-mirror-client": "./src/artifactMirrorClient.ts",
     "./scaffold-client": "./src/scaffoldClient.ts",
     "./environment-selection": "./src/environmentSelection.ts",
     "./thread-checkpoint-client": "./src/threadCheckpointClient.ts",
