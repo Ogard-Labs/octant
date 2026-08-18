@@ -6,6 +6,7 @@ import type {
 import type { ExtensionEffectiveState } from "@octant/contracts/extensions";
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildCatalogs,
   createExtensionChatResolver,
   createStoredExtensionMaterialLoader,
   UNAVAILABLE_EXTENSION_TOOL_EXECUTION,
@@ -502,5 +503,72 @@ describe("authoritative extension Chat resolver", () => {
       kind: "instructions",
       text: "Use verified review guidance.",
     });
+  });
+});
+
+describe("scoping a selection to the thread it belongs to", () => {
+  const projectId = "94000000-0000-4000-8000-000000000009";
+
+  function skillCatalog(mode: string) {
+    const { snapshot, effective } = snapshots({ kind: "effective" });
+    return {
+      snapshot: {
+        ...snapshot,
+        skills: [
+          {
+            skill: {
+              qualifiedId: `catalog:review-tools:${digest}:code-review`,
+              id: "code-review",
+              source: { kind: "catalog", catalogId: "octant", entryId: "review-tools" },
+            },
+            displayName: "Code review",
+            effectiveState: { kind: "effective" },
+            scope: { mode, projectId, threadRef: threadId },
+          },
+        ],
+      } as unknown as ExtensionSnapshot,
+      effective,
+    };
+  }
+
+  it("reads the mode from the thread rather than assuming Chat", () => {
+    const { snapshot, effective } = skillCatalog("code");
+
+    const chatScoped = buildCatalogs(snapshot, effective, {
+      mode: "chat",
+      threadId,
+      projectId,
+      threadVersion: 1,
+      providerInstanceId: providerInstanceId as never,
+      modelId: "model-a" as never,
+    });
+    const codeScoped = buildCatalogs(snapshot, effective, {
+      mode: "code",
+      threadId,
+      projectId,
+      threadVersion: 1,
+      providerInstanceId: providerInstanceId as never,
+      modelId: "model-a" as never,
+    });
+
+    expect(chatScoped.addressing.skills).toHaveLength(0);
+    expect(codeScoped.addressing.skills.map((skill) => String(skill.skillId))).toEqual([
+      `catalog:review-tools:${digest}:code-review`,
+    ]);
+  });
+
+  it("names the thread's own mode in the scope a capability is offered against", () => {
+    const { snapshot, effective } = skillCatalog("work");
+
+    const catalogs = buildCatalogs(snapshot, effective, {
+      mode: "work",
+      threadId,
+      projectId: null,
+      threadVersion: 1,
+      providerInstanceId: providerInstanceId as never,
+      modelId: "model-a" as never,
+    });
+
+    expect(catalogs.request.activeScope.mode.referenceId).toBe("mode:work");
   });
 });
