@@ -1016,4 +1016,39 @@ describe("ZenSurface live thread cards", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue Thread 1" })).toBeInTheDocument();
   });
+  it("streams the cards of the space in front, and drops them on the way to another", () => {
+    const inFront = threadElement(1);
+    const elsewhere = threadElement(2);
+    const surface = (element: ReturnType<typeof threadElement>) => (
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        renderLiveThread={({ activity, entry }) =>
+          activity.activity === "frozen"
+            ? { status: "paused", reason: activity.reason }
+            : { status: "streaming", surface: <p>{`Live ${entry.title}`}</p> }
+        }
+        space={{
+          ...makeSpace([element]),
+          spaceId: `00000000-0000-4000-8000-00000000091${element.zIndex}` as ZenSpaceId,
+        }}
+        threadEntries={[catalogEntry(inFront), catalogEntry(elsewhere)]}
+      />
+    );
+    const view = render(surface(inFront));
+
+    expect(screen.getByText("Live Thread 1")).toBeInTheDocument();
+
+    // Switching space replaces the surface with the space now in front. A card
+    // pinned to the space left behind stops streaming because it is no longer
+    // on screen at all, not because anything told it to stop.
+    view.rerender(surface(elsewhere));
+
+    expect(screen.queryByText("Live Thread 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Live Thread 2")).toBeInTheDocument();
+  });
 });
