@@ -85,12 +85,17 @@ export function createManagedCodeThreadCreationPort(
         return { status: "waiting" };
       }
       const repositoryId = decodeCodeRepositoryId(observation.repositoryId);
+      // A revision source names an object that is already in the repository, so
+      // it resolves the object itself and never fetches: the point of returning
+      // to a recorded revision is that the branch it came from has moved on.
+      const refIntent = input.sourceRevision ?? `refs/heads/${input.sourceBranch}`;
+      const startFromOrigin = input.sourceRevision === undefined && input.startFromOrigin;
       const preview = await deps.service.previewSource(
         {
           repositoryId,
           repositoryRoot,
-          refIntent: `refs/heads/${input.sourceBranch}`,
-          startFromOrigin: input.startFromOrigin,
+          refIntent,
+          startFromOrigin,
           ...(input.remoteName === undefined ? {} : { remoteName: input.remoteName }),
         },
         signal,
@@ -114,7 +119,7 @@ export function createManagedCodeThreadCreationPort(
         branchIntent: input.branchIntent,
         resolvedHead: preview.resolvedHead,
         mode: preview.status,
-        sourceBranch: input.sourceBranch,
+        sourceBranch: input.sourceRevision ?? input.sourceBranch,
         ...(preview.remoteName === undefined ? {} : { remoteName: preview.remoteName }),
         ...(preview.status === "origin" ? { fetchedAt: preview.fetchedAt } : {}),
       };
@@ -138,7 +143,7 @@ export function createManagedCodeThreadCreationPort(
         checkoutId: preparation.checkoutId,
         branchIntent: preparation.branchIntent,
         startPoint: preparation.resolvedHead,
-        startFromOrigin: input.startFromOrigin,
+        startFromOrigin: input.sourceRevision === undefined && input.startFromOrigin,
         sourceBranch: preparation.sourceBranch,
         sourceMode: preparation.mode,
         ...(preparation.remoteName === undefined ? {} : { remoteName: preparation.remoteName }),

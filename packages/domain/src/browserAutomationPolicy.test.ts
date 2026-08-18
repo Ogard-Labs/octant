@@ -5,6 +5,7 @@ import {
   canRecordBrowserObservation,
   isContextExpired,
   shouldProtectCredentialField,
+  remoteBrowserActionReach,
 } from "./browserAutomationPolicy";
 import type {
   BrowserActionRequest,
@@ -237,5 +238,32 @@ describe("shouldProtectCredentialField", () => {
       policy: { ...activeContext.policy, credentialFieldProtection: false },
     };
     expect(shouldProtectCredentialField(noProtection, "password")).toBe(false);
+  });
+});
+
+describe("what a paired device may do in the host's browser", () => {
+  it("lets a companion client tap, press, scroll, and read the page it is watching", () => {
+    for (const kind of [
+      "click",
+      "press",
+      "scroll",
+      "screenshot",
+      "extract-text",
+      "wait",
+    ] as const) {
+      expect(remoteBrowserActionReach(kind)).toEqual({ kind: "allowed" });
+    }
+  });
+
+  it("keeps pointing the browser somewhere new on the host", () => {
+    expect(remoteBrowserActionReach("navigate")).toEqual({
+      kind: "denied",
+      reason: "Navigating the host's browser is not a remote action.",
+    });
+  });
+
+  it("keeps typing into the page and closing its tabs on the host", () => {
+    expect(remoteBrowserActionReach("type").kind).toBe("denied");
+    expect(remoteBrowserActionReach("close-tab").kind).toBe("denied");
   });
 });

@@ -1,4 +1,5 @@
 import type {
+  BrowserActionKind,
   BrowserActionRequest,
   BrowserContextPolicy,
   BrowserContextRecord,
@@ -141,4 +142,26 @@ function checkOriginAllowed(target: string, policy: BrowserContextPolicy): boole
     const allowedOrigin = normalizeOrigin(allowed);
     return allowedOrigin !== undefined && allowedOrigin === targetOrigin;
   });
+}
+
+/**
+ * How far a paired device reaches into the host's browser.
+ *
+ * Watching a page and acting inside it are one thing; deciding what page the
+ * host is on is another. A companion client taps, presses, and scrolls within
+ * the view the host already opened, and reads what came back. Navigating,
+ * typing, and closing tabs stay with the person at the machine, so a phone can
+ * never point the host's browser at a new origin or put text into a field.
+ */
+export function remoteBrowserActionReach(kind: BrowserActionKind): BrowserPolicyDecision {
+  if (kind === "navigate") {
+    return { kind: "denied", reason: "Navigating the host's browser is not a remote action." };
+  }
+  if (kind === "type") {
+    return { kind: "denied", reason: "Typing into the host's browser is not a remote action." };
+  }
+  if (kind === "close-tab") {
+    return { kind: "denied", reason: "Closing a host browser tab is not a remote action." };
+  }
+  return { kind: "allowed" };
 }

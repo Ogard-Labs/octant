@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
+import { useProductFeedback } from "./useProductFeedback";
 import type { BrowserSurfaceState, OctantHostBridge } from "../shell/hostBridge";
 
 const BROWSER_REFRESH_INTERVAL_MS = 500;
@@ -36,6 +38,8 @@ export interface BrowserWorkspaceProps {
   readonly client: BrowserAutomationClient;
   readonly hostBridge?: OctantHostBridge;
   readonly tab: Extract<WorkspaceTab, { kind: "browser" }>;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
 }
 
 export function BrowserWorkspace(props: BrowserWorkspaceProps) {
@@ -52,6 +56,16 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [nativeAttachError, setNativeAttachError] = useState(false);
   const [nativeAttachAttempt, setNativeAttachAttempt] = useState(0);
   const [remoteFocused, setRemoteFocused] = useState(false);
+  // Pointing at the page is a separate gesture from using it: while it is on, a
+  // click marks a spot to write about instead of clicking through to the page.
+  const [pointing, setPointing] = useState(false);
+  const [pendingPoint, setPendingPoint] = useState<BrowserViewportPoint>();
+  const feedback = useProductFeedback({
+    threadId: props.tab.threadId === undefined ? undefined : String(props.tab.threadId),
+    mode: "code",
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
   const nativeMount = useRef<HTMLDivElement>(null);
   const startInFlight = useRef(false);
   const localFailure = useRef(false);
@@ -663,6 +677,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
               onClick={(event) => {
                 const point = previewPoint(event.currentTarget, event.clientX, event.clientY);
                 if (point === undefined) return;
+                if (pointing) {
+                  // Marking a spot never touches the page: the host is asked
+                  // what is there only once the user has written the note.
+                  setPendingPoint(point);
+                  return;
+                }
                 event.currentTarget.parentElement?.focus();
                 queueRemoteAction("click", { point });
               }}
@@ -670,6 +690,37 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             />
           )}
         </article>
+      )}
+      {!feedback.available || snapshot?.context === undefined ? null : (
+        <ProductFeedbackPanel
+          busy={feedback.busy}
+          {...(feedback.message === undefined ? {} : { message: feedback.message })}
+          onCancel={() => setPendingPoint(undefined)}
+          onDiscard={(note) => void feedback.discard(note)}
+          onSubmit={(comment) => {
+            const point = pendingPoint;
+            const contextId = snapshot.context?.contextId;
+            if (point === undefined || contextId === undefined) return;
+            void (async () => {
+              const captured = await feedback.capture({
+                contextId: String(contextId),
+                point,
+                comment,
+              });
+              if (captured) {
+                setPendingPoint(undefined);
+                setPointing(false);
+              }
+            })();
+          }}
+          onTogglePointing={() => {
+            setPointing((current) => !current);
+            setPendingPoint(undefined);
+          }}
+          pending={feedback.pending}
+          {...(pendingPoint === undefined ? {} : { pendingPoint })}
+          pointing={pointing}
+        />
       )}
     </section>
   );

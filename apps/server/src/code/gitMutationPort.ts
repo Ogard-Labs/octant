@@ -242,6 +242,42 @@ export class GitMutationPort {
     );
   }
 
+  /**
+   * Merge a run's branch into the branch the checkout is on.
+   *
+   * `--no-ff` on purpose: bringing a run home should leave a commit that says
+   * a run was brought home, not a history that looks like the work happened
+   * here. `--no-commit` is deliberately not used — a merge that stops half-done
+   * would leave the person's checkout mid-merge, which is exactly the state
+   * this operation exists to avoid. A merge that cannot complete is aborted so
+   * the checkout is left as it was found.
+   */
+  async mergeBranch(
+    input: { readonly checkoutRoot: string; readonly branch: string },
+    signal?: AbortSignal,
+  ): Promise<GitMutationResult> {
+    if (!validBranchName(input.branch)) return { status: "rejected", reason: "invalid-refspec" };
+    const lock = await this.#lockState(input.checkoutRoot, signal);
+    if (lock === "failed") return { status: "failed" };
+    if (lock === "locked") return { status: "rejected", reason: "index-locked" };
+    const result = await this.#run(
+      ["-C", input.checkoutRoot, "merge", "--no-ff", "--no-edit", "--end-of-options", input.branch],
+      signal,
+    );
+    if (result.exitCode !== 0) {
+      await this.#run(["-C", input.checkoutRoot, "merge", "--abort"], signal);
+      return { status: "failed" };
+    }
+    const head = await this.#run(
+      ["-C", input.checkoutRoot, "rev-parse", "--verify", "HEAD"],
+      signal,
+    );
+    const oid = head.stdout.trim();
+    return head.exitCode === 0 && isObjectId(oid)
+      ? { status: "applied", oid }
+      : { status: "failed" };
+  }
+
   async revertCommit(
     input: { readonly checkoutRoot: string; readonly oid: string },
     signal?: AbortSignal,
@@ -669,6 +705,24 @@ function checkpointRefNames(
   const namespace = checkpointRefNamespace(checkoutId);
   if (namespace === undefined || checkpointRefNamespace(anchorId) === undefined) return undefined;
   return [`${namespace}/${anchorId}/worktree`, `${namespace}/${anchorId}/index`];
+}
+
+/**
+ * A branch name this port will hand to Git. Narrow on purpose: no leading dash,
+ * no path traversal, and nothing that could be read as an option.
+ */
+function validBranchName(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 255 &&
+    value.trim() === value &&
+    !value.startsWith("-") &&
+    !value.startsWith("/") &&
+    !value.endsWith("/") &&
+    !value.includes("..") &&
+    !value.includes("//") &&
+    /^[A-Za-z0-9._/-]+$/.test(value)
+  );
 }
 
 function isObjectId(value: string): boolean {

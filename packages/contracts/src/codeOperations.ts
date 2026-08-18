@@ -25,6 +25,7 @@ import {
   WorktreeReceiptId,
 } from "./code";
 import { CodeRepositoryTestDefinition, CodeRepositoryTestConcern } from "./codeTestDefinitions";
+import { ScaffoldDirectoryName, ScaffoldId, ScaffoldRun, ScaffoldRunId } from "./scaffolds";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import {
@@ -303,6 +304,20 @@ const CancelRepositoryTest = Schema.Struct({
   ...OperationScope,
   testRunId: CodeTestRunId,
 }).annotations(strict);
+/**
+ * Start a curated scaffold in this checkout.
+ *
+ * The command names an entry and a directory; it carries no command line. The
+ * host resolves the entry from its own catalog and composes the argv, so a
+ * caller cannot reach a generator the host does not offer.
+ */
+const RunScaffold = Schema.Struct({
+  kind: Schema.Literal("run-scaffold"),
+  ...OperationScope,
+  scaffoldRunId: ScaffoldRunId,
+  scaffoldId: ScaffoldId,
+  directoryName: ScaffoldDirectoryName,
+}).annotations(strict);
 const ObserveGit = Schema.Struct({
   kind: Schema.Literal("observe-git"),
   ...OperationScope,
@@ -436,6 +451,71 @@ const RestoreGitCheckpoint = Schema.Struct({
   gitOperationId: CodeGitOperationId,
   checkpoint: CodeCheckpoint,
 }).annotations(strict);
+/**
+ * What a finished run amounts to, measured against the branch it is meant to
+ * come home to.
+ *
+ * This is the same Git the diff pane already renders, scoped to the branch
+ * rather than the working tree: the commits this run added, the files it
+ * touched, and whether the base could take them as they stand. Nothing here
+ * mutates anything — reviewing a run is a read.
+ */
+export const CodeRunOutcome = Schema.Struct({
+  branch: GitBranchName,
+  baseRef: boundedNonEmptyText(512),
+  head: GitObjectId,
+  /** Absent when the base ref cannot be resolved in this repository. */
+  base: Schema.optional(GitObjectId),
+  ahead: Schema.Int.pipe(Schema.nonNegative()),
+  behind: Schema.Int.pipe(Schema.nonNegative()),
+  changedPaths: Schema.Array(CodeRelativePath).pipe(
+    Schema.filter((paths) => paths.length <= MAX_CODE_OPERATION_PATHS),
+  ),
+  diff: CodeEvidenceReference,
+  /** Files still uncommitted in the run's own worktree, which no merge carries. */
+  uncommittedPaths: Schema.Array(CodeRelativePath).pipe(
+    Schema.filter((paths) => paths.length <= MAX_CODE_OPERATION_PATHS),
+  ),
+  /**
+   * Whether the base could take this run as it stands. `unknown` is an honest
+   * answer from a Git that could not be asked, never an optimistic one.
+   */
+  mergeability: Schema.Literal("clean", "conflicts", "nothing-to-merge", "unknown"),
+}).annotations(strict);
+export type CodeRunOutcome = typeof CodeRunOutcome.Type;
+
+/**
+ * Read what a run produced, against the branch it targets. Read-only, so it
+ * runs under the ordinary read gate and never needs an approval.
+ */
+const ReviewRun = Schema.Struct({
+  kind: Schema.Literal("review-run"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
+}).annotations(strict);
+
+/**
+ * Bring a finished run home: merge its branch into the base, in the base
+ * checkout.
+ *
+ * This mutates the checkout the person works in, so it carries the same
+ * explicit confirmation a push does — the branch and base named here must match
+ * what the host resolves — and the same approval class. The host records what
+ * the checkout looked like first, so the merge can be put back.
+ */
+const MergeRun = Schema.Struct({
+  kind: Schema.Literal("merge-run"),
+  ...OperationScope,
+  gitOperationId: CodeGitOperationId,
+  confirmation: Schema.Struct({
+    branch: GitBranchName,
+    baseBranch: GitBranchName,
+    expectedHeadOid: GitObjectId,
+  }).annotations(strict),
+  authorization: GitAuthorization,
+}).annotations(strict);
+
 const CreatePullRequest = Schema.Struct({
   kind: Schema.Literal("create-pull-request"),
   ...OperationScope,
@@ -554,7 +634,10 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "stop-terminal",
   "run-repository-test",
   "cancel-repository-test",
+  "run-scaffold",
   "observe-git",
+  "review-run",
+  "merge-run",
   "stage-git",
   "commit-git",
   "push-git",
@@ -570,6 +653,8 @@ export const CODE_OPERATION_COMMAND_KINDS = [
 ] as const;
 
 export const CodeOperationCommand = Schema.Union(
+  ReviewRun,
+  MergeRun,
   StartTerminal,
   AttachTerminal,
   WriteTerminal,
@@ -577,6 +662,7 @@ export const CodeOperationCommand = Schema.Union(
   StopTerminal,
   RunRepositoryTest,
   CancelRepositoryTest,
+  RunScaffold,
   ObserveGit,
   StageGit,
   DiscardGitChanges,
@@ -691,6 +777,11 @@ const RepositoryTestResult = Schema.Union(
     state: Schema.Literal("running", "interrupted", "unavailable", "failed"),
   }).annotations(strict),
 );
+const ScaffoldResult = Schema.Struct({
+  kind: Schema.Literal("scaffold-run"),
+  operationId: CodeOperationId,
+  run: ScaffoldRun,
+}).annotations(strict);
 const GitMutationResult = Schema.Struct({
   kind: Schema.Literal("git-mutation-state"),
   operationId: CodeOperationId,
@@ -703,6 +794,7 @@ const GitMutationResult = Schema.Struct({
     "push",
     "revert",
     "restore-checkpoint",
+    "merge-run",
   ),
   state: Schema.Literal("completed", "rejected", "failed"),
   headOid: Schema.optional(GitObjectId),
@@ -897,10 +989,19 @@ const GitDraftResult = Schema.Struct({
   body: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_TEXT_BYTES)),
 }).annotations(strict);
 
+const RunReviewResult = Schema.Struct({
+  kind: Schema.Literal("run-reviewed"),
+  operationId: CodeOperationId,
+  gitOperationId: CodeGitOperationId,
+  outcome: CodeRunOutcome,
+}).annotations(strict);
+
 export const CodeOperationResult = Schema.Union(
+  RunReviewResult,
   OperationAccepted,
   TerminalStateResult,
   RepositoryTestResult,
+  ScaffoldResult,
   GitObservation,
   GitMutationResult,
   GitDraftResult,
@@ -1586,6 +1687,7 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "start-terminal",
   "run-repository-test",
   "cancel-repository-test",
+  "run-scaffold",
   "stage-git",
   "unstage-git",
   "discard-git-changes",
@@ -1671,6 +1773,7 @@ export const decodeCodeFileOpenResultEnvelope = Schema.decodeUnknownSync(
   CodeFileOpenResultEnvelope,
 );
 export const decodeCodeOperationCommand = Schema.decodeUnknownSync(CodeOperationCommand);
+export const decodeCodeRunOutcome = Schema.decodeUnknownSync(CodeRunOutcome);
 export const decodeCodeOperationResult = Schema.decodeUnknownSync(CodeOperationResult);
 export const decodeCodeOperationEvent = Schema.decodeUnknownSync(CodeOperationEvent);
 export const decodeCodeOperationEventFrame = Schema.decodeUnknownSync(CodeOperationEventFrame);

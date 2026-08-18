@@ -56,6 +56,7 @@ import {
   type CodeOperationExecuteOptions,
   type CodeOperationGitPort,
   type CodeOperationPullRequestPort,
+  type CodeOperationScaffoldPort,
   type CodeOperationServiceOptions,
   type CodeOperationTurnPort,
 } from "./codeOperationService";
@@ -63,6 +64,13 @@ import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import { RepositoryTestRunner } from "./repositoryTestRunner";
 import { RepositoryTestDiscoveryService } from "./repositoryTestDiscoveryService";
+import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "../scaffold/curatedScaffoldCatalog";
+import {
+  makeScaffoldDirectory,
+  resolveAvailableTools,
+  scaffoldEntryExists,
+} from "../scaffold/scaffoldFilesystem";
+import { ScaffoldRunner } from "../scaffold/scaffoldRunner";
 import {
   ReviewFindingService,
   type ReviewFindingFilePort,
@@ -160,7 +168,24 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
+  /** Takes the notes the user pointed at the running product into the next turn. */
+  readonly takeProductFeedbackForTurn?: CodeOperationServiceOptions["takeProductFeedbackForTurn"];
+  /**
+   * The Project checkout a run comes home to. The host resolves the path; this
+   * runtime observes its branch and cleanliness itself, so the merge gate reads
+   * the checkout as it stands rather than as the caller last saw it.
+   */
+  readonly resolveBaseCheckoutRoot?: (thread: CodeThread) => Promise<string | undefined>;
   readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
+  /**
+   * Where a curated scaffold runs. Absent on a host that offers none, which
+   * refuses the operation rather than running a generator nobody configured.
+   */
+  readonly scaffoldProcess?: {
+    readonly execute: ProcessTestPort["execute"];
+    /** Variables the generator needs, notably where to keep its package cache. */
+    readonly environment: Readonly<Record<string, string>>;
+  };
 }
 
 export interface CodeOperationRuntime {
@@ -310,6 +335,30 @@ export function createCodeOperationRuntime(
       return true;
     },
   };
+  const scaffoldProcess = options.scaffoldProcess;
+  const scaffolds =
+    scaffoldProcess === undefined
+      ? undefined
+      : scaffoldRunnerPort(
+          new ScaffoldRunner({
+            entryExists: scaffoldEntryExists,
+            makeDirectory: makeScaffoldDirectory,
+            availableTools: () => resolveAvailableTools(curatedScaffoldTools()),
+            execute: (input, signal) =>
+              scaffoldProcess
+                .execute(
+                  { ...input, environment: scaffoldProcess.environment },
+                  ...(signal === undefined ? [] : [signal]),
+                )
+                .then((result) => ({
+                  termination: result.termination,
+                  exitCode: result.exitCode,
+                  // A generator narrates on both streams; the user reads one log.
+                  output: concatenatedOutput(result.stdout, result.stderr),
+                })),
+            now: options.clock,
+          }),
+        );
   const observation = options.gitObservationPort ?? new GitObservationPort();
   const mutation = options.gitMutationPort ?? new GitMutationPort();
   const gitService = new GitService(observation, mutation);
@@ -335,6 +384,7 @@ export function createCodeOperationRuntime(
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     terminals: terminal,
     repositoryTests,
+    ...(scaffolds === undefined ? {} : { scaffolds }),
     git,
     pullRequests,
     reviewFindings: {
@@ -355,6 +405,14 @@ export function createCodeOperationRuntime(
     ...(options.resolveThreadMentionContext === undefined
       ? {}
       : { resolveThreadMentionContext: options.resolveThreadMentionContext }),
+    ...(options.takeProductFeedbackForTurn === undefined
+      ? {}
+      : { takeProductFeedbackForTurn: options.takeProductFeedbackForTurn }),
+    ...(options.resolveBaseCheckoutRoot === undefined
+      ? {}
+      : {
+          resolveBaseCheckout: baseCheckoutResolver(gitService, options.resolveBaseCheckoutRoot),
+        }),
     ...(options.resolveForkHandoff === undefined
       ? {}
       : { resolveForkHandoff: options.resolveForkHandoff }),
@@ -1266,6 +1324,32 @@ function createPullRequestPort(options: CodeOperationRuntimeOptions): CodeOperat
   }
 }
 
+/**
+ * Read the Project checkout a run would come home to, as it stands now.
+ *
+ * The path comes from the host, which knows the Project binding; the branch and
+ * cleanliness are observed here, immediately before the merge gate reads them.
+ * A checkout that cannot be observed is reported unavailable, which the gate
+ * treats as a refusal rather than as permission.
+ */
+function baseCheckoutResolver(
+  git: GitService,
+  resolveRoot: (thread: CodeThread) => Promise<string | undefined>,
+): NonNullable<CodeOperationServiceOptions["resolveBaseCheckout"]> {
+  return async (thread) => {
+    const checkoutRoot = await resolveRoot(thread).catch(() => undefined);
+    if (checkoutRoot === undefined) return { status: "unavailable" };
+    const observed = await git.observe(checkoutRoot);
+    if (observed.status !== "ready") return { status: "unavailable" };
+    return {
+      status: "observed",
+      checkoutRoot: observed.checkoutRoot,
+      branch: observed.head.kind === "branch" ? observed.head.name : undefined,
+      clean: observed.changedPaths.length === 0,
+    };
+  };
+}
+
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
     observe: async ({ checkoutRoot, maxDiffBytes }) =>
@@ -1286,6 +1370,33 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
     unstage: (input) => git.unstage(input),
     checkpoint: (input) => git.checkpoint(input),
     restoreCheckpoint: (input) => git.restoreCheckpoint(input),
+    compareBranch: (input) => git.compareBranch(input),
+    readBranchDiff: async (input) => {
+      const result = await git.readDiff({
+        checkoutRoot: input.checkoutRoot,
+        scope: { kind: "branch", baseRef: input.baseRef },
+      });
+      return result.status === "ready"
+        ? {
+            status: "ready",
+            paths: result.paths,
+            diff: result.diff.text,
+            diffTruncated: result.diff.truncated,
+          }
+        : { status: "unavailable" };
+    },
+    mergeRun: async (input) => {
+      const result = await git.mergeBranch({
+        checkoutId: input.checkoutRoot,
+        checkoutRoot: input.checkoutRoot,
+        branch: input.branch,
+      });
+      return result.status === "applied"
+        ? { status: "applied", ...(result.oid === undefined ? {} : { oid: result.oid }) }
+        : result.status === "rejected"
+          ? { status: "rejected", reason: result.reason }
+          : { status: result.status };
+    },
   } as CodeOperationGitPort;
 }
 
@@ -1445,4 +1556,26 @@ function checkoutIdForPath(path: string) {
   return decodeCodeCheckoutId(
     `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`,
   );
+}
+
+/**
+ * The curated catalog and one runner, as the operation service asks for them.
+ *
+ * Resolving the entry here — not in the service, and never from the command —
+ * is what keeps the published catalog the only set of generators a thread can
+ * reach.
+ */
+function scaffoldRunnerPort(runner: ScaffoldRunner): CodeOperationScaffoldPort {
+  return {
+    entry: (scaffoldId) =>
+      CURATED_SCAFFOLDS.find((candidate) => String(candidate.id) === scaffoldId),
+    run: (input) => runner.run(input),
+  };
+}
+
+function concatenatedOutput(stdout: Uint8Array, stderr: Uint8Array): Uint8Array {
+  const combined = new Uint8Array(stdout.byteLength + stderr.byteLength);
+  combined.set(stdout, 0);
+  combined.set(stderr, stdout.byteLength);
+  return combined;
 }

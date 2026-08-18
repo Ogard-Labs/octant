@@ -76,6 +76,38 @@ export type GitScopedDiffResult =
     }
   | { readonly status: "unavailable" };
 
+/**
+ * How a run's branch stands against the branch it targets. `mergeability` is
+ * what Git said, never what the caller hoped.
+ */
+export type GitBranchComparisonResult =
+  | {
+      readonly status: "ready";
+      readonly head: string;
+      readonly base?: string;
+      readonly ahead: number;
+      readonly behind: number;
+      readonly mergeability: "clean" | "conflicts" | "nothing-to-merge" | "unknown";
+    }
+  | { readonly status: "unavailable" };
+
+/**
+ * A revision this port will pass to Git. Deliberately narrow: branch names,
+ * remote-tracking names, and object IDs, with nothing that could be read as an
+ * option or a path.
+ */
+function validRevision(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 512 &&
+    value.trim() === value &&
+    !value.startsWith("-") &&
+    /^[A-Za-z0-9._/-]+$/.test(value) &&
+    !value.includes("..") &&
+    !value.endsWith("/")
+  );
+}
+
 interface CommandResult {
   readonly exitCode: number;
   readonly stdout: string;
@@ -335,6 +367,97 @@ export class GitObservationPort {
     } catch {
       return { status: "unavailable" };
     }
+  }
+
+  /**
+   * Measure a run against the branch it targets: how far apart they are, and
+   * whether the base could take it as it stands.
+   *
+   * Mergeability is asked of Git rather than guessed. `merge-tree` computes the
+   * merge without a working tree and without touching either branch, so asking
+   * costs nothing and changes nothing. A Git that cannot answer reports
+   * `unknown`, which the policy treats as a refusal — an optimistic guess here
+   * would be a merge conflict in the person's own checkout.
+   */
+  async compareBranch(
+    input: {
+      readonly checkoutRoot: string;
+      readonly baseRef: string;
+      readonly headRef: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<GitBranchComparisonResult> {
+    let checkoutRoot: string;
+    try {
+      checkoutRoot = await this.#dependencies.realpath(input.checkoutRoot);
+    } catch {
+      return { status: "unavailable" };
+    }
+    if (!validRevision(input.baseRef) || !validRevision(input.headRef)) {
+      return { status: "unavailable" };
+    }
+    const run = (args: readonly string[]) => this.#run(["-C", checkoutRoot, ...args], signal);
+    try {
+      const head = await run([
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        `${input.headRef}^{commit}`,
+      ]);
+      if (head.exitCode !== 0) return { status: "unavailable" };
+      const headOid = head.stdout.trim();
+      const base = await run([
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        `${input.baseRef}^{commit}`,
+      ]);
+      if (base.exitCode !== 0) {
+        // A base the repository has never seen is not a failure of the run: it
+        // is a base that cannot be compared against, and the caller is told so.
+        return { status: "ready", head: headOid, ahead: 0, behind: 0, mergeability: "unknown" };
+      }
+      const baseOid = base.stdout.trim();
+      const counts = await run([
+        "rev-list",
+        "--left-right",
+        "--count",
+        "--end-of-options",
+        `${baseOid}...${headOid}`,
+      ]);
+      if (counts.exitCode !== 0) return { status: "unavailable" };
+      const [behindText, aheadText] = counts.stdout.trim().split(/\s+/);
+      const behind = Number.parseInt(behindText ?? "", 10);
+      const ahead = Number.parseInt(aheadText ?? "", 10);
+      if (!Number.isSafeInteger(behind) || !Number.isSafeInteger(ahead)) {
+        return { status: "unavailable" };
+      }
+      const mergeability =
+        ahead === 0
+          ? ("nothing-to-merge" as const)
+          : await this.#mergeability(checkoutRoot, baseOid, headOid, signal);
+      return { status: "ready", head: headOid, base: baseOid, ahead, behind, mergeability };
+    } catch {
+      return { status: "unavailable" };
+    }
+  }
+
+  async #mergeability(
+    checkoutRoot: string,
+    baseOid: string,
+    headOid: string,
+    signal?: AbortSignal,
+  ): Promise<"clean" | "conflicts" | "unknown"> {
+    const result = await this.#run(
+      ["-C", checkoutRoot, "merge-tree", "--write-tree", "--end-of-options", baseOid, headOid],
+      signal,
+    );
+    // `merge-tree --write-tree` exits 0 for a clean merge and 1 for conflicts.
+    // Anything else is a Git that could not answer — an older one, or a
+    // repository state it refused to read — and is reported as such.
+    if (result.exitCode === 0) return "clean";
+    if (result.exitCode === 1) return "conflicts";
+    return "unknown";
   }
 
   async #run(args: readonly string[], parentSignal?: AbortSignal): Promise<CommandResult> {

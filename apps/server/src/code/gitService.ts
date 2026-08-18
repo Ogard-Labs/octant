@@ -1,5 +1,6 @@
 import type { GitMutationPort, GitMutationResult, GitTreeSnapshot } from "./gitMutationPort";
 import type {
+  GitBranchComparisonResult,
   GitObservation,
   GitObservationPort,
   GitObservationResult,
@@ -17,6 +18,14 @@ interface ObservationPort {
     input: Parameters<GitObservationPort["readDiff"]>[0],
     signal?: AbortSignal,
   ) => Promise<GitScopedDiffResult>;
+  /**
+   * Optional: an observation fake without it reports a run's comparison
+   * unavailable rather than being unusable.
+   */
+  compareBranch?: (
+    input: Parameters<GitObservationPort["compareBranch"]>[0],
+    signal?: AbortSignal,
+  ) => Promise<GitBranchComparisonResult>;
 }
 
 interface MutationPort {
@@ -56,6 +65,11 @@ interface MutationPort {
     input: Parameters<GitMutationPort["releaseCheckpoint"]>[0],
     signal?: AbortSignal,
   ): Promise<void>;
+  /** Optional: a mutation fake without it refuses to bring a run home. */
+  mergeBranch?: (
+    input: Parameters<GitMutationPort["mergeBranch"]>[0],
+    signal?: AbortSignal,
+  ) => Promise<GitMutationResult>;
 }
 
 export type GitServiceResult =
@@ -103,6 +117,40 @@ export class GitService {
     signal?: AbortSignal,
   ): Promise<GitScopedDiffResult> {
     return (await this.#observation.readDiff?.(input, signal)) ?? { status: "unavailable" };
+  }
+
+  /** Measure one branch against another. Read-only, so unqueued. */
+  async compareBranch(
+    input: Parameters<GitObservationPort["compareBranch"]>[0],
+    signal?: AbortSignal,
+  ): Promise<GitBranchComparisonResult> {
+    return (await this.#observation.compareBranch?.(input, signal)) ?? { status: "unavailable" };
+  }
+
+  /**
+   * Merge a run's branch into the branch its checkout is on.
+   *
+   * Serialized against that checkout like every other mutation, and refused
+   * outright when the checkout is not clean — the caller has already decided
+   * that it should be, and re-checking here is what keeps a merge from landing
+   * on work that arrived in between.
+   */
+  mergeBranch(
+    input: {
+      readonly checkoutId: string;
+      readonly checkoutRoot: string;
+      readonly branch: string;
+    },
+    signal?: AbortSignal,
+  ): Promise<GitServiceResult> {
+    return this.#serialized(input.checkoutId, async () => {
+      const current = await this.#ready(input.checkoutRoot, signal);
+      if (!current) return { status: "unavailable" };
+      if (current.changedPaths.length > 0) return { status: "rejected", reason: "dirty-checkout" };
+      const merge = this.#mutation.mergeBranch;
+      if (merge === undefined) return { status: "unavailable" };
+      return merge({ checkoutRoot: current.checkoutRoot, branch: input.branch }, signal);
+    });
   }
 
   stage(

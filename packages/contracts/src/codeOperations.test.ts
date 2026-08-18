@@ -39,6 +39,7 @@ const ids = {
   providerSession: "a0000000-0000-4000-8000-000000000001",
   definition: "b0000000-0000-4000-8000-000000000001",
   approval: "c0000000-0000-4000-8000-000000000001",
+  scaffoldRun: "d0000000-0000-4000-8000-000000000001",
 } as const;
 
 const scope = {
@@ -157,7 +158,26 @@ describe("Code operation contracts", () => {
       { kind: "stop-terminal", ...scope, terminalId: ids.terminal },
       { kind: "run-repository-test", ...scope, testRunId: ids.testRun, definition },
       { kind: "cancel-repository-test", ...scope, testRunId: ids.testRun },
+      {
+        kind: "run-scaffold",
+        ...scope,
+        scaffoldRunId: ids.scaffoldRun,
+        scaffoldId: "web-app",
+        directoryName: "storefront",
+      },
       { kind: "observe-git", ...scope, gitOperationId: ids.git, maxDiffBytes: 262_144 },
+      { kind: "review-run", ...scope, gitOperationId: ids.git, maxDiffBytes: 262_144 },
+      {
+        kind: "merge-run",
+        ...scope,
+        gitOperationId: ids.git,
+        confirmation: {
+          branch: "octant/attempt-a",
+          baseBranch: "main",
+          expectedHeadOid: "b".repeat(40),
+        },
+        authorization: { kind: "full-access" },
+      },
       {
         kind: "stage-git",
         ...scope,

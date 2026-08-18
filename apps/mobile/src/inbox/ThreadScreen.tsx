@@ -21,7 +21,11 @@ import {
 } from "@octant/client-runtime";
 import type { ChatThreadView, ThreadFollowUp, ThreadWorkItem } from "@octant/contracts";
 import { presentStaleHostSecurity } from "@octant/domain";
+import type { RemoteThreadSurfaceKind } from "@octant/client-runtime";
 import { ApprovalDeferralSheet } from "../approvals/ApprovalDeferralSheet";
+import { BrowserSurfacePanel } from "../surfaces/BrowserSurfacePanel";
+import { ThreadSurfaceSwitcher } from "../surfaces/ThreadSurfaceSwitcher";
+import { listMobileThreadSurfaces } from "../surfaces/threadSurfacePresentation";
 import { MOBILE_COPY, mobileThreadReadOnlyCopy } from "../copy";
 import { PullRequestReviewPanel } from "../review/PullRequestReviewPanel";
 import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthenticator";
@@ -92,6 +96,15 @@ export function ThreadScreen(props: ThreadScreenProps) {
   );
   const viewRef = useRef<ChatThreadView | undefined>(undefined);
   viewRef.current = view;
+  const [surface, setSurface] = useState<RemoteThreadSurfaceKind>("chat");
+  // The surfaces on offer come from the shared remote matrix, so a host that
+  // would refuse one never has it shown here.
+  const surfaces = useMemo(
+    () => listMobileThreadSurfaces({ mode: props.selected?.mode ?? "chat" }),
+    [props.selected?.mode],
+  );
+  const activeSurface = surfaces.some((entry) => entry.id === surface) ? surface : "chat";
+  const browserReach = surfaces.find((entry) => entry.id === "browser")?.reach ?? "unavailable";
 
   const hostLabel = useMemo(() => {
     if (props.selected === undefined) return undefined;
@@ -556,121 +569,138 @@ export function ThreadScreen(props: ThreadScreenProps) {
         <View style={styles.topSpacer} />
       </View>
 
+      <ThreadSurfaceSwitcher active={activeSurface} onSelect={setSurface} surfaces={surfaces} />
+
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         style={styles.scroll}
       >
-        {busy && activeAttempt === undefined ? <ActivityIndicator color={colors.accent} /> : null}
-        {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
-        {props.selected.mode === "code" &&
-        (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
-          <ApprovalDeferralSheet
-            executionPolicy={codePolicy}
-            mode="code"
-            operationSummary="Approval-gated Code operations"
-            threadTitle={title}
-            {...(hostLabel === undefined ? {} : { hostLabel })}
-          />
-        ) : null}
-        {props.selected.mode === "code" && transport !== undefined ? (
-          <PullRequestReviewPanel
-            authenticator={authenticator}
-            hostHealth={hostHealth}
+        {activeSurface === "browser" && transport !== undefined ? (
+          <BrowserSurfacePanel
+            mode={props.selected.mode}
+            reach={browserReach}
             threadId={props.selected.threadId}
             transport={transport}
           />
         ) : null}
-        {view !== undefined ? (
-          <View style={styles.transcript} testID="mobile-thread-transcript">
-            {activeAttempt !== undefined ? (
-              <AttemptStatus
-                outcome={activeAttempt.outcome}
-                testID="mobile-thread-attempt-status"
+        {activeSurface === "browser" ? null : (
+          <>
+            {busy && activeAttempt === undefined ? (
+              <ActivityIndicator color={colors.accent} />
+            ) : null}
+            {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
+            {props.selected.mode === "code" &&
+            (codePolicy === "approval-gated" || codePolicy === "auto-accept-edits") ? (
+              <ApprovalDeferralSheet
+                executionPolicy={codePolicy}
+                mode="code"
+                operationSummary="Approval-gated Code operations"
+                threadTitle={title}
+                {...(hostLabel === undefined ? {} : { hostLabel })}
               />
-            ) : retryableAttempt !== undefined ? (
-              <AttemptStatus
-                outcome={retryableAttempt.outcome}
-                testID="mobile-thread-attempt-status"
+            ) : null}
+            {props.selected.mode === "code" && transport !== undefined ? (
+              <PullRequestReviewPanel
+                authenticator={authenticator}
+                hostHealth={hostHealth}
+                threadId={props.selected.threadId}
+                transport={transport}
               />
             ) : null}
-            {view.thread.handoffWarning !== undefined ? (
-              <Text style={styles.warningText} testID="mobile-thread-handoff-warning">
-                {MOBILE_COPY.handoffWarning}
-              </Text>
-            ) : null}
-            <ThreadWorkShelf
-              items={view.workItems}
-              {...(view.followUp === undefined ? {} : { followUp: view.followUp })}
-              {...(staleGate.allowProductMutations
-                ? {
-                    onCompleteItem: completeWorkItem,
-                    onCancelItem: cancelWorkItem,
-                    onCompleteFollowUp: completeFollowUp,
-                  }
-                : {})}
-            />
-            {view.attachments.length > 0 || view.citations.length > 0 ? (
-              <View style={styles.metaBlock} testID="mobile-thread-meta">
-                {view.attachments.map((attachment) => (
-                  <Text key={String(attachment.id)} style={styles.metaText}>
-                    {MOBILE_COPY.attachmentLabel}: {attachment.displayName}
-                  </Text>
-                ))}
-                {view.citations.map((citation) => (
-                  <Text key={String(citation.citationId)} style={styles.metaText}>
-                    {MOBILE_COPY.citationLabel}: {citation.sourceTitle}
-                  </Text>
-                ))}
-              </View>
-            ) : null}
-            {view.contents.length === 0 ? (
-              <View style={styles.emptyChat} testID="mobile-thread-empty">
-                <Text style={styles.emptyTitle}>{MOBILE_COPY.threadStart}</Text>
-                <Text style={styles.emptyBody}>{MOBILE_COPY.threadStartHelp}</Text>
-              </View>
-            ) : (
-              view.contents.map((content, index) => {
-                const isLastAssistant =
-                  index ===
-                  view.contents.reduce(
-                    (last, entry, i) =>
-                      entry.role.toLowerCase() !== "user" && entry.role.toLowerCase() !== "human"
-                        ? i
-                        : last,
-                    -1,
-                  );
-                const showRetry =
-                  isLastAssistant &&
-                  retryableAttempt !== undefined &&
-                  activeAttempt === undefined &&
-                  staleGate.allowProductMutations;
-                return (
-                  <MessageBubble
-                    body={content.body}
-                    key={content.contentId}
-                    role={content.role}
-                    showActions={isLastAssistant}
-                    testID={`mobile-message-${content.contentId}`}
-                    {...(content.parts === undefined ? {} : { parts: content.parts })}
-                    {...(showRetry
-                      ? {
-                          extraActions: [
-                            {
-                              id: "retry",
-                              label: `Retry ${chatAttemptStatusLabel(retryableAttempt.outcome).toLowerCase()}`,
-                              icon: "refresh-outline" as const,
-                              onPress: () => void retry(),
-                            },
-                          ],
-                        }
-                      : {})}
+            {view !== undefined ? (
+              <View style={styles.transcript} testID="mobile-thread-transcript">
+                {activeAttempt !== undefined ? (
+                  <AttemptStatus
+                    outcome={activeAttempt.outcome}
+                    testID="mobile-thread-attempt-status"
                   />
-                );
-              })
-            )}
-          </View>
-        ) : null}
+                ) : retryableAttempt !== undefined ? (
+                  <AttemptStatus
+                    outcome={retryableAttempt.outcome}
+                    testID="mobile-thread-attempt-status"
+                  />
+                ) : null}
+                {view.thread.handoffWarning !== undefined ? (
+                  <Text style={styles.warningText} testID="mobile-thread-handoff-warning">
+                    {MOBILE_COPY.handoffWarning}
+                  </Text>
+                ) : null}
+                <ThreadWorkShelf
+                  items={view.workItems}
+                  {...(view.followUp === undefined ? {} : { followUp: view.followUp })}
+                  {...(staleGate.allowProductMutations
+                    ? {
+                        onCompleteItem: completeWorkItem,
+                        onCancelItem: cancelWorkItem,
+                        onCompleteFollowUp: completeFollowUp,
+                      }
+                    : {})}
+                />
+                {view.attachments.length > 0 || view.citations.length > 0 ? (
+                  <View style={styles.metaBlock} testID="mobile-thread-meta">
+                    {view.attachments.map((attachment) => (
+                      <Text key={String(attachment.id)} style={styles.metaText}>
+                        {MOBILE_COPY.attachmentLabel}: {attachment.displayName}
+                      </Text>
+                    ))}
+                    {view.citations.map((citation) => (
+                      <Text key={String(citation.citationId)} style={styles.metaText}>
+                        {MOBILE_COPY.citationLabel}: {citation.sourceTitle}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+                {view.contents.length === 0 ? (
+                  <View style={styles.emptyChat} testID="mobile-thread-empty">
+                    <Text style={styles.emptyTitle}>{MOBILE_COPY.threadStart}</Text>
+                    <Text style={styles.emptyBody}>{MOBILE_COPY.threadStartHelp}</Text>
+                  </View>
+                ) : (
+                  view.contents.map((content, index) => {
+                    const isLastAssistant =
+                      index ===
+                      view.contents.reduce(
+                        (last, entry, i) =>
+                          entry.role.toLowerCase() !== "user" &&
+                          entry.role.toLowerCase() !== "human"
+                            ? i
+                            : last,
+                        -1,
+                      );
+                    const showRetry =
+                      isLastAssistant &&
+                      retryableAttempt !== undefined &&
+                      activeAttempt === undefined &&
+                      staleGate.allowProductMutations;
+                    return (
+                      <MessageBubble
+                        body={content.body}
+                        key={content.contentId}
+                        role={content.role}
+                        showActions={isLastAssistant}
+                        testID={`mobile-message-${content.contentId}`}
+                        {...(content.parts === undefined ? {} : { parts: content.parts })}
+                        {...(showRetry
+                          ? {
+                              extraActions: [
+                                {
+                                  id: "retry",
+                                  label: `Retry ${chatAttemptStatusLabel(retryableAttempt.outcome).toLowerCase()}`,
+                                  icon: "refresh-outline" as const,
+                                  onPress: () => void retry(),
+                                },
+                              ],
+                            }
+                          : {})}
+                      />
+                    );
+                  })
+                )}
+              </View>
+            ) : null}
+          </>
+        )}
       </ScrollView>
 
       {props.selected.mode === "chat" ? (

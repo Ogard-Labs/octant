@@ -32,6 +32,10 @@ import {
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
+import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
+import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
+import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
+import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
 import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
@@ -133,6 +137,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [auxiliarySurface, setAuxiliarySurface] = useState<"agents">();
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
+  const checkpoints = useThreadCheckpoints({
+    threadId: String(props.threadId),
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const scaffolds = useScaffoldCatalog({
+    threadId: String(props.threadId),
+    checkoutId: String(view?.checkout.id ?? ""),
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
   const [restoring, setRestoring] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<string>();
   // The way back from the last restore is the controller's, not this
@@ -655,9 +670,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       <div className="code-thread-workspace__conversation" role="log" aria-live="polite">
         <div className="code-thread-workspace__transcript">
           {showEmptyConversation ? (
-            <p className="code-thread-workspace__empty" role="status">
-              No messages yet. Send a prompt to start this thread.
-            </p>
+            <>
+              <p className="code-thread-workspace__empty" role="status">
+                No messages yet. Send a prompt to start this thread.
+              </p>
+              {/* A thread on an empty checkout has nothing to talk about yet.
+                  Offering the curated scaffolds here, and only here, keeps the
+                  choice next to the moment it matters. */}
+              {scaffolds.available ? (
+                <ScaffoldPicker
+                  busy={scaffolds.busy}
+                  entries={scaffolds.entries}
+                  {...(scaffolds.lastRun === undefined ? {} : { lastRun: scaffolds.lastRun })}
+                  {...(scaffolds.message === undefined ? {} : { message: scaffolds.message })}
+                  onStart={(entry, directoryName) => {
+                    void scaffolds.start(entry, directoryName);
+                  }}
+                  runnable={scaffolds.runnable}
+                />
+              ) : null}
+            </>
           ) : null}
           {messages.map((message, index) => {
             const previousAssistant = previousAssistantMessage(messages, index);
@@ -669,6 +701,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               message.role === "assistant" && message.operationId !== undefined
                 ? props.controller.turnActivity.get(String(message.operationId))
                 : undefined;
+            const markedCheckpoint =
+              message.operationId === undefined
+                ? undefined
+                : checkpoints.byAnchor.get(String(message.operationId));
             return (
               // Long threads stay cheap without a windowing library: the engine
               // skips laying out rows that are scrolled out of view, and the
@@ -736,6 +772,49 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       >
                         {forking ? "Forking…" : "Fork from here"}
                       </OctantButton>
+                    </footer>
+                  ) : null}
+                  {message.role === "assistant" &&
+                  message.operationId !== undefined &&
+                  message.status === "completed" &&
+                  checkpoints.available ? (
+                    <footer className="code-thread-workspace__checkpoint">
+                      <ThreadCheckpointControls
+                        busy={checkpoints.busy}
+                        {...(markedCheckpoint === undefined
+                          ? {}
+                          : { checkpoint: markedCheckpoint })}
+                        defaultLabel="Checkpoint"
+                        onForget={() => {
+                          if (markedCheckpoint !== undefined)
+                            void checkpoints.forget(markedCheckpoint);
+                        }}
+                        onMark={(label) => {
+                          const operationId = message.operationId;
+                          if (operationId === undefined || view === undefined) return;
+                          void checkpoints.mark(
+                            { mode: "code", threadId: view.thread.id, operationId },
+                            label,
+                          );
+                        }}
+                        onRestore={(title) => {
+                          const activeView = view;
+                          if (markedCheckpoint === undefined || activeView === undefined) return;
+                          void (async () => {
+                            const restored = await checkpoints.restore(markedCheckpoint, title);
+                            // The new thread runs on its own worktree at the
+                            // marked revision; opening it is what makes that
+                            // visible, and this thread is untouched either way.
+                            if (restored?.mode === "code") {
+                              props.onOpenCodeThread?.(
+                                restored.threadId,
+                                title,
+                                activeView.thread.projectId,
+                              );
+                            }
+                          })();
+                        }}
+                      />
                     </footer>
                   ) : null}
                   {message.role === "user" && message.checkpoint !== undefined && mayRestore ? (
