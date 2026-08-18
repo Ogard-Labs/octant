@@ -81,8 +81,9 @@ export function createWorkPromotionProjectPort(
       if (options.gitObservation === undefined) return undefined;
 
       const observation = await options.gitObservation.observe(project.binding.canonicalRoot);
-      if (observation.status !== "ready" || observation.head.branch.kind !== "named")
-        return undefined;
+      // Only a branch with a commit can be proposed as a base; a detached or
+      // unborn head has nothing a pull request could target.
+      if (observation.status !== "ready" || observation.head.kind !== "branch") return undefined;
       const remote =
         observation.remotes.find((candidate) => candidate.name === "origin") ??
         observation.remotes[0];
@@ -90,10 +91,10 @@ export function createWorkPromotionProjectPort(
       const proposedBaseRepository = repositoryFromRemote(remote.fetchUrl);
       if (proposedBaseRepository === undefined) return undefined;
       return {
-        branchIntent: observation.head.branch.name,
+        branchIntent: observation.head.name,
         remoteName: remote.name,
         proposedBaseRepository,
-        proposedBaseBranch: observation.head.branch.name,
+        proposedBaseBranch: observation.head.name,
         outcomeKind: "opened-pr",
         confirmedAt: decodeTimestamp((options.clock ?? (() => new Date().toISOString()))()),
       } satisfies CodeDeliveryTarget;
