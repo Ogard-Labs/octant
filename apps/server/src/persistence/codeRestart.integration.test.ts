@@ -262,6 +262,7 @@ describe("Code persistence restart", () => {
       { projection_name: "rootless", reason: "unsupported-event-version" },
       { projection_name: "shell", reason: "unsupported-event-version" },
       { projection_name: "theme", reason: "unsupported-event-version" },
+      { projection_name: "thread-checkpoint", reason: "unsupported-event-version" },
       { projection_name: "usage", reason: "unsupported-event-version" },
       { projection_name: "validation-evidence", reason: "unsupported-event-version" },
       { projection_name: "zen", reason: "unsupported-event-version" },

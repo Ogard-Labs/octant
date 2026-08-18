@@ -210,6 +210,7 @@ describe("database CLI runtime composition", () => {
         { name: "theme", lastSequence: 1, lag: 0 },
         { name: "extensions", lastSequence: 1, lag: 0 },
         { name: "remote-access", lastSequence: 1, lag: 0 },
+        { name: "thread-checkpoint", lastSequence: 1, lag: 0 },
       ],
     });
 
