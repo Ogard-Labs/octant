@@ -9,6 +9,13 @@ import type {
 import type { AutomationClient, AutomationClientCommand } from "@octant/client-runtime";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ChevronDown, Plus, Search } from "lucide-react";
+import { RoutineComposer } from "./RoutineComposer";
+import {
+  routineCadence,
+  routineCadenceLabel,
+  routineHasCompleted,
+  routineScheduleLine,
+} from "./routinePresentation";
 import { useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -55,6 +62,13 @@ export interface AutomationCenterProps {
   readonly now?: () => string;
   /** Injectable UUID source for command request identifiers. */
   readonly generateId?: () => string;
+  /**
+   * What each connected host is called, and which one is this machine. A
+   * routine is owned and run by exactly one host, so a row that does not say
+   * which is a row you cannot act on from the wrong machine.
+   */
+  readonly environmentNames?: ReadonlyMap<string, string>;
+  readonly localHostId?: string;
 }
 
 type EditorState =
@@ -85,9 +99,17 @@ export function AutomationCenter(props: AutomationCenterProps) {
     AutomationNotificationDeliveryQueryResponse["status"] | undefined
   >(undefined);
   const listRef = useRef<HTMLUListElement>(null);
+  const [includeCompleted, setIncludeCompleted] = useState(false);
   const generateId = props.generateId ?? (() => crypto.randomUUID());
   const format: AutomationFormatOptions =
     props.displayTimeZone === undefined ? {} : { timeZone: props.displayTimeZone };
+  // Read once per render rather than per row, so every row on a page agrees
+  // about what "tomorrow" means.
+  const nowInstant = (props.now ?? (() => new Date().toISOString()))();
+  const environmentLabel = (hostId: string): string =>
+    hostId === props.localHostId
+      ? "Local"
+      : (props.environmentNames?.get(hostId) ?? "Another environment");
 
   const projectNames = new Map(
     props.catalog.projects.map((project) => [String(project.projectId), project.name]),
@@ -235,6 +257,17 @@ export function AutomationCenter(props: AutomationCenterProps) {
       <div className="automation-center__body">
         {hideListForNarrow ? null : (
           <div className="automation-center__list-pane">
+            <RoutineComposer
+              now={nowInstant}
+              onConfirm={() => {
+                // The draft opens the ordinary editor, which is where a
+                // routine is checked and saved. The composer proposes; it
+                // never creates.
+                controller.select(undefined);
+                setEditor({ kind: "create" });
+              }}
+              timeZone={props.displayTimeZone ?? "UTC"}
+            />
             <div
               aria-label="Automation controls"
               className="automation-center__toolbar"
@@ -249,6 +282,14 @@ export function AutomationCenter(props: AutomationCenterProps) {
                   type="search"
                   value={controller.search}
                 />
+              </label>
+              <label className="automation-center__completed">
+                <input
+                  checked={includeCompleted}
+                  onChange={(event) => setIncludeCompleted(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Show completed</span>
               </label>
               <fieldset className="automation-center__filters">
                 <legend className="sr-only">Filter by mode</legend>
@@ -287,6 +328,9 @@ export function AutomationCenter(props: AutomationCenterProps) {
               onSelect={selectRow}
               openMenuId={openMenuId}
               projectNames={projectNames}
+              environmentLabel={environmentLabel}
+              now={nowInstant}
+              includeCompleted={includeCompleted}
               generateId={generateId}
               setOpenMenuId={setOpenMenuId}
             />
@@ -348,6 +392,9 @@ function AutomationListBody(props: {
   readonly onSelect: (automationId: string) => void;
   readonly openMenuId: string | undefined;
   readonly projectNames: ReadonlyMap<string, string>;
+  readonly environmentLabel: (hostId: string) => string;
+  readonly now: string;
+  readonly includeCompleted: boolean;
   readonly generateId: () => string;
   readonly setOpenMenuId: (automationId: string | undefined) => void;
 }) {
@@ -384,138 +431,150 @@ function AutomationListBody(props: {
   }
   return (
     <ul aria-label="Automations" className="automation-center__rows" ref={props.listRef}>
-      {controller.list.items.map((summary) => (
-        <li aria-label={summary.displayName} className="automation-row" key={String(summary.id)}>
-          <button
-            className="automation-row__open"
-            data-automation-row={String(summary.id)}
-            onClick={() => props.onSelect(String(summary.id))}
-            type="button"
-          >
-            <span className="automation-row__name">{summary.displayName}</span>
-          </button>
-          <div className="automation-row__meta">
-            <span className="automation-row__project">
-              {props.projectNames.get(String(summary.projectId)) ?? "Project"}
-            </span>
-            <span className="automation-row__mode">{automationModeLabel(summary.mode)}</span>
-            <span className="automation-row__next">
-              {summary.nextDueAt === null
-                ? "Not scheduled"
-                : `Next run: ${automationNextRunLabel(summary.nextDueAt, props.format)}`}
-            </span>
-            <span className="automation-row__state" data-lifecycle={summary.lifecycle}>
-              {automationLifecycleLabel(summary.lifecycle)}
-            </span>
-            {summary.latestRunLifecycle === undefined ? null : (
-              <span
-                className="automation-row__status"
-                data-run-lifecycle={summary.latestRunLifecycle}
-              >
-                {`Last run: ${automationRunStatusLabel(summary.latestRunLifecycle)}`}
-              </span>
-            )}
-          </div>
-          <div className="automation-row__menu-wrap">
-            <OctantButton
-              aria-expanded={props.openMenuId === String(summary.id)}
-              aria-haspopup="true"
-              aria-label={`Actions for ${summary.displayName}`}
-              className="automation-row__menu-toggle"
-              onClick={() =>
-                props.setOpenMenuId(
-                  props.openMenuId === String(summary.id) ? undefined : String(summary.id),
-                )
-              }
+      {controller.list.items
+        .filter(
+          (summary) =>
+            props.includeCompleted || !routineHasCompleted(summary.trigger, summary.nextDueAt),
+        )
+        .map((summary) => (
+          <li aria-label={summary.displayName} className="automation-row" key={String(summary.id)}>
+            <button
+              className="automation-row__open"
+              data-automation-row={String(summary.id)}
+              onClick={() => props.onSelect(String(summary.id))}
               type="button"
-              variant="ghost"
             >
-              <span>Actions</span>
-              <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
-            </OctantButton>
-            {props.openMenuId !== String(summary.id) ? null : (
-              <div className="automation-row__menu">
-                {summary.lifecycle === "enabled" ? (
-                  <OctantButton
-                    onClick={() =>
-                      void props.onRunCommand(
-                        summary,
-                        {
-                          kind: "pause-automation",
-                          automationId: summary.id,
-                          expectedVersion: summary.version,
-                        },
-                        "Automation paused.",
-                      )
-                    }
-                    type="button"
-                    variant="ghost"
-                  >
-                    Pause
-                  </OctantButton>
-                ) : summary.lifecycle === "paused" ? (
-                  <OctantButton
-                    onClick={() =>
-                      void props.onRunCommand(
-                        summary,
-                        {
-                          kind: "resume-automation",
-                          automationId: summary.id,
-                          expectedVersion: summary.version,
-                        },
-                        "Automation resumed.",
-                      )
-                    }
-                    type="button"
-                    variant="ghost"
-                  >
-                    Resume
-                  </OctantButton>
-                ) : null}
-                {summary.lifecycle === "archived" ? null : (
-                  <>
+              <span className="automation-row__name">{summary.displayName}</span>
+            </button>
+            <div className="automation-row__meta">
+              <span className="automation-row__project">
+                {props.projectNames.get(String(summary.projectId)) ?? "Project"}
+              </span>
+              <span className="automation-row__mode">{automationModeLabel(summary.mode)}</span>
+              <span className="automation-row__schedule">
+                {routineScheduleLine(summary.trigger, summary.nextDueAt, props.now, props.format)}
+              </span>
+              <span
+                className="automation-row__cadence"
+                data-cadence={routineCadence(summary.trigger)}
+              >
+                {routineCadenceLabel(routineCadence(summary.trigger))}
+              </span>
+              <span className="automation-row__environment">
+                {props.environmentLabel(String(summary.hostId))}
+              </span>
+              <span className="automation-row__state" data-lifecycle={summary.lifecycle}>
+                {automationLifecycleLabel(summary.lifecycle)}
+              </span>
+              {summary.latestRunLifecycle === undefined ? null : (
+                <span
+                  className="automation-row__status"
+                  data-run-lifecycle={summary.latestRunLifecycle}
+                >
+                  {`Last run: ${automationRunStatusLabel(summary.latestRunLifecycle)}`}
+                </span>
+              )}
+            </div>
+            <div className="automation-row__menu-wrap">
+              <OctantButton
+                aria-expanded={props.openMenuId === String(summary.id)}
+                aria-haspopup="true"
+                aria-label={`Actions for ${summary.displayName}`}
+                className="automation-row__menu-toggle"
+                onClick={() =>
+                  props.setOpenMenuId(
+                    props.openMenuId === String(summary.id) ? undefined : String(summary.id),
+                  )
+                }
+                type="button"
+                variant="ghost"
+              >
+                <span>Actions</span>
+                <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
+              </OctantButton>
+              {props.openMenuId !== String(summary.id) ? null : (
+                <div className="automation-row__menu">
+                  {summary.lifecycle === "enabled" ? (
                     <OctantButton
                       onClick={() =>
                         void props.onRunCommand(
                           summary,
                           {
-                            kind: "run-now-automation",
-                            automationId: summary.id,
-                            expectedVersion: summary.version,
-                            runNowRequestId: props.generateId(),
-                          } as unknown as AutomationClientCommand,
-                          "Run requested.",
-                        )
-                      }
-                      type="button"
-                      variant="ghost"
-                    >
-                      Run now
-                    </OctantButton>
-                    <OctantButton
-                      onClick={() =>
-                        void props.onRunCommand(
-                          summary,
-                          {
-                            kind: "archive-automation",
+                            kind: "pause-automation",
                             automationId: summary.id,
                             expectedVersion: summary.version,
                           },
-                          "Automation archived.",
+                          "Automation paused.",
                         )
                       }
                       type="button"
                       variant="ghost"
                     >
-                      Archive
+                      Pause
                     </OctantButton>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </li>
-      ))}
+                  ) : summary.lifecycle === "paused" ? (
+                    <OctantButton
+                      onClick={() =>
+                        void props.onRunCommand(
+                          summary,
+                          {
+                            kind: "resume-automation",
+                            automationId: summary.id,
+                            expectedVersion: summary.version,
+                          },
+                          "Automation resumed.",
+                        )
+                      }
+                      type="button"
+                      variant="ghost"
+                    >
+                      Resume
+                    </OctantButton>
+                  ) : null}
+                  {summary.lifecycle === "archived" ? null : (
+                    <>
+                      <OctantButton
+                        onClick={() =>
+                          void props.onRunCommand(
+                            summary,
+                            {
+                              kind: "run-now-automation",
+                              automationId: summary.id,
+                              expectedVersion: summary.version,
+                              runNowRequestId: props.generateId(),
+                            } as unknown as AutomationClientCommand,
+                            "Run requested.",
+                          )
+                        }
+                        type="button"
+                        variant="ghost"
+                      >
+                        Run now
+                      </OctantButton>
+                      <OctantButton
+                        onClick={() =>
+                          void props.onRunCommand(
+                            summary,
+                            {
+                              kind: "archive-automation",
+                              automationId: summary.id,
+                              expectedVersion: summary.version,
+                            },
+                            "Automation archived.",
+                          )
+                        }
+                        type="button"
+                        variant="ghost"
+                      >
+                        Archive
+                      </OctantButton>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
     </ul>
   );
 }
