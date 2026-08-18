@@ -977,6 +977,111 @@ describe("useChatController", () => {
     expect(client.bootstrap).toHaveBeenCalledOnce();
   });
 
+  it("does not let a second immediate defaults change race the first", async () => {
+    const current = bootstrap();
+    let version = current.settings.version as unknown as number;
+    const seen: Array<{ modelId: string; expectedVersion: number }> = [];
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => current),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute: vi.fn(async (command) => {
+        if (command.kind !== "update-chat-settings") throw new Error("unexpected command");
+        const expected = command.expectedVersion as unknown as number;
+        seen.push({ modelId: String(command.defaultModelId), expectedVersion: expected });
+        if (expected !== version) throw new Error(`conflict: expected ${String(version)}`);
+        version += 1;
+        return {
+          kind: "settings-updated" as const,
+          settings: decodeChatBootstrap({
+            ...current,
+            settings: { ...current.settings, defaultModelId: command.defaultModelId, version },
+          }).settings,
+        };
+      }),
+    });
+    const { result } = renderHook(() =>
+      useChatController({ client, serverUrl: "http://127.0.0.1", windowCapability: capability }),
+    );
+    await waitFor(() => expect(result.current.bootstrap).toEqual(current));
+
+    const command = (modelId: string) => ({
+      kind: "update-chat-settings" as const,
+      expectedVersion: current.settings.version,
+      defaultProviderInstanceId: current.settings.defaultProviderInstanceId,
+      defaultModelId: modelId as never,
+      defaultResearchEnabled: current.settings.defaultResearchEnabled,
+      defaultResearchRouting: current.settings.defaultResearchRouting,
+      defaultPersonalityInstructions: current.settings.defaultPersonalityInstructions,
+    });
+
+    // Two picks before the first returns. Both are built from the same render,
+    // so without a queue they claim the same version and the server rejects the
+    // second — leaving whichever arrived first, not the model chosen last.
+    await act(async () => {
+      const first = result.current.updateSettings(command("model-b"));
+      const second = result.current.updateSettings(command("model-c"));
+      expect(await first).toBe(true);
+      expect(await second).toBe(true);
+    });
+
+    expect(seen).toEqual([
+      { modelId: "model-b", expectedVersion: 1 },
+      { modelId: "model-c", expectedVersion: 2 },
+    ]);
+    await waitFor(() => expect(result.current.bootstrap?.settings.defaultModelId).toBe("model-c"));
+  });
+
+  it("stands down a queued defaults write once another window has won", async () => {
+    const current = bootstrap();
+    const elsewhere = decodeChatBootstrap({
+      ...current,
+      settings: {
+        ...current.settings,
+        defaultPersonalityInstructions: "Be blunt.",
+        version: 2,
+      },
+    });
+    const execute = vi.fn(async () => {
+      throw new ChatClientFailure({ category: "stale", message: "Settings changed." });
+    });
+    const client = createMockClient({
+      bootstrap: vi.fn().mockResolvedValueOnce(current).mockResolvedValue(elsewhere),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute,
+    });
+    const { result } = renderHook(() =>
+      useChatController({ client, serverUrl: "http://127.0.0.1", windowCapability: capability }),
+    );
+    await waitFor(() => expect(result.current.bootstrap).toEqual(current));
+
+    const command = (modelId: string) => ({
+      kind: "update-chat-settings" as const,
+      expectedVersion: current.settings.version,
+      defaultProviderInstanceId: current.settings.defaultProviderInstanceId,
+      defaultModelId: modelId as never,
+      defaultResearchEnabled: current.settings.defaultResearchEnabled,
+      defaultResearchRouting: current.settings.defaultResearchRouting,
+      defaultPersonalityInstructions: current.settings.defaultPersonalityInstructions,
+    });
+
+    await act(async () => {
+      const first = result.current.updateSettings(command("model-b"));
+      const second = result.current.updateSettings(command("model-c"));
+      expect(await first).toBe(false);
+      expect(await second).toBe(false);
+    });
+
+    // The command carries the whole settings record. Re-stamping the second one
+    // with the reloaded version would get it accepted, putting this window's
+    // pre-conflict personality back over the one the other window just wrote.
+    expect(execute).toHaveBeenCalledOnce();
+    await waitFor(() =>
+      expect(result.current.bootstrap?.settings.defaultPersonalityInstructions).toBe("Be blunt."),
+    );
+  });
+
   it("surfaces a stale Chat defaults conflict after loading authoritative values", async () => {
     const current = bootstrap();
     const updated = decodeChatBootstrap({

@@ -180,6 +180,7 @@ describe("Journal", () => {
         modeSwitcherPresentation: "dropdown",
         navigatorAssistant: {},
         projectViewSwitcherPresentation: "dropdown",
+        userProfile: { accent: "indigo", avatar: { kind: "initials" } },
         sidebarBackground: {
           kind: "none",
           overlayColor: "#1a1a1c",
