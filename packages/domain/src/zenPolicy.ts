@@ -8,6 +8,7 @@ import {
   ZenViewport,
   ZenAppearance,
   ZenAssistantBinding,
+  ZenResearchDock,
   ZenSourceContext,
   ZenWidgetRecipeDraft,
   ZenWidgetPrimitive,
@@ -283,6 +284,7 @@ export function createZenSpace(
     active: true,
     barCollapsed: false,
     assistant: null,
+    research: null,
     createdAt: now as any,
     updatedAt: now as any,
   };
@@ -754,6 +756,35 @@ export function bindAssistant(
 }
 
 /**
+ * Apply a dock-research command to a Zen space.
+ *
+ * The dock holds a bound source context and how the person arranged it, never
+ * anything the browsing context itself may do. A space with no dock stores
+ * null, so closing one is the same write as opening one.
+ */
+export function dockResearch(
+  space: ZenSpace,
+  research: ZenResearchDock | null,
+  expectedVersion: number,
+): ZenSpace {
+  if (expectedVersion !== space.version) {
+    reject("stale-version", `Expected version ${expectedVersion} but space is at ${space.version}`);
+  }
+  if (research !== null && research.sourceContext.threadKind === "chat") {
+    reject("invalid-source-context", "A Chat thread has no browsing context to dock.");
+  }
+
+  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+
+  return {
+    ...space,
+    version: (space.version + 1) as AggregateVersion,
+    research,
+    updatedAt: now as any,
+  };
+}
+
+/**
  * Apply a recover command: reset the space to empty elements and defaults
  * while preserving the space identity. This is the safe recovery path for
  * invalid/unreachable Zen state.
@@ -950,6 +981,8 @@ export function processZenCommand(
       return updateAppearance(space, command.appearance, command.expectedVersion);
     case "bind-assistant":
       return bindAssistant(space, command.assistant, command.expectedVersion);
+    case "dock-research":
+      return dockResearch(space, command.research, command.expectedVersion);
     case "save-notes":
       return saveNotes(
         space,

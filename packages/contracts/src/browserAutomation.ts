@@ -5,6 +5,16 @@ import { ToolActionAuthority, ToolActionId } from "./toolActions";
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
 export const MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS = 54 * 1024;
+/**
+ * How many pages one browsing context may hold open at once.
+ *
+ * The ceiling is a property of the host, not a preference of whoever opened the
+ * context, so every context is created with it and the number of pages actually
+ * open is the person's to decide. Tabs of a context share its session and its
+ * origin approval; opening one is a user action and reaches the page through
+ * the same navigation admission as the first.
+ */
+export const MAX_BROWSER_TABS_PER_CONTEXT = 8;
 
 export const BrowserContextId = brandedUuid("BrowserContextId");
 export type BrowserContextId = typeof BrowserContextId.Type;

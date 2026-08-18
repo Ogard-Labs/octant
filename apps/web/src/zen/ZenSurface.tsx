@@ -134,6 +134,17 @@ export interface ZenSurfaceProps {
     readonly activity: ZenLiveCardActivity;
   }) => ReactNode | undefined;
   /**
+   * Builds the docked research browser, or returns undefined when this window
+   * cannot show one. Rendered outside the canvas on purpose: the page is a
+   * native view the host places by absolute window bounds, so it cannot live
+   * under the canvas's CSS transform. As with every other surface here, the
+   * zone holds no browser client of its own and only hands over the dock the
+   * space is bound to.
+   */
+  readonly renderResearchDock?: (input: {
+    readonly dock: NonNullable<ZenSpace["research"]>;
+  }) => ReactNode | undefined;
+  /**
    * Opens this window's Zen assistant surface. Awaited before a turn is sent,
    * because opening is what binds the surface to the conversation, and a turn
    * that overtakes the binding is answered without Zen's own actions.
@@ -648,6 +659,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
           );
         })}
       </div>
+
+      {props.space.research === null || props.space.research === undefined
+        ? null
+        : props.renderResearchDock?.({ dock: props.space.research })}
 
       <div className="zen-surface__controls window-no-drag">
         <OctantButton

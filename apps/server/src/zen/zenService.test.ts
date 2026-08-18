@@ -3,6 +3,7 @@ import {
   decodeChatThreadId,
   decodeCodeCheckoutId,
   decodeCodeThreadId,
+  decodeWorkThreadId,
   decodeHostId,
   decodeProjectId,
   decodeProviderInstanceId,
@@ -1751,5 +1752,90 @@ describe("ZenService terminal cards", () => {
 
     await expect(service.attachTerminal(ids.window, request)).rejects.toThrow(/missing-capability/);
     expect(current.elements).toEqual([]);
+  });
+});
+
+describe("ZenService research dock", () => {
+  const workThread = decodeWorkThreadId("00000000-0000-4000-8000-000000000080");
+  const workEntry = decodeZenThreadCatalogEntry({
+    catalogRef: decodeZenThreadCatalogRef(`work:${workThread}`),
+    hostId: LOCAL_HOST_ID,
+    hostLabel: "This Mac",
+    mode: "work",
+    projectId: ids.project,
+    projectLabel: "Release",
+    threadId: workThread,
+    title: "Competitive read",
+    status: "active",
+    recentActivityAt: "2026-07-28T12:00:00.000Z",
+    providerInstanceId: ids.provider,
+    modelId: "model-local",
+    sourceContext: {
+      hostId: LOCAL_HOST_ID,
+      mode: "work",
+      projectId: ids.project,
+      threadKind: "work",
+      threadId: workThread,
+    },
+  });
+
+  function dockFixture(options: { readonly resolves?: boolean } = {}) {
+    let current = space();
+    const append = vi.fn((next: ZenSpace, expectedVersion: number) => {
+      current = { ...next, version: (expectedVersion + 1) as AggregateVersion };
+      return current;
+    });
+    const service = new ZenService({
+      focusZone: memoryFocusZone(),
+      loadSpace: () => current,
+      loadSpaceByWindow: () => current,
+      eventStore: { append, isConcurrencyConflict: () => false } as never,
+      localHostId: LOCAL_HOST_ID,
+      threadCatalog: {
+        resolve: async () => (options.resolves === false ? undefined : workEntry),
+        search: async () => [workEntry],
+      },
+      uuid: () => ids.element,
+    });
+    return { append, service };
+  }
+
+  it("docks a research browser under the source context the server resolved", async () => {
+    const { append, service } = dockFixture();
+
+    const result = await service.dockResearch(ids.window, {
+      thread: { threadId: workThread, mode: "work" },
+      expectedVersion: 2 as AggregateVersion,
+    });
+
+    expect(result.result).toBe("research-docked");
+    expect(append.mock.calls[0]?.[0].research).toMatchObject({
+      sourceContext: { threadKind: "work", threadId: workThread },
+      collapsed: false,
+    });
+  });
+
+  it("refuses to dock onto a thread this window cannot see", async () => {
+    const { append, service } = dockFixture({ resolves: false });
+
+    await expect(
+      service.dockResearch(ids.window, {
+        thread: { threadId: workThread, mode: "work" },
+        expectedVersion: 2 as AggregateVersion,
+      }),
+    ).rejects.toThrow(/unavailable-source/);
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("closes the dock without asking the catalog for anything", async () => {
+    const { append, service } = dockFixture({ resolves: false });
+
+    const result = await service.dockResearch(ids.window, {
+      thread: null,
+      expectedVersion: 2 as AggregateVersion,
+    });
+
+    expect(result.space.research).toBeNull();
+    expect(append.mock.calls[0]?.[0].research).toBeNull();
   });
 });

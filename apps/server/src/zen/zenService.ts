@@ -16,6 +16,10 @@ import {
   type ZenWidgetMutation,
   type ZenThreadAttachRequest,
   type ZenThreadAttachResult,
+  DEFAULT_ZEN_RESEARCH_DOCK_WIDTH,
+  type ZenResearchDock,
+  type ZenResearchDockRequest,
+  type ZenResearchDockResult,
   type ZenTerminalAttachRequest,
   type ZenTerminalAttachResult,
   decodeZenThreadCatalogRef,
@@ -454,6 +458,70 @@ export class ZenService {
       return {
         result: "terminal-attached",
         elementId,
+        space: this.deps.eventStore.append(updated, request.expectedVersion),
+      };
+    } catch (error) {
+      if (error instanceof ZenPolicyRejected) {
+        throw new ZenError({ reason: error.code, spaceId: space.spaceId });
+      }
+      if (this.deps.eventStore.isConcurrencyConflict(error)) {
+        throw new ZenError({ reason: "stale-version", spaceId: space.spaceId });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Dock a research browser onto a Work or Code thread this window may see.
+   *
+   * Resolved through the same thread catalog that pins a card, so the dock
+   * carries the thread's own source context and nothing the caller wrote. The
+   * dock is where the page is shown, never what it may reach: the browsing
+   * context keeps the origin approval it already has, and docking adds none.
+   */
+  async dockResearch(
+    windowId: WindowId,
+    request: ZenResearchDockRequest,
+    signal?: AbortSignal,
+  ): Promise<ZenResearchDockResult> {
+    const space = this.#activeSpace(windowId);
+    if (space === null) throw new ZenError({ reason: "unknown-space" });
+    if (space.windowId !== windowId) {
+      throw new ZenError({ reason: "wrong-window", spaceId: space.spaceId });
+    }
+    if (signal?.aborted) throw new ZenError({ reason: "interrupted", spaceId: space.spaceId });
+    let research: ZenResearchDock | null = null;
+    if (request.thread !== null) {
+      if (this.deps.threadCatalog === undefined) {
+        throw new ZenError({ reason: "missing-capability", spaceId: space.spaceId });
+      }
+      const entry = await this.deps.threadCatalog.resolve(
+        windowId,
+        decodeZenThreadCatalogRef(`${request.thread.mode}:${String(request.thread.threadId)}`),
+      );
+      if (entry === undefined || entry.sourceContext.threadKind !== request.thread.mode) {
+        throw new ZenError({ reason: "unavailable-source", spaceId: space.spaceId });
+      }
+      research = {
+        sourceContext: entry.sourceContext,
+        width: request.width ?? DEFAULT_ZEN_RESEARCH_DOCK_WIDTH,
+        collapsed: request.collapsed ?? false,
+      };
+    }
+    if (signal?.aborted) throw new ZenError({ reason: "interrupted", spaceId: space.spaceId });
+    try {
+      const updated = processZenCommand(
+        space,
+        {
+          command: "dock-research",
+          spaceId: space.spaceId,
+          research,
+          expectedVersion: request.expectedVersion,
+        },
+        this.deps.localHostId,
+      );
+      return {
+        result: "research-docked",
         space: this.deps.eventStore.append(updated, request.expectedVersion),
       };
     } catch (error) {

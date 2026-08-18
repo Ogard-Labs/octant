@@ -12,6 +12,7 @@ export const IPC_CHANNELS = {
   browserSurfaceDetach: "octant:browser-surface:detach",
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
   browserSurfaceState: "octant:browser-surface:state",
+  browserSurfaceTab: "octant:browser-surface:tab",
   clearProviderCredential: "octant:provider-credential:clear",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
@@ -56,6 +57,12 @@ export interface HostCapabilities {
   readonly liveBrowserSupported: boolean;
 }
 
+export interface BrowserSurfaceTabState {
+  readonly tabId: string;
+  readonly url: string;
+  readonly title: string;
+}
+
 export interface BrowserSurfaceState {
   readonly contextId: string;
   readonly url: string;
@@ -64,7 +71,14 @@ export interface BrowserSurfaceState {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
   readonly control: "idle" | "user" | "agent";
+  readonly tabs: ReadonlyArray<BrowserSurfaceTabState>;
+  readonly activeTabId: string;
 }
+
+export type BrowserSurfaceTabCommand =
+  | { readonly kind: "open" }
+  | { readonly kind: "select"; readonly tabId: string }
+  | { readonly kind: "close"; readonly tabId: string };
 
 export interface BrowserSurfaceRequest {
   readonly contextId: string;
@@ -248,6 +262,11 @@ export interface OctantHostBridge {
       readonly command: "back" | "forward" | "reload" | "stop";
     },
   ) => Promise<void>;
+  readonly tabBrowserSurface: (
+    request: Omit<BrowserSurfaceRequest, "bounds"> & {
+      readonly command: BrowserSurfaceTabCommand;
+    },
+  ) => Promise<BrowserSurfaceState>;
   readonly openBrowserExternal: (url: string) => Promise<void>;
   readonly subscribeBrowserSurfaceState: (
     listener: (state: BrowserSurfaceState) => void,
@@ -373,6 +392,25 @@ export function createHostBridge(
         return Promise.reject(new TypeError("Invalid Browser surface command."));
       }
       return invoke(IPC_CHANNELS.browserSurfaceCommand, request);
+    },
+    tabBrowserSurface: async (
+      request: Omit<BrowserSurfaceRequest, "bounds"> & {
+        readonly command: BrowserSurfaceTabCommand;
+      },
+    ) => {
+      validateBrowserSurfaceIdentity(request);
+      const command = request.command;
+      if (
+        !isRecord(command) ||
+        (command.kind !== "open" &&
+          ((command.kind !== "select" && command.kind !== "close") ||
+            typeof command.tabId !== "string" ||
+            command.tabId.length === 0 ||
+            command.tabId.length > 64))
+      ) {
+        return Promise.reject(new TypeError("Invalid Browser tab command."));
+      }
+      return decodeBrowserSurfaceState(await ipc.invoke(IPC_CHANNELS.browserSurfaceTab, request));
     },
     openBrowserExternal: (url: string) => {
       validateExternalBrowserUrl(url);
@@ -1075,7 +1113,11 @@ function decodeBrowserSurfaceState(value: unknown): BrowserSurfaceState {
     typeof value.loading !== "boolean" ||
     typeof value.canGoBack !== "boolean" ||
     typeof value.canGoForward !== "boolean" ||
-    (value.control !== "idle" && value.control !== "user" && value.control !== "agent")
+    (value.control !== "idle" && value.control !== "user" && value.control !== "agent") ||
+    !Array.isArray(value.tabs) ||
+    value.tabs.length > 16 ||
+    typeof value.activeTabId !== "string" ||
+    value.activeTabId.length > 64
   ) {
     throw new TypeError("Invalid Browser surface state.");
   }
@@ -1087,7 +1129,25 @@ function decodeBrowserSurfaceState(value: unknown): BrowserSurfaceState {
     canGoBack: value.canGoBack,
     canGoForward: value.canGoForward,
     control: value.control,
+    tabs: Object.freeze(value.tabs.map(decodeBrowserSurfaceTabState)),
+    activeTabId: value.activeTabId,
   });
+}
+
+function decodeBrowserSurfaceTabState(value: unknown): BrowserSurfaceTabState {
+  if (
+    !isRecord(value) ||
+    typeof value.tabId !== "string" ||
+    value.tabId.length === 0 ||
+    value.tabId.length > 64 ||
+    typeof value.url !== "string" ||
+    value.url.length > 4_096 ||
+    typeof value.title !== "string" ||
+    value.title.length > 1_024
+  ) {
+    throw new TypeError("Invalid Browser surface tab.");
+  }
+  return Object.freeze({ tabId: value.tabId, url: value.url, title: value.title });
 }
 
 function validatePrivateListenerEnableRequest(value: PrivateListenerEnableBridgeRequest): void {

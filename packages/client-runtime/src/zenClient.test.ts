@@ -68,6 +68,7 @@ const space = decodeZenSpace({
     increasedContrast: false,
   },
   assistant: null,
+  research: null,
   createdAt: "2026-07-28T12:00:00.000Z",
   updatedAt: "2026-07-28T12:00:00.000Z",
 });
