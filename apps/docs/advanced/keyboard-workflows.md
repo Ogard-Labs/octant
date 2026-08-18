@@ -32,6 +32,23 @@ behavior:
   focus.
 - Inside Zen, **Arrow** keys move the active element and **Alt+Arrow**
   resizes it.
+- **⌘/Ctrl+Alt+]** and **⌘/Ctrl+Alt+[** show the next and previous focus
+  space, wrapping at both ends.
+
+## Focus spaces
+
+A window's Zen surface holds up to eight named spaces and shows one at a
+time, so you can keep separate arrangements of pinned work without unpinning
+anything. The strip at the top of the surface lists them:
+
+- Click a space to show it; double-click its name to rename it.
+- **+** adds a space and shows it; **×** removes one. A window always keeps
+  its last space.
+- The arrow keys step through the strip when it has focus.
+
+Switching space changes nothing about what is pinned to either one, and
+grants nothing: every pinned element still acts under its own source
+context.
 
 When Zen state cannot be decoded, a **Recover Zen** path restores the main
 workspace instead of trapping you. Zen rebuilds from the event journal after

@@ -12,8 +12,10 @@ import type {
   ZenAppearance,
   ZenChecklistItemId,
   ZenElementPayload,
+  ZenFocusZone,
   ZenGeometry,
   ZenSpace,
+  ZenSpaceId,
   ZenTimerAction,
   ZenThreadCatalogEntry,
   ZenThreadCatalogRef,
@@ -29,6 +31,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { ZenAppearancePanel } from "./ZenAppearancePanel";
 import { ZenBar } from "./ZenBar";
 import { ZenAssistant } from "./ZenAssistant";
+import { ZenSpaceSwitcher } from "./ZenSpaceSwitcher";
 import { ZenThreadElement } from "./ZenThreadElement";
 import { ZenThreadPicker } from "./ZenThreadPicker";
 import { ZenTimer } from "./widgets/ZenTimer";
@@ -46,6 +49,13 @@ import {
 
 export interface ZenSurfaceProps {
   readonly barCollapsed: boolean;
+  /** The spaces this window holds, or null before the zone has been read. */
+  readonly focusZone?: ZenFocusZone | null;
+  readonly spacesBusy?: boolean;
+  readonly onAddSpace?: (name: string) => void;
+  readonly onRemoveSpace?: (spaceId: ZenSpaceId) => void;
+  readonly onRenameSpace?: (spaceId: ZenSpaceId, name: string) => void;
+  readonly onShowSpace?: (spaceId: ZenSpaceId) => void;
   readonly message?: string;
   readonly onExit: () => void;
   readonly onAddTimer?: (durationMs: number) => void;
@@ -362,6 +372,18 @@ export function ZenSurface(props: ZenSurfaceProps) {
       tabIndex={0}
     >
       <div className="zen-surface__traffic-light-safe window-drag-region" aria-hidden="true" />
+      {props.focusZone === null || props.focusZone === undefined ? null : (
+        <div className="zen-surface__spaces-anchor window-no-drag">
+          <ZenSpaceSwitcher
+            busy={props.spacesBusy === true}
+            zone={props.focusZone}
+            {...(props.onAddSpace === undefined ? {} : { onAddSpace: props.onAddSpace })}
+            {...(props.onRemoveSpace === undefined ? {} : { onRemoveSpace: props.onRemoveSpace })}
+            {...(props.onRenameSpace === undefined ? {} : { onRenameSpace: props.onRenameSpace })}
+            {...(props.onShowSpace === undefined ? {} : { onShowSpace: props.onShowSpace })}
+          />
+        </div>
+      )}
       {overlay > 0 ? (
         <div
           aria-hidden="true"

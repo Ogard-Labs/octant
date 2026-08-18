@@ -431,6 +431,67 @@
   background: rgb(43 43 47 / 96%);
 }
 
+/* The switcher rides above the panning surface: it is how you leave a space. */
+.zen-surface__spaces-anchor {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: calc(100% - 32px);
+}
+
+.zen-spaces {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 999px;
+  background: rgb(17 17 19 / 88%);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 40%);
+  overflow-x: auto;
+}
+
+.zen-spaces__space {
+  display: flex;
+  align-items: center;
+}
+
+.zen-spaces__tab {
+  border-radius: 999px;
+  font-size: 13px;
+  white-space: nowrap;
+  opacity: 0.7;
+}
+
+.zen-spaces__tab--showing {
+  opacity: 1;
+  background: rgb(255 255 255 / 12%);
+}
+
+.zen-spaces__remove,
+.zen-spaces__add {
+  border-radius: 999px;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px 8px;
+  opacity: 0.6;
+}
+
+.zen-spaces__remove:hover,
+.zen-spaces__add:hover {
+  opacity: 1;
+}
+
+.zen-spaces__rename {
+  width: 120px;
+  border-radius: 999px;
+  font-size: 13px;
+  padding: 4px 10px;
+}
+
 .zen-surface__bar-anchor {
   position: absolute;
   left: 50%;
@@ -525,6 +586,12 @@
     right: 12px;
     transform: none;
     bottom: 12px;
+  }
+
+  .zen-surface__spaces-anchor {
+    left: 12px;
+    right: 12px;
+    transform: none;
   }
 
   .zen-surface__panel-anchor,

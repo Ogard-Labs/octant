@@ -85,7 +85,9 @@ afterEach(() => {
 describe("Zen takeover shell restore", () => {
   it("restores the ordinary shell markers after Exit Zen", async () => {
     const client: ZenClient = {
-      bootstrap: vi.fn(async (): Promise<ZenBootstrapResponse> => ({ space: null, windowId })),
+      bootstrap: vi.fn(
+        async (): Promise<ZenBootstrapResponse> => ({ space: null, focusZone: null, windowId }),
+      ),
       command: vi.fn(async (cmd: ZenCommand): Promise<ZenResult> => {
         if (cmd.command === "create-space") {
           return { result: "create-space", space: makeSpace({ active: true }) };
@@ -101,6 +103,7 @@ describe("Zen takeover shell restore", () => {
         }
         return { result: "mutation", space: makeSpace() };
       }),
+      space: vi.fn() as never,
       searchThreads: vi.fn() as never,
       attachThread: vi.fn() as never,
       continueThread: vi.fn() as never,

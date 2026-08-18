@@ -2,6 +2,9 @@ import type {
   ZenBootstrapResponse,
   ZenCommand,
   ZenElementId,
+  ZenFocusZone,
+  ZenFocusZoneCommand,
+  ZenFocusZoneResult,
   ZenResult,
   ZenSpace,
   ZenSpaceId,
@@ -39,14 +42,33 @@ function makeSpace(overrides: Partial<ZenSpace> = {}): ZenSpace {
   };
 }
 
+/** The one-space focus zone a window has until someone adds a second space. */
+function makeZone(space: ZenSpace | null): ZenFocusZone | null {
+  if (space === null) return null;
+  return {
+    windowId,
+    version: 1 as AggregateVersion,
+    spaces: [{ spaceId: space.spaceId, name: "Focus", position: 0 }],
+    activeSpaceId: space.spaceId,
+    createdAt: space.createdAt,
+    updatedAt: space.updatedAt,
+  };
+}
+
 function createClient(overrides: Partial<ZenClient> = {}): ZenClient {
   let space: ZenSpace | null = null;
   return {
+    space: vi.fn(
+      async (command: ZenFocusZoneCommand): Promise<ZenFocusZoneResult> =>
+        overrides.space !== undefined
+          ? await overrides.space(command)
+          : Promise.reject(new Error("This window holds one space.")),
+    ),
     bootstrap: vi.fn(async (): Promise<ZenBootstrapResponse> => {
       const result =
         overrides.bootstrap !== undefined
           ? await overrides.bootstrap()
-          : { space: null as ZenSpace | null, windowId };
+          : { space: null as ZenSpace | null, focusZone: null, windowId };
       space = result.space;
       return result as ZenBootstrapResponse;
     }),
@@ -105,7 +127,9 @@ describe("useZenController", () => {
 
     expect(result.current.active).toBe(true);
     expect(result.current.space?.spaceId).toBe(spaceId);
-    expect(client.bootstrap).toHaveBeenCalledOnce();
+    // Once to find there is no space, once more to read the focus zone that
+    // creating the first space opened.
+    expect(client.bootstrap).toHaveBeenCalledTimes(2);
     expect(client.command).toHaveBeenCalledWith(
       expect.objectContaining({ command: "create-space", windowId }),
     );
@@ -152,7 +176,7 @@ describe("useZenController", () => {
       ],
     });
     const client = createClient({
-      bootstrap: vi.fn(async () => ({ space: initial, windowId })),
+      bootstrap: vi.fn(async () => ({ space: initial, focusZone: makeZone(initial), windowId })),
       command: vi
         .fn()
         .mockResolvedValueOnce({ result: "mutation", space: created })
@@ -295,7 +319,7 @@ describe("useZenController", () => {
     window.sessionStorage.setItem(`${ZEN_PRESENTATION_STORAGE_PREFIX}${windowId}`, "active");
     const space = makeSpace({ active: true });
     const client = createClient({
-      bootstrap: vi.fn(async () => ({ space, windowId })),
+      bootstrap: vi.fn(async () => ({ space, focusZone: makeZone(space), windowId })),
     });
 
     const { result } = renderHook(() =>
@@ -318,7 +342,12 @@ describe("useZenController", () => {
       arrayBuffer,
     } as unknown as File;
     const client = createClient({
-      bootstrap: vi.fn(async () => ({ space: makeSpace(), windowId })),
+      bootstrap: vi.fn(async () =>
+        (() => {
+          const only = makeSpace();
+          return { space: only, focusZone: makeZone(only), windowId };
+        })(),
+      ),
       uploadBackground,
     });
     const { result } = renderHook(() => useZenController({ client, windowId }));
@@ -353,7 +382,7 @@ describe("useZenController", () => {
     const createObjectURL = vi.fn<(blob: Blob) => string>().mockReturnValue("blob:zen-still");
     vi.stubGlobal("URL", { createObjectURL, revokeObjectURL: vi.fn() });
     const client = createClient({
-      bootstrap: vi.fn(async () => ({ space, windowId })),
+      bootstrap: vi.fn(async () => ({ space, focusZone: makeZone(space), windowId })),
       readBackground: vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/gif" })),
     });
     const { result } = renderHook(() => useZenController({ client, windowId }));
@@ -392,7 +421,7 @@ describe("useZenController", () => {
     const revokeObjectURL = vi.fn();
     vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
     const client = createClient({
-      bootstrap: vi.fn(async () => ({ space: first, windowId })),
+      bootstrap: vi.fn(async () => ({ space: first, focusZone: makeZone(first), windowId })),
       command: vi.fn(async (): Promise<ZenResult> => ({ result: "mutation", space: second })),
       readBackground: vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" })),
     });
@@ -420,7 +449,12 @@ describe("useZenController", () => {
 
   it("exits Zen without clearing the durable space", async () => {
     const client = createClient({
-      bootstrap: vi.fn(async () => ({ space: makeSpace(), windowId })),
+      bootstrap: vi.fn(async () =>
+        (() => {
+          const only = makeSpace();
+          return { space: only, focusZone: makeZone(only), windowId };
+        })(),
+      ),
     });
     const { result } = renderHook(() =>
       useZenController({ client, windowId, storage: window.sessionStorage }),
@@ -464,7 +498,7 @@ describe("useZenController", () => {
     const client = createClient({
       bootstrap: vi
         .fn()
-        .mockResolvedValueOnce({ space, windowId })
+        .mockResolvedValueOnce({ space, focusZone: makeZone(space), windowId })
         .mockResolvedValueOnce({
           space: makeSpace({ version: 2 as AggregateVersion, active: true, elements: [] }),
           windowId,
@@ -523,7 +557,7 @@ describe("useZenController", () => {
       ],
     });
     const client = createClient({
-      bootstrap: vi.fn(async () => ({ space, windowId })),
+      bootstrap: vi.fn(async () => ({ space, focusZone: makeZone(space), windowId })),
       command: vi.fn(async () => {
         throw new Error("rejected-update");
       }),
@@ -557,8 +591,8 @@ describe("useZenController", () => {
     const client = createClient({
       bootstrap: vi
         .fn()
-        .mockResolvedValueOnce({ space: localSpace, windowId })
-        .mockResolvedValueOnce({ space: serverSpace, windowId }),
+        .mockResolvedValueOnce({ space: localSpace, focusZone: makeZone(localSpace), windowId })
+        .mockResolvedValueOnce({ space: serverSpace, focusZone: makeZone(serverSpace), windowId }),
       command: vi.fn(async () => {
         throw new Error("Zen error: stale-version");
       }),
@@ -599,7 +633,7 @@ describe("useZenController", () => {
       elements: [{ ...notes, widgetVersion: 1 as AggregateVersion, content: "Durable" }],
     });
     const client = createClient({
-      bootstrap: vi.fn(async () => ({ space: initial, windowId })),
+      bootstrap: vi.fn(async () => ({ space: initial, focusZone: makeZone(initial), windowId })),
       command: vi
         .fn()
         .mockResolvedValueOnce({ result: "mutation", space: created })
@@ -654,8 +688,8 @@ describe("useZenController", () => {
     const client = createClient({
       bootstrap: vi
         .fn()
-        .mockResolvedValueOnce({ space: initial, windowId })
-        .mockResolvedValueOnce({ space: refreshed, windowId }),
+        .mockResolvedValueOnce({ space: initial, focusZone: makeZone(initial), windowId })
+        .mockResolvedValueOnce({ space: refreshed, focusZone: makeZone(refreshed), windowId }),
       command: vi.fn(async () => {
         throw new Error("Zen error: stale-widget-version");
       }),
@@ -835,11 +869,9 @@ describe("useZenController", () => {
         let calls = 0;
         return vi.fn(async (): Promise<ZenBootstrapResponse> => {
           calls++;
-          if (calls === 1) return { space: null as ZenSpace | null, windowId };
-          return {
-            space: makeSpace({ version: 3 as AggregateVersion, active: true }),
-            windowId,
-          };
+          if (calls === 1) return { space: null as ZenSpace | null, focusZone: null, windowId };
+          const only = makeSpace({ version: 3 as AggregateVersion, active: true });
+          return { space: only, focusZone: makeZone(only), windowId };
         });
       })(),
     });
@@ -864,5 +896,106 @@ describe("useZenController", () => {
       expect(result.current.message).toMatch(/exit|refresh|available|workspace/i);
     });
     expect(result.current.active).toBe(false);
+  });
+});
+
+describe("useZenController focus zone", () => {
+  const second = "00000000-0000-4000-8000-000000000905" as ZenSpaceId;
+
+  function twoSpaceZone(activeSpaceId: ZenSpaceId): ZenFocusZone {
+    return {
+      windowId,
+      version: 2 as AggregateVersion,
+      spaces: [
+        { spaceId, name: "Focus", position: 0 },
+        { spaceId: second, name: "Review", position: 1 },
+      ],
+      activeSpaceId,
+      createdAt: "2026-07-26T12:00:00.000Z" as ZenFocusZone["createdAt"],
+      updatedAt: "2026-07-26T12:00:00.000Z" as ZenFocusZone["updatedAt"],
+    };
+  }
+
+  it("shows the space the switcher picked, adopting the zone the server returned", async () => {
+    const showing = makeSpace({ spaceId: second, active: true });
+    const client = createClient({
+      bootstrap: vi.fn(async () => ({
+        space: makeSpace({ active: true }),
+        focusZone: twoSpaceZone(spaceId),
+        windowId,
+      })),
+      space: vi.fn(async () => ({
+        result: "focus-zone-updated" as const,
+        zone: twoSpaceZone(second),
+        space: showing,
+      })),
+    });
+    const { result } = renderHook(() => useZenController({ client, windowId }));
+
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    await act(async () => {
+      await result.current.showSpace(second);
+    });
+
+    expect(client.space).toHaveBeenCalledWith({
+      command: "activate-space",
+      spaceId: second,
+      expectedVersion: 2,
+    });
+    expect(result.current.space?.spaceId).toBe(second);
+    expect(result.current.focusZone?.activeSpaceId).toBe(second);
+  });
+
+  it("wraps to the first space when cycling past the last one", async () => {
+    const client = createClient({
+      bootstrap: vi.fn(async () => ({
+        space: makeSpace({ spaceId: second, active: true }),
+        focusZone: twoSpaceZone(second),
+        windowId,
+      })),
+      space: vi.fn(async () => ({
+        result: "focus-zone-updated" as const,
+        zone: twoSpaceZone(spaceId),
+        space: makeSpace({ active: true }),
+      })),
+    });
+    const { result } = renderHook(() => useZenController({ client, windowId }));
+
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    await act(async () => {
+      await result.current.cycleSpace(1);
+    });
+
+    expect(client.space).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "activate-space", spaceId }),
+    );
+  });
+
+  it("reports a space command the window's zone has moved past rather than switching", async () => {
+    const client = createClient({
+      bootstrap: vi.fn(async () => ({
+        space: makeSpace({ active: true }),
+        focusZone: twoSpaceZone(spaceId),
+        windowId,
+      })),
+      space: vi.fn(async () => {
+        throw new Error("Zen error: stale-version");
+      }),
+    });
+    const { result } = renderHook(() => useZenController({ client, windowId }));
+
+    await act(async () => {
+      await result.current.enterZen();
+    });
+    await act(async () => {
+      await result.current.showSpace(second);
+    });
+
+    expect(result.current.space?.spaceId).toBe(spaceId);
+    expect(result.current.message).toMatch(/stale-version/);
   });
 });

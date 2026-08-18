@@ -6,7 +6,10 @@ import type {
   ZenChecklistItemId,
   ZenCommand,
   ZenElementPayload,
+  ZenFocusZone,
+  ZenFocusZoneCommand,
   ZenSpace,
+  ZenSpaceId,
   ZenThreadCatalogEntry,
   ZenThreadCatalogRef,
   ZenThreadContinuationTarget,
@@ -14,6 +17,7 @@ import type {
   ZenViewport,
 } from "@octant/contracts/zen";
 import { MAX_ZEN_BACKGROUND_BYTES } from "@octant/contracts/zen";
+import { cycleZenSpace } from "@octant/domain";
 import type { WindowId } from "@octant/contracts/shell";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -94,6 +98,7 @@ export function useZenController(options: UseZenControllerOptions) {
 
   const [active, setActive] = useState(false);
   const [space, setSpace] = useState<ZenSpace | null>(null);
+  const [focusZone, setFocusZone] = useState<ZenFocusZone | null>(null);
   const presentationSpace = useRef<ZenSpace | null>(null);
   const presentationQueue = useRef<
     Array<{
@@ -196,6 +201,7 @@ export function useZenController(options: UseZenControllerOptions) {
           if (isZenStaleConflict(error)) {
             try {
               const refreshed = await client.bootstrap().catch(() => null);
+              if (refreshed !== null && mounted.current) setFocusZone(refreshed.focusZone);
               if (refreshed?.space !== null && refreshed?.space !== undefined) {
                 if (refreshed.space.version >= optimistic.version) {
                   if (exitGate) {
@@ -290,6 +296,7 @@ export function useZenController(options: UseZenControllerOptions) {
     setMessage(undefined);
     try {
       const bootstrap = await client.bootstrap();
+      if (mounted.current) setFocusZone(bootstrap.focusZone);
       if (bootstrap.space !== null) {
         if (mounted.current) {
           setSpace(bootstrap.space);
@@ -306,7 +313,11 @@ export function useZenController(options: UseZenControllerOptions) {
       if (created.result !== "create-space") {
         throw new Error("Zen space creation failed.");
       }
+      // The window's first space also opens its focus zone, and only a
+      // bootstrap reports the zone, so the switcher is right from the start.
+      const opened = await client.bootstrap();
       if (mounted.current) {
+        setFocusZone(opened.focusZone);
         setSpace(created.space);
         presentationSpace.current = created.space;
         setRecoveryNeeded(false);
@@ -361,12 +372,15 @@ export function useZenController(options: UseZenControllerOptions) {
       let current = space;
       if (current === null) {
         const bootstrap = await client.bootstrap();
+        if (mounted.current) setFocusZone(bootstrap.focusZone);
         current = bootstrap.space;
       }
       if (current === null) {
         const created = await client.command({ command: "create-space", windowId });
         if (created.result !== "create-space") throw new Error("Zen recovery failed.");
+        const opened = await client.bootstrap();
         if (mounted.current) {
+          setFocusZone(opened.focusZone);
           setSpace(created.space);
           presentationSpace.current = created.space;
           setRecoveryNeeded(false);
@@ -382,6 +396,7 @@ export function useZenController(options: UseZenControllerOptions) {
         expectedVersion: current.version,
       });
       const bootstrap = await client.bootstrap();
+      if (mounted.current) setFocusZone(bootstrap.focusZone);
       if (mounted.current && bootstrap.space !== null) {
         setSpace(bootstrap.space);
         presentationSpace.current = bootstrap.space;
@@ -433,6 +448,7 @@ export function useZenController(options: UseZenControllerOptions) {
           if (isZenStaleConflict(error)) {
             try {
               const refreshed = await client.bootstrap();
+              if (mounted.current) setFocusZone(refreshed.focusZone);
               if (refreshed.space !== null) setSpace(refreshed.space);
               setMessage("Zen changed elsewhere; refreshed the current space.");
             } catch {
@@ -474,6 +490,7 @@ export function useZenController(options: UseZenControllerOptions) {
         if (isZenStaleConflict(error)) {
           try {
             const refreshed = await client.bootstrap();
+            if (mounted.current) setFocusZone(refreshed.focusZone);
             if (refreshed.space !== null) setSpace(refreshed.space);
             setMessage("Zen changed elsewhere; refreshed the current space.");
           } catch {
@@ -513,6 +530,7 @@ export function useZenController(options: UseZenControllerOptions) {
           if (isZenStaleConflict(error)) {
             try {
               const refreshed = await client.bootstrap();
+              if (mounted.current) setFocusZone(refreshed.focusZone);
               if (refreshed.space !== null) setSpace(refreshed.space);
               setMessage("Zen changed elsewhere; refreshed the current space.");
             } catch {
@@ -582,6 +600,7 @@ export function useZenController(options: UseZenControllerOptions) {
         if (!mounted.current) return;
         if (isZenStaleConflict(error)) {
           const refreshed = await client.bootstrap().catch(() => null);
+          if (refreshed !== null && mounted.current) setFocusZone(refreshed.focusZone);
           if (refreshed?.space !== null && refreshed?.space !== undefined)
             setSpace(refreshed.space);
           setMessage("Zen changed elsewhere; refreshed before attachment.");
@@ -625,6 +644,7 @@ export function useZenController(options: UseZenControllerOptions) {
       const snapshot = await client.ensureAssistant();
       if (mounted.current) setAssistant(snapshot);
       const refreshed = await client.bootstrap().catch(() => null);
+      if (refreshed !== null && mounted.current) setFocusZone(refreshed.focusZone);
       if (mounted.current && refreshed?.space !== null && refreshed?.space !== undefined) {
         setSpace(refreshed.space);
       }
@@ -652,6 +672,7 @@ export function useZenController(options: UseZenControllerOptions) {
       const snapshot = await client.assistant();
       if (mounted.current) setAssistant(snapshot);
       const refreshed = await client.bootstrap().catch(() => null);
+      if (refreshed !== null && mounted.current) setFocusZone(refreshed.focusZone);
       if (mounted.current && refreshed?.space !== null && refreshed?.space !== undefined) {
         setSpace(refreshed.space);
       }
@@ -720,10 +741,103 @@ export function useZenController(options: UseZenControllerOptions) {
     [client, space],
   );
 
+  /**
+   * Run one focus-zone command and adopt what came back.
+   *
+   * A space command changes which space the window is on, so the result
+   * carries both the zone and the space now in front; taking them together is
+   * what keeps the switcher and the surface from disagreeing.
+   */
+  const runSpaceCommand = useCallback(
+    async (command: ZenFocusZoneCommand, failure: string) => {
+      if (client === undefined) return;
+      setPanelBusy(true);
+      try {
+        const result = await client.space(command);
+        if (!mounted.current) return;
+        setFocusZone(result.zone);
+        setSpace(result.space);
+        presentationSpace.current = result.space;
+        setMessage(undefined);
+      } catch (error) {
+        if (mounted.current) setMessage(error instanceof Error ? error.message : failure);
+      } finally {
+        if (mounted.current) setPanelBusy(false);
+      }
+    },
+    [client],
+  );
+
+  const addSpace = useCallback(
+    async (name: string) => {
+      if (focusZone === null) return;
+      await runSpaceCommand(
+        { command: "add-space", name, expectedVersion: focusZone.version },
+        "This space could not be added.",
+      );
+    },
+    [focusZone, runSpaceCommand],
+  );
+
+  const renameSpace = useCallback(
+    async (spaceId: ZenSpaceId, name: string) => {
+      if (focusZone === null) return;
+      await runSpaceCommand(
+        { command: "rename-space", spaceId, name, expectedVersion: focusZone.version },
+        "This space could not be renamed.",
+      );
+    },
+    [focusZone, runSpaceCommand],
+  );
+
+  const removeSpace = useCallback(
+    async (spaceId: ZenSpaceId) => {
+      if (focusZone === null) return;
+      await runSpaceCommand(
+        { command: "remove-space", spaceId, expectedVersion: focusZone.version },
+        "This space could not be removed.",
+      );
+    },
+    [focusZone, runSpaceCommand],
+  );
+
+  const reorderSpace = useCallback(
+    async (spaceId: ZenSpaceId, position: number) => {
+      if (focusZone === null) return;
+      await runSpaceCommand(
+        { command: "reorder-space", spaceId, position, expectedVersion: focusZone.version },
+        "This space could not be moved.",
+      );
+    },
+    [focusZone, runSpaceCommand],
+  );
+
+  const showSpace = useCallback(
+    async (spaceId: ZenSpaceId) => {
+      if (focusZone === null) return;
+      if (String(focusZone.activeSpaceId) === String(spaceId)) return;
+      await runSpaceCommand(
+        { command: "activate-space", spaceId, expectedVersion: focusZone.version },
+        "That space could not be shown.",
+      );
+    },
+    [focusZone, runSpaceCommand],
+  );
+
+  /** Step one space along the switcher, wrapping at both ends. */
+  const cycleSpace = useCallback(
+    async (step: 1 | -1) => {
+      if (focusZone === null || focusZone.spaces.length < 2) return;
+      await showSpace(cycleZenSpace(focusZone, step));
+    },
+    [focusZone, showSpace],
+  );
+
   const refreshTimers = useCallback(async () => {
     if (client === undefined) return;
     try {
       const bootstrap = await client.bootstrap();
+      if (mounted.current) setFocusZone(bootstrap.focusZone);
       if (mounted.current && bootstrap.space !== null) setSpace(bootstrap.space);
     } catch (error) {
       if (mounted.current) {
@@ -806,6 +920,7 @@ export function useZenController(options: UseZenControllerOptions) {
         if (mounted.current) {
           if (isZenStaleConflict(error)) {
             const refreshed = await client.bootstrap().catch(() => null);
+            if (refreshed !== null && mounted.current) setFocusZone(refreshed.focusZone);
             if (refreshed?.space !== null && refreshed?.space !== undefined) {
               setSpace(refreshed.space);
               setMessage("Zen widget changed elsewhere; refreshed the saved copy.");
@@ -1057,6 +1172,7 @@ export function useZenController(options: UseZenControllerOptions) {
     void (async () => {
       try {
         const bootstrap = await client.bootstrap();
+        if (mounted.current) setFocusZone(bootstrap.focusZone);
         if (!mounted.current) return;
         if (bootstrap.space !== null) {
           setSpace(bootstrap.space);
@@ -1087,6 +1203,13 @@ export function useZenController(options: UseZenControllerOptions) {
   return {
     active,
     space,
+    focusZone,
+    addSpace,
+    renameSpace,
+    removeSpace,
+    reorderSpace,
+    showSpace,
+    cycleSpace,
     busy,
     barCollapsed,
     setBarCollapsed,

@@ -6,6 +6,7 @@ import {
   decodeWindowId,
   decodeZenThreadCatalogEntry,
   decodeZenThreadCatalogRef,
+  ZenError,
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
@@ -394,5 +395,76 @@ describe("Zen routes", () => {
     );
 
     expect(turn).toBeUndefined();
+  });
+});
+
+describe("Zen space routes", () => {
+  function spaceRouteFixture(focusZoneCommand: () => unknown) {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId, capability, now: 0 });
+    return createZenRouteHandler({
+      windowAuthorityStore,
+      zenService: { focusZoneCommand: vi.fn(focusZoneCommand) } as never,
+      now: () => 0,
+    });
+  }
+
+  it("switches the window that proved its own identity to another of its spaces", async () => {
+    const spaceId = "55555555-5555-4555-8555-555555555555";
+    const handler = spaceRouteFixture(() => ({ result: "focus-zone-updated" }));
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/zen/spaces", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability },
+        body: JSON.stringify({ command: "activate-space", spaceId, expectedVersion: 3 }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({ result: "focus-zone-updated" });
+  });
+
+  it("refuses a space command from a caller that cannot prove the window", async () => {
+    const handler = spaceRouteFixture(() => ({ result: "focus-zone-updated" }));
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/zen/spaces", {
+        method: "POST",
+        body: JSON.stringify({ command: "add-space", name: "Review", expectedVersion: 1 }),
+      }),
+    );
+
+    expect(response?.status).toBe(401);
+  });
+
+  it("refuses a space command whose body is not one of the space commands", async () => {
+    const handler = spaceRouteFixture(() => ({ result: "focus-zone-updated" }));
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/zen/spaces", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability },
+        body: JSON.stringify({ command: "add-space", name: "" }),
+      }),
+    );
+
+    expect(response?.status).toBe(400);
+  });
+
+  it("reports a space command the window's zone has moved past as a conflict", async () => {
+    const handler = spaceRouteFixture(() => {
+      throw new ZenError({ reason: "stale-version" });
+    });
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/zen/spaces", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability },
+        body: JSON.stringify({ command: "add-space", name: "Review", expectedVersion: 1 }),
+      }),
+    );
+
+    expect(response?.status).toBe(409);
   });
 });
