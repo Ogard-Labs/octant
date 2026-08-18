@@ -93,10 +93,18 @@ interface PendingAttachment {
   readonly displayName: string;
 }
 
-/** The authoritative thread state a queued model option change builds on. */
+/**
+ * The authoritative thread state a queued model option change builds on.
+ *
+ * The provider and model travel with the version because an option control is
+ * rendered against one model. A queued command that assumes a different model
+ * than the one the thread has actually reached cannot be applied as written.
+ */
 interface ModelOptionBase {
   readonly threadId: string;
   readonly version: ChatThread["version"];
+  readonly providerInstanceId: ChatThread["providerInstanceId"];
+  readonly modelId: ChatThread["modelId"];
   readonly values: Readonly<Record<string, string>>;
 }
 
@@ -342,44 +350,64 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       ? {
           threadId: String(result.thread.id),
           version: result.thread.version,
+          providerInstanceId: result.thread.providerInstanceId,
+          modelId: result.thread.modelId,
           values: result.thread.modelOptionValues ?? {},
         }
       : undefined;
   }
 
+  /**
+   * The authoritative thread state the next queued command builds on: the one a
+   * command already in flight produced, or the rendered thread's when the queue
+   * is empty. Reading the rendered state while another command is settling is
+   * what makes the second command stale, so every versioned thread mutation
+   * goes through here.
+   */
+  function queuedBase(previous: ModelOptionBase | undefined): ModelOptionBase {
+    return previous !== undefined && previous.threadId === String(thread.id)
+      ? previous
+      : {
+          threadId: String(thread.id),
+          version: thread.version,
+          providerInstanceId: thread.providerInstanceId,
+          modelId: thread.modelId,
+          values: thread.modelOptionValues ?? {},
+        };
+  }
+
+  function queuedVersion(previous: ModelOptionBase | undefined): ChatThread["version"] {
+    return queuedBase(previous).version;
+  }
+
   function changeModelOption(optionId: string, value: string | undefined) {
+    // The control carries the provider and model it was rendered for. A model
+    // switch still settling ahead of this change moves the thread off them, and
+    // `change-chat-provider` names the model it applies to — re-sending the
+    // rendered one on the authoritative version would silently switch the
+    // thread back. An option for a model the thread has left has nothing left
+    // to apply to, so it is dropped rather than reinterpreted.
+    const renderedProviderInstanceId = String(thread.providerInstanceId);
+    const renderedModelId = String(thread.modelId);
     void enqueueThreadCommand(async (previous) => {
-      const base: ModelOptionBase =
-        previous !== undefined && previous.threadId === String(thread.id)
-          ? previous
-          : {
-              threadId: String(thread.id),
-              version: thread.version,
-              values: thread.modelOptionValues ?? {},
-            };
+      const base = queuedBase(previous);
+      if (
+        String(base.providerInstanceId) !== renderedProviderInstanceId ||
+        String(base.modelId) !== renderedModelId
+      ) {
+        return { value: undefined, base: previous };
+      }
       const { [optionId]: _cleared, ...rest } = base.values;
       const result = await props.controller.execute({
         kind: "change-chat-provider",
         threadId: thread.id,
         expectedVersion: base.version,
-        providerInstanceId: thread.providerInstanceId,
-        modelId: thread.modelId,
+        providerInstanceId: base.providerInstanceId,
+        modelId: base.modelId,
         modelOptionValues: value === undefined ? rest : { ...rest, [optionId]: value },
       });
       return { value: undefined, base: baseFromResult(result) };
     }).catch(() => undefined);
-  }
-
-  /**
-   * The version the next queued command builds on: the one a command already in
-   * flight produced, or the rendered thread's when the queue is empty. Reading
-   * the rendered version while another command is settling is what makes the
-   * second command stale, so every versioned thread mutation goes through here.
-   */
-  function queuedVersion(previous: ModelOptionBase | undefined): ChatThread["version"] {
-    return previous !== undefined && previous.threadId === String(thread.id)
-      ? previous.version
-      : thread.version;
   }
 
   /** Select a provider/model behind the same queue an option change uses. */
@@ -510,22 +538,31 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             })();
           }}
           onEditTurn={(turnId, prompt) => {
-            void props.controller.execute({
-              kind: "edit-chat-turn",
-              threadId: view.thread.id,
-              expectedVersion: view.thread.version,
-              turnId,
-              prompt,
-            });
+            // Behind the same queue as a model or option change: an edit sent on
+            // the rendered version while one of those is settling is refused as
+            // stale, and the person's revision is lost with no second chance.
+            void enqueueThreadCommand(async (previous) => {
+              const result = await props.controller.execute({
+                kind: "edit-chat-turn",
+                threadId: view.thread.id,
+                expectedVersion: queuedVersion(previous),
+                turnId,
+                prompt,
+              });
+              return { value: undefined, base: baseFromResult(result) };
+            }).catch(() => undefined);
           }}
           onRetryAttempt={(turnId, attemptId) => {
-            void props.controller.execute({
-              kind: "retry-chat-turn",
-              threadId: view.thread.id,
-              expectedVersion: view.thread.version,
-              turnId,
-              attemptId,
-            });
+            void enqueueThreadCommand(async (previous) => {
+              const result = await props.controller.execute({
+                kind: "retry-chat-turn",
+                threadId: view.thread.id,
+                expectedVersion: queuedVersion(previous),
+                turnId,
+                attemptId,
+              });
+              return { value: undefined, base: baseFromResult(result) };
+            }).catch(() => undefined);
           }}
           view={view}
         />
@@ -653,10 +690,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           })();
         }}
         onModelChange={(modelId) => {
-          void props.controller.execute({
-            kind: "change-chat-provider",
-            threadId: view.thread.id,
-            expectedVersion: view.thread.version,
+          // The same queue as the picker rail's selection: a model switch the
+          // queue cannot see is one an option change cannot know it has to
+          // stand down for.
+          selectProviderModel({
             providerInstanceId: view.thread.providerInstanceId,
             modelId: decodeProviderModelId(modelId),
           });
