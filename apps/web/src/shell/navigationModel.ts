@@ -17,6 +17,7 @@ export type SidebarNavigationDescriptorId =
   | "new-work-thread"
   | "new-code-thread"
   | "automations"
+  | "artifact-library"
   | "plugins"
   | "thread-board"
   | "pull-requests"
@@ -35,6 +36,7 @@ export interface SidebarNavigationInput {
   readonly pullRequests: NavigationAvailability;
   readonly plugins: NavigationAvailability;
   readonly automationsEnabled: boolean;
+  readonly artifactLibrary: NavigationAvailability;
 }
 
 export interface ChatThreadNavigationSource {
@@ -80,6 +82,7 @@ const descriptors = {
   "new-work-thread": { id: "new-work-thread", label: "New thread" },
   "new-code-thread": { id: "new-code-thread", label: "New thread" },
   automations: { id: "automations", label: "Automations" },
+  "artifact-library": { id: "artifact-library", label: "Artifacts" },
   plugins: { id: "plugins", label: "Plugins" },
   "thread-board": { id: "thread-board", label: "Thread board" },
   "pull-requests": { id: "pull-requests", label: "Pull requests" },
@@ -94,11 +97,16 @@ export function buildSidebarNavigation(
   // allows them, so the destination belongs in every mode rather than only the
   // two work modes.
   const plugins = input.plugins === "available" ? [descriptors.plugins] : [];
+  // Artifacts are made in every mode and the library gathers all of them, so
+  // the destination belongs in every mode rather than only where Canvas is
+  // most used. A mode-scoped library would be the per-Project inventory again.
+  const artifacts = input.artifactLibrary === "available" ? [descriptors["artifact-library"]] : [];
 
   switch (input.activeMode) {
     case "chat":
       return [
         ...(input.createThread === "available" ? [descriptors["new-chat"]] : []),
+        ...artifacts,
         ...plugins,
         ...(input.projects === "available" ? [descriptors.projects] : []),
       ];
@@ -106,6 +114,7 @@ export function buildSidebarNavigation(
       return [
         ...(input.createThread === "available" ? [descriptors["new-work-thread"]] : []),
         ...automations,
+        ...artifacts,
         ...plugins,
         ...(input.threadBoard === "available" ? [descriptors["thread-board"]] : []),
         ...(input.projects === "available" ? [descriptors.projects] : []),
@@ -114,6 +123,7 @@ export function buildSidebarNavigation(
       return [
         ...(input.createThread === "available" ? [descriptors["new-code-thread"]] : []),
         ...automations,
+        ...artifacts,
         ...plugins,
         ...(input.threadBoard === "available" ? [descriptors["thread-board"]] : []),
         ...(input.pullRequests === "available" ? [descriptors["pull-requests"]] : []),
