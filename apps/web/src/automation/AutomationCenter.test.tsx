@@ -529,3 +529,39 @@ describe("AutomationCenter narrow layout, keyboard, and focus", () => {
     expect(stylesheet).toMatch(/\.automation-center\s*\{[^}]*overflow:\s*auto;/s);
   });
 });
+
+describe("AutomationCenter calendar view", () => {
+  it("lays the same routines out by when they run, and goes back to the list", async () => {
+    renderCenter();
+    expect(await screen.findByLabelText("Automations")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("radio", { name: "Calendar" }));
+
+    const calendar = screen.getByRole("region", { name: "Routine calendar" });
+    expect(
+      within(calendar).getAllByRole("button", { name: /Weekly summary/ }).length,
+    ).toBeGreaterThan(0);
+    // The list is a view, not a place: switching away and back keeps the rows.
+    expect(screen.queryByLabelText("Automations")).toBeNull();
+
+    await userEvent.click(screen.getByRole("radio", { name: "List" }));
+
+    expect(screen.getByLabelText("Automations")).toBeTruthy();
+  });
+
+  it("moves between months without losing the routines", async () => {
+    renderCenter();
+    await screen.findByLabelText("Automations");
+    await userEvent.click(screen.getByRole("radio", { name: "Calendar" }));
+    const heading = screen.getByRole("region", { name: "Routine calendar" });
+    const before = within(heading).getByRole("heading").textContent;
+
+    await userEvent.click(screen.getByRole("button", { name: "Next month" }));
+
+    expect(within(heading).getByRole("heading").textContent).not.toBe(before);
+
+    await userEvent.click(screen.getByRole("button", { name: "Previous month" }));
+
+    expect(within(heading).getByRole("heading").textContent).toBe(before);
+  });
+});

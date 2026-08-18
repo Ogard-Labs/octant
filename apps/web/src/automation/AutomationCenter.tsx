@@ -9,6 +9,7 @@ import type {
 import type { AutomationClient, AutomationClientCommand } from "@octant/client-runtime";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ChevronDown, Plus, Search } from "lucide-react";
+import { RoutineCalendar } from "./RoutineCalendar";
 import { RoutineComposer } from "./RoutineComposer";
 import {
   routineCadence,
@@ -100,6 +101,8 @@ export function AutomationCenter(props: AutomationCenterProps) {
   >(undefined);
   const listRef = useRef<HTMLUListElement>(null);
   const [includeCompleted, setIncludeCompleted] = useState(false);
+  const [view, setView] = useState<"list" | "calendar">("list");
+  const [calendarMonth, setCalendarMonth] = useState<string | undefined>(undefined);
   const generateId = props.generateId ?? (() => crypto.randomUUID());
   const format: AutomationFormatOptions =
     props.displayTimeZone === undefined ? {} : { timeZone: props.displayTimeZone };
@@ -283,6 +286,21 @@ export function AutomationCenter(props: AutomationCenterProps) {
                   value={controller.search}
                 />
               </label>
+              <fieldset className="automation-center__views">
+                <legend className="sr-only">Choose a view</legend>
+                {(["list", "calendar"] as const).map((candidate) => (
+                  <label className="automation-center__view" key={candidate}>
+                    <input
+                      checked={view === candidate}
+                      name="automation-center-view"
+                      onChange={() => setView(candidate)}
+                      type="radio"
+                      value={candidate}
+                    />
+                    <span>{candidate === "list" ? "List" : "Calendar"}</span>
+                  </label>
+                ))}
+              </fieldset>
               <label className="automation-center__completed">
                 <input
                   checked={includeCompleted}
@@ -320,20 +338,36 @@ export function AutomationCenter(props: AutomationCenterProps) {
               </OctantButton>
             </div>
 
-            <AutomationListBody
-              controller={controller}
-              format={format}
-              listRef={listRef}
-              onRunCommand={runSummaryCommand}
-              onSelect={selectRow}
-              openMenuId={openMenuId}
-              projectNames={projectNames}
-              environmentLabel={environmentLabel}
-              now={nowInstant}
-              includeCompleted={includeCompleted}
-              generateId={generateId}
-              setOpenMenuId={setOpenMenuId}
-            />
+            {view === "calendar" && controller.list.status === "ready" ? (
+              <RoutineCalendar
+                month={calendarMonth ?? nowInstant}
+                now={nowInstant}
+                onMonthChange={setCalendarMonth}
+                onSelect={selectRow}
+                // The calendar draws what the list would draw: the same search,
+                // the same filters, the same completed rows hidden or shown.
+                routines={controller.list.items.filter(
+                  (summary) =>
+                    includeCompleted || !routineHasCompleted(summary.trigger, summary.nextDueAt),
+                )}
+                timeZone={props.displayTimeZone ?? "UTC"}
+              />
+            ) : (
+              <AutomationListBody
+                controller={controller}
+                format={format}
+                listRef={listRef}
+                onRunCommand={runSummaryCommand}
+                onSelect={selectRow}
+                openMenuId={openMenuId}
+                projectNames={projectNames}
+                environmentLabel={environmentLabel}
+                now={nowInstant}
+                includeCompleted={includeCompleted}
+                generateId={generateId}
+                setOpenMenuId={setOpenMenuId}
+              />
+            )}
           </div>
         )}
 
