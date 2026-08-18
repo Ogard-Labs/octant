@@ -19,6 +19,7 @@ import {
 } from "./previews";
 import { MentionableThreadId } from "./threadMention";
 import { NavigatorAssistantSettings } from "./navigatorAssistant";
+import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR, UserProfile } from "./userProfile";
 import { SidebarBackground, DEFAULT_SIDEBAR_BACKGROUND } from "./theme";
 
 export const MIN_SIDEBAR_WIDTH = 220;
@@ -239,6 +240,12 @@ export const ShellSettings = Schema.Struct({
   // reports as `unconfigured` rather than inventing a default model.
   navigatorAssistant: Schema.optionalWith(NavigatorAssistantSettings, {
     default: () => ({}),
+  }),
+  // Who is using this host. A store persisted before profiles shipped decodes
+  // to the empty profile rather than a name guessed from the OS account: the
+  // host was never asked, and saying so is the honest reading.
+  userProfile: Schema.optionalWith(UserProfile, {
+    default: () => ({ accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR }),
   }),
 }).annotations(strict);
 export type ShellSettings = typeof ShellSettings.Type;

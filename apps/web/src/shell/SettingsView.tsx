@@ -55,6 +55,7 @@ import {
 import { octantSettingsRegistry } from "../settings/octantSettingsRegistry";
 import { KeybindingSettings } from "../keybindings/KeybindingSettings";
 import { NavigatorAssistantSettingsView } from "../settings/NavigatorAssistantSettingsView";
+import { UserProfileSettingsView } from "../profile/UserProfileSettingsView";
 import { SettingRow } from "../settings/primitives";
 import { SettingsSearchResults } from "../settings/SettingsSearchResults";
 import { useSettingsRoute } from "../settings/useSettingsRoute";
@@ -502,6 +503,18 @@ interface SectionProps {
 function GeneralSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="General" id="settings-general">
+      <SettingRow
+        description="How you are shown inside Octant. There is no account behind this, and none of it is required."
+        focused={focusedSetting === settingId("user-profile")}
+        label="Your profile"
+        scope="app"
+        settingId="user-profile"
+      >
+        <UserProfileSettingsView
+          onSettingsChange={props.onSettingsChange}
+          profile={props.settings.userProfile}
+        />
+      </SettingRow>
       <SettingRow
         focused={focusedSetting === settingId("enable-chat")}
         label="Enable Chat"

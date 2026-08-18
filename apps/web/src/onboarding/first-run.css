@@ -8,22 +8,181 @@
  */
 
 .first-run {
-  max-width: 40rem;
+  max-width: 52rem;
 }
 
+/*
+ * Two columns: the step rail and the current step. The rail collapses above
+ * the panel on a narrow window or at large text sizes, so the dialog stays
+ * usable at 200% zoom instead of squeezing both columns.
+ */
 .first-run__body {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  display: grid;
+  grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+  grid-template-areas:
+    "rail panel"
+    "notice notice"
+    "actions actions";
+  gap: 1rem 1.5rem;
   min-width: 0;
   max-height: 80vh;
   overflow-y: auto;
 }
 
-.first-run__header {
+@media (max-width: 46rem) {
+  .first-run__body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "rail" "panel" "notice" "actions";
+  }
+}
+
+.first-run__rail {
+  grid-area: rail;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.first-run__rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.first-run__rail-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 0.5rem;
+  inline-size: 100%;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: var(--octant-radius-panel, 0.625rem);
+  background: none;
+  color: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.first-run__rail-step:hover {
+  background: var(--octant-surface-raised, color-mix(in srgb, Canvas 94%, CanvasText 6%));
+}
+
+/*
+ * The current step is marked by `aria-current` in the markup as well as by the
+ * border here, so it is not announced by appearance alone.
+ */
+.first-run__rail-step[aria-current="step"] {
+  border-color: var(--octant-border, color-mix(in srgb, CanvasText 30%, transparent));
+  background: var(--octant-surface-raised, color-mix(in srgb, Canvas 94%, CanvasText 6%));
+}
+
+.first-run__rail-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: 1.15rem;
+  block-size: 1.15rem;
+  border: 1px solid var(--octant-border, color-mix(in srgb, CanvasText 30%, transparent));
+  border-radius: 999px;
+}
+
+.first-run__rail-step[data-configured="true"] .first-run__rail-marker {
+  border-color: CanvasText;
+}
+
+.first-run__rail-title {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.first-run__rail-summary {
+  grid-column: 2;
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.first-run__panel {
+  grid-area: panel;
+  min-width: 0;
+}
+
+.first-run__step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+/* Grouping only — the browser's own fieldset frame is not part of the design. */
+.first-run__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.first-run__group > legend {
+  padding: 0;
+  margin-block-end: 0.5rem;
+}
+
+.first-run__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.first-run__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.first-run__choice {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--octant-border, color-mix(in srgb, CanvasText 20%, transparent));
+  border-radius: var(--octant-radius-panel, 0.625rem);
+  background: none;
+  color: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+/*
+ * The chosen option is carried by `aria-checked` in the markup as well as by
+ * the border here, so the choice is never communicated by appearance alone.
+ */
+.first-run__choice[aria-checked="true"] {
+  border-color: CanvasText;
+  background: var(--octant-surface-raised, color-mix(in srgb, Canvas 94%, CanvasText 6%));
+  font-weight: 600;
+}
+
+.first-run__choice:focus-visible {
+  outline: 2px solid Highlight;
+  outline-offset: 2px;
+}
+
+.first-run__switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.first-run__switch-label {
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .first-run__title {
@@ -117,6 +276,11 @@
 }
 
 .first-run__notice {
+  grid-area: notice;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
   padding: 0.5rem 0.65rem;
   border: 1px solid var(--octant-border, color-mix(in srgb, CanvasText 15%, transparent));
   border-radius: var(--octant-radius-panel, 0.625rem);
@@ -134,6 +298,7 @@
 }
 
 .first-run__actions {
+  grid-area: actions;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;

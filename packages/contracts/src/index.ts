@@ -49,6 +49,7 @@ export * from "./localServers";
 export * from "./modes";
 export * from "./multiModelPool";
 export * from "./navigatorAssistant";
+export * from "./userProfile";
 export * from "./previews";
 export * from "./projects";
 export * from "./settings";

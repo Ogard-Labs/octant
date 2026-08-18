@@ -845,6 +845,10 @@ describe("ShellProjection", () => {
         // section: both roles absent, so Navigator reports unconfigured.
         navigatorAssistant: {},
         projectViewSwitcherPresentation: "dropdown",
+        // Likewise the profile: a store written before profiles shipped was
+        // never asked who is using it, so it upcasts to the empty profile
+        // rather than to a name guessed from the OS account.
+        userProfile: { accent: "indigo", avatar: { kind: "initials" } },
       },
       aggregateVersion: 1,
     });
@@ -936,6 +940,10 @@ describe("ShellProjection", () => {
         // section: both roles absent, so Navigator reports unconfigured.
         navigatorAssistant: {},
         projectViewSwitcherPresentation: "dropdown",
+        // Likewise the profile: a store written before profiles shipped was
+        // never asked who is using it, so it upcasts to the empty profile
+        // rather than to a name guessed from the OS account.
+        userProfile: { accent: "indigo", avatar: { kind: "initials" } },
       },
       aggregateVersion: 1,
     });
