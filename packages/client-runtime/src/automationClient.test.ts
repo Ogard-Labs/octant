@@ -80,6 +80,7 @@ const summary = {
   projectId,
   lifecycle: "enabled",
   definitionRevision: 1,
+  trigger: { kind: "once", scheduledAt: "2026-09-01T09:00:00.000Z" },
   nextDueAt: "2026-09-01T09:00:00.000Z",
   version: 1,
   updatedAt: "2026-08-10T12:00:00.000Z",

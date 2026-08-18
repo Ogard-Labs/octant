@@ -187,6 +187,98 @@
   font-size: 0.74rem;
 }
 
+.automation-row__cadence,
+.automation-row__environment {
+  padding: 0 0.35rem;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 999px;
+  line-height: 1.5;
+}
+
+.automation-row__cadence[data-cadence="one-time"] {
+  border-style: dashed;
+}
+
+.routine-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 8px;
+}
+
+.routine-composer__label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--octant-text-primary);
+  font-size: 0.8rem;
+}
+
+.routine-composer__input {
+  padding: 0.5rem;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 6px;
+  background: var(--octant-surface-raised);
+  color: var(--octant-text-primary);
+  font: inherit;
+  resize: vertical;
+}
+
+.routine-composer__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.routine-composer__chip {
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--octant-text-muted);
+  font: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.routine-composer__chip:hover {
+  color: var(--octant-text-primary);
+}
+
+.routine-composer__draft {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border-radius: 6px;
+  background: var(--octant-surface-raised);
+  font-size: 0.78rem;
+}
+
+.routine-composer__draft-schedule {
+  margin: 0;
+  color: var(--octant-text-primary);
+}
+
+.routine-composer__draft-work {
+  margin: 0;
+  color: var(--octant-text-muted);
+}
+
+.automation-center__completed {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--octant-text-muted);
+  font-size: 0.74rem;
+}
+
 .automation-row__state[data-lifecycle="paused"],
 .automation-row__status[data-run-lifecycle="failed"] {
   color: var(--octant-warning-text, #ffcf99);

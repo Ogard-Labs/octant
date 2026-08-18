@@ -1130,6 +1130,12 @@ export const AutomationSummary = Schema.Struct({
   projectId: ProjectId,
   lifecycle: AutomationLifecycle,
   definitionRevision: AutomationDefinitionRevision,
+  /**
+   * What this automation runs on. A row has to say what a routine *does*, and
+   * one instant cannot tell a daily routine from a one-off that happens to be
+   * due tomorrow — so `nextDueAt` alone can never carry that sentence.
+   */
+  trigger: AutomationTrigger,
   nextDueAt: Schema.NullOr(UtcTimestamp),
   latestRunLifecycle: Schema.optional(AutomationRunLifecycle),
   version: AggregateVersion,

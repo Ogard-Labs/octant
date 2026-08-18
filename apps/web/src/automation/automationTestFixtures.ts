@@ -176,6 +176,7 @@ export function automationSummaryFixture(
     projectId: AUTOMATION_UI_TEST_IDS.project,
     lifecycle: "enabled",
     definitionRevision: 1,
+    trigger: { kind: "weekly-local", weekdays: [1], localTime: "09:00", timeZone: "UTC" },
     nextDueAt: AUTOMATION_UI_TEST_DUE,
     latestRunLifecycle: "completed",
     version: 1,
