@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as ApplePolicy from "./appleToolchainPolicy";
 import {
   evaluateAppleBuildRequest,
+  evaluateAppleSimulatorRequest,
   canUseSimulator,
   isSimulatorReady,
   canRecordAppleBuildEvidence,
@@ -320,6 +321,64 @@ describe("evaluateAppleSimulatorRequest", () => {
         },
       ]),
     ).toMatchObject({ kind: "denied", reason: "destination-unavailable" });
+  });
+});
+
+describe("a Simulator screenshot", () => {
+  const booted: AppleSimulatorRecord = {
+    simulatorId: "10000000-0000-4000-8000-000000000003" as never,
+    name: "iPhone 16",
+    platform: "ios",
+    runtimeVersion: "18.0",
+    state: "booted",
+    udid: "ABCD-1234",
+  };
+  const request = {
+    actionId: "10000000-0000-4000-8000-000000000001" as never,
+    correlationId: "10000000-0000-4000-8000-000000000002" as never,
+    authority,
+    threadId: makeRequest().threadId,
+    checkoutId: makeRequest().checkoutId,
+    kind: "screenshot" as const,
+    simulatorId: booted.simulatorId,
+    timeoutMs: 30_000,
+    approval: { kind: "not-required" as const },
+  };
+  const scope = {
+    authority,
+    threadId: request.threadId,
+    checkoutId: request.checkoutId,
+    executionPolicy: "approval-gated" as const,
+    approvalValid: false,
+  };
+
+  it("reads the screen of a booted Simulator without an approval, like reading its logs", () => {
+    expect(evaluateAppleSimulatorRequest(request, scope, [booted])).toEqual({ kind: "allowed" });
+  });
+
+  it("stays available in Plan mode because it changes nothing", () => {
+    expect(
+      evaluateAppleSimulatorRequest(request, { ...scope, executionPolicy: "plan" }, [booted]),
+    ).toEqual({ kind: "allowed" });
+  });
+
+  it("refuses a Simulator that is not booted, which has no screen to read", () => {
+    expect(
+      evaluateAppleSimulatorRequest(request, scope, [{ ...booted, state: "shutdown" }]),
+    ).toMatchObject({ kind: "denied", reason: "destination-not-booted" });
+  });
+
+  it("still refuses a screenshot the user explicitly denied", () => {
+    expect(
+      evaluateAppleSimulatorRequest(
+        {
+          ...request,
+          approval: { kind: "denied" as const },
+        },
+        scope,
+        [booted],
+      ),
+    ).toMatchObject({ kind: "denied", reason: "approval-denied" });
   });
 });
 

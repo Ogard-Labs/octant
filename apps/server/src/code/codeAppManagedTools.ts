@@ -10,7 +10,15 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import { MAX_BROWSER_SCREENSHOT_DATA_URL_CHARACTERS } from "@octant/contracts";
+import type {
+  AppleActionRequest,
+  AppleBuildEvidence,
+  AppleDiscoveryRequest,
+  AppleRuntimeSnapshot,
+  ApplePlatform,
+} from "@octant/contracts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import type { AppleDiscoveryResult } from "../apple/appleToolchainService";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
 
 const MAX_TOOL_INPUT_BYTES = 16 * 1024;
@@ -22,6 +30,13 @@ const TERMINAL_COMPLETION_POLL_MS = 50;
 
 export const CODE_BROWSER_TOOL_NAME = "octant_browser";
 export const CODE_TERMINAL_TOOL_NAME = "octant_terminal";
+export const CODE_APPLE_TOOL_NAME = "octant_apple";
+
+/** How long one agent-driven Apple action may run before it is given up on. */
+const APPLE_BUILD_TIMEOUT_MS = 15 * 60_000;
+const APPLE_BOOT_TIMEOUT_MS = 120_000;
+const APPLE_SIMULATOR_TIMEOUT_MS = 30_000;
+const MAX_APPLE_RESULT_DIAGNOSTICS = 16;
 
 const browserDefinition = {
   name: CODE_BROWSER_TOOL_NAME,
@@ -51,6 +66,55 @@ const terminalDefinition = {
     required: ["operation"],
   },
 } as const;
+
+const appleDefinition = {
+  name: CODE_APPLE_TOOL_NAME,
+  inputSchema: {
+    type: "object",
+    properties: {
+      operation: {
+        type: "string",
+        enum: ["discover", "status", "build", "test", "run", "boot", "shutdown", "screenshot"],
+      },
+      projectPath: { type: "string" },
+      scheme: { type: "string" },
+      platform: { type: "string", enum: ["ios", "macos", "watchos", "tvos", "visionos"] },
+      simulatorId: { type: "string" },
+    },
+    required: ["operation"],
+  },
+} as const;
+
+/**
+ * What the Apple capability lends one Code thread's agent.
+ *
+ * Deliberately the same requests the workbench sends: the host resolves the
+ * thread's checkout, root, and posture for both, and the same Apple policy
+ * decides. The tool takes no shortcut a person operating the workbench could
+ * not take, and mints no destination of its own.
+ */
+export interface CodeAppleToolPort {
+  readonly resolveAuthority: (
+    windowId: WindowId,
+    thread: CodeThread,
+  ) => ToolActionAuthority | undefined;
+  readonly discover: (
+    windowId: WindowId,
+    request: AppleDiscoveryRequest,
+  ) => Promise<AppleDiscoveryResult | undefined>;
+  readonly execute: (
+    windowId: WindowId,
+    request: AppleActionRequest,
+  ) => Promise<AppleBuildEvidence | undefined>;
+  readonly snapshot: (
+    windowId: WindowId,
+    scope: {
+      readonly authority: ToolActionAuthority;
+      readonly threadId: CodeThread["id"];
+      readonly checkoutId: CodeThread["checkoutId"];
+    },
+  ) => Promise<AppleRuntimeSnapshot | undefined>;
+}
 
 export interface CodeAppManagedToolsOptions {
   readonly windowId: WindowId;
@@ -132,12 +196,17 @@ export interface CodeAppManagedToolsOptions {
       threadId: BrowserThreadId,
     ) => Promise<BrowserAutomationSnapshot>;
   };
+  readonly apple?: CodeAppleToolPort;
   readonly wait?: (milliseconds: number) => Promise<void>;
 }
 
 export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): AppManagedToolSet {
   return {
-    definitions: [browserDefinition, terminalDefinition],
+    definitions: [
+      browserDefinition,
+      terminalDefinition,
+      ...(options.apple === undefined ? [] : [appleDefinition]),
+    ],
     execute: async ({ name, inputJson, signal }) => {
       if (signal?.aborted) return failure("tool-interrupted");
       const authorityFailure = currentAuthorityFailure(options);
@@ -147,6 +216,9 @@ export function createCodeAppManagedTools(options: CodeAppManagedToolsOptions): 
       }
       if (name === CODE_BROWSER_TOOL_NAME && options.browser !== undefined) {
         return browserTool(options, parseBrowserInput(inputJson), signal);
+      }
+      if (name === CODE_APPLE_TOOL_NAME && options.apple !== undefined) {
+        return appleTool(options, parseAppleInput(inputJson), signal);
       }
       return failure("tool-unavailable");
     },
@@ -370,6 +442,158 @@ async function browserTool(
   return browserResult(acted.snapshot, input.operation === "screenshot");
 }
 
+/**
+ * The Apple capability, driven by the thread's own agent.
+ *
+ * Every request carries the thread and checkout the tool is bound to and an
+ * approval of `not-required`: the host decides. Under a posture that decides
+ * effects by approval, the shared authority gate above has already refused the
+ * call, so a request that reaches Apple is one the thread's posture already
+ * permits. Reading the toolchain, the runtime, or the Simulator's screen is not
+ * an effect and stays available wherever the tool itself is.
+ */
+async function appleTool(
+  options: CodeAppManagedToolsOptions,
+  input: AppleToolInput | undefined,
+  signal?: AbortSignal,
+) {
+  const apple = options.apple;
+  if (input === undefined || apple === undefined) return failure("invalid-apple-input");
+  const authority = apple.resolveAuthority(options.windowId, options.thread);
+  if (authority === undefined) return failure("apple-authority-unavailable");
+  const scope = {
+    authority,
+    threadId: options.thread.id,
+    checkoutId: options.thread.checkoutId,
+  } as const;
+
+  if (input.operation === "status") {
+    const snapshot = await apple.snapshot(options.windowId, scope);
+    if (snapshot === undefined) return failure("apple-unavailable");
+    return {
+      result: {
+        simulators: snapshot.simulators.map((simulator) => ({
+          simulatorId: String(simulator.simulatorId),
+          name: simulator.name,
+          platform: simulator.platform,
+          runtimeVersion: simulator.runtimeVersion,
+          state: simulator.state,
+        })),
+        running: snapshot.active.map((progress) => ({
+          actionId: String(progress.actionId),
+          kind: progress.kind,
+          step: progress.step,
+        })),
+      },
+      isError: false,
+    };
+  }
+
+  if (input.operation === "discover") {
+    if (input.projectPath === undefined) return failure("apple-project-path-required");
+    const discovered = await apple.discover(options.windowId, {
+      ...scope,
+      actionId: options.uuid() as AppleDiscoveryRequest["actionId"],
+      correlationId: options.uuid() as AppleDiscoveryRequest["correlationId"],
+      projectPath: input.projectPath as AppleDiscoveryRequest["projectPath"],
+    });
+    if (discovered === undefined) return failure("apple-unavailable");
+    if (discovered.kind === "failure") {
+      return failure(discovered.failure.category, discovered.failure.message);
+    }
+    return {
+      result: {
+        xcodeVersion: discovered.toolchain.xcodeVersion ?? "unavailable",
+        schemes: discovered.workspace.schemes,
+        configurations: discovered.workspace.configurations,
+        simulators: discovered.simulators.map((simulator) => ({
+          simulatorId: String(simulator.simulatorId),
+          name: simulator.name,
+          platform: simulator.platform,
+          state: simulator.state,
+        })),
+      },
+      isError: false,
+    };
+  }
+
+  if (signal?.aborted) return failure("tool-interrupted");
+  const request = appleActionRequest(input, scope, options.uuid);
+  if (request === undefined) return failure("invalid-apple-input");
+  const evidence = await apple.execute(options.windowId, request);
+  if (evidence === undefined) return failure("apple-unavailable");
+  return {
+    result: {
+      kind: evidence.kind,
+      outcome: evidence.outcome,
+      cleanup: evidence.cleanup,
+      durationMs: evidence.durationMs,
+      diagnostics: evidence.diagnostics
+        .slice(0, MAX_APPLE_RESULT_DIAGNOSTICS)
+        .map((diagnostic) => ({
+          severity: diagnostic.severity,
+          message: diagnostic.message,
+          ...(diagnostic.location === undefined ? {} : { location: diagnostic.location }),
+        })),
+      // References, never bytes. A captured screen is an artifact the host
+      // holds; putting it in a tool result would put the Simulator's screen
+      // into the provider transcript.
+      artifacts: evidence.artifacts.map((artifact) => ({
+        kind: artifact.kind,
+        reference: artifact.reference,
+      })),
+    },
+    isError: evidence.outcome !== "succeeded",
+  };
+}
+
+function appleActionRequest(
+  input: AppleToolInput,
+  scope: {
+    readonly authority: ToolActionAuthority;
+    readonly threadId: CodeThread["id"];
+    readonly checkoutId: CodeThread["checkoutId"];
+  },
+  uuid: () => string,
+): AppleActionRequest | undefined {
+  const base = {
+    ...scope,
+    actionId: uuid() as AppleActionRequest["actionId"],
+    correlationId: uuid() as AppleActionRequest["correlationId"],
+    approval: { kind: "not-required" as const },
+  };
+  switch (input.operation) {
+    case "build":
+    case "test":
+    case "run": {
+      if (input.projectPath === undefined) return undefined;
+      if (input.operation === "run" && input.simulatorId === undefined) return undefined;
+      return {
+        ...base,
+        kind: input.operation,
+        platform: (input.platform ?? "ios") as ApplePlatform,
+        ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
+        ...(input.simulatorId === undefined ? {} : { simulatorId: input.simulatorId as never }),
+        projectPath: input.projectPath as never,
+        timeoutMs: APPLE_BUILD_TIMEOUT_MS,
+      } as AppleActionRequest;
+    }
+    case "boot":
+    case "shutdown":
+    case "screenshot": {
+      if (input.simulatorId === undefined) return undefined;
+      return {
+        ...base,
+        kind: input.operation,
+        simulatorId: input.simulatorId as never,
+        timeoutMs: input.operation === "boot" ? APPLE_BOOT_TIMEOUT_MS : APPLE_SIMULATOR_TIMEOUT_MS,
+      } as AppleActionRequest;
+    }
+    default:
+      return undefined;
+  }
+}
+
 async function guardedBrowserEffect(
   options: CodeAppManagedToolsOptions,
   threadId: BrowserThreadId,
@@ -559,6 +783,22 @@ type TerminalToolInput =
   | { readonly operation: "read" | "stop" }
   | { readonly operation: "run" | "write"; readonly command?: string };
 
+interface AppleToolInput {
+  readonly operation:
+    | "discover"
+    | "status"
+    | "build"
+    | "test"
+    | "run"
+    | "boot"
+    | "shutdown"
+    | "screenshot";
+  readonly projectPath?: string;
+  readonly scheme?: string;
+  readonly platform?: string;
+  readonly simulatorId?: string;
+}
+
 type BrowserToolInput =
   | { readonly operation: "navigate"; readonly url?: string }
   | { readonly operation: "read-page" | "scroll" | "screenshot" | "stop" }
@@ -606,6 +846,31 @@ function parseBrowserInput(value: string): BrowserToolInput | undefined {
     if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
   }
   return parsed as BrowserToolInput;
+}
+
+function parseAppleInput(value: string): AppleToolInput | undefined {
+  const parsed = parseObject(
+    value,
+    new Set(["operation", "projectPath", "scheme", "platform", "simulatorId"]),
+  );
+  if (parsed === undefined) return undefined;
+  const operation = parsed.operation;
+  if (
+    operation !== "discover" &&
+    operation !== "status" &&
+    operation !== "build" &&
+    operation !== "test" &&
+    operation !== "run" &&
+    operation !== "boot" &&
+    operation !== "shutdown" &&
+    operation !== "screenshot"
+  ) {
+    return undefined;
+  }
+  for (const field of ["projectPath", "scheme", "platform", "simulatorId"] as const) {
+    if (parsed[field] !== undefined && typeof parsed[field] !== "string") return undefined;
+  }
+  return parsed as unknown as AppleToolInput;
 }
 
 function currentAuthorityFailure(options: CodeAppManagedToolsOptions): string | undefined {

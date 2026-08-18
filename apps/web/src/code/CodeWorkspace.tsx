@@ -22,6 +22,11 @@ import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
+import type {
+  AppleActionProgress,
+  AppleActionRequest,
+  ApplePlatform,
+} from "@octant/contracts/apple-toolchain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -29,7 +34,7 @@ import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
 import type { CodeTerminalId } from "@octant/contracts/code";
 import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
-import { AppleWorkbenchPane } from "../apple/AppleWorkbenchPane";
+import { AppleWorkbenchPane, type AppleWorkbenchIntent } from "../apple/AppleWorkbenchPane";
 import { useAppleWorkbench } from "../apple/useAppleWorkbench";
 
 const CodeDiffPane = lazy(() =>
@@ -65,6 +70,12 @@ export interface CodeWorkspaceApprovals {
   readonly pullRequest?: React.ComponentProps<typeof CodePullRequestPane>["requestApproval"];
   readonly review?: React.ComponentProps<typeof CodeReviewPane>["requestApproval"];
   readonly test?: React.ComponentProps<typeof CodeTestPane>["requestApproval"];
+  /**
+   * Native confirmation for one Apple action. Returns the approval the host
+   * minted, or undefined when the user refused — the workbench then reports the
+   * refusal rather than sending an action the host would deny.
+   */
+  readonly apple?: (request: AppleActionRequest) => Promise<string | undefined>;
 }
 
 export interface CodeWorkspaceProps {
@@ -285,6 +296,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
       }
       return (
         <AppleWorkbenchSurface
+          {...(props.approvals?.apple === undefined
+            ? {}
+            : { requestApproval: props.approvals.apple })}
           client={props.appleToolchainClient}
           createUuid={nextUuid}
           tab={props.tab}
@@ -298,6 +312,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
 function AppleWorkbenchSurface(props: {
   readonly client: AppleToolchainClient;
   readonly createUuid: () => string;
+  readonly requestApproval?: (request: AppleActionRequest) => Promise<string | undefined>;
   readonly tab: Extract<CodeTab, { readonly kind: "apple-workbench" }>;
   readonly thread: NonNullable<CodeController["activeView"]>["thread"];
   readonly checkoutId: NonNullable<CodeController["activeView"]>["checkout"]["id"];
@@ -348,15 +363,171 @@ function AppleWorkbenchSurface(props: {
     discoveryRequest,
     snapshotRequest,
   });
+  const [busy, setBusy] = useState(false);
+  const [actionMessage, setActionMessage] = useState<string>();
+  const approvalGated = decidesCodeEffectsByApproval(props.thread.executionPolicy);
+  const simulators = controller.discovery?.simulators ?? [];
+  const platform =
+    simulators[0]?.platform ?? controller.discovery?.toolchain.sdks[0]?.platform ?? "macos";
+  const scheme = controller.discovery?.workspace.schemes[0];
+  const createUuid = props.createUuid;
+  const requestApproval = props.requestApproval;
+
+  const run = useCallback(
+    async (intent: AppleWorkbenchIntent) => {
+      setActionMessage(undefined);
+      setBusy(true);
+      try {
+        const base = appleActionRequest({
+          intent,
+          actionId: createUuid(),
+          correlationId: createUuid(),
+          authority,
+          threadId: props.thread.id,
+          checkoutId: props.checkoutId,
+          platform,
+          ...(scheme === undefined ? {} : { scheme }),
+          projectPath: props.tab.projectPath,
+        });
+        // A read of the Simulator changes nothing, so it is not put through an
+        // approval the host would not ask for. Everything else is an effect on
+        // the bound checkout and goes through the same native confirmation the
+        // rest of Code uses.
+        let request = base;
+        if (approvalGated && intent.kind !== "screenshot") {
+          if (requestApproval === undefined) {
+            setActionMessage(
+              "This window cannot confirm Apple actions. Approve from the desktop app.",
+            );
+            return;
+          }
+          const approvalId = await requestApproval(base);
+          if (approvalId === undefined) {
+            setActionMessage("The Apple action was not approved, so nothing ran.");
+            return;
+          }
+          request = { ...base, approval: { kind: "approved", approvalId: approvalId as never } };
+        }
+        const evidence = await controller.execute(request);
+        if (evidence.outcome !== "succeeded") {
+          setActionMessage(`Apple ${intent.kind} ${evidence.outcome.replace("-", " ")}.`);
+        }
+      } catch {
+        setActionMessage("The Apple toolchain service did not answer this action.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      approvalGated,
+      authority,
+      controller,
+      createUuid,
+      platform,
+      props.checkoutId,
+      props.tab.projectPath,
+      props.thread.id,
+      requestApproval,
+      scheme,
+    ],
+  );
+
+  const cancel = useCallback(
+    async (actionId: AppleActionProgress["actionId"]) => {
+      setActionMessage(undefined);
+      setBusy(true);
+      try {
+        const cancelled = await controller.cancel({
+          kind: "apple-cancel-request",
+          threadId: props.thread.id,
+          checkoutId: props.checkoutId,
+          cancellation: {
+            actionId,
+            correlationId: createUuid() as never,
+            authority,
+            reason: "user-requested",
+          },
+        } as never);
+        if (!cancelled) setActionMessage("That Apple action was already finished.");
+      } catch {
+        setActionMessage("The Apple toolchain service did not answer the cancellation.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [authority, controller, createUuid, props.checkoutId, props.thread.id],
+  );
+
   return (
     <AppleWorkbenchPane
+      {...(actionMessage === undefined ? {} : { actionMessage })}
+      busy={busy}
       status={controller.status}
       {...(controller.discovery === undefined ? {} : { discovery: controller.discovery })}
       {...(controller.runtime === undefined ? {} : { runtime: controller.runtime })}
       {...(controller.errorMessage === undefined ? {} : { errorMessage: controller.errorMessage })}
+      onCancel={(actionId) => void cancel(actionId)}
       onRetry={controller.retry}
+      onRun={(intent) => void run(intent)}
     />
   );
+}
+
+/**
+ * Turn what the reader chose into the exact request the host authorizes.
+ *
+ * The timeouts are per action rather than one budget: a build may legitimately
+ * take minutes, while a capture that has not answered in seconds has not
+ * answered at all.
+ */
+function appleActionRequest(input: {
+  readonly intent: AppleWorkbenchIntent;
+  readonly actionId: string;
+  readonly correlationId: string;
+  readonly authority: AppleActionRequest["authority"];
+  readonly threadId: AppleActionRequest["threadId"];
+  readonly checkoutId: AppleActionRequest["checkoutId"];
+  readonly platform: ApplePlatform;
+  readonly scheme?: string;
+  readonly projectPath: string;
+}): AppleActionRequest {
+  const intent = input.intent;
+  const base = {
+    actionId: input.actionId as never,
+    correlationId: input.correlationId as never,
+    authority: input.authority,
+    threadId: input.threadId,
+    checkoutId: input.checkoutId,
+    approval: { kind: "not-required" as const },
+  };
+  switch (intent.kind) {
+    case "build":
+    case "test":
+      return {
+        ...base,
+        kind: intent.kind,
+        platform: input.platform,
+        ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
+        projectPath: input.projectPath as never,
+        timeoutMs: 15 * 60_000,
+      };
+    case "run":
+      return {
+        ...base,
+        kind: "run",
+        platform: input.platform,
+        ...(input.scheme === undefined ? {} : { scheme: input.scheme }),
+        simulatorId: intent.simulatorId,
+        projectPath: input.projectPath as never,
+        timeoutMs: 15 * 60_000,
+      };
+    case "boot":
+      return { ...base, kind: "boot", simulatorId: intent.simulatorId, timeoutMs: 120_000 };
+    case "shutdown":
+      return { ...base, kind: "shutdown", simulatorId: intent.simulatorId, timeoutMs: 30_000 };
+    case "screenshot":
+      return { ...base, kind: "screenshot", simulatorId: intent.simulatorId, timeoutMs: 30_000 };
+  }
 }
 
 function GitWorkspaceSurface(
