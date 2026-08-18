@@ -430,4 +430,74 @@ describe("managed Code thread creation (composer submit -> worktree -> thread bi
     // D1: the checkout branch is the delivery branch, distinct from the source.
     expect(result.thread.deliveryTarget.branchIntent).toBe(deliveryBranch);
   });
+  it("starts a thread at a recorded revision without fetching, and says where it came from", async () => {
+    const recordedRevision = "e".repeat(40);
+    const { codeService, receipts, git, repository } = harness();
+    (git.resolveRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: "resolved",
+      oid: recordedRevision,
+    });
+    const calls: ReturnType<typeof observation>[] = [
+      observation(false),
+      observation(false),
+      observation(false),
+      observation(false),
+      observation(true, recordedRevision),
+    ];
+    (repository.observe as ReturnType<typeof vi.fn>).mockImplementation(
+      async () => calls.shift() ?? observation(true, recordedRevision),
+    );
+
+    const result = await codeService.execute(windowId, {
+      ...managedCommand,
+      startFromOrigin: false,
+      remoteName: undefined,
+      sourceRevision: recordedRevision,
+      forkedFrom: {
+        threadId: "60000000-0000-4000-8000-000000000070",
+        throughOperationId: "60000000-0000-4000-8000-000000000071",
+      },
+    });
+    if (result?.kind !== "managed-thread-created")
+      throw new Error("expected managed-thread-created");
+
+    // The revision is already in the repository, so returning to it never
+    // reaches the network and never depends on where the branch has moved to.
+    expect(git.fetchRemote).not.toHaveBeenCalled();
+    expect(git.resolveRef).toHaveBeenCalledWith(
+      repositoryRoot,
+      recordedRevision,
+      expect.any(AbortSignal),
+    );
+    expect(git.addWorktree).toHaveBeenCalledWith(
+      {
+        repositoryRoot,
+        targetPath,
+        branchIntent: deliveryBranch,
+        startPoint: recordedRevision,
+      },
+      expect.any(AbortSignal),
+    );
+    // Provenance names the revision the worktree started from rather than a
+    // branch tip that has since moved on.
+    expect(receipts.records.get("60000000-0000-4000-8000-000000000020")?.source).toMatchObject({
+      mode: "local",
+      branch: recordedRevision,
+      resolvedHead: recordedRevision,
+    });
+    expect(result.thread.forkedFrom).toEqual({
+      threadId: "60000000-0000-4000-8000-000000000070",
+      throughOperationId: "60000000-0000-4000-8000-000000000071",
+    });
+  });
+
+  it("refuses to fetch a remote while starting from a recorded revision", async () => {
+    const { codeService } = harness();
+    await expect(
+      codeService.execute(windowId, {
+        ...managedCommand,
+        sourceRevision: "e".repeat(40),
+      }),
+    ).rejects.toThrow();
+  });
 });

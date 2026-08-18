@@ -48,6 +48,12 @@ import { ResearchRouter } from "./chat/research/researchRouter";
 import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
 import { createChatRouteHandler } from "./chatRoutes";
+import { createThreadCheckpointRouteHandler } from "./threadCheckpointRoutes";
+import {
+  createCheckpointChatPort,
+  createCheckpointCodePort,
+} from "./checkpoint/threadCheckpointPorts";
+import { ThreadCheckpointService } from "./checkpoint/threadCheckpointService";
 import { createWorkMutationRouteHandler } from "./workMutationRoutes";
 import { createWorkOverviewRouteHandler } from "./workOverviewRoutes";
 import { WorkArtifactProjection } from "./work/workArtifactProjection";
@@ -2993,6 +2999,49 @@ export function startOctantServer(
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       maxAttachmentBodySize: MAX_CHAT_ATTACHMENT_BYTES,
     });
+    // Checkpoints span Chat and Code, so the service owns only the marker and
+    // delegates every thread it produces to the mode that owns the authority
+    // for it: Chat branches, Code creates a managed-worktree thread.
+    const threadCheckpointService = new ThreadCheckpointService({
+      journal: persistence.journal,
+      readCheckpoint: (checkpointId) => persistence.readThreadCheckpoint(checkpointId),
+      readCheckpoints: (threadId) => persistence.readThreadCheckpoints(threadId),
+      canAccess: async (_windowId, projectId) => {
+        if (projectId === undefined) return true;
+        try {
+          return persistence.readProject(decodeProjectId(projectId))?.lifecycle === "active";
+        } catch {
+          return false;
+        }
+      },
+      chat: createCheckpointChatPort({
+        readChatThread: (threadId) => persistence.readChatThread(threadId),
+        readChatThreadView: (threadId) => persistence.readChatThreadView(threadId),
+        readProject: (projectId) => persistence.readProject(projectId),
+        execute: (command) => chatService.execute(command),
+      }),
+      code: createCheckpointCodePort({
+        readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+        readProject: (projectId) => persistence.readProject(projectId),
+        readOperationStart: (operationId) =>
+          persistence.journal.replayAggregate({
+            aggregateType: "code-operation",
+            aggregateId: String(operationId),
+            afterVersion: 0,
+            limit: 1,
+          })[0],
+        execute: (windowId, command) => codeService.execute(windowId, command),
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      }),
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const threadCheckpointRoutes = createThreadCheckpointRouteHandler({
+      checkpoints: threadCheckpointService,
+      windowAuthorityStore,
+    });
     const workArtifactProjection = new WorkArtifactProjection();
     hydrateWorkArtifactProjectionFromJournal({
       replay: (cursor) =>
@@ -4185,6 +4234,7 @@ export function startOctantServer(
       (await providerRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??
+      (await threadCheckpointRoutes(request)) ??
       (await workThreadRoutes(request)) ??
       (await workTurnRoutes(request)) ??
       (await workOverviewRoutes(request)) ??

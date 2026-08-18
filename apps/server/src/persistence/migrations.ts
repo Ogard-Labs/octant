@@ -316,6 +316,20 @@ CREATE TABLE zen_space_projection (
 ) STRICT;
 `;
 
+const THREAD_CHECKPOINT_PROJECTION_SQL = `
+CREATE TABLE thread_checkpoint_projection (
+  checkpoint_id TEXT PRIMARY KEY CHECK(length(trim(checkpoint_id)) > 0),
+  thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+  mode TEXT NOT NULL CHECK(mode IN ('chat', 'code')),
+  lifecycle TEXT NOT NULL CHECK(lifecycle IN ('marked', 'forgotten')),
+  checkpoint_json TEXT NOT NULL CHECK(json_valid(checkpoint_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+CREATE INDEX thread_checkpoint_thread_idx
+  ON thread_checkpoint_projection (thread_id, last_sequence);
+`;
+
 const USAGE_PROJECTION_SQL = `
 CREATE TABLE usage_record_projection (
   reconciliation_id TEXT PRIMARY KEY CHECK(length(trim(reconciliation_id)) > 0),
@@ -1421,6 +1435,11 @@ ALTER TABLE code_runtime_projection
     version: 47,
     name: "add_grok_provider_projection",
     sql: ADD_GROK_PROVIDER_PROJECTION_SQL,
+  },
+  {
+    version: 48,
+    name: "create_thread_checkpoint_projection",
+    sql: THREAD_CHECKPOINT_PROJECTION_SQL,
   },
 ];
 

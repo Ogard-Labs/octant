@@ -63,6 +63,7 @@ export * from "./themePolicy";
 export * from "./toolActionPolicy";
 export * from "./toolCallPolicy";
 export * from "./untrustedContentPolicy";
+export * from "./threadCheckpointPolicy";
 export * from "./threadWorkPolicy";
 export * from "./threadMentionPolicy";
 export * from "./usagePolicy";

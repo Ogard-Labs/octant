@@ -5897,6 +5897,34 @@ dialog.project-dialog {
   color: var(--octant-danger-text);
 }
 
+.thread-checkpoints {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.thread-checkpoints__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.thread-checkpoints__input {
+  min-width: 160px;
+  flex: 1 1 160px;
+  padding: 2px 6px;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 4px;
+  background: var(--octant-surface-raised);
+  color: var(--octant-text-primary);
+  font-size: 11px;
+}
+
+.code-thread-workspace__checkpoint,
 .code-thread-workspace__fork,
 .code-thread-workspace__restore {
   display: flex;
