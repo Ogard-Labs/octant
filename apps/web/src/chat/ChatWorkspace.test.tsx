@@ -19,6 +19,7 @@ const threadId = "00000000-0000-4000-8000-000000000921";
 const providerId = "10000000-0000-4000-8000-000000000001";
 const turnId = "00000000-0000-4000-8000-000000000931";
 const contentId = "00000000-0000-4000-8000-000000000932";
+const attemptId = "00000000-0000-4000-8000-000000000933";
 
 function controllerFixture(
   overrides: Partial<ChatController> = {},
@@ -106,6 +107,48 @@ function controllerFixture(
     })),
     ...overrides,
   } as ChatController;
+}
+
+/** A view with one turn whose only attempt failed, so it can be edited or retried. */
+function viewWithFailedAttempt() {
+  return decodeChatThreadView({
+    ...controllerFixture().activeView!,
+    turns: [
+      {
+        id: turnId,
+        threadId,
+        sequence: 1,
+        userMessageRef: { contentId, digest: "a".repeat(64), byteLength: 12 },
+        attachmentIds: [],
+        attempts: [
+          {
+            id: attemptId,
+            turnId,
+            threadId,
+            providerInstanceId: providerId,
+            providerSessionId: "20000000-0000-4000-8000-000000000001",
+            modelId: "model-a",
+            contextManifestId: "30000000-0000-4000-8000-000000000001",
+            outcome: "failed",
+            responseRefs: [],
+            citationIds: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        createdAt: now,
+      },
+    ],
+    contents: [
+      {
+        contentId,
+        role: "user",
+        body: "Ship the transcript first.",
+        digest: "a".repeat(64),
+        byteLength: 25,
+      },
+    ],
+  });
 }
 
 /** Paste clipboard images into the composer the way the OS delivers them. */
@@ -797,6 +840,8 @@ describe("ChatWorkspace", () => {
         thread: {
           id: threadId,
           version: 3 + issued,
+          providerInstanceId: providerId,
+          modelId: "model-a",
           modelOptionValues: (command as { readonly modelOptionValues?: Record<string, string> })
             .modelOptionValues,
         },
@@ -839,7 +884,13 @@ describe("ChatWorkspace", () => {
       if (command.kind === "change-chat-provider") await changeSettles;
       return {
         kind: "thread-updated",
-        thread: { id: threadId, version: 4, modelOptionValues: { effort: "high" } },
+        thread: {
+          id: threadId,
+          version: 4,
+          providerInstanceId: providerId,
+          modelId: "model-a",
+          modelOptionValues: { effort: "high" },
+        },
       } as never;
     });
     render(
@@ -866,6 +917,60 @@ describe("ChatWorkspace", () => {
     );
   });
 
+  it("drops an option change made against the model a queued switch has already left", async () => {
+    const user = userEvent.setup();
+    const commands: ChatCommand[] = [];
+    let releaseSwitch: () => void = () => undefined;
+    const switchSettles = new Promise<void>((resolve) => {
+      releaseSwitch = resolve;
+    });
+    const execute = vi.fn(async (command: ChatCommand) => {
+      commands.push(command);
+      await switchSettles;
+      return {
+        kind: "thread-updated",
+        thread: {
+          id: threadId,
+          version: 4,
+          providerInstanceId: providerId,
+          modelId: "model-b",
+          modelOptionValues: {},
+        },
+      } as never;
+    });
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({ execute })}
+        providerSnapshot={providerSnapshotWithModelOptions()}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Model" }));
+    await user.click(await screen.findByRole("option", { name: "Model B" }));
+    // The option controls still belong to model A: the switch has not settled,
+    // so nothing has re-rendered them for model B yet.
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    // A third command, queued behind both, marks where the queue has got to:
+    // the dropped change cannot slip in after it.
+    await user.click(screen.getByRole("button", { name: "Enable web research" }));
+
+    releaseSwitch();
+    await waitFor(() =>
+      expect(commands.some((command) => command.kind === "change-chat-research")).toBe(true),
+    );
+    // An effort chosen for model A cannot be applied to model B, and applying it
+    // as written would name model A and switch the thread back to it, undoing
+    // the switch the person made first. So the stale change is dropped, and the
+    // version it would have consumed is still there for the next command.
+    expect(commands.map((command) => command.kind)).toEqual([
+      "change-chat-provider",
+      "change-chat-research",
+    ]);
+    expect(commands[0]).toMatchObject({ modelId: "model-b", expectedVersion: 3 });
+    expect(commands[1]).toMatchObject({ expectedVersion: 4 });
+  });
+
   it("sends a turn only after an option change already in flight has settled", async () => {
     const user = userEvent.setup();
     let releaseChange: () => void = () => undefined;
@@ -876,7 +981,13 @@ describe("ChatWorkspace", () => {
       await changeSettles;
       return {
         kind: "thread-updated",
-        thread: { id: threadId, version: 4, modelOptionValues: { effort: "high" } },
+        thread: {
+          id: threadId,
+          version: 4,
+          providerInstanceId: providerId,
+          modelId: "model-a",
+          modelOptionValues: { effort: "high" },
+        },
       } as never;
     });
     const sendTurn = vi.fn(async () => true);
@@ -1598,6 +1709,72 @@ describe("ChatWorkspace", () => {
       turnId: turnId as never,
       prompt: "Ship export first.",
     });
+  });
+
+  it.each([
+    {
+      what: "revises a turn",
+      act: async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.click(screen.getByRole("button", { name: "Edit" }));
+        const editor = screen.getByRole("textbox", { name: "Edit your message" });
+        await user.clear(editor);
+        await user.type(editor, "Ship export first.");
+        await user.click(screen.getByRole("button", { name: "Save and run" }));
+      },
+      expected: {
+        kind: "edit-chat-turn",
+        expectedVersion: 4,
+        turnId,
+        prompt: "Ship export first.",
+      },
+    },
+    {
+      what: "retries an attempt",
+      act: async (user: ReturnType<typeof userEvent.setup>) => {
+        await user.click(screen.getByRole("button", { name: "Retry failed response" }));
+      },
+      expected: { kind: "retry-chat-turn", expectedVersion: 4, turnId, attemptId },
+    },
+  ])("$what on the version an option change already in flight reached", async (scenario) => {
+    const user = userEvent.setup();
+    const commands: ChatCommand[] = [];
+    let releaseChange: () => void = () => undefined;
+    const changeSettles = new Promise<void>((resolve) => {
+      releaseChange = resolve;
+    });
+    const execute = vi.fn(async (command: ChatCommand) => {
+      commands.push(command);
+      if (command.kind === "change-chat-provider") await changeSettles;
+      return {
+        kind: "thread-updated",
+        thread: {
+          id: threadId,
+          version: 4,
+          providerInstanceId: providerId,
+          modelId: "model-a",
+          modelOptionValues: { effort: "high" },
+        },
+      } as never;
+    });
+    render(
+      <ChatWorkspace
+        controller={controllerFixture({ activeView: viewWithFailedAttempt(), execute })}
+        providerSnapshot={providerSnapshotWithModelOptions()}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Effort" }));
+    await user.click(await screen.findByRole("option", { name: "Effort: high" }));
+    await scenario.act(user);
+
+    // Sent on the rendered version, this would reach the host behind the option
+    // change and be refused as stale — the person's revision or retry lost with
+    // nothing to show for it. It waits for the option change instead.
+    expect(commands.map((command) => command.kind)).toEqual(["change-chat-provider"]);
+
+    releaseChange();
+    await waitFor(() => expect(commands).toHaveLength(2));
+    expect(commands[1]).toMatchObject(scenario.expected);
   });
 
   it("hands the mention chip's Side Chat sidecar to the shell callback", async () => {
