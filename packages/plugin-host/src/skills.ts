@@ -27,6 +27,21 @@ export function buildSkillCatalog(records: ReadonlyArray<StandaloneSkillRecord>)
   return { skills, collisions };
 }
 
+/**
+ * Do two scope references name the same thing?
+ *
+ * Branded identifiers compare as strings on both sides, never one. A scope
+ * reference can also be absent, and absence is only ever equal to absence: a
+ * skill scoped to a Project must not fall into a thread that belongs to none
+ * just because one side stringified into the word "null".
+ */
+function sameReference(left: string | null | undefined, right: string | null | undefined): boolean {
+  if (left === null || left === undefined || right === null || right === undefined) {
+    return (left ?? null) === (right ?? null);
+  }
+  return String(left) === String(right);
+}
+
 export function filterSkillCatalogForScope(
   catalog: SkillCatalog,
   scope: {
@@ -42,8 +57,8 @@ export function filterSkillCatalogForScope(
       shared.push(record);
     } else if (
       record.scope.mode === scope.mode &&
-      String(record.scope.projectId) === scope.projectId &&
-      String(record.scope.threadRef) === scope.threadRef
+      sameReference(record.scope.projectId, scope.projectId) &&
+      sameReference(record.scope.threadRef, scope.threadRef)
     ) {
       exact.push(record);
     }
