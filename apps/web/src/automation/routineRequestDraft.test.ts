@@ -73,6 +73,21 @@ describe("drafting a routine from a plain-English request", () => {
     });
   });
 
+  it("keeps the time when a count comes before it", () => {
+    // "3" is a count, not 03:00 — but stopping there would throw away the 9am
+    // the person actually asked for.
+    expect(draftRoutineFromRequest("Every 3 days at 9am, tidy the board", context).trigger).toEqual(
+      {
+        kind: "interval",
+        anchorAt: "2026-08-18T09:00:00.000Z",
+        intervalMinutes: 4_320,
+      },
+    );
+    expect(draftRoutineFromRequest("Every 3 days at 9am, tidy the board", context).prompt).toBe(
+      "tidy the board",
+    );
+  });
+
   it("reads am and pm rather than assuming a 24-hour clock", () => {
     expect(
       draftRoutineFromRequest("Every day at 5pm, do the thing", context).trigger,

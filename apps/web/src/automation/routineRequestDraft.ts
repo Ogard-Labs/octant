@@ -145,21 +145,28 @@ function readIntervalMinutes(text: string): number | undefined {
   return count * 1_440;
 }
 
-/** `9am`, `9:30`, `17:00`, `5pm` — the forms people type, and nothing else. */
+/**
+ * `9am`, `9:30`, `17:00`, `5pm` — the forms people type, and nothing else.
+ *
+ * Every candidate is considered, not just the first. A bare number with no
+ * colon and no am/pm is a count rather than a time ("every 3 days"), and
+ * stopping at the first such number would throw away the clock that follows
+ * it: "every 3 days at 9am" means 9am, and reading it as no time at all is the
+ * same silent guess this module exists to avoid.
+ */
 function readClock(text: string): { readonly hour: number; readonly minute: number } | undefined {
-  const match = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i.exec(text);
-  if (match === null) return undefined;
-  const rawHour = Number(match[1]);
-  const minute = match[2] === undefined ? 0 : Number(match[2]);
-  const meridiem = match[3]?.toLowerCase();
-  if (!Number.isFinite(rawHour) || minute > 59) return undefined;
-  // A bare number with no colon and no am/pm is a count ("every 3 days"), not
-  // a time. Reading it as one is how "every 3 days" becomes "at 03:00".
-  if (match[2] === undefined && meridiem === undefined) return undefined;
-  let hour = rawHour;
-  if (meridiem === "pm" && hour < 12) hour += 12;
-  if (meridiem === "am" && hour === 12) hour = 0;
-  return hour > 23 ? undefined : { hour, minute };
+  for (const match of text.matchAll(/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/gi)) {
+    const rawHour = Number(match[1]);
+    const minute = match[2] === undefined ? 0 : Number(match[2]);
+    const meridiem = match[3]?.toLowerCase();
+    if (!Number.isFinite(rawHour) || minute > 59) continue;
+    if (match[2] === undefined && meridiem === undefined) continue;
+    let hour = rawHour;
+    if (meridiem === "pm" && hour < 12) hour += 12;
+    if (meridiem === "am" && hour === 12) hour = 0;
+    if (hour <= 23) return { hour, minute };
+  }
+  return undefined;
 }
 
 /**
