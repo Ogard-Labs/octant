@@ -621,10 +621,10 @@ describe("ACP provider driver profile quirks", () => {
     [devin, "code", "plan", "plan"],
     [devin, "code", "full-access", "bypass"],
     [devin, "chat", "full-access", "ask"],
-    [vibe, "code", "approval-gated", "default"],
+    [vibe, "code", "approval-gated", "ask"],
     [vibe, "code", "plan", "plan"],
     [vibe, "code", "full-access", "auto-approve"],
-    [vibe, "chat", "full-access", "chat"],
+    [vibe, "chat", "full-access", "ask"],
     [kimi, "code", "approval-gated", "default"],
     [kimi, "code", "plan", "plan"],
     [kimi, "code", "full-access", "yolo"],
@@ -636,6 +636,23 @@ describe("ACP provider driver profile quirks", () => {
       expect(profile.sessionMode(mode, policy)).toBe(expected);
     },
   );
+
+  it("leaves Mistral Vibe a selectable default agent for every mode it can request", () => {
+    const guards = vibe.process.guards;
+    const enabled = JSON.parse(guards.VIBE_ENABLED_AGENTS ?? "[]") as ReadonlyArray<string>;
+
+    // Vibe resolves `default_agent` against these guards while creating the
+    // session, so a guard that excludes it fails `session/new` before any mode
+    // is requested.
+    expect(guards).not.toHaveProperty("VIBE_DISABLED_AGENTS");
+    expect(enabled).toContain(guards.VIBE_DEFAULT_AGENT);
+    for (const mode of ["chat", "work", "code"] as const) {
+      for (const policy of ["approval-gated", "plan", "full-access"] as const) {
+        expect(enabled).toContain(vibe.sessionMode(mode, policy));
+      }
+    }
+    expect(enabled).not.toContain("accept-edits");
+  });
 
   it("does not select the Kimi auto mode for any execution policy", () => {
     for (const policy of ["approval-gated", "plan", "full-access"] as const) {
