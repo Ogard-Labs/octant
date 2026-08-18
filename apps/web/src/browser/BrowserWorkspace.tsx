@@ -12,6 +12,7 @@ import type {
   BrowserActionRequest,
   BrowserViewportPoint,
 } from "@octant/contracts/browser-automation";
+import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
 import type { ToolActionRequest } from "@octant/contracts/tool-actions";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import {
@@ -21,6 +22,7 @@ import {
   ExternalLink,
   LoaderCircle,
   LockKeyhole,
+  PanelRight,
   RotateCw,
   ShieldCheck,
   X,
@@ -29,7 +31,23 @@ import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ProductFeedbackPanel } from "./ProductFeedbackPanel";
 import { useProductFeedback } from "./useProductFeedback";
-import type { BrowserSurfaceState, OctantHostBridge } from "../shell/hostBridge";
+import type { OctantHostBridge } from "../shell/hostBridge";
+import { useNativeBrowserSurface } from "./useNativeBrowserSurface";
+
+/**
+ * Renderer chrome a native page must never be painted over. A native view is a
+ * window-level sibling rather than a node in the document, so nothing drawn in
+ * React can cover it; while any of these is up the page leaves the window.
+ */
+export const RENDERER_OVERLAY_SELECTOR = [
+  ".code-board-layer",
+  ".rail-placeholder",
+  ".workspace-drag-preview",
+  ".workspace-drop-overlay",
+  ".octant-dialog__backdrop",
+  ".octant-dialog__viewport",
+  ".octant-dialog__popup",
+].join(", ");
 
 const BROWSER_REFRESH_INTERVAL_MS = 500;
 const BROWSER_MAX_REFRESH_INTERVAL_MS = 5_000;
@@ -40,6 +58,16 @@ export interface BrowserWorkspaceProps {
   readonly tab: Extract<WorkspaceTab, { kind: "browser" }>;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
+  /**
+   * Dock this thread's research browser into the focus zone. Absent when this
+   * window has no zone to dock into. The dock shows the same thread's browsing
+   * context under the same authority; docking moves where the page is shown
+   * and changes nothing about what may reach it.
+   */
+  readonly onDockResearch?: (request: {
+    readonly threadId: string;
+    readonly mode: "work" | "code";
+  }) => void;
 }
 
 export function BrowserWorkspace(props: BrowserWorkspaceProps) {
@@ -52,9 +80,6 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const [message, setMessage] = useState<string>();
   const [starting, setStarting] = useState(false);
   const [nativeSupported, setNativeSupported] = useState(false);
-  const [nativeState, setNativeState] = useState<BrowserSurfaceState>();
-  const [nativeAttachError, setNativeAttachError] = useState(false);
-  const [nativeAttachAttempt, setNativeAttachAttempt] = useState(0);
   const [remoteFocused, setRemoteFocused] = useState(false);
   // Pointing at the page is a separate gesture from using it: while it is on, a
   // click marks a spot to write about instead of clicking through to the page.
@@ -66,7 +91,6 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
-  const nativeMount = useRef<HTMLDivElement>(null);
   const startInFlight = useRef(false);
   const localFailure = useRef(false);
   const localFailureRevision = useRef<string | undefined>(undefined);
@@ -78,6 +102,17 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const remoteActionTail = useRef<Promise<void>>(Promise.resolve());
   const activeContext = snapshot?.context?.state === "active";
   const nativeContext = nativeSupported && snapshot?.context?.presentation !== "headless";
+  const nativeSurface = useNativeBrowserSurface({
+    ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
+    ...(snapshot?.context?.contextId === undefined
+      ? {}
+      : { contextId: String(snapshot.context.contextId) }),
+    ...(props.tab.threadId === undefined ? {} : { threadId: String(props.tab.threadId) }),
+    enabled: nativeContext && activeContext,
+    overlaySelector: RENDERER_OVERLAY_SELECTOR,
+  });
+  const nativeState = nativeSurface.state;
+
   const committedAddress = activeContext
     ? ((nativeContext ? nativeState?.url : undefined) ?? snapshot?.observation?.url)
     : undefined;
@@ -88,7 +123,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     ? snapshot?.observation?.revision === undefined
       ? "Headless preview"
       : "Interactive preview"
-    : nativeAttachError
+    : nativeSurface.failed
       ? "Live page unavailable"
       : nativeState?.control === "agent"
         ? "Agent active"
@@ -105,100 +140,6 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       active = false;
     };
   }, [props.hostBridge]);
-
-  useEffect(() => {
-    if (props.hostBridge?.subscribeBrowserSurfaceState === undefined) return;
-    return props.hostBridge.subscribeBrowserSurfaceState((next) => {
-      if (next.contextId === snapshot?.context?.contextId) setNativeState(next);
-    });
-  }, [props.hostBridge, snapshot?.context?.contextId]);
-
-  useEffect(() => {
-    const bridge = props.hostBridge;
-    const mount = nativeMount.current;
-    const contextId = snapshot?.context?.contextId;
-    const threadId = props.tab.threadId;
-    if (
-      !nativeContext ||
-      !activeContext ||
-      bridge?.attachBrowserSurface === undefined ||
-      bridge.updateBrowserSurfaceBounds === undefined ||
-      bridge.detachBrowserSurface === undefined ||
-      mount === null ||
-      contextId === undefined ||
-      threadId === undefined
-    ) {
-      return;
-    }
-    let disposed = false;
-    let attached = false;
-    const request = () => ({ contextId, threadId, bounds: surfaceBounds(mount) });
-    const rendererOverlaySelector = [
-      ".code-board-layer",
-      ".rail-placeholder",
-      ".workspace-drag-preview",
-      ".workspace-drop-overlay",
-      ".octant-dialog__backdrop",
-      ".octant-dialog__viewport",
-      ".octant-dialog__popup",
-    ].join(", ");
-    const shouldDetach = () =>
-      mount.getClientRects().length === 0 ||
-      document.querySelector(rendererOverlaySelector) !== null;
-    const sync = async () => {
-      if (disposed) return;
-      if (shouldDetach()) {
-        if (attached) {
-          attached = false;
-          await bridge.detachBrowserSurface!({ contextId, threadId }).catch(() => undefined);
-        }
-        return;
-      }
-      try {
-        if (!attached) {
-          const state = await bridge.attachBrowserSurface!(request());
-          // Attach can complete after unmount/tab switch; detach immediately
-          // instead of marking the native surface attached while disposed.
-          if (disposed || shouldDetach()) {
-            await bridge.detachBrowserSurface!({ contextId, threadId }).catch(() => undefined);
-            return;
-          }
-          attached = true;
-          setNativeState(state);
-        } else {
-          await bridge.updateBrowserSurfaceBounds!(request());
-        }
-        if (!disposed) setNativeAttachError(false);
-      } catch {
-        attached = false;
-        if (!disposed) setNativeAttachError(true);
-      }
-    };
-    const observer = new ResizeObserver(() => void sync());
-    const visibilityObserver = new IntersectionObserver(() => void sync());
-    const overlayObserver = new MutationObserver(() => void sync());
-    observer.observe(mount);
-    visibilityObserver.observe(mount);
-    overlayObserver.observe(document.body, { childList: true, subtree: true });
-    window.addEventListener("resize", sync);
-    void sync();
-    return () => {
-      disposed = true;
-      observer.disconnect();
-      visibilityObserver.disconnect();
-      overlayObserver.disconnect();
-      window.removeEventListener("resize", sync);
-      if (attached)
-        void bridge.detachBrowserSurface!({ contextId, threadId }).catch(() => undefined);
-    };
-  }, [
-    activeContext,
-    nativeAttachAttempt,
-    nativeContext,
-    props.hostBridge,
-    props.tab.threadId,
-    snapshot?.context?.contextId,
-  ]);
 
   useEffect(() => {
     if (nativeState?.url) setUrl(nativeState.url);
@@ -311,7 +252,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           profileMode: "isolated",
           allowedOrigins: [origin],
           credentialFieldProtection: true,
-          maxConcurrentTabs: 1,
+          maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
           sessionTimeoutMs: 300_000,
         },
       });
@@ -575,6 +516,22 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
             </button>
           )
         ) : null}
+        {props.onDockResearch === undefined || props.tab.threadId === undefined ? null : (
+          <button
+            aria-label="Dock in the focus zone"
+            className="browser-workspace__close"
+            onClick={() =>
+              props.onDockResearch?.({
+                threadId: String(props.tab.threadId),
+                mode: props.tab.mode,
+              })
+            }
+            title="Dock in the focus zone"
+            type="button"
+          >
+            <PanelRight aria-hidden="true" size={13} />
+          </button>
+        )}
         {activeContext ? (
           <button
             aria-label="Stop"
@@ -615,16 +572,12 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         <div
           aria-label="Live Chromium page"
           className="browser-workspace__native"
-          ref={nativeMount}
+          ref={nativeSurface.mount}
         >
-          {nativeAttachError ? (
+          {nativeSurface.failed ? (
             <div className="browser-workspace__native-error" role="alert">
               <p>The live Chromium page could not attach to this pane.</p>
-              <OctantButton
-                onClick={() => setNativeAttachAttempt((attempt) => attempt + 1)}
-                type="button"
-                variant="secondary"
-              >
+              <OctantButton onClick={nativeSurface.retry} type="button" variant="secondary">
                 Retry
               </OctantButton>
             </div>
@@ -768,40 +721,7 @@ function boundedWheelDelta(value: number): number {
   return Math.max(-2000, Math.min(2000, Math.round(value)));
 }
 
-function surfaceBounds(element: HTMLElement) {
-  return boundsInsideViewport(
-    element.getBoundingClientRect(),
-    window.innerWidth,
-    window.innerHeight,
-  );
-}
-
-/**
- * Integer bounds for the native surface that never leave the window: the
- * host refuses a view whose edge lies outside its content area, and rounding
- * each side independently can push the right or bottom edge one pixel past it.
- * The top stays below the traffic-light strip the host reserves.
- */
-export function boundsInsideViewport(
-  rect: {
-    readonly left: number;
-    readonly top: number;
-    readonly right: number;
-    readonly bottom: number;
-  },
-  viewportWidth: number,
-  viewportHeight: number,
-) {
-  const maxRight = Math.max(1, Math.floor(viewportWidth));
-  const maxBottom = Math.max(37, Math.floor(viewportHeight));
-  const x = Math.min(Math.max(0, Math.floor(rect.left)), maxRight - 1);
-  const y = Math.min(Math.max(36, Math.floor(rect.top)), maxBottom - 1);
-  const right = Math.min(Math.max(x + 1, Math.floor(rect.right)), maxRight);
-  const bottom = Math.min(Math.max(y + 1, Math.floor(rect.bottom)), maxBottom);
-  return { x, y, width: right - x, height: bottom - y };
-}
-
-function normalizeBrowserUrl(value: string): string {
+export function normalizeBrowserUrl(value: string): string {
   const trimmed = value.trim();
   const url = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
   if (url.protocol !== "https:" && url.protocol !== "http:") {

@@ -20,6 +20,7 @@ import { MAX_ZEN_BACKGROUND_BYTES } from "@octant/contracts/zen";
 import { cycleZenSpace } from "@octant/domain";
 import type { WindowId } from "@octant/contracts/shell";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
+import type { WorkThreadId } from "@octant/contracts/work-threads";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export const ZEN_PRESENTATION_STORAGE_PREFIX = "octant:zen-presentation:";
@@ -782,6 +783,49 @@ export function useZenController(options: UseZenControllerOptions) {
   );
 
   /**
+   * Dock, rearrange, or close this space's research browser.
+   *
+   * The request names a thread, and the server resolves the source context it
+   * writes into the dock, so nothing here decides whose browsing context the
+   * dock shows. Passing no thread closes the dock.
+   */
+  const dockResearch = useCallback(
+    async (request: {
+      readonly thread: {
+        readonly threadId: WorkThreadId | CodeThreadId;
+        readonly mode: "work" | "code";
+      } | null;
+      readonly width?: number;
+      readonly collapsed?: boolean;
+    }) => {
+      if (client === undefined || space === null) return;
+      setPanelBusy(true);
+      try {
+        const result = await client.dockResearch({
+          thread: request.thread,
+          expectedVersion: space.version,
+          ...(request.width === undefined ? {} : { width: request.width }),
+          ...(request.collapsed === undefined ? {} : { collapsed: request.collapsed }),
+        });
+        if (mounted.current) {
+          setSpace(result.space);
+          presentationSpace.current = result.space;
+          setMessage(undefined);
+        }
+      } catch (error) {
+        if (mounted.current) {
+          setMessage(
+            error instanceof Error ? error.message : "That research browser could not be docked.",
+          );
+        }
+      } finally {
+        if (mounted.current) setPanelBusy(false);
+      }
+    },
+    [client, space],
+  );
+
+  /**
    * Run one focus-zone command and adopt what came back.
    *
    * A space command changes which space the window is on, so the result
@@ -1244,6 +1288,7 @@ export function useZenController(options: UseZenControllerOptions) {
     active,
     space,
     pinTerminal,
+    dockResearch,
     focusZone,
     addSpace,
     renameSpace,

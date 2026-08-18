@@ -10,6 +10,7 @@ import type {
   WorkspaceTabId,
 } from "@octant/contracts/shell";
 import { decodeWorkMutationRequestId } from "@octant/contracts";
+import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import type { ComposerFolderSelection } from "@octant/contracts/rootless-thread";
 import type { RootlessThreadSummary } from "@octant/contracts/rootless-thread";
@@ -198,6 +199,10 @@ export interface WorkspaceViewProps {
    */
   /** Pins a Code thread's terminal to the focus zone. */
   readonly onPinTerminal?: CodeWorkspaceProps["onPinTerminal"];
+  readonly onDockResearch?: (request: {
+    readonly threadId: string;
+    readonly mode: "work" | "code";
+  }) => void;
   readonly onOpenSurface?: (
     surface: WorkspaceSurfaceDescriptor["kind"],
     groupId: TabGroupId,
@@ -1018,6 +1023,7 @@ function renderNonCodeTab(
         {...(props.projectWindowCapability === undefined
           ? {}
           : { windowCapability: props.projectWindowCapability })}
+        {...(props.onDockResearch === undefined ? {} : { onDockResearch: props.onDockResearch })}
         tab={tab}
       />
     );
@@ -1440,7 +1446,7 @@ async function openLocalServerBrowserContext(
       profileMode: "isolated",
       allowedOrigins: [target.allowedOrigin],
       credentialFieldProtection: true,
-      maxConcurrentTabs: 1,
+      maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
       sessionTimeoutMs: 300_000,
       // The host already decided this, and only for a loopback HTTPS origin: an
       // HTTPS dev server's self-signed localhost certificate is accepted by this

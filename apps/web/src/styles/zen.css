@@ -686,3 +686,116 @@
   grid-template-columns: 1fr 1fr;
   gap: 6px;
 }
+
+/*
+ * The docked research browser.
+ *
+ * Anchored to the space's own edge rather than placed on the canvas: the page
+ * inside is a native view the host positions by absolute window bounds, and
+ * the canvas is drawn under a CSS transform, so a docked page keeps a
+ * rectangle the host can actually use however far the canvas has panned.
+ */
+.zen-research {
+  position: absolute;
+  top: 44px;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-left: 1px solid rgb(255 255 255 / 12%);
+  background: rgb(17 17 19 / 96%);
+}
+
+.zen-research--collapsed {
+  width: auto;
+  padding: 8px;
+  background: transparent;
+  border-left: none;
+}
+
+.zen-research__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+.zen-research__title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--octant-text-secondary, #c8c8c5);
+}
+
+.zen-research__rail {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  overflow-x: auto;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+.zen-research__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 160px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: rgb(255 255 255 / 6%);
+}
+
+.zen-research__tab button[role="tab"] {
+  max-width: 132px;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-research__tab button[aria-selected="true"] {
+  font-weight: 600;
+  color: var(--octant-text-primary, #f4f4f2);
+}
+
+.zen-research__chrome {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid rgb(255 255 255 / 10%);
+}
+
+.zen-research__address {
+  flex: 1;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--octant-text-secondary, #c8c8c5);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zen-research__page {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.zen-research__empty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  font-size: 13px;
+}
+
+.zen-research__notice {
+  margin: 0;
+  padding: 12px;
+  font-size: 13px;
+  color: var(--octant-text-secondary, #c8c8c5);
+}

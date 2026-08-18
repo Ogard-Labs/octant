@@ -29,6 +29,7 @@ function makeSpace(overrides: Partial<ZenSpace> = {}): ZenSpace {
     active: false,
     barCollapsed: false,
     assistant: null,
+    research: null,
     createdAt: "2026-07-26T12:00:00.000Z" as ZenSpace["createdAt"],
     updatedAt: "2026-07-26T12:00:00.000Z" as ZenSpace["updatedAt"],
     ...overrides,
@@ -88,6 +89,7 @@ describe("Zen takeover shell restore", () => {
       bootstrap: vi.fn(
         async (): Promise<ZenBootstrapResponse> => ({ space: null, focusZone: null, windowId }),
       ),
+      dockResearch: vi.fn(),
       command: vi.fn(async (cmd: ZenCommand): Promise<ZenResult> => {
         if (cmd.command === "create-space") {
           return { result: "create-space", space: makeSpace({ active: true }) };

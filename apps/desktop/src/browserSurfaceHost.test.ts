@@ -494,4 +494,179 @@ describe("BrowserSurfaceHost", () => {
     );
     expect(created.webContents.debugger.detach).toHaveBeenCalledOnce();
   });
+  it("lets the person reach a new origin without handing the agent that page", async () => {
+    // Browsing is the person's own action, so a link they follow may leave the
+    // origins approval granted. What must not follow is the agent inheriting
+    // it: the page they reached is theirs to read, not the agent's.
+    const created = view();
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 4,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const listener = (event: string) =>
+      vi.mocked(created.webContents.on).mock.calls.find(([name]) => name === event)?.[1];
+
+    listener("focus")?.();
+    const followed = vi.fn();
+    listener("will-navigate")?.({ preventDefault: followed }, { url: "https://research.test/a" });
+    expect(followed).not.toHaveBeenCalled();
+    const again = vi.fn();
+    listener("will-navigate")?.({ preventDefault: again }, { url: "https://research.test/b" });
+    expect(again).not.toHaveBeenCalled();
+
+    vi.mocked(created.webContents.getURL).mockReturnValue("https://research.test/a");
+    await expect(host.act(contextId, { kind: "extract-text" })).rejects.toThrow("allowed origins");
+    await expect(
+      host.act(contextId, { kind: "navigate", target: "https://research.test/a" }),
+    ).rejects.toThrow("allowlist");
+  });
+
+  it("refuses a page the agent could not manage to leave", async () => {
+    const created = view();
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    vi.mocked(created.webContents.getURL).mockReturnValue("https://research.test/a");
+
+    await expect(
+      host.act(contextId, { kind: "navigate", target: "https://example.com/next" }),
+    ).rejects.toThrow("allowed origins");
+  });
+
+  it("opens a second page in the same session and shows one tab at a time", async () => {
+    const views = [view(), view(), view()];
+    let opened = 0;
+    const host = createBrowserSurfaceHost({
+      createView: () => views[opened++] ?? view(),
+    });
+    const shellWindow = {
+      contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+      isDestroyed: () => false,
+      webContents: { send: vi.fn() },
+    };
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 2,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    host.attach(contextId, { windowId: "window-a", threadId }, shellWindow, {
+      x: 10,
+      y: 20,
+      width: 400,
+      height: 300,
+    });
+
+    const twoTabs = await host.tabCommand(
+      contextId,
+      { windowId: "window-a", threadId },
+      { kind: "open" },
+    );
+
+    // One partition, so a sign-in in the first tab is a sign-in in the second.
+    expect(opened).toBe(2);
+    expect(views[1]?.webContents.loadURL).toHaveBeenCalledWith("about:blank");
+    expect(twoTabs.tabs).toHaveLength(2);
+    expect(twoTabs.activeTabId).toBe(twoTabs.tabs[1]?.tabId);
+    // The outgoing tab leaves the window rather than merely turning invisible:
+    // a hidden child view still holds the same rectangle.
+    expect(shellWindow.contentView.removeChildView).toHaveBeenCalledWith(views[0]);
+    expect(views[1]?.setBounds).toHaveBeenCalledWith({ x: 10, y: 20, width: 400, height: 300 });
+    await expect(
+      host.tabCommand(contextId, { windowId: "window-a", threadId }, { kind: "open" }),
+    ).rejects.toThrow("tab limit");
+
+    const back = await host.tabCommand(
+      contextId,
+      { windowId: "window-a", threadId },
+      { kind: "select", tabId: twoTabs.tabs[0]!.tabId },
+    );
+    expect(back.activeTabId).toBe(twoTabs.tabs[0]?.tabId);
+
+    const closed = await host.tabCommand(
+      contextId,
+      { windowId: "window-a", threadId },
+      { kind: "close", tabId: twoTabs.tabs[0]!.tabId },
+    );
+    expect(closed.tabs).toHaveLength(1);
+    expect(closed.activeTabId).toBe(twoTabs.tabs[1]?.tabId);
+    expect(views[0]?.webContents.close).toHaveBeenCalledOnce();
+    await expect(
+      host.tabCommand(
+        contextId,
+        { windowId: "window-a", threadId },
+        { kind: "close", tabId: closed.tabs[0]!.tabId },
+      ),
+    ).rejects.toThrow("only tab");
+  });
+
+  it("keeps a research session when one of its tabs goes away on its own", async () => {
+    const views = [view(), view()];
+    let opened = 0;
+    const host = createBrowserSurfaceHost({ createView: () => views[opened++] ?? view() });
+    const gone = vi.fn();
+    host.onContextGone(gone);
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 4,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    await host.tabCommand(contextId, { windowId: "window-a", threadId }, { kind: "open" });
+
+    vi.mocked(views[1]!.webContents.on).mock.calls.find(
+      ([event]) => event === "render-process-gone",
+    )?.[1]?.();
+
+    expect(gone).not.toHaveBeenCalled();
+    const state = host.state(contextId);
+    expect(state.tabs).toHaveLength(1);
+    expect(state.activeTabId).toBe(state.tabs[0]?.tabId);
+  });
+
+  it("refuses a tab command from a window that does not own the context", async () => {
+    const host = createBrowserSurfaceHost({ createView: () => view() });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 4,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+
+    await expect(
+      host.tabCommand(contextId, { windowId: "window-b", threadId }, { kind: "open" }),
+    ).rejects.toThrow("does not own");
+  });
 });

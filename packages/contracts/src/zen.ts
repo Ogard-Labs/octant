@@ -705,6 +705,38 @@ export const ZenAssistantBinding = Schema.Struct({
 }).annotations(strict);
 export type ZenAssistantBinding = typeof ZenAssistantBinding.Type;
 
+export const MIN_ZEN_RESEARCH_DOCK_WIDTH = 320;
+export const MAX_ZEN_RESEARCH_DOCK_WIDTH = 1200;
+export const DEFAULT_ZEN_RESEARCH_DOCK_WIDTH = 480;
+
+/**
+ * A research browser docked to the edge of a space.
+ *
+ * Docked rather than pinned: the page is a live native view the host places by
+ * absolute window bounds, and the canvas is drawn under a CSS transform, so a
+ * page arranged with the cards would sit wherever the canvas last panned to
+ * rather than where it appears. The dock is the space's edge, outside that
+ * transform, and holds only how wide it is and whose browsing context it
+ * shows.
+ *
+ * The dock binds a Work or Code thread and shows that thread's browsing
+ * context, under that thread's authority and no other. Chat threads have no
+ * browsing context to show. Docking grants nothing: what the agent may reach
+ * in that context is exactly what approval put there, and stays there however
+ * far the person browses.
+ */
+export const ZenResearchDock = Schema.Struct({
+  sourceContext: ZenSourceContext,
+  width: Schema.Number.pipe(
+    Schema.greaterThanOrEqualTo(MIN_ZEN_RESEARCH_DOCK_WIDTH),
+    Schema.lessThanOrEqualTo(MAX_ZEN_RESEARCH_DOCK_WIDTH),
+  ),
+  collapsed: Schema.Boolean,
+})
+  .pipe(Schema.filter((dock) => dock.sourceContext.threadKind !== "chat"))
+  .annotations(strict);
+export type ZenResearchDock = typeof ZenResearchDock.Type;
+
 export const ZenSpace = Schema.Struct({
   spaceId: ZenSpaceId,
   windowId: WindowId,
@@ -716,6 +748,7 @@ export const ZenSpace = Schema.Struct({
   active: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   barCollapsed: Schema.optionalWith(Schema.Boolean, { default: () => false }),
   assistant: Schema.NullOr(ZenAssistantBinding),
+  research: Schema.optionalWith(Schema.NullOr(ZenResearchDock), { default: () => null }),
   createdAt: UtcTimestamp,
   updatedAt: UtcTimestamp,
 })
@@ -827,6 +860,39 @@ export const ZenTerminalAttachResult = Schema.Struct({
   space: ZenSpace,
 }).annotations(strict);
 export type ZenTerminalAttachResult = typeof ZenTerminalAttachResult.Type;
+
+/**
+ * Dock a research browser onto a Work or Code thread this window may see.
+ *
+ * The request names the thread, never the source context: the server resolves
+ * the thread's own context from the catalog and writes the dock itself, so a
+ * caller cannot dock onto authority by describing it. A null thread closes the
+ * dock; naming the bound thread again with a new width or collapsed flag
+ * rearranges it.
+ */
+export const ZenResearchDockRequest = Schema.Struct({
+  thread: Schema.NullOr(
+    Schema.Struct({
+      threadId: Schema.Union(WorkThreadId, CodeThreadId),
+      mode: Schema.Literal("work", "code"),
+    }).annotations(strict),
+  ),
+  width: Schema.optional(
+    Schema.Number.pipe(
+      Schema.greaterThanOrEqualTo(MIN_ZEN_RESEARCH_DOCK_WIDTH),
+      Schema.lessThanOrEqualTo(MAX_ZEN_RESEARCH_DOCK_WIDTH),
+    ),
+  ),
+  collapsed: Schema.optional(Schema.Boolean),
+  expectedVersion: AggregateVersion,
+}).annotations(strict);
+export type ZenResearchDockRequest = typeof ZenResearchDockRequest.Type;
+
+export const ZenResearchDockResult = Schema.Struct({
+  result: Schema.Literal("research-docked"),
+  space: ZenSpace,
+}).annotations(strict);
+export type ZenResearchDockResult = typeof ZenResearchDockResult.Type;
 
 export const ZenThreadContinuationTarget = Schema.Struct({
   result: Schema.Literal("thread-continuation"),
@@ -1089,6 +1155,14 @@ export const ZenBindAssistantCommand = Schema.Struct({
 }).annotations(strict);
 export type ZenBindAssistantCommand = typeof ZenBindAssistantCommand.Type;
 
+export const ZenDockResearchCommand = Schema.Struct({
+  command: Schema.Literal("dock-research"),
+  spaceId: ZenSpaceId,
+  research: Schema.NullOr(ZenResearchDock),
+  expectedVersion: AggregateVersion,
+}).annotations(strict);
+export type ZenDockResearchCommand = typeof ZenDockResearchCommand.Type;
+
 export const ZenCreateWidgetCommand = Schema.Struct({
   command: Schema.Literal("create-widget"),
   spaceId: ZenSpaceId,
@@ -1199,6 +1273,7 @@ export const ZenCommand = Schema.Union(
   ZenUpdateViewportCommand,
   ZenUpdateAppearanceCommand,
   ZenBindAssistantCommand,
+  ZenDockResearchCommand,
   ZenCreateWidgetCommand,
   ZenCreateReferenceCommand,
   ZenSaveNotesCommand,
@@ -1447,6 +1522,8 @@ export const decodeZenThreadCatalogEntry = Schema.decodeUnknownSync(ZenThreadCat
 export const decodeZenThreadCatalogResponse = Schema.decodeUnknownSync(ZenThreadCatalogResponse);
 export const decodeZenThreadAttachRequest = Schema.decodeUnknownSync(ZenThreadAttachRequest);
 export const decodeZenThreadAttachResult = Schema.decodeUnknownSync(ZenThreadAttachResult);
+export const decodeZenResearchDockRequest = Schema.decodeUnknownSync(ZenResearchDockRequest);
+export const decodeZenResearchDockResult = Schema.decodeUnknownSync(ZenResearchDockResult);
 export const decodeZenTerminalAttachRequest = Schema.decodeUnknownSync(ZenTerminalAttachRequest);
 export const decodeZenTerminalAttachResult = Schema.decodeUnknownSync(ZenTerminalAttachResult);
 export const decodeZenThreadContinuationTarget = Schema.decodeUnknownSync(

@@ -104,6 +104,22 @@ redesigns.
   Code thread's to do.
 - One budget covers every card that streams, whatever it streams. A pinned
   conversation and a pinned shell cost the same live slot and compete for it.
+- A space may dock one research browser onto a Work or Code thread it is bound
+  to, and shows that thread's browsing context. It is docked to the space's edge
+  rather than pinned to the canvas because the page is a native view the host
+  places by absolute window bounds, while the canvas draws its cards under a
+  transform; a page arranged among them would be positioned by the canvas's last
+  pan rather than by where it appears. The rail, the address, and the page all
+  live outside that transform.
+- The dock's tabs are real pages of one browsing context, opened by the host, so
+  they share that context's session as any browser profile's tabs do. A tab the
+  renderer arranged out of one view would share neither the session nor the
+  origin approval, and is not a tab.
+- The person browsing may reach an origin approval never granted, and that
+  origin joins what their own view may show. It never joins what the agent may
+  act on: the agent reaches only origins approval put on the context, and
+  refuses to read or drive a page outside them however far the person has
+  browsed. Docking grants nothing, and neither does following a link.
 - Desktop and web clients share the same content structure and commands; web
   omits native window affordances. The UI is truthful: every visible action
   works, is clearly unavailable, or is absent.
@@ -127,6 +143,9 @@ redesigns.
 - Zen can host real work without becoming a second workspace: the card seam
   carries only a source context, so a new interactive card is a shell surface
   bound to that context, never a widening of what the canvas may do.
+- The focus zone can hold a live web page without the canvas learning about
+  native views: the dock is the space's edge, and what it shows is a thread's
+  browsing context under that thread's authority.
 
 ## Related
 

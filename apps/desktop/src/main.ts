@@ -39,6 +39,7 @@ import {
 import { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 import {
   createBrowserSurfaceHost,
+  type BrowserSurfaceTabCommand,
   type BrowserSurfaceViewPort,
   type ReturnTypeOfBrowserSurfaceHost,
 } from "./browserSurfaceHost";
@@ -138,6 +139,7 @@ const IPC_CHANNELS = {
   browserSurfaceCommand: "octant:browser-surface:command",
   browserSurfaceDetach: "octant:browser-surface:detach",
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
+  browserSurfaceTab: "octant:browser-surface:tab",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
   hostCapabilities: "octant:window:host-capabilities",
@@ -1915,6 +1917,16 @@ function installIpcHandlers(): void {
     );
     return { windowId: context.windowId };
   });
+  ipcMain.handle(IPC_CHANNELS.browserSurfaceTab, async (event, value: unknown) => {
+    const context = ownedTopLevelWindowContext(event);
+    const request = validateBrowserSurfaceTabCommand(value);
+    if (browserSurfaceHost === undefined) throw new Error("Octant live Browser is unavailable.");
+    return await browserSurfaceHost.tabCommand(
+      request.contextId,
+      { windowId: context.windowId, threadId: request.threadId },
+      request.command,
+    );
+  });
   ipcMain.handle(IPC_CHANNELS.browserSurfaceOpenExternal, async (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     await shell.openExternal(validateExternalBrowserUrl(value));
@@ -2015,6 +2027,32 @@ function validateBrowserSurfaceCommand(value: unknown): BrowserSurfaceIdentityRe
     throw new Error("Octant rejected an invalid Browser surface command.");
   }
   return { ...identity, command: value.command as "back" | "forward" | "reload" | "stop" };
+}
+
+function validateBrowserSurfaceTabCommand(
+  value: unknown,
+): BrowserSurfaceIdentityRequest & { readonly command: BrowserSurfaceTabCommand } {
+  if (!isStrictRecord(value, ["command", "contextId", "threadId"])) {
+    throw new Error("Octant rejected an invalid Browser tab command.");
+  }
+  const identity = validateBrowserSurfaceIdentity({
+    contextId: value.contextId,
+    threadId: value.threadId,
+  });
+  const command = value.command;
+  if (!isStrictRecord(command, ["kind"]) && !isStrictRecord(command, ["kind", "tabId"])) {
+    throw new Error("Octant rejected an invalid Browser tab command.");
+  }
+  if (command.kind === "open") return { ...identity, command: { kind: "open" } };
+  if (
+    (command.kind !== "select" && command.kind !== "close") ||
+    typeof command.tabId !== "string" ||
+    command.tabId.length === 0 ||
+    command.tabId.length > 64
+  ) {
+    throw new Error("Octant rejected an invalid Browser tab command.");
+  }
+  return { ...identity, command: { kind: command.kind, tabId: command.tabId } };
 }
 
 function validateExternalBrowserUrl(value: unknown): string {

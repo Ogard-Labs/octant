@@ -7,6 +7,7 @@ import {
   updateViewport,
   updateAppearance,
   bindAssistant,
+  dockResearch,
   recoverSpace,
   processZenCommand,
   reconcileScheduledTimer,
@@ -50,6 +51,7 @@ function makeSpace(version: number = 0, elements: ZenElementPayload[] = []): Zen
     active: false,
     barCollapsed: false,
     assistant: null,
+    research: null,
     createdAt: now,
     updatedAt: now,
   };
@@ -601,6 +603,56 @@ describe("bindAssistant", () => {
     };
     const result = bindAssistant(space, assistant, 0);
     expect(result.assistant).toEqual(assistant);
+  });
+});
+
+describe("dockResearch", () => {
+  const workSource: ZenSourceContext = {
+    hostId: localHostId,
+    mode: "work",
+    projectId: null,
+    threadKind: "work",
+    threadId: makeId("66666666") as ZenSourceContext["threadId"],
+  };
+
+  it("docks a research browser onto a Work or Code thread", () => {
+    const result = dockResearch(
+      makeSpace(),
+      { sourceContext: workSource, width: 480, collapsed: false },
+      0,
+    );
+    expect(result.research).toEqual({
+      sourceContext: workSource,
+      width: 480,
+      collapsed: false,
+    });
+  });
+
+  it("closes the dock by holding nothing", () => {
+    const docked = dockResearch(
+      makeSpace(),
+      { sourceContext: workSource, width: 480, collapsed: false },
+      0,
+    );
+    expect(dockResearch(docked, null, docked.version).research).toBeNull();
+  });
+
+  it("refuses to dock onto a Chat thread, which has no browsing context", () => {
+    expect(() =>
+      dockResearch(
+        makeSpace(),
+        {
+          sourceContext: { ...workSource, mode: "chat" as const, threadKind: "chat" as const },
+          width: 480,
+          collapsed: false,
+        },
+        0,
+      ),
+    ).toThrow();
+  });
+
+  it("refuses a dock written against a space that has moved on", () => {
+    expect(() => dockResearch(makeSpace(3), null, 2)).toThrow();
   });
 });
 

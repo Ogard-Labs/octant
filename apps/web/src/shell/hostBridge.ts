@@ -35,6 +35,12 @@ export interface HostCapabilities {
   readonly liveBrowserSupported?: boolean;
 }
 
+export interface BrowserSurfaceTabState {
+  readonly tabId: string;
+  readonly url: string;
+  readonly title: string;
+}
+
 export interface BrowserSurfaceState {
   readonly contextId: string;
   readonly url: string;
@@ -43,7 +49,18 @@ export interface BrowserSurfaceState {
   readonly canGoBack: boolean;
   readonly canGoForward: boolean;
   readonly control: "idle" | "user" | "agent";
+  /**
+   * Every page open in this context. Older hosts report no tabs at all, so a
+   * rail reads an absent list as the one page it already shows.
+   */
+  readonly tabs?: ReadonlyArray<BrowserSurfaceTabState>;
+  readonly activeTabId?: string;
 }
+
+export type BrowserSurfaceTabCommand =
+  | { readonly kind: "open" }
+  | { readonly kind: "select"; readonly tabId: string }
+  | { readonly kind: "close"; readonly tabId: string };
 
 export interface BrowserSurfaceRequest {
   readonly contextId: string;
@@ -84,6 +101,11 @@ export interface OctantHostBridge {
       readonly command: "back" | "forward" | "reload" | "stop";
     },
   ) => Promise<void>;
+  readonly tabBrowserSurface?: (
+    request: Omit<BrowserSurfaceRequest, "bounds"> & {
+      readonly command: BrowserSurfaceTabCommand;
+    },
+  ) => Promise<BrowserSurfaceState>;
   readonly openBrowserExternal?: (url: string) => Promise<void>;
   readonly subscribeBrowserSurfaceState?: (
     listener: (state: BrowserSurfaceState) => void,

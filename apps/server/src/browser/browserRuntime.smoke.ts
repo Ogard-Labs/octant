@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { BrowserActionRequest, BrowserContextId } from "@octant/contracts";
+import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
 import { createPlaywrightBrowserRuntime } from "./playwrightBrowserRuntime";
 
 const server = Bun.serve({
@@ -22,7 +23,7 @@ const policy = {
   profileMode: "isolated" as const,
   allowedOrigins: [server.url.origin],
   credentialFieldProtection: true,
-  maxConcurrentTabs: 1,
+  maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
   sessionTimeoutMs: 60_000,
 };
 const base = {

@@ -6,7 +6,8 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { BrowserWorkspace, boundsInsideViewport } from "./BrowserWorkspace";
+import { BrowserWorkspace } from "./BrowserWorkspace";
+import { boundsInsideViewport } from "./useNativeBrowserSurface";
 
 const threadId = "10000000-0000-4000-8000-000000000001";
 const authority = {

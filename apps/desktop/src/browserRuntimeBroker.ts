@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { BrowserContextPolicy } from "@octant/contracts";
+import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts";
 import {
   BrowserNavigationBlockedError,
   type ReturnTypeOfBrowserSurfaceHost,
@@ -218,7 +219,9 @@ function isPolicy(value: unknown): boolean {
     Array.isArray(value.allowedOrigins) &&
     value.allowedOrigins.every((origin) => typeof origin === "string") &&
     value.credentialFieldProtection === true &&
-    value.maxConcurrentTabs === 1 &&
+    Number.isInteger(value.maxConcurrentTabs) &&
+    (value.maxConcurrentTabs as number) >= 1 &&
+    (value.maxConcurrentTabs as number) <= MAX_BROWSER_TABS_PER_CONTEXT &&
     typeof value.sessionTimeoutMs === "number"
   );
 }

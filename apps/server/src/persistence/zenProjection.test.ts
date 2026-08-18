@@ -201,6 +201,7 @@ describe("Zen timer projection", () => {
         increasedContrast: false,
       },
       assistant: null,
+      research: null,
       createdAt: now,
       updatedAt: now,
     });
