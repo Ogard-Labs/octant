@@ -927,3 +927,93 @@ describe("ZenSurface", () => {
     expect(matchMedia).toHaveBeenCalledWith("(prefers-contrast: more)");
   });
 });
+
+describe("ZenSurface live thread cards", () => {
+  const sourceContext = (threadId: string) =>
+    ({
+      hostId: "local-host",
+      mode: "chat",
+      projectId: null,
+      threadKind: "chat",
+      threadId,
+    }) as never;
+
+  function threadElement(suffix: number): ZenElementPayload {
+    return {
+      elementId: `00000000-0000-4000-8000-00000000092${suffix}` as ZenElementId,
+      kind: "thread",
+      sourceContext: sourceContext(`00000000-0000-4000-8000-00000000093${suffix}`),
+      geometry: { x: 40, y: 40, width: 360, height: 220 },
+      zIndex: suffix,
+      minimized: false,
+      locked: false,
+    };
+  }
+
+  function catalogEntry(element: ZenElementPayload) {
+    if (element.kind !== "thread") throw new Error("not a thread element");
+    return {
+      catalogRef: `chat:${element.sourceContext.threadId}`,
+      hostId: "local-host",
+      hostLabel: "This Mac",
+      mode: "chat",
+      projectId: null,
+      projectLabel: "Unfiled",
+      threadId: element.sourceContext.threadId,
+      title: `Thread ${element.zIndex}`,
+      status: "active",
+      recentActivityAt: "2026-07-28T12:00:00.000Z",
+      providerInstanceId: "00000000-0000-4000-8000-000000000003",
+      modelId: "model-local",
+      sourceContext: element.sourceContext,
+    } as never;
+  }
+
+  it("streams each card's own thread and holds the rest at the live-card budget", () => {
+    const elements = [1, 2, 3, 4].map(threadElement);
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        renderLiveThread={({ activity, entry }) =>
+          activity.activity === "frozen"
+            ? { status: "paused", reason: activity.reason }
+            : { status: "streaming", surface: <p>{`Live ${entry.title}`}</p> }
+        }
+        space={makeSpace(elements)}
+        threadEntries={elements.map(catalogEntry)}
+      />,
+    );
+
+    expect(screen.getByText("Live Thread 4")).toBeInTheDocument();
+    expect(screen.getByText("Live Thread 3")).toBeInTheDocument();
+    expect(screen.getByText("Live Thread 2")).toBeInTheDocument();
+    expect(screen.queryByText("Live Thread 1")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/Paused while other cards are streaming/i);
+  });
+
+  it("keeps a card on its metadata reading when the window hosts no live surface for it", () => {
+    const element = threadElement(1);
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        renderLiveThread={() => undefined}
+        space={makeSpace([element])}
+        threadEntries={[catalogEntry(element)]}
+      />,
+    );
+
+    expect(screen.getByRole("group", { name: "Thread 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue Thread 1" })).toBeInTheDocument();
+  });
+});

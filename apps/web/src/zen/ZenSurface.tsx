@@ -1,12 +1,14 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
-import { resolveAccessibilityFallbacks } from "@octant/domain";
+import { resolveAccessibilityFallbacks, resolveZenThreadCardActivity } from "@octant/domain";
+import type { ZenThreadCardActivity } from "@octant/domain";
 import type {
   ZenAssistantSnapshot,
   ZenAppearance,
@@ -14,6 +16,7 @@ import type {
   ZenElementPayload,
   ZenFocusZone,
   ZenGeometry,
+  ZenSourceContext,
   ZenSpace,
   ZenSpaceId,
   ZenTimerAction,
@@ -32,7 +35,7 @@ import { ZenAppearancePanel } from "./ZenAppearancePanel";
 import { ZenBar } from "./ZenBar";
 import { ZenAssistant } from "./ZenAssistant";
 import { ZenSpaceSwitcher } from "./ZenSpaceSwitcher";
-import { ZenThreadElement } from "./ZenThreadElement";
+import { ZenThreadElement, type ZenLiveThreadCard } from "./ZenThreadElement";
 import { ZenThreadPicker } from "./ZenThreadPicker";
 import { ZenTimer } from "./widgets/ZenTimer";
 import { ZenChecklist } from "./widgets/ZenChecklist";
@@ -41,6 +44,7 @@ import { ZenReference } from "./widgets/ZenReference";
 import {
   bringElementToFront,
   clampGeometryToBounds,
+  computeVisibleRegion,
   computeZoomToFit,
   nudgeGeometry,
   resizeGeometry,
@@ -106,6 +110,18 @@ export interface ZenSurfaceProps {
   readonly onCloseAssistant?: () => void;
   readonly onCloseThreadPicker?: () => void;
   readonly onContinueThread?: (catalogRef: ZenThreadCatalogRef) => void;
+  /**
+   * Builds the live surface for one attached card, or returns undefined when
+   * this window hosts no live card for that source context. The canvas holds no
+   * thread clients of its own: it says which cards may stream and hands each
+   * one its own source context, and the shell decides what that context is
+   * allowed to open. Nothing here is shared between cards.
+   */
+  readonly renderLiveThread?: (input: {
+    readonly sourceContext: ZenSourceContext;
+    readonly entry: ZenThreadCatalogEntry;
+    readonly activity: ZenThreadCardActivity;
+  }) => ZenLiveThreadCard | undefined;
   /**
    * Opens this window's Zen assistant surface. Awaited before a turn is sent,
    * because opening is what binds the surface to the conversation, and a turn
@@ -217,6 +233,21 @@ export function ZenSurface(props: ZenSurfaceProps) {
   const [timerMinutes, setTimerMinutes] = useState(DEFAULT_ZEN_TIMER_DURATION_MS / 60_000);
   const [referenceUrl, setReferenceUrl] = useState("");
   const [referenceLabel, setReferenceLabel] = useState("");
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  // Which cards may stream depends on how much of the space is on screen, and
+  // the canvas fills the window, so the only thing that changes that size is a
+  // window resize.
+  const [surfaceSize, setSurfaceSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    function measure(): void {
+      const node = surfaceRef.current;
+      if (node === null) return;
+      setSurfaceSize({ width: node.clientWidth, height: node.clientHeight });
+    }
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
   const appearance = useZenEffectiveAppearance(props.space.appearance);
   const sorted = useMemo(
     () => [...props.space.elements].sort((a, b) => a.zIndex - b.zIndex),
@@ -225,6 +256,45 @@ export function ZenSurface(props: ZenSurfaceProps) {
   const { panX, panY, scale } = props.space.viewport;
   const background = appearance.background;
   const forceOpaque = appearance.reducedTransparency || appearance.increasedContrast;
+  const focusedElement = props.space.elements.find(
+    (element) => String(element.elementId) === focusedId,
+  );
+  const threadCardActivity = useMemo(() => {
+    const focusedElementId = focusedElement?.elementId;
+    const resolved = resolveZenThreadCardActivity({
+      elements: props.space.elements,
+      visibleRegion: computeVisibleRegion(props.space.viewport, surfaceSize),
+      ...(focusedElementId === undefined ? {} : { focusedElementId }),
+    });
+    return new Map(resolved.map((card) => [String(card.elementId), card]));
+  }, [focusedElement?.elementId, props.space.elements, props.space.viewport, surfaceSize]);
+
+  /**
+   * The card's own reading of its own thread.
+   *
+   * Every lookup is keyed by this element's source context, never by whatever
+   * the shell happens to have open, so a card can only ever show the thread it
+   * was attached to.
+   */
+  function resolveThreadCard(element: Extract<ZenElementPayload, { kind: "thread" }>): {
+    readonly entry?: ZenThreadCatalogEntry;
+    readonly live?: ZenLiveThreadCard;
+  } {
+    const entry = props.threadEntries?.find(
+      (candidate) =>
+        candidate.mode === element.sourceContext.mode &&
+        String(candidate.threadId) === String(element.sourceContext.threadId),
+    );
+    if (entry === undefined) return {};
+    const activity = threadCardActivity.get(String(element.elementId));
+    if (props.renderLiveThread === undefined || activity === undefined) return { entry };
+    const live = props.renderLiveThread({
+      sourceContext: element.sourceContext,
+      entry,
+      activity,
+    });
+    return live === undefined ? { entry } : { entry, live };
+  }
   const backgroundStyle = resolveZenBackgroundStyle(background, props.backgroundImageUrl);
   const overlay = Math.max(
     appearance.dimming,
@@ -367,6 +437,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
       onPointerMove={handlePointerMove}
       onPointerUp={finishPointerInteraction}
       onPointerCancel={finishPointerInteraction}
+      ref={surfaceRef}
       role="application"
       style={backgroundStyle}
       tabIndex={0}
@@ -407,6 +478,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
         }}
       >
         {sorted.map((element) => {
+          const threadCard = element.kind === "thread" ? resolveThreadCard(element) : undefined;
           const title =
             "title" in element && typeof element.title === "string"
               ? element.title
@@ -415,7 +487,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
                 : element.kind === "checklist"
                   ? "Checklist"
                   : element.kind === "thread"
-                    ? "Thread"
+                    ? // A card that hosts a conversation is named by that
+                      // thread; three cards all labelled "Thread" tell a
+                      // keyboard reader nothing about which one they are on.
+                      (threadCard?.entry?.title ?? "Thread")
                     : element.kind === "timer"
                       ? "Timer"
                       : element.kind;
@@ -485,14 +560,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                   <div className="zen-element__body">
                     {element.kind === "thread" ? (
                       <ZenThreadElement
-                        {...(() => {
-                          const entry = props.threadEntries?.find(
-                            (candidate) =>
-                              candidate.mode === element.sourceContext.mode &&
-                              String(candidate.threadId) === String(element.sourceContext.threadId),
-                          );
-                          return entry === undefined ? {} : { entry };
-                        })()}
+                        {...(threadCard ?? {})}
                         onContinue={(catalogRef) => props.onContinueThread?.(catalogRef)}
                         sourceContext={element.sourceContext}
                       />
