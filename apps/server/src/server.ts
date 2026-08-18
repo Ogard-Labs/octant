@@ -107,6 +107,9 @@ import { createSidebarBackgroundRouteHandler } from "./theme/sidebarBackgroundRo
 import { SidebarBackgroundStore } from "./theme/backgroundStore";
 import { createThemeRouteHandler } from "./theme/themeRoutes";
 import { createGoalRouteHandler } from "./goal/goalRoutes";
+import { createPlanRouteHandler } from "./plan/planRoutes";
+import { PlanService } from "./plan/planService";
+import { JournalPlanStore } from "./plan/journalPlanStore";
 import { JournalNavigatorAssistantBindingStore } from "./navigatorAssistant/navigatorAssistantBindingStore";
 import { createNavigatorAssistantRouteHandler } from "./navigatorAssistant/navigatorAssistantRoutes";
 import { NavigatorAssistantService } from "./navigatorAssistant/navigatorAssistantService";
@@ -1701,6 +1704,29 @@ export function startOctantServer(
         let thread;
         try {
           thread = workThreadProjection.read(threadId as never);
+        } catch {
+          return false;
+        }
+        if (thread === undefined || thread.lifecycle !== "active") return false;
+        return String(context.projectId) === String(thread.projectId);
+      },
+    });
+    // A plan belongs to a Code thread, so the window must currently be in Code
+    // on the Project that owns it. Same shape as the Goal check above: read the
+    // window's own workspace, never a scope the caller supplied.
+    const planRoutes = createPlanRouteHandler({
+      service: new PlanService({
+        store: new JournalPlanStore({ journal: persistence.journal, uuid: randomUUID }),
+      }),
+      windowAuthorityStore,
+      authorizeThread: ({ threadId, windowId }) => {
+        const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+        if (workspace === undefined) return false;
+        const context = workspace.contextByMode.code;
+        if (context.mode !== "code") return false;
+        let thread;
+        try {
+          thread = persistence.readCodeThread(threadId as never);
         } catch {
           return false;
         }
@@ -4371,6 +4397,7 @@ export function startOctantServer(
       (await browserAutomationRoutes(request)) ??
       (await shellRoutes(request)) ??
       (await goalRoutes(request)) ??
+      (await planRoutes(request)) ??
       (await workResearchRoutes(request)) ??
       (await themeRoutes(request));
 

@@ -61,6 +61,9 @@ import type { UsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { WorkResearchPanel } from "../work/WorkResearchPanel";
 import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
+import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
+import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
+import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { ChildRunStatusChrome } from "../agents/ChildRunStatusChrome";
@@ -154,6 +157,7 @@ export interface WorkspaceViewProps {
   readonly workOverviewClient?: WorkOverviewClient;
   readonly workResearchClient?: WorkResearchClient;
   readonly goalClient?: GoalClient;
+  readonly planClient?: PlanClient;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
   readonly workOverviewModel?: WorkOverviewModel;
@@ -659,6 +663,11 @@ function renderCodeTab(
         threadId={String(tab.threadId)}
       />
       {content}
+      {/* The thread's plan, beside the thread it belongs to. A Plan-mode
+        thread may only read its checkout, but it may still write, revise, and
+        approve the plan — deciding what to do is the whole point of the
+        posture. */}
+      <ThreadPlanPanel />
     </ThreadActivityPictureInPicture>
   );
   const files = (
@@ -676,54 +685,59 @@ function renderCodeTab(
   );
   return (
     <CodeWorkspaceErrorBoundary key={tab.id}>
-      <CodeThreadEnvironment
-        presentation={props.environmentPresentation}
-        onChangePresentation={props.onSetEnvironmentPresentation}
-        {...(project === undefined ? {} : { project })}
-        {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
-        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-        {...(props.projectWindowCapability === undefined
-          ? {}
-          : { windowCapability: props.projectWindowCapability })}
-        {...(props.localServerClient === undefined
-          ? {}
-          : { localServerClient: props.localServerClient })}
-        {...(browserAutomationClient === undefined || onOpenSurface === undefined
-          ? {}
-          : {
-              onOpenLocalServer: async (target: LocalServerOpenTarget) => {
-                const browserThreadId = tab.threadId as unknown as BrowserThreadId;
-                const contextId = await openLocalServerBrowserContext(
-                  browserAutomationClient,
-                  browserThreadId,
-                  target,
-                );
-                // Named by the context it just created, so this Open gets its
-                // own tab instead of taking over the thread's Browser tab.
-                // The shell recovers a rejected tab mutation rather than
-                // throwing, so only its adoption answer proves the context
-                // gained a close path; without one it is released here and
-                // the Open is reported as the failure it was.
-                const adopted = await onOpenSurface("browser", groupId, contextId);
-                if (adopted) return;
-                await releaseBrowserContext(browserAutomationClient, browserThreadId, contextId);
-                throw new Error("No Browser tab adopted the context opened for this server.");
-              },
-            })}
-        {...(globalThis.navigator?.clipboard === undefined
-          ? {}
-          : {
-              onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
-            })}
-        tab={tab}
-        onExecute={codeController.execute}
-        files={files}
-        onOpenChanges={() =>
-          props.onOpenCodeSurface("code-diff", tab.threadId, codeSurfaceTitle("code-diff"))
-        }
+      <ThreadPlanProvider
+        {...(props.planClient === undefined ? {} : { client: props.planClient })}
+        threadId={String(tab.threadId)}
       >
-        {surface}
-      </CodeThreadEnvironment>
+        <CodeThreadEnvironment
+          presentation={props.environmentPresentation}
+          onChangePresentation={props.onSetEnvironmentPresentation}
+          {...(project === undefined ? {} : { project })}
+          {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+          {...(props.projectWindowCapability === undefined
+            ? {}
+            : { windowCapability: props.projectWindowCapability })}
+          {...(props.localServerClient === undefined
+            ? {}
+            : { localServerClient: props.localServerClient })}
+          {...(browserAutomationClient === undefined || onOpenSurface === undefined
+            ? {}
+            : {
+                onOpenLocalServer: async (target: LocalServerOpenTarget) => {
+                  const browserThreadId = tab.threadId as unknown as BrowserThreadId;
+                  const contextId = await openLocalServerBrowserContext(
+                    browserAutomationClient,
+                    browserThreadId,
+                    target,
+                  );
+                  // Named by the context it just created, so this Open gets its
+                  // own tab instead of taking over the thread's Browser tab.
+                  // The shell recovers a rejected tab mutation rather than
+                  // throwing, so only its adoption answer proves the context
+                  // gained a close path; without one it is released here and
+                  // the Open is reported as the failure it was.
+                  const adopted = await onOpenSurface("browser", groupId, contextId);
+                  if (adopted) return;
+                  await releaseBrowserContext(browserAutomationClient, browserThreadId, contextId);
+                  throw new Error("No Browser tab adopted the context opened for this server.");
+                },
+              })}
+          {...(globalThis.navigator?.clipboard === undefined
+            ? {}
+            : {
+                onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
+              })}
+          tab={tab}
+          onExecute={codeController.execute}
+          files={files}
+          onOpenChanges={() =>
+            props.onOpenCodeSurface("code-diff", tab.threadId, codeSurfaceTitle("code-diff"))
+          }
+        >
+          {surface}
+        </CodeThreadEnvironment>
+      </ThreadPlanProvider>
     </CodeWorkspaceErrorBoundary>
   );
 }
