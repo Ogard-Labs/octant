@@ -5,6 +5,7 @@ import {
   type ThemeClient,
 } from "@octant/client-runtime/theme-client";
 import { importThemeSettings, serializeOctantTheme } from "@octant/theme/import";
+import { exportThemeTokens, type ThemeExport, type ThemeExportFormat } from "@octant/theme/export";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type ThemeControllerStatus = "loading" | "ready" | "unavailable" | "conflict";
@@ -24,6 +25,12 @@ export interface ThemeController {
   readonly reset: () => void;
   readonly importJson: (value: string) => void;
   readonly exportJson: () => string | undefined;
+  /**
+   * The theme as design tokens for a project outside Octant, in the format the
+   * project consumes. Undefined before the host has answered with a theme —
+   * there is nothing to export until then.
+   */
+  readonly exportTokens: (format: ThemeExportFormat) => ThemeExport | undefined;
 }
 
 export function useThemeController(options: {
@@ -192,6 +199,20 @@ export function useThemeController(options: {
     () => (settings === undefined ? undefined : serializeOctantTheme(draft ?? settings)),
     [draft, settings],
   );
+  // Exports the draft when there is one: what the user is looking at is what
+  // they mean to hand to the project.
+  const exportTokens = useCallback(
+    (format: ThemeExportFormat) => {
+      const source = draft ?? settings;
+      if (source === undefined) return undefined;
+      try {
+        return exportThemeTokens(source, { format, includeTypography: true });
+      } catch {
+        return undefined;
+      }
+    },
+    [draft, settings],
+  );
   const hasDraftChanges =
     settings !== undefined &&
     draft !== undefined &&
@@ -210,5 +231,6 @@ export function useThemeController(options: {
     reset,
     importJson,
     exportJson,
+    exportTokens,
   };
 }

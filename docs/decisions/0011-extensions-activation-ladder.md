@@ -48,6 +48,10 @@ adopting its lack of trust semantics.
   interpreted. Discovery is not activation: new or changed skills index as
   disabled until reviewed. Name collisions stay visible with source labels;
   ambiguous invocation opens a chooser rather than guessing.
+- A skill that declares a scope is offered against the thread's own mode,
+  Project, and thread, resolved from the thread rather than from whichever mode
+  the resolver was first written for. A skill scoped to Work or Code is not
+  something Chat may quietly offer, and the reverse holds too.
 - Composer addressing is structured: `@plugin` and `@plugin/component` chips
   and `$skill` invocations resolve only to already installed, trusted, enabled,
   and policy-allowed components. A reference can never install, trust, enable,

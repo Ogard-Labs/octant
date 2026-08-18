@@ -19,6 +19,7 @@ function controller(): ThemeController {
     reset: vi.fn(),
     importJson: vi.fn(),
     exportJson: vi.fn(() => undefined),
+    exportTokens: vi.fn(() => undefined),
   };
 }
 
@@ -40,5 +41,27 @@ describe("ThemeAppearanceEditor", () => {
     expect(screen.getByText("Import or export theme").closest("details")).not.toHaveAttribute(
       "open",
     );
+  });
+});
+
+describe("handing the theme to a project outside Octant", () => {
+  it("fills the transfer box with design tokens and names the overrides it left out", async () => {
+    const { fireEvent, render, screen } = await import("@testing-library/react");
+    const exportTokens = vi.fn(() => ({
+      format: "css" as const,
+      fileName: "octant-theme-tokens.css",
+      mediaType: "text/css",
+      content: ":root { --octant-workspace: #1e1e1e; }",
+      droppedOverrides: [{ role: "not-a-role", reason: "unknown-role" as const }],
+    }));
+    render(<ThemeAppearanceEditor controller={{ ...controller(), exportTokens } as never} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Export design tokens (CSS)" }));
+
+    expect(exportTokens).toHaveBeenCalledWith("css");
+    expect(screen.getByRole("textbox", { name: "Theme JSON" })).toHaveValue(
+      ":root { --octant-workspace: #1e1e1e; }",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("not-a-role");
   });
 });

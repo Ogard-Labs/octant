@@ -9,6 +9,7 @@
     "./tokens": "./src/tokens.ts",
     "./fallback": "./src/fallback.ts",
     "./import": "./src/import.ts",
+    "./export": "./src/export.ts",
     "./backgrounds": "./src/backgrounds.ts",
     "./typography": "./src/typography.ts"
   },

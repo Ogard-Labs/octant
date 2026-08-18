@@ -69,6 +69,27 @@ and card opacity stay adjustable. Uploads remain local PNG, JPEG, WebP, or
 GIF. Animated presets and custom animated uploads fall back to a still frame
 under **Reduced Motion**. Built-in loops use animated WebP.
 
+### Handing the theme to a project
+
+Appearance offers two exports beside **Export theme JSON**, which writes
+Octant's own settings file:
+
+- **Export design tokens (CSS)** writes custom properties a project outside
+  Octant can adopt directly — `:root` for the light reading, a
+  `prefers-color-scheme: dark` block for the dark one, and `[data-theme]`
+  blocks for a project that pins the mode itself.
+- **Export design tokens (JSON)** writes the same values as a token document,
+  with both modes side by side.
+
+Both write **both** readings of the theme, not whichever one is on screen, and
+both carry the theme's own overrides rather than the preset they started from.
+A prefix other than `octant` is accepted for the custom-property names. If the
+theme refused an override — an unknown role, an unreadable colour, or one that
+failed its contrast target — the export leaves it out and says so, instead of
+handing a project values Octant does not itself render.
+
+Type-scale variables travel with the export.
+
 ## Keyboard and navigation
 
 Appearance and layout choices, including the mode switcher presentation, are
