@@ -4,7 +4,7 @@ import type { CodeRelativePath, CodeThread } from "@octant/contracts/code";
 import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-definitions";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deferredCodeAdapterFor } from "./codeLeafAdapters";
-import { CodeWorkspace } from "./CodeWorkspace";
+import { CodeWorkspace, type CodeWorkspaceProps } from "./CodeWorkspace";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
 import type { CodeController } from "./useCodeController";
 import type { OctantHostBridge } from "../shell/hostBridge";
@@ -28,6 +28,7 @@ export default function CodeWorkspaceTab(props: {
   readonly tab: CodeWorkspaceTab;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
+  readonly onPinTerminal?: CodeWorkspaceProps["onPinTerminal"];
   /** Opens one changed repository file as a Code file tab, from the diff. */
   readonly onOpenFile?: (relativePath: string) => void;
   readonly onOpenSurface?: (
@@ -118,6 +119,7 @@ export default function CodeWorkspaceTab(props: {
         client={props.controller.client}
         controller={props.controller}
         {...(props.onOpenBrowser === undefined ? {} : { onOpenBrowser: props.onOpenBrowser })}
+        {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}
         {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
         {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}

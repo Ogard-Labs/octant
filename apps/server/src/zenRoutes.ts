@@ -1,6 +1,7 @@
 import {
   decodeZenCommand,
   decodeZenFocusZoneCommand,
+  decodeZenTerminalAttachRequest,
   decodeZenThreadAttachRequest,
   decodeZenThreadCatalogRef,
   ZenError,
@@ -72,6 +73,9 @@ export function createZenRouteHandler(dependencies: ZenRouteDependencies) {
     }
     if (url.pathname === "/api/zen/threads/attach" && request.method === "POST") {
       return await handleZenThreadAttach(request, url, origin, dependencies, now);
+    }
+    if (url.pathname === "/api/zen/terminals/attach" && request.method === "POST") {
+      return await handleZenTerminalAttach(request, url, origin, dependencies, now);
     }
     if (url.pathname === "/api/zen/threads/continue" && request.method === "GET") {
       return await handleZenThreadContinue(request, url, origin, dependencies, now);
@@ -192,6 +196,16 @@ async function handleZenCommand(
       origin,
     );
   }
+  if (
+    (command.command === "add-element" || command.command === "update-element") &&
+    command.element.kind === "terminal"
+  ) {
+    return failureResponse(
+      "Zen does not accept caller-supplied terminal cards; a terminal is pinned by naming it.",
+      400,
+      origin,
+    );
+  }
   if (command.command === "add-element" && command.element.kind === "timer") {
     return failureResponse("Zen timer state is server-authoritative.", 400, origin);
   }
@@ -299,6 +313,41 @@ async function handleZenThreadAttach(
   } catch (error) {
     if (error instanceof ZenError) return zenFailureResponse(error, origin);
     return failureResponse("Zen thread attachment is invalid.", 400, origin);
+  }
+}
+
+/**
+ * Pin a terminal one of this window's Code threads owns.
+ *
+ * Separate from the generic command route for the same reason thread elements
+ * are: the caller names a terminal, and the server writes the card. There is no
+ * body here that could describe a shell into existence.
+ */
+async function handleZenTerminalAttach(
+  request: Request,
+  url: URL,
+  origin: string | null,
+  deps: ZenRouteDependencies,
+  now: () => number,
+): Promise<Response> {
+  let windowId: WindowId;
+  try {
+    if (url.search !== "") {
+      return failureResponse("Zen terminal attachment is invalid.", 400, origin);
+    }
+    windowId = authenticateWindow(request, deps.windowAuthorityStore, now());
+  } catch (error) {
+    return authenticationFailure(error, "Zen terminal attachment", origin);
+  }
+  try {
+    const body = decodeZenTerminalAttachRequest(await request.json());
+    return jsonResponse(
+      await deps.zenService.attachTerminal(windowId, body, request.signal),
+      origin,
+    );
+  } catch (error) {
+    if (error instanceof ZenError) return zenFailureResponse(error, origin);
+    return failureResponse("Zen terminal attachment is invalid.", 400, origin);
   }
 }
 

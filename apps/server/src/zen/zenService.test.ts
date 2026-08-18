@@ -1,6 +1,8 @@
 import {
   LOCAL_HOST_ID,
   decodeChatThreadId,
+  decodeCodeCheckoutId,
+  decodeCodeThreadId,
   decodeHostId,
   decodeProjectId,
   decodeProviderInstanceId,
@@ -1648,5 +1650,106 @@ describe("ZenService focus zone", () => {
 
     expect(result.result).toBe("thread-attached");
     expect(result.space.spaceId).toBe(added);
+  });
+});
+
+describe("ZenService terminal cards", () => {
+  const codeThread = decodeCodeThreadId("00000000-0000-4000-8000-000000000070");
+  const checkout = decodeCodeCheckoutId("00000000-0000-4000-8000-000000000071");
+  const terminal = "00000000-0000-4000-8000-000000000072" as never;
+  const codeRef = decodeZenThreadCatalogRef(`code:${codeThread}`);
+  const codeEntry = decodeZenThreadCatalogEntry({
+    catalogRef: codeRef,
+    hostId: LOCAL_HOST_ID,
+    hostLabel: "This Mac",
+    mode: "code",
+    projectId: ids.project,
+    projectLabel: "Release",
+    threadId: codeThread,
+    title: "Release blocker",
+    status: "active",
+    recentActivityAt: "2026-07-28T12:00:00.000Z",
+    providerInstanceId: ids.provider,
+    modelId: "model-local",
+    sourceContext: {
+      hostId: LOCAL_HOST_ID,
+      mode: "code",
+      projectId: ids.project,
+      threadKind: "code",
+      threadId: codeThread,
+    },
+  });
+
+  function terminalFixture(options: { readonly owned?: boolean } = {}) {
+    let current = space();
+    const append = vi.fn((next: ZenSpace, expectedVersion: number) => {
+      current = { ...next, version: (expectedVersion + 1) as AggregateVersion };
+      return current;
+    });
+    const read = vi.fn(async () => {
+      if (options.owned === false) throw new Error("Terminal belongs to another code thread.");
+      return { terminalId: terminal, state: "running" as const };
+    });
+    const service = new ZenService({
+      focusZone: memoryFocusZone(),
+      loadSpace: () => current,
+      loadSpaceByWindow: () => current,
+      eventStore: { append, isConcurrencyConflict: () => false } as never,
+      localHostId: LOCAL_HOST_ID,
+      threadCatalog: { resolve: async () => codeEntry, search: async () => [codeEntry] },
+      codeTerminals: { read },
+      uuid: () => ids.element,
+    });
+    return { append, read, service };
+  }
+
+  const request = {
+    threadId: codeThread,
+    checkoutId: checkout,
+    terminalId: terminal,
+    expectedVersion: 2 as AggregateVersion,
+  };
+
+  it("pins a terminal by naming it, and writes the card from what the server resolved", async () => {
+    const { append, read, service } = terminalFixture();
+
+    const result = await service.attachTerminal(ids.window, request);
+
+    expect(read).toHaveBeenCalledWith(ids.window, {
+      threadId: codeThread,
+      checkoutId: checkout,
+      terminalId: terminal,
+    });
+    expect(result.result).toBe("terminal-attached");
+    expect(append.mock.calls[0]?.[0].elements[0]).toMatchObject({
+      kind: "terminal",
+      checkoutId: checkout,
+      terminalId: terminal,
+      sourceContext: { threadKind: "code", threadId: codeThread },
+      title: "Release blocker",
+    });
+  });
+
+  it("refuses to pin a terminal this window's Code thread does not own", async () => {
+    const { append, service } = terminalFixture({ owned: false });
+
+    await expect(service.attachTerminal(ids.window, request)).rejects.toThrow(/unavailable-source/);
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to pin a terminal on a host that cannot answer for Code", async () => {
+    let current = space();
+    const service = new ZenService({
+      focusZone: memoryFocusZone(),
+      loadSpace: () => current,
+      loadSpaceByWindow: () => current,
+      eventStore: { append: vi.fn(), isConcurrencyConflict: () => false } as never,
+      localHostId: LOCAL_HOST_ID,
+      threadCatalog: { resolve: async () => codeEntry, search: async () => [codeEntry] },
+      uuid: () => ids.element,
+    });
+
+    await expect(service.attachTerminal(ids.window, request)).rejects.toThrow(/missing-capability/);
+    expect(current.elements).toEqual([]);
   });
 });

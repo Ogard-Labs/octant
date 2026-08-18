@@ -89,6 +89,15 @@ export interface CodeWorkspaceProps {
   readonly projections?: CodeWorkspaceProjections;
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenBrowser?: () => void;
+  /**
+   * Pins a terminal this thread owns to the focus zone. Absent on a surface
+   * with no focus zone to pin into.
+   */
+  readonly onPinTerminal?: (request: {
+    readonly threadId: import("@octant/contracts/code").CodeThreadId;
+    readonly checkoutId: import("@octant/contracts/code").CodeCheckoutId;
+    readonly terminalId: CodeTerminalId;
+  }) => void;
   /** Opens one changed repository file as a Code file tab, from the diff. */
   readonly onOpenFile?: (relativePath: string) => void;
   /** Re-opens the file projection so the editor can leave a stale revision. */
@@ -944,6 +953,16 @@ function TerminalWorkspaceSurface(
               onOpenAnotherTerminal: () =>
                 props.onOpenSurface?.("code-terminal", {
                   terminalId: props.nextUuid() as unknown as CodeTerminalId,
+                }),
+            })}
+        {...(props.onPinTerminal === undefined
+          ? {}
+          : {
+              onPinTerminal: () =>
+                props.onPinTerminal?.({
+                  threadId: props.scope.threadId,
+                  checkoutId: props.scope.checkoutId,
+                  terminalId: props.terminalId,
                 }),
             })}
         restart={{

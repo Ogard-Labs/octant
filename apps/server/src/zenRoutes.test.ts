@@ -468,3 +468,91 @@ describe("Zen space routes", () => {
     expect(response?.status).toBe(409);
   });
 });
+
+describe("Zen terminal routes", () => {
+  const terminalRequest = {
+    threadId: "77777777-7777-4777-8777-777777777777",
+    checkoutId: "88888888-8888-4888-8888-888888888888",
+    terminalId: "99999999-9999-4999-8999-999999999999",
+    expectedVersion: 2,
+  };
+
+  function terminalRouteFixture(attachTerminal: () => unknown) {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId, capability, now: 0 });
+    return createZenRouteHandler({
+      windowAuthorityStore,
+      zenService: {
+        attachTerminal: vi.fn(async () => attachTerminal()),
+        handleCommand: vi.fn(),
+      } as never,
+      now: () => 0,
+    });
+  }
+
+  it("pins a terminal for the window that proved its own identity", async () => {
+    const handler = terminalRouteFixture(() => ({ result: "terminal-attached" }));
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/zen/terminals/attach", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability },
+        body: JSON.stringify(terminalRequest),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toMatchObject({ result: "terminal-attached" });
+  });
+
+  it("refuses a terminal card the caller wrote itself instead of naming a terminal", async () => {
+    const handler = terminalRouteFixture(() => ({ result: "terminal-attached" }));
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/zen/command", {
+        method: "POST",
+        headers: { "x-octant-window-capability": capability },
+        body: JSON.stringify({
+          command: "add-element",
+          spaceId: "12121212-1212-4212-8212-121212121212",
+          expectedVersion: 2,
+          element: {
+            elementId: "13131313-1313-4313-8313-131313131313",
+            kind: "terminal",
+            sourceContext: {
+              hostId: LOCAL_HOST_ID,
+              mode: "code",
+              projectId: null,
+              threadKind: "code",
+              threadId: terminalRequest.threadId,
+            },
+            checkoutId: terminalRequest.checkoutId,
+            terminalId: terminalRequest.terminalId,
+            geometry: { x: 0, y: 0, width: 520, height: 320 },
+            zIndex: 1,
+            minimized: false,
+            locked: false,
+          },
+        }),
+      }),
+    );
+
+    expect(response?.status).toBe(400);
+    await expect(response?.json()).resolves.toMatchObject({
+      error: expect.stringContaining("pinned by naming it"),
+    });
+  });
+
+  it("refuses to pin a terminal for a caller that cannot prove the window", async () => {
+    const handler = terminalRouteFixture(() => ({ result: "terminal-attached" }));
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/zen/terminals/attach", {
+        method: "POST",
+        body: JSON.stringify(terminalRequest),
+      }),
+    );
+
+    expect(response?.status).toBe(401);
+  });
+});

@@ -94,6 +94,16 @@ redesigns.
   than a drawn one. A card that is minimized, out of view, or past that budget
   pauses, says so, and keeps its last reading rather than passing stale text
   off as live.
+- A card may be pinned to a terminal a Code thread owns. The card addresses the
+  shell rather than describing it: it names the thread, checkout, and terminal,
+  and the server writes the card only after the thread catalog says this window
+  may see the thread and Code says that thread owns the shell. Every keystroke
+  is authorized against the same thread and checkout it is from the workspace
+  tab, so a pinned shell reaches exactly as far as the tab already did and no
+  further. A pinned card never starts or restarts a shell; opening one is the
+  Code thread's to do.
+- One budget covers every card that streams, whatever it streams. A pinned
+  conversation and a pinned shell cost the same live slot and compete for it.
 - Desktop and web clients share the same content structure and commands; web
   omits native window affordances. The UI is truthful: every visible action
   works, is clearly unavailable, or is absent.

@@ -77,13 +77,13 @@ export const MAX_ZEN_ELEMENT_Z_INDEX = 1000;
  * How many attached thread cards may hold a live transcript at once.
  *
  * `MAX_ZEN_ELEMENTS` was sized for widgets, which cost one render and nothing
- * more. A live card holds its own thread controller and stream, so a space
- * filled to that ceiling with cards would open twenty concurrent streams
- * against the host for one reader. Cards past this budget stay on their
- * metadata reading until a live one is minimized, panned away, or gives up
- * focus.
+ * more. A live card holds its own stream — a thread card its conversation, a
+ * terminal card its shell — so a space filled to that ceiling with cards would
+ * open twenty concurrent streams against the host for one reader. Cards past
+ * this budget stay on their last reading until a live one is minimized, panned
+ * away, or gives up focus.
  */
-export const MAX_LIVE_ZEN_THREAD_CARDS = 3;
+export const MAX_LIVE_ZEN_CARDS = 3;
 
 export interface ZenTimerClockSample {
   readonly wallTimeMs: number;
@@ -312,6 +312,7 @@ export function addElement(
   // Validate element-specific constraints
   switch (element.kind) {
     case "thread":
+    case "terminal":
       validateLocalHostSource(element.sourceContext, localHostId);
       break;
     case "notes":
@@ -406,6 +407,7 @@ export function updateElement(
   // Validate element-specific constraints
   switch (element.kind) {
     case "thread":
+    case "terminal":
       validateLocalHostSource(element.sourceContext, localHostId);
       break;
     case "notes":
@@ -1071,14 +1073,14 @@ function stillBackground(background: ZenAppearance["background"]): ZenAppearance
 }
 
 /** Why an attached thread card is not streaming. */
-export type ZenThreadCardFrozenReason = "minimized" | "off-screen" | "budget";
+export type ZenLiveCardFrozenReason = "minimized" | "off-screen" | "budget";
 
-export type ZenThreadCardActivity =
+export type ZenLiveCardActivity =
   | { readonly elementId: ZenElementId; readonly activity: "live" }
   | {
       readonly elementId: ZenElementId;
       readonly activity: "frozen";
-      readonly reason: ZenThreadCardFrozenReason;
+      readonly reason: ZenLiveCardFrozenReason;
     };
 
 /** The rectangle of a space a reader can currently see, in space coordinates. */
@@ -1089,7 +1091,7 @@ export interface ZenVisibleRegion {
   readonly height: number;
 }
 
-export interface ZenThreadCardActivityInput {
+export interface ZenLiveCardActivityInput {
   readonly elements: ReadonlyArray<ZenElementPayload>;
   readonly visibleRegion: ZenVisibleRegion;
   readonly focusedElementId?: ZenElementId;
@@ -1108,12 +1110,14 @@ export interface ZenThreadCardActivityInput {
  * Returns one entry per thread element in input order; widgets are not cards
  * and never appear.
  */
-export function resolveZenThreadCardActivity(
-  input: ZenThreadCardActivityInput,
-): ReadonlyArray<ZenThreadCardActivity> {
-  const budget = Math.max(0, input.budget ?? MAX_LIVE_ZEN_THREAD_CARDS);
-  const cards = input.elements.filter((element) => element.kind === "thread");
-  const frozen = new Map<ZenElementId, ZenThreadCardFrozenReason>();
+export function resolveZenLiveCardActivity(
+  input: ZenLiveCardActivityInput,
+): ReadonlyArray<ZenLiveCardActivity> {
+  const budget = Math.max(0, input.budget ?? MAX_LIVE_ZEN_CARDS);
+  const cards = input.elements.filter(
+    (element) => element.kind === "thread" || element.kind === "terminal",
+  );
+  const frozen = new Map<ZenElementId, ZenLiveCardFrozenReason>();
   const eligible: Array<{ readonly element: ZenElementPayload; readonly order: number }> = [];
   cards.forEach((element, order) => {
     if (element.minimized) {
