@@ -246,6 +246,7 @@ import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { ProjectRootPort } from "./projectRootPort";
 import { createArtifactLibraryRouteHandler } from "./artifactLibraryRoutes";
+import { createArtifactMirrorRouteHandler } from "./artifactMirrorRoutes";
 import { ArtifactLibraryService } from "./canvas/artifactLibraryService";
 import { createCanvasRouteHandler, resolveCanvasActiveContext } from "./canvasRoutes";
 import { AutomationCommandService } from "./automation/automationCommandService";
@@ -4107,6 +4108,10 @@ export function startOctantServer(
       library: artifactLibraryService,
       windowAuthorityStore,
     });
+    const artifactMirrorRoutes = createArtifactMirrorRouteHandler({
+      mirror: artifactMirrorService,
+      windowAuthorityStore,
+    });
     const canvasRoutes = createCanvasRouteHandler({
       canvasProjection: persistence.canvasProjection,
       canvasService,
@@ -4540,6 +4545,7 @@ export function startOctantServer(
       (await previewRoutes(request)) ??
       (await canvasRoutes(request)) ??
       (await artifactLibraryRoutes(request)) ??
+      (await artifactMirrorRoutes(request)) ??
       (await automationRoutes(request)) ??
       (await automationNotificationRoutes(request)) ??
       (await workPromotionRoutes(request)) ??

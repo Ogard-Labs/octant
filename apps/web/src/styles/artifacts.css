@@ -220,3 +220,69 @@
   align-items: center;
   gap: 0.2rem;
 }
+
+.artifact-mirror {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: 520px;
+  margin: 1rem auto 0;
+  padding: 0.75rem;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 8px;
+  font-size: 0.78rem;
+}
+
+.artifact-mirror__title {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: 0.85rem;
+}
+
+.artifact-mirror__note,
+.artifact-mirror__message {
+  margin: 0;
+  color: var(--octant-text-muted);
+}
+
+.artifact-mirror__tier {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.artifact-mirror__tier-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.artifact-mirror__tier-label {
+  color: var(--octant-text-primary);
+}
+
+.artifact-mirror__tier-detail,
+.artifact-mirror__auto-commit {
+  color: var(--octant-text-muted);
+}
+
+.artifact-mirror__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.artifact-mirror__field input {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 6px;
+  background: var(--octant-surface-raised);
+  color: var(--octant-text-primary);
+  font: inherit;
+}
+
+.artifact-mirror__auto-commit {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
