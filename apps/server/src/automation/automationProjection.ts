@@ -282,6 +282,7 @@ export class AutomationProjection implements Projection {
       mode: definition.mode,
       projectId: definition.projectId,
       lifecycle: definition.lifecycle,
+      trigger: definition.trigger,
       definitionRevision: definition.definitionRevision,
       nextDueAt: definition.nextDueAt,
       ...(latest === undefined ? {} : { latestRunLifecycle: latest.lifecycle }),

@@ -79,6 +79,7 @@ function renderCenter(overrides: Record<string, unknown> = {}) {
     client,
     catalog: catalog(),
     displayTimeZone: "UTC",
+    localHostId: "local",
     now: () => AUTOMATION_UI_TEST_NOW,
     generateId: () => AUTOMATION_UI_TEST_IDS.runNowRequest,
     ...overrides,
@@ -117,12 +118,18 @@ describe("AutomationCenter default surface", () => {
 
     const workRow = within(rows).getByRole("listitem", { name: "Weekly summary" });
     expect(within(workRow).getByText("Docs Project")).toBeVisible();
-    expect(within(workRow).getByText("Next run: Sep 1, 2026, 09:00")).toBeVisible();
+    // A row says what the routine does and when it next does it, in one line.
+    expect(
+      within(workRow).getByText("Weekly on Mon at 9:00 · Next run on Sep 1 at 9:00"),
+    ).toBeVisible();
+    expect(within(workRow).getByText("Recurring")).toBeVisible();
+    // The host that owns and runs it, named as an environment.
+    expect(within(workRow).getByText("Local")).toBeVisible();
     expect(within(workRow).getByText("Enabled")).toBeVisible();
     expect(within(workRow).getByText("Last run: Completed")).toBeVisible();
 
     const codeRow = within(rows).getByRole("listitem", { name: "Nightly build check" });
-    expect(within(codeRow).getByText("Not scheduled")).toBeVisible();
+    expect(within(codeRow).getByText("Weekly on Mon at 9:00 · Not scheduled")).toBeVisible();
     expect(within(codeRow).getByText("Paused")).toBeVisible();
     expect(within(codeRow).getByText("Last run: Failed")).toBeVisible();
   });
