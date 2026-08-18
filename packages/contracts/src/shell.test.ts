@@ -19,6 +19,7 @@ import {
   decodeWorkspaceSurfaceCatalog,
   decodeWorkspaceTab,
 } from "./shell";
+import { MAX_AVATAR_IMAGE_CHARACTERS } from "./userProfile";
 
 const ids = {
   window: "11111111-1111-4111-8111-111111111111",
@@ -64,6 +65,7 @@ const settings = {
   environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
   firstRunOnboarding: "pending",
   navigatorAssistant: {},
+  userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 
 const group = (nodeId: string, groupId: string, tab: object, activeTabId: string) => ({
@@ -208,6 +210,53 @@ describe("shell bootstrap contracts", () => {
     ).toThrow();
     expect(() =>
       decodeShellSettings({ ...settings, navigatorAssistant: { fallback: "any" } }),
+    ).toThrow();
+  });
+
+  it("decodes a store without the profile section to an empty profile", () => {
+    const { userProfile: _omitted, ...withoutProfile } = settings;
+
+    // A store persisted before profiles shipped was never asked who is using
+    // it, so it must decode to no name and no address rather than to a name
+    // guessed from the OS account.
+    const decoded = decodeShellSettings(withoutProfile).userProfile;
+    expect(decoded.displayName).toBeUndefined();
+    expect(decoded.email).toBeUndefined();
+    expect(decoded.accent).toBe("indigo");
+    expect(decoded.avatar).toEqual({ kind: "initials" });
+  });
+
+  it("rejects a profile that cannot be honoured", () => {
+    const withProfile = (userProfile: unknown) => () =>
+      decodeShellSettings({ ...settings, userProfile });
+
+    expect(
+      decodeShellSettings({
+        ...settings,
+        userProfile: { displayName: "Ada Lovelace", email: "ada@example.com", accent: "teal" },
+      }).userProfile,
+    ).toMatchObject({ displayName: "Ada Lovelace", accent: "teal" });
+
+    expect(withProfile({ email: "not-an-address" })).toThrow();
+    expect(withProfile({ accent: "chartreuse" })).toThrow();
+    expect(withProfile({ displayName: "   " })).toThrow();
+    // An avatar has to be a picture the surface can actually draw offline: a
+    // remote URL would make the profile depend on a network the host may not
+    // have, and an oversized image would grow every replay of these settings.
+    expect(
+      withProfile({ avatar: { kind: "image", source: "upload", dataUrl: "https://x/y.png" } }),
+    ).toThrow();
+    expect(
+      withProfile({
+        avatar: {
+          kind: "image",
+          source: "upload",
+          dataUrl: `data:image/png;base64,${"A".repeat(MAX_AVATAR_IMAGE_CHARACTERS)}`,
+        },
+      }),
+    ).toThrow();
+    expect(
+      withProfile({ avatar: { kind: "gravatar-link", url: "https://gravatar.com/x" } }),
     ).toThrow();
   });
 

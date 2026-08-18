@@ -17,6 +17,7 @@ type DiscoveryCreateCommand = Extract<
       | "create-kimi-code-provider"
       | "create-claude-provider"
       | "create-mistral-vibe-provider"
+      | "create-grok-provider"
       | "create-devin-provider"
       | "create-kilo-provider"
       | "create-pi-provider"
@@ -98,6 +99,22 @@ export function createProviderFromDiscoveryCandidate(
           displayName: candidate.displayName,
           configuration: {
             kind: "mistral-vibe-acp",
+            binaryPath: candidate.binaryPath,
+            authentication: "subscription",
+          },
+          enabled: options.enabled,
+        },
+      };
+    case "grok":
+      return {
+        instanceId,
+        command: {
+          kind: "create-grok-provider",
+          instanceId,
+          expectedVersion,
+          displayName: candidate.displayName,
+          configuration: {
+            kind: "grok-acp",
             binaryPath: candidate.binaryPath,
             authentication: "subscription",
           },

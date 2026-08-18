@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import { makeAcpDriver, type AcpClientPort, type AcpDriverOptions } from "./acpDriver";
 import type { AcpConnection, AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind, type AcpProviderProfile } from "./acpProfiles";
-import { AcpFailure } from "./acpProtocol";
+import { AcpFailure, type AcpNewSessionResult } from "./acpProtocol";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000311");
@@ -31,6 +31,7 @@ class FakeClient implements AcpClientPort {
   readonly notifications = new Set<Parameters<AcpClientPort["onNotification"]>[0]>();
   readonly requests = new Set<Parameters<AcpClientPort["onRequest"]>[0]>();
   readonly setConfigOption = vi.fn(async () => ({ configOptions: this.configOptions }));
+  readonly call = vi.fn(async () => ({})) as unknown as AcpClientPort["call"];
   readonly respondPermission = vi.fn(async () => undefined);
   readonly closeSession = vi.fn(async () => undefined);
   readonly authenticate = vi.fn(async () => undefined);
@@ -41,7 +42,7 @@ class FakeClient implements AcpClientPort {
   }));
   readonly completeBrowserAuthentication = vi.fn(async () => undefined);
   availableCommands: string[];
-  readonly newSession = vi.fn(async () => {
+  readonly newSession = vi.fn(async (): Promise<AcpNewSessionResult> => {
     this.emitCommands("agent-session-1");
     return { sessionId: "agent-session-1", configOptions: this.configOptions };
   });
@@ -330,6 +331,35 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
     expect(result.models.every((model) => model.reasoning === "unavailable")).toBe(true);
   });
 
+  // ACP lets an agent report its models either as a `model` config option or as
+  // the session's own model state. An agent that only does the latter was read
+  // as having none, so the picker offered nothing and no session could start.
+  it("discovers the models an agent reports as session state rather than a config option", async () => {
+    const { driver, client } = fixture(profile);
+    client.newSession.mockImplementationOnce(async () => {
+      client.emitCommands("agent-session-models");
+      return {
+        sessionId: "agent-session-models",
+        models: {
+          currentModelId: "agent-fast",
+          availableModels: [
+            { modelId: "agent-fast", name: "Agent Fast" },
+            { modelId: "agent-deep", name: "Agent Deep" },
+          ],
+        },
+      };
+    });
+
+    const result = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    expect(result).toMatchObject({
+      readiness: "ready",
+      models: [
+        { id: "agent-fast", displayName: "Agent Fast", source: "discovered" },
+        { id: "agent-deep", displayName: "Agent Deep", source: "discovered" },
+      ],
+    });
+  });
+
   it("reports degraded readiness when ACP exposes no selectable models", async () => {
     const { driver, client } = fixture(profile);
     client.newSession.mockImplementationOnce(async () => {
@@ -400,16 +430,62 @@ describe.each(profiles)("ACP provider driver ($displayName)", (profile) => {
         },
       ]);
       expect(client.newSession).toHaveBeenCalledWith(expectedRoot);
-      expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-1", "model", modelId);
-      expect(client.setConfigOption).toHaveBeenCalledWith(
-        "agent-session-1",
-        "mode",
-        profile.sessionMode(productMode, executionPolicy),
-      );
+      // A profile without its own request shape is standard ACP, and has to go
+      // through the call that decodes the reply rather than the untyped one.
+      const expectedModelRequest = profile.setModelCall?.("agent-session-1", modelId);
+      if (expectedModelRequest === undefined) {
+        expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-1", "model", modelId);
+      } else {
+        expect(client.call).toHaveBeenCalledWith(
+          expectedModelRequest.method,
+          expectedModelRequest.params,
+        );
+      }
+      const modeValue = profile.sessionMode(productMode, executionPolicy);
+      const expectedModeRequest = profile.setModeCall?.("agent-session-1", modeValue);
+      if (expectedModeRequest === undefined) {
+        expect(client.setConfigOption).toHaveBeenCalledWith("agent-session-1", "mode", modeValue);
+      } else {
+        expect(client.call).toHaveBeenCalledWith(
+          expectedModeRequest.method,
+          expectedModeRequest.params,
+        );
+      }
       expect(active()).toBe(0);
       expect(registry.activeSessionCount(instanceId)).toBe(0);
     },
   );
+
+  it("tells the user to sign in again when a turn is refused for a stale credential", async () => {
+    // A managed home holding an expired credential passes the probe: the agent
+    // opens the session and reports its models, and only the turn is refused.
+    // Reporting that as a generic provider failure left the user with nothing
+    // to act on.
+    const { driver, client } = fixture(profile);
+    client.prompt.mockRejectedValueOnce(
+      new AcpFailure("remote", "ACP authentication is required."),
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* driver.acquire({ instanceId, projectRoot, mode: "code" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          const collected = yield* Effect.fork(
+            Effect.promise(() => collectTerminal(connection.events)),
+          );
+          yield* connection.send({ sessionId, prompt: "hello", attachments: [], tools: [] });
+          const events = yield* Fiber.join(collected);
+          const last = events.at(-1);
+          expect(last?.kind).toBe("failed");
+          expect(last?.kind === "failed" ? last.failure : undefined).toEqual({
+            category: "unauthenticated",
+            message: profile.unauthenticatedMessage,
+          });
+          yield* connection.stop(sessionId);
+        }),
+      ),
+    );
+  });
 
   it("normalizes a streamed turn and returns an exact opaque resume cursor", async () => {
     const { driver } = fixture(profile);
@@ -576,10 +652,10 @@ describe("ACP provider driver profile quirks", () => {
     [devin, "code", "plan", "plan"],
     [devin, "code", "full-access", "bypass"],
     [devin, "chat", "full-access", "ask"],
-    [vibe, "code", "approval-gated", "default"],
+    [vibe, "code", "approval-gated", "ask"],
     [vibe, "code", "plan", "plan"],
     [vibe, "code", "full-access", "auto-approve"],
-    [vibe, "chat", "full-access", "chat"],
+    [vibe, "chat", "full-access", "ask"],
     [kimi, "code", "approval-gated", "default"],
     [kimi, "code", "plan", "plan"],
     [kimi, "code", "full-access", "yolo"],
@@ -591,6 +667,23 @@ describe("ACP provider driver profile quirks", () => {
       expect(profile.sessionMode(mode, policy)).toBe(expected);
     },
   );
+
+  it("leaves Mistral Vibe a selectable default agent for every mode it can request", () => {
+    const guards = vibe.process.guards;
+    const enabled = JSON.parse(guards.VIBE_ENABLED_AGENTS ?? "[]") as ReadonlyArray<string>;
+
+    // Vibe resolves `default_agent` against these guards while creating the
+    // session, so a guard that excludes it fails `session/new` before any mode
+    // is requested.
+    expect(guards).not.toHaveProperty("VIBE_DISABLED_AGENTS");
+    expect(enabled).toContain(guards.VIBE_DEFAULT_AGENT);
+    for (const mode of ["chat", "work", "code"] as const) {
+      for (const policy of ["approval-gated", "plan", "full-access"] as const) {
+        expect(enabled).toContain(vibe.sessionMode(mode, policy));
+      }
+    }
+    expect(enabled).not.toContain("accept-edits");
+  });
 
   it("does not select the Kimi auto mode for any execution policy", () => {
     for (const policy of ["approval-gated", "plan", "full-access"] as const) {

@@ -40,6 +40,7 @@ import {
   type WorkspaceTabId,
 } from "@octant/contracts/shell";
 import { DEFAULT_SIDEBAR_BACKGROUND } from "@octant/contracts/theme";
+import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR } from "@octant/contracts/user-profile";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { CodeEnvironmentObservation } from "@octant/contracts";
@@ -149,6 +150,7 @@ export function defaultShellSettings(): ShellSettings {
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),
     firstRunOnboarding: "pending",
     navigatorAssistant: {},
+    userProfile: { accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR },
   };
 }
 

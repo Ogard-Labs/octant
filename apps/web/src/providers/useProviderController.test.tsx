@@ -581,7 +581,7 @@ describe("useProviderController", () => {
     expect(result.current.message).not.toMatch(/private-value|Keychain/i);
   });
 
-  it("clears a Claude API key before switching durable configuration to subscription", async () => {
+  it("clears a Claude API key after switching durable configuration to subscription", async () => {
     const calls: string[] = [];
     const apiKeyProvider = claudeProvider({
       configuration: {
@@ -612,10 +612,13 @@ describe("useProviderController", () => {
       ).resolves.toBe(true);
     });
 
-    expect(calls).toEqual(["credential.clear", "provider.update", "field.clear"]);
+    expect(calls).toEqual(["provider.update", "credential.clear", "field.clear"]);
   });
 
-  it("keeps Claude API-key configuration unchanged when credential deletion fails", async () => {
+  // A clear that fails once the instance has stopped using the key leaves a
+  // secret behind rather than an unusable provider, so the change stands and
+  // cleanup is retried later.
+  it("defers Claude credential cleanup when deletion fails after the switch to subscription", async () => {
     const apiKeyProvider = claudeProvider({
       configuration: {
         kind: "claude-agent-sdk",
@@ -624,8 +627,12 @@ describe("useProviderController", () => {
       },
     });
     const api = client(snapshot([apiKeyProvider]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-updated",
+      instance: claudeProvider({ version: 2 as never }),
+    });
     const host = credentialHost();
-    vi.mocked(host.clearProviderCredential).mockRejectedValue(new Error("private diagnostic"));
+    vi.mocked(host.clearProviderCredential).mockRejectedValueOnce(new Error("private diagnostic"));
     const credential = transientCredential("");
     const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
@@ -633,15 +640,22 @@ describe("useProviderController", () => {
     await act(async () => {
       await expect(
         result.current.changeClaudeConfiguration(id, claudeProvider().configuration, credential),
-      ).resolves.toBe(false);
+      ).resolves.toBe(true);
     });
 
-    expect(api.execute).not.toHaveBeenCalled();
+    expect(api.execute).toHaveBeenCalledOnce();
     expect(credential.clear).toHaveBeenCalledOnce();
     expect(result.current.instances[0]?.configuration).toMatchObject({
-      authentication: "api-key",
+      authentication: "subscription",
     });
-    expect(result.current.message).not.toContain("private diagnostic");
+    expect(JSON.stringify(result.current)).not.toContain("private diagnostic");
+
+    await act(async () => {
+      await expect(result.current.retry()).resolves.toBe(true);
+    });
+
+    expect(host.clearProviderCredential).toHaveBeenCalledTimes(2);
+    expect(result.current.message).toMatch(/credential cleanup completed/i);
   });
 
   it("stores a non-empty key before switching Claude subscription to API-key mode", async () => {
@@ -937,13 +951,13 @@ describe("useProviderController", () => {
       "credential.set",
       "provider.update",
       "field.clear",
-      "credential.clear",
       "provider.remove",
+      "credential.clear",
     ]);
     expect(result.current.instances).toHaveLength(0);
   });
 
-  it("clears cleanup-required credentials before removing a subscription provider", async () => {
+  it("clears cleanup-required credentials after removing a subscription provider", async () => {
     const calls: string[] = [];
     const apiKeyConfiguration = {
       kind: "claude-agent-sdk" as const,
@@ -986,8 +1000,8 @@ describe("useProviderController", () => {
       "credential.clear",
       "provider.update",
       "field.clear",
-      "credential.clear",
       "provider.remove",
+      "credential.clear",
     ]);
     expect(result.current.instances).toHaveLength(0);
     expect(JSON.stringify(result.current)).not.toMatch(
@@ -995,7 +1009,7 @@ describe("useProviderController", () => {
     );
   });
 
-  it("clears Claude API-key credentials before removal but skips subscription credentials", async () => {
+  it("clears Claude API-key credentials after removal but skips subscription credentials", async () => {
     for (const authentication of ["api-key", "subscription"] as const) {
       const calls: string[] = [];
       const instance = claudeProvider({
@@ -1022,14 +1036,14 @@ describe("useProviderController", () => {
 
       expect(calls).toEqual(
         authentication === "api-key"
-          ? ["credential.clear", "provider.remove"]
+          ? ["provider.remove", "credential.clear"]
           : ["provider.remove"],
       );
       unmount();
     }
   });
 
-  it("clears Anthropic-compatible credentials before removal", async () => {
+  it("clears Anthropic-compatible credentials after removal", async () => {
     for (const authentication of ["api-key", "bearer", "none"] as const) {
       const calls: string[] = [];
       const instance = anthropicProvider({
@@ -1058,7 +1072,7 @@ describe("useProviderController", () => {
       });
 
       expect(calls).toEqual(
-        authentication === "none" ? ["provider.remove"] : ["credential.clear", "provider.remove"],
+        authentication === "none" ? ["provider.remove"] : ["provider.remove", "credential.clear"],
       );
       unmount();
     }
@@ -1089,6 +1103,155 @@ describe("useProviderController", () => {
     });
 
     expect(calls).toEqual(["provider.remove"]);
+    unmount();
+  });
+
+  // A browser-only window has a provider client but no desktop bridge. An edit
+  // that neither stores nor clears a key needs no Keychain authority, and
+  // demanding one made a subscription instance uneditable outside the desktop.
+  it("changes a subscription Grok binary path in a window without host credential authority", async () => {
+    const calls: string[] = [];
+    const instance = grokProvider();
+    const api = client(snapshot([instance]));
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.update");
+      return { kind: "provider-updated", instance: grokProvider({ version: 2 as never }) };
+    });
+    const { result, unmount } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeGrokConfiguration(
+          id,
+          { ...grokProvider().configuration, binaryPath: "/opt/homebrew/bin/grok" },
+          transientCredential("", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(calls).toEqual(["provider.update", "field.clear"]);
+    unmount();
+  });
+
+  // The server refuses an authentication change while the instance has an
+  // active session. Clearing the key first left the instance still configured
+  // for API-key authentication with no key to connect with, forcing the user to
+  // re-enter it.
+  it("keeps the stored Claude credential when a refused change stops using it", async () => {
+    const calls: string[] = [];
+    const api = client(
+      snapshot([
+        claudeProvider({
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "api-key",
+          },
+        }),
+      ]),
+    );
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.update");
+      throw new Error("private registry diagnostic");
+    });
+    const host = credentialHost(calls);
+    const { result, unmount } = renderHook(() =>
+      useProviderController({ client: api, hostBridge: host }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeClaudeConfiguration(
+          id,
+          claudeProvider().configuration,
+          transientCredential("", calls),
+        ),
+      ).resolves.toBe(false);
+    });
+
+    expect(host.clearProviderCredential).not.toHaveBeenCalled();
+    expect(calls).toEqual(["provider.update", "field.clear"]);
+    expect(result.current.message).toMatch(/credential was left in place/i);
+    expect(JSON.stringify(result.current)).not.toContain("private registry diagnostic");
+    unmount();
+  });
+
+  it("keeps the stored Mistral Vibe credential when a refused change stops using it", async () => {
+    const calls: string[] = [];
+    const api = client(
+      snapshot([
+        vibeProvider({
+          configuration: {
+            kind: "mistral-vibe-acp",
+            binaryPath: "/Users/example/.local/bin/vibe-acp",
+            authentication: "api-key",
+          },
+        }),
+      ]),
+    );
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.update");
+      throw new Error("private registry diagnostic");
+    });
+    const host = credentialHost(calls);
+    const { result, unmount } = renderHook(() =>
+      useProviderController({ client: api, hostBridge: host }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeMistralVibeConfiguration(
+          id,
+          vibeProvider().configuration,
+          transientCredential("", calls),
+        ),
+      ).resolves.toBe(false);
+    });
+
+    expect(host.clearProviderCredential).not.toHaveBeenCalled();
+    expect(calls).toEqual(["provider.update", "field.clear"]);
+    expect(result.current.message).toMatch(/credential was left in place/i);
+    expect(JSON.stringify(result.current)).not.toContain("private registry diagnostic");
+    unmount();
+  });
+
+  it("clears the stored Mistral Vibe credential after the change that stops using it", async () => {
+    const calls: string[] = [];
+    const api = client(
+      snapshot([
+        vibeProvider({
+          configuration: {
+            kind: "mistral-vibe-acp",
+            binaryPath: "/Users/example/.local/bin/vibe-acp",
+            authentication: "api-key",
+          },
+        }),
+      ]),
+    );
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.update");
+      return { kind: "provider-updated", instance: vibeProvider({ version: 2 as never }) };
+    });
+    const host = credentialHost(calls);
+    const { result, unmount } = renderHook(() =>
+      useProviderController({ client: api, hostBridge: host }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeMistralVibeConfiguration(
+          id,
+          vibeProvider().configuration,
+          transientCredential("", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(calls).toEqual(["provider.update", "credential.clear", "field.clear"]);
     unmount();
   });
 
@@ -1435,7 +1598,7 @@ describe("useProviderController", () => {
     );
   });
 
-  it("deletes the credential before removing a bearer provider", async () => {
+  it("deletes the credential after removing a bearer provider", async () => {
     const calls: string[] = [];
     const api = client(snapshot([httpProvider()]));
     vi.mocked(api.execute).mockImplementation(async () => {
@@ -1449,26 +1612,42 @@ describe("useProviderController", () => {
     await act(async () => {
       await expect(result.current.remove(id)).resolves.toBe(true);
     });
-    expect(calls).toEqual(["credential.clear", "provider.remove"]);
+    expect(calls).toEqual(["provider.remove", "credential.clear"]);
   });
 
-  it("blocks removal when credential deletion fails", async () => {
+  it("defers cleanup when credential deletion fails after removal", async () => {
     const api = client(snapshot([httpProvider()]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-removed",
+      instanceId: id,
+      version: 2 as never,
+    });
     const host = credentialHost();
-    vi.mocked(host.clearProviderCredential).mockRejectedValue(
+    vi.mocked(host.clearProviderCredential).mockRejectedValueOnce(
       new Error("private-value raw Keychain diagnostic"),
     );
     const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
     await act(async () => {
-      await expect(result.current.remove(id)).resolves.toBe(false);
+      await expect(result.current.remove(id)).resolves.toBe(true);
     });
-    expect(api.execute).not.toHaveBeenCalled();
+    expect(result.current.instances).toHaveLength(0);
+    expect(result.current.message).toMatch(/removed.*credential could not be cleared/i);
     expect(result.current.message).not.toMatch(/private-value|Keychain/i);
+
+    // The stranded secret is retried by the same deferred cleanup the
+    // configuration paths use.
+    await act(async () => {
+      await result.current.retry();
+    });
+    expect(host.clearProviderCredential).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps an unauthenticated provider when registry removal fails after deletion", async () => {
+  // The server refuses removal while the instance still has an active session.
+  // Clearing the key first left the instance configured for API-key
+  // authentication with a write-only key that could not be put back.
+  it("keeps a rejected provider's credential when registry removal fails", async () => {
     const calls: string[] = [];
     const api = client(snapshot([httpProvider()]));
     vi.mocked(api.execute).mockImplementation(async () => {
@@ -1483,8 +1662,10 @@ describe("useProviderController", () => {
       await expect(result.current.remove(id)).resolves.toBe(false);
     });
 
-    expect(calls).toEqual(["credential.clear", "provider.remove"]);
+    expect(calls).toEqual(["provider.remove"]);
+    expect(host.clearProviderCredential).not.toHaveBeenCalled();
     expect(result.current.instances).toHaveLength(1);
+    expect(result.current.message).toMatch(/removal failed/i);
     expect(result.current.message).not.toContain("private registry diagnostic");
   });
 
@@ -1694,6 +1875,27 @@ function vibeProvider(
     updatedAt: "2026-07-17T10:00:00.000Z" as ProviderInstance["updatedAt"],
     ...patch,
   } as Extract<ProviderInstance, { driverKind: "mistral-vibe" }>;
+}
+
+function grokProvider(
+  patch: Partial<ProviderInstance> = {},
+): Extract<ProviderInstance, { driverKind: "grok" }> {
+  return {
+    id,
+    displayName: "Grok Build local",
+    driverKind: "grok",
+    configuration: {
+      kind: "grok-acp",
+      binaryPath: "/Users/example/.grok/bin/grok",
+      authentication: "subscription",
+    },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as ProviderInstance["version"],
+    createdAt: "2026-07-17T10:00:00.000Z" as ProviderInstance["createdAt"],
+    updatedAt: "2026-07-17T10:00:00.000Z" as ProviderInstance["updatedAt"],
+    ...patch,
+  } as Extract<ProviderInstance, { driverKind: "grok" }>;
 }
 
 function devinProvider(

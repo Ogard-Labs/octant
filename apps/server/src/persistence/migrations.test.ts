@@ -77,9 +77,10 @@ describe("applyMigrations", () => {
       const before = connection.prepare("SELECT * FROM event_journal").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 44,
+        currentVersion: 47,
         appliedVersions: [
-          24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+          24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
+          46, 47,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -100,15 +101,47 @@ describe("applyMigrations", () => {
     }
   });
 
+  it("rewinds the Code checkpoint so an upgraded store replays thread activity", () => {
+    const connection = openTemporaryDatabase();
+    try {
+      applyMigrations(connection, MIGRATIONS.slice(0, 44), clock);
+      // An upgraded store carries a Code checkpoint already at the journal head.
+      // Left there, catch-up replays nothing and the new activity table stays
+      // empty for every thread that already exists.
+      connection
+        .prepare(
+          `INSERT INTO projection_checkpoints (projection_name, last_sequence, updated_at)
+           VALUES ('code', 42, ?)`,
+        )
+        .run(clock());
+      connection
+        .prepare(
+          `INSERT INTO projection_checkpoints (projection_name, last_sequence, updated_at)
+           VALUES ('chat', 42, ?)`,
+        )
+        .run(clock());
+
+      applyMigrations(connection, MIGRATIONS, clock);
+
+      expect(
+        connection
+          .prepare("SELECT projection_name FROM projection_checkpoints ORDER BY projection_name")
+          .all(),
+      ).toEqual([{ projection_name: "chat" }]);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("creates the event store and strict shell, Project, provider, and context projection tables on a fresh database", () => {
     const connection = openTemporaryDatabase();
 
     try {
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 44,
+        currentVersion: 47,
         appliedVersions: [
           1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
-          26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+          26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
         ],
       });
 
@@ -139,6 +172,7 @@ describe("applyMigrations", () => {
         "code_review_projection",
         "code_runtime_projection",
         "code_settings_projection",
+        "code_thread_activity_projection",
         "code_thread_follow_up_projection",
         "code_thread_projection",
         "context_capacity_projection",
@@ -289,6 +323,7 @@ describe("applyMigrations", () => {
         "code_runtime_projection",
         "code_review_projection",
         "code_settings_projection",
+        "code_thread_activity_projection",
         "code_thread_follow_up_projection",
         "code_thread_projection",
       ]) {
@@ -353,10 +388,10 @@ describe("applyMigrations", () => {
         .run("existing-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 44,
+        currentVersion: 47,
         appliedVersions: [
           5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
-          29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+          29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
         ],
       });
       expect(
@@ -394,10 +429,10 @@ describe("applyMigrations", () => {
         .run("kimi-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 44,
+        currentVersion: 47,
         appliedVersions: [
           11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-          33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+          33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
         ],
       });
       expect(
@@ -444,10 +479,10 @@ describe("applyMigrations", () => {
         .run("anthropic-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 44,
+        currentVersion: 47,
         appliedVersions: [
           13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
-          35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+          35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
         ],
       });
       expect(
@@ -465,6 +500,44 @@ describe("applyMigrations", () => {
             ) VALUES (?, 1, 'azure-foundry', 1, '{}', 1)
           `)
           .run("foundry-provider"),
+      ).not.toThrow();
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("adds Grok to provider projections without rewriting existing rows", () => {
+    const connection = openTemporaryDatabase();
+
+    try {
+      applyMigrations(connection, MIGRATIONS.slice(0, 44), clock);
+      connection
+        .prepare(`
+          INSERT INTO provider_instance_projection (
+            instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+          ) VALUES (?, 1, 'azure-foundry', 1, '{}', 1)
+        `)
+        .run("foundry-provider");
+
+      expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
+        currentVersion: 47,
+        appliedVersions: [45, 46, 47],
+      });
+      expect(
+        connection
+          .prepare(
+            "SELECT instance_id, driver_kind FROM provider_instance_projection ORDER BY instance_id",
+          )
+          .all(),
+      ).toEqual([{ instance_id: "foundry-provider", driver_kind: "azure-foundry" }]);
+      expect(() =>
+        connection
+          .prepare(`
+            INSERT INTO provider_instance_projection (
+              instance_id, schema_version, driver_kind, enabled, instance_json, aggregate_version
+            ) VALUES (?, 1, 'grok', 1, '{}', 1)
+          `)
+          .run("grok-provider"),
       ).not.toThrow();
     } finally {
       connection.close();
@@ -509,10 +582,10 @@ describe("applyMigrations", () => {
       const providerBefore = connection.prepare("SELECT * FROM provider_instance_projection").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 44,
+        currentVersion: 47,
         appliedVersions: [
           6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
-          29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+          29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -534,7 +607,7 @@ describe("applyMigrations", () => {
       const before = connection.prepare("SELECT * FROM schema_migrations").all();
 
       expect(applyMigrations(connection, MIGRATIONS, () => "2099-01-01T00:00:00.000Z")).toEqual({
-        currentVersion: 44,
+        currentVersion: 47,
         appliedVersions: [],
       });
       expect(connection.prepare("SELECT * FROM schema_migrations").all()).toEqual(before);
@@ -587,10 +660,10 @@ describe("applyMigrations", () => {
       const projectBefore = connection.prepare("SELECT * FROM project_projection").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 44,
+        currentVersion: 47,
         appliedVersions: [
           8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-          31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44,
+          31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -609,6 +682,7 @@ describe("applyMigrations", () => {
         { name: "code_review_projection" },
         { name: "code_runtime_projection" },
         { name: "code_settings_projection" },
+        { name: "code_thread_activity_projection" },
         { name: "code_thread_follow_up_projection" },
         { name: "code_thread_projection" },
       ]);

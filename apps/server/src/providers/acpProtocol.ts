@@ -38,6 +38,7 @@ const InitializeResult = Schema.Struct({
       version: Schema.NonEmptyTrimmedString,
     }),
   ),
+  _meta: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.Unknown })),
 });
 export type AcpInitializeResult = typeof InitializeResult.Type;
 
@@ -56,9 +57,25 @@ const SessionConfigOption = Schema.Struct({
 });
 export type AcpSessionConfigOption = typeof SessionConfigOption.Type;
 
+// An agent may report its models as the session's own model state instead of a
+// `model` config option; both are ACP, and an agent that only sends this one
+// would otherwise be read as having no model to select at all.
+const SessionModelState = Schema.Struct({
+  currentModelId: Schema.optional(Schema.NonEmptyTrimmedString),
+  availableModels: Schema.Array(
+    Schema.Struct({
+      modelId: Schema.NonEmptyTrimmedString,
+      name: Schema.NonEmptyTrimmedString,
+      description: Schema.optional(Schema.String),
+    }),
+  ),
+});
+export type AcpSessionModelState = typeof SessionModelState.Type;
+
 const NewSessionResult = Schema.Struct({
   sessionId: Schema.NonEmptyTrimmedString,
   configOptions: Schema.optional(Schema.Array(SessionConfigOption)),
+  models: Schema.optional(SessionModelState),
 });
 export type AcpNewSessionResult = typeof NewSessionResult.Type;
 
@@ -140,6 +157,36 @@ export class AcpFailure extends Error {
   }
 }
 
+interface AcpRemoteError {
+  readonly code: number;
+  readonly message?: string;
+  readonly data?: unknown;
+}
+
+// An agent that refuses a request for a credential reason spells it several
+// ways, and only the never-signed-in case reliably arrives as -32000. Observed
+// on grok 1.0.4 and vibe-acp 2.24.1: a never-signed-in home refuses
+// `session/new` with -32000 ("Authentication required", "Missing API key for
+// mistral provider."), while a home holding an expired or invalid credential
+// opens the session and refuses `session/prompt` with -32603 ("Unauthorized
+// (401) ... Invalid or expired credentials", "Invalid API key."). Classifying
+// on the code alone reported the second case as a generic failure, so the user
+// was never told to sign in again.
+const AUTHENTICATION_REFUSAL_TERMS = [
+  "unauthorized",
+  "unauthenticated",
+  "authentication",
+  "api key",
+  "credentials",
+];
+
+function refusesForAuthentication(error: AcpRemoteError): boolean {
+  if (error.code === -32000) return true;
+  const detail = typeof error.data === "string" ? error.data : "";
+  const text = `${error.message ?? ""} ${detail}`.toLowerCase();
+  return AUTHENTICATION_REFUSAL_TERMS.some((term) => text.includes(term));
+}
+
 export interface AcpLimits {
   readonly lineBytes: number;
   readonly pendingRequests: number;
@@ -182,6 +229,8 @@ export interface AcpClient {
     configId: string,
     value: string,
   ): Promise<AcpConfigOptionsResult>;
+  /** Generic JSON-RPC call for profile-specific ACP methods (e.g. Grok's `session/set_mode`). */
+  call<T = unknown>(method: string, params: Record<string, unknown>): Promise<T>;
   closeSession(sessionId: string): Promise<void>;
   onNotification(listener: (message: AcpServerNotification) => void): () => void;
   onRequest(listener: (message: AcpServerRequest) => void): () => void;
@@ -353,7 +402,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
 
   const settleResponse = (
     id: RpcId,
-    response: { readonly result?: unknown; readonly error?: { readonly code: number } },
+    response: { readonly result?: unknown; readonly error?: AcpRemoteError },
   ) => {
     const request = pending.get(id);
     if (request === undefined) {
@@ -366,7 +415,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       request.reject(
         new AcpFailure(
           "remote",
-          response.error.code === -32000
+          refusesForAuthentication(response.error)
             ? "ACP authentication is required."
             : "ACP request failed.",
         ),
@@ -388,7 +437,13 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         method: Schema.optional(Schema.String),
         params: Schema.optional(Schema.Unknown),
         result: Schema.optional(Schema.Unknown),
-        error: Schema.optional(Schema.Struct({ code: Schema.Int, message: Schema.String })),
+        error: Schema.optional(
+          Schema.Struct({
+            code: Schema.Int,
+            message: Schema.String,
+            data: Schema.optional(Schema.Unknown),
+          }),
+        ),
       }),
     )(value);
     if (envelope.method === undefined) {
@@ -565,6 +620,8 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         { sessionId, configId, value },
         decode(ConfigOptionsResult),
       ),
+    call: <T>(method: string, params: Record<string, unknown>) =>
+      request<T>(method, params, decode(Schema.Unknown) as (value: unknown) => T),
     closeSession: (sessionId) =>
       request("session/close", { sessionId }, decode(EmptyResult)).then(() => undefined),
     onNotification: (listener) => {

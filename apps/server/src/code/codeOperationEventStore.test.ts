@@ -488,6 +488,52 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("keeps the way back from the last restore that ran, and retracts it once one replaced nothing", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    const first = { worktree: "a".repeat(40), index: "b".repeat(40) };
+    const second = { worktree: "c".repeat(40), index: "d".repeat(40) };
+    const restore = (undo?: Record<string, string>, state = "completed") =>
+      decodeCodeOperationEvent({
+        kind: "operation-result",
+        result: {
+          kind: "git-mutation-state",
+          operationId,
+          gitOperationId: "89000000-0000-4000-8000-000000000060",
+          mutation: "restore-checkpoint",
+          state,
+          ...(undo === undefined ? {} : { undo }),
+        },
+      });
+    store.append({ threadId, operationId, expectedCursor: 0, event: restore(first) });
+
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).restoreUndo).toEqual(first);
+    // Another thread's restore is another checkout's business.
+    expect(
+      store.conversation({ threadId: otherThreadId, afterCursor: 0, limit: 10 }).restoreUndo,
+    ).toBeUndefined();
+
+    // Undoing is itself a restore, so one more step back is what it replaced.
+    store.append({ threadId, operationId, expectedCursor: 1, event: restore(second) });
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).restoreUndo).toEqual(second);
+
+    // A rejected restore is refused before the checkout is touched, so the way
+    // back from the last one that ran still points where it did.
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 2,
+      event: restore(undefined, "rejected"),
+    });
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).restoreUndo).toEqual(second);
+
+    // A restore that ran and replaced nothing withdraws the offer, rather than
+    // leaving one pointing at a state the checkout has since moved past.
+    store.append({ threadId, operationId, expectedCursor: 3, event: restore(undefined) });
+    expect(store.conversation({ threadId, afterCursor: 0, limit: 10 }).restoreUndo).toBeUndefined();
+    fixture.connection.close();
+  });
+
   it("requires a snapshot when operation cursors or aggregate versions contain a gap", () => {
     const fixture = openJournal();
     appendRaw(fixture.journal, operationId, 0, frame(2, threadId, operationId));

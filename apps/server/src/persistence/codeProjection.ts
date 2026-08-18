@@ -18,6 +18,9 @@ import {
   decodeCodeReviewFindingUpdated,
   decodeCodeThreadFollowUp,
   decodeCodeThreadFollowUpUpdated,
+  decodeCodeOperationEventFrame,
+  decodeCodeThreadActivity,
+  type CodeThreadActivity,
   type CodeThreadFollowUp,
   type CodeCheckoutId,
   type CodeCheckoutIdentity,
@@ -44,6 +47,7 @@ import {
   type CodeRuntimeProjectionRow,
   type CodeReviewProjectionRow,
   type CodeSettingsProjectionRow,
+  type CodeThreadActivityProjectionRow,
   type CodeThreadProjectionRow,
   type ProjectedCodeSettings,
 } from "./codePersistenceSchema";
@@ -56,9 +60,11 @@ const codeEventNames = new Set<string>([
   ...CODE_EVENT_NAMES,
   "code.review-finding-updated@1",
   "code.follow-up-updated@1",
+  "code.operation-event-recorded@1",
 ]);
 
 export const CODE_FOLLOW_UP_AGGREGATE_TYPE = "code-thread-follow-up";
+export const CODE_OPERATION_AGGREGATE_TYPE = "code-operation";
 
 export class CodeProjection implements Projection {
   readonly name = "code";
@@ -66,6 +72,7 @@ export class CodeProjection implements Projection {
 
   reset(connection: SqliteConnection): void {
     connection.exec(`
+      DELETE FROM code_thread_activity_projection;
       DELETE FROM code_thread_follow_up_projection;
       DELETE FROM code_review_projection;
       DELETE FROM code_runtime_projection;
@@ -169,6 +176,16 @@ export class CodeProjection implements Projection {
         upsertReviewFinding(connection, finding, event);
         return;
       }
+      case "code.operation-event-recorded@1": {
+        assertEnvelope(event.aggregateType === CODE_OPERATION_AGGREGATE_TYPE);
+        const frame = decodeProjection(() => decodeCodeOperationEventFrame(event.payload));
+        assertEnvelope(String(frame.operationId) === String(event.aggregateId));
+        // The operation aggregate is per turn, so its version says nothing about
+        // the thread. The journal's global sequence is what orders one thread's
+        // turns against each other, and it only ever grows.
+        upsertThreadActivity(connection, frame.threadId, event.globalSequence);
+        return;
+      }
       case "code.follow-up-updated@1": {
         assertEnvelope(event.aggregateType === CODE_FOLLOW_UP_AGGREGATE_TYPE);
         const followUp = decodeProjection(
@@ -179,6 +196,23 @@ export class CodeProjection implements Projection {
       }
     }
   }
+}
+
+function upsertThreadActivity(
+  connection: SqliteConnection,
+  threadId: CodeThreadId,
+  globalSequence: number,
+): void {
+  connection
+    .prepare(`
+      INSERT INTO code_thread_activity_projection (thread_id, schema_version, last_sequence)
+      VALUES (?, ?, ?)
+      ON CONFLICT (thread_id) DO UPDATE SET
+        schema_version = excluded.schema_version,
+        last_sequence = excluded.last_sequence
+      WHERE excluded.last_sequence > code_thread_activity_projection.last_sequence
+    `)
+    .run(threadId, CODE_PROJECTION_SCHEMA_VERSION, globalSequence);
 }
 
 function upsertFollowUp(
@@ -426,8 +460,14 @@ function upsertRuntimeWork(
       INSERT INTO code_runtime_projection (
         runtime_work_id, thread_id, work_kind, state, evidence_content_id,
         digest, byte_length, schema_version, work_json, aggregate_version,
-        updated_at, last_sequence
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        updated_at, last_sequence, first_sequence
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      -- \`first_sequence\` is deliberately absent from the update list. It keeps
+      -- the journal position where this work first appeared, which is the only
+      -- durable chronology a work record has: \`updated_at\` moves with the work
+      -- and \`last_sequence\` moves with the latest event, so a restart appending
+      -- to an older record would otherwise push it past work that finished
+      -- earlier.
       ON CONFLICT (runtime_work_id) DO UPDATE SET
         thread_id = excluded.thread_id,
         work_kind = excluded.work_kind,
@@ -454,6 +494,7 @@ function upsertRuntimeWork(
       JSON.stringify(work),
       event.aggregateVersion,
       work.updatedAt,
+      event.globalSequence,
       event.globalSequence,
     );
 }
@@ -489,6 +530,27 @@ export function readCodeThreads(connection: SqliteConnection): ReadonlyArray<Cod
       .prepare("SELECT * FROM code_thread_projection ORDER BY updated_at DESC, thread_id ASC")
       .all() as ReadonlyArray<CodeThreadProjectionRow>
   ).map(decodeThreadRow);
+}
+
+/**
+ * Every thread that has journaled operation activity, with the global sequence
+ * of its latest operation event. Threads that have never run one are absent, so
+ * a caller can tell "nothing has happened" from "sequence zero".
+ */
+export function readCodeThreadActivity(
+  connection: SqliteConnection,
+): ReadonlyArray<CodeThreadActivity> {
+  return (
+    connection
+      .prepare("SELECT * FROM code_thread_activity_projection ORDER BY thread_id ASC")
+      .all() as ReadonlyArray<CodeThreadActivityProjectionRow>
+  ).map((row) => {
+    assertCodeProjectionSchema(row.schema_version);
+    return decodeCodeThreadActivity({
+      threadId: row.thread_id,
+      lastSequence: row.last_sequence,
+    });
+  });
 }
 
 export function readCodeCheckout(
@@ -552,15 +614,42 @@ export function readCodeRuntimeWork(
   return row === undefined ? undefined : decodeRuntimeRow(row);
 }
 
+/**
+ * A projected runtime work record with the chronology callers need to tell an
+ * older record from a newer one.
+ *
+ * `firstSequence` is the journal position of the event that first projected the
+ * work. It is assigned once and never rewritten, so it orders records by when
+ * the work started rather than by when it was last touched. Neither
+ * `work.updatedAt` nor the row's `last_sequence` can do that: reconciliation
+ * appends to an old record after newer work has already finished.
+ */
+export interface ProjectedCodeRuntimeWork {
+  readonly work: CodeRuntimeWork;
+  readonly firstSequence: number;
+}
+
+/**
+ * Every runtime work record for a thread, oldest first.
+ *
+ * Rows projected before `first_sequence` existed fall back to `last_sequence`,
+ * the closest journal position those rows still carry.
+ */
 export function readCodeRuntimeWorks(
   connection: SqliteConnection,
   threadId: CodeThreadId,
-): ReadonlyArray<CodeRuntimeWork> {
+): ReadonlyArray<ProjectedCodeRuntimeWork> {
   return (
     connection
-      .prepare("SELECT * FROM code_runtime_projection WHERE thread_id = ? ORDER BY runtime_work_id")
+      .prepare(
+        `SELECT * FROM code_runtime_projection WHERE thread_id = ?
+         ORDER BY COALESCE(first_sequence, last_sequence) ASC, runtime_work_id ASC`,
+      )
       .all(threadId) as ReadonlyArray<CodeRuntimeProjectionRow>
-  ).map(decodeRuntimeRow);
+  ).map((row) => ({
+    work: decodeRuntimeRow(row),
+    firstSequence: row.first_sequence ?? row.last_sequence,
+  }));
 }
 
 export function readCodeReviewFinding(

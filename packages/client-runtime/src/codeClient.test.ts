@@ -79,6 +79,7 @@ describe("code client", () => {
               observedAt: now,
             },
           ],
+          activity: [{ threadId: ids.thread, lastSequence: 7 }],
         }),
       )
       .mockResolvedValueOnce(
@@ -91,7 +92,10 @@ describe("code client", () => {
       );
     const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
 
-    await expect(client.bootstrap()).resolves.toMatchObject({ threads: [thread] });
+    await expect(client.bootstrap()).resolves.toMatchObject({
+      threads: [thread],
+      activity: [{ threadId: ids.thread, lastSequence: 7 }],
+    });
     await expect(
       client.execute({
         kind: "change-code-thread-lifecycle",

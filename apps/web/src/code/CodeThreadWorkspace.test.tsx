@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { StrictMode } from "react";
+import { StrictMode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
@@ -102,7 +102,7 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Files restored to this point.")).toBeVisible();
   });
 
-  it("keeps the checkpoint a restore replaced so the overwrite can be undone", async () => {
+  it("keeps the checkpoint a restore replaced reachable after a tab switch unmounts this surface", async () => {
     const user = userEvent.setup();
     const undo = { worktree: "e".repeat(40), index: "f".repeat(40) };
     const executeOperation = vi.fn(async () => ({
@@ -113,22 +113,36 @@ describe("CodeThreadWorkspace", () => {
     const conversation = [
       { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
     ];
-    render(
-      <CodeThreadWorkspace
-        controller={controller({ conversation } as never)}
-        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
-        operationClient={{ executeOperation } as never}
-        requestApproval={vi.fn(async () => "40000000-0000-4000-8000-000000000001" as never)}
-        threadId={threadId}
-      />,
-    );
+    // The undo point belongs to the controller, which outlives this surface;
+    // opening another tab unmounts the surface exactly like this.
+    function Harness(props: { readonly open: boolean }) {
+      const [restoreUndo, noteRestoreUndo] = useState<unknown>();
+      if (!props.open) return <p>Another tab</p>;
+      return (
+        <CodeThreadWorkspace
+          controller={controller({ conversation, restoreUndo, noteRestoreUndo } as never)}
+          nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+          operationClient={{ executeOperation } as never}
+          requestApproval={vi.fn(async () => "40000000-0000-4000-8000-000000000001" as never)}
+          threadId={threadId}
+        />
+      );
+    }
+    const { rerender } = render(<Harness open />);
 
     await user.click(screen.getByRole("button", { name: "Restore files to this point" }));
     await user.click(screen.getByRole("button", { name: "Restore files" }));
     await waitFor(() => expect(screen.getByText("Files restored to this point.")).toBeVisible());
-
     // The host returned what it replaced, so the destructive overwrite is
     // reachable rather than stranded.
+    expect(await screen.findByRole("button", { name: "Undo restore" })).toBeVisible();
+
+    rerender(<Harness open={false} />);
+    expect(screen.queryByRole("button", { name: "Undo restore" })).toBeNull();
+    rerender(<Harness open />);
+
+    // The sentence the restore printed went with the surface that printed it.
+    // The way back did not, so returning to the thread still finds it.
     await user.click(await screen.findByRole("button", { name: "Undo restore" }));
     await waitFor(() =>
       expect(executeOperation).toHaveBeenLastCalledWith(
@@ -1278,6 +1292,7 @@ function controller(
     queueFollowUp: vi.fn(),
     queuedFollowUps: [],
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
+    noteRestoreUndo: vi.fn(),
     turnActivity: new Map(),
     sendFollowUp: vi.fn(async () => true),
     setPendingDraft: vi.fn(),

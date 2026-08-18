@@ -12,7 +12,7 @@ import type {
 import { decodeProjectId } from "@octant/contracts/projects";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useCodeController } from "./useCodeController";
+import { createCodeReadCursorStore, useCodeController } from "./useCodeController";
 
 const now = "2026-07-21T12:00:00.000Z";
 const ids = {
@@ -378,7 +378,9 @@ describe("useCodeController", () => {
         title: "Controller foundation",
       }),
     ]);
-    expect(client.bootstrap).toHaveBeenCalledOnce();
+    // One read for navigation, and one that records the activity activating
+    // the thread has just put on screen. Nothing else fetches.
+    await waitFor(() => expect(client.bootstrap).toHaveBeenCalledTimes(2));
     expect(client.thread).toHaveBeenCalledWith(ids.thread);
     expect(client.thread).toHaveBeenCalledTimes(1);
     expect(client.subscribe).toHaveBeenCalledWith(ids.thread, 1, expect.any(AbortSignal));
@@ -1375,6 +1377,159 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.navigation[0]?.followUp).toBe(true));
   });
 
+  it("marks a thread unread when a background turn advances its activity sequence", async () => {
+    // A provider turn is journaled on the `code-operation` aggregate, so the
+    // thread's own version is identical before and after it runs. Only the
+    // activity sequence moves, and comparing the version instead is exactly the
+    // bug: the thread stays read forever.
+    const readCursorStore = createCodeReadCursorStore();
+    let activitySequence = 4;
+    const client = fakeClient({ bootstrap: vi.fn(async () => bootstrap(1, activitySequence)) });
+
+    // The user opens the thread and reads it.
+    const opened = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, readCursorStore }),
+    );
+    await waitFor(() => expect(opened.result.current.navigation[0]?.unread).toBe(false));
+    opened.unmount();
+
+    // A turn runs to completion while the thread is not on screen. Same
+    // version, higher activity sequence.
+    activitySequence = 9;
+    const closed = renderHook(() => useCodeController({ client, readCursorStore }));
+
+    await waitFor(() => expect(closed.result.current.navigation[0]?.unread).toBe(true));
+    expect(closed.result.current.navigation[0]?.threadId).toBe(ids.thread);
+  });
+
+  it("keeps background activity unread until the active thread's own evidence renders", async () => {
+    // The navigation refresh reports activity for every thread, including the
+    // one on screen whose snapshot has not arrived yet. A read cursor only
+    // moves forward, so marking there spends the unread mark on a turn the
+    // transcript never showed.
+    const readCursorStore = createCodeReadCursorStore();
+    const snapshot = deferred<CodeThreadView>();
+    const bootstrapRead = vi.fn(async () => bootstrap(1, 9));
+    const client = fakeClient({
+      bootstrap: bootstrapRead,
+      thread: vi.fn(() => snapshot.promise),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 10,
+        readCursorStore,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    // Several refreshes report the background turn while the thread's own view
+    // is still outstanding.
+    await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(2));
+    expect(result.current.activeView).toBeUndefined();
+    expect(result.current.navigation[0]?.unread).toBe(true);
+
+    snapshot.resolve(view(1));
+
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
+    unmount();
+  });
+
+  it("keeps a turn that finished on screen read when the user leaves before the next refresh", async () => {
+    const readCursorStore = createCodeReadCursorStore();
+    const promptId = "60000000-0000-4000-8000-000000000040";
+    const operationId = "70000000-0000-4000-8000-000000000040";
+    let activitySequence = 4;
+    let status: "incomplete" | "completed" = "incomplete";
+    const bootstrapRead = vi.fn(async () => bootstrap(1, activitySequence));
+    const conversation = vi.fn(async () => ({
+      version: 2 as const,
+      threadId: ids.thread,
+      turns: [
+        {
+          operationId,
+          providerInstanceId: ids.provider,
+          modelId: "model-a",
+          sessionId: "80000000-0000-4000-8000-000000000040",
+          prompt: { contentId: promptId, digest: "a".repeat(64), byteLength: 20 },
+          assistant: [],
+          status,
+          startedAt: now,
+          updatedAt: now,
+        },
+      ],
+      nextCursor: 1,
+      hasMore: false,
+    }));
+    const finish = deferred<void>();
+    async function* operationFrames(signal: AbortSignal) {
+      await finish.promise;
+      // The host journals the finished turn before any client is told about it.
+      activitySequence = 9;
+      status = "completed";
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 2,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      } as never;
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+    }
+    const client = fakeClient({
+      bootstrap: bootstrapRead,
+      conversation: conversation as never,
+      operationContent: vi.fn(async () => new TextEncoder().encode("Finish this turn")),
+      subscribeOperation: vi.fn((_threadId, _operationId, _cursor, signal) =>
+        operationFrames(signal),
+      ),
+    });
+    const { result, rerender, unmount } = renderHook(
+      ({ activeThreadId, navigationRefreshMs }) =>
+        useCodeController({
+          ...(activeThreadId === undefined ? {} : { activeThreadId }),
+          client,
+          navigationRefreshMs,
+          readCursorStore,
+          reconnectDelayMs: 60_000,
+        }),
+      {
+        initialProps: {
+          activeThreadId: ids.thread as CodeThreadId | undefined,
+          // No timed refresh while the thread is open, so the finished turn's
+          // sequence reaches the list only after the user has moved on.
+          navigationRefreshMs: 60_000,
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.turnStatus).toBe("running"));
+
+    finish.resolve();
+    await waitFor(() => expect(result.current.turnStatus).toBe("idle"));
+
+    // The user leaves for another thread, and the refresh that follows is the
+    // first report of the higher sequence.
+    rerender({ activeThreadId: undefined, navigationRefreshMs: 10 });
+    const refreshesBefore = bootstrapRead.mock.calls.length;
+    await waitFor(() =>
+      expect(bootstrapRead.mock.calls.length).toBeGreaterThan(refreshesBefore + 1),
+    );
+
+    expect(result.current.navigation[0]?.unread).toBe(false);
+    unmount();
+  });
+
+  it("leaves a thread with no journaled activity read", async () => {
+    const client = fakeClient({ bootstrap: vi.fn(async () => bootstrap(1, 0)) });
+    const { result } = renderHook(() => useCodeController({ client }));
+
+    await waitFor(() => expect(result.current.navigation).toHaveLength(1));
+    expect(result.current.navigation[0]?.unread).toBe(false);
+  });
+
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
     const executeFollowUp = vi.fn(async () => ({ kind: "code-follow-up-updated" }) as never);
     const client = fakeClient({
@@ -1498,7 +1653,7 @@ function openFollowUp() {
   };
 }
 
-function bootstrap(version = 1): CodeBootstrap {
+function bootstrap(version = 1, activitySequence = 0): CodeBootstrap {
   return {
     checkouts: [checkout()],
     settings: {
@@ -1508,6 +1663,10 @@ function bootstrap(version = 1): CodeBootstrap {
       version: 1 as never,
     },
     threads: [thread(version)],
+    activity:
+      activitySequence === 0
+        ? []
+        : [{ threadId: ids.thread as never, lastSequence: activitySequence as never }],
   };
 }
 

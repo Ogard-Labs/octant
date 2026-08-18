@@ -77,6 +77,10 @@ for line in sys.stdin:
                 "title": "Fixture Agent",
                 "version": "0.0.0-dev",
             },
+            # Harmless for every other profile; required so the Grok profile's
+            # `verifyAgentInfo` identity check (which ignores `agentInfo` the
+            # way the real `grok` CLI does) still passes against this fixture.
+            "_meta": {"grokShell": True},
         },
     }
     sys.stdout.write(json.dumps(response, separators=(",", ":")) + "\n")

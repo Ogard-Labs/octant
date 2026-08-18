@@ -10,6 +10,9 @@ import type {
   CodexProviderInstance,
   DevinProviderConfiguration,
   DevinProviderInstance,
+  GrokAuthentication,
+  GrokProviderConfiguration,
+  GrokProviderInstance,
   KimiCodeProviderInstance,
   KiloProviderConfiguration,
   KiloProviderInstance,
@@ -274,6 +277,12 @@ export interface MistralVibeConfigurationInput {
   readonly authentication: MistralVibeAuthentication;
 }
 
+export interface GrokConfigurationInput {
+  readonly kind: GrokProviderConfiguration["kind"];
+  readonly binaryPath: string;
+  readonly authentication: GrokAuthentication;
+}
+
 export interface DevinConfigurationInput {
   readonly kind: DevinProviderConfiguration["kind"];
   readonly binaryPath: string;
@@ -389,6 +398,22 @@ function normalizeMistralVibeConfiguration(
   };
 }
 
+function normalizeGrokConfiguration(
+  configuration: GrokConfigurationInput,
+): GrokProviderConfiguration {
+  if (
+    configuration.authentication !== "subscription" &&
+    configuration.authentication !== "api-key"
+  ) {
+    reject("invalid-authentication", "Grok Build authentication must be subscription or api-key.");
+  }
+  return {
+    kind: "grok-acp",
+    binaryPath: normalizeBinaryPath(configuration.binaryPath),
+    authentication: configuration.authentication,
+  };
+}
+
 function normalizeClaudeConfiguration(
   configuration: ClaudeConfigurationInput,
 ): ClaudeProviderConfiguration {
@@ -467,6 +492,47 @@ export function changeMistralVibeConfiguration(
   return {
     ...provider,
     configuration: normalizeMistralVibeConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
+interface CreateGrokProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: GrokConfigurationInput;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+export function createGrokProvider(input: CreateGrokProviderInput): GrokProviderInstance {
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: "grok",
+    configuration: normalizeGrokConfiguration(input.configuration),
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeGrokConfiguration(
+  provider: GrokProviderInstance,
+  configuration: GrokConfigurationInput,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): GrokProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
+  }
+  return {
+    ...provider,
+    configuration: normalizeGrokConfiguration(configuration),
     version: nextVersion(provider.version),
     updatedAt,
   };

@@ -14,6 +14,7 @@ import type {
   CodeRuntimeWork,
   CodeRuntimeWorkId,
   CodeThread,
+  CodeThreadActivity,
   CodeThreadId,
   CodeThreadView,
   MemoryEntry,
@@ -97,9 +98,11 @@ import {
   readCodeReviewFindings,
   readCodeSettings,
   readCodeThread,
+  readCodeThreadActivity,
   readCodeThreads,
   readCodeThreadView,
   reconcileCodeRestart,
+  type ProjectedCodeRuntimeWork,
 } from "./codeProjection";
 import { databaseStatus, type DatabaseStatus } from "./recovery";
 import {
@@ -180,13 +183,16 @@ export interface PersistenceService {
   readonly readThemeSettings: () => ProjectedThemeSettings | undefined;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
   readonly readCodeThreads: () => ReadonlyArray<CodeThread>;
+  readonly readCodeThreadActivity: () => ReadonlyArray<CodeThreadActivity>;
   readonly readCodeCheckout: (checkoutId: CodeCheckoutId) => CodeCheckoutIdentity | undefined;
   readonly readCodeCheckoutAggregateVersion: (checkoutId: CodeCheckoutId) => number;
   readonly readCodeCheckouts: () => ReadonlyArray<CodeCheckoutIdentity>;
   readonly readCodeFileReference: (fileId: CodeFileId) => CodeFileReference | undefined;
   readonly readCodeFileReferences: (threadId: CodeThreadId) => ReadonlyArray<CodeFileReference>;
   readonly readCodeRuntimeWork: (workId: CodeRuntimeWorkId) => CodeRuntimeWork | undefined;
-  readonly readCodeRuntimeWorks: (threadId: CodeThreadId) => ReadonlyArray<CodeRuntimeWork>;
+  readonly readCodeRuntimeWorks: (
+    threadId: CodeThreadId,
+  ) => ReadonlyArray<ProjectedCodeRuntimeWork>;
   readonly readCodeReviewFinding: (findingId: CodeReviewFindingId) => CodeReviewFinding | undefined;
   readonly readCodeReviewFindings: (threadId: CodeThreadId) => ReadonlyArray<CodeReviewFinding>;
   readonly readCodeThreadView: (threadId: CodeThreadId) => CodeThreadView | undefined;
@@ -346,6 +352,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readThemeSettings: () => readThemeSettings(connection),
       readCodeThread: (threadId) => readCodeThread(connection, threadId),
       readCodeThreads: () => readCodeThreads(connection),
+      readCodeThreadActivity: () => readCodeThreadActivity(connection),
       readCodeCheckout: (checkoutId) => readCodeCheckout(connection, checkoutId),
       readCodeCheckoutAggregateVersion: (checkoutId) =>
         readCodeCheckoutAggregateVersion(connection, checkoutId),

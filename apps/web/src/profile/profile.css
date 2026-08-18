@@ -1,0 +1,154 @@
+/*
+ * User profile surfaces.
+ *
+ * Accents are named in the contract, not stored as hex, so the pairs below are
+ * the only place a colour is decided. Each pair carries its own foreground so
+ * initials stay legible on the accent in every theme, and the whole set is
+ * reinforcement: an avatar never carries information the name beside it does
+ * not already say.
+ */
+
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  user-select: none;
+  background: var(--octant-avatar-bg, color-mix(in srgb, CanvasText 18%, Canvas));
+  color: var(--octant-avatar-fg, Canvas);
+}
+
+.user-avatar--image {
+  object-fit: cover;
+  background: color-mix(in srgb, CanvasText 10%, Canvas);
+}
+
+.user-avatar[data-accent="slate"] {
+  --octant-avatar-bg: #55606f;
+  --octant-avatar-fg: #f7f8fa;
+}
+.user-avatar[data-accent="indigo"] {
+  --octant-avatar-bg: #4f56c9;
+  --octant-avatar-fg: #f6f7ff;
+}
+.user-avatar[data-accent="violet"] {
+  --octant-avatar-bg: #7b45c4;
+  --octant-avatar-fg: #f9f5ff;
+}
+.user-avatar[data-accent="teal"] {
+  --octant-avatar-bg: #12706c;
+  --octant-avatar-fg: #f0fdfa;
+}
+.user-avatar[data-accent="green"] {
+  --octant-avatar-bg: #2c6b3c;
+  --octant-avatar-fg: #f2fbf4;
+}
+.user-avatar[data-accent="amber"] {
+  --octant-avatar-bg: #8a5a08;
+  --octant-avatar-fg: #fffaf0;
+}
+.user-avatar[data-accent="rose"] {
+  --octant-avatar-bg: #a83250;
+  --octant-avatar-fg: #fff5f7;
+}
+.user-avatar[data-accent="cyan"] {
+  --octant-avatar-bg: #1e5f86;
+  --octant-avatar-fg: #f0faff;
+}
+
+.profile-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.profile-editor__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.profile-editor__identity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.profile-editor__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+/* The colour group is a fieldset for grouping, not for the browser's frame. */
+fieldset.profile-editor__field {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+fieldset.profile-editor__field > legend {
+  padding: 0;
+  margin-block-end: 0.3rem;
+}
+
+.profile-editor__label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.profile-editor__hint,
+.profile-editor__notice {
+  margin: 0;
+  font-size: 0.8125rem;
+  opacity: 0.85;
+}
+
+.profile-editor__notice[data-tone="attention"] {
+  opacity: 1;
+  padding: 0.45rem 0.6rem;
+  border: 1px dashed var(--octant-border, color-mix(in srgb, CanvasText 25%, transparent));
+  border-radius: var(--octant-radius-panel, 0.625rem);
+}
+
+.profile-editor__accents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.profile-editor__accent {
+  inline-size: 1.6rem;
+  block-size: 1.6rem;
+  padding: 0;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  background: var(--octant-avatar-bg);
+}
+
+/*
+ * Selection is carried by a ring *and* the checked radio state in the markup,
+ * so the chosen accent is not communicated by colour alone.
+ */
+.profile-editor__accent[aria-checked="true"] {
+  border-color: CanvasText;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+
+.profile-editor__accent:focus-visible {
+  outline: 2px solid Highlight;
+  outline-offset: 2px;
+}

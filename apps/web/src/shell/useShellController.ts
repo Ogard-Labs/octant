@@ -398,38 +398,51 @@ export function useShellController(options: ShellControllerOptions) {
     };
   }, [load]);
 
-  function enqueueMutation(mutation: SemanticMutation): Promise<void> {
+  /**
+   * Resolves to whether the mutation actually committed.
+   *
+   * A conflict is recovered by reloading, which leaves the status `ready`
+   * again, so a caller that only awaits this cannot tell a write that landed
+   * from one the host discarded. Reporting the outcome lets a caller whose
+   * next step depends on this write — first run recording its durable
+   * outcome — stop instead of building on a state the host never accepted.
+   */
+  function enqueueMutation(mutation: SemanticMutation): Promise<boolean> {
     const queued = mutationQueue.current.then(async () => {
       const pendingLoad = activeLoad.current;
       if (pendingLoad !== undefined) await pendingLoad;
-      if (!mounted.current) return;
+      if (!mounted.current) return false;
       const latest = committedShell.current;
-      if (latest === undefined) return;
+      if (latest === undefined) return false;
       setStatus("ready");
       setErrorMessage(undefined);
       setCrossContextOffer(undefined);
       try {
         if (mutation.kind === "settings") {
-          await commitSettings(latest, mutation.patch);
-        } else if (mutation.kind === "presentation") {
-          await commitPresentation(latest, mutation.presentation);
-        } else {
-          const workspaceMutation = createWorkspaceMutation(latest, mutation.intent);
-          noteTabActivation(tabActivation, workspaceMutation.operation);
-          await commitWorkspaceOperation(
-            latest,
-            workspaceMutation.operation,
-            workspaceMutation.message,
-            workspaceMutation.newWindowTarget,
-          );
+          return await commitSettings(latest, mutation.patch);
         }
+        if (mutation.kind === "presentation") {
+          return await commitPresentation(latest, mutation.presentation);
+        }
+        const workspaceMutation = createWorkspaceMutation(latest, mutation.intent);
+        noteTabActivation(tabActivation, workspaceMutation.operation);
+        return await commitWorkspaceOperation(
+          latest,
+          workspaceMutation.operation,
+          workspaceMutation.message,
+          workspaceMutation.newWindowTarget,
+        );
       } catch (error) {
-        if (!mounted.current) return;
+        if (!mounted.current) return false;
         setAuthoritative(committedShell.current);
         await recoverCommandFailure(error);
+        return false;
       }
     });
-    mutationQueue.current = queued.catch(() => undefined);
+    mutationQueue.current = queued.then(
+      () => undefined,
+      () => undefined,
+    );
     return queued;
   }
 
@@ -438,7 +451,7 @@ export function useShellController(options: ShellControllerOptions) {
     operation: WorkspaceOperation,
     message: string,
     requestedTarget?: ProjectWindowTarget,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const generation = ++requestGeneration.current;
     const preview = applyWorkspaceOperation(previous.workspace, operation);
     setAuthoritative({ ...previous, workspace: preview });
@@ -450,7 +463,7 @@ export function useShellController(options: ShellControllerOptions) {
         expectedVersion: previous.workspaceVersion,
         operation,
       });
-      if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
+      if (!isCurrentRequest(generation, requestGeneration, mounted)) return false;
       if (result.kind !== "workspace-replaced") throw invalidResult();
       announce(message);
       const next = {
@@ -463,9 +476,11 @@ export function useShellController(options: ShellControllerOptions) {
       setStatus("ready");
       setErrorMessage(undefined);
       setCrossContextOffer(undefined);
+      return true;
     } catch (error) {
-      if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
+      if (!isCurrentRequest(generation, requestGeneration, mounted)) return false;
       await recoverCommandFailure(error, operation, requestedTarget);
+      return false;
     }
   }
 
@@ -748,8 +763,9 @@ export function useShellController(options: ShellControllerOptions) {
     setCrossContextOffer(undefined);
   }
 
-  async function updateSettings(patch: Partial<ShellSettings>): Promise<void> {
-    await enqueueMutation({ kind: "settings", patch });
+  /** Resolves to whether the host accepted the patch. */
+  async function updateSettings(patch: Partial<ShellSettings>): Promise<boolean> {
+    return await enqueueMutation({ kind: "settings", patch });
   }
 
   async function setEnvironmentPresentation(
@@ -761,7 +777,7 @@ export function useShellController(options: ShellControllerOptions) {
   async function commitPresentation(
     previous: AuthoritativeShell,
     presentation: EnvironmentPresentationState,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const generation = ++requestGeneration.current;
     setAuthoritative({ ...previous, environmentPresentation: presentation });
     try {
@@ -771,7 +787,7 @@ export function useShellController(options: ShellControllerOptions) {
         expectedVersion: previous.presentationVersion,
         presentation,
       });
-      if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
+      if (!isCurrentRequest(generation, requestGeneration, mounted)) return false;
       if (result.kind !== "environment-presentation-replaced") throw invalidResult();
       const next: AuthoritativeShell = {
         ...previous,
@@ -784,16 +800,18 @@ export function useShellController(options: ShellControllerOptions) {
       setErrorMessage(undefined);
       setCrossContextOffer(undefined);
       announce("Environment presentation saved.");
+      return true;
     } catch (error) {
-      if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
+      if (!isCurrentRequest(generation, requestGeneration, mounted)) return false;
       await recoverCommandFailure(error);
+      return false;
     }
   }
 
   async function commitSettings(
     previous: AuthoritativeShell,
     patch: Partial<ShellSettings>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const generation = ++requestGeneration.current;
     const settings = { ...previous.settings, ...patch };
     const reconciled = reconcileWorkspaceWithSettings(previous.workspace, settings);
@@ -816,7 +834,7 @@ export function useShellController(options: ShellControllerOptions) {
           expectedVersion: previous.workspaceVersion,
           operation: { kind: "set-active-mode", mode: reconciled.activeMode },
         });
-        if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
+        if (!isCurrentRequest(generation, requestGeneration, mounted)) return false;
         if (workspaceResult.kind !== "workspace-replaced") throw invalidResult();
         next = {
           ...next,
@@ -832,7 +850,7 @@ export function useShellController(options: ShellControllerOptions) {
         expectedVersion: previous.settingsVersion,
         settings,
       });
-      if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
+      if (!isCurrentRequest(generation, requestGeneration, mounted)) return false;
       if (result.kind !== "settings-replaced") throw invalidResult();
       const mergedPresentation = normalizeEnvironmentPresentationState({
         byTab: previous.environmentPresentation.byTab,
@@ -850,9 +868,11 @@ export function useShellController(options: ShellControllerOptions) {
       setErrorMessage(undefined);
       setCrossContextOffer(undefined);
       announce("Shell settings saved.");
+      return true;
     } catch (error) {
-      if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
+      if (!isCurrentRequest(generation, requestGeneration, mounted)) return false;
       await recoverCommandFailure(error);
+      return false;
     }
   }
 

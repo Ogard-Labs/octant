@@ -615,6 +615,7 @@ describe("hasWorkToolAuthority", () => {
     expect(hasWorkToolAuthority("claude", runtimeModel)).toBe(true);
     expect(hasWorkToolAuthority("opencode", runtimeModel)).toBe(true);
     expect(hasWorkToolAuthority("kimi-code", runtimeModel)).toBe(true);
+    expect(hasWorkToolAuthority("grok", runtimeModel)).toBe(true);
   });
 
   it("rejects probe-only Oh My Pi models without an executable turn runtime", () => {

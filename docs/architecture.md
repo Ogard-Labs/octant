@@ -187,7 +187,7 @@ modelId }`, and the model picker is provider-first. Discovery can find
 - **Driver families.** Direct HTTP drivers (OpenAI-compatible, Anthropic-
   compatible, Azure AI Foundry API-key, Ollama), SDK/RPC drivers (Claude Agent
   SDK, Codex app-server, OpenCode, Pi and Oh My Pi), and ACP-based agent CLIs
-  (Kilo Code, Devin, Mistral Vibe, Kimi Code). The ACP drivers share one
+  (Kilo Code, Devin, Mistral Vibe, Kimi Code, Grok Build). The ACP drivers share one
   generic ACP client and protocol layer; the remaining per-vendor ACP wrappers
   are being collapsed into that single stack. Provider-specific wire payloads
   never leave the adapter — the rest of the system sees only normalized runtime
@@ -302,7 +302,7 @@ nothing first-party.
 ```sh
 bun install --frozen-lockfile
 bun run dev        # Vite renderer + Electron with hot reload; server spawned from source
-bun run verify     # wiring:check, fmt:check, lint, typecheck, test, build
+bun run verify     # wiring:check, decisions:check, fmt:check, lint, typecheck, test, build
 ```
 
 - `bun run dev` starts Vite for `apps/web` and launches Electron against it.

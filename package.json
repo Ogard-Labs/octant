@@ -35,6 +35,7 @@
     "build": "turbo run build",
     "dev": "bun scripts/dev-desktop.ts",
     "wiring:check": "bun test scripts/check-module-wiring.test.ts && bun scripts/check-module-wiring.ts",
+    "decisions:check": "bun test scripts/check-decisions.test.ts && bun scripts/check-decisions.ts",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "lint": "oxlint --report-unused-disable-directives",
@@ -50,7 +51,7 @@
     "smoke:packaged-opencode": "bun scripts/smoke-packaged-opencode.ts",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "verify": "bun run wiring:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build"
+    "verify": "bun run wiring:check && bun run decisions:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build"
   },
   "devDependencies": {
     "@types/node": "catalog:",

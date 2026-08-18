@@ -62,6 +62,7 @@ const codeBootstrap = decodeCodeBootstrap({
   },
   threads: [],
   checkouts: [],
+  activity: [],
 });
 
 const codeBoard = decodeCodeBoardView({

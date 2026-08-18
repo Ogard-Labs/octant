@@ -37,6 +37,18 @@ export interface CodeThreadProjectionRow {
   readonly last_sequence: number;
 }
 
+/**
+ * How far a thread's journaled operation activity has advanced. Kept apart from
+ * `code_thread_projection` because it is driven by a different aggregate: a
+ * provider turn is journaled on `code-operation`, so it never touches the
+ * thread row's `aggregate_version` or `updated_at`.
+ */
+export interface CodeThreadActivityProjectionRow {
+  readonly thread_id: string;
+  readonly schema_version: number;
+  readonly last_sequence: number;
+}
+
 export interface CodeCheckoutProjectionRow {
   readonly checkout_id: string;
   readonly repository_id: string;
@@ -76,6 +88,12 @@ export interface CodeRuntimeProjectionRow {
   readonly aggregate_version: number;
   readonly updated_at: string;
   readonly last_sequence: number;
+  /**
+   * Journal position of the event that first projected this work. Written once
+   * at insert and never rewritten, so it is the record's durable chronology.
+   * Null only for rows projected before the column existed.
+   */
+  readonly first_sequence: number | null;
 }
 
 export interface CodeReviewProjectionRow {

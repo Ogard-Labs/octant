@@ -121,9 +121,11 @@ export interface CodeThreadNavigationItem {
    */
   readonly followUp?: boolean;
   /**
-   * Whether the thread advanced since the user last had it open. Session-scoped
-   * like Chat's: an unread mark is about this sitting, and carrying it across
-   * restarts would resurface work the user already dealt with.
+   * Whether the thread's journaled activity advanced since the user last had it
+   * open — including a provider turn that ran entirely in the background.
+   * Session-scoped like Chat's: an unread mark is about this sitting, and
+   * carrying it across restarts would resurface work the user already dealt
+   * with.
    */
   readonly unread?: boolean;
   /** Whether the user pinned this thread to the top of the list. */
@@ -131,7 +133,11 @@ export interface CodeThreadNavigationItem {
 }
 
 /**
- * Per-thread record of the version the user has actually seen.
+ * Per-thread record of the activity sequence the user has actually seen.
+ *
+ * The sequence is the host's, from the bootstrap: a thread's own version cannot
+ * stand in for it, because a provider turn is journaled on a different
+ * aggregate and moves neither the version nor `updatedAt`.
  *
  * Deliberately in memory and deliberately shaped like Chat's: unread is a
  * property of this sitting at the app, so a durable one would tell the user
@@ -139,7 +145,7 @@ export interface CodeThreadNavigationItem {
  */
 export interface CodeReadCursorStore {
   readonly getSnapshot: () => ReadonlyMap<string, number>;
-  readonly mark: (threadId: CodeThreadId, version: number) => void;
+  readonly mark: (threadId: CodeThreadId, sequence: number) => void;
   readonly subscribe: (listener: () => void) => () => void;
 }
 
@@ -148,11 +154,11 @@ export function createCodeReadCursorStore(): CodeReadCursorStore {
   const listeners = new Set<() => void>();
   return {
     getSnapshot: () => snapshot,
-    mark: (threadId, version) => {
+    mark: (threadId, sequence) => {
       const key = String(threadId);
-      if (version <= (snapshot.get(key) ?? 0)) return;
+      if (sequence <= (snapshot.get(key) ?? 0)) return;
       const next = new Map(snapshot);
-      next.set(key, version);
+      next.set(key, sequence);
       snapshot = next;
       for (const listener of listeners) listener();
     },
@@ -282,6 +288,19 @@ export function useCodeController(options: CodeControllerOptions) {
   // is left. Both are the provider's own figures; nothing here is derived from
   // a price list or a limit Octant assumed.
   const [threadUsage, setThreadUsage] = useState<CodeThreadUsage>(EMPTY_THREAD_USAGE);
+  // The way back from this thread's last restore, as the host recorded it. It
+  // lives here rather than in the surface that ran the restore because that
+  // surface is unmounted the moment the user opens another tab, and the only
+  // copy of the state the restore overwrote would go with it.
+  const [restoreUndo, setRestoreUndo] = useState<CodeCheckpoint>();
+  /**
+   * Carry what a restore just replaced, so the offer appears without waiting
+   * for the thread to be reopened. The host has already recorded it; this only
+   * keeps the renderer level with the journal it will read back next time.
+   */
+  const noteRestoreUndo = useCallback((checkpoint: CodeCheckpoint | undefined) => {
+    setRestoreUndo(checkpoint);
+  }, []);
   const usageByOperation = useRef(new Map<string, CodeTurnUsage>());
   const noteUsage = useCallback((operationId: CodeOperationId, event: CodeOperationEvent) => {
     if (event.kind === "usage") {
@@ -426,11 +445,64 @@ export function useCodeController(options: CodeControllerOptions) {
     [clearFailure, client, fail],
   );
 
+  // How far each thread's journaled activity had reached the last time the host
+  // said so, readable from the stream callbacks that decide a thread has been
+  // seen. Those run outside render, so the derived map below is mirrored here.
+  const observedActivity = useRef<ReadonlyMap<string, number>>(new Map());
+
+  /**
+   * Record what the host has already reported for a thread as seen.
+   *
+   * Only call this once the thread's own evidence has reached the transcript.
+   * The sequence is the host's, and a read cursor is monotonic, so marking one
+   * that never rendered spends the only chance the activity had to become an
+   * unread mark.
+   */
+  const markRenderedActivity = useCallback(
+    (threadId: CodeThreadId) => {
+      readCursorStore.mark(threadId, observedActivity.current.get(String(threadId)) ?? 0);
+    },
+    [readCursorStore],
+  );
+
+  const applyNavigationRefresh = useCallback((next: CodeBootstrap) => {
+    setBootstrap((current) =>
+      current === undefined ? next : { ...current, threads: next.threads, activity: next.activity },
+    );
+  }, []);
+
+  /**
+   * Read the host's own activity sequence for a thread and record it as seen.
+   *
+   * A turn that just rendered is journaled ahead of the timed navigation
+   * refresh, so the last observed sequence still describes the thread as it was
+   * before the turn ran. Recording that number would leave the turn the user
+   * watched finish looking unread the moment the next refresh reports the
+   * higher one — including after they have moved to another thread, where
+   * nothing would mark it again. Reading the host here closes that window; a
+   * refresh that fails falls back to the last sequence actually observed.
+   */
+  const recordSeenActivity = useCallback(
+    async (threadId: CodeThreadId) => {
+      try {
+        const next = await client.bootstrap();
+        if (!mounted.current) return;
+        applyNavigationRefresh(next);
+        const seen = next.activity.find(
+          (entry) => String(entry.threadId) === String(threadId),
+        )?.lastSequence;
+        readCursorStore.mark(threadId, Number(seen ?? 0));
+      } catch {
+        if (!mounted.current) return;
+        markRenderedActivity(threadId);
+      }
+    },
+    [applyNavigationRefresh, client, markRenderedActivity, readCursorStore],
+  );
+
   const installView = useCallback(
     (view: CodeThreadView) => {
       setActiveView(view);
-      // The thread is on screen, so everything it has reached is seen.
-      readCursorStore.mark(view.thread.id, Number(view.thread.version));
       setBootstrap((current) =>
         current === undefined
           ? current
@@ -443,7 +515,7 @@ export function useCodeController(options: CodeControllerOptions) {
       setStatus("ready");
       clearFailure();
     },
-    [clearFailure, readCursorStore],
+    [clearFailure],
   );
 
   const hydrateConversation = useCallback(
@@ -453,12 +525,14 @@ export function useCodeController(options: CodeControllerOptions) {
       let pageCount = 0;
       const turns: CodeConversationTurn[] = [];
       let pageLimits: ReadonlyArray<CodeProviderLimit> = [];
+      let pageRestoreUndo: CodeCheckpoint | undefined;
       for (;;) {
         const page = await client.conversation(threadId, cursor, 50);
         if (!isActive(request, threadGeneration, mounted) || page.threadId !== threadId)
           return undefined;
         turns.push(...page.turns);
         if (page.limits !== undefined) pageLimits = page.limits;
+        pageRestoreUndo = page.restoreUndo;
         nextCursor = page.nextCursor;
         if (!page.hasMore) break;
         if (page.nextCursor <= cursor || (pageCount += 1) >= 100) {
@@ -549,6 +623,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ),
       );
       setThreadUsage({ ...totalTurnUsage(usageByOperation.current), limits: pageLimits });
+      setRestoreUndo(pageRestoreUndo);
       setConversation(messages);
       if (replayedActivity.size > 0) {
         setTurnActivity((current) => new Map([...current, ...replayedActivity]));
@@ -589,6 +664,10 @@ export function useCodeController(options: CodeControllerOptions) {
       // new thread would keep showing the previous thread's totals and limits.
       usageByOperation.current = new Map();
       setThreadUsage(EMPTY_THREAD_USAGE);
+      // The restore point belongs to the thread being left, for the same
+      // reason: hydration may fail, and offering one thread's way back on
+      // another thread's checkout would overwrite files nobody asked about.
+      setRestoreUndo(undefined);
       try {
         const initial = await client.thread(threadId);
         if (!isActive(request, threadGeneration, mounted)) return;
@@ -597,17 +676,24 @@ export function useCodeController(options: CodeControllerOptions) {
         let conversationCursor = 0;
         let conversationIncomplete = false;
         let conversationOperationId: CodeOperationId | undefined;
+        let conversationRendered = false;
         try {
           const hydrated = await hydrateConversation(threadId, request);
           conversationIncomplete = hydrated?.incomplete === true;
           conversationOperationId = hydrated?.incompleteOperationId;
           conversationCursor = hydrated?.nextCursor ?? 0;
+          conversationRendered = true;
         } catch {
           if (!isActive(request, threadGeneration, mounted)) return;
           setConversation([]);
           setTurnError("Conversation history could not be loaded.");
         }
         if (!isActive(request, threadGeneration, mounted)) return;
+        // The thread's own state and the turns it has recorded are on screen
+        // now, so everything the host has journaled for it counts as read. A
+        // thread whose history could not be loaded shows an error instead of
+        // that work, and is left to keep its mark.
+        if (conversationRendered) void recordSeenActivity(threadId);
         let cursor = Number(initial.lastSequence);
         const controller = new AbortController();
         streamAbort.current = controller;
@@ -689,12 +775,23 @@ export function useCodeController(options: CodeControllerOptions) {
 
                   operationCursor = Number(frame.cursor);
                   received += 1;
+                  // The frame is on screen, so the activity the host had
+                  // reported by now has been read.
+                  markRenderedActivity(threadId);
                   if (terminalState !== undefined) {
                     activeTurnOperations.current.delete(String(threadId));
                     setProviderRequests([]);
                     const hydrated = await hydrateConversation(threadId, request).catch(
                       () => undefined,
                     );
+                    // The turn ended in front of the user. Recording it here,
+                    // rather than waiting for the timed refresh, is what keeps
+                    // leaving for another thread in the same moment from
+                    // raising an unread mark for the turn they just watched.
+                    // It is neither awaited nor guarded by the active thread:
+                    // the frame is already rendered, and the composer should
+                    // not wait on a read the user has no stake in.
+                    void recordSeenActivity(threadId);
                     if (!isActive(request, threadGeneration, mounted)) return;
                     if (terminalState === "completed") {
                       if (hydrated?.incomplete !== true) {
@@ -751,6 +848,10 @@ export function useCodeController(options: CodeControllerOptions) {
                 }
                 const hydrated = await hydrateConversation(threadId, request);
                 if (hydrated?.incomplete !== true) {
+                  // Same reason as the streamed terminal frame: the finished
+                  // turn is on screen now, and the timed refresh that would
+                  // otherwise report it may not run until the user has left.
+                  void recordSeenActivity(threadId);
                   setTurnError((current) =>
                     current === "Conversation history could not be refreshed."
                       ? undefined
@@ -840,6 +941,10 @@ export function useCodeController(options: CodeControllerOptions) {
                   conversationIncomplete = hydrated?.incomplete === true;
                   conversationOperationId = hydrated?.incompleteOperationId;
                   conversationCursor = hydrated?.nextCursor ?? conversationCursor;
+                  // The thread's state and its recorded turns were both
+                  // re-read into the transcript, so the activity the host had
+                  // reported by now has been read.
+                  markRenderedActivity(threadId);
                   if (conversationIncomplete) {
                     startConversationPoll();
                     if (conversationOperationId !== undefined) {
@@ -873,7 +978,9 @@ export function useCodeController(options: CodeControllerOptions) {
       fail,
       hydrateConversation,
       installView,
+      markRenderedActivity,
       reconnectDelayMs,
+      recordSeenActivity,
       refreshFollowUp,
     ],
   );
@@ -960,6 +1067,24 @@ export function useCodeController(options: CodeControllerOptions) {
   const bootstrapRef = useRef(bootstrap);
   bootstrapRef.current = bootstrap;
 
+  // How far each thread's own journaled activity has reached. A provider turn
+  // never touches the thread aggregate, so this — not `thread.version` — is the
+  // only number that moves when one runs or finishes.
+  const activityByThread = useMemo(() => {
+    const byThread = new Map<string, number>();
+    for (const entry of bootstrap?.activity ?? []) {
+      byThread.set(String(entry.threadId), Number(entry.lastSequence));
+    }
+    return byThread;
+  }, [bootstrap]);
+  // Being the thread on screen is not the same as having shown what the host
+  // journaled. A refresh reports activity for every thread, including one whose
+  // snapshot or operation stream is late or gone, and a read cursor only moves
+  // forward: marking here would spend an unread mark the user never saw. The
+  // transcript itself records what it renders, through `markRenderedActivity`
+  // and `recordSeenActivity`.
+  observedActivity.current = activityByThread;
+
   const navigation = useMemo(
     (): ReadonlyArray<CodeThreadNavigationItem> =>
       (bootstrap?.threads ?? [])
@@ -971,7 +1096,9 @@ export function useCodeController(options: CodeControllerOptions) {
           threadId: thread.id,
           title: thread.title,
           followUp: followUps.get(String(thread.id))?.followUp?.state === "open",
-          unread: Number(thread.version) > (readCursors.get(String(thread.id)) ?? 0),
+          unread:
+            (activityByThread.get(String(thread.id)) ?? 0) >
+            (readCursors.get(String(thread.id)) ?? 0),
           ...(thread.pinned === true ? { pinned: true } : {}),
           updatedAt: thread.updatedAt,
         }))
@@ -979,16 +1106,17 @@ export function useCodeController(options: CodeControllerOptions) {
         // Sorting the whole list by recency instead would move a pinned thread
         // the moment anything else ran, which is the opposite of pinning it.
         .sort((left, right) => Number(right.pinned ?? false) - Number(left.pinned ?? false)),
-    [bootstrap, followUps, readCursors],
+    [activityByThread, bootstrap, followUps, readCursors],
   );
 
   // Only the thread in view streams, so the list is re-read on a timer to keep
   // titles, lifecycle, and access current for threads nobody is watching.
   //
-  // It does not yet report background provider output: a turn is journaled on
-  // the `code-operation` aggregate, so a thread's own version — which is what
-  // the unread mark compares — does not move when one finishes. Saying so is
-  // better than a mark that quietly never appears.
+  // The activity sequence is what makes background provider output visible
+  // here. A turn is journaled on the `code-operation` aggregate, so a thread's
+  // own version stands still while it runs; the host projects the operation
+  // events per thread and reports that instead, which is what the unread mark
+  // compares against.
   useEffect(() => {
     if (navigationRefreshMs <= 0) return;
     let cancelled = false;
@@ -997,9 +1125,7 @@ export function useCodeController(options: CodeControllerOptions) {
         try {
           const next = await client.bootstrap();
           if (cancelled || !mounted.current) return;
-          setBootstrap((current) =>
-            current === undefined ? next : { ...current, threads: next.threads },
-          );
+          applyNavigationRefresh(next);
         } catch {
           // A refresh that fails leaves the last list on screen; the stream and
           // the retry path are what report a host that has actually gone away.
@@ -1010,7 +1136,7 @@ export function useCodeController(options: CodeControllerOptions) {
       cancelled = true;
       clearInterval(timer);
     };
-  }, [client, navigationRefreshMs]);
+  }, [applyNavigationRefresh, client, navigationRefreshMs]);
 
   const execute = useCallback(
     async (command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult | undefined> => {
@@ -1664,6 +1790,8 @@ export function useCodeController(options: CodeControllerOptions) {
     renameThread,
     providerRequests,
     refreshFollowUp,
+    restoreUndo,
+    noteRestoreUndo,
     retry: () => loadBootstrap("retry"),
     sendFollowUp,
     setPendingDraft,

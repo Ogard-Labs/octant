@@ -122,6 +122,7 @@ function createFixture(profile: AcpProviderProfile) {
     },
     authMethods: [{ id: "provider-auth" }],
     agentInfo: { name: profile.process.agentName, version: "0.0.0-dev" },
+    _meta: { grokShell: true },
   };
   const processPort: AcpProcessPort = {
     start: (input) =>
@@ -237,6 +238,7 @@ class ConformanceClient implements AcpClientPort {
   };
   resumeSession = this.loadSession;
   setConfigOption = async () => ({ configOptions: this.configOptions });
+  call = async <T = unknown>() => ({}) as T;
   respondPermission = async () => undefined;
   onNotification(listener: Parameters<AcpClientPort["onNotification"]>[0]) {
     this.#notifications.add(listener);

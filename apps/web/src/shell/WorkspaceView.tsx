@@ -331,6 +331,37 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   const closeTab = useCallback(
     async (groupId: TabGroupId, tabId: WorkspaceTabId) => {
       const tab = findWorkspaceTab(props.workspace, tabId);
+      // A terminal tab that carries an identity of its own is the only thing
+      // that knows it: the identity was minted for that tab and is recorded
+      // nowhere else, so closing the tab would leave the shell running with
+      // nothing able to reach, watch, or stop it for the rest of the session.
+      // The shutdown therefore has to be confirmed before the tab goes, not
+      // after — a transient failure, a refused operation, or a checkout that
+      // will not resolve all mean the tab is what has to stay.
+      // A tab with no identity of its own only views the thread's original
+      // terminal, which the thread's own Terminal surface still reaches, so it
+      // is left running.
+      if (tab?.kind === "code-terminal" && tab.terminalId !== undefined) {
+        const checkoutId = resolveCodeTabCheckoutId(tab, props.codeController);
+        if (checkoutId === undefined) return;
+        const stopped = await props.codeController.client
+          .executeOperation({
+            kind: "stop-terminal",
+            operationId: globalThis.crypto.randomUUID() as never,
+            terminalId: tab.terminalId,
+            threadId: tab.threadId,
+            checkoutId,
+          })
+          .catch(() => undefined);
+        // A terminal the host no longer owns has already stopped — the user
+        // pressed Stop inside it, or its shell exited on its own — so there is
+        // nothing left to strand and the tab may go. Every other answer keeps
+        // the tab, because the tab is the only thing that can retry.
+        const cleaned =
+          stopped?.kind === "terminal-state" ||
+          (stopped?.kind === "operation-failed" && stopped.failure.category === "unavailable");
+        if (!cleaned) return;
+      }
       const closed = await props.onClose(groupId, tabId);
       if (closed === false) return;
       if (
@@ -350,7 +381,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         ).catch(() => undefined);
       }
     },
-    [props.browserAutomationClient, props.onClose, props.workspace],
+    [props.browserAutomationClient, props.codeController, props.onClose, props.workspace],
   );
 
   return (

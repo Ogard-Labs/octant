@@ -13,6 +13,22 @@ diagnostics export, and the extensions marketplace itself. Each of these adds
 sidebar entries, settings sections, server routes, contracts, and event-store
 projections that are compiled in whether or not a user wants them.
 
+Compiled-in is not the expensive part; unbounded reach is. A feature built as
+host code can call any host code, so the blast radius of adding the next
+provider, tool, or integration is the whole product rather than the surface
+being extended. That is the driving cost: Octant's stated purpose is breadth
+across many providers, so expansion is not an occasional event but the normal
+mode of work, and every expansion currently carries a chance of regressing an
+unrelated part of the system.
+
+What contains that blast radius is a narrow, enforced boundary, not the fact
+that code is loaded as a plugin. A plugin host whose API is wide reproduces the
+same coupling and adds indirection on top. So the boundary is the primary
+deliverable and the host is what it enables. Two protections follow from it and
+should not be conflated: a seam bounds what new code can reach at build time and
+is available without a host at all, while process isolation, crash containment,
+and user-visible enable/disable require the host described below.
+
 `packages/extensions` already implements the _content_ half of a plugin
 system: an `ExtensionPackageManifest` with components (`skill-instructions`,
 `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`, `hook`, `app`,
@@ -167,6 +183,17 @@ Moving the board into a plugin does not create a general task Kanban.
 
 ### 4. Migration sequence
 
+Once the seams exist, order the moves by how often a surface expands, not by how
+cheap it is to move. Containment is only worth what it covers, so a sequence that
+ends with the surfaces that change weekly leaves the driving cost unpaid until
+the end. This trades away the original ordering's appeal, which was to prove the
+machinery on kinds with no server authority surface first. The trade is
+acceptable for provider drivers specifically, because that boundary is the
+repository's most mature: `packages/provider-sdk` already owns the driver
+interface and a conformance harness, so moving vendors behind it exercises an
+established seam rather than betting the first move on an unproven one. It would
+not be acceptable for kinds whose contribution points do not exist yet.
+
 1. **Rename and publish the API.** Move `packages/extensions` to
    `packages/plugin-host`; extract the schemas third parties need into
    `packages/plugin-api` (manifest, component kinds, capabilities, contribution
@@ -175,15 +202,21 @@ Moving the board into a plugin does not create a general task Kanban.
    and convert the existing hard-coded sidebar destinations and settings
    sections to registry entries populated from a static first-party manifest
    list. Availability still comes from the server catalog.
-3. **First bundled plugins.** Package zen backgrounds and preview viewers as
-   `@octant/*` plugins loaded from the bundled catalog and enabled by default.
-   This proves appearance and preview kinds with no server authority surface.
+3. **Provider drivers as plugins.** Register vendor drivers through the
+   provider-driver kind once the generic ACP stack has landed, keeping the
+   honest-capability and fail-closed rules in the host. First because adding and
+   revising vendors is the repository's highest-frequency expansion, so it is
+   where unbounded reach costs the most.
 4. **First integration and board plugins.** Move the thread board and the
    GitHub integration behind the integration and board component kinds with
-   typed server ports; add Linear as the first bundled-off integration.
-5. **Provider drivers as plugins.** Register vendor drivers through the
-   provider-driver kind once the generic ACP stack has landed, keeping the
-   honest-capability and fail-closed rules in the host.
+   typed server ports; add Linear as the first bundled-off integration. Second
+   because external services change on their own schedule, so these surfaces are
+   revised without the change ever originating in Octant.
+5. **Appearance and preview kinds.** Package zen backgrounds and preview viewers
+   as `@octant/*` plugins loaded from the bundled catalog and enabled by
+   default. Last because they are the surfaces that change least, so moving them
+   buys the least containment; they remain worth moving for the user-facing
+   enable/disable and packaging benefits.
 
 Each step keeps `git diff --check`, existing extension conformance tests, and
 the activation ladder tests green; a step that requires weakening an invariant
@@ -219,7 +252,13 @@ viewers, appearance) are not yet built.
 - More indirection in the renderer; contribution rendering must stay lazy so
   disabled plugins cost nothing at startup.
 - Migration risk concentrates in the GitHub and canvas moves, which touch
-  routes, contracts, and event projections at once.
+  routes, contracts, and event projections at once. Moving code to prevent
+  regressions can cause them, so extraction is its own deliberate change with
+  its own evidence, never folded into an unrelated fix or feature.
+- Ordering by expansion frequency front-loads the surfaces with server
+  authority, so the earlier steps carry more risk per step than the original
+  sequence did. The payoff is that containment arrives where changes actually
+  land, instead of after every cheap move is exhausted.
 
 ## Open questions
 

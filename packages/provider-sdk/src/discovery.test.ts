@@ -13,6 +13,7 @@ describe("provider discovery descriptors", () => {
     expect(kinds).toContain("pi");
     expect(kinds).toContain("oh-my-pi");
     expect(kinds).toContain("mistral-vibe");
+    expect(kinds).toContain("grok");
     expect(kinds).toContain("ollama");
     expect(kinds).toContain("openai-compatible");
     expect(kinds).toContain("anthropic-compatible");

@@ -2,7 +2,7 @@ import type { CodeClient, CodeFileOpenResult } from "@octant/client-runtime/code
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import type { CodeRelativePath, CodeThread } from "@octant/contracts/code";
 import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-definitions";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { deferredCodeAdapterFor } from "./codeLeafAdapters";
 import { CodeWorkspace } from "./CodeWorkspace";
 import type { CodeEditorFileProjection } from "./MonacoEditorPane";
@@ -191,10 +191,14 @@ function useCodeTestDefinitions(options: {
  * `refresh` re-runs that same authorized open, which is the only way to reach
  * fresh bytes and fresh metadata: the host releases a file's previous staging
  * when it re-opens it, so re-reading the old reference would serve exactly the
- * revision the editor is trying to leave behind. Each run blanks the projection
- * first and cancels the answer of the run it replaced, so a refresh that
- * overtakes an in-flight open — or fails outright — leaves the workspace saying
- * the file is unavailable instead of showing the superseded content.
+ * revision the editor is trying to leave behind. A refresh keeps the projection
+ * it is replacing, because blanking it would unmount the editor pane and take
+ * the user's unsaved draft and the revision that draft is based on with it —
+ * the reopened file would then look like the draft's own origin and Save would
+ * overwrite the external change. Only a change of file or checkout blanks the
+ * projection, so the pane can never show one file's content under another's
+ * name. Every run still cancels the answer of the run it replaced, and a run
+ * that fails leaves the workspace saying the file is unavailable.
  */
 function useCodeEditorFile(options: {
   readonly client: CodeClient;
@@ -209,6 +213,7 @@ function useCodeEditorFile(options: {
 } {
   const [file, setFile] = useState<CodeEditorFileProjection>();
   const [refreshGeneration, setRefreshGeneration] = useState(0);
+  const openedScope = useRef<string | undefined>(undefined);
   const { client, enabled, relativePath, threadId, checkoutId, executionPolicy } = options;
   const refresh = useCallback(() => setRefreshGeneration((generation) => generation + 1), []);
 
@@ -220,11 +225,21 @@ function useCodeEditorFile(options: {
       checkoutId === undefined ||
       executionPolicy === undefined
     ) {
+      openedScope.current = undefined;
       setFile(undefined);
       return;
     }
     let active = true;
-    setFile(undefined);
+    // A policy change re-reads the file but does not clear it. The open pane
+    // holds the unsaved draft together with the revision that draft was based
+    // on, and that pairing is what makes a change underneath it a conflict
+    // rather than a silent overwrite; dropping the projection here would throw
+    // the anchor away and let Save carry the new revision's digest.
+    const scope = `${threadId}/${checkoutId}/${relativePath}`;
+    if (openedScope.current !== scope) {
+      openedScope.current = scope;
+      setFile(undefined);
+    }
     void client
       .openFile(threadId, checkoutId, relativePath)
       .then((result) => {
@@ -243,7 +258,16 @@ function useCodeEditorFile(options: {
     return () => void (active = false);
   }, [checkoutId, client, enabled, executionPolicy, refreshGeneration, relativePath, threadId]);
 
-  return { file, refresh };
+  // The posture is re-applied to whatever is already open, so a thread that
+  // drops to Plan mode stops offering Save now rather than when the reopen
+  // settles, while the pane it belongs to stays mounted.
+  const posture = useMemo(
+    () =>
+      file === undefined || executionPolicy === undefined ? file : { ...file, executionPolicy },
+    [executionPolicy, file],
+  );
+
+  return { file: posture, refresh };
 }
 
 function editorFileProjection(

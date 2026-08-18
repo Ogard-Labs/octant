@@ -77,12 +77,14 @@ describe("discoveryService", () => {
       new Map([
         ["/Users/test/.bun/bin/omp", { file: true }],
         ["/Users/test/.kimi-code/bin/kimi", { file: true }],
+        ["/Users/test/.grok/bin/grok", { file: true }],
       ]),
     );
     const exec = makeFakeExec(
       new Map([
         ["/Users/test/.bun/bin/omp --version", { stdout: "omp 1.0.0\n", stderr: "" }],
         ["/Users/test/.kimi-code/bin/kimi --version", { stdout: "kimi 2.0.0\n", stderr: "" }],
+        ["/Users/test/.grok/bin/grok --version", { stdout: "grok 1.0.4 (0a1b2c3d)\n", stderr: "" }],
       ]),
     );
     const service = makeDiscoveryService({
@@ -105,6 +107,11 @@ describe("discoveryService", () => {
           driverKind: "kimi-code",
           binaryPath: "/Users/test/.kimi-code/bin/kimi",
           pathSummary: "~/.kimi-code/bin/kimi",
+        }),
+        expect.objectContaining({
+          driverKind: "grok",
+          binaryPath: "/Users/test/.grok/bin/grok",
+          pathSummary: "~/.grok/bin/grok",
         }),
       ]),
     );
