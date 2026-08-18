@@ -157,6 +157,36 @@ export class AcpFailure extends Error {
   }
 }
 
+interface AcpRemoteError {
+  readonly code: number;
+  readonly message?: string;
+  readonly data?: unknown;
+}
+
+// An agent that refuses a request for a credential reason spells it several
+// ways, and only the never-signed-in case reliably arrives as -32000. Observed
+// on grok 1.0.4 and vibe-acp 2.24.1: a never-signed-in home refuses
+// `session/new` with -32000 ("Authentication required", "Missing API key for
+// mistral provider."), while a home holding an expired or invalid credential
+// opens the session and refuses `session/prompt` with -32603 ("Unauthorized
+// (401) ... Invalid or expired credentials", "Invalid API key."). Classifying
+// on the code alone reported the second case as a generic failure, so the user
+// was never told to sign in again.
+const AUTHENTICATION_REFUSAL_TERMS = [
+  "unauthorized",
+  "unauthenticated",
+  "authentication",
+  "api key",
+  "credentials",
+];
+
+function refusesForAuthentication(error: AcpRemoteError): boolean {
+  if (error.code === -32000) return true;
+  const detail = typeof error.data === "string" ? error.data : "";
+  const text = `${error.message ?? ""} ${detail}`.toLowerCase();
+  return AUTHENTICATION_REFUSAL_TERMS.some((term) => text.includes(term));
+}
+
 export interface AcpLimits {
   readonly lineBytes: number;
   readonly pendingRequests: number;
@@ -372,7 +402,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
 
   const settleResponse = (
     id: RpcId,
-    response: { readonly result?: unknown; readonly error?: { readonly code: number } },
+    response: { readonly result?: unknown; readonly error?: AcpRemoteError },
   ) => {
     const request = pending.get(id);
     if (request === undefined) {
@@ -385,7 +415,7 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
       request.reject(
         new AcpFailure(
           "remote",
-          response.error.code === -32000
+          refusesForAuthentication(response.error)
             ? "ACP authentication is required."
             : "ACP request failed.",
         ),
@@ -407,7 +437,13 @@ export function makeAcpClient(options: AcpClientOptions): AcpClient {
         method: Schema.optional(Schema.String),
         params: Schema.optional(Schema.Unknown),
         result: Schema.optional(Schema.Unknown),
-        error: Schema.optional(Schema.Struct({ code: Schema.Int, message: Schema.String })),
+        error: Schema.optional(
+          Schema.Struct({
+            code: Schema.Int,
+            message: Schema.String,
+            data: Schema.optional(Schema.Unknown),
+          }),
+        ),
       }),
     )(value);
     if (envelope.method === undefined) {
