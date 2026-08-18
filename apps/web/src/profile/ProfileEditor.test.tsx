@@ -89,6 +89,24 @@ describe("ProfileEditor", () => {
     expect(onCommit).not.toHaveBeenCalled();
   });
 
+  it("keeps a name the contract refuses on screen, so it can be fixed", async () => {
+    const user = userEvent.setup();
+    const stored: UserProfile = {
+      displayName: "A".repeat(64),
+      accent: "indigo",
+      avatar: { kind: "initials" },
+    };
+    render(<Harness initial={stored} />);
+
+    // Refusing the name means reporting no name, which the owner echoes back
+    // as a profile without one. Reading that echo as an external update wiped
+    // the field and the message with it, leaving nothing to correct.
+    await user.type(screen.getByLabelText("Name"), "B");
+
+    expect(screen.getByLabelText("Name")).toHaveValue(`${"A".repeat(64)}B`);
+    expect(screen.getByText("That name is 65 characters. Octant stores at most 64.")).toBeVisible();
+  });
+
   it("adopts a profile that arrives after the fields were first shown", () => {
     const stored: UserProfile = {
       displayName: "Ada",
@@ -131,6 +149,20 @@ describe("ProfileEditor", () => {
     expect(screen.getByText("That does not look like an email address yet.")).toBeVisible();
     expect(screen.getByLabelText("Email (optional)")).toHaveAttribute("aria-invalid", "true");
     expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("stops reporting an address once the user has typed on past it", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<ProfileEditor onChange={onChange} profile={{ ...empty, email: "ada@example.com" }} />);
+
+    await user.type(screen.getByLabelText("Email (optional)"), "@");
+
+    // An owner left holding the last value that happened to parse would persist
+    // an address the field no longer shows and the user did not choose.
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ email: expect.anything() }),
+    );
   });
 
   it("offers Gravatar only once an address has been entered", async () => {

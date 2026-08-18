@@ -198,6 +198,23 @@ describe("FirstRunOnboarding", () => {
     );
   });
 
+  it("never saves a name the user typed past and can no longer see", async () => {
+    const user = userEvent.setup();
+    const props = mount();
+
+    // Typed one character at a time, the 64th character makes a storable name
+    // and the 65th makes the field invalid.
+    await user.type(screen.getByLabelText("Name"), "A".repeat(65));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    // Skipping still records what was answered, but the 64-character prefix is
+    // not an answer: the user never settled on it and the field stopped showing
+    // it. Saving it here would journal a name that exists nowhere on screen.
+    expect(props.onSaveProfile).not.toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: expect.anything() }),
+    );
+  });
+
   it("walks forward and back without losing the draft", async () => {
     const user = userEvent.setup();
     mount();

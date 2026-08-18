@@ -74,6 +74,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
   const latestProfile = useRef(props.profile);
   latestProfile.current = props.profile;
   const pendingCommit = useRef(false);
+  const reported = useRef<UserProfile | undefined>(undefined);
 
   // The typed fields keep their own text so a half-typed value survives
   // normalization, which means an owner that replaces the profile — a store
@@ -83,10 +84,17 @@ export function ProfileEditor(props: ProfileEditorProps) {
   // the `Ada` the owner just echoed back, and must not lose its space.
   if (syncedProfile !== props.profile) {
     setSyncedProfile(props.profile);
-    const name = props.profile.displayName ?? "";
-    const email = props.profile.email ?? "";
-    if (name !== nameDraft.trim()) setNameDraft(name);
-    if (email !== emailDraft.trim()) setEmailDraft(email);
+    // An owner re-renders with what this editor just reported, and that echo
+    // is not an external update. Text the contract refuses is reported as no
+    // value at all, so adopting the echo would erase the entry the user still
+    // has in front of them — together with the message saying what to fix.
+    const echo = reported.current !== undefined && sameProfile(props.profile, reported.current);
+    if (!echo) {
+      const name = props.profile.displayName ?? "";
+      const email = props.profile.email ?? "";
+      if (name !== nameDraft.trim()) setNameDraft(name);
+      if (email !== emailDraft.trim()) setEmailDraft(email);
+    }
   }
 
   const disabled = props.disabled === true || busy !== undefined;
@@ -105,6 +113,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
   function apply(next: UserProfile, settled: boolean) {
     if (!sameProfile(next, props.profile)) {
       pendingCommit.current = true;
+      reported.current = next;
       props.onChange(next);
     }
     if (settled && pendingCommit.current) {
@@ -117,10 +126,15 @@ export function ProfileEditor(props: ProfileEditorProps) {
     setNameDraft(value);
     const trimmed = value.trim();
     const { displayName: _cleared, ...rest } = props.profile;
-    // A name the contract would refuse is not written. Reporting it here, while
-    // the field still holds it, is the only point at which the user can fix it.
-    if (trimmed !== "" && nameValidationMessage(trimmed) !== undefined) return;
-    apply(trimmed === "" ? rest : { ...rest, displayName: trimmed }, settled);
+    // A name the contract would refuse is not written, and neither is the last
+    // one that would have been: a name typed past the limit one character at a
+    // time leaves the owner holding the prefix that was still valid, which the
+    // field no longer shows and the user never settled on. Clearing it keeps
+    // the owner's draft equal to what is on screen, so anything written later
+    // is something the user can see. Reporting the problem here, while the
+    // field still holds it, is the only point at which they can fix it.
+    const storable = trimmed !== "" && nameValidationMessage(trimmed) === undefined;
+    apply(storable ? { ...rest, displayName: trimmed } : rest, settled);
   }
 
   function setEmail(value: string, settled: boolean) {
@@ -128,9 +142,12 @@ export function ProfileEditor(props: ProfileEditorProps) {
     const trimmed = value.trim();
     const { email: _cleared, ...rest } = props.profile;
     // An address that cannot be an address is not written: the profile would
-    // then hold something no Gravatar lookup or display could ever use.
-    if (trimmed !== "" && emailValidationMessage(trimmed) !== undefined) return;
-    apply(trimmed === "" ? rest : { ...rest, email: trimmed }, settled);
+    // then hold something no Gravatar lookup or display could ever use. Nor is
+    // the last intermediate value that happened to parse — typing on past
+    // `ada@example.com` must not leave the owner holding that address while
+    // the field shows something else.
+    const storable = trimmed !== "" && emailValidationMessage(trimmed) === undefined;
+    apply(storable ? { ...rest, email: trimmed } : rest, settled);
   }
 
   function setAvatar(avatar: UserAvatarValue) {
