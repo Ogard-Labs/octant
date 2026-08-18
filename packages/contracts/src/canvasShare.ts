@@ -335,6 +335,16 @@ export const CanvasStaticExportBlock = Schema.Union(
         label: Schema.optional(ExportLabel),
       }).annotations(strict),
     ).pipe(Schema.maxItems(1_024)),
+    groups: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          groupId: boundedToken("CanvasGroupId"),
+          label: ExportLabel,
+          nodeIds: Schema.Array(boundedToken("CanvasNodeId")).pipe(Schema.maxItems(512)),
+        }).annotations(strict),
+      ).pipe(Schema.maxItems(64)),
+    ),
+    flow: Schema.optional(Schema.Literal("down", "right")),
   }).annotations(strict),
   Schema.Struct({
     ...exportBlockFields,
