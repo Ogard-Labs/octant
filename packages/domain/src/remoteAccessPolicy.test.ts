@@ -107,6 +107,33 @@ describe("remote access policy", () => {
     ).toEqual({ kind: "deny", reason: "unknown-action" });
   });
 
+  it("lets a paired device watch a thread's running product without driving the host", () => {
+    // A companion screen is a read of what the host is already showing, plus
+    // the gestures that land inside that view. Pointing the host's browser
+    // somewhere new, typing into it, or opening and closing its sessions are
+    // not watching, so they stay on the host.
+    expect(classifyRemoteAction("browser.observe")).toEqual({ kind: "remote-approvable" });
+    expect(classifyRemoteAction("browser.interact")).toEqual({ kind: "remote-approvable" });
+    expect(classifyRemoteAction("simulator.observe")).toEqual({ kind: "remote-approvable" });
+    expect(classifyRemoteAction("terminal.read")).toEqual({ kind: "remote-approvable" });
+    expect(classifyRemoteAction("browser.session.manage")).toEqual({
+      kind: "local-host-required",
+    });
+    expect(classifyRemoteAction("terminal.write")).toEqual({ kind: "local-host-required" });
+    expect(
+      authorizePrincipalAction({ principalKind: "remote-device", action: "browser.observe" }),
+    ).toEqual({ kind: "allow" });
+    expect(
+      authorizePrincipalAction({
+        principalKind: "remote-device",
+        action: "browser.session.manage",
+      }),
+    ).toEqual({ kind: "deny", reason: "local-host-required" });
+    expect(
+      authorizePrincipalAction({ principalKind: "remote-device", action: "terminal.write" }),
+    ).toEqual({ kind: "deny", reason: "local-host-required" });
+  });
+
   it("lets a remote device perform ordinary Automation Center mutations", () => {
     // Design §4.3/§10: a RemoteDevicePrincipal may run the ordinary Automation
     // commands on the owning host; it never gains local-window authority.

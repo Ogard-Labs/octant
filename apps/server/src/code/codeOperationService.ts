@@ -20,6 +20,8 @@ import {
   type CodeThreadForkOrigin,
   type CodeThreadId,
   type MentionableThreadId,
+  type ScaffoldEntry,
+  type ScaffoldRun,
   type ProviderAttachmentInput,
   type ProviderContextBlock,
   type WindowId,
@@ -29,7 +31,11 @@ import {
   mayWriteToRepository,
   type CodeOperation,
 } from "@octant/domain/code-policy";
-import { THREAD_MENTION_UNREADABLE_CONTEXT } from "@octant/domain";
+import {
+  decideRunMerge,
+  runMergeRefusalText,
+  THREAD_MENTION_UNREADABLE_CONTEXT,
+} from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
@@ -213,6 +219,28 @@ export interface CodeOperationRepositoryTestPort {
   }) => Promise<boolean>;
 }
 
+/**
+ * The curated scaffolds this host offers, and the one gesture that runs one.
+ *
+ * A host without this port has no scaffolds: the operation is refused rather
+ * than run against a catalog nobody published.
+ */
+export interface CodeOperationScaffoldPort {
+  readonly entry: (scaffoldId: string) => ScaffoldEntry | undefined;
+  readonly run: (input: {
+    readonly runId: string;
+    readonly entry: ScaffoldEntry;
+    readonly directoryName: string;
+    readonly threadId: CodeThread["id"];
+    readonly checkoutId: CodeThread["checkoutId"];
+    readonly executionPolicy: CodeThread["executionPolicy"];
+    readonly checkoutRoot: string;
+  }) => Promise<
+    | { readonly status: "ran"; readonly run: ScaffoldRun }
+    | { readonly status: "refused"; readonly message: string }
+  >;
+}
+
 export interface CodeOperationGitPort {
   readonly observe: (input: {
     readonly checkoutRoot: string;
@@ -291,6 +319,48 @@ export interface CodeOperationGitPort {
     readonly expectedStateToken: string;
     readonly authority: "approved" | "full-access";
   }) => Promise<GitMutationOutcome>;
+  /**
+   * Measure one branch against another and say whether the base could take it.
+   * Optional so a host assembled without it reports run review unavailable
+   * rather than guessing at a comparison.
+   */
+  readonly compareBranch?: (input: {
+    readonly checkoutRoot: string;
+    readonly baseRef: string;
+    readonly headRef: string;
+  }) => Promise<
+    | {
+        readonly status: "ready";
+        readonly head: string;
+        readonly base?: string;
+        readonly ahead: number;
+        readonly behind: number;
+        readonly mergeability: "clean" | "conflicts" | "nothing-to-merge" | "unknown";
+      }
+    | { readonly status: "unavailable" }
+  >;
+  /** The branch diff behind a run review. */
+  readonly readBranchDiff?: (input: {
+    readonly checkoutRoot: string;
+    readonly baseRef: string;
+  }) => Promise<
+    | {
+        readonly status: "ready";
+        readonly paths: readonly string[];
+        readonly diff: string;
+        readonly diffTruncated: boolean;
+      }
+    | { readonly status: "unavailable" }
+  >;
+  /**
+   * Merge a run's branch into the base branch, in the base checkout. Optional
+   * so a host without it refuses to bring a run home rather than pretending to.
+   */
+  readonly mergeRun?: (input: {
+    readonly checkoutRoot: string;
+    readonly branch: string;
+    readonly authority: "approved" | "full-access";
+  }) => Promise<GitMutationOutcome & { readonly undo?: CodeCheckpoint }>;
   /**
    * Record the checkout's content without changing it. Optional so a host
    * assembled without checkpoint support simply runs turns that carry none.
@@ -546,7 +616,22 @@ export interface CodeOperationServiceOptions {
   readonly approvals?: CodeApprovalValidationPort;
   readonly terminals: CodeOperationTerminalPort;
   readonly repositoryTests: CodeOperationRepositoryTestPort;
+  readonly scaffolds?: CodeOperationScaffoldPort;
   readonly git: CodeOperationGitPort;
+  /**
+   * The Project checkout a run comes home to, as the host finds it right now.
+   * Absent on a host that cannot resolve one, which refuses the merge rather
+   * than merging into a checkout nobody located.
+   */
+  readonly resolveBaseCheckout?: (thread: CodeThread) => Promise<
+    | {
+        readonly status: "observed";
+        readonly checkoutRoot: string;
+        readonly branch: string | undefined;
+        readonly clean: boolean;
+      }
+    | { readonly status: "unavailable" }
+  >;
   readonly pullRequests: CodeOperationPullRequestPort;
   readonly reviewFindings: CodeOperationReviewFindingPort;
   readonly turns: CodeOperationTurnPort;
@@ -573,6 +658,20 @@ export interface CodeOperationServiceOptions {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
     readonly windowId: WindowId;
   }) => Promise<ReadonlyArray<CodeThreadMentionContext>>;
+  /**
+   * Takes the notes the user pointed at the running product and hands them to
+   * this turn. The port marks each note carried in the same step, so a note
+   * travels exactly once; absent on a host with no browser surface, where a
+   * thread simply has no notes waiting.
+   */
+  readonly takeProductFeedbackForTurn?: (input: {
+    readonly threadId: CodeThreadId;
+    readonly operationId: CodeOperationId;
+    readonly supportsImages: boolean;
+  }) => Promise<{
+    readonly context?: string;
+    readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
+  }>;
   /**
    * Reads the conversation a forked thread inherits, for its first turn only.
    *
@@ -1202,8 +1301,43 @@ export class CodeOperationService {
             })
           : this.#failed(command.operationId, "unavailable", "Repository test is unavailable.");
       }
+      case "run-scaffold": {
+        // The renderer names an entry; the host owns the catalog and composes
+        // the command line. An id the host does not publish is refused rather
+        // than resolved into something adjacent.
+        const scaffolds = this.#options.scaffolds;
+        const entry = scaffolds?.entry(String(command.scaffoldId));
+        if (scaffolds === undefined || entry === undefined) {
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "This host offers no scaffold by that name.",
+          );
+        }
+        const outcome = await scaffolds.run({
+          runId: command.scaffoldRunId,
+          entry,
+          directoryName: command.directoryName,
+          threadId: thread.id,
+          checkoutId: checkout.id,
+          executionPolicy: thread.executionPolicy,
+          checkoutRoot: root.checkoutRoot,
+        });
+        if (outcome.status === "refused") {
+          return this.#failed(command.operationId, "invalid", outcome.message);
+        }
+        return decodeCodeOperationResult({
+          kind: "scaffold-run",
+          operationId: command.operationId,
+          run: outcome.run,
+        });
+      }
       case "observe-git":
         return this.#gitObservation(command, root.checkoutRoot);
+      case "review-run":
+        return this.#reviewRun(command, thread, root.checkoutRoot);
+      case "merge-run":
+        return this.#mergeRun(command, thread, root.checkoutRoot);
       case "stage-git":
         return this.#gitMutation(
           command.operationId,
@@ -1471,6 +1605,142 @@ export class CodeOperationService {
         );
   }
 
+  /**
+   * What this run produced, measured against the branch it targets.
+   *
+   * The comparison runs in the run's own worktree — it is the checkout that has
+   * the branch — and reads only. The base ref is the thread's confirmed
+   * delivery target, remote-tracking first, because that is what a pull request
+   * would be opened against and what a merge would land on.
+   */
+  async #reviewRun(
+    command: Extract<CodeOperationCommand, { readonly kind: "review-run" }>,
+    thread: CodeThread,
+    checkoutRoot: string,
+  ): Promise<CodeOperationResult> {
+    const compare = this.#options.git.compareBranch;
+    const readDiff = this.#options.git.readBranchDiff;
+    if (compare === undefined || readDiff === undefined) {
+      return this.#failed(command.operationId, "unavailable", "Run review is unavailable.");
+    }
+    const branch = thread.deliveryTarget.branchIntent;
+    const observed = await this.#options.git.observe({
+      checkoutRoot,
+      maxDiffBytes: command.maxDiffBytes,
+    });
+    if (observed.status !== "ready" || observed.statusEntries === undefined) {
+      return this.#failed(command.operationId, "unavailable", "Run review is unavailable.");
+    }
+    for (const baseRef of [
+      `${thread.deliveryTarget.remoteName}/${thread.deliveryTarget.proposedBaseBranch}`,
+      thread.deliveryTarget.proposedBaseBranch,
+    ]) {
+      const comparison = await compare({ checkoutRoot, baseRef, headRef: "HEAD" });
+      if (comparison.status !== "ready") continue;
+      const diff = await readDiff({ checkoutRoot, baseRef });
+      if (diff.status !== "ready") continue;
+      return decodeCodeOperationResult({
+        kind: "run-reviewed",
+        operationId: command.operationId,
+        gitOperationId: command.gitOperationId,
+        outcome: {
+          branch,
+          baseRef,
+          head: comparison.head,
+          ...(comparison.base === undefined ? {} : { base: comparison.base }),
+          ahead: comparison.ahead,
+          behind: comparison.behind,
+          changedPaths: diff.paths,
+          diff: this.#options.evidence.put(diff.diff, { truncated: diff.diffTruncated }),
+          // Work the run never committed is work a merge would leave behind, so
+          // the review names it rather than letting the diff imply it is all
+          // there is.
+          uncommittedPaths: observed.statusEntries.map((entry) => entry.path),
+          mergeability: comparison.mergeability,
+        },
+      });
+    }
+    return this.#failed(command.operationId, "unavailable", "Run review is unavailable.");
+  }
+
+  /**
+   * Bring the run home: merge its branch into the base branch, in the base
+   * checkout.
+   *
+   * Every refusal is decided before anything moves, from facts the host reads
+   * itself: the base checkout must be on the base branch and clean, the run
+   * must have committed everything it means to bring, and Git must have said
+   * the merge is clean. The confirmation the caller sent must match the run the
+   * host sees, so a merge computed against a stale review is refused rather
+   * than applied.
+   */
+  async #mergeRun(
+    command: Extract<CodeOperationCommand, { readonly kind: "merge-run" }>,
+    thread: CodeThread,
+    runCheckoutRoot: string,
+  ): Promise<CodeOperationResult> {
+    const merge = this.#options.git.mergeRun;
+    const resolveBase = this.#options.resolveBaseCheckout;
+    if (merge === undefined || resolveBase === undefined) {
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "Bringing a run home is unavailable.",
+      );
+    }
+    if (
+      command.confirmation.branch !== thread.deliveryTarget.branchIntent ||
+      command.confirmation.baseBranch !== thread.deliveryTarget.proposedBaseBranch
+    ) {
+      return this.#failed(
+        command.operationId,
+        "invalid",
+        "The confirmed branch does not match this thread's delivery target.",
+      );
+    }
+    // The merge is decided against a review the host takes now, not against the
+    // one the caller happens to be holding: a run that moved since it was read
+    // is refused rather than merged on trust.
+    const review = await this.#reviewRun(
+      { ...command, kind: "review-run", maxDiffBytes: 1_024 },
+      thread,
+      runCheckoutRoot,
+    );
+    if (review.kind !== "run-reviewed") return review;
+    const base = await resolveBase(thread);
+    const decision = decideRunMerge({
+      outcome: review.outcome,
+      base:
+        base.status === "observed"
+          ? { status: "observed", branch: base.branch, clean: base.clean }
+          : { status: "unavailable" },
+      baseBranch: command.confirmation.baseBranch,
+      confirmedHead: command.confirmation.expectedHeadOid,
+    });
+    if (decision.decision === "refuse") {
+      // A refusal here is a state the user can fix, not a broken host: it is
+      // reported as stale so the surface re-reads rather than retries blindly.
+      return this.#failed(command.operationId, "stale", runMergeRefusalText(decision.reason));
+    }
+    if (base.status !== "observed") {
+      return this.#failed(
+        command.operationId,
+        "unavailable",
+        "Bringing a run home is unavailable.",
+      );
+    }
+    return this.#gitMutation(
+      command.operationId,
+      command.gitOperationId,
+      "merge-run",
+      await merge({
+        checkoutRoot: base.checkoutRoot,
+        branch: command.confirmation.branch,
+        authority: command.authorization.kind === "approved" ? "approved" : "full-access",
+      }),
+    );
+  }
+
   async #gitObservation(
     command: Extract<CodeOperationCommand, { readonly kind: "observe-git" }>,
     checkoutRoot: string,
@@ -1527,7 +1797,14 @@ export class CodeOperationService {
   #gitMutation(
     operationId: CodeOperationCommand["operationId"],
     gitOperationId: string,
-    mutation: "stage" | "unstage" | "discard" | "commit" | "push" | "restore-checkpoint",
+    mutation:
+      | "stage"
+      | "unstage"
+      | "discard"
+      | "commit"
+      | "push"
+      | "restore-checkpoint"
+      | "merge-run",
     result: GitMutationOutcome & { readonly undo?: CodeCheckpoint },
   ): CodeOperationResult {
     if (result.status === "unavailable")
@@ -1721,20 +1998,35 @@ export class CodeOperationService {
         "unavailable",
         "Provider prompt evidence is unavailable.",
       );
+    const supportsImages = this.#options.supportsAttachments?.(thread) === true;
+    // Notes the user pointed at the running product ride with the next turn
+    // they send. They are quoted as evidence beside the prompt, never folded
+    // into it, and the port records that each one went before it is used.
+    const feedback = await this.#options
+      .takeProductFeedbackForTurn?.({
+        threadId: command.threadId,
+        operationId: command.operationId,
+        supportsImages,
+      })
+      .catch(() => undefined);
     const context = [
       ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
       ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
+      ...(feedback?.context === undefined || feedback.context.trim().length === 0
+        ? []
+        : [{ kind: "user-message", text: feedback.context } as const]),
     ];
     // A model that cannot read a picture is told so plainly rather than sent
     // the turn with its images quietly removed.
-    if (references.length > 0 && this.#options.supportsAttachments?.(thread) !== true) {
+    if (references.length > 0 && !supportsImages) {
       return this.#failed(
         command.operationId,
         "invalid",
         "The selected model does not support images. Choose a vision model, or remove the attachments.",
       );
     }
-    const attachments = await this.#attachmentInputs(command.threadId, references);
+    const own = await this.#attachmentInputs(command.threadId, references);
+    const attachments = own === undefined ? undefined : [...own, ...(feedback?.attachments ?? [])];
     if (attachments === undefined) {
       return this.#failed(
         command.operationId,
@@ -2054,6 +2346,10 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
     case "run-repository-test":
     case "cancel-repository-test":
       return "test";
+    // A scaffold runs a generator that writes a directory of files. It is a
+    // shell command with a narrower surface, not a new kind of authority.
+    case "run-scaffold":
+      return "terminal";
     case "stage-git":
       return "stage";
     case "unstage-git":
@@ -2066,6 +2362,10 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
       return "discard";
     case "restore-git-checkpoint":
       return "restore-checkpoint";
+    case "review-run":
+      return "read";
+    case "merge-run":
+      return "merge-run";
     case "commit-git":
       return "commit";
     case "push-git":

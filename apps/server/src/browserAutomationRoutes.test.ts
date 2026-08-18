@@ -1,6 +1,8 @@
 import type { BrowserAutomationSnapshot, ToolActionAuthority, WindowId } from "@octant/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createBrowserAutomationRouteHandler } from "./browserAutomationRoutes";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
@@ -169,5 +171,49 @@ describe("browser automation routes", () => {
     );
     expect(response?.status).toBe(400);
     expect(service.create).not.toHaveBeenCalled();
+  });
+
+  it("lets a paired device act inside the page but never drive the host's browser", async () => {
+    function pairedRequest(kind: string): Request {
+      const request = new Request("http://127.0.0.1/api/browser/actions", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        },
+        body: JSON.stringify({
+          actionId: "70000000-0000-4000-8000-000000000001",
+          contextId,
+          correlationId: "80000000-0000-4000-8000-000000000001",
+          authority,
+          kind,
+          ...(kind === "click" ? { point: { x: 0.5, y: 0.5 } } : {}),
+          ...(kind === "navigate" ? { target: "https://example.com/" } : {}),
+          ...(kind === "type" ? { target: "#field", value: "text" } : {}),
+        }),
+      });
+      bindPrincipalRouteContext(request, {
+        principal: createRemoteDevicePrincipal({
+          hostId: "local" as never,
+          deviceId: "90000000-0000-4000-8000-000000000001" as never,
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "a".repeat(64),
+          sessionId: "a1000000-0000-4000-8000-000000000001" as never,
+        }),
+        scopeId: windowId,
+      });
+      return request;
+    }
+
+    expect((await handler(pairedRequest("click")))?.status).toBe(200);
+    expect(service.act).toHaveBeenCalledOnce();
+
+    for (const kind of ["navigate", "type", "close-tab"]) {
+      const response = await handler(pairedRequest(kind));
+      expect(response?.status).toBe(403);
+    }
+    expect(service.act).toHaveBeenCalledOnce();
   });
 });

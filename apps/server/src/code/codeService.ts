@@ -254,6 +254,8 @@ export interface ManagedCodeThreadCreationInput {
   readonly sourceBranch: string;
   readonly startFromOrigin: boolean;
   readonly remoteName?: string;
+  /** An exact revision to start from, in place of the tip of `sourceBranch`. */
+  readonly sourceRevision?: string;
 }
 
 /**
@@ -733,6 +735,9 @@ export class CodeService {
           sourceBranch: command.sourceBranch,
           startFromOrigin: command.startFromOrigin,
           ...(command.remoteName === undefined ? {} : { remoteName: command.remoteName }),
+          ...(command.sourceRevision === undefined
+            ? {}
+            : { sourceRevision: command.sourceRevision }),
         };
         const creationSignal = signal ?? new AbortController().signal;
         // Prepare resolves the exact source without mutating the user's checkout.
@@ -760,6 +765,7 @@ export class CodeService {
           executionPolicy: command.executionPolicy,
           permissionPersistence: command.permissionPersistence,
           deliveryTarget: command.deliveryTarget,
+          ...(command.forkedFrom === undefined ? {} : { forkedFrom: command.forkedFrom }),
           version: 1,
           createdAt: timestamp,
           updatedAt: timestamp,

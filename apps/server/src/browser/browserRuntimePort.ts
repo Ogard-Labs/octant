@@ -21,6 +21,36 @@ export interface BrowserTargetInspection {
 }
 
 /**
+ * One element the host resolved from a point in its own viewport, so a client
+ * that only ever saw a picture can still name what the user pointed at.
+ *
+ * `bounds` is normalized to the viewport, so a caller can draw the same box the
+ * host cropped without knowing the page's pixel size.
+ */
+export interface BrowserPointDescription {
+  readonly selector: string;
+  readonly role?: string;
+  readonly accessibleName?: string;
+  readonly text?: string;
+  readonly bounds: {
+    readonly x: number;
+    readonly y: number;
+    readonly width: number;
+    readonly height: number;
+  };
+}
+
+export type BrowserPointObservation =
+  | {
+      readonly status: "described";
+      readonly element: BrowserPointDescription;
+      readonly cropDataUrl?: string;
+      readonly url?: string;
+      readonly title?: string;
+    }
+  | { readonly status: "no-element" };
+
+/**
  * A navigation was refused because the page tried to move to an origin outside
  * the context allowlist (typically a redirect such as example.com →
  * www.example.com). Carries the blocked URL so the failure can tell the user
@@ -53,6 +83,16 @@ export interface BrowserRuntimePort {
     request: BrowserActionRequest,
     signal: AbortSignal,
   ) => Promise<BrowserRuntimeObservation>;
+  /**
+   * Resolve the element under one normalized viewport point and cut a picture
+   * of it. Optional: a runtime that cannot read its own page — a native view
+   * Octant only presents — simply offers no pointed-at notes.
+   */
+  readonly describePoint?: (
+    contextId: BrowserContextId,
+    point: { readonly x: number; readonly y: number },
+    signal: AbortSignal,
+  ) => Promise<BrowserPointObservation>;
   readonly closeContext: (contextId: BrowserContextId) => Promise<void>;
   readonly closeAll: () => Promise<void>;
   readonly reconcile?: () => Promise<void>;

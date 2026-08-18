@@ -27,6 +27,12 @@ distilled successor of the earlier long-form design specifications.
 | [0017](0017-code-projects-bind-any-folder.md)           | Code Projects bind any folder                                     | Accepted |
 | [0018](0018-auto-accept-edits-posture.md)               | Auto-accept edits as a fourth access posture                      | Accepted |
 | [0019](0019-user-profile-and-first-run-setup.md)        | User profile and first-run setup                                  | Accepted |
+| [0020](0020-checkpoints-and-restore-by-forking.md)      | Checkpoints and restore by forking                                | Accepted |
+| [0021](0021-remote-thread-surfaces.md)                  | Remote thread surfaces: watching the running product              | Accepted |
+| [0022](0022-pointed-at-product-feedback.md)             | Pointing at the running product                                   | Accepted |
+| [0023](0023-bringing-a-run-home.md)                     | Bringing a run home                                               | Accepted |
+| [0024](0024-curated-project-scaffolds.md)               | Curated project scaffolds                                         | Accepted |
+| [0025](0025-long-running-goal-loops.md)                 | Long-running goal loops                                           | Proposed |
 
 ## Adding an ADR
 

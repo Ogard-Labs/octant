@@ -1,7 +1,21 @@
 import type { LinkedThreadAggregate, LinkedThreadAggregateStatus } from "@octant/contracts";
+import type { ParallelRunComparison } from "@octant/domain";
+import { ParallelRunComparisonPanel } from "./ParallelRunComparisonPanel";
 
 export interface LinkedThreadAggregateViewProps {
   readonly aggregate: LinkedThreadAggregate;
+  /**
+   * What each attempt produced, when the host could be asked. Absent on a host
+   * that serves no Code operations, which keeps the comparison off the surface
+   * rather than showing empty outcomes.
+   */
+  readonly runs?: {
+    readonly comparison: ParallelRunComparison;
+    readonly busy: boolean;
+    readonly message?: string;
+    readonly onBringHome: (threadId: string) => void;
+    readonly onRefresh: () => void;
+  };
 }
 
 const STATUS_LABELS: Record<LinkedThreadAggregateStatus, string> = {
@@ -57,6 +71,16 @@ export function LinkedThreadAggregateView(props: LinkedThreadAggregateViewProps)
           </li>
         ))}
       </ul>
+
+      {props.runs === undefined ? null : (
+        <ParallelRunComparisonPanel
+          busy={props.runs.busy}
+          comparison={props.runs.comparison}
+          {...(props.runs.message === undefined ? {} : { message: props.runs.message })}
+          onBringHome={props.runs.onBringHome}
+          onRefresh={props.runs.onRefresh}
+        />
+      )}
     </section>
   );
 }

@@ -8,6 +8,7 @@ import type {
   ChatTurnRouteDecision,
   ChatAttemptId,
 } from "@octant/contracts/chat";
+import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
 import {
   Ban,
@@ -22,6 +23,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { ChatRichText } from "./ChatRichText";
 import { ChatTurnEditor } from "./ChatTurnEditor";
 
@@ -38,6 +40,23 @@ export interface ChatTranscriptProps {
   readonly onBranchTurn?: (turnId: ChatTurnId) => void;
   /** True while a turn is running, so revising and branching stay unavailable. */
   readonly busy?: boolean;
+  /**
+   * The points this conversation is marked at, and the gestures that change
+   * them. Absent on a host that serves no checkpoint surface, which keeps the
+   * affordance off the transcript rather than offering a marker nothing would
+   * record.
+   */
+  readonly checkpoints?: ChatTranscriptCheckpoints;
+}
+
+export interface ChatTranscriptCheckpoints {
+  /** Keyed by the turn each marked checkpoint sits on. */
+  readonly byTurnId: ReadonlyMap<string, ThreadCheckpoint>;
+  readonly busy: boolean;
+  readonly message?: string;
+  readonly onMark: (turnId: ChatTurnId, label: string) => void;
+  readonly onForget: (checkpoint: ThreadCheckpoint) => void;
+  readonly onRestore: (checkpoint: ThreadCheckpoint, title: string) => void;
 }
 
 const attemptLabels: Record<ChatAttemptOutcome, string> = {
@@ -107,6 +126,11 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           {branchOriginText(props.view.thread.branchedFrom)}
         </p>
       )}
+      {props.checkpoints?.message === undefined ? null : (
+        <p className="chat-transcript__provenance" role="status">
+          {props.checkpoints.message}
+        </p>
+      )}
       {revisedTurnCount === 0 ? null : (
         <p className="chat-transcript__provenance" role="status">
           {revisedTurnCount === 1
@@ -125,6 +149,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           const userContent = resolvedContent(contentById, turn.userMessageRef, "user");
           const attachments = turn.attachmentIds.map((id) => attachmentById.get(String(id)));
           const editing = editingTurnId === String(turn.id);
+          const checkpoints = props.checkpoints;
+          const marked = checkpoints?.byTurnId.get(String(turn.id));
 
           return (
             <li className="chat-transcript__turn" key={turn.id}>
@@ -157,6 +183,20 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                     ))}
                   </ul>
                 ) : null}
+                {editing || checkpoints === undefined ? null : (
+                  <ThreadCheckpointControls
+                    busy={props.busy === true || checkpoints.busy}
+                    {...(marked === undefined ? {} : { checkpoint: marked })}
+                    defaultLabel={`Message ${String(turn.sequence)}`}
+                    onForget={() => {
+                      if (marked !== undefined) checkpoints.onForget(marked);
+                    }}
+                    onMark={(label) => checkpoints.onMark(turn.id, label)}
+                    onRestore={(title) => {
+                      if (marked !== undefined) checkpoints.onRestore(marked, title);
+                    }}
+                  />
+                )}
                 {editing ? null : (
                   <TurnActions
                     busy={props.busy === true}

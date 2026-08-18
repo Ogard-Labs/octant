@@ -17,7 +17,8 @@ import type {
   BrowserAuthorityResolver,
   BrowserAutomationService,
 } from "./browser/browserAutomationService";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { remoteBrowserActionReach } from "@octant/domain";
+import { authenticateRouteWindowId, readPrincipalRouteContext } from "./principalRouteContext";
 import { isAllowedRendererOrigin } from "./shellRoutes";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
 
@@ -136,6 +137,16 @@ export function createBrowserAutomationRouteHandler(
       }
       if (url.pathname === "/api/browser/actions") {
         const input = decodeBrowserActionCommand(decoded.value);
+        // A paired device acts inside the view the host opened. The gateway
+        // already admitted this route for a remote principal; the kind it may
+        // carry is decided here, where the principal is known, so a companion
+        // client can never navigate, type, or close a tab on the host.
+        if (readPrincipalRouteContext(request)?.principal.kind === "remote-device") {
+          const reach = remoteBrowserActionReach(input.kind);
+          if (reach.kind === "denied") {
+            return failure({ category: "unauthorized", message: reach.reason }, 403, origin);
+          }
+        }
         return success(
           decodeBrowserAutomationSnapshot(
             await dependencies.service.act({ windowId, request: input }),

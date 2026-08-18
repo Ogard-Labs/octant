@@ -21,7 +21,11 @@ import {
   evaluateBrowserAction,
   evaluateProfileMode,
 } from "@octant/domain";
-import { BrowserNavigationBlockedError, type BrowserRuntimePort } from "./browserRuntimePort";
+import {
+  BrowserNavigationBlockedError,
+  type BrowserPointObservation,
+  type BrowserRuntimePort,
+} from "./browserRuntimePort";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 
 export interface BrowserAuthorityResolver {
@@ -509,6 +513,47 @@ export class BrowserAutomationService {
       return expired;
     }
     return snapshot(owned);
+  }
+
+  /**
+   * Name the element under one point in a context this window owns.
+   *
+   * Every check `act` runs before touching a page runs here too: the context
+   * must be this window's, on this thread, still active, and still holding the
+   * authority it was created under. Describing changes nothing, but it reads a
+   * page, and reading a page the caller is no longer entitled to see is exactly
+   * what these checks exist to prevent. A runtime that cannot read its own page
+   * reports the surface unavailable rather than guessing at an element.
+   */
+  async describePoint(input: {
+    readonly windowId: WindowId;
+    readonly threadId: BrowserThreadId;
+    readonly contextId: BrowserContextId;
+    readonly point: { readonly x: number; readonly y: number };
+  }): Promise<BrowserPointObservation | { readonly status: "unavailable" }> {
+    const owned = this.#contexts.get(input.contextId);
+    if (
+      owned === undefined ||
+      owned.windowId !== input.windowId ||
+      String(owned.threadId) !== String(input.threadId) ||
+      owned.abort.signal.aborted ||
+      owned.record.state !== "active"
+    ) {
+      return { status: "unavailable" };
+    }
+    const granted = this.#authority.resolve(owned.threadId, modeOf(owned.action.authority));
+    if (granted === undefined || authorizeToolAction(owned.action, granted).kind !== "allowed") {
+      return { status: "unavailable" };
+    }
+    const describe = this.#runtime.describePoint;
+    if (describe === undefined) return { status: "unavailable" };
+    return this.#queueAction(owned, async () => {
+      try {
+        return await describe(input.contextId, input.point, owned.abort.signal);
+      } catch {
+        return { status: "unavailable" as const };
+      }
+    });
   }
 
   inspectThread(windowId: WindowId, threadId: BrowserThreadId): BrowserAutomationSnapshot {

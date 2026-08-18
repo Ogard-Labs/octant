@@ -510,6 +510,34 @@ describe("ChatTranscript", () => {
     expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Branch from here" })).toBeDisabled();
   });
+
+  it("offers a checkpoint on each message and marks the turn the user chose", async () => {
+    const user = userEvent.setup();
+    const onMark = vi.fn();
+    render(
+      <ChatTranscript
+        checkpoints={{
+          byTurnId: new Map(),
+          busy: false,
+          onForget: vi.fn(),
+          onMark,
+          onRestore: vi.fn(),
+        }}
+        view={viewFixture()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Checkpoint" }));
+    await user.click(screen.getByRole("button", { name: "Mark" }));
+
+    expect(onMark).toHaveBeenCalledWith(ids.turn, "Message 1");
+  });
+
+  it("keeps the checkpoint affordance off a transcript the host serves none for", () => {
+    render(<ChatTranscript view={viewFixture()} />);
+
+    expect(screen.queryByRole("button", { name: "Checkpoint" })).toBeNull();
+  });
 });
 
 const poolCandidates = [

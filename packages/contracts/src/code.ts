@@ -384,8 +384,27 @@ export const CodeCommand = Schema.Union(
     sourceBranch: WorktreeSourceBranch,
     startFromOrigin: Schema.Boolean,
     remoteName: Schema.optional(WorktreeSourceRemote),
+    /**
+     * Start the worktree from this exact revision instead of the tip of
+     * `sourceBranch`. Present when the thread is taking up a recorded point in
+     * another thread's history, where the branch tip has since moved on and
+     * only the revision names what the user asked to return to. A revision
+     * source never fetches: the object is already in the repository, or the
+     * creation fails closed.
+     */
+    sourceRevision: Schema.optional(GitObjectId),
+    /**
+     * The thread and turn this one continues, so the new thread's first turn
+     * carries that history as read-only context. The source thread is never
+     * touched.
+     */
+    forkedFrom: Schema.optional(CodeThreadForkOrigin),
     approvalId: Schema.optional(CodeApprovalId),
-  }).annotations(strict),
+  })
+    .annotations(strict)
+    .pipe(
+      Schema.filter((command) => command.sourceRevision === undefined || !command.startFromOrigin),
+    ),
   Schema.Struct({
     kind: Schema.Literal("update-code-settings"),
     expectedVersion: AggregateVersion,

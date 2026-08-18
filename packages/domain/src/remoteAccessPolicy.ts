@@ -73,6 +73,17 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   "code.local-servers.open",
   "code.local-servers.stop-owned",
   "project.overview.read",
+  // Companion surfaces: a paired device may watch what the host is already
+  // showing for a thread, and may act inside that view. Reading the browser's
+  // observation, a simulator screenshot the Apple toolchain recorded, and a
+  // terminal's output are all reads of state the host produced on its own.
+  // `browser.interact` covers only gestures that land in the page the host
+  // opened — pointing it elsewhere, typing into it, or opening and closing its
+  // sessions are separate, host-only actions below.
+  "browser.observe",
+  "browser.interact",
+  "simulator.observe",
+  "terminal.read",
   "automation.manage",
   "preview.open-authorized",
   "settings.read-non-secret",
@@ -102,6 +113,11 @@ const LOCAL_HOST_ACTIONS = new Set([
   // signals a
   // process outside Octant's ownership, so it stays on the host.
   "code.local-servers.stop-leftover",
+  // Opening, navigating, closing, or typing into the host's browser is driving
+  // the host rather than watching it, and terminal input runs commands there,
+  // so both stay with the person at the machine.
+  "browser.session.manage",
+  "terminal.write",
   "host-key.rotate",
   "host.service.start",
   "host.service.stop",
