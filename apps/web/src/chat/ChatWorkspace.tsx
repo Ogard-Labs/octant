@@ -940,7 +940,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 : {}
           : { sendDisabledReason: "Choose an available provider and model before sending." })}
       />
-      <LinkedThreadParallelReviewFlow controller={parallelReview} />
+      <LinkedThreadParallelReviewFlow
+        controller={parallelReview}
+        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+        {...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability })}
+      />
     </section>
   );
 }

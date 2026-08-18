@@ -162,6 +162,12 @@ export interface CodeOperationRuntimeOptions {
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
   /** Takes the notes the user pointed at the running product into the next turn. */
   readonly takeProductFeedbackForTurn?: CodeOperationServiceOptions["takeProductFeedbackForTurn"];
+  /**
+   * The Project checkout a run comes home to. The host resolves the path; this
+   * runtime observes its branch and cleanliness itself, so the merge gate reads
+   * the checkout as it stands rather than as the caller last saw it.
+   */
+  readonly resolveBaseCheckoutRoot?: (thread: CodeThread) => Promise<string | undefined>;
   readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
 }
 
@@ -360,6 +366,11 @@ export function createCodeOperationRuntime(
     ...(options.takeProductFeedbackForTurn === undefined
       ? {}
       : { takeProductFeedbackForTurn: options.takeProductFeedbackForTurn }),
+    ...(options.resolveBaseCheckoutRoot === undefined
+      ? {}
+      : {
+          resolveBaseCheckout: baseCheckoutResolver(gitService, options.resolveBaseCheckoutRoot),
+        }),
     ...(options.resolveForkHandoff === undefined
       ? {}
       : { resolveForkHandoff: options.resolveForkHandoff }),
@@ -1271,6 +1282,32 @@ function createPullRequestPort(options: CodeOperationRuntimeOptions): CodeOperat
   }
 }
 
+/**
+ * Read the Project checkout a run would come home to, as it stands now.
+ *
+ * The path comes from the host, which knows the Project binding; the branch and
+ * cleanliness are observed here, immediately before the merge gate reads them.
+ * A checkout that cannot be observed is reported unavailable, which the gate
+ * treats as a refusal rather than as permission.
+ */
+function baseCheckoutResolver(
+  git: GitService,
+  resolveRoot: (thread: CodeThread) => Promise<string | undefined>,
+): NonNullable<CodeOperationServiceOptions["resolveBaseCheckout"]> {
+  return async (thread) => {
+    const checkoutRoot = await resolveRoot(thread).catch(() => undefined);
+    if (checkoutRoot === undefined) return { status: "unavailable" };
+    const observed = await git.observe(checkoutRoot);
+    if (observed.status !== "ready") return { status: "unavailable" };
+    return {
+      status: "observed",
+      checkoutRoot: observed.checkoutRoot,
+      branch: observed.head.kind === "branch" ? observed.head.name : undefined,
+      clean: observed.changedPaths.length === 0,
+    };
+  };
+}
+
 function codeOperationGitPort(git: GitService): CodeOperationGitPort {
   return {
     observe: async ({ checkoutRoot, maxDiffBytes }) =>
@@ -1291,6 +1328,33 @@ function codeOperationGitPort(git: GitService): CodeOperationGitPort {
     unstage: (input) => git.unstage(input),
     checkpoint: (input) => git.checkpoint(input),
     restoreCheckpoint: (input) => git.restoreCheckpoint(input),
+    compareBranch: (input) => git.compareBranch(input),
+    readBranchDiff: async (input) => {
+      const result = await git.readDiff({
+        checkoutRoot: input.checkoutRoot,
+        scope: { kind: "branch", baseRef: input.baseRef },
+      });
+      return result.status === "ready"
+        ? {
+            status: "ready",
+            paths: result.paths,
+            diff: result.diff.text,
+            diffTruncated: result.diff.truncated,
+          }
+        : { status: "unavailable" };
+    },
+    mergeRun: async (input) => {
+      const result = await git.mergeBranch({
+        checkoutId: input.checkoutRoot,
+        checkoutRoot: input.checkoutRoot,
+        branch: input.branch,
+      });
+      return result.status === "applied"
+        ? { status: "applied", ...(result.oid === undefined ? {} : { oid: result.oid }) }
+        : result.status === "rejected"
+          ? { status: "rejected", reason: result.reason }
+          : { status: result.status };
+    },
   } as CodeOperationGitPort;
 }
 

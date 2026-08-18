@@ -158,6 +158,18 @@ describe("Code operation contracts", () => {
       { kind: "run-repository-test", ...scope, testRunId: ids.testRun, definition },
       { kind: "cancel-repository-test", ...scope, testRunId: ids.testRun },
       { kind: "observe-git", ...scope, gitOperationId: ids.git, maxDiffBytes: 262_144 },
+      { kind: "review-run", ...scope, gitOperationId: ids.git, maxDiffBytes: 262_144 },
+      {
+        kind: "merge-run",
+        ...scope,
+        gitOperationId: ids.git,
+        confirmation: {
+          branch: "octant/attempt-a",
+          baseBranch: "main",
+          expectedHeadOid: "b".repeat(40),
+        },
+        authorization: { kind: "full-access" },
+      },
       {
         kind: "stage-git",
         ...scope,

@@ -2562,6 +2562,16 @@ export function startOctantServer(
         takeProductFeedbackForTurn: createProductFeedbackTurnPort({
           service: productFeedbackService,
         }),
+        // Where a run comes home to: the directory the thread's Project binds.
+        // A run on a managed worktree works in a sibling tree; the merge lands
+        // in the person's own checkout, and only the Project knows where that
+        // is.
+        resolveBaseCheckoutRoot: async (thread) => {
+          const project = persistence.readProject(thread.projectId);
+          return project?.type === "code" && project.lifecycle === "active"
+            ? project.binding.canonicalRoot
+            : undefined;
+        },
         resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
         githubReadTools: ({ windowId, thread, readThread }) =>
           githubReadToolService.createToolSet({ windowId, thread, readThread }),

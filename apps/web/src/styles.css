@@ -5897,6 +5897,61 @@ dialog.project-dialog {
   color: var(--octant-danger-text);
 }
 
+.parallel-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--octant-border-subtle);
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.parallel-runs__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--octant-text-primary);
+}
+
+.parallel-runs__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.parallel-runs__entry {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 6px;
+}
+
+.parallel-runs__entry-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.parallel-runs__entry-label {
+  color: var(--octant-text-primary);
+}
+
+.parallel-runs__confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .product-feedback {
   display: flex;
   flex-direction: column;
