@@ -29,6 +29,7 @@ distilled successor of the earlier long-form design specifications.
 | [0019](0019-user-profile-and-first-run-setup.md)        | User profile and first-run setup                                  | Accepted |
 | [0020](0020-checkpoints-and-restore-by-forking.md)      | Checkpoints and restore by forking                                | Accepted |
 | [0021](0021-remote-thread-surfaces.md)                  | Remote thread surfaces: watching the running product              | Accepted |
+| [0022](0022-pointed-at-product-feedback.md)             | Pointing at the running product                                   | Accepted |
 
 ## Adding an ADR
 

@@ -160,6 +160,8 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
+  /** Takes the notes the user pointed at the running product into the next turn. */
+  readonly takeProductFeedbackForTurn?: CodeOperationServiceOptions["takeProductFeedbackForTurn"];
   readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
 }
 
@@ -355,6 +357,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveThreadMentionContext === undefined
       ? {}
       : { resolveThreadMentionContext: options.resolveThreadMentionContext }),
+    ...(options.takeProductFeedbackForTurn === undefined
+      ? {}
+      : { takeProductFeedbackForTurn: options.takeProductFeedbackForTurn }),
     ...(options.resolveForkHandoff === undefined
       ? {}
       : { resolveForkHandoff: options.resolveForkHandoff }),

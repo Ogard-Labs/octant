@@ -26,6 +26,8 @@ import type {
   ProviderDefaults,
   ProviderCatalogSnapshot,
   ProviderInstance,
+  ProductFeedbackNote,
+  ProductFeedbackNoteId,
   ProviderInstanceId,
   ThreadCheckpoint,
   ThreadCheckpointId,
@@ -106,6 +108,7 @@ import {
   reconcileCodeRestart,
   type ProjectedCodeRuntimeWork,
 } from "./codeProjection";
+import { readProductFeedbackNote, readProductFeedbackNotes } from "./productFeedbackProjection";
 import { readThreadCheckpoint, readThreadCheckpoints } from "./threadCheckpointProjection";
 import { databaseStatus, type DatabaseStatus } from "./recovery";
 import {
@@ -184,6 +187,10 @@ export interface PersistenceService {
   readonly readPendingChatPurges: () => ReadonlyArray<PendingChatPurge>;
   readonly readThreadCheckpoint: (checkpointId: ThreadCheckpointId) => ThreadCheckpoint | undefined;
   readonly readThreadCheckpoints: (threadId: string) => ReadonlyArray<ThreadCheckpoint>;
+  readonly readProductFeedbackNote: (
+    noteId: ProductFeedbackNoteId,
+  ) => ProductFeedbackNote | undefined;
+  readonly readProductFeedbackNotes: (threadId: string) => ReadonlyArray<ProductFeedbackNote>;
   readonly readCodeSettings: () => ProjectedCodeSettings | undefined;
   readonly readThemeSettings: () => ProjectedThemeSettings | undefined;
   readonly readCodeThread: (threadId: CodeThreadId) => CodeThread | undefined;
@@ -355,6 +362,8 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readPendingChatPurges: () => readPendingChatPurges(connection),
       readThreadCheckpoint: (checkpointId) => readThreadCheckpoint(connection, checkpointId),
       readThreadCheckpoints: (threadId) => readThreadCheckpoints(connection, threadId),
+      readProductFeedbackNote: (noteId) => readProductFeedbackNote(connection, noteId),
+      readProductFeedbackNotes: (threadId) => readProductFeedbackNotes(connection, threadId),
       readCodeSettings: () => readCodeSettings(connection),
       readThemeSettings: () => readThemeSettings(connection),
       readCodeThread: (threadId) => readCodeThread(connection, threadId),

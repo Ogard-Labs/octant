@@ -51,6 +51,7 @@ export * from "./memoryPolicy";
 export * from "./modePolicy";
 export * from "./multiModelPoolPolicy";
 export * from "./previewPolicy";
+export * from "./productFeedbackPolicy";
 export * from "./projectPolicy";
 export * from "./providerCapacityPolicy";
 export * from "./modelCatalogPolicy";

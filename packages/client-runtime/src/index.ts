@@ -21,6 +21,7 @@ export * from "./extensionClient";
 export * from "./githubClient";
 export * from "./githubCloneClient";
 export * from "./goalClient";
+export * from "./productFeedbackClient";
 export * from "./threadCheckpointClient";
 export * from "./hostClient";
 export * from "./hostControlClient";

@@ -49,6 +49,14 @@ import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
 import { createChatRouteHandler } from "./chatRoutes";
 import { createThreadCheckpointRouteHandler } from "./threadCheckpointRoutes";
+import { createProductFeedbackRouteHandler } from "./productFeedbackRoutes";
+import {
+  decodeBrowserContextId,
+  decodeBrowserThreadId,
+} from "@octant/contracts/browser-automation";
+import { decodeCodeEvidenceReference } from "@octant/contracts/code-operations";
+import { ProductFeedbackService } from "./browser/productFeedbackService";
+import { createProductFeedbackTurnPort } from "./browser/productFeedbackTurnPort";
 import {
   createCheckpointChatPort,
   createCheckpointCodePort,
@@ -1201,6 +1209,7 @@ export function startOctantServer(
     const codeSessionAuthority = new CodeSessionAuthorityStore();
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
+    let productFeedbackService: ProductFeedbackService;
     let activeComputerUseRuntime: ComputerUseRuntime | undefined;
     let workRequestRuntime: WorkRequestRuntime | undefined;
     const windowAuthorityStore = new WindowAuthorityStore(
@@ -2414,6 +2423,59 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       now: Date.now,
     });
+    // Notes the user points at the running product. The service owns the
+    // authority check and resolves the element itself; the crop lives in the
+    // same purgeable evidence store the rest of Code's bulk content uses, and
+    // the journal keeps only the reference.
+    productFeedbackService = new ProductFeedbackService({
+      journal: persistence.journal,
+      browser: {
+        describePoint: async (input) =>
+          (await browserAutomationService?.describePoint({
+            windowId: input.windowId,
+            threadId: decodeBrowserThreadId(input.threadId),
+            contextId: decodeBrowserContextId(input.contextId),
+            point: input.point,
+          })) ?? { status: "unavailable" },
+      },
+      crops: {
+        put: (dataUrl) => {
+          const reference = codeEvidence.put(dataUrl);
+          return {
+            contentId: String(reference.contentId),
+            digest: reference.digest,
+            byteLength: reference.byteLength,
+          };
+        },
+        read: (crop) => {
+          try {
+            return codeEvidence.read(
+              decodeCodeEvidenceReference({
+                contentId: crop.contentId,
+                digest: crop.digest,
+                byteLength: crop.byteLength,
+              }),
+            );
+          } catch {
+            return undefined;
+          }
+        },
+      },
+      readNote: (noteId) => persistence.readProductFeedbackNote(noteId),
+      readNotes: (threadId) => persistence.readProductFeedbackNotes(threadId),
+      canAccessThread: async (windowId, threadId) => {
+        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        if (thread === undefined) return false;
+        return projectService.hasActiveProject(thread.projectId, "code");
+      },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const productFeedbackRoutes = createProductFeedbackRouteHandler({
+      feedback: productFeedbackService,
+      windowAuthorityStore,
+    });
     if (codeOperationRuntime === undefined && options.codeService === undefined) {
       const terminalProcessPort = new TerminalProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "terminal-receipts"),
@@ -2497,6 +2559,9 @@ export function startOctantServer(
         },
         credentialResolver: { resolve: async () => undefined },
         resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+        takeProductFeedbackForTurn: createProductFeedbackTurnPort({
+          service: productFeedbackService,
+        }),
         resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
         githubReadTools: ({ windowId, thread, readThread }) =>
           githubReadToolService.createToolSet({ windowId, thread, readThread }),
@@ -4235,6 +4300,7 @@ export function startOctantServer(
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??
       (await threadCheckpointRoutes(request)) ??
+      (await productFeedbackRoutes(request)) ??
       (await workThreadRoutes(request)) ??
       (await workTurnRoutes(request)) ??
       (await workOverviewRoutes(request)) ??

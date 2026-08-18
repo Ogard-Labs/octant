@@ -219,6 +219,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "extensions",
       "remote-access",
       "thread-checkpoint",
+      "product-feedback",
     ]);
     expect(second.projections.all().map((projection) => projection.name)).toEqual([
       "aggregate-heads",
@@ -242,6 +243,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "extensions",
       "remote-access",
       "thread-checkpoint",
+      "product-feedback",
     ]);
     expect(first.projections.all()[0]).not.toBe(second.projections.all()[0]);
     expect(first.events.decode("shell.settings-replaced", 1, validSettingsPayload())).toEqual(

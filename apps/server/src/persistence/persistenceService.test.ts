@@ -135,6 +135,7 @@ describe("PersistenceLive", () => {
         { name: "extensions", lastSequence: 1, lag: 0 },
         { name: "remote-access", lastSequence: 1, lag: 0 },
         { name: "thread-checkpoint", lastSequence: 1, lag: 0 },
+        { name: "product-feedback", lastSequence: 1, lag: 0 },
       ],
     });
   });
@@ -410,6 +411,7 @@ describe("PersistenceLive", () => {
         { projection_name: "extensions", global_sequence: 1, reason },
         { projection_name: "remote-access", global_sequence: 1, reason },
         { projection_name: "thread-checkpoint", global_sequence: 1, reason },
+        { projection_name: "product-feedback", global_sequence: 1, reason },
       ]);
       inspected.close();
     },

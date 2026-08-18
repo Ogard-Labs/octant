@@ -574,6 +574,20 @@ export interface CodeOperationServiceOptions {
     readonly windowId: WindowId;
   }) => Promise<ReadonlyArray<CodeThreadMentionContext>>;
   /**
+   * Takes the notes the user pointed at the running product and hands them to
+   * this turn. The port marks each note carried in the same step, so a note
+   * travels exactly once; absent on a host with no browser surface, where a
+   * thread simply has no notes waiting.
+   */
+  readonly takeProductFeedbackForTurn?: (input: {
+    readonly threadId: CodeThreadId;
+    readonly operationId: CodeOperationId;
+    readonly supportsImages: boolean;
+  }) => Promise<{
+    readonly context?: string;
+    readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
+  }>;
+  /**
    * Reads the conversation a forked thread inherits, for its first turn only.
    *
    * A fork's own transcript starts empty, so without this its provider would be
@@ -1721,20 +1735,35 @@ export class CodeOperationService {
         "unavailable",
         "Provider prompt evidence is unavailable.",
       );
+    const supportsImages = this.#options.supportsAttachments?.(thread) === true;
+    // Notes the user pointed at the running product ride with the next turn
+    // they send. They are quoted as evidence beside the prompt, never folded
+    // into it, and the port records that each one went before it is used.
+    const feedback = await this.#options
+      .takeProductFeedbackForTurn?.({
+        threadId: command.threadId,
+        operationId: command.operationId,
+        supportsImages,
+      })
+      .catch(() => undefined);
     const context = [
       ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
       ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
+      ...(feedback?.context === undefined || feedback.context.trim().length === 0
+        ? []
+        : [{ kind: "user-message", text: feedback.context } as const]),
     ];
     // A model that cannot read a picture is told so plainly rather than sent
     // the turn with its images quietly removed.
-    if (references.length > 0 && this.#options.supportsAttachments?.(thread) !== true) {
+    if (references.length > 0 && !supportsImages) {
       return this.#failed(
         command.operationId,
         "invalid",
         "The selected model does not support images. Choose a vision model, or remove the attachments.",
       );
     }
-    const attachments = await this.#attachmentInputs(command.threadId, references);
+    const own = await this.#attachmentInputs(command.threadId, references);
+    const attachments = own === undefined ? undefined : [...own, ...(feedback?.attachments ?? [])];
     if (attachments === undefined) {
       return this.#failed(
         command.operationId,

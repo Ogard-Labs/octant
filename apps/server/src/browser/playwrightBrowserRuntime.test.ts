@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { BrowserActionRequest, BrowserContextId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
+  describeElementAtPoint,
   PlaywrightBrowserRuntime,
   type PlaywrightBrowserPort,
   type PlaywrightContextPort,
@@ -637,3 +638,155 @@ function harnessWithReceipt(options: {
   });
   return { browser, disconnected: () => disconnected?.(), runtime };
 }
+
+describe("naming the element a user pointed at", () => {
+  const described = {
+    selector: "main > button:nth-of-type(2)",
+    role: "button",
+    accessibleName: "Save changes",
+    text: "Save changes",
+    bounds: { x: 0.25, y: 0.5, width: 0.1, height: 0.05 },
+  };
+
+  it("cuts a crop with room around the element and reports where it sat", async () => {
+    const { pages, runtime } = harness();
+    await runtime.createContext(firstId, policy, new AbortController().signal);
+    const page = pages[0]!;
+    (page.evaluate as ReturnType<typeof vi.fn>).mockResolvedValue(described);
+
+    const observation = await runtime.describePoint(
+      firstId,
+      { x: 0.3, y: 0.52 },
+      new AbortController().signal,
+    );
+
+    if (observation.status !== "described") throw new Error("expected a described element");
+    expect(observation.element).toEqual(described);
+    expect(observation.cropDataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    // 1280x720 viewport, 24px of air on each side, clamped to the page.
+    expect(page.screenshot).toHaveBeenCalledWith({
+      type: "jpeg",
+      quality: 60,
+      scale: "css",
+      clip: { x: 296, y: 336, width: 176, height: 84 },
+    });
+  });
+
+  it("says there is nothing there rather than inventing an element", async () => {
+    const { pages, runtime } = harness();
+    await runtime.createContext(firstId, policy, new AbortController().signal);
+    (pages[0]!.evaluate as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+    expect(
+      await runtime.describePoint(firstId, { x: 0.5, y: 0.5 }, new AbortController().signal),
+    ).toEqual({ status: "no-element" });
+  });
+
+  it("keeps the note without a picture when the crop cannot be taken", async () => {
+    const { pages, runtime } = harness();
+    await runtime.createContext(firstId, policy, new AbortController().signal);
+    const page = pages[0]!;
+    (page.evaluate as ReturnType<typeof vi.fn>).mockResolvedValue(described);
+    (page.screenshot as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("no picture"));
+
+    const observation = await runtime.describePoint(
+      firstId,
+      { x: 0.3, y: 0.52 },
+      new AbortController().signal,
+    );
+
+    if (observation.status !== "described") throw new Error("expected a described element");
+    expect(observation.cropDataUrl).toBeUndefined();
+  });
+});
+
+describe("the description the page itself produces", () => {
+  interface FakeElement {
+    tagName: string;
+    textContent: string;
+    children: FakeElement[];
+    parentElement: FakeElement | null;
+    getAttribute: (attribute: string) => string | null;
+    getBoundingClientRect: () => {
+      left: number;
+      top: number;
+      width: number;
+      height: number;
+    };
+  }
+
+  function fakeElement(input: {
+    readonly tagName: string;
+    readonly id?: string;
+    readonly ariaLabel?: string;
+    readonly textContent?: string;
+    readonly parent?: FakeElement;
+  }): FakeElement {
+    const element: FakeElement = {
+      tagName: input.tagName,
+      textContent: input.textContent ?? "",
+      children: [],
+      parentElement: input.parent ?? null,
+      getAttribute: (attribute) =>
+        attribute === "id"
+          ? (input.id ?? null)
+          : attribute === "aria-label"
+            ? (input.ariaLabel ?? null)
+            : null,
+      getBoundingClientRect: () => ({ left: 320, top: 360, width: 128, height: 36 }),
+    };
+    input.parent?.children.push(element);
+    return element;
+  }
+
+  function withDocument(element: FakeElement | null, run: () => void): void {
+    const previous = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = { elementFromPoint: () => element };
+    try {
+      run();
+    } finally {
+      (globalThis as { document?: unknown }).document = previous;
+    }
+  }
+
+  const argument = { x: 320, y: 360, viewportWidth: 1280, viewportHeight: 720 };
+
+  it("prefers an element's own id over a structural path", () => {
+    const parent = fakeElement({ tagName: "MAIN" });
+    const element = fakeElement({ tagName: "BUTTON", id: "save", parent });
+    withDocument(element, () => {
+      expect(describeElementAtPoint(argument)?.selector).toBe("#save");
+    });
+  });
+
+  it("counts an element among its like siblings when it has no id", () => {
+    const parent = fakeElement({ tagName: "MAIN" });
+    fakeElement({ tagName: "BUTTON", parent });
+    const element = fakeElement({ tagName: "BUTTON", parent });
+    withDocument(element, () => {
+      expect(describeElementAtPoint(argument)?.selector).toContain("button:nth-of-type(2)");
+    });
+  });
+
+  it("normalizes the element's box to the viewport and bounds its text", () => {
+    const parent = fakeElement({ tagName: "MAIN" });
+    const element = fakeElement({
+      tagName: "BUTTON",
+      ariaLabel: "Save changes",
+      textContent: "  Save   changes  ",
+      parent,
+    });
+    withDocument(element, () => {
+      const described = describeElementAtPoint(argument);
+      expect(described?.bounds).toEqual({ x: 0.25, y: 0.5, width: 0.1, height: 0.05 });
+      expect(described?.accessibleName).toBe("Save changes");
+      expect(described?.text).toBe("Save changes");
+    });
+  });
+
+  it("reports nothing when the point lands on no element at all", () => {
+    withDocument(null, () => {
+      expect(describeElementAtPoint(argument)).toBeNull();
+    });
+  });
+});

@@ -35,6 +35,7 @@
     "./work-overview-client": "./src/workOverviewClient.ts",
     "./work-research-client": "./src/workResearchClient.ts",
     "./goal-client": "./src/goalClient.ts",
+    "./product-feedback-client": "./src/productFeedbackClient.ts",
     "./thread-checkpoint-client": "./src/threadCheckpointClient.ts",
     "./code-file-listing-client": "./src/codeFileListingClient.ts",
     "./local-server-client": "./src/localServerClient.ts",

@@ -93,6 +93,9 @@ import {
   DiagnosticsFailureIncidentRecorded,
   DiagnosticsFailureIncidentRecordedV1,
   ExtensionLifecycleEvent,
+  ProductFeedbackCaptured,
+  ProductFeedbackDelivered,
+  ProductFeedbackDiscarded,
   ThreadCheckpointForgotten,
   ThreadCheckpointMarked,
   ThreadCheckpointRestored,
@@ -134,6 +137,12 @@ import { ValidationEvidenceProjection } from "../validation/validationEvidencePr
 import { ThemeProjection } from "./themeProjection";
 import { ExtensionProjection, EXTENSION_LIFECYCLE_EVENT } from "./extensionProjection";
 import { RemoteAccessProjection } from "./remoteAccessProjection";
+import {
+  PRODUCT_FEEDBACK_CAPTURED,
+  PRODUCT_FEEDBACK_DELIVERED,
+  PRODUCT_FEEDBACK_DISCARDED,
+  ProductFeedbackProjection,
+} from "./productFeedbackProjection";
 import {
   THREAD_CHECKPOINT_FORGOTTEN,
   THREAD_CHECKPOINT_MARKED,
@@ -303,6 +312,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(REMOTE_ACCESS_EVENT_NAMES.sessionInvalidated, 1, RemoteSessionInvalidatedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.commandReceiptRecorded, 1, RemoteCommandReceiptRecordedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.securityAuditRecorded, 1, SecurityAuditRecordedV1)
+    .register(PRODUCT_FEEDBACK_CAPTURED, 1, ProductFeedbackCaptured)
+    .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)
+    .register(PRODUCT_FEEDBACK_DELIVERED, 1, ProductFeedbackDelivered)
     .register(THREAD_CHECKPOINT_MARKED, 1, ThreadCheckpointMarked)
     .register(THREAD_CHECKPOINT_FORGOTTEN, 1, ThreadCheckpointForgotten)
     .register(THREAD_CHECKPOINT_RESTORED, 1, ThreadCheckpointRestored)
@@ -345,6 +357,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ThemeProjection())
       .register(new ExtensionProjection())
       .register(new RemoteAccessProjection())
-      .register(new ThreadCheckpointProjection()),
+      .register(new ThreadCheckpointProjection())
+      .register(new ProductFeedbackProjection()),
   };
 }
