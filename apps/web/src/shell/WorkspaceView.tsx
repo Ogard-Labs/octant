@@ -43,6 +43,7 @@ import { ChatWorkspace } from "../chat/ChatWorkspace";
 import { ChatWelcome } from "../chat/ChatWelcome";
 import { ChatProjectOverview } from "../chat/ChatProjectOverview";
 import type { CodeController } from "../code/useCodeController";
+import { useCodeThreadController, type CodeThreadControllers } from "../code/codeThreadControllers";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { CodeOverview } from "../code/CodeOverview";
@@ -104,6 +105,13 @@ export interface WorkspaceViewProps {
   readonly chatController: ChatController;
   readonly chatReadCursorStore: ChatReadCursorStore;
   readonly codeController: CodeController;
+  /**
+   * One controller per open Code thread. Every Code surface reads the one for
+   * the thread its tab is bound to, so two Code threads in one window run and
+   * render at the same time. `codeController` stays the window's own reader for
+   * the thread list, settings, and thread creation.
+   */
+  readonly codeControllers: CodeThreadControllers;
   readonly extensionClient?: ExtensionClient;
   readonly workPromotionController: WorkPromotionController;
   readonly workMutationClient?: WorkMutationClient;
@@ -511,173 +519,227 @@ function renderTab(
     );
   }
   if (isCodeWorkspaceTab(tab)) {
-    const project = resolveCodeTabProject(tab, props);
-    const browserAutomationClient = props.browserAutomationClient;
-    const onOpenSurface = props.onOpenSurface;
-    const checkoutId = resolveCodeTabCheckoutId(tab, props.codeController);
-    const content = (
-      <Suspense
-        fallback={
-          <ShellState
-            eyebrow="Code workspace"
-            message="Loading the selected Code surface."
-            state="loading"
-            title={tab.title}
-          />
-        }
-      >
-        <CodeWorkspaceTab
-          {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-          {...(props.agentRunSettingsClient === undefined
-            ? {}
-            : { agentRunSettingsClient: props.agentRunSettingsClient })}
-          {...(props.appleToolchainClient === undefined
-            ? {}
-            : { appleToolchainClient: props.appleToolchainClient })}
-          controller={props.codeController}
-          onOpenCodeThread={props.onOpenCodeThread}
-          {...(props.onOpenSurface === undefined
-            ? {}
-            : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
-          onOpenSurface={(kind, options) =>
-            options?.terminalId === undefined
-              ? props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))
-              : props.onOpenCodeSurface(
-                  kind,
-                  tab.threadId,
-                  codeSurfaceTitle(kind),
-                  options.terminalId,
-                )
-          }
-          {...(props.onOpenCodeFile === undefined
-            ? {}
-            : {
-                onOpenFile: (relativePath: string) =>
-                  props.onOpenCodeFile?.({
-                    threadId: tab.threadId,
-                    relativePath: relativePath as never,
-                  }),
-              })}
-          tab={tab}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
-            ? {}
-            : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}
-          {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
-          {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
-          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-          {...(props.projectWindowCapability === undefined
-            ? {}
-            : { windowCapability: props.projectWindowCapability })}
-          {...(props.onOpenCanvasReference === undefined
-            ? {}
-            : { onOpenCanvas: props.onOpenCanvasReference })}
-          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-        />
-      </Suspense>
+    return (
+      <CodeThreadTabSurface controllers={props.codeControllers} key={tab.id} tab={tab}>
+        {(controller) => renderCodeTab(tab, props, groupId, controller)}
+      </CodeThreadTabSurface>
     );
-    // Auxiliary Code surfaces (terminal, file, diff, tests, …) share the
-    // thread rail, child-run chrome, and Browser/Computer Use preview with the
-    // thread tab; mounting them per split pane just repeats the same rail and
-    // "Browser is active" card beside every surface of one thread.
-    if (tab.kind !== "code-overview") {
-      return (
-        <CodeWorkspaceErrorBoundary key={tab.id}>
-          <div className="code-thread-environment code-thread-environment--surface">
-            <div className="code-thread-environment__content">{content}</div>
-          </div>
-        </CodeWorkspaceErrorBoundary>
-      );
-    }
-    const surface = (
-      <ThreadActivityPictureInPicture
-        {...(props.browserAutomationClient === undefined
+  }
+  return renderNonCodeTab(tab, props, groupId, canvasContext, openProviderSettings);
+}
+
+/**
+ * One Code surface, rendered under its own thread's controller.
+ *
+ * A tab whose thread has no controller yet says so. Rendering it against
+ * another thread's controller is what let one window show a second Code
+ * thread the first thread's transcript, checkout, and runtime.
+ */
+function CodeThreadTabSurface(props: {
+  readonly controllers: CodeThreadControllers;
+  readonly tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>;
+  readonly children: (controller: CodeController) => React.ReactNode;
+}) {
+  const controller = useCodeThreadController(props.controllers, props.tab.threadId as CodeThreadId);
+  if (controller === undefined) {
+    return (
+      <ShellState
+        eyebrow="Code workspace"
+        message="Opening this thread's own Code state."
+        state="loading"
+        title="Preparing this Code thread"
+      />
+    );
+  }
+  return <>{props.children(controller)}</>;
+}
+
+function renderCodeTab(
+  tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>,
+  props: WorkspaceViewProps,
+  groupId: TabGroupId,
+  codeController: CodeController,
+): React.ReactNode {
+  const project = resolveCodeTabProject(tab, props);
+  const browserAutomationClient = props.browserAutomationClient;
+  const onOpenSurface = props.onOpenSurface;
+  const checkoutId = resolveCodeTabCheckoutId(tab, codeController);
+  const content = (
+    <Suspense
+      fallback={
+        <ShellState
+          eyebrow="Code workspace"
+          message="Loading the selected Code surface."
+          state="loading"
+          title={tab.title}
+        />
+      }
+    >
+      <CodeWorkspaceTab
+        {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+        {...(props.agentRunSettingsClient === undefined
           ? {}
-          : { browserClient: props.browserAutomationClient })}
-        {...(props.computerUseClient === undefined
+          : { agentRunSettingsClient: props.agentRunSettingsClient })}
+        {...(props.appleToolchainClient === undefined
           ? {}
-          : { computerUseClient: props.computerUseClient })}
-        {...(props.onComputerUseSessionChange === undefined
-          ? {}
-          : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
+          : { appleToolchainClient: props.appleToolchainClient })}
+        controller={codeController}
+        onOpenCodeThread={props.onOpenCodeThread}
         {...(props.onOpenSurface === undefined
           ? {}
           : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
-        threadId={tab.threadId as never}
-      >
-        <ThreadChildRunStatusSlot
-          {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
-          threadId={String(tab.threadId)}
-        />
-        {content}
-      </ThreadActivityPictureInPicture>
-    );
-    const files = (
-      <CodeFileExplorerPanel
-        threadId={tab.threadId}
-        {...(checkoutId === undefined ? {} : { checkoutId })}
+        onOpenSurface={(kind, options) =>
+          options?.terminalId === undefined
+            ? props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))
+            : props.onOpenCodeSurface(
+                kind,
+                tab.threadId,
+                codeSurfaceTitle(kind),
+                options.terminalId,
+              )
+        }
+        {...(props.onOpenCodeFile === undefined
+          ? {}
+          : {
+              onOpenFile: (relativePath: string) =>
+                props.onOpenCodeFile?.({
+                  threadId: tab.threadId,
+                  relativePath: relativePath as never,
+                }),
+            })}
+        tab={tab}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        {...(props.codeProviderGroups === undefined && props.draftProviderGroups === undefined
+          ? {}
+          : { providerGroups: props.codeProviderGroups ?? props.draftProviderGroups })}
+        {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+        {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
           ? {}
           : { windowCapability: props.projectWindowCapability })}
-        onOpenFile={(entry) =>
-          props.onOpenCodeFile?.({ threadId: tab.threadId, relativePath: entry.path })
-        }
+        {...(props.onOpenCanvasReference === undefined
+          ? {}
+          : { onOpenCanvas: props.onOpenCanvasReference })}
+        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
       />
-    );
+    </Suspense>
+  );
+  // Auxiliary Code surfaces (terminal, file, diff, tests, …) share the
+  // thread rail, child-run chrome, and Browser/Computer Use preview with the
+  // thread tab; mounting them per split pane just repeats the same rail and
+  // "Browser is active" card beside every surface of one thread.
+  if (tab.kind !== "code-overview") {
     return (
       <CodeWorkspaceErrorBoundary key={tab.id}>
-        <CodeThreadEnvironment
-          presentation={props.environmentPresentation}
-          onChangePresentation={props.onSetEnvironmentPresentation}
-          {...(project === undefined ? {} : { project })}
-          {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
-          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-          {...(props.projectWindowCapability === undefined
-            ? {}
-            : { windowCapability: props.projectWindowCapability })}
-          {...(props.localServerClient === undefined
-            ? {}
-            : { localServerClient: props.localServerClient })}
-          {...(browserAutomationClient === undefined || onOpenSurface === undefined
-            ? {}
-            : {
-                onOpenLocalServer: async (target: LocalServerOpenTarget) => {
-                  const browserThreadId = tab.threadId as unknown as BrowserThreadId;
-                  const contextId = await openLocalServerBrowserContext(
-                    browserAutomationClient,
-                    browserThreadId,
-                    target,
-                  );
-                  // Named by the context it just created, so this Open gets its
-                  // own tab instead of taking over the thread's Browser tab.
-                  // The shell recovers a rejected tab mutation rather than
-                  // throwing, so only its adoption answer proves the context
-                  // gained a close path; without one it is released here and
-                  // the Open is reported as the failure it was.
-                  const adopted = await onOpenSurface("browser", groupId, contextId);
-                  if (adopted) return;
-                  await releaseBrowserContext(browserAutomationClient, browserThreadId, contextId);
-                  throw new Error("No Browser tab adopted the context opened for this server.");
-                },
-              })}
-          {...(globalThis.navigator?.clipboard === undefined
-            ? {}
-            : {
-                onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
-              })}
-          tab={tab}
-          onExecute={props.codeController.execute}
-          files={files}
-          onOpenChanges={() =>
-            props.onOpenCodeSurface("code-diff", tab.threadId, codeSurfaceTitle("code-diff"))
-          }
-        >
-          {surface}
-        </CodeThreadEnvironment>
+        <div className="code-thread-environment code-thread-environment--surface">
+          <div className="code-thread-environment__content">{content}</div>
+        </div>
       </CodeWorkspaceErrorBoundary>
     );
   }
+  const surface = (
+    <ThreadActivityPictureInPicture
+      {...(props.browserAutomationClient === undefined
+        ? {}
+        : { browserClient: props.browserAutomationClient })}
+      {...(props.computerUseClient === undefined
+        ? {}
+        : { computerUseClient: props.computerUseClient })}
+      {...(props.onComputerUseSessionChange === undefined
+        ? {}
+        : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
+      {...(props.onOpenSurface === undefined
+        ? {}
+        : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
+      threadId={tab.threadId as never}
+    >
+      <ThreadChildRunStatusSlot
+        {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
+        threadId={String(tab.threadId)}
+      />
+      {content}
+    </ThreadActivityPictureInPicture>
+  );
+  const files = (
+    <CodeFileExplorerPanel
+      threadId={tab.threadId}
+      {...(checkoutId === undefined ? {} : { checkoutId })}
+      {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+      {...(props.projectWindowCapability === undefined
+        ? {}
+        : { windowCapability: props.projectWindowCapability })}
+      onOpenFile={(entry) =>
+        props.onOpenCodeFile?.({ threadId: tab.threadId, relativePath: entry.path })
+      }
+    />
+  );
+  return (
+    <CodeWorkspaceErrorBoundary key={tab.id}>
+      <CodeThreadEnvironment
+        presentation={props.environmentPresentation}
+        onChangePresentation={props.onSetEnvironmentPresentation}
+        {...(project === undefined ? {} : { project })}
+        {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+        {...(props.projectWindowCapability === undefined
+          ? {}
+          : { windowCapability: props.projectWindowCapability })}
+        {...(props.localServerClient === undefined
+          ? {}
+          : { localServerClient: props.localServerClient })}
+        {...(browserAutomationClient === undefined || onOpenSurface === undefined
+          ? {}
+          : {
+              onOpenLocalServer: async (target: LocalServerOpenTarget) => {
+                const browserThreadId = tab.threadId as unknown as BrowserThreadId;
+                const contextId = await openLocalServerBrowserContext(
+                  browserAutomationClient,
+                  browserThreadId,
+                  target,
+                );
+                // Named by the context it just created, so this Open gets its
+                // own tab instead of taking over the thread's Browser tab.
+                // The shell recovers a rejected tab mutation rather than
+                // throwing, so only its adoption answer proves the context
+                // gained a close path; without one it is released here and
+                // the Open is reported as the failure it was.
+                const adopted = await onOpenSurface("browser", groupId, contextId);
+                if (adopted) return;
+                await releaseBrowserContext(browserAutomationClient, browserThreadId, contextId);
+                throw new Error("No Browser tab adopted the context opened for this server.");
+              },
+            })}
+        {...(globalThis.navigator?.clipboard === undefined
+          ? {}
+          : {
+              onCopyLocalServerUrl: (url: string) => navigator.clipboard.writeText(url),
+            })}
+        tab={tab}
+        onExecute={codeController.execute}
+        files={files}
+        onOpenChanges={() =>
+          props.onOpenCodeSurface("code-diff", tab.threadId, codeSurfaceTitle("code-diff"))
+        }
+      >
+        {surface}
+      </CodeThreadEnvironment>
+    </CodeWorkspaceErrorBoundary>
+  );
+}
+
+function renderNonCodeTab(
+  tab: WorkspaceTab,
+  props: WorkspaceViewProps,
+  groupId: TabGroupId,
+  canvasContext: {
+    readonly clearCanvasSelections: () => void;
+    readonly pendingCanvasSelections: ReadonlyArray<CanvasContextSelection>;
+    readonly onAttachCanvasContext: (selection: CanvasContextSelection) => void;
+    readonly onRemoveCanvasSelection: (selectionId: CanvasContextSelectionId) => void;
+  },
+  openProviderSettings: (() => void) | undefined,
+): React.ReactNode {
   if (tab.kind === "draft-thread") {
     return (
       <div className="draft-thread-execution-profile" key={tab.id}>

@@ -56,6 +56,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   App,
   activeCodeThreadTabId,
+  openLocalCodeThreadIds,
   launchFromLocation,
   resolveWorkProviderChoice,
   resolveDraftProject,
@@ -1206,6 +1207,71 @@ describe("App", () => {
         browserGroupId as never,
       ),
     ).toBeUndefined();
+  });
+
+  it("collects every open Code thread once, however many surfaces it has open", () => {
+    const threadA = "00000000-0000-4000-8000-000000000631";
+    const threadB = "00000000-0000-4000-8000-000000000632";
+    const layout = {
+      kind: "split",
+      nodeId: "00000000-0000-4000-8000-000000000633",
+      orientation: "horizontal",
+      ratio: 0.5,
+      first: {
+        kind: "group",
+        nodeId: "00000000-0000-4000-8000-000000000634",
+        groupId: "00000000-0000-4000-8000-000000000635",
+        activeTabId: "00000000-0000-4000-8000-000000000636",
+        tabs: [
+          {
+            kind: "code-overview",
+            id: "00000000-0000-4000-8000-000000000636",
+            threadId: threadA,
+            mode: "code",
+            title: "Overview",
+          },
+          {
+            kind: "code-terminal",
+            id: "00000000-0000-4000-8000-000000000637",
+            threadId: threadA,
+            mode: "code",
+            title: "Terminal",
+          },
+          {
+            kind: "apple-workbench",
+            id: "00000000-0000-4000-8000-000000000638",
+            threadId: threadB,
+            mode: "code",
+            title: "Apple workbench",
+            projectPath: "Fixture.xcodeproj",
+          },
+        ],
+      },
+      second: {
+        kind: "group",
+        nodeId: "00000000-0000-4000-8000-000000000639",
+        groupId: "00000000-0000-4000-8000-000000000640",
+        activeTabId: "00000000-0000-4000-8000-000000000641",
+        tabs: [
+          {
+            kind: "code-diff",
+            id: "00000000-0000-4000-8000-000000000641",
+            threadId: threadB,
+            mode: "code",
+            title: "Changes",
+            relativePath: "README.md",
+          },
+          {
+            kind: "browser",
+            id: "00000000-0000-4000-8000-000000000642",
+            mode: "code",
+            title: "Browser",
+          },
+        ],
+      },
+    } as never;
+
+    expect(openLocalCodeThreadIds(layout).map(String)).toEqual([threadA, threadB]);
   });
 
   it("uses the active Project only for a draft that named no Project", () => {

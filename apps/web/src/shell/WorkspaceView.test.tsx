@@ -9,6 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceView, type WorkspaceViewProps } from "./WorkspaceView";
 import { createChatReadCursorStore } from "../chat/useChatController";
+import { createCodeThreadControllers } from "../code/codeThreadControllers";
 import {
   codeClient,
   gitObservation,
@@ -622,6 +623,12 @@ describe("WorkspaceView split Code file explorer", () => {
         ],
       },
     } as never as WorkspaceViewProps["codeController"];
+    // Both panes are open, so both threads have a controller. Neither reads a
+    // checkout from the other's view: thread B's is known only through the
+    // bootstrap thread record, exactly as at runtime.
+    const codeControllers = createCodeThreadControllers();
+    codeControllers.publish(codeIds.thread as never, codeController);
+    codeControllers.publish(threadBId as never, codeController);
     const listingRequests: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -639,6 +646,7 @@ describe("WorkspaceView split Code file explorer", () => {
       <WorkspaceView
         {...base}
         codeController={codeController}
+        codeControllers={codeControllers}
         layout={split}
         workspace={
           {
@@ -666,6 +674,91 @@ describe("WorkspaceView split Code file explorer", () => {
     );
     expect(byThread.get(String(codeIds.thread))).toBe(String(codeIds.checkout));
     expect(byThread.get(threadBId)).toBe(checkoutBId);
+  });
+});
+
+describe("WorkspaceView concurrent Code threads", () => {
+  it("shows each open Code thread its own composition rather than the focused one's", async () => {
+    const threadBId = "b0000000-0000-4000-8000-000000000002";
+    const checkoutBId = "20000000-0000-4000-8000-000000000002";
+    const tabA = codeTab("code-overview", "Thread A");
+    const tabBId = "10000000-0000-4000-8000-000000000024" as WorkspaceTab["id"];
+    const tabB = {
+      id: tabBId,
+      kind: "code-overview",
+      mode: "code",
+      threadId: threadBId,
+      title: "Thread B",
+    } as WorkspaceTab;
+    const base = propsFor(tabA);
+    const split = {
+      kind: "split",
+      nodeId: "10000000-0000-4000-8000-000000000021",
+      orientation: "horizontal",
+      ratio: 0.5,
+      first: base.layout,
+      second: {
+        kind: "group",
+        nodeId: "10000000-0000-4000-8000-000000000022",
+        groupId: "10000000-0000-4000-8000-000000000023",
+        activeTabId: tabBId,
+        tabs: [tabB],
+      },
+    } as never as WorkspaceViewProps["layout"];
+    const controllers = createCodeThreadControllers();
+    controllers.publish(codeIds.thread as never, base.codeController);
+    controllers.publish(
+      threadBId as never,
+      {
+        ...(base.codeController as object),
+        activeView: {
+          ...((base.codeController.activeView ?? {}) as object),
+          checkout: {
+            ...((base.codeController.activeView?.checkout ?? {}) as object),
+            id: checkoutBId,
+          },
+          thread: {
+            ...((base.codeController.activeView?.thread ?? {}) as object),
+            id: threadBId,
+            checkoutId: checkoutBId,
+            title: "Second composition",
+          },
+        },
+      } as never,
+    );
+
+    render(
+      <WorkspaceView
+        {...base}
+        codeControllers={controllers}
+        layout={split}
+        workspace={
+          { ...base.workspace, layouts: { ...base.workspace.layouts, code: split } } as never
+        }
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Composition" }, { timeout: 5_000 }),
+    ).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Second composition" }, { timeout: 5_000 }),
+    ).toBeVisible();
+  });
+
+  it("waits for a Code thread's own controller instead of borrowing another thread's", async () => {
+    const base = propsFor(codeTab("code-overview", "Thread A"));
+
+    render(<WorkspaceView {...base} codeControllers={createCodeThreadControllers()} />);
+
+    expect(
+      await screen.findByRole(
+        "heading",
+        { name: "Preparing this Code thread" },
+        { timeout: 5_000 },
+      ),
+    ).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Composition" })).not.toBeInTheDocument();
   });
 });
 
@@ -1968,11 +2061,13 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
     activeTabId: ids.tab,
     tabs: [tab],
   } as const;
-  return {
+  const codeControllers = createCodeThreadControllers();
+  const props = {
     availabilityByProject: new Map(),
     chatClient: {} as never,
     chatController: {} as never,
     chatReadCursorStore: {} as never,
+    codeControllers,
     codeController: {
       activeView: {
         checkout: {
@@ -2065,7 +2160,12 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
     onSetEnvironmentPresentation: vi.fn(),
     projectServerUrl: "http://localhost:0",
     projectWindowCapability: "test-capability",
-  };
+  } as WorkspaceViewProps;
+  // At runtime the shell holds one controller per open Code thread; these tests
+  // stand in one for the thread the fixture tab is bound to.
+  codeControllers.publish(codeIds.thread as never, props.codeController);
+  if ("threadId" in tab) codeControllers.publish(tab.threadId as never, props.codeController);
+  return props;
 }
 
 function workProjectPropsFor(input: {

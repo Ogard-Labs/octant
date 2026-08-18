@@ -200,7 +200,12 @@ import { ContextStatusBar } from "./context/ContextStatusBar";
 import { ContextTabWarning } from "./context/ContextTabWarning";
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
-import { useCodeController } from "./code/useCodeController";
+import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
+import {
+  CodeThreadControllerSlots,
+  createCodeThreadControllers,
+  useCodeThreadController,
+} from "./code/codeThreadControllers";
 import { CodeSearchDialog } from "./code/CodeSearchDialog";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
 import { CodeThreadBoard } from "./code/CodeThreadBoard";
@@ -1116,10 +1121,29 @@ function LaunchedShell(
     const remembered = rememberHealthyCreateHost(host);
     if (remembered !== undefined) setLastSelectedHealthyHostId(remembered);
   }
+  // Read cursors are the window's, not a thread's: the sidebar's unread marks
+  // have to agree no matter which thread's controller cleared them.
+  const codeReadCursorStore = useMemo(() => createCodeReadCursorStore(), []);
+  const codeThreadControllers = useMemo(() => createCodeThreadControllers(), []);
+  // The window's own Code reader: the thread list, settings, and the commands
+  // that create a thread. It deliberately binds to no thread, so no thread's
+  // transcript or stream depends on which tab happens to be in front.
   const codeController = useCodeController({
-    ...(activeCodeThreadId === undefined ? {} : { activeThreadId: activeCodeThreadId }),
     client: codeClient,
+    readCursorStore: codeReadCursorStore,
   });
+  const openCodeThreadIds = useMemo(
+    () =>
+      controller.workspace === undefined
+        ? []
+        : openLocalCodeThreadIds(controller.workspace.layouts.code),
+    [controller.workspace],
+  );
+  const activeCodeThreadController = useCodeThreadController(
+    codeThreadControllers,
+    activeCodeThreadId,
+  );
+  const activeCodeThreadView = activeCodeThreadController?.activeView;
   const watchedThreadId =
     activeMode === "code"
       ? activeCodeThreadId === undefined
@@ -1139,14 +1163,14 @@ function LaunchedShell(
           ? {}
           : { activeCodeThreadId: String(activeCodeThreadId) }),
         chatThreads: chatController.navigation,
-        codeProviderRequests: codeController.providerRequests,
+        codeProviderRequests: activeCodeThreadController?.providerRequests ?? [],
         codeThreads: codeController.navigation,
       }),
     [
       activeCodeThreadId,
       chatController.navigation,
+      activeCodeThreadController?.providerRequests,
       codeController.navigation,
-      codeController.providerRequests,
     ],
   );
   useThreadAttentionNotifications({
@@ -1157,7 +1181,7 @@ function LaunchedShell(
   const activeProjectId =
     selectedProjectTabId ??
     (activeMode === "code"
-      ? (codeController.activeView?.thread.projectId ??
+      ? (activeCodeThreadController?.activeView?.thread.projectId ??
         codeController.bootstrap?.threads.find((thread) => thread.id === activeCodeThreadId)
           ?.projectId)
       : undefined) ??
@@ -3559,6 +3583,7 @@ function LaunchedShell(
                   chatController={chatController}
                   chatReadCursorStore={chatReadCursorStore}
                   codeController={codeController}
+                  codeControllers={codeThreadControllers}
                   extensionClient={extensionClient}
                   workPromotionController={workPromotionController}
                   codeProviderChoices={codeProviderChoices}
@@ -4005,13 +4030,13 @@ function LaunchedShell(
         {/* One quick-open for the window, scoped to the Code thread currently
           in view. Mounting it per tab would make one chord open a dialog for
           every split pane at once. */}
-        {zen.active || codeController.activeView === undefined ? null : (
+        {zen.active || activeCodeThreadView === undefined ? null : (
           <CodeSearchDialog
-            checkoutId={codeController.activeView.checkout.id}
+            checkoutId={activeCodeThreadView.checkout.id}
             onOpenFile={(relativePath) => {
               void controller.openCodeSurface({
                 kind: "code-file",
-                threadId: codeController.activeView!.thread.id,
+                threadId: activeCodeThreadView.thread.id,
                 title: relativePath,
                 relativePath,
               });
@@ -4020,7 +4045,7 @@ function LaunchedShell(
             {...(props.projectWindowCapability === undefined
               ? {}
               : { windowCapability: props.projectWindowCapability })}
-            threadId={codeController.activeView.thread.id}
+            threadId={activeCodeThreadView.thread.id}
           />
         )}
         <FirstRunOnboarding
@@ -4094,6 +4119,15 @@ function LaunchedShell(
 
   return (
     <OctantCommandProvider commands={octantCommands}>
+      {/* Held here rather than with any Code pane: a thread's controller has to
+        outlive the surfaces reading it, so closing a diff tab never tears down
+        the turn that thread is running. */}
+      <CodeThreadControllerSlots
+        client={codeClient}
+        readCursorStore={codeReadCursorStore}
+        registry={codeThreadControllers}
+        threadIds={openCodeThreadIds}
+      />
       <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
     </OctantCommandProvider>
   );
@@ -4272,6 +4306,48 @@ export function activeCodeThreadTabId(
     default:
       return undefined;
   }
+}
+
+/**
+ * Every local Code thread this window has open, in any group of the Code tree.
+ *
+ * Keyed on the thread, not the tab: a thread's overview, diff, terminal, and
+ * workbench are several tabs of one conversation, and giving each its own
+ * controller would open the same thread's stream several times over.
+ */
+export function openLocalCodeThreadIds(
+  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
+): ReadonlyArray<CodeThreadId> {
+  const open: CodeThreadId[] = [];
+  collect(layout);
+  return open;
+
+  function collect(node: import("@octant/contracts/shell").WorkspaceLayoutNode): void {
+    if (node.kind !== "group") {
+      collect(node.first);
+      collect(node.second);
+      return;
+    }
+    for (const tab of node.tabs) {
+      const threadId = openCodeTabThreadId(tab);
+      if (threadId === undefined) continue;
+      if (open.some((candidate) => String(candidate) === String(threadId))) continue;
+      open.push(threadId);
+    }
+  }
+}
+
+function openCodeTabThreadId(
+  tab: import("@octant/contracts/shell").WorkspaceTab,
+): CodeThreadId | undefined {
+  const local = localCodeThreadTabId(tab);
+  if (local !== undefined) return local;
+  // An Apple workbench tab is bound to a Code thread like the other surfaces.
+  // The active-thread lookup leaves it out because focus resting there does not
+  // make it the thread in view; it still needs that thread's own controller.
+  if (tab.kind !== "apple-workbench") return undefined;
+  if ("hostId" in tab && tab.hostId !== undefined) return undefined;
+  return tab.threadId;
 }
 
 function localCodeThreadTabId(

@@ -10,6 +10,7 @@ vi.mock("../code/CodeWorkspaceTab", () => ({
 }));
 
 import { WorkspaceView, type WorkspaceViewProps } from "./WorkspaceView";
+import { createCodeThreadControllers } from "../code/codeThreadControllers";
 
 const ids = {
   group: "20000000-0000-4000-8000-000000000001",
@@ -35,6 +36,8 @@ describe("WorkspaceView Code chunk failure", () => {
 });
 
 function props(): WorkspaceViewProps {
+  const codeControllers = createCodeThreadControllers();
+  codeControllers.publish(ids.thread as never, {} as never);
   const tab = {
     id: ids.tab,
     kind: "code-overview",
@@ -55,6 +58,7 @@ function props(): WorkspaceViewProps {
     chatController: {} as never,
     chatReadCursorStore: {} as never,
     codeController: {} as never,
+    codeControllers,
     workPromotionController: {
       pendingProposals: [],
       availableArtifactRefs: [],
