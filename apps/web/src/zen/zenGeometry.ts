@@ -1,3 +1,4 @@
+import type { ZenVisibleRegion } from "@octant/domain";
 import {
   DEFAULT_ZEN_VIEWPORT,
   MAX_ZEN_ELEMENT_HEIGHT,
@@ -152,6 +153,36 @@ export function computeZoomToFit(
     panX: clamp(panX, -10000, 10000),
     panY: clamp(panY, -10000, 10000),
     scale,
+  };
+}
+
+/**
+ * The whole placeable space, used before the surface has been measured.
+ *
+ * A zero-sized surface means the first render has not laid out yet, not that
+ * the reader can see nothing — freezing every card on that frame would tear
+ * down streams a moment after opening them.
+ */
+export const DEFAULT_ZEN_VISIBLE_REGION: ZenVisibleRegion = {
+  x: DEFAULT_ZEN_VIEWPORT_BOUNDS.minX,
+  y: DEFAULT_ZEN_VIEWPORT_BOUNDS.minY,
+  width: DEFAULT_ZEN_VIEWPORT_BOUNDS.maxX - DEFAULT_ZEN_VIEWPORT_BOUNDS.minX,
+  height: DEFAULT_ZEN_VIEWPORT_BOUNDS.maxY - DEFAULT_ZEN_VIEWPORT_BOUNDS.minY,
+};
+
+/** Invert the canvas pan and zoom to say which part of the space is on screen. */
+export function computeVisibleRegion(
+  viewport: ZenViewport,
+  surfaceSize: { readonly width: number; readonly height: number },
+): ZenVisibleRegion {
+  if (surfaceSize.width <= 0 || surfaceSize.height <= 0 || viewport.scale <= 0) {
+    return DEFAULT_ZEN_VISIBLE_REGION;
+  }
+  return {
+    x: -viewport.panX / viewport.scale,
+    y: -viewport.panY / viewport.scale,
+    width: surfaceSize.width / viewport.scale,
+    height: surfaceSize.height / viewport.scale,
   };
 }
 

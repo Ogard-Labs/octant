@@ -4,8 +4,10 @@ import type { AggregateVersion } from "@octant/contracts/events";
 import {
   bringElementToFront,
   clampGeometryToBounds,
+  computeVisibleRegion,
   computeZoomToFit,
   DEFAULT_ZEN_VIEWPORT_BOUNDS,
+  DEFAULT_ZEN_VISIBLE_REGION,
   nudgeGeometry,
   reconcileOptimisticSpace,
   resizeGeometry,
@@ -125,5 +127,22 @@ describe("zenGeometry", () => {
       elements: [notesElement("a", 1, baseGeo({ x: 90 }))],
     };
     expect(reconcileOptimisticSpace(local, server).elements[0]?.geometry.x).toBe(10);
+  });
+});
+
+describe("computeVisibleRegion", () => {
+  it("reports the part of the space a panned, zoomed reader can see", () => {
+    const region = computeVisibleRegion(
+      { panX: -200, panY: -100, scale: 2 },
+      { width: 1200, height: 800 },
+    );
+
+    expect(region).toEqual({ x: 100, y: 50, width: 600, height: 400 });
+  });
+
+  it("falls back to the whole space when the surface has not been measured yet", () => {
+    const region = computeVisibleRegion({ panX: 0, panY: 0, scale: 1 }, { width: 0, height: 0 });
+
+    expect(region).toEqual(DEFAULT_ZEN_VISIBLE_REGION);
   });
 });
