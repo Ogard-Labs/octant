@@ -48,6 +48,20 @@ function setPlatform(platform: string): void {
   Object.defineProperty(window.navigator, "platform", { value: platform, configurable: true });
 }
 
+/**
+ * Press the chord and hand back the search field once focus has actually landed
+ * in it. The dialog moves focus on a later animation frame, so a test that types
+ * as soon as the chord returns can land its keystrokes on `<body>` instead —
+ * the query stays empty, the arrow key never reaches the palette, and the row
+ * the assertion reads is whichever one happened to start active.
+ */
+async function openPalette(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
+  await user.keyboard("{Meta>}k{/Meta}");
+  const search = await screen.findByRole("combobox", { name: "Search commands" });
+  await waitFor(() => expect(search).toHaveFocus());
+  return search;
+}
+
 describe("CommandPalette", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -61,10 +75,8 @@ describe("CommandPalette", () => {
     const opener = screen.getByRole("button", { name: "Opener" });
     opener.focus();
 
-    await user.keyboard("{Meta>}k{/Meta}");
+    const search = await openPalette(user);
 
-    const search = screen.getByRole("combobox", { name: "Search commands" });
-    expect(search).toHaveFocus();
     // An `address` command has no draft to write into here, so the palette must
     // not offer it at all rather than offering a row that would do nothing.
     expect(screen.queryByRole("option", { name: /Writing review/ })).not.toBeInTheDocument();
@@ -79,18 +91,14 @@ describe("CommandPalette", () => {
 
     expect(openSettings).toHaveBeenCalledOnce();
     expect(screen.queryByRole("combobox", { name: "Search commands" })).not.toBeInTheDocument();
-    expect(opener).toHaveFocus();
+    // Focus goes back on a later frame too, for the same reason it arrived on one.
+    await waitFor(() => expect(opener).toHaveFocus());
   });
 
   it("moves the active option with the arrow keys and dismisses with Escape", async () => {
     const user = userEvent.setup();
     harness(hostCommands());
-    await user.keyboard("{Meta>}k{/Meta}");
-    // The dialog moves focus into the search field on a later frame; typing
-    // before that lands the arrow key on <body>.
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Search commands" })).toHaveFocus(),
-    );
+    await openPalette(user);
     await user.keyboard("{ArrowDown}");
 
     expect(screen.getByRole("option", { name: /Open Settings/ })).toHaveAttribute(
@@ -189,7 +197,7 @@ describe("CommandPalette", () => {
       },
     ]);
 
-    await user.keyboard("{Meta>}k{/Meta}");
+    await openPalette(user);
     await user.keyboard("chat");
     await user.keyboard("{ArrowDown}");
 
@@ -204,7 +212,7 @@ describe("CommandPalette", () => {
     expect(openTeamChatProject).toHaveBeenCalledOnce();
     expect(openChatLog).not.toHaveBeenCalled();
 
-    await user.keyboard("{Meta>}k{/Meta}");
+    await openPalette(user);
     await user.keyboard("chat");
     await user.hover(screen.getByRole("option", { name: /Open chat log/ }));
 
