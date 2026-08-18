@@ -68,6 +68,7 @@ export * from "./toolActionPolicy";
 export * from "./toolCallPolicy";
 export * from "./untrustedContentPolicy";
 export * from "./artifactLibraryPolicy";
+export * from "./artifactMirrorPolicy";
 export * from "./scaffoldPolicy";
 export * from "./threadCheckpointPolicy";
 export * from "./threadWorkPolicy";

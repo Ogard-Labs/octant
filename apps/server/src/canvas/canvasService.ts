@@ -18,6 +18,7 @@ import {
   type CanvasActionRequest,
   type CanvasActionResult,
   type CanvasActor,
+  type CanvasVersion,
   type CanvasCreateResult,
   type CanvasThreadReferenceCard,
   type CanvasGetOutcome,
@@ -68,6 +69,16 @@ export interface CanvasServiceOptions {
   readonly actor?: CanvasActor;
   readonly providerInstanceId?: ReturnType<typeof decodeProviderInstanceId>;
   readonly modelId?: ReturnType<typeof decodeProviderModelId>;
+  /**
+   * Told about every version this service commits, whatever surface asked for
+   * it. The mirror listens here so materialization follows revision rather than
+   * being re-triggered by each renderer that can revise.
+   *
+   * It is told after the journal write, never before, and its failure is not
+   * the revision's: a file that could not be written must not undo a version
+   * that already happened.
+   */
+  readonly onVersionCommitted?: (version: CanvasVersion) => void;
 }
 
 export interface CanvasAuthorizationContext {
@@ -183,6 +194,7 @@ export class CanvasService {
   readonly #clock: () => UtcTimestamp;
   readonly #authorize: CanvasServiceDependencies["authorize"];
   readonly #promptSummaries = new Map<string, string>();
+  readonly #onVersionCommitted: CanvasServiceOptions["onVersionCommitted"];
   readonly #actor: CanvasActor;
   readonly #providerInstanceId: ReturnType<typeof decodeProviderInstanceId>;
   readonly #modelId: ReturnType<typeof decodeProviderModelId>;
@@ -224,6 +236,7 @@ export class CanvasService {
     this.#eventStore = options.eventStore;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
+    this.#onVersionCommitted = options.onVersionCommitted;
     this.#authorize = dependencies.authorize;
     this.#resolveWorkspace = dependencies.resolveWorkspace;
     this.#listRefreshSkills = dependencies.listRefreshSkills;
@@ -414,6 +427,7 @@ export class CanvasService {
       });
       this.#projection.applyVersionAppended({ canvasId, version: admitted.next });
       this.#promptSummaries.set(String(admitted.next.versionId), request.prompt);
+      this.#announceVersion(admitted.next);
       return decodeCanvasReviseResult({
         kind: "accepted",
         receipt: admitted.receipt,
@@ -427,6 +441,21 @@ export class CanvasService {
         };
       }
       throw error;
+    }
+  }
+
+  /**
+   * Tell whoever is listening that a version was committed.
+   *
+   * A listener that throws is swallowed on purpose. The version is already in
+   * the journal; letting a mirror's failure escape here would report a revision
+   * as denied when it plainly happened.
+   */
+  #announceVersion(version: CanvasVersion): void {
+    try {
+      this.#onVersionCommitted?.(version);
+    } catch {
+      // Reported by the listener's own receipt, never by the revision.
     }
   }
 
@@ -488,6 +517,11 @@ export class CanvasService {
         occurredAt: admitted.receipt.createdAt,
       });
       this.#projection.applyCreated({ canvasId, version });
+      // A created Canvas is a committed version like any other, and since an
+      // author can write its document at creation it is no longer reliably
+      // empty. Announcing only revisions would leave a first draft with no
+      // file until someone happened to edit it.
+      this.#announceVersion(version);
       const card = projectThreadReferenceCardFromVersion({
         version,
         cardId: version.versionId,

@@ -7,6 +7,7 @@
     "./agent-profile": "./src/agentProfile.ts",
     "./agent-run": "./src/agentRun.ts",
     "./artifact-library": "./src/artifactLibrary.ts",
+    "./artifact-mirror": "./src/artifactMirror.ts",
     "./automation": "./src/automation.ts",
     "./automation-notifications": "./src/automationNotifications.ts",
     "./linked-thread": "./src/linkedThread.ts",
