@@ -1414,6 +1414,7 @@ function ControllerBackedProviderSettings(props: {
       onChangeOhMyPiConfiguration={controller.changeOhMyPiConfiguration}
       onChangeOllamaConfiguration={controller.changeOllamaConfiguration}
       onChangeMistralVibeConfiguration={controller.changeMistralVibeConfiguration}
+      onChangeGrokConfiguration={controller.changeGrokConfiguration}
       onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
       onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
       onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
@@ -1423,6 +1424,7 @@ function ControllerBackedProviderSettings(props: {
       onCreate={controller.create}
       onCreateClaude={controller.createClaude}
       onCreateMistralVibe={controller.createMistralVibe}
+      onCreateGrok={controller.createGrok}
       onCreateOllama={controller.createOllama}
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}
@@ -1520,6 +1522,10 @@ function fixture(
       credential.clear();
       return true;
     }),
+    onCreateGrok: vi.fn(async (_name, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
     onCreateOllama: vi.fn(async () => true),
     onCreateOpenAiCompatible: vi.fn(async (_name, _configuration, credential) => {
       credential.clear();
@@ -1545,6 +1551,10 @@ function fixture(
     onChangeOhMyPiConfiguration: vi.fn(async () => true),
     onChangeOllamaConfiguration: vi.fn(async () => true),
     onChangeMistralVibeConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
+    onChangeGrokConfiguration: vi.fn(async (_id, _configuration, credential) => {
       credential.clear();
       return true;
     }),

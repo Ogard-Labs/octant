@@ -35,6 +35,7 @@ export const ProviderDriverKind = Schema.Literal(
   "mistral-vibe",
   "ollama",
   "kimi-code",
+  "grok",
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
@@ -229,6 +230,15 @@ export const MistralVibeProviderConfiguration = Schema.Struct({
 }).annotations(strict);
 export type MistralVibeProviderConfiguration = typeof MistralVibeProviderConfiguration.Type;
 
+export const GrokAuthentication = Schema.Literal("subscription", "api-key");
+export type GrokAuthentication = typeof GrokAuthentication.Type;
+export const GrokProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("grok-acp"),
+  binaryPath: AbsoluteBinaryPath,
+  authentication: GrokAuthentication,
+}).annotations(strict);
+export type GrokProviderConfiguration = typeof GrokProviderConfiguration.Type;
+
 export const DevinProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("devin-acp"),
   binaryPath: AbsoluteBinaryPath,
@@ -388,6 +398,13 @@ export const MistralVibeProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type MistralVibeProviderInstance = typeof MistralVibeProviderInstance.Type;
 
+export const GrokProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("grok"),
+  configuration: GrokProviderConfiguration,
+}).annotations(strict);
+export type GrokProviderInstance = typeof GrokProviderInstance.Type;
+
 export const DevinProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
   driverKind: Schema.Literal("devin"),
@@ -444,6 +461,7 @@ export const ProviderInstance = Schema.Union(
   KimiCodeProviderInstance,
   KiloProviderInstance,
   MistralVibeProviderInstance,
+  GrokProviderInstance,
   DevinProviderInstance,
   PiProviderInstance,
   OhMyPiProviderInstance,
@@ -513,6 +531,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     AzureFoundryProviderInstance,
     ClaudeProviderInstance,
     MistralVibeProviderInstance,
+    GrokProviderInstance,
     KiloProviderInstance,
     DevinProviderInstance,
     PiProviderInstance,
@@ -879,6 +898,12 @@ export const ProviderRegistryCommand = Schema.Union(
     configuration: MistralVibeProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("create-grok-provider"),
+    ...CreateProviderCommandFields,
+    displayName: Schema.NonEmptyTrimmedString,
+    configuration: GrokProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("create-devin-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
@@ -942,6 +967,11 @@ export const ProviderRegistryCommand = Schema.Union(
     kind: Schema.Literal("change-mistral-vibe-configuration"),
     ...ProviderInstanceCommandFields,
     configuration: MistralVibeProviderConfiguration,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-grok-configuration"),
+    ...ProviderInstanceCommandFields,
+    configuration: GrokProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("change-devin-configuration"),

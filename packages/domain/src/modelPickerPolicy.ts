@@ -25,6 +25,7 @@ const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   "mistral-vibe": "Mistral Vibe ACP",
   ollama: "Ollama",
   "kimi-code": "Kimi Code ACP",
+  grok: "Grok Build ACP",
   "openai-compatible": "OpenAI-compatible HTTP",
   "anthropic-compatible": "Anthropic-compatible HTTP",
   "azure-foundry": "Azure AI Foundry",
