@@ -213,6 +213,7 @@ import type { ZenClient } from "@octant/client-runtime/zen-client";
 import { ZenRoot } from "./zen/ZenRoot";
 import { ZenSurface } from "./zen/ZenSurface";
 import { useZenController } from "./zen/useZenController";
+import { resolveZenLiveThreadCard, type ZenLiveThreadClients } from "./zen/ZenLiveThreadCards";
 import { useThemeController } from "./theme/useThemeController";
 import { ExecutionProfileWorkflow } from "./agentProfile/ExecutionProfileWorkflow";
 import { useExecutionProfileController } from "./agentProfile/useExecutionProfileController";
@@ -1451,6 +1452,28 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  // The surfaces a Zen card may open. Each card builds its own controller from
+  // its own source context; these are only the connections it does that over.
+  const zenLiveThreadClients = useMemo<ZenLiveThreadClients>(
+    () => ({
+      chatClient,
+      chatReadCursorStore,
+      providerController,
+      workMutationClient,
+      workRequestClient,
+      workThreadClient,
+      workTurnClient,
+    }),
+    [
+      chatClient,
+      chatReadCursorStore,
+      providerController,
+      workMutationClient,
+      workRequestClient,
+      workThreadClient,
+      workTurnClient,
+    ],
+  );
 
   // First run is derived from projected host settings, never renderer storage,
   // so a clean store is the only thing that can produce it.
@@ -3244,6 +3267,9 @@ function LaunchedShell(
             onCloseAssistant={() => zen.setAssistantOpen(false)}
             onCloseThreadPicker={() => zen.setThreadPickerOpen(false)}
             onContinueThread={(catalogRef) => void continueZenThread(catalogRef)}
+            renderLiveThread={(input) =>
+              resolveZenLiveThreadCard({ ...input, clients: zenLiveThreadClients })
+            }
             onConfirmRecipePreview={(action) => void zen.confirmRecipePreview(action)}
             onCreateReference={(url, label) =>
               void zen.createReference(url, label).catch(() => undefined)

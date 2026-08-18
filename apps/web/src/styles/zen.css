@@ -366,6 +366,32 @@
   color: var(--octant-text-secondary, #c8c8c5);
 }
 
+/* A live card is the thread, so its surface takes the height and scrolls
+   itself; the identity line above it stays fixed so the card never loses which
+   host, mode, and Project it is acting under. */
+.zen-thread-element--live {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+}
+
+.zen-thread-element__surface {
+  min-height: 0;
+  overflow: auto;
+  border-radius: 10px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.zen-thread-element__paused {
+  color: var(--octant-text-secondary, #c8c8c5);
+  font-style: italic;
+}
+
+.zen-thread-element__unreachable {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
 .zen-assistant__capability {
   padding: 10px 12px;
   border: 1px solid rgb(255 255 255 / 9%);

@@ -68,8 +68,12 @@ redesigns.
   performance, unsupported hosts, or an explicit preference, without changing
   geometry; the workspace stays visually solid.
 - Zen is a separate presentation aggregate that replaces the renderer surface
-  inside the same window for focus work; it is not a split-tree tab, not a
-  fourth authority mode, and never merges authority from attached entities.
+  inside the same window for focus work; it is not a split-tree tab and not a
+  fourth authority mode. A pinned card may be interactive and host its thread's
+  own live transcript and composer, but only under its own source context: each
+  card resolves its surface from that context and holds its own controller and
+  stream. The focus zone grants nothing, merges nothing between cards, and has
+  no authority to lend; what it cannot host that way stays a read-only reading.
 - Zen is a focus zone: a window holds several named, ordered spaces and shows
   one at a time. The spaces a window holds are their own journaled aggregate,
   keyed by window and separate from the spaces themselves, so switching writes
@@ -85,6 +89,11 @@ redesigns.
 - Switching space grants nothing. Every pinned element still acts strictly
   under its own bound source context, and a space is a place to arrange them,
   never an authority of its own.
+- Live cards carry their own render and subscription budget within a space,
+  separate from the element ceiling, because a streaming element costs more
+  than a drawn one. A card that is minimized, out of view, or past that budget
+  pauses, says so, and keeps its last reading rather than passing stale text
+  off as live.
 - Desktop and web clients share the same content structure and commands; web
   omits native window affordances. The UI is truthful: every visible action
   works, is clearly unavailable, or is absent.
@@ -105,6 +114,9 @@ redesigns.
   system to maintain.
 - Visual redesigns can change tokens, density, and chrome without touching the
   layout model or authority key.
+- Zen can host real work without becoming a second workspace: the card seam
+  carries only a source context, so a new interactive card is a shell surface
+  bound to that context, never a widening of what the canvas may do.
 
 ## Related
 

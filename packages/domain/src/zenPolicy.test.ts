@@ -18,6 +18,8 @@ import {
   validateLocalHostSource,
   ZenPolicyRejected,
   MAX_ZEN_ELEMENTS,
+  MAX_LIVE_ZEN_THREAD_CARDS,
+  resolveZenThreadCardActivity,
 } from "./zenPolicy";
 import { DEFAULT_ZEN_APPEARANCE, DEFAULT_ZEN_VIEWPORT } from "@octant/contracts/zen";
 import type {
@@ -956,5 +958,100 @@ describe("processZenCommand", () => {
       ),
     ).toThrow(/checklist item/i);
     expect(checklist.items).toEqual([]);
+  });
+});
+
+describe("resolveZenThreadCardActivity", () => {
+  const visibleRegion = { x: 0, y: 0, width: 1200, height: 800 };
+
+  function threadCard(
+    id: string,
+    overrides: Partial<Extract<ZenElementPayload, { kind: "thread" }>> = {},
+  ): Extract<ZenElementPayload, { kind: "thread" }> {
+    return {
+      ...(makeThreadElement(id) as Extract<ZenElementPayload, { kind: "thread" }>),
+      ...overrides,
+    };
+  }
+
+  it("keeps only the cards a reader is actually looking at streaming", () => {
+    const cards = [
+      threadCard(makeId("aaaaaaaa"), { zIndex: 1 as any }),
+      threadCard(makeId("bbbbbbbb"), { zIndex: 2 as any }),
+      threadCard(makeId("cccccccc"), { zIndex: 3 as any }),
+      threadCard(makeId("dddddddd"), { zIndex: 4 as any }),
+    ];
+
+    const activity = resolveZenThreadCardActivity({
+      elements: cards,
+      visibleRegion,
+      budget: 2,
+    });
+
+    expect(
+      activity.filter((card) => card.activity === "live").map((card) => card.elementId),
+    ).toEqual([cards[2]!.elementId, cards[3]!.elementId]);
+    expect(activity.filter((card) => card.activity === "frozen")).toEqual([
+      { elementId: cards[0]!.elementId, activity: "frozen", reason: "budget" },
+      { elementId: cards[1]!.elementId, activity: "frozen", reason: "budget" },
+    ]);
+  });
+
+  it("gives the focused card a live slot ahead of a card stacked in front of it", () => {
+    const back = threadCard(makeId("aaaaaaaa"), { zIndex: 1 as any });
+    const front = threadCard(makeId("bbbbbbbb"), { zIndex: 9 as any });
+
+    const activity = resolveZenThreadCardActivity({
+      elements: [back, front],
+      visibleRegion,
+      focusedElementId: back.elementId,
+      budget: 1,
+    });
+
+    expect(activity).toEqual([
+      { elementId: back.elementId, activity: "live" },
+      { elementId: front.elementId, activity: "frozen", reason: "budget" },
+    ]);
+  });
+
+  it("stops streaming a card that is minimized or panned out of sight", () => {
+    const minimized = threadCard(makeId("aaaaaaaa"), { minimized: true });
+    const offScreen = threadCard(makeId("bbbbbbbb"), {
+      geometry: { x: 4000, y: 4000, width: 400, height: 300 },
+    });
+    const visible = threadCard(makeId("cccccccc"));
+
+    const activity = resolveZenThreadCardActivity({
+      elements: [minimized, offScreen, visible],
+      visibleRegion,
+    });
+
+    expect(activity).toEqual([
+      { elementId: minimized.elementId, activity: "frozen", reason: "minimized" },
+      { elementId: offScreen.elementId, activity: "frozen", reason: "off-screen" },
+      { elementId: visible.elementId, activity: "live" },
+    ]);
+  });
+
+  it("reports nothing for the widgets sharing the space", () => {
+    const activity = resolveZenThreadCardActivity({
+      elements: [makeNotesElement(), makeTimerElement()],
+      visibleRegion,
+    });
+
+    expect(activity).toEqual([]);
+  });
+
+  it("defaults to the live-card budget rather than the element ceiling", () => {
+    const cards = Array.from({ length: MAX_ZEN_ELEMENTS }, (_unused, index) =>
+      threadCard(makeId(`${index}`.padStart(8, "a")), { zIndex: (index + 1) as any }),
+    );
+
+    const activity = resolveZenThreadCardActivity({ elements: cards, visibleRegion });
+
+    expect(activity.filter((card) => card.activity === "live")).toHaveLength(
+      MAX_LIVE_ZEN_THREAD_CARDS,
+    );
+    expect(MAX_LIVE_ZEN_THREAD_CARDS).toBeLessThan(MAX_ZEN_ELEMENTS);
   });
 });
