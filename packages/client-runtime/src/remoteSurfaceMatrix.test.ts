@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   listRemoteShellSurfaces,
   listRemoteShellSurfacesByAvailability,
+  listRemoteThreadSurfaces,
+  listRemoteThreadSurfacesByReach,
   remoteShellSurfaceAvailability,
+  remoteThreadSurfaceReach,
 } from "./remoteSurfaceMatrix";
 
 describe("remoteSurfaceMatrix", () => {
@@ -45,5 +48,54 @@ describe("remoteSurfaceMatrix", () => {
 
   it("lists every declared surface exactly once", () => {
     expect(listRemoteShellSurfaces()).toHaveLength(11);
+  });
+});
+
+describe("the surfaces a companion client may watch a thread through", () => {
+  it("lets a paired device act only where the catalog says acting is remote work", () => {
+    expect(listRemoteThreadSurfacesByReach("interactive").map((surface) => surface.id)).toEqual([
+      "chat",
+      "browser",
+    ]);
+  });
+
+  it("keeps a terminal watchable and never typeable from a companion client", () => {
+    const terminal = listRemoteThreadSurfaces().find((surface) => surface.id === "terminal");
+    if (terminal === undefined) throw new Error("the terminal surface is missing");
+    expect(remoteThreadSurfaceReach(terminal)).toBe("read-only");
+  });
+
+  it("reports a surface whose read the catalog does not allow as unavailable", () => {
+    expect(
+      remoteThreadSurfaceReach({
+        id: "simulator",
+        label: "Simulator",
+        description: "",
+        observeAction: "never.catalogued",
+      }),
+    ).toBe("unavailable");
+  });
+
+  it("falls back to watching when only the interaction is host work", () => {
+    expect(
+      remoteThreadSurfaceReach({
+        id: "browser",
+        label: "Browser",
+        description: "",
+        observeAction: "browser.observe",
+        interactAction: "browser.session.manage",
+      }),
+    ).toBe("read-only");
+  });
+
+  it("offers every declared thread surface exactly once", () => {
+    expect(listRemoteThreadSurfaces().map((surface) => surface.id)).toEqual([
+      "chat",
+      "browser",
+      "terminal",
+      "simulator",
+      "canvas",
+      "preview",
+    ]);
   });
 });

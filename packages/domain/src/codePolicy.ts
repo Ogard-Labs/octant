@@ -20,6 +20,7 @@ export type CodeOperation =
   | "push"
   | "create-pr"
   | "merge-pr"
+  | "merge-run"
   | "managed-root"
   | "pr-mutation";
 export type CodePolicyDecisionValue =
@@ -84,6 +85,10 @@ export function approvalClassForCodeOperation(
     case "push":
     case "create-pr":
     case "merge-pr":
+    // Bringing a run home rewrites the checkout the person works in. The host
+    // records what it replaced first, but the merge itself is a wholesale
+    // change to their tree and is gated like one.
+    case "merge-run":
       return "destructive-or-irreversible";
     case "managed-root":
       return "privilege-expansion-or-sandbox-change";
@@ -173,6 +178,10 @@ function authorizeCodeOperationBase(input: CodePolicyInput): CodePolicyDecision 
     ) {
       return { decision: "host-thread-credential-clamped" };
     }
+    // A remote client may ask for a merge into the person's own checkout, but
+    // it is clamped to the host's thread authority like every other mutation:
+    // the decision is still made where the checkout is.
+    if (input.operation === "merge-run") return { decision: "host-thread-clamped" };
     return { decision: "host-thread-clamped" };
   }
 

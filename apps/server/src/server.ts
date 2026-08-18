@@ -48,6 +48,21 @@ import { ResearchRouter } from "./chat/research/researchRouter";
 import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
 import { createChatRouteHandler } from "./chatRoutes";
+import { createScaffoldRouteHandler } from "./scaffoldRoutes";
+import { createThreadCheckpointRouteHandler } from "./threadCheckpointRoutes";
+import { createProductFeedbackRouteHandler } from "./productFeedbackRoutes";
+import {
+  decodeBrowserContextId,
+  decodeBrowserThreadId,
+} from "@octant/contracts/browser-automation";
+import { decodeCodeEvidenceReference } from "@octant/contracts/code-operations";
+import { ProductFeedbackService } from "./browser/productFeedbackService";
+import { createProductFeedbackTurnPort } from "./browser/productFeedbackTurnPort";
+import {
+  createCheckpointChatPort,
+  createCheckpointCodePort,
+} from "./checkpoint/threadCheckpointPorts";
+import { ThreadCheckpointService } from "./checkpoint/threadCheckpointService";
 import { createWorkMutationRouteHandler } from "./workMutationRoutes";
 import { createWorkOverviewRouteHandler } from "./workOverviewRoutes";
 import { WorkArtifactProjection } from "./work/workArtifactProjection";
@@ -369,6 +384,8 @@ import {
   type CodexPluginPackageResolverOptions,
 } from "./extensions/codexPluginResolver";
 import { createDefaultCodexPluginPackageSources } from "./extensions/curatedBuildIosAppsCatalog";
+import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "./scaffold/curatedScaffoldCatalog";
+import { resolveAvailableTools } from "./scaffold/scaffoldFilesystem";
 import { AgentPluginMcpSessionManager } from "./extensions/agentPluginMcpSessionManager";
 import { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
@@ -1195,6 +1212,7 @@ export function startOctantServer(
     const codeSessionAuthority = new CodeSessionAuthorityStore();
     let activeCodeService: CodeRouteService | undefined;
     let browserAutomationService: BrowserAutomationService | undefined;
+    let productFeedbackService: ProductFeedbackService;
     let activeComputerUseRuntime: ComputerUseRuntime | undefined;
     let workRequestRuntime: WorkRequestRuntime | undefined;
     const windowAuthorityStore = new WindowAuthorityStore(
@@ -2408,6 +2426,59 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       now: Date.now,
     });
+    // Notes the user points at the running product. The service owns the
+    // authority check and resolves the element itself; the crop lives in the
+    // same purgeable evidence store the rest of Code's bulk content uses, and
+    // the journal keeps only the reference.
+    productFeedbackService = new ProductFeedbackService({
+      journal: persistence.journal,
+      browser: {
+        describePoint: async (input) =>
+          (await browserAutomationService?.describePoint({
+            windowId: input.windowId,
+            threadId: decodeBrowserThreadId(input.threadId),
+            contextId: decodeBrowserContextId(input.contextId),
+            point: input.point,
+          })) ?? { status: "unavailable" },
+      },
+      crops: {
+        put: (dataUrl) => {
+          const reference = codeEvidence.put(dataUrl);
+          return {
+            contentId: String(reference.contentId),
+            digest: reference.digest,
+            byteLength: reference.byteLength,
+          };
+        },
+        read: (crop) => {
+          try {
+            return codeEvidence.read(
+              decodeCodeEvidenceReference({
+                contentId: crop.contentId,
+                digest: crop.digest,
+                byteLength: crop.byteLength,
+              }),
+            );
+          } catch {
+            return undefined;
+          }
+        },
+      },
+      readNote: (noteId) => persistence.readProductFeedbackNote(noteId),
+      readNotes: (threadId) => persistence.readProductFeedbackNotes(threadId),
+      canAccessThread: async (windowId, threadId) => {
+        const thread = persistence.readCodeThread(decodeCodeThreadId(threadId));
+        if (thread === undefined) return false;
+        return projectService.hasActiveProject(thread.projectId, "code");
+      },
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const productFeedbackRoutes = createProductFeedbackRouteHandler({
+      feedback: productFeedbackService,
+      windowAuthorityStore,
+    });
     if (codeOperationRuntime === undefined && options.codeService === undefined) {
       const terminalProcessPort = new TerminalProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "terminal-receipts"),
@@ -2416,10 +2487,27 @@ export function startOctantServer(
       const repositoryTestProcessPort = new RepositoryTestProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "test-receipts"),
       });
+      // A scaffold generator downloads what it writes, so it gets its own
+      // private work directory and is pointed at it for every package cache.
+      // Nothing it fetches lands in the user's own caches, and the confinement
+      // still writes only the checkout and this directory.
+      const scaffoldWorkDirectory = join(providerDataDirectory, "code", "scaffold-work");
+      const scaffoldProcessPort = new RepositoryTestProcessPort({
+        receiptDirectory: join(providerDataDirectory, "code", "scaffold-receipts"),
+        temporaryDirectory: scaffoldWorkDirectory,
+      });
       const rootProbePath = decodeCodeRelativePath("package.json");
       codeOperationRuntime = createCodeOperationRuntime({
         terminalProcessPort,
         repositoryTestProcessPort,
+        scaffoldProcess: {
+          execute: (input, signal) => scaffoldProcessPort.execute(input, signal),
+          environment: {
+            BUN_INSTALL_CACHE_DIR: join(scaffoldWorkDirectory, "bun-cache"),
+            npm_config_cache: join(scaffoldWorkDirectory, "npm-cache"),
+            TMPDIR: scaffoldWorkDirectory,
+          },
+        },
         repositoryTestDiscovery: codeTestDiscovery,
         attachments: codeAttachments,
         persistence: {
@@ -2491,6 +2579,19 @@ export function startOctantServer(
         },
         credentialResolver: { resolve: async () => undefined },
         resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+        takeProductFeedbackForTurn: createProductFeedbackTurnPort({
+          service: productFeedbackService,
+        }),
+        // Where a run comes home to: the directory the thread's Project binds.
+        // A run on a managed worktree works in a sibling tree; the merge lands
+        // in the person's own checkout, and only the Project knows where that
+        // is.
+        resolveBaseCheckoutRoot: async (thread) => {
+          const project = persistence.readProject(thread.projectId);
+          return project?.type === "code" && project.lifecycle === "active"
+            ? project.binding.canonicalRoot
+            : undefined;
+        },
         resolveForkHandoff: forkHandoffResolver(() => routeCodeService),
         githubReadTools: ({ windowId, thread, readThread }) =>
           githubReadToolService.createToolSet({ windowId, thread, readThread }),
@@ -2992,6 +3093,54 @@ export function startOctantServer(
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       maxAttachmentBodySize: MAX_CHAT_ATTACHMENT_BYTES,
+    });
+    // Checkpoints span Chat and Code, so the service owns only the marker and
+    // delegates every thread it produces to the mode that owns the authority
+    // for it: Chat branches, Code creates a managed-worktree thread.
+    const threadCheckpointService = new ThreadCheckpointService({
+      journal: persistence.journal,
+      readCheckpoint: (checkpointId) => persistence.readThreadCheckpoint(checkpointId),
+      readCheckpoints: (threadId) => persistence.readThreadCheckpoints(threadId),
+      canAccess: async (_windowId, projectId) => {
+        if (projectId === undefined) return true;
+        try {
+          return persistence.readProject(decodeProjectId(projectId))?.lifecycle === "active";
+        } catch {
+          return false;
+        }
+      },
+      chat: createCheckpointChatPort({
+        readChatThread: (threadId) => persistence.readChatThread(threadId),
+        readChatThreadView: (threadId) => persistence.readChatThreadView(threadId),
+        readProject: (projectId) => persistence.readProject(projectId),
+        execute: (command) => chatService.execute(command),
+      }),
+      code: createCheckpointCodePort({
+        readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+        readProject: (projectId) => persistence.readProject(projectId),
+        readOperationStart: (operationId) =>
+          persistence.journal.replayAggregate({
+            aggregateType: "code-operation",
+            aggregateId: String(operationId),
+            afterVersion: 0,
+            limit: 1,
+          })[0],
+        execute: (windowId, command) => codeService.execute(windowId, command),
+        uuid: randomUUID,
+        clock: () => new Date().toISOString(),
+      }),
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const threadCheckpointRoutes = createThreadCheckpointRouteHandler({
+      checkpoints: threadCheckpointService,
+      windowAuthorityStore,
+    });
+    const scaffoldRoutes = createScaffoldRouteHandler({
+      entries: CURATED_SCAFFOLDS,
+      availableTools: () => resolveAvailableTools(curatedScaffoldTools()),
+      windowAuthorityStore,
     });
     const workArtifactProjection = new WorkArtifactProjection();
     hydrateWorkArtifactProjectionFromJournal({
@@ -4185,6 +4334,9 @@ export function startOctantServer(
       (await providerRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??
+      (await threadCheckpointRoutes(request)) ??
+      (await scaffoldRoutes(request)) ??
+      (await productFeedbackRoutes(request)) ??
       (await workThreadRoutes(request)) ??
       (await workTurnRoutes(request)) ??
       (await workOverviewRoutes(request)) ??

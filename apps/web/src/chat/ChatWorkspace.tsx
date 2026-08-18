@@ -34,6 +34,7 @@ import {
 } from "./ChatComposer";
 import { ChatExportControl } from "./ChatExportControl";
 import { ChatTranscript } from "./ChatTranscript";
+import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
 import type { ChatController } from "./useChatController";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -137,6 +138,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   >([]);
   const activeThread = view?.thread;
   const activeThreadId = activeThread?.id;
+  const checkpoints = useThreadCheckpoints({
+    threadId: String(activeThreadId ?? ""),
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
   const conversationRef = useRef<HTMLDivElement>(null);
   const followsConversationRef = useRef(true);
   const followedThreadRef = useRef<string | undefined>(undefined);
@@ -514,6 +520,30 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         )}
         <ChatTranscript
           busy={isSending || branchPending}
+          {...(checkpoints.available
+            ? {
+                checkpoints: {
+                  byTurnId: checkpoints.byAnchor,
+                  busy: checkpoints.busy,
+                  ...(checkpoints.message === undefined ? {} : { message: checkpoints.message }),
+                  onForget: (checkpoint) => void checkpoints.forget(checkpoint),
+                  onMark: (turnId, label) =>
+                    void checkpoints.mark(
+                      { mode: "chat", threadId: view.thread.id, turnId },
+                      label,
+                    ),
+                  onRestore: (checkpoint, title) => {
+                    void (async () => {
+                      const restored = await checkpoints.restore(checkpoint, title);
+                      // The host owns the new thread; refreshing navigation is
+                      // what puts it in front of the user rather than leaving it
+                      // somewhere only the journal knows about.
+                      if (restored !== undefined) await props.controller.refreshNavigation();
+                    })();
+                  },
+                },
+              }
+            : {})}
           connectionStatus={
             props.controller.status === "disconnected" ? "disconnected" : "connected"
           }
@@ -910,7 +940,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 : {}
           : { sendDisabledReason: "Choose an available provider and model before sending." })}
       />
-      <LinkedThreadParallelReviewFlow controller={parallelReview} />
+      <LinkedThreadParallelReviewFlow
+        controller={parallelReview}
+        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+        {...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability })}
+      />
     </section>
   );
 }

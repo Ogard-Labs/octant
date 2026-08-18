@@ -934,6 +934,10 @@ function renderTab(
         key={tab.id}
         client={props.browserAutomationClient}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+        {...(props.projectWindowCapability === undefined
+          ? {}
+          : { windowCapability: props.projectWindowCapability })}
         tab={tab}
       />
     );
