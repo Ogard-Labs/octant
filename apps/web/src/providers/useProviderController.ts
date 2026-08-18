@@ -740,18 +740,27 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
-          try {
-            if (mustClear) await hostBridge!.clearProviderCredential(instanceId);
-            if (mustSet) await hostBridge!.setProviderCredential(instanceId, credentialValue);
-          } catch {
-            if (mounted.current) {
-              setMessage(
-                mustClear
-                  ? "The provider credential could not be cleared, so the authentication change was cancelled."
-                  : "The provider credential could not be stored, so the configuration was unchanged.",
-              );
+          // Only credential work needs the desktop bridge. A renderer without
+          // one can still edit a binary path or re-save an instance whose key
+          // is unchanged, so the requirement stays inside the branches that
+          // actually touch the Keychain.
+          const bridge = hostBridge;
+          // A key is stored before the change that starts using it, but cleared
+          // only after the change that stops. The server refuses this command
+          // while the instance has an active session, and clearing first left
+          // the instance still configured for API-key authentication with no
+          // key to connect with and nothing able to put it back.
+          if (mustSet && bridge !== undefined) {
+            try {
+              await bridge.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              if (mounted.current) {
+                setMessage(
+                  "The provider credential could not be stored, so the configuration was unchanged.",
+                );
+              }
+              return false;
             }
-            return false;
           }
           try {
             applyResult(
@@ -764,11 +773,19 @@ export function useProviderController(options: ProviderControllerOptions) {
               current,
               install,
             );
+            if (mustClear && bridge !== undefined) {
+              // The instance no longer uses the key. A clear that fails here
+              // leaves a secret behind rather than an unusable provider, so it
+              // is retried by the same deferred cleanup the other paths use.
+              await bridge
+                .clearProviderCredential(instanceId)
+                .catch(() => void credentialCleanupRequired.current.add(instanceId));
+            }
             return true;
           } catch (error) {
-            if (mustSet && previousAuthentication === "subscription") {
+            if (mustSet && previousAuthentication === "subscription" && bridge !== undefined) {
               try {
-                await hostBridge!.clearProviderCredential(instanceId);
+                await bridge.clearProviderCredential(instanceId);
               } catch {
                 try {
                   const refreshed = await client.bootstrap();
@@ -811,7 +828,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             await recoverRegistryFailure(
               error,
               mustClear
-                ? "Provider configuration could not be updated after its credential was cleared."
+                ? "Provider configuration could not be updated, so its credential was left in place."
                 : "Provider configuration could not be updated.",
             );
             return false;
@@ -858,18 +875,27 @@ export function useProviderController(options: ProviderControllerOptions) {
             }
             return false;
           }
-          try {
-            if (mustClear) await hostBridge!.clearProviderCredential(instanceId);
-            if (mustSet) await hostBridge!.setProviderCredential(instanceId, credentialValue);
-          } catch {
-            if (mounted.current) {
-              setMessage(
-                mustClear
-                  ? "The provider credential could not be cleared, so the authentication change was cancelled."
-                  : "The provider credential could not be stored, so the configuration was unchanged.",
-              );
+          // Only credential work needs the desktop bridge. A renderer without
+          // one can still edit a binary path or re-save an instance whose key
+          // is unchanged, so the requirement stays inside the branches that
+          // actually touch the Keychain.
+          const bridge = hostBridge;
+          // A key is stored before the change that starts using it, but cleared
+          // only after the change that stops. The server refuses this command
+          // while the instance has an active session, and clearing first left
+          // the instance still configured for API-key authentication with no
+          // key to connect with and nothing able to put it back.
+          if (mustSet && bridge !== undefined) {
+            try {
+              await bridge.setProviderCredential(instanceId, credentialValue);
+            } catch {
+              if (mounted.current) {
+                setMessage(
+                  "The provider credential could not be stored, so the configuration was unchanged.",
+                );
+              }
+              return false;
             }
-            return false;
           }
           try {
             applyResult(
@@ -882,11 +908,19 @@ export function useProviderController(options: ProviderControllerOptions) {
               current,
               install,
             );
+            if (mustClear && bridge !== undefined) {
+              // The instance no longer uses the key. A clear that fails here
+              // leaves a secret behind rather than an unusable provider, so it
+              // is retried by the same deferred cleanup the other paths use.
+              await bridge
+                .clearProviderCredential(instanceId)
+                .catch(() => void credentialCleanupRequired.current.add(instanceId));
+            }
             return true;
           } catch (error) {
-            if (mustSet && previousAuthentication === "subscription") {
+            if (mustSet && previousAuthentication === "subscription" && bridge !== undefined) {
               try {
-                await hostBridge!.clearProviderCredential(instanceId);
+                await bridge.clearProviderCredential(instanceId);
               } catch {
                 credentialCleanupRequired.current.add(instanceId);
               }
@@ -894,7 +928,7 @@ export function useProviderController(options: ProviderControllerOptions) {
             await recoverRegistryFailure(
               error,
               mustClear
-                ? "Provider configuration could not be updated after its credential was cleared."
+                ? "Provider configuration could not be updated, so its credential was left in place."
                 : "Provider configuration could not be updated.",
             );
             return false;

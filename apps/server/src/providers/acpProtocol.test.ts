@@ -192,6 +192,49 @@ describe("ACP protocol boundary", () => {
     }
   });
 
+  it("reads an expired credential as an authentication refusal without echoing the agent", async () => {
+    // Verified against grok 1.0.4 and vibe-acp 2.24.1: a managed home holding a
+    // stale credential opens the session and only refuses the turn, and neither
+    // agent uses -32000 for it.
+    const refusals = [
+      {
+        code: -32603,
+        message: "Internal error",
+        data: "Unauthorized (401) from https://cli-chat-proxy.example/v1/responses: Invalid or expired credentials",
+      },
+      {
+        code: -32603,
+        message:
+          "API error from mistral (model: vibe-cli): Invalid API key. Please check your API key and try again.",
+      },
+      { code: -32000, message: "Authentication required", data: "no auth method id provided" },
+    ];
+    for (const error of refusals) {
+      const { client, stdout } = transport();
+      const observed = failureOf(client.prompt("session-1", "hello"));
+      stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, error })}\n`);
+      const failure = await observed;
+      expect(failure).toMatchObject({ kind: "remote", message: "ACP authentication is required." });
+      expect(failure.message).not.toContain("cli-chat-proxy");
+      expect(failure.message).not.toContain("mistral");
+      await client.close();
+    }
+  });
+
+  it("leaves an unrelated agent refusal a generic failure", async () => {
+    const { client, stdout } = transport();
+    const observed = failureOf(client.prompt("session-1", "hello"));
+    stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        error: { code: -32603, message: "Internal error", data: "tool execution failed" },
+      })}\n`,
+    );
+    expect(await observed).toMatchObject({ kind: "remote", message: "ACP request failed." });
+    await client.close();
+  });
+
   it("bounds stderr diagnostics without exposing their contents", async () => {
     const onStderr = vi.fn();
     const { client, stderr, stdout } = transport({

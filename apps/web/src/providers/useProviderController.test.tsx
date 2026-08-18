@@ -581,7 +581,7 @@ describe("useProviderController", () => {
     expect(result.current.message).not.toMatch(/private-value|Keychain/i);
   });
 
-  it("clears a Claude API key before switching durable configuration to subscription", async () => {
+  it("clears a Claude API key after switching durable configuration to subscription", async () => {
     const calls: string[] = [];
     const apiKeyProvider = claudeProvider({
       configuration: {
@@ -612,10 +612,13 @@ describe("useProviderController", () => {
       ).resolves.toBe(true);
     });
 
-    expect(calls).toEqual(["credential.clear", "provider.update", "field.clear"]);
+    expect(calls).toEqual(["provider.update", "credential.clear", "field.clear"]);
   });
 
-  it("keeps Claude API-key configuration unchanged when credential deletion fails", async () => {
+  // A clear that fails once the instance has stopped using the key leaves a
+  // secret behind rather than an unusable provider, so the change stands and
+  // cleanup is retried later.
+  it("defers Claude credential cleanup when deletion fails after the switch to subscription", async () => {
     const apiKeyProvider = claudeProvider({
       configuration: {
         kind: "claude-agent-sdk",
@@ -624,8 +627,12 @@ describe("useProviderController", () => {
       },
     });
     const api = client(snapshot([apiKeyProvider]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-updated",
+      instance: claudeProvider({ version: 2 as never }),
+    });
     const host = credentialHost();
-    vi.mocked(host.clearProviderCredential).mockRejectedValue(new Error("private diagnostic"));
+    vi.mocked(host.clearProviderCredential).mockRejectedValueOnce(new Error("private diagnostic"));
     const credential = transientCredential("");
     const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
@@ -633,15 +640,22 @@ describe("useProviderController", () => {
     await act(async () => {
       await expect(
         result.current.changeClaudeConfiguration(id, claudeProvider().configuration, credential),
-      ).resolves.toBe(false);
+      ).resolves.toBe(true);
     });
 
-    expect(api.execute).not.toHaveBeenCalled();
+    expect(api.execute).toHaveBeenCalledOnce();
     expect(credential.clear).toHaveBeenCalledOnce();
     expect(result.current.instances[0]?.configuration).toMatchObject({
-      authentication: "api-key",
+      authentication: "subscription",
     });
-    expect(result.current.message).not.toContain("private diagnostic");
+    expect(JSON.stringify(result.current)).not.toContain("private diagnostic");
+
+    await act(async () => {
+      await expect(result.current.retry()).resolves.toBe(true);
+    });
+
+    expect(host.clearProviderCredential).toHaveBeenCalledTimes(2);
+    expect(result.current.message).toMatch(/credential cleanup completed/i);
   });
 
   it("stores a non-empty key before switching Claude subscription to API-key mode", async () => {
@@ -1117,6 +1131,127 @@ describe("useProviderController", () => {
     });
 
     expect(calls).toEqual(["provider.update", "field.clear"]);
+    unmount();
+  });
+
+  // The server refuses an authentication change while the instance has an
+  // active session. Clearing the key first left the instance still configured
+  // for API-key authentication with no key to connect with, forcing the user to
+  // re-enter it.
+  it("keeps the stored Claude credential when a refused change stops using it", async () => {
+    const calls: string[] = [];
+    const api = client(
+      snapshot([
+        claudeProvider({
+          configuration: {
+            kind: "claude-agent-sdk",
+            binaryPath: "/opt/homebrew/bin/claude",
+            authentication: "api-key",
+          },
+        }),
+      ]),
+    );
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.update");
+      throw new Error("private registry diagnostic");
+    });
+    const host = credentialHost(calls);
+    const { result, unmount } = renderHook(() =>
+      useProviderController({ client: api, hostBridge: host }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeClaudeConfiguration(
+          id,
+          claudeProvider().configuration,
+          transientCredential("", calls),
+        ),
+      ).resolves.toBe(false);
+    });
+
+    expect(host.clearProviderCredential).not.toHaveBeenCalled();
+    expect(calls).toEqual(["provider.update", "field.clear"]);
+    expect(result.current.message).toMatch(/credential was left in place/i);
+    expect(JSON.stringify(result.current)).not.toContain("private registry diagnostic");
+    unmount();
+  });
+
+  it("keeps the stored Mistral Vibe credential when a refused change stops using it", async () => {
+    const calls: string[] = [];
+    const api = client(
+      snapshot([
+        vibeProvider({
+          configuration: {
+            kind: "mistral-vibe-acp",
+            binaryPath: "/Users/example/.local/bin/vibe-acp",
+            authentication: "api-key",
+          },
+        }),
+      ]),
+    );
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.update");
+      throw new Error("private registry diagnostic");
+    });
+    const host = credentialHost(calls);
+    const { result, unmount } = renderHook(() =>
+      useProviderController({ client: api, hostBridge: host }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeMistralVibeConfiguration(
+          id,
+          vibeProvider().configuration,
+          transientCredential("", calls),
+        ),
+      ).resolves.toBe(false);
+    });
+
+    expect(host.clearProviderCredential).not.toHaveBeenCalled();
+    expect(calls).toEqual(["provider.update", "field.clear"]);
+    expect(result.current.message).toMatch(/credential was left in place/i);
+    expect(JSON.stringify(result.current)).not.toContain("private registry diagnostic");
+    unmount();
+  });
+
+  it("clears the stored Mistral Vibe credential after the change that stops using it", async () => {
+    const calls: string[] = [];
+    const api = client(
+      snapshot([
+        vibeProvider({
+          configuration: {
+            kind: "mistral-vibe-acp",
+            binaryPath: "/Users/example/.local/bin/vibe-acp",
+            authentication: "api-key",
+          },
+        }),
+      ]),
+    );
+    vi.mocked(api.execute).mockImplementation(async () => {
+      calls.push("provider.update");
+      return { kind: "provider-updated", instance: vibeProvider({ version: 2 as never }) };
+    });
+    const host = credentialHost(calls);
+    const { result, unmount } = renderHook(() =>
+      useProviderController({ client: api, hostBridge: host }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeMistralVibeConfiguration(
+          id,
+          vibeProvider().configuration,
+          transientCredential("", calls),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(calls).toEqual(["provider.update", "credential.clear", "field.clear"]);
     unmount();
   });
 
