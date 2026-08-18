@@ -388,6 +388,12 @@ import {
   CodexPluginPackageResolver,
   type CodexPluginPackageResolverOptions,
 } from "./extensions/codexPluginResolver";
+import { ArtifactMirrorEventStore } from "./canvas/artifactMirrorEventStore";
+import {
+  createArtifactMirrorFilePort,
+  isInsideHomeDirectory,
+} from "./canvas/artifactMirrorFilePort";
+import { ArtifactMirrorService } from "./canvas/artifactMirrorService";
 import { createDefaultCodexPluginPackageSources } from "./extensions/curatedBuildIosAppsCatalog";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "./scaffold/curatedScaffoldCatalog";
 import { resolveAvailableTools } from "./scaffold/scaffoldFilesystem";
@@ -3676,12 +3682,55 @@ export function startOctantServer(
         }) && provenance.mode === project.type
       );
     };
+    const artifactMirrorEvents = new ArtifactMirrorEventStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString() as never,
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    // The mirror listens for committed versions rather than being called by
+    // each surface that can revise, so every revision materializes the same way
+    // wherever it came from. It is constructed before the service it listens to
+    // so the hook below can name it.
+    const artifactMirrorService = new ArtifactMirrorService({
+      files: createArtifactMirrorFilePort(),
+      currentVersion: (canvasId) => persistence.canvasProjection.getById(canvasId)?.currentVersion,
+      projects: {
+        read: (projectId: string) => {
+          const project = persistence
+            .readProjects()
+            .find((candidate) => String(candidate.id) === projectId);
+          if (project === undefined) return undefined;
+          return {
+            name: project.name,
+            ...(project.type === "chat" ? {} : { checkoutRoot: project.binding.canonicalRoot }),
+          };
+        },
+      },
+      // A folder the person picked is theirs to pick, but only inside their own
+      // home: anywhere else needs the access-outside-project grant, which has no
+      // surface yet, so it fails closed rather than being assumed.
+      outsideRootApproved: (destination) =>
+        destination.kind !== "global-folder" ||
+        isInsideHomeDirectory(destination.canonicalRoot, homedir()),
+      planMode: () => false,
+      appendVersionFromBundle: () => ({
+        kind: "denied",
+        message: "Importing a mirrored file is not available on this host yet.",
+      }),
+      journal: artifactMirrorEvents,
+      clock: () => new Date().toISOString() as never,
+    });
+
     const canvasService = new CanvasService(
       {
         projection: persistence.canvasProjection,
         eventStore: canvasEventStore,
         uuid: randomUUID,
         clock: () => new Date().toISOString() as never,
+        onVersionCommitted: (version) => {
+          void artifactMirrorService.materialize(version);
+        },
       },
       {
         // Reauthorize every source against authoritative server state; the
