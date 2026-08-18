@@ -194,6 +194,8 @@ import {
 import { createContextRouteHandler } from "./contextRoutes";
 import { GitEnvironmentPort } from "./gitEnvironmentPort";
 import { GitObservationPort } from "./code/gitObservationPort";
+import { GitMutationPort } from "./code/gitMutationPort";
+import { GitService } from "./code/gitService";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
 import { GhRepositoryCataloguePort } from "./github/ghRepositoryCataloguePort";
 import { GhRepositoryObservationPort } from "./github/ghRepositoryObservationPort";
@@ -246,6 +248,7 @@ import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { ProjectRootPort } from "./projectRootPort";
 import { createArtifactLibraryRouteHandler } from "./artifactLibraryRoutes";
+import { createArtifactMirrorRouteHandler } from "./artifactMirrorRoutes";
 import { ArtifactLibraryService } from "./canvas/artifactLibraryService";
 import { createCanvasRouteHandler, resolveCanvasActiveContext } from "./canvasRoutes";
 import { AutomationCommandService } from "./automation/automationCommandService";
@@ -388,6 +391,13 @@ import {
   CodexPluginPackageResolver,
   type CodexPluginPackageResolverOptions,
 } from "./extensions/codexPluginResolver";
+import { ArtifactMirrorEventStore } from "./canvas/artifactMirrorEventStore";
+import {
+  createArtifactMirrorFilePort,
+  isInsideHomeDirectory,
+} from "./canvas/artifactMirrorFilePort";
+import { createArtifactMirrorCommitPort } from "./canvas/artifactMirrorCommitPort";
+import { ArtifactMirrorService } from "./canvas/artifactMirrorService";
 import { createDefaultCodexPluginPackageSources } from "./extensions/curatedBuildIosAppsCatalog";
 import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "./scaffold/curatedScaffoldCatalog";
 import { resolveAvailableTools } from "./scaffold/scaffoldFilesystem";
@@ -438,7 +448,12 @@ import {
   type ThreadMentionCommandResult,
 } from "@octant/contracts";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
-import { decodeProjectId, type ProjectId, type UtcTimestamp } from "@octant/contracts";
+import {
+  decodeCanvasDefinition,
+  decodeProjectId,
+  type ProjectId,
+  type UtcTimestamp,
+} from "@octant/contracts";
 import {
   activeChatTurns,
   assertHostRoutable,
@@ -3676,12 +3691,187 @@ export function startOctantServer(
         }) && provenance.mode === project.type
       );
     };
+    // Resolved from the Canvas's own provenance and durable host state, so
+    // the scope a client echoes is never the scope that authorizes it.
+    const resolveCanvasWorkspace = (
+      provenance: import("@octant/contracts").CanvasProvenance,
+    ): import("@octant/contracts/canvas-cards").CanvasWorkspaceScope | undefined => {
+      if (provenance.mode === "chat") {
+        const thread = persistence.readChatThread(provenance.threadId as never);
+        if (thread === undefined || thread.lifecycle !== "active") return undefined;
+        return { kind: "chat-virtual", projectId: null };
+      }
+      if (provenance.mode === "work") {
+        const thread = workThreadProjection.read(provenance.threadId as never);
+        const project =
+          thread === undefined ? undefined : persistence.readProject(thread.projectId);
+        const revision = project?.type === "work" ? project.bindingHistory.at(-1) : undefined;
+        if (
+          thread === undefined ||
+          thread.lifecycle !== "active" ||
+          revision === undefined ||
+          String(thread.bindingRevisionId) !== String(revision.revisionId)
+        ) {
+          return undefined;
+        }
+        return {
+          kind: "work-root",
+          projectId: thread.projectId,
+          rootId: Schema.decodeUnknownSync(ThreadCreationRootId)(revision.revisionId),
+        };
+      }
+      const thread = persistence.readCodeThread(provenance.threadId as never);
+      if (thread === undefined || thread.lifecycle !== "active") return undefined;
+      const project = persistence.readProject(thread.projectId);
+      const revision = project?.type === "code" ? project.bindingHistory.at(-1) : undefined;
+      const checkout = persistence.readCodeCheckout(thread.checkoutId);
+      if (
+        project?.type !== "code" ||
+        project.lifecycle !== "active" ||
+        revision === undefined ||
+        String(revision.revisionId) !== String(thread.bindingRevisionId) ||
+        checkout === undefined ||
+        checkout.availability !== "available"
+      ) {
+        return undefined;
+      }
+      return {
+        kind: "code-worktree",
+        projectId: thread.projectId,
+        repositoryId: thread.repositoryId,
+        bindingRevisionId: thread.bindingRevisionId,
+        checkoutId: thread.checkoutId,
+        verified: true,
+      };
+    };
+
+    const artifactMirrorEvents = new ArtifactMirrorEventStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString() as never,
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    // The mirror listens for committed versions rather than being called by
+    // each surface that can revise, so every revision materializes the same way
+    // wherever it came from. It is constructed before the service it listens to
+    // so the hook below can name it.
+    const artifactMirrorService = new ArtifactMirrorService({
+      files: createArtifactMirrorFilePort(),
+      currentVersion: (canvasId) => persistence.canvasProjection.getById(canvasId)?.currentVersion,
+      projects: {
+        read: (projectId: string) => {
+          const project = persistence
+            .readProjects()
+            .find((candidate) => String(candidate.id) === projectId);
+          if (project === undefined) return undefined;
+          return {
+            name: project.name,
+            ...(project.type === "chat" ? {} : { checkoutRoot: project.binding.canonicalRoot }),
+          };
+        },
+      },
+      // A folder the person picked is theirs to pick, but only inside their own
+      // home: anywhere else needs the access-outside-project grant, which has no
+      // surface yet, so it fails closed rather than being assumed.
+      outsideRootApproved: (destination) =>
+        destination.kind !== "global-folder" ||
+        isInsideHomeDirectory(destination.canonicalRoot, homedir()),
+      // Read-only is a promise about the disk as well as the journal, so a
+      // Code thread under Plan mode writes no files. Only Code carries an
+      // execution policy; Chat and Work threads have no read-only posture to
+      // read here.
+      planMode: (version) => {
+        const provenance = version.definition.provenance;
+        if (provenance.mode !== "code") return false;
+        return persistence.readCodeThread(provenance.threadId)?.executionPolicy === "plan";
+      },
+      // Taking an edited file back in goes through `revise` — the same path a
+      // person or an agent takes — so it is authorized, journaled, and counted
+      // as a version like any other. Nothing here can replace a version.
+      appendVersionFromBundle: ({ canvasId, definition }) => {
+        const entry = persistence.canvasProjection.getById(canvasId);
+        if (entry === undefined) {
+          return { kind: "denied", message: "That artifact is no longer available." };
+        }
+        let blocks;
+        try {
+          blocks = decodeCanvasDefinition(definition).blocks;
+        } catch {
+          return { kind: "denied", message: "The file is not a readable artifact bundle." };
+        }
+        const current = entry.currentVersion;
+        const provenance = current.definition.provenance;
+        const workspace = resolveCanvasWorkspace(provenance);
+        if (workspace === undefined) {
+          return {
+            kind: "denied",
+            message: "The Project or thread this artifact belongs to is no longer available.",
+          };
+        }
+        const project = persistence.readProject(provenance.projectId);
+        const result = canvasService.revise(
+          {
+            schemaVersion: 1,
+            kind: "canvas-revise",
+            requestId: randomUUID(),
+            canvasId,
+            expectedSequence: current.sequence,
+            hostId: LOCAL_HOST_ID,
+            mode: provenance.mode,
+            workspace,
+            originThreadId: provenance.threadId,
+            prompt: "Re-imported from the mirrored file.",
+            actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+            providerInstanceId: provenance.providerInstanceId,
+            modelId: provenance.modelId,
+            requestedAuthority: {
+              filesystem: false,
+              shell: false,
+              git: false,
+              network: false,
+              tools: false,
+              subagents: false,
+              executionPolicy: "plan",
+              permissionPersistence: "current-session",
+            },
+          },
+          {
+            mode: provenance.mode,
+            projectId: String(provenance.projectId),
+            hostId: String(LOCAL_HOST_ID),
+            workspace,
+            originThreadId: String(provenance.threadId),
+          },
+          project === undefined
+            ? undefined
+            : { id: String(project.id), type: project.type, lifecycle: project.lifecycle },
+          blocks,
+        );
+        return result.kind === "accepted"
+          ? { kind: "accepted", versionId: String(result.receipt.versionId) }
+          : { kind: "denied", message: result.message };
+      },
+      // Auto-commit is off unless the person turned it on, and even then it
+      // commits only what the mirror wrote. Its Git service is this host's own
+      // rather than the Code runtime's: the commit is authorized against the
+      // index as it stands at that moment, so anything staged underneath
+      // refuses the commit rather than joining it.
+      commitMirroredFiles: createArtifactMirrorCommitPort(
+        new GitService(new GitObservationPort(), new GitMutationPort()),
+      ),
+      journal: artifactMirrorEvents,
+      clock: () => new Date().toISOString() as never,
+    });
+
     const canvasService = new CanvasService(
       {
         projection: persistence.canvasProjection,
         eventStore: canvasEventStore,
         uuid: randomUUID,
         clock: () => new Date().toISOString() as never,
+        onVersionCommitted: (version) => {
+          void artifactMirrorService.materialize(version);
+        },
       },
       {
         // Reauthorize every source against authoritative server state; the
@@ -3948,57 +4138,7 @@ export function startOctantServer(
           ]);
           return allowed.has(reference);
         },
-        // Resolved from the Canvas's own provenance and durable host state, so
-        // the scope a client echoes is never the scope that authorizes it.
-        resolveWorkspace: (provenance) => {
-          if (provenance.mode === "chat") {
-            const thread = persistence.readChatThread(provenance.threadId as never);
-            if (thread === undefined || thread.lifecycle !== "active") return undefined;
-            return { kind: "chat-virtual", projectId: null };
-          }
-          if (provenance.mode === "work") {
-            const thread = workThreadProjection.read(provenance.threadId as never);
-            const project =
-              thread === undefined ? undefined : persistence.readProject(thread.projectId);
-            const revision = project?.type === "work" ? project.bindingHistory.at(-1) : undefined;
-            if (
-              thread === undefined ||
-              thread.lifecycle !== "active" ||
-              revision === undefined ||
-              String(thread.bindingRevisionId) !== String(revision.revisionId)
-            ) {
-              return undefined;
-            }
-            return {
-              kind: "work-root",
-              projectId: thread.projectId,
-              rootId: Schema.decodeUnknownSync(ThreadCreationRootId)(revision.revisionId),
-            };
-          }
-          const thread = persistence.readCodeThread(provenance.threadId as never);
-          if (thread === undefined || thread.lifecycle !== "active") return undefined;
-          const project = persistence.readProject(thread.projectId);
-          const revision = project?.type === "code" ? project.bindingHistory.at(-1) : undefined;
-          const checkout = persistence.readCodeCheckout(thread.checkoutId);
-          if (
-            project?.type !== "code" ||
-            project.lifecycle !== "active" ||
-            revision === undefined ||
-            String(revision.revisionId) !== String(thread.bindingRevisionId) ||
-            checkout === undefined ||
-            checkout.availability !== "available"
-          ) {
-            return undefined;
-          }
-          return {
-            kind: "code-worktree",
-            projectId: thread.projectId,
-            repositoryId: thread.repositoryId,
-            bindingRevisionId: thread.bindingRevisionId,
-            checkoutId: thread.checkoutId,
-            verified: true,
-          };
-        },
+        resolveWorkspace: resolveCanvasWorkspace,
         authorize: authorizeCanvas,
       },
     );
@@ -4056,6 +4196,10 @@ export function startOctantServer(
     });
     const artifactLibraryRoutes = createArtifactLibraryRouteHandler({
       library: artifactLibraryService,
+      windowAuthorityStore,
+    });
+    const artifactMirrorRoutes = createArtifactMirrorRouteHandler({
+      mirror: artifactMirrorService,
       windowAuthorityStore,
     });
     const canvasRoutes = createCanvasRouteHandler({
@@ -4491,6 +4635,7 @@ export function startOctantServer(
       (await previewRoutes(request)) ??
       (await canvasRoutes(request)) ??
       (await artifactLibraryRoutes(request)) ??
+      (await artifactMirrorRoutes(request)) ??
       (await automationRoutes(request)) ??
       (await automationNotificationRoutes(request)) ??
       (await workPromotionRoutes(request)) ??

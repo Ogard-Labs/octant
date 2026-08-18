@@ -36,6 +36,7 @@ distilled successor of the earlier long-form design specifications.
 | [0026](0026-shipping-to-a-user-owned-target.md)         | Shipping to a user-owned target                                   | Proposed |
 | [0027](0027-plans-as-journaled-artifacts.md)            | Plans as journaled artifacts                                      | Accepted |
 | [0028](0028-the-artifact-library.md)                    | The artifact library                                              | Accepted |
+| [0029](0029-artifact-storage-mirror.md)                 | The artifact storage mirror                                       | Accepted |
 
 ## Adding an ADR
 

@@ -2,7 +2,9 @@ import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
 import { X } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ArtifactLibraryView } from "./ArtifactLibraryView";
+import { ArtifactMirrorSettings } from "./ArtifactMirrorSettings";
 import { useArtifactLibrary } from "./useArtifactLibrary";
+import { useArtifactMirror } from "./useArtifactMirror";
 
 export interface ArtifactLibrarySurfaceProps {
   readonly serverUrl?: string;
@@ -22,6 +24,10 @@ export interface ArtifactLibrarySurfaceProps {
  * skew.
  */
 export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
+  const mirror = useArtifactMirror({
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
   const library = useArtifactLibrary({
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -44,6 +50,13 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         onFiltersChange={library.setFilters}
         onOpen={props.onOpen}
         {...(props.onCreate === undefined ? {} : { onCreate: props.onCreate })}
+      />
+      <ArtifactMirrorSettings
+        busy={mirror.busy}
+        {...(mirror.message === undefined ? {} : { message: mirror.message })}
+        onChangeAutoCommit={(autoCommit) => void mirror.changeAutoCommit(autoCommit)}
+        onChangeDestination={(destination) => void mirror.changeDestination(destination)}
+        settings={mirror.settings}
       />
     </div>
   );
