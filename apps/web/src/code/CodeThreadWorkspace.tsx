@@ -135,7 +135,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
   const [restoring, setRestoring] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<string>();
-  const [restoreUndo, setRestoreUndo] = useState<CodeCheckpoint>();
+  // The way back from the last restore is the controller's, not this
+  // component's: switching tabs unmounts this surface, and a handle held here
+  // would take the only reachable copy of the overwritten state with it.
+  const restoreUndo = props.controller.restoreUndo;
+  const setRestoreUndo = props.controller.noteRestoreUndo;
   const [forking, setForking] = useState(false);
   const [forkMessage, setForkMessage] = useState<string>();
 
@@ -950,9 +954,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 {accessMessage}
               </span>
             )}
-            {restoreMessage === undefined ? null : (
+            {/*
+              A restore point outlives the message that announced it, so the
+              offer stands on the undo point alone. Returning to the thread
+              after a tab switch finds the way back still here, described
+              plainly rather than as the sentence the last restore printed.
+            */}
+            {restoreMessage === undefined && restoreUndo === undefined ? null : (
               <span className="code-thread-workspace__hint" role="status">
-                {restoreMessage}
+                {restoreMessage ?? "Files were restored to an earlier point."}
                 {restoreUndo === undefined ? null : (
                   <OctantButton
                     disabled={restoring}
