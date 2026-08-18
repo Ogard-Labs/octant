@@ -67,10 +67,12 @@ import {
   RootlessTurnUpdated,
   ShellSettingsReplaced,
   THREAD_GOAL_EVENT_NAMES,
+  THREAD_PLAN_EVENT_NAMES,
   ZEN_FOCUS_ZONE_EVENT_NAMES,
   ThreadFollowUpUpdated,
   ThemeSettingsUpdated,
   ThreadGoalUpdated,
+  ThreadPlanUpdated,
   ZenFocusZoneRecorded,
   ThreadWorkUpdated,
   ValidationEvidenceRecorded,
@@ -246,6 +248,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("thread.follow-up-updated@1", 1, ThreadFollowUpUpdated)
     .register(THREAD_GOAL_EVENT_NAMES.updated, 1, ThreadGoalUpdated)
     .register(ZEN_FOCUS_ZONE_EVENT_NAMES.updated, 1, ZenFocusZoneRecorded)
+    .register(THREAD_PLAN_EVENT_NAMES.updated, 1, ThreadPlanUpdated)
     .register(NAVIGATOR_ASSISTANT_EVENT_NAMES.threadBound, 1, NavigatorAssistantThreadBound)
     .register("chat.deletion-requested@1", 1, ChatDeletionRequested)
     .register("chat.deleted@1", 1, ChatDeleted)

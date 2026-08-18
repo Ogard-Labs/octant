@@ -242,3 +242,96 @@ html[data-octant-reduced-transparency="true"] .folder-picker {
   color: var(--octant-text-secondary);
   font-size: 11.5px;
 }
+
+.thread-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.thread-plan__compose {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.thread-plan__status,
+.thread-plan__empty,
+.thread-plan__command-error,
+.thread-plan__history,
+.thread-plan__retention {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--octant-text-secondary);
+  font-size: 11.5px;
+}
+
+.plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.plan-card__header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.plan-card__status,
+.plan-card__progress,
+.plan-card__step-state,
+.plan-card__step-rationale {
+  color: var(--octant-text-secondary);
+  font-size: 11.5px;
+}
+
+.plan-card__steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-card__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.plan-card__step-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* A dropped step stays readable and stays legible as dropped in words; the
+   line-through is the second signal, never the only one. */
+.plan-card__step[data-step-status="dropped"] .plan-card__step-title {
+  text-decoration: line-through;
+}
+
+.plan-card__step-actions,
+.plan-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.code-thread-workspace__plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 12px 8px;
+}
