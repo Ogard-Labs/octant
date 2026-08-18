@@ -103,10 +103,14 @@ describe("Canvas accessibility basics", () => {
     expect(note).toHaveTextContent("Note");
   });
 
-  it("exposes diagram node labels accessibly", () => {
+  it("says a diagram in words for a reader who cannot see the drawing", () => {
     render(<CanvasDocument definition={canvasFixture} />);
-    expect(screen.getByText("Ingest")).toBeInTheDocument();
-    expect(screen.getByText("Report")).toBeInTheDocument();
+    // The names are on the boxes; what a reader cannot get from the drawing is
+    // which of them connects to which.
+    expect(
+      screen.getByRole("img", { name: /Diagram with 2 nodes and 1 edges/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Ingest to Report")).toBeInTheDocument();
   });
 
   it("annotates diff line kinds for assistive technology", () => {

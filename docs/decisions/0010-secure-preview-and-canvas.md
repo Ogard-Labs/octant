@@ -57,6 +57,12 @@ Canvas:
   or schema versions fail closed. The renderer never interprets arbitrary CSS,
   HTML, JavaScript, React, remote components, inline handlers, data URLs, or
   unapproved network locations.
+- A diagram is structure, not a picture: nodes, edges, named groups, and the
+  direction it reads, with an optional position per node. Where each part is
+  drawn is derived from that data by one deterministic layout, so every surface
+  that draws a diagram draws the same one and none of them is handed markup.
+  A node's own position is the author's, which is the seam a direct-manipulation
+  editor would write into without changing what a diagram is.
 - A Canvas appears as a card in its thread and opens as an ordinary workspace
   tab. Refinement creates a new immutable version; refresh is a server command
   that re-authorizes every source against current policy and never replaces
