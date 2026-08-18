@@ -1525,7 +1525,7 @@ describe("useShellController", () => {
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    let mutation!: Promise<void>;
+    let mutation!: Promise<boolean>;
     act(() => {
       mutation = result.current.updateSettings({ sidebarMaterial: "opaque" });
     });
@@ -1804,6 +1804,36 @@ describe("useShellController", () => {
     );
   });
 
+  it("reports a settings write the host discarded, even once the reload clears", async () => {
+    const client: ShellClient = {
+      bootstrap: vi.fn(async () => initialBootstrap()),
+      execute: vi.fn(async () => {
+        throw {
+          category: "conflict",
+          message: "Shell state changed; reload and retry.",
+          expectedVersion: 0,
+          actualVersion: 1,
+        };
+      }),
+    };
+    const { result } = renderHook(() =>
+      useShellController({ client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    let write!: Promise<boolean>;
+    act(() => {
+      write = result.current.updateSettings({ chatEnabled: false });
+    });
+
+    // Recovery reloads and leaves the status `ready` again, so the status
+    // alone cannot tell a caller its write was thrown away. A caller whose
+    // next step is durable has to be able to see that it was.
+    await expect(write).resolves.toBe(false);
+    expect(result.current.status).toBe("ready");
+    expect(result.current.settings?.chatEnabled).toBe(true);
+  });
+
   it.each(["workspace", "settings"] as const)(
     "reloads a committed %s mutation after a malformed success response",
     async (mutationKind) => {
@@ -1950,7 +1980,7 @@ describe("useShellController", () => {
       workspaceIntent = result.current.setMode("chat");
     });
     await waitFor(() => expect(result.current.workspace?.activeMode).toBe("chat"));
-    let settingsIntent!: Promise<void>;
+    let settingsIntent!: Promise<boolean>;
     act(() => {
       settingsIntent = result.current.updateSettings({ workEnabled: false });
     });
@@ -2014,7 +2044,7 @@ describe("useShellController", () => {
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    let settingsIntent!: Promise<void>;
+    let settingsIntent!: Promise<boolean>;
     act(() => {
       settingsIntent = result.current.updateSettings({ sidebarWidth: 320 });
     });
@@ -2081,7 +2111,7 @@ describe("useShellController", () => {
     act(() => {
       ambiguous = result.current.setMode("chat");
     });
-    let cancelled!: Promise<void>;
+    let cancelled!: Promise<boolean>;
     act(() => {
       cancelled = result.current.updateSettings({ workEnabled: false });
     });

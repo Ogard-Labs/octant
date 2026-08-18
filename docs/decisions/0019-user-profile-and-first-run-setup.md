@@ -61,6 +61,16 @@ calls unless a decision record and the request authorise them.
 - Answers are recorded as they are made, so quitting part-way keeps what was
   already chosen. Only the first-run _outcome_ is recorded at the end, and
   dismissing the dialog records the same durable "skipped" outcome as the button.
+- The outcome is recorded last, and only once every answer already given has
+  been accepted by the host. Answers are written by three independent
+  controllers — shell, Chat, and theme — so one can still be in flight, or have
+  been discarded by a conflict, when the user answers first run. A conflict is
+  recovered by reloading, which leaves the surface able to record an outcome
+  against state that never took the answer; because the outcome is durable, the
+  user would never be asked again and the answer would be gone with no retry.
+  Leaving first run pending is the honest result: the surface returns on the
+  next launch, still holding the question. This is why a settings write reports
+  whether the host accepted it rather than only that it finished.
 - An avatar image is stored inlined in settings, downscaled to a 128px square
   and bounded at 96 KB of encoded characters by the contract itself. Settings are
   journaled, so an unbounded image would grow every replay of them forever.
