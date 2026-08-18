@@ -199,6 +199,24 @@ const requestCommand: GithubCloneCommand = {
   expectedName: "octant",
 } as GithubCloneCommand;
 
+/**
+ * A promise a fake resolves when it has actually been reached.
+ *
+ * The cancellation tests used to wait a fixed 25ms before cancelling, hoping
+ * the confirm path had got as far as calling `clone` and registering its abort
+ * listener. Confirming does real filesystem work first, so on a loaded machine
+ * it has not, the cancel lands before anything is listening, and the pending
+ * confirm never settles. Waiting for the event itself is the same test without
+ * the guess.
+ */
+function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
 function confirmCommand(digest: string): GithubCloneCommand {
   return {
     kind: "confirm-clone",
@@ -558,6 +576,7 @@ describe("managed clone confirmation and pipeline", () => {
 
   it("cancellation terminates the owned process and quarantines deterministically", async () => {
     let sawAbort = false;
+    const cloneStarted = deferred();
     const harness = createHarness({
       clone: (_input, _onProgress, cloneSignal) =>
         new Promise((resolve) => {
@@ -569,6 +588,7 @@ describe("managed clone confirmation and pipeline", () => {
             },
             { once: true },
           );
+          cloneStarted.resolve();
         }),
     });
     const operation = await requestOperation(harness);
@@ -577,7 +597,7 @@ describe("managed clone confirmation and pipeline", () => {
       context,
       signal,
     );
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await cloneStarted.promise;
     const cancelResponse = await harness.service.execute(
       { kind: "cancel-clone", requestId } as GithubCloneCommand,
       context,
@@ -724,6 +744,7 @@ describe("managed clone restart recovery", () => {
 
 describe("managed clone list", () => {
   it("lists operations with bounded redacted progress", async () => {
+    const cloneStarted = deferred();
     const harness = createHarness({
       clone: (_input, onProgress, cloneSignal) =>
         new Promise((resolve) => {
@@ -731,6 +752,7 @@ describe("managed clone list", () => {
           cloneSignal.addEventListener("abort", () => resolve({ kind: "cancelled" }), {
             once: true,
           });
+          cloneStarted.resolve();
         }),
     });
     const operation = await requestOperation(harness);
@@ -739,7 +761,7 @@ describe("managed clone list", () => {
       context,
       signal,
     );
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await cloneStarted.promise;
     const listed = harness.service.list();
     expect(listed.operations).toHaveLength(1);
     expect(listed.operations[0]?.operation.state).toBe("cloning");
