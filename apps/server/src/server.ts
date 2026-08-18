@@ -397,6 +397,7 @@ import {
 import { createAppleToolchainRouteHandler } from "./appleToolchainRoutes";
 import { composeAppleValidationEvents } from "./apple/appleValidationEvidence";
 import { ZenEventStore } from "./zen/zenEventStore";
+import { ZenFocusZoneStore } from "./zen/zenFocusZoneStore";
 import { ZenService } from "./zen/zenService";
 import { ZenBackgroundStore } from "./zen/zenBackgroundStore";
 import { readFile as readFileFromDisk, stat as statFromDisk } from "node:fs/promises";
@@ -3067,9 +3068,17 @@ export function startOctantServer(
       readCodeThreads: () => persistence.readCodeThreads(),
       readCodeCheckout: (checkoutId) => persistence.readCodeCheckout(checkoutId),
     });
+    const zenFocusZones = new ZenFocusZoneStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+    });
     const zenService = new ZenService({
       loadSpace: (spaceId) => persistence.readZenSpace(spaceId),
       loadSpaceByWindow: (windowId) => persistence.readZenSpaceByWindowId(windowId),
+      focusZone: {
+        read: (windowId) => zenFocusZones.read(windowId),
+        write: (zone) => zenFocusZones.write(zone),
+      },
       eventStore: zenEventStore,
       localHostId: LOCAL_HOST_ID,
       threadCatalog: zenThreadCatalog,

@@ -1202,6 +1202,7 @@ export const ZenFailureReason = Schema.Literal(
   "duplicate-element-id",
   "duplicate-z-index",
   "unknown-space",
+  "duplicate-space",
   "wrong-window",
   "stale-version",
   "invalid-geometry",
@@ -1224,10 +1225,154 @@ export const ZenFailureReason = Schema.Literal(
 );
 export type ZenFailureReason = typeof ZenFailureReason.Type;
 
+// ── Focus zone: the spaces one window holds ──────────────────────────────────
+
+/**
+ * How many spaces one window may hold.
+ *
+ * A focus zone is where the user pins what they are working on now. Past a
+ * handful of spaces the switcher stops being a place you can find something and
+ * becomes a list you have to read, which is the opposite of the point.
+ */
+export const MAX_ZEN_SPACES_PER_WINDOW = 8;
+
+export const MAX_ZEN_SPACE_NAME_LENGTH = 64;
+
+export const ZenSpaceName = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(MAX_ZEN_SPACE_NAME_LENGTH),
+);
+export type ZenSpaceName = typeof ZenSpaceName.Type;
+
+/**
+ * One space's place in its window, without its contents.
+ *
+ * The index carries the name and the order; the space itself carries what is
+ * pinned to it. Keeping them apart is what lets the switcher list every space
+ * without loading any of them.
+ */
+export const ZenSpaceSummary = Schema.Struct({
+  spaceId: ZenSpaceId,
+  name: ZenSpaceName,
+  position: Schema.Int.pipe(Schema.nonNegative()),
+}).annotations(strict);
+export type ZenSpaceSummary = typeof ZenSpaceSummary.Type;
+
+/**
+ * The spaces one window holds, in order, and which of them is in front.
+ *
+ * `activeSpaceId` is the authority for which space the window is showing. A
+ * space's own `active` flag says whether the focus zone is replacing the shell;
+ * where the two ever disagree — a crash between the two writes that switch
+ * spaces — this pointer wins and the stale flag is inert.
+ */
+export const ZenFocusZone = Schema.Struct({
+  windowId: WindowId,
+  version: AggregateVersion,
+  spaces: Schema.Array(ZenSpaceSummary).pipe(
+    Schema.minItems(1),
+    Schema.maxItems(MAX_ZEN_SPACES_PER_WINDOW),
+  ),
+  activeSpaceId: ZenSpaceId,
+  createdAt: UtcTimestamp,
+  updatedAt: UtcTimestamp,
+})
+  .pipe(
+    Schema.filter(
+      (zone) => {
+        const ids = new Set(zone.spaces.map((space) => String(space.spaceId)));
+        if (ids.size !== zone.spaces.length) return false;
+        if (!ids.has(String(zone.activeSpaceId))) return false;
+        const positions = [...zone.spaces].map((space) => space.position).sort((a, b) => a - b);
+        return positions.every((position, index) => position === index);
+      },
+      {
+        message: () =>
+          "a focus zone needs unique spaces, contiguous positions, and an active space it holds",
+      },
+    ),
+  )
+  .annotations(strict);
+export type ZenFocusZone = typeof ZenFocusZone.Type;
+
+/** A full focus-zone snapshot carried by the event journal for replay. */
+export const ZenFocusZoneRecorded = Schema.Struct({
+  windowId: WindowId,
+  zone: ZenFocusZone,
+}).annotations(strict);
+export type ZenFocusZoneRecorded = typeof ZenFocusZoneRecorded.Type;
+
+/**
+ * Add another space to a window that already has a focus zone. The window's
+ * first space is minted by `create-space`, which opens the zone itself.
+ */
+export const ZenAddSpaceCommand = Schema.Struct({
+  command: Schema.Literal("add-space"),
+  name: ZenSpaceName,
+  expectedVersion: AggregateVersion,
+}).annotations(strict);
+export type ZenAddSpaceCommand = typeof ZenAddSpaceCommand.Type;
+
+export const ZenRenameSpaceCommand = Schema.Struct({
+  command: Schema.Literal("rename-space"),
+  spaceId: ZenSpaceId,
+  name: ZenSpaceName,
+  expectedVersion: AggregateVersion,
+}).annotations(strict);
+export type ZenRenameSpaceCommand = typeof ZenRenameSpaceCommand.Type;
+
+export const ZenRemoveSpaceCommand = Schema.Struct({
+  command: Schema.Literal("remove-space"),
+  spaceId: ZenSpaceId,
+  expectedVersion: AggregateVersion,
+}).annotations(strict);
+export type ZenRemoveSpaceCommand = typeof ZenRemoveSpaceCommand.Type;
+
+export const ZenReorderSpaceCommand = Schema.Struct({
+  command: Schema.Literal("reorder-space"),
+  spaceId: ZenSpaceId,
+  position: Schema.Int.pipe(Schema.nonNegative()),
+  expectedVersion: AggregateVersion,
+}).annotations(strict);
+export type ZenReorderSpaceCommand = typeof ZenReorderSpaceCommand.Type;
+
+export const ZenActivateSpaceCommand = Schema.Struct({
+  command: Schema.Literal("activate-space"),
+  spaceId: ZenSpaceId,
+  expectedVersion: AggregateVersion,
+}).annotations(strict);
+export type ZenActivateSpaceCommand = typeof ZenActivateSpaceCommand.Type;
+
+export const ZenFocusZoneCommand = Schema.Union(
+  ZenAddSpaceCommand,
+  ZenRenameSpaceCommand,
+  ZenRemoveSpaceCommand,
+  ZenReorderSpaceCommand,
+  ZenActivateSpaceCommand,
+);
+export type ZenFocusZoneCommand = typeof ZenFocusZoneCommand.Type;
+
+export const ZenFocusZoneResult = Schema.Struct({
+  result: Schema.Literal("focus-zone-updated"),
+  zone: ZenFocusZone,
+  /** The space now in front, so a switch is one round trip rather than two. */
+  space: ZenSpace,
+}).annotations(strict);
+export type ZenFocusZoneResult = typeof ZenFocusZoneResult.Type;
+
+export const ZEN_FOCUS_ZONE_EVENT_NAMES = {
+  updated: "zen.focus-zone-updated@1",
+} as const;
+
 // ── Bootstrap ────────────────────────────────────────────────────────────────
 
 export const ZenBootstrapResponse = Schema.Struct({
   space: Schema.NullOr(ZenSpace),
+  /**
+   * The window's spaces and which is in front. Null alongside a null space for
+   * a window that has never opened its focus zone; never null beside a space,
+   * because a space always belongs to a zone.
+   */
+  focusZone: Schema.NullOr(ZenFocusZone),
   windowId: WindowId,
 }).annotations(strict);
 export type ZenBootstrapResponse = typeof ZenBootstrapResponse.Type;
@@ -1235,6 +1380,10 @@ export type ZenBootstrapResponse = typeof ZenBootstrapResponse.Type;
 export const decodeZenCommand = Schema.decodeUnknownSync(ZenCommand);
 export const decodeZenResult = Schema.decodeUnknownSync(ZenResult);
 export const decodeZenBootstrapResponse = Schema.decodeUnknownSync(ZenBootstrapResponse);
+export const decodeZenFocusZone = Schema.decodeUnknownSync(ZenFocusZone);
+export const decodeZenFocusZoneCommand = Schema.decodeUnknownSync(ZenFocusZoneCommand);
+export const decodeZenFocusZoneRecorded = Schema.decodeUnknownSync(ZenFocusZoneRecorded);
+export const decodeZenFocusZoneResult = Schema.decodeUnknownSync(ZenFocusZoneResult);
 export const decodeZenSpace = Schema.decodeUnknownSync(ZenSpace);
 export const decodeZenWidgetMutationRecorded = Schema.decodeUnknownSync(ZenWidgetMutationRecorded);
 export const decodeZenSpaceId = Schema.decodeUnknownSync(ZenSpaceId);

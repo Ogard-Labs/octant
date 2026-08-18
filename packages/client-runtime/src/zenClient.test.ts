@@ -250,6 +250,46 @@ describe("ZenClient thread catalog", () => {
     });
   });
 
+  it("switches this window to another of its spaces without touching what is pinned to either", async () => {
+    const zone = {
+      windowId,
+      version: 4,
+      spaces: [
+        { spaceId: space.spaceId, name: "Focus", position: 0 },
+        {
+          spaceId: decodeZenSpaceId("00000000-0000-4000-8000-000000000007"),
+          name: "Review",
+          position: 1,
+        },
+      ],
+      activeSpaceId: space.spaceId,
+      createdAt: "2026-07-28T12:00:00.000Z",
+      updatedAt: "2026-07-28T12:05:00.000Z",
+    };
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(Response.json({ result: "focus-zone-updated", zone, space }));
+    const client = createZenClient({
+      baseUrl: "http://127.0.0.1:4242",
+      fetch,
+      windowCapability: `${"A".repeat(42)}A`,
+    });
+
+    await expect(
+      client.space({
+        command: "activate-space",
+        spaceId: space.spaceId,
+        expectedVersion: 3 as AggregateVersion,
+      }),
+    ).resolves.toMatchObject({
+      result: "focus-zone-updated",
+      zone: { activeSpaceId: space.spaceId },
+    });
+    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
+      "http://127.0.0.1:4242/api/zen/spaces",
+    ]);
+  });
+
   it("reads and opens this window's assistant surface, and offers no turn of its own", async () => {
     const snapshot = {
       status: "ready" as const,

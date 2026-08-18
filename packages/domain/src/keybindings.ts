@@ -14,7 +14,9 @@ export type OctantKeybindingActionId =
   | "command-palette"
   | "code-file-search"
   | "code-content-search"
-  | "zen-mode";
+  | "zen-mode"
+  | "zen-next-space"
+  | "zen-previous-space";
 
 export interface OctantKeybindingAction {
   readonly id: OctantKeybindingActionId;
@@ -37,6 +39,18 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     defaultChord: "Mod+K",
   },
   { id: "zen-mode", label: "Toggle Zen mode", area: "Shell", defaultChord: "Mod+Shift+Z" },
+  {
+    id: "zen-next-space",
+    label: "Show the next focus space",
+    area: "Shell",
+    defaultChord: "Mod+Alt+]",
+  },
+  {
+    id: "zen-previous-space",
+    label: "Show the previous focus space",
+    area: "Shell",
+    defaultChord: "Mod+Alt+[",
+  },
   { id: "code-file-search", label: "Find a file by name", area: "Code", defaultChord: "Mod+P" },
   {
     id: "code-content-search",

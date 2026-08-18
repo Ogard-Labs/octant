@@ -12,12 +12,26 @@ import {
   decodeZenThreadCatalogRef,
   type ZenSpace,
   type AggregateVersion,
+  type WindowId,
+  type ZenFocusZone,
   type ChatThread,
   type ChatThreadView,
 } from "@octant/contracts";
 import { createZenSpace } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { ZenService } from "./zenService";
+
+/** Each window's focus zone, held only for the life of one test. */
+function memoryFocusZone() {
+  const byWindow = new Map<string, ZenFocusZone>();
+  return {
+    read: (windowId: WindowId) => byWindow.get(String(windowId)) ?? null,
+    write: (next: ZenFocusZone) => {
+      byWindow.set(String(next.windowId), next);
+      return next;
+    },
+  };
+}
 
 const ids = {
   window: decodeWindowId("00000000-0000-4000-8000-000000000001"),
@@ -73,6 +87,7 @@ function fixture(options: { readonly resolve?: typeof entry | undefined } = {}) 
   });
   const resolve = vi.fn(async () => ("resolve" in options ? options.resolve : entry));
   const service = new ZenService({
+    focusZone: memoryFocusZone(),
     loadSpace: () => current,
     loadSpaceByWindow: () => current,
     eventStore: {
@@ -135,6 +150,7 @@ describe("ZenService thread attachment", () => {
     const conflict = new Error("conflict");
     let committed = false;
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: {
@@ -178,6 +194,7 @@ describe("ZenService thread attachment", () => {
     const current = space();
     const append = vi.fn();
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: { append, isConcurrencyConflict: () => false } as never,
@@ -212,6 +229,7 @@ describe("ZenService durable Notes and Checklist widgets", () => {
     );
     const generated = [ids.element, ids.item];
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: {
@@ -521,6 +539,7 @@ describe("ZenService timer lifecycle", () => {
       return vi.fn();
     });
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: { append, isConcurrencyConflict: () => false } as never,
@@ -583,6 +602,7 @@ describe("ZenService timer lifecycle", () => {
     });
     const cancel = vi.fn();
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: { append, isConcurrencyConflict: () => false } as never,
@@ -667,6 +687,7 @@ describe("ZenService timer lifecycle", () => {
       return current;
     });
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: { append, isConcurrencyConflict: () => false } as never,
@@ -709,6 +730,7 @@ describe("ZenService timer lifecycle", () => {
       .mockReturnValueOnce(cancelSecond);
     const elementIds = [ids.element, ids.otherElement];
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: (spaceId) => spaces.get(spaceId) ?? null,
       loadSpaceByWindow: (windowId) =>
         [...spaces.values()].find((candidate) => candidate.windowId === windowId) ?? null,
@@ -775,6 +797,7 @@ describe("ZenService timer lifecycle", () => {
       return current;
     });
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: { append, isConcurrencyConflict: () => false } as never,
@@ -836,6 +859,7 @@ describe("ZenService Navigator", () => {
       ],
     } as unknown as ChatThreadView;
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: { append: vi.fn(), isConcurrencyConflict: () => false } as never,
@@ -869,6 +893,7 @@ describe("ZenService Navigator", () => {
       } as ZenSpace;
       const view = { thread: assistantThread(), turns, contents } as unknown as ChatThreadView;
       const service = new ZenService({
+        focusZone: memoryFocusZone(),
         loadSpace: () => current,
         loadSpaceByWindow: () => current,
         eventStore: { append: vi.fn(), isConcurrencyConflict: () => false } as never,
@@ -971,6 +996,7 @@ describe("ZenService Navigator", () => {
     ];
     let recipeNow = Date.parse("2026-07-29T12:00:00.000Z");
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: { append, isConcurrencyConflict: () => false } as never,
@@ -1055,6 +1081,7 @@ describe("ZenService Navigator", () => {
     let recipeNow = Date.parse("2026-07-29T12:00:00.000Z");
     let nextPreviewId = 20;
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: {
@@ -1132,6 +1159,7 @@ describe("ZenService Navigator", () => {
     let recipeNow = Date.parse("2026-07-29T12:00:00.000Z");
     let nextPreviewId = 30;
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: {
@@ -1201,6 +1229,7 @@ describe("ZenService Navigator", () => {
       return current;
     });
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: { append, isConcurrencyConflict: () => false } as never,
@@ -1244,6 +1273,7 @@ describe("ZenService Navigator", () => {
       return current;
     });
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: { append, isConcurrencyConflict: () => false } as never,
@@ -1289,6 +1319,7 @@ describe("ZenService Navigator", () => {
       return current;
     });
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: { append, isConcurrencyConflict: () => false } as never,
@@ -1318,6 +1349,7 @@ describe("ZenService Navigator", () => {
       },
     } as ZenSpace;
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: {
@@ -1347,6 +1379,7 @@ describe("ZenService Navigator", () => {
     } as ZenSpace;
     const conversation = assistantThread();
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: {
@@ -1377,6 +1410,7 @@ describe("ZenService Navigator", () => {
     } as ZenSpace;
     const conversation = assistantThread();
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: () => current,
       loadSpaceByWindow: () => current,
       eventStore: {
@@ -1449,6 +1483,7 @@ describe("ZenService Navigator", () => {
       return committed;
     });
     const service = new ZenService({
+      focusZone: memoryFocusZone(),
       loadSpace: (spaceId) =>
         [...spaces.values()].find((candidate) => candidate.spaceId === spaceId) ?? null,
       loadSpaceByWindow: (windowId) => spaces.get(String(windowId)) ?? null,
@@ -1497,5 +1532,121 @@ describe("ZenService Navigator", () => {
         recipePreview: { previewId: preview.previewId },
       }),
     ]);
+  });
+});
+
+describe("ZenService focus zone", () => {
+  const added = decodeZenSpaceId("00000000-0000-4000-8000-000000000060");
+
+  function zoneFixture() {
+    const stored = new Map<string, ZenSpace>([[String(ids.space), space()]]);
+    const append = vi.fn((next: ZenSpace, expectedVersion: number) => {
+      const committed = { ...next, version: (expectedVersion + 1) as AggregateVersion };
+      stored.set(String(committed.spaceId), committed);
+      return committed;
+    });
+    const service = new ZenService({
+      focusZone: memoryFocusZone(),
+      loadSpace: (spaceId) => stored.get(String(spaceId)) ?? null,
+      loadSpaceByWindow: (windowId) =>
+        [...stored.values()].find((candidate) => candidate.windowId === windowId) ?? null,
+      eventStore: { append, isConcurrencyConflict: () => false } as never,
+      localHostId: LOCAL_HOST_ID,
+      threadCatalog: { resolve: async () => entry, search: async () => [entry] },
+      uuid: () => added,
+    });
+    return { append, service, stored };
+  }
+
+  it("keeps the space a window already had as the first space of its focus zone", () => {
+    const { service } = zoneFixture();
+
+    const bootstrap = service.bootstrap(ids.window);
+
+    expect(bootstrap.space?.spaceId).toBe(ids.space);
+    expect(bootstrap.focusZone).toMatchObject({
+      activeSpaceId: ids.space,
+      spaces: [{ spaceId: ids.space, name: "Focus", position: 0 }],
+    });
+  });
+
+  it("puts a newly added space in front of the window without touching the one it left", () => {
+    const { append, service } = zoneFixture();
+    const zone = service.focusZoneOrFail(ids.window);
+
+    const result = service.focusZoneCommand(
+      { command: "add-space", name: "Review", expectedVersion: zone.version },
+      ids.window,
+    );
+
+    expect(result.zone.activeSpaceId).toBe(added);
+    expect(result.zone.spaces.map((entryOf) => entryOf.name)).toEqual(["Focus", "Review"]);
+    expect(result.space.spaceId).toBe(added);
+    expect(result.space.elements).toEqual([]);
+    // Only the new space and the showing flag were written; nothing pinned to
+    // the space the user left was rewritten.
+    expect(append.mock.calls.map(([next]) => next.spaceId)).toEqual([added, ids.space]);
+  });
+
+  it("carries the focus zone's showing state to the space being switched to", () => {
+    const { service, stored } = zoneFixture();
+    const zone = service.focusZoneOrFail(ids.window);
+    service.focusZoneCommand(
+      { command: "add-space", name: "Review", expectedVersion: zone.version },
+      ids.window,
+    );
+
+    const back = service.focusZoneCommand(
+      {
+        command: "activate-space",
+        spaceId: ids.space,
+        expectedVersion: service.focusZoneOrFail(ids.window).version,
+      },
+      ids.window,
+    );
+
+    expect(back.zone.activeSpaceId).toBe(ids.space);
+    expect(back.space.active).toBe(true);
+    expect(stored.get(String(added))?.active).toBe(false);
+  });
+
+  it("refuses to remove a window's last space", () => {
+    const { service } = zoneFixture();
+    const zone = service.focusZoneOrFail(ids.window);
+
+    expect(() =>
+      service.focusZoneCommand(
+        { command: "remove-space", spaceId: ids.space, expectedVersion: zone.version },
+        ids.window,
+      ),
+    ).toThrow(/limit-exceeded/);
+  });
+
+  it("refuses a focus-zone command that names a version the window has moved past", () => {
+    const { service } = zoneFixture();
+
+    expect(() =>
+      service.focusZoneCommand(
+        { command: "add-space", name: "Review", expectedVersion: 99 as AggregateVersion },
+        ids.window,
+      ),
+    ).toThrow(/stale-version/);
+  });
+
+  it("pins a thread to the space in front rather than the one the window opened first", async () => {
+    const { service } = zoneFixture();
+    const zone = service.focusZoneOrFail(ids.window);
+    service.focusZoneCommand(
+      { command: "add-space", name: "Review", expectedVersion: zone.version },
+      ids.window,
+    );
+
+    const result = await service.attachThread(ids.window, {
+      catalogRef,
+      expectedVersion: service.bootstrap(ids.window).space!.version,
+    });
+
+    expect(result.result).toBe("thread-attached");
+    expect(result.space.spaceId).toBe(added);
   });
 });

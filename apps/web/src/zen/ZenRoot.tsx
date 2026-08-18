@@ -6,6 +6,8 @@ import { isApplePlatform } from "../platform";
 export interface ZenRootProps {
   readonly active: boolean;
   readonly children: ReactNode;
+  /** Step one space along this window's switcher, wrapping at both ends. */
+  readonly onCycleSpace?: (step: 1 | -1) => void;
   readonly onExit: () => void;
   readonly onToggle: () => void;
   readonly zen: ReactNode;
@@ -29,10 +31,26 @@ export function ZenRoot(props: ZenRootProps) {
 
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent): void {
-      if (matchKeybinding(keybindings, event, isApplePlatform()) !== "zen-mode") return;
+      const action = matchKeybinding(keybindings, event, isApplePlatform());
+      if (action === undefined) return;
       if (isEditableTarget(event.target) && props.active) return;
-      event.preventDefault();
-      props.onToggle();
+      if (action === "zen-mode") {
+        event.preventDefault();
+        props.onToggle();
+        return;
+      }
+      // Cycling only means anything while the focus zone is the surface; off
+      // it the chord belongs to whatever the window is actually showing.
+      if (!props.active) return;
+      if (action === "zen-next-space") {
+        event.preventDefault();
+        props.onCycleSpace?.(1);
+        return;
+      }
+      if (action === "zen-previous-space") {
+        event.preventDefault();
+        props.onCycleSpace?.(-1);
+      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);

@@ -70,12 +70,31 @@ redesigns.
 - Zen is a separate presentation aggregate that replaces the renderer surface
   inside the same window for focus work; it is not a split-tree tab, not a
   fourth authority mode, and never merges authority from attached entities.
+- Zen is a focus zone: a window holds several named, ordered spaces and shows
+  one at a time. The spaces a window holds are their own journaled aggregate,
+  keyed by window and separate from the spaces themselves, so switching writes
+  only which space is in front and never anything pinned to either. A window
+  holds at most eight spaces and always keeps its last one. The element budget
+  is a property of a space, so each space carries its own.
+- The zone's pointer is the authority for which space is in front. A space's
+  own showing flag says only whether the focus zone is replacing the shell for
+  that window, and moves with the pointer.
+- A window that had a space before it had a zone keeps that space as the first
+  space of its zone. Projections are rebuildable, so the migration is
+  forward-only and nothing pinned to that space is rewritten.
+- Switching space grants nothing. Every pinned element still acts strictly
+  under its own bound source context, and a space is a place to arrange them,
+  never an authority of its own.
 - Desktop and web clients share the same content structure and commands; web
   omits native window affordances. The UI is truthful: every visible action
   works, is clearly unavailable, or is absent.
 
 ## Consequences
 
+- The switcher lists a window's spaces without loading any of them, because the
+  zone holds only names, order, and which space is in front.
+- Removing a space drops it from the switcher; its own journal is retained, so
+  the removal is not a destructive write.
 - One layout aggregate serves every pane kind, so new surfaces (previews,
   canvases, Simulator, plugin tabs) inherit persistence, docking, restore, and
   the authority key for free.

@@ -9,12 +9,25 @@ import {
   type ChatThread,
   type ChatThreadView,
   type WindowId,
+  type ZenFocusZone,
   type ZenSpace,
 } from "@octant/contracts";
 import { createZenSpace } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { ZenAssistantTools } from "./zenAssistantTools";
 import { ZenService } from "./zenService";
+
+/** Each window's focus zone, held only for the life of one test. */
+function memoryFocusZone() {
+  const byWindow = new Map<string, ZenFocusZone>();
+  return {
+    read: (windowId: WindowId) => byWindow.get(String(windowId)) ?? null,
+    write: (next: ZenFocusZone) => {
+      byWindow.set(String(next.windowId), next);
+      return next;
+    },
+  };
+}
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000001");
 const threadId = decodeChatThreadId("00000000-0000-4000-8000-000000000002");
@@ -74,6 +87,7 @@ async function boundAssistantFixture() {
     [String(unboundWindowId), createZenSpace(unboundWindowId, decodeHostId(LOCAL_HOST_ID))],
   ]);
   const zenService = new ZenService({
+    focusZone: memoryFocusZone(),
     loadSpace: (spaceId) =>
       [...spaces.values()].find((candidate) => candidate.spaceId === spaceId) ?? null,
     loadSpaceByWindow: (id) => spaces.get(String(id)) ?? null,
