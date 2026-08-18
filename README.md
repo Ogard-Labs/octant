@@ -143,14 +143,14 @@ bun --cwd packages/cli src/bin.ts web          # terminal 2
 
 Common checks:
 
-| Command             | Purpose                                                    |
-| ------------------- | ---------------------------------------------------------- |
-| `bun run fmt`       | Format with oxfmt (`fmt:check` to verify)                  |
-| `bun run lint`      | oxlint                                                     |
-| `bun run typecheck` | Typecheck all workspaces                                   |
-| `bun run test`      | Run workspace tests (Vitest)                               |
-| `bun run build`     | Build all buildable workspaces                             |
-| `bun run verify`    | Full local chain: wiring, format, lint, types, test, build |
+| Command             | Purpose                                                               |
+| ------------------- | --------------------------------------------------------------------- |
+| `bun run fmt`       | Format with oxfmt (`fmt:check` to verify)                             |
+| `bun run lint`      | oxlint                                                                |
+| `bun run typecheck` | Typecheck all workspaces                                              |
+| `bun run test`      | Run workspace tests (Vitest)                                          |
+| `bun run build`     | Build all buildable workspaces                                        |
+| `bun run verify`    | Full local chain: wiring, decisions, format, lint, types, test, build |
 
 Credentialed provider smokes, packaged app smokes, and browser QA are opt-in
 scripts (`bun run smoke:*`) and are not part of `verify`.
