@@ -18,6 +18,8 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeOverviewSurfaceKind } from "./CodeOverview";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
+import { ChatRichText } from "../chat/ChatRichText";
+import { InlineThreadPlan } from "../plan/InlineThreadPlan";
 import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -758,7 +760,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                       running={message.status === "incomplete"}
                     />
                   )}
-                  <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
+                  {/* An assistant reply is markdown — a plan arrives as a
+                    heading and a numbered list, and rendering it as one long
+                    line is what made plans unreadable here. What the user typed
+                    stays exactly as they typed it. */}
+                  {message.role === "assistant" && message.text.length > 0 ? (
+                    <ChatRichText body={message.text} />
+                  ) : (
+                    <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
+                  )}
                   {message.role === "assistant" &&
                   message.operationId !== undefined &&
                   message.status === "completed" &&
@@ -860,6 +870,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           })}
         </div>
       </div>
+
+      <InlineThreadPlan />
 
       <div className="code-thread-workspace__composer">
         <div className="code-thread-workspace__composer-shell">

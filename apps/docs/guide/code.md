@@ -27,6 +27,33 @@ Code threads run in one of four server-enforced authority modes:
 
 Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The access control sits in the thread composer and applies from the next turn; raising a thread to Full access still needs the native confirmation.
 
+## Plans
+
+A Code thread's plan is a durable, ordered list of steps, not prose in the
+transcript. Write one in the thread's **Plan** panel — one step per line, with
+an optional reason after an em dash — and press **Propose plan**. It appears
+beside the transcript as well, so it stays in view while you read the thread.
+
+A plan starts **Proposed · not approved**. Nothing about it is work yet: the
+host refuses to start, finish, or drop a step until the plan is approved.
+**Approve plan** is that gesture and the only one — changing a thread's
+authority mode says what the thread may do and never that its plan was agreed.
+Approval records the exact wording you read, so rewriting the steps returns the
+plan to proposed and asks for approval again. A step that survives a rewrite
+keeps whatever was already done to it.
+
+Once approved, the steps are the thread's task list: **Start**, **Finish**,
+**Drop**, and **Reopen** each move one step, and the card counts how many are
+done. **Withdraw** puts the plan aside so the thread can propose a different
+one; the withdrawn wording stays in the recorded revisions.
+
+Plans work under every authority mode, Plan mode included — deciding what to do
+is exactly what a read-only thread is for. The host records the plan in its
+journal, so it survives a restart.
+
+Assistant replies in Code render as markdown, so a plan an agent writes out as a
+heading and a numbered list reads as one. What you type stays exactly as typed.
+
 ## Attaching images
 
 Paste or drop a PNG, JPEG, WebP, or GIF into the thread composer to send it with your next message. Each image uploads to the host as you attach it, and the turn sends only the identifier the host answered with, so the provider receives bytes the host itself accepted.

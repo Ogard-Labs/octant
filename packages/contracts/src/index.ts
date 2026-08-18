@@ -19,6 +19,7 @@ export * from "./workingDirectory";
 export * from "./events";
 export * from "./auditEvents";
 export * from "./goal";
+export * from "./threadPlan";
 export * from "./extensions";
 export * from "./extensionEvents";
 export * from "./extensionRpc";

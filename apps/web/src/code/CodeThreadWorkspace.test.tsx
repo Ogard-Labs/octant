@@ -48,6 +48,33 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], []);
   });
 
+  it("reads a plan the assistant wrote as a plan, not as one long line", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "turn-1:user", role: "user" as const, text: "## Not a heading, I typed this" },
+            {
+              id: "turn-1:assistant",
+              role: "assistant" as const,
+              text: "## Plan\n\n1. Reproduce the gap\n2. Fix the projection\n",
+              status: "completed" as const,
+            },
+          ],
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Plan" })).toBeVisible();
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toContain(
+      "Reproduce the gap",
+    );
+    // What the user typed is what the user typed.
+    expect(screen.getByText("## Not a heading, I typed this")).toBeVisible();
+  });
+
   it("restores the checkout to a message's checkpoint only after a confirmation and an approval", async () => {
     const user = userEvent.setup();
     const executeOperation = vi.fn(async () => ({
