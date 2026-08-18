@@ -189,6 +189,50 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledOnce();
   });
 
+  it("classifies watching the host's browser as a read and acting in it as its own action", () => {
+    for (const path of [
+      "/api/browser/scope",
+      "/api/browser/contexts/current",
+      "/api/browser/contexts/inspect",
+    ]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBe("browser.observe");
+    }
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/browser/actions", { method: "POST" }),
+      ),
+    ).toBe("browser.interact");
+    // Opening, releasing, cancelling, and stopping a browser session decide
+    // what the host is running, not what a watcher sees.
+    for (const path of [
+      "/api/browser/contexts",
+      "/api/browser/contexts/release",
+      "/api/browser/contexts/cancel",
+      "/api/browser/contexts/stop",
+    ]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBeUndefined();
+    }
+  });
+
+  it("dispatches a browser observation and gesture for a paired device but not a session change", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    for (const path of ["/api/browser/contexts/inspect", "/api/browser/actions"]) {
+      expect((await product(handoff(path, "POST")))?.status).toBe(200);
+    }
+    expect(dispatch).toHaveBeenCalledTimes(2);
+
+    for (const path of ["/api/browser/contexts", "/api/browser/contexts/stop"]) {
+      expect((await product(handoff(path, "POST")))?.status).toBe(403);
+    }
+    expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
   it("classifies the POST-only Usage reads as reads and leaves the ledger purges denied", () => {
     for (const path of ["/api/usage/dashboard", "/api/usage/query", "/api/usage/export"]) {
       expect(

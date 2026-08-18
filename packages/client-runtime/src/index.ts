@@ -53,6 +53,7 @@ export * from "./diagnosticsExportClient";
 export * from "./validationEvidenceClient";
 export * from "./expoSecureDeviceKeyStore";
 export * from "./mobileInboxClient";
+export * from "./mobileThreadSurfaceClient";
 export * from "./mobileChatAttempt";
 export * from "./chatNdjsonStream";
 export * from "./mobileCodeOperationsClient";

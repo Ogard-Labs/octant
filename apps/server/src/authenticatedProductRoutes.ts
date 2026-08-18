@@ -205,12 +205,30 @@ export function classifyProductAction(request: Request): string | undefined {
     }
     return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
   }
+  if (path.startsWith("/api/browser/")) {
+    // A companion client watches the page the host already opened and acts
+    // inside it. Reading the thread's scope, its current context, and the
+    // latest observation are reads; the action route carries the gestures.
+    // Creating, releasing, cancelling, and stopping a browser session are not
+    // listed, so they stay denied. The route re-derives the principal and
+    // refuses every action kind that would drive the host rather than act
+    // within its view.
+    if (
+      method === "POST" &&
+      (path === "/api/browser/scope" ||
+        path === "/api/browser/contexts/current" ||
+        path === "/api/browser/contexts/inspect")
+    ) {
+      return "browser.observe";
+    }
+    if (method === "POST" && path === "/api/browser/actions") return "browser.interact";
+    return method === "GET" || method === "HEAD" ? "settings.read-non-secret" : undefined;
+  }
   if (
     path === "/api/agent-profiles" ||
     path.startsWith("/api/agent-profiles/") ||
     path.startsWith("/api/theme/") ||
     path.startsWith("/api/apple/") ||
-    path.startsWith("/api/browser/") ||
     path.startsWith("/api/computer-use/") ||
     path.startsWith("/api/zen")
   ) {
