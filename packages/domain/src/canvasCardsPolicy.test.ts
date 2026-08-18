@@ -245,7 +245,7 @@ describe("Canvas create admission", () => {
 });
 
 describe("Canvas create version projection", () => {
-  it("builds a sequence-one heading and prompt callout", () => {
+  it("starts an unauthored canvas as its title, never as its prompt read back", () => {
     const request = authorizeCanvasCreateRequest({
       request: chatRequest({
         workspace: { kind: "chat-virtual", projectId },
@@ -273,7 +273,64 @@ describe("Canvas create version projection", () => {
       createdAt: "2026-08-01T21:00:00.000Z" as never,
     });
     expect(version.sequence).toBe(1);
-    expect(version.definition.blocks.map((block) => block.kind)).toEqual(["heading", "callout"]);
+    // A canvas nobody has written yet is its title, not its prompt read back:
+    // the request that asked for it is provenance, and putting it on the page
+    // would present the question as though it were the answer.
+    expect(version.definition.blocks.map((block) => block.kind)).toEqual(["heading"]);
+    expect(JSON.stringify(version.definition.blocks)).not.toContain("Explain the release risk.");
+  });
+
+  it("takes an author's blocks as the document itself", () => {
+    const request = authorizeCanvasCreateRequest({
+      request: chatRequest({
+        workspace: { kind: "chat-virtual", projectId },
+        intent: "prompt",
+        prompt: "Draw how the host is put together.",
+      }),
+      activeContext: { mode: "chat", projectId },
+    });
+    const admitted = admitCanvasCreate({
+      request,
+      receiptId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      canvasId,
+      versionId,
+      now: "2026-08-01T21:00:00.000Z" as never,
+    });
+
+    const version = buildCreateVersion({
+      request,
+      admitted,
+      canvasId: canvasId as never,
+      versionId: versionId as never,
+      projectId: projectId as never,
+      actor: { kind: "local-user", actorId: actorId as never },
+      providerInstanceId: providerInstanceId as never,
+      modelId: "octant-test-model" as never,
+      createdAt: "2026-08-01T21:00:00.000Z" as never,
+      blocks: [
+        {
+          blockId: "authored-heading" as never,
+          schemaVersion: 1 as never,
+          kind: "heading",
+          level: 1,
+          text: "How the host is put together",
+        },
+        {
+          blockId: "authored-diagram" as never,
+          schemaVersion: 1 as never,
+          kind: "diagram",
+          nodes: [
+            { nodeId: "renderer" as never, label: "Renderer" },
+            { nodeId: "server" as never, label: "Server" },
+          ],
+          edges: [
+            { edgeId: "commands" as never, source: "renderer" as never, target: "server" as never },
+          ],
+        },
+      ] as never,
+    });
+
+    expect(version.definition.blocks.map((block) => block.kind)).toEqual(["heading", "diagram"]);
   });
 
   it("rejects a create request bound to another active Project", () => {

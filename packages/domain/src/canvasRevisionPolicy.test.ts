@@ -196,4 +196,38 @@ describe("canvasRevisionPolicy", () => {
       title: "Quarterly summary",
     });
   });
+
+  it("takes an author's document as the revision rather than noting the prompt", () => {
+    const v1 = version();
+    const authored = buildRevisionVersion({
+      canvasId,
+      current: v1,
+      nextVersionId: ids.version2 as never,
+      prompt: "Add the journal to the picture.",
+      actor: v1.createdBy,
+      providerInstanceId: v1.definition.provenance.providerInstanceId,
+      modelId: "octant-revise-model" as never,
+      createdAt: later as never,
+      blocks: [
+        {
+          blockId: "authored-diagram" as never,
+          schemaVersion: 1 as never,
+          kind: "diagram",
+          nodes: [
+            { nodeId: "server" as never, label: "Server" },
+            { nodeId: "journal" as never, label: "Event journal" },
+          ],
+          edges: [
+            { edgeId: "appends" as never, source: "server" as never, target: "journal" as never },
+          ],
+        },
+      ] as never,
+    });
+
+    expect(authored.definition.blocks.map((block) => block.kind)).toEqual(["diagram"]);
+    // The prompt asked for the drawing; it does not become part of it.
+    expect(JSON.stringify(authored.definition.blocks)).not.toContain(
+      "Add the journal to the picture.",
+    );
+  });
 });
