@@ -21,6 +21,7 @@ const REGISTERED_PROVIDER_DRIVER_KINDS = {
   "kimi-code": true,
   kilo: true,
   "mistral-vibe": true,
+  grok: true,
   devin: true,
   pi: true,
   "oh-my-pi": true,
@@ -43,6 +44,7 @@ const CHAT_OUTCOMES = {
   "kimi-code": "complete",
   kilo: "complete",
   "mistral-vibe": "complete",
+  grok: "complete",
   devin: "complete",
   pi: "complete",
   "oh-my-pi": "unavailable",
@@ -54,7 +56,7 @@ const CHAT_OUTCOMES = {
 
 describe("Chat provider matrix", () => {
   it("consumes Chat conformance evidence for every registered provider kind", () => {
-    expect(new Set(registeredProviderDriverKinds).size).toBe(13);
+    expect(new Set(registeredProviderDriverKinds).size).toBe(14);
 
     for (const driverKind of registeredProviderDriverKinds) {
       if (CHAT_OUTCOMES[driverKind] === "unavailable") continue;

@@ -35,6 +35,11 @@ distilled successor of the earlier long-form design specifications.
   `## Consequences`, and optionally `## Related`; keep it under about 90 lines.
 - Status is one of `Proposed` (agreed direction, not yet implemented),
   `Accepted` (implemented and enforced), `Superseded by 00NN`, or `Deprecated`.
-- To change a decision, write a new ADR and add `**Status:** Superseded by 00NN`
-  to the old one; do not edit history in place.
-- Add the record to the index above in the same change.
+- To change an `Accepted` decision, write a new ADR and add
+  `**Status:** Superseded by 00NN` to the old one; do not edit history in place.
+  A superseding number always points at a later record.
+- A `Proposed` record is still being agreed, so it is revised in place. There is
+  no history to preserve until it is accepted, and superseding a proposal with a
+  second proposal would leave two records describing one undecided direction.
+- Add the record to the index above in the same change. `bun run decisions:check`
+  gates numbering, status, required sections, and index agreement.
