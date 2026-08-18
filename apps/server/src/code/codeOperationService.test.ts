@@ -1366,3 +1366,194 @@ function providerTurnFixture(
   });
   return { service, turns, events };
 }
+
+describe("CodeOperationService terminal readers", () => {
+  const second = decodeCodeOperationId("5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a");
+
+  function readerFixture(
+    evidenceOverrides: { readonly put?: (content: string) => undefined } = {},
+  ) {
+    let observer: ((emission: unknown) => void) | undefined;
+    const removeObserver = vi.fn();
+    const snapshot = (chunks: ReadonlyArray<string>) => ({
+      terminalId: ids.terminal,
+      status: "running" as const,
+      canRerun: false,
+      transcript: { chunks, byteLength: chunks.join("").length, truncated: false },
+    });
+    const terminals = {
+      launch: vi.fn(async () => snapshot(["boot"])),
+      attach: vi.fn(() => snapshot(["boot"])),
+      observe: vi.fn((_terminalId: unknown, listener: (emission: unknown) => void) => {
+        observer = listener;
+        return removeObserver;
+      }),
+      write: vi.fn(),
+      resize: vi.fn(),
+      terminate: vi.fn(),
+    };
+    const events = {
+      replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
+      append: vi.fn(),
+    };
+    const service = new CodeOperationService({
+      authority: {
+        readThread: vi.fn(() => thread()),
+        readCheckout: vi.fn(() =>
+          decodeCodeCheckoutIdentity({
+            id: ids.checkout,
+            repositoryId: `repo_${"8".repeat(64)}`,
+            kind: "existing-worktree",
+            availability: "available",
+            head: { kind: "branch", name: "feature/exact", oid: "b".repeat(40) },
+            observedAt: "2026-07-21T10:00:00.000Z",
+          }),
+        ),
+        canAccessProject: vi.fn(async () => true),
+        approvalContextDigest: vi.fn(async () => "a".repeat(64)),
+        resolveCheckoutRoot: vi.fn(async () => ({
+          checkoutRoot: "/private/exact-checkout",
+          workingDirectory: "/private/exact-checkout",
+          shell: "/bin/zsh",
+          credentialReferences: [],
+          environment: {},
+        })),
+      } as never,
+      approvals: { validate: vi.fn(async () => true) } as never,
+      terminals: terminals as never,
+      repositoryTests: {} as never,
+      git: {} as never,
+      pullRequests: {} as never,
+      reviewFindings: {} as never,
+      turns: {} as never,
+      evidence: {
+        put: vi.fn(
+          (content: string) =>
+            evidenceOverrides.put?.(content) ??
+            decodeCodeEvidenceReference({
+              contentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              digest: "a".repeat(64),
+              byteLength: Buffer.byteLength(content),
+            }),
+        ),
+        read: vi.fn(async () => ""),
+      } as never,
+      events: events as never,
+    } as CodeOperationServiceOptions);
+    return {
+      emit: (text: string) => observer?.({ text, replace: false, snapshot: snapshot([text]) }),
+      events,
+      service,
+      terminals,
+    };
+  }
+
+  const scope = { threadId: ids.thread, checkoutId: ids.checkout, terminalId: ids.terminal };
+
+  function outputCursorsFor(
+    events: { append: { mock: { calls: ReadonlyArray<ReadonlyArray<any>> } } },
+    operationId: string,
+  ): ReadonlyArray<number> {
+    return events.append.mock.calls
+      .map(([entry]) => entry)
+      .filter(
+        (entry) => entry.operationId === operationId && entry.event.kind === "terminal-output",
+      )
+      .map((entry) => entry.expectedCursor);
+  }
+
+  it("keeps sending a terminal's output to the reader that was already following it", async () => {
+    const { emit, events, service } = readerFixture();
+    await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    emit("first\n");
+
+    await service.execute(ids.window, {
+      kind: "attach-terminal",
+      operationId: second,
+      ...scope,
+    });
+    emit("second\n");
+
+    // The first reader is still following its own operation, so the output
+    // that arrived after the second surface opened reaches both of them.
+    expect(outputCursorsFor(events, ids.operation)).toEqual([1, 2]);
+    expect(outputCursorsFor(events, second)).toEqual([1]);
+  });
+  it("collects readers left behind by surfaces that stopped reading, keeping the ones still on screen", async () => {
+    const { emit, events, service } = readerFixture();
+    await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+
+    // Four more surfaces open the same terminal and walk away without reading.
+    const abandoned = [
+      "6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a",
+      "6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b",
+      "6c6c6c6c-6c6c-4c6c-8c6c-6c6c6c6c6c6c",
+      "6d6d6d6d-6d6d-4d6d-8d6d-6d6d6d6d6d6d",
+    ].map((id) => decodeCodeOperationId(id));
+    for (const operationId of abandoned) {
+      // The surface that is still on screen keeps reading between each one.
+      await service.subscribe(ids.window, ids.thread, ids.operation, 0, 16);
+      await service.execute(ids.window, { kind: "attach-terminal", operationId, ...scope });
+    }
+    emit("still here\n");
+
+    // The reader that kept reading survived; the ones that went quiet did not.
+    expect(outputCursorsFor(events, ids.operation)).toEqual([1]);
+    expect(outputCursorsFor(events, String(abandoned[0]))).toEqual([]);
+    expect(outputCursorsFor(events, String(abandoned[3]))).toEqual([1]);
+  });
+
+  it("stops a terminal nothing can be journaled to any more", async () => {
+    const { emit, events, service, terminals } = readerFixture();
+    await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    events.append.mockImplementation(() => {
+      throw new Error("journal is unavailable");
+    });
+
+    emit("unjournaled\n");
+
+    expect(terminals.terminate).toHaveBeenCalledWith(ids.terminal);
+  });
+  it("stops a terminal whose output cannot be stored", async () => {
+    // Only the streamed output fails to store; the terminal starts normally.
+    const { emit, service, terminals } = readerFixture({
+      put: (content) => {
+        if (content.includes("unstorable")) throw new Error("evidence is unavailable");
+        return undefined;
+      },
+    });
+    await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+
+    emit("unstorable\n");
+
+    expect(terminals.terminate).toHaveBeenCalledWith(ids.terminal);
+  });
+});
