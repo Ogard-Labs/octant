@@ -316,10 +316,10 @@ describe("putting a point away", () => {
       kind: "checkpoint-forgotten",
       checkpoint: { lifecycle: "forgotten", version: 2 },
     });
-    expect(
-      (journal.append.mock.calls[0]?.[0] as { events: ReadonlyArray<{ eventName: string }> })
-        .events[0]?.eventName,
-    ).toBe("checkpoint.forgotten@1");
+    const append = journal.append.mock.calls[0]?.[0] as
+      | { readonly events: ReadonlyArray<{ readonly eventName: string }> }
+      | undefined;
+    expect(append?.events[0]?.eventName).toBe("checkpoint.forgotten@1");
   });
 });
 

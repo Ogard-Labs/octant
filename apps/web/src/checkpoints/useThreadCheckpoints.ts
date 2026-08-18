@@ -70,7 +70,7 @@ export function useThreadCheckpoints(options: ThreadCheckpointsOptions): ThreadC
   activeThreadId.current = threadId;
 
   const refresh = useCallback(async () => {
-    if (client === undefined) return;
+    if (client === undefined || threadId.length === 0) return;
     try {
       const listed = await client.list(threadId);
       if (activeThreadId.current === threadId) setCheckpoints(listed);
