@@ -5952,6 +5952,111 @@ dialog.project-dialog {
   gap: 6px;
 }
 
+.scaffolds {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 520px;
+  margin: 12px auto 0;
+  padding: 12px;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 8px;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+}
+
+.scaffolds__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--octant-text-primary);
+}
+
+.scaffolds__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scaffolds__entry {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scaffolds__entry-button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scaffolds__entry-button[aria-pressed="true"] {
+  border-color: var(--octant-accent);
+}
+
+.scaffolds__entry-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.scaffolds__entry-name {
+  color: var(--octant-text-primary);
+}
+
+.scaffolds__entry-blocked {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 11px;
+}
+
+.scaffolds__start {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scaffolds__input {
+  padding: 6px 8px;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 6px;
+  background: var(--octant-surface-raised);
+  color: var(--octant-text-primary);
+  font: inherit;
+}
+
+.scaffolds__produces,
+.scaffolds__command,
+.scaffolds__message {
+  margin: 0;
+  font-size: 11px;
+}
+
+.scaffolds__command code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.scaffolds__output {
+  max-height: 200px;
+  margin: 0;
+  overflow: auto;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
 .product-feedback {
   display: flex;
   flex-direction: column;

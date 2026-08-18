@@ -25,6 +25,7 @@ import {
   WorktreeReceiptId,
 } from "./code";
 import { CodeRepositoryTestDefinition, CodeRepositoryTestConcern } from "./codeTestDefinitions";
+import { ScaffoldDirectoryName, ScaffoldId, ScaffoldRun, ScaffoldRunId } from "./scaffolds";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import {
@@ -302,6 +303,20 @@ const CancelRepositoryTest = Schema.Struct({
   kind: Schema.Literal("cancel-repository-test"),
   ...OperationScope,
   testRunId: CodeTestRunId,
+}).annotations(strict);
+/**
+ * Start a curated scaffold in this checkout.
+ *
+ * The command names an entry and a directory; it carries no command line. The
+ * host resolves the entry from its own catalog and composes the argv, so a
+ * caller cannot reach a generator the host does not offer.
+ */
+const RunScaffold = Schema.Struct({
+  kind: Schema.Literal("run-scaffold"),
+  ...OperationScope,
+  scaffoldRunId: ScaffoldRunId,
+  scaffoldId: ScaffoldId,
+  directoryName: ScaffoldDirectoryName,
 }).annotations(strict);
 const ObserveGit = Schema.Struct({
   kind: Schema.Literal("observe-git"),
@@ -619,6 +634,7 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "stop-terminal",
   "run-repository-test",
   "cancel-repository-test",
+  "run-scaffold",
   "observe-git",
   "review-run",
   "merge-run",
@@ -646,6 +662,7 @@ export const CodeOperationCommand = Schema.Union(
   StopTerminal,
   RunRepositoryTest,
   CancelRepositoryTest,
+  RunScaffold,
   ObserveGit,
   StageGit,
   DiscardGitChanges,
@@ -760,6 +777,11 @@ const RepositoryTestResult = Schema.Union(
     state: Schema.Literal("running", "interrupted", "unavailable", "failed"),
   }).annotations(strict),
 );
+const ScaffoldResult = Schema.Struct({
+  kind: Schema.Literal("scaffold-run"),
+  operationId: CodeOperationId,
+  run: ScaffoldRun,
+}).annotations(strict);
 const GitMutationResult = Schema.Struct({
   kind: Schema.Literal("git-mutation-state"),
   operationId: CodeOperationId,
@@ -979,6 +1001,7 @@ export const CodeOperationResult = Schema.Union(
   OperationAccepted,
   TerminalStateResult,
   RepositoryTestResult,
+  ScaffoldResult,
   GitObservation,
   GitMutationResult,
   GitDraftResult,
@@ -1664,6 +1687,7 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "start-terminal",
   "run-repository-test",
   "cancel-repository-test",
+  "run-scaffold",
   "stage-git",
   "unstage-git",
   "discard-git-changes",

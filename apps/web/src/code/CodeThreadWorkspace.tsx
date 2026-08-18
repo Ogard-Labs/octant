@@ -34,6 +34,8 @@ import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
+import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
+import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
 import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
@@ -137,6 +139,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
   const checkpoints = useThreadCheckpoints({
     threadId: String(props.threadId),
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const scaffolds = useScaffoldCatalog({
+    threadId: String(props.threadId),
+    checkoutId: String(view?.checkout.id ?? ""),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
@@ -662,9 +670,26 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       <div className="code-thread-workspace__conversation" role="log" aria-live="polite">
         <div className="code-thread-workspace__transcript">
           {showEmptyConversation ? (
-            <p className="code-thread-workspace__empty" role="status">
-              No messages yet. Send a prompt to start this thread.
-            </p>
+            <>
+              <p className="code-thread-workspace__empty" role="status">
+                No messages yet. Send a prompt to start this thread.
+              </p>
+              {/* A thread on an empty checkout has nothing to talk about yet.
+                  Offering the curated scaffolds here, and only here, keeps the
+                  choice next to the moment it matters. */}
+              {scaffolds.available ? (
+                <ScaffoldPicker
+                  busy={scaffolds.busy}
+                  entries={scaffolds.entries}
+                  {...(scaffolds.lastRun === undefined ? {} : { lastRun: scaffolds.lastRun })}
+                  {...(scaffolds.message === undefined ? {} : { message: scaffolds.message })}
+                  onStart={(entry, directoryName) => {
+                    void scaffolds.start(entry, directoryName);
+                  }}
+                  runnable={scaffolds.runnable}
+                />
+              ) : null}
+            </>
           ) : null}
           {messages.map((message, index) => {
             const previousAssistant = previousAssistantMessage(messages, index);

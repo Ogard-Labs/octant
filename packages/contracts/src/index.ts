@@ -65,6 +65,7 @@ export * from "./toolActions";
 export * from "./toolCatalog";
 export * from "./appleToolchain";
 export * from "./appleToolchainRpc";
+export * from "./scaffolds";
 export * from "./threadCheckpoints";
 export * from "./threadCreation";
 export * from "./usage";

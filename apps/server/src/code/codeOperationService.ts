@@ -20,6 +20,8 @@ import {
   type CodeThreadForkOrigin,
   type CodeThreadId,
   type MentionableThreadId,
+  type ScaffoldEntry,
+  type ScaffoldRun,
   type ProviderAttachmentInput,
   type ProviderContextBlock,
   type WindowId,
@@ -215,6 +217,28 @@ export interface CodeOperationRepositoryTestPort {
     readonly threadId: CodeThread["id"];
     readonly checkoutId: CodeThread["checkoutId"];
   }) => Promise<boolean>;
+}
+
+/**
+ * The curated scaffolds this host offers, and the one gesture that runs one.
+ *
+ * A host without this port has no scaffolds: the operation is refused rather
+ * than run against a catalog nobody published.
+ */
+export interface CodeOperationScaffoldPort {
+  readonly entry: (scaffoldId: string) => ScaffoldEntry | undefined;
+  readonly run: (input: {
+    readonly runId: string;
+    readonly entry: ScaffoldEntry;
+    readonly directoryName: string;
+    readonly threadId: CodeThread["id"];
+    readonly checkoutId: CodeThread["checkoutId"];
+    readonly executionPolicy: CodeThread["executionPolicy"];
+    readonly checkoutRoot: string;
+  }) => Promise<
+    | { readonly status: "ran"; readonly run: ScaffoldRun }
+    | { readonly status: "refused"; readonly message: string }
+  >;
 }
 
 export interface CodeOperationGitPort {
@@ -592,6 +616,7 @@ export interface CodeOperationServiceOptions {
   readonly approvals?: CodeApprovalValidationPort;
   readonly terminals: CodeOperationTerminalPort;
   readonly repositoryTests: CodeOperationRepositoryTestPort;
+  readonly scaffolds?: CodeOperationScaffoldPort;
   readonly git: CodeOperationGitPort;
   /**
    * The Project checkout a run comes home to, as the host finds it right now.
@@ -1275,6 +1300,37 @@ export class CodeOperationService {
               concerns: [],
             })
           : this.#failed(command.operationId, "unavailable", "Repository test is unavailable.");
+      }
+      case "run-scaffold": {
+        // The renderer names an entry; the host owns the catalog and composes
+        // the command line. An id the host does not publish is refused rather
+        // than resolved into something adjacent.
+        const scaffolds = this.#options.scaffolds;
+        const entry = scaffolds?.entry(String(command.scaffoldId));
+        if (scaffolds === undefined || entry === undefined) {
+          return this.#failed(
+            command.operationId,
+            "unavailable",
+            "This host offers no scaffold by that name.",
+          );
+        }
+        const outcome = await scaffolds.run({
+          runId: command.scaffoldRunId,
+          entry,
+          directoryName: command.directoryName,
+          threadId: thread.id,
+          checkoutId: checkout.id,
+          executionPolicy: thread.executionPolicy,
+          checkoutRoot: root.checkoutRoot,
+        });
+        if (outcome.status === "refused") {
+          return this.#failed(command.operationId, "invalid", outcome.message);
+        }
+        return decodeCodeOperationResult({
+          kind: "scaffold-run",
+          operationId: command.operationId,
+          run: outcome.run,
+        });
       }
       case "observe-git":
         return this.#gitObservation(command, root.checkoutRoot);
@@ -2290,6 +2346,10 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
     case "run-repository-test":
     case "cancel-repository-test":
       return "test";
+    // A scaffold runs a generator that writes a directory of files. It is a
+    // shell command with a narrower surface, not a new kind of authority.
+    case "run-scaffold":
+      return "terminal";
     case "stage-git":
       return "stage";
     case "unstage-git":

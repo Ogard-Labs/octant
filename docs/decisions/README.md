@@ -31,6 +31,7 @@ distilled successor of the earlier long-form design specifications.
 | [0021](0021-remote-thread-surfaces.md)                  | Remote thread surfaces: watching the running product              | Accepted |
 | [0022](0022-pointed-at-product-feedback.md)             | Pointing at the running product                                   | Accepted |
 | [0023](0023-bringing-a-run-home.md)                     | Bringing a run home                                               | Accepted |
+| [0024](0024-curated-project-scaffolds.md)               | Curated project scaffolds                                         | Accepted |
 
 ## Adding an ADR
 

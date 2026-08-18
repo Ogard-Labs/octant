@@ -56,6 +56,7 @@ import {
   type CodeOperationExecuteOptions,
   type CodeOperationGitPort,
   type CodeOperationPullRequestPort,
+  type CodeOperationScaffoldPort,
   type CodeOperationServiceOptions,
   type CodeOperationTurnPort,
 } from "./codeOperationService";
@@ -63,6 +64,13 @@ import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import { RepositoryTestProcessPort } from "./repositoryTestProcessPort";
 import { RepositoryTestRunner } from "./repositoryTestRunner";
 import { RepositoryTestDiscoveryService } from "./repositoryTestDiscoveryService";
+import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "../scaffold/curatedScaffoldCatalog";
+import {
+  makeScaffoldDirectory,
+  resolveAvailableTools,
+  scaffoldEntryExists,
+} from "../scaffold/scaffoldFilesystem";
+import { ScaffoldRunner } from "../scaffold/scaffoldRunner";
 import {
   ReviewFindingService,
   type ReviewFindingFilePort,
@@ -169,6 +177,15 @@ export interface CodeOperationRuntimeOptions {
    */
   readonly resolveBaseCheckoutRoot?: (thread: CodeThread) => Promise<string | undefined>;
   readonly resolveForkHandoff?: CodeOperationServiceOptions["resolveForkHandoff"];
+  /**
+   * Where a curated scaffold runs. Absent on a host that offers none, which
+   * refuses the operation rather than running a generator nobody configured.
+   */
+  readonly scaffoldProcess?: {
+    readonly execute: ProcessTestPort["execute"];
+    /** Variables the generator needs, notably where to keep its package cache. */
+    readonly environment: Readonly<Record<string, string>>;
+  };
 }
 
 export interface CodeOperationRuntime {
@@ -318,6 +335,30 @@ export function createCodeOperationRuntime(
       return true;
     },
   };
+  const scaffoldProcess = options.scaffoldProcess;
+  const scaffolds =
+    scaffoldProcess === undefined
+      ? undefined
+      : scaffoldRunnerPort(
+          new ScaffoldRunner({
+            entryExists: scaffoldEntryExists,
+            makeDirectory: makeScaffoldDirectory,
+            availableTools: () => resolveAvailableTools(curatedScaffoldTools()),
+            execute: (input, signal) =>
+              scaffoldProcess
+                .execute(
+                  { ...input, environment: scaffoldProcess.environment },
+                  ...(signal === undefined ? [] : [signal]),
+                )
+                .then((result) => ({
+                  termination: result.termination,
+                  exitCode: result.exitCode,
+                  // A generator narrates on both streams; the user reads one log.
+                  output: concatenatedOutput(result.stdout, result.stderr),
+                })),
+            now: options.clock,
+          }),
+        );
   const observation = options.gitObservationPort ?? new GitObservationPort();
   const mutation = options.gitMutationPort ?? new GitMutationPort();
   const gitService = new GitService(observation, mutation);
@@ -343,6 +384,7 @@ export function createCodeOperationRuntime(
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     terminals: terminal,
     repositoryTests,
+    ...(scaffolds === undefined ? {} : { scaffolds }),
     git,
     pullRequests,
     reviewFindings: {
@@ -1514,4 +1556,26 @@ function checkoutIdForPath(path: string) {
   return decodeCodeCheckoutId(
     `${digest.slice(0, 8)}-${digest.slice(8, 12)}-5${digest.slice(13, 16)}-a${digest.slice(17, 20)}-${digest.slice(20, 32)}`,
   );
+}
+
+/**
+ * The curated catalog and one runner, as the operation service asks for them.
+ *
+ * Resolving the entry here — not in the service, and never from the command —
+ * is what keeps the published catalog the only set of generators a thread can
+ * reach.
+ */
+function scaffoldRunnerPort(runner: ScaffoldRunner): CodeOperationScaffoldPort {
+  return {
+    entry: (scaffoldId) =>
+      CURATED_SCAFFOLDS.find((candidate) => String(candidate.id) === scaffoldId),
+    run: (input) => runner.run(input),
+  };
+}
+
+function concatenatedOutput(stdout: Uint8Array, stderr: Uint8Array): Uint8Array {
+  const combined = new Uint8Array(stdout.byteLength + stderr.byteLength);
+  combined.set(stdout, 0);
+  combined.set(stderr, stdout.byteLength);
+  return combined;
 }

@@ -48,6 +48,7 @@ import { ResearchRouter } from "./chat/research/researchRouter";
 import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
 import { createChatRouteHandler } from "./chatRoutes";
+import { createScaffoldRouteHandler } from "./scaffoldRoutes";
 import { createThreadCheckpointRouteHandler } from "./threadCheckpointRoutes";
 import { createProductFeedbackRouteHandler } from "./productFeedbackRoutes";
 import {
@@ -383,6 +384,8 @@ import {
   type CodexPluginPackageResolverOptions,
 } from "./extensions/codexPluginResolver";
 import { createDefaultCodexPluginPackageSources } from "./extensions/curatedBuildIosAppsCatalog";
+import { CURATED_SCAFFOLDS, curatedScaffoldTools } from "./scaffold/curatedScaffoldCatalog";
+import { resolveAvailableTools } from "./scaffold/scaffoldFilesystem";
 import { AgentPluginMcpSessionManager } from "./extensions/agentPluginMcpSessionManager";
 import { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
@@ -2484,10 +2487,27 @@ export function startOctantServer(
       const repositoryTestProcessPort = new RepositoryTestProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "test-receipts"),
       });
+      // A scaffold generator downloads what it writes, so it gets its own
+      // private work directory and is pointed at it for every package cache.
+      // Nothing it fetches lands in the user's own caches, and the confinement
+      // still writes only the checkout and this directory.
+      const scaffoldWorkDirectory = join(providerDataDirectory, "code", "scaffold-work");
+      const scaffoldProcessPort = new RepositoryTestProcessPort({
+        receiptDirectory: join(providerDataDirectory, "code", "scaffold-receipts"),
+        temporaryDirectory: scaffoldWorkDirectory,
+      });
       const rootProbePath = decodeCodeRelativePath("package.json");
       codeOperationRuntime = createCodeOperationRuntime({
         terminalProcessPort,
         repositoryTestProcessPort,
+        scaffoldProcess: {
+          execute: (input, signal) => scaffoldProcessPort.execute(input, signal),
+          environment: {
+            BUN_INSTALL_CACHE_DIR: join(scaffoldWorkDirectory, "bun-cache"),
+            npm_config_cache: join(scaffoldWorkDirectory, "npm-cache"),
+            TMPDIR: scaffoldWorkDirectory,
+          },
+        },
         repositoryTestDiscovery: codeTestDiscovery,
         attachments: codeAttachments,
         persistence: {
@@ -3115,6 +3135,11 @@ export function startOctantServer(
     });
     const threadCheckpointRoutes = createThreadCheckpointRouteHandler({
       checkpoints: threadCheckpointService,
+      windowAuthorityStore,
+    });
+    const scaffoldRoutes = createScaffoldRouteHandler({
+      entries: CURATED_SCAFFOLDS,
+      availableTools: () => resolveAvailableTools(curatedScaffoldTools()),
       windowAuthorityStore,
     });
     const workArtifactProjection = new WorkArtifactProjection();
@@ -4310,6 +4335,7 @@ export function startOctantServer(
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??
       (await threadCheckpointRoutes(request)) ??
+      (await scaffoldRoutes(request)) ??
       (await productFeedbackRoutes(request)) ??
       (await workThreadRoutes(request)) ??
       (await workTurnRoutes(request)) ??
