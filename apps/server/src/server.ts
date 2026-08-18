@@ -3304,6 +3304,16 @@ export function startOctantServer(
         read: (windowId) => zenFocusZones.read(windowId),
         write: (zone) => zenFocusZones.write(zone),
       },
+      // Pinning a terminal asks Code whether this window owns it. Without the
+      // Code runtime there is nothing to own a shell, so there is nothing to
+      // pin and Zen refuses rather than inventing an answer.
+      ...(codeOperationRuntime === undefined
+        ? {}
+        : {
+            codeTerminals: {
+              read: (windowId, request) => codeOperationRuntime.inspectTerminal(windowId, request),
+            },
+          }),
       eventStore: zenEventStore,
       localHostId: LOCAL_HOST_ID,
       threadCatalog: zenThreadCatalog,

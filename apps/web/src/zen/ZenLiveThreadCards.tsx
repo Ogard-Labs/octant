@@ -7,7 +7,7 @@ import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
 import { decodeWorkThreadId, type WorkThreadId } from "@octant/contracts/work-threads";
 import type { ZenSourceContext, ZenThreadCatalogEntry } from "@octant/contracts/zen";
 import { buildModelPickerGroups } from "@octant/domain";
-import type { ZenThreadCardActivity } from "@octant/domain";
+import type { ZenLiveCardActivity } from "@octant/domain";
 import { useMemo, type ReactNode } from "react";
 import { ChatWorkspace } from "../chat/ChatWorkspace";
 import { useChatController, type ChatReadCursorStore } from "../chat/useChatController";
@@ -46,7 +46,7 @@ export interface ZenLiveThreadClients {
 export interface ZenLiveThreadCardInput {
   readonly sourceContext: ZenSourceContext;
   readonly entry: ZenThreadCatalogEntry;
-  readonly activity: ZenThreadCardActivity;
+  readonly activity: ZenLiveCardActivity;
   readonly clients: ZenLiveThreadClients;
 }
 

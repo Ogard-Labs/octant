@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { ZenThreadCardFrozenReason } from "@octant/domain";
+import type { ZenLiveCardFrozenReason } from "@octant/domain";
 import type {
   ZenSourceContext,
   ZenThreadCatalogEntry,
@@ -18,7 +18,7 @@ import { OctantButton } from "../ui/base/OctantButton";
  */
 export type ZenLiveThreadCard =
   | { readonly status: "streaming"; readonly surface: ReactNode }
-  | { readonly status: "paused"; readonly reason: ZenThreadCardFrozenReason };
+  | { readonly status: "paused"; readonly reason: ZenLiveCardFrozenReason };
 
 export interface ZenThreadElementProps {
   readonly entry?: ZenThreadCatalogEntry;
@@ -86,7 +86,7 @@ export function ZenThreadElement(props: ZenThreadElementProps) {
  * A paused card shows the reading it already had rather than a blank frame, so
  * the notice has to be explicit that this is not the live conversation.
  */
-function pausedExplanation(reason: ZenThreadCardFrozenReason): string {
+function pausedExplanation(reason: ZenLiveCardFrozenReason): string {
   switch (reason) {
     case "minimized":
       return "Paused while minimized. Restore the card to follow this thread again.";

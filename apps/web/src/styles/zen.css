@@ -457,6 +457,19 @@
   background: rgb(43 43 47 / 96%);
 }
 
+/* A pinned shell fills its card; the notices that stand in for it do not. */
+.zen-terminal-card__notice {
+  margin: 0;
+  padding: 12px;
+  font-size: 13px;
+  color: var(--octant-text-secondary, #c8c8c5);
+}
+
+.zen-element__body .code-terminal-pane {
+  height: 100%;
+  min-height: 0;
+}
+
 /* The switcher rides above the panning surface: it is how you leave a space. */
 .zen-surface__spaces-anchor {
   position: absolute;

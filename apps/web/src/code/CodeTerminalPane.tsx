@@ -21,6 +21,11 @@ export interface CodeTerminalPaneProps {
   readonly onAddSelectionToChat?: (selection: string) => void;
   /** Opens a second terminal for this thread. Absent when tabs cannot open. */
   readonly onOpenAnotherTerminal?: () => void;
+  /**
+   * Pins this terminal to the focus zone. Absent on a card that is already a
+   * pinned window onto the shell, which has nothing to pin.
+   */
+  readonly onPinTerminal?: () => void;
   readonly restart?: {
     readonly columns: number;
     readonly createTerminalId: () => CodeTerminalId;
@@ -236,6 +241,11 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
               variant="secondary"
             >
               Add selection to chat
+            </OctantButton>
+          )}
+          {props.onPinTerminal === undefined ? null : (
+            <OctantButton onClick={() => props.onPinTerminal?.()} type="button" variant="secondary">
+              Pin to focus zone
             </OctantButton>
           )}
           {props.onOpenAnotherTerminal === undefined ? null : (

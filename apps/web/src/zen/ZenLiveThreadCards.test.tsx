@@ -6,7 +6,7 @@ import {
   type ChatThreadView,
 } from "@octant/contracts/chat";
 import type { ZenSourceContext, ZenThreadCatalogEntry } from "@octant/contracts/zen";
-import type { ZenThreadCardActivity } from "@octant/domain";
+import type { ZenLiveCardActivity } from "@octant/domain";
 import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createChatReadCursorStore } from "../chat/useChatController";
@@ -108,7 +108,7 @@ function catalogEntry(context: ZenSourceContext): ZenThreadCatalogEntry {
   } as unknown as ZenThreadCatalogEntry;
 }
 
-const live: ZenThreadCardActivity = {
+const live: ZenLiveCardActivity = {
   elementId: "00000000-0000-4000-8000-000000000951" as never,
   activity: "live",
 };
