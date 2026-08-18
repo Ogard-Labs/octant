@@ -1,3 +1,6 @@
+import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
+import type { FederatedHostState } from "@octant/client-runtime";
+import { EnvironmentFilter } from "./EnvironmentFilter";
 import type { OctantMode } from "@octant/contracts/modes";
 import { enabledModes } from "@octant/domain/mode-policy";
 import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
@@ -35,6 +38,17 @@ export interface ShellSidebarProps {
   readonly automationsEnabled?: boolean;
   /** Absent on a host that serves no library, which keeps the row off entirely. */
   readonly artifactLibraryAvailable?: boolean;
+  /**
+   * The connected hosts this window gathers from, and which one is this
+   * machine. Absent on a window with no federation, which hides the filter
+   * rather than offering a menu with one row in it.
+   */
+  readonly environments?: {
+    readonly hostStates: ReadonlyArray<FederatedHostState>;
+    readonly selection: EnvironmentSelection;
+    readonly localHostId?: string;
+    readonly onSelectionChange: (next: EnvironmentSelection) => void;
+  };
   readonly chatErrorMessage?: string;
   /**
    * Mode navigation is actions only. Thread rows for every mode are rendered by
@@ -103,6 +117,16 @@ export function ShellSidebar(props: ShellSidebarProps) {
         <span aria-hidden="true" className="sidebar__drag-surface window-drag-region" />
       </div>
       <div className="sidebar__content window-no-drag" data-octant-sidebar-content>
+        {props.environments === undefined || props.environments.hostStates.length < 2 ? null : (
+          <EnvironmentFilter
+            hostStates={props.environments.hostStates}
+            {...(props.environments.localHostId === undefined
+              ? {}
+              : { localHostId: props.environments.localHostId })}
+            onSelectionChange={props.environments.onSelectionChange}
+            selection={props.environments.selection}
+          />
+        )}
         <ModeSwitcher
           actions={
             <>

@@ -39,6 +39,7 @@
     "./product-feedback-client": "./src/productFeedbackClient.ts",
     "./artifact-library-client": "./src/artifactLibraryClient.ts",
     "./scaffold-client": "./src/scaffoldClient.ts",
+    "./environment-selection": "./src/environmentSelection.ts",
     "./thread-checkpoint-client": "./src/threadCheckpointClient.ts",
     "./code-file-listing-client": "./src/codeFileListingClient.ts",
     "./local-server-client": "./src/localServerClient.ts",
