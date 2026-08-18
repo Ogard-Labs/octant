@@ -101,4 +101,68 @@ describe("standalone skill catalog", () => {
       }).skills,
     ).toEqual([root]);
   });
+
+  it("keeps a Project's skills out of a thread that belongs to no Project", () => {
+    const root = record(
+      `agents-skills-directory:project-root:review:${digestA}`,
+      "agents-skills-directory",
+      digestA,
+    );
+    const scoped = {
+      ...record(
+        `agents-skills-directory:thread-a:review:${digestB}`,
+        "agents-skills-directory",
+        digestB,
+      ),
+      scope: {
+        mode: "code",
+        projectId: "11111111-1111-4111-8111-111111111111" as never,
+        threadRef: "22222222-2222-4222-8222-222222222222" as never,
+      },
+    } satisfies StandaloneSkillRecord;
+    const catalog = buildSkillCatalog([root, scoped]);
+
+    // An unfiled thread names no Project. Absence matches only absence, so a
+    // Project's own skill stays with that Project rather than reaching a thread
+    // that has none.
+    expect(
+      filterSkillCatalogForScope(catalog, {
+        mode: "code",
+        projectId: null,
+        threadRef: "22222222-2222-4222-8222-222222222222",
+      }).skills,
+    ).toEqual([root]);
+  });
+
+  it("matches a scope reference by its value on both sides, not by one side's spelling", () => {
+    const scoped = {
+      ...record(
+        `agents-skills-directory:thread-a:review:${digestB}`,
+        "agents-skills-directory",
+        digestB,
+      ),
+      scope: {
+        mode: "work",
+        projectId: "11111111-1111-4111-8111-111111111111" as never,
+        threadRef: "22222222-2222-4222-8222-222222222222" as never,
+      },
+    } satisfies StandaloneSkillRecord;
+    const catalog = buildSkillCatalog([scoped]);
+
+    expect(
+      filterSkillCatalogForScope(catalog, {
+        mode: "work",
+        projectId: "11111111-1111-4111-8111-111111111111",
+        threadRef: "22222222-2222-4222-8222-222222222222",
+      }).skills,
+    ).toEqual([scoped]);
+    // A different Project with the same thread reference is a different scope.
+    expect(
+      filterSkillCatalogForScope(catalog, {
+        mode: "work",
+        projectId: "99999999-9999-4999-8999-999999999999",
+        threadRef: "22222222-2222-4222-8222-222222222222",
+      }).skills,
+    ).toEqual([]);
+  });
 });
