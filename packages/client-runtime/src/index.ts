@@ -23,6 +23,7 @@ export * from "./githubCloneClient";
 export * from "./goalClient";
 export * from "./planClient";
 export * from "./productFeedbackClient";
+export * from "./artifactLibraryClient";
 export * from "./scaffoldClient";
 export * from "./threadCheckpointClient";
 export * from "./hostClient";

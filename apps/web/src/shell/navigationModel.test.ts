@@ -15,6 +15,7 @@ const unavailableCapabilities = {
   pullRequests: "unavailable",
   plugins: "unavailable",
   automationsEnabled: false,
+  artifactLibrary: "unavailable" as const,
 } as const;
 
 const availableBaseCapabilities = {
@@ -39,6 +40,7 @@ describe("buildSidebarNavigation", () => {
       pullRequests: "available" as const,
       plugins: "available" as const,
       automationsEnabled: true,
+      artifactLibrary: "unavailable" as const,
     } as const;
 
     // Plugins reach every mode; Automations and the work-mode boards do not.
@@ -76,6 +78,7 @@ describe("buildSidebarNavigation", () => {
           pullRequests: availability,
           plugins: availability,
           automationsEnabled: false,
+          artifactLibrary: "unavailable" as const,
         }),
       ).toEqual([]);
     },
@@ -118,6 +121,7 @@ describe("buildSidebarNavigation", () => {
         activeMode: "chat",
         ...availableBaseCapabilities,
         automationsEnabled: true,
+        artifactLibrary: "unavailable" as const,
       }),
     ).toEqual(["new-chat", "projects"]);
   });
@@ -231,14 +235,22 @@ describe("buildSidebarNavigation", () => {
       "unauthorized",
     ];
     const allowedByMode: Record<OctantMode, ReadonlySet<SidebarNavigationDescriptorId>> = {
-      chat: new Set(["new-chat", "plugins", "projects"]),
-      work: new Set(["new-work-thread", "thread-board", "projects", "automations", "plugins"]),
+      chat: new Set(["new-chat", "artifact-library", "plugins", "projects"]),
+      work: new Set([
+        "new-work-thread",
+        "thread-board",
+        "projects",
+        "automations",
+        "artifact-library",
+        "plugins",
+      ]),
       code: new Set([
         "new-code-thread",
         "thread-board",
         "pull-requests",
         "projects",
         "automations",
+        "artifact-library",
         "plugins",
       ]),
     };
@@ -247,19 +259,23 @@ describe("buildSidebarNavigation", () => {
       for (const threadBoard of availability) {
         for (const pullRequests of availability) {
           for (const plugins of availability) {
-            for (const automationsEnabled of [false, true]) {
-              const ids = descriptorIds({
-                activeMode,
-                createThread: "available",
-                projects: "available",
-                threadBoard,
-                pullRequests,
-                plugins,
-                automationsEnabled,
-              });
-              expect(new Set(ids).size).toBe(ids.length);
-              for (const id of ids) {
-                expect(allowedByMode[activeMode].has(id)).toBe(true);
+            for (const artifactLibrary of availability) {
+              for (const automationsEnabled of [false, true]) {
+                const ids = descriptorIds({
+                  activeMode,
+                  createThread: "available",
+                  projects: "available",
+                  threadBoard,
+                  pullRequests,
+                  plugins,
+                  artifactLibrary,
+                  automationsEnabled,
+                });
+                expect(new Set(ids).size).toBe(ids.length);
+                for (const id of ids) {
+                  expect(allowedByMode[activeMode].has(id)).toBe(true);
+                }
+                expect(ids.includes("artifact-library")).toBe(artifactLibrary === "available");
               }
             }
           }

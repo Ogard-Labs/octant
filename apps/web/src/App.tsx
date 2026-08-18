@@ -1,6 +1,7 @@
 import { createContextClient, type ContextClient } from "@octant/client-runtime/context-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
+import { ArtifactLibrarySurface } from "./artifacts/ArtifactLibrarySurface";
 import { AutomationCenter } from "./automation/AutomationCenter";
 import type { AutomationEditorCatalog } from "./automation/automationCenterModel";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
@@ -675,6 +676,7 @@ function LaunchedShell(
   }>();
   const [codeBoardOpen, setCodeBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
+  const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] =
     useState<import("@octant/contracts/providers").ProviderInstanceId>();
   const [draftModelId, setDraftModelId] =
@@ -2427,7 +2429,18 @@ function LaunchedShell(
   function openAutomationCenter() {
     setRailPlaceholder(undefined);
     setCodeBoardOpen(false);
+    setArtifactLibraryOpen(false);
     setAutomationCenterOpen(true);
+  }
+
+  // The library gathers artifacts from every mode, so unlike the Automation
+  // Center it is not dismissed when the mode changes: a person who opened it
+  // in Work is looking for the same artifacts in Code.
+  function openArtifactLibrary() {
+    setRailPlaceholder(undefined);
+    setCodeBoardOpen(false);
+    setAutomationCenterOpen(false);
+    setArtifactLibraryOpen(true);
   }
 
   function handleSelectMode(mode: OctantMode) {
@@ -3432,6 +3445,7 @@ function LaunchedShell(
                   chatNavigation: {
                     actions: {
                       "new-chat": createChat,
+                      "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
                     },
                   },
@@ -3443,10 +3457,12 @@ function LaunchedShell(
                     actions: {
                       "new-code-thread": () => openDraftInActiveProject("code"),
                       automations: openAutomationCenter,
+                      "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
                       "thread-board": () => {
                         setRailPlaceholder(undefined);
                         setAutomationCenterOpen(false);
+                        setArtifactLibraryOpen(false);
                         setCodeBoardOpen(true);
                       },
                       "pull-requests": () =>
@@ -3464,6 +3480,7 @@ function LaunchedShell(
                     actions: {
                       "new-work-thread": () => openDraftInActiveProject("work"),
                       automations: openAutomationCenter,
+                      "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
                       "thread-board": () =>
                         openRailPlaceholder(
@@ -3642,6 +3659,33 @@ function LaunchedShell(
                         thread?.projectId,
                       );
                     }}
+                  />
+                </div>
+              ) : null}
+              {artifactLibraryOpen ? (
+                <div className="artifact-library-layer">
+                  <ArtifactLibrarySurface
+                    onClose={() => setArtifactLibraryOpen(false)}
+                    onCreate={() => {
+                      // An artifact carries the thread it was made in, so there
+                      // is nowhere to put one that has no origin. Starting a
+                      // thread is what "new artifact" means here.
+                      setArtifactLibraryOpen(false);
+                      createChat();
+                    }}
+                    onOpen={(entry) => {
+                      setArtifactLibraryOpen(false);
+                      void controller.openCanvas({
+                        mode: entry.mode,
+                        title: entry.title,
+                        canvasId: entry.canvasId,
+                        projectId: entry.projectId,
+                      });
+                    }}
+                    serverUrl={props.launch.serverUrl}
+                    {...(props.projectWindowCapability === undefined
+                      ? {}
+                      : { windowCapability: props.projectWindowCapability })}
                   />
                 </div>
               ) : null}

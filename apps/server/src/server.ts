@@ -245,6 +245,8 @@ import { RootlessTurnRuntime } from "./rootlessTurnRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { ProjectRootPort } from "./projectRootPort";
+import { createArtifactLibraryRouteHandler } from "./artifactLibraryRoutes";
+import { ArtifactLibraryService } from "./canvas/artifactLibraryService";
 import { createCanvasRouteHandler, resolveCanvasActiveContext } from "./canvasRoutes";
 import { AutomationCommandService } from "./automation/automationCommandService";
 import {
@@ -4006,6 +4008,26 @@ export function startOctantServer(
       },
       { authorize: authorizeCanvas },
     );
+    // The library is a host-wide read of the same journal-derived projection
+    // the per-Project inventory reads. It is deliberately wider than a window's
+    // Project scope (0026); the service, not the route, decides what a given
+    // principal may see.
+    const artifactLibraryService = new ArtifactLibraryService({
+      projection: persistence.canvasProjection,
+      projects: () =>
+        persistence.readProjects().map((project) => ({
+          id: project.id,
+          name: project.name,
+          type: project.type,
+          lifecycle: project.lifecycle,
+        })),
+      liveShares: () => canvasShareService.liveShareCanvasIds(),
+      clock: () => new Date().toISOString() as never,
+    });
+    const artifactLibraryRoutes = createArtifactLibraryRouteHandler({
+      library: artifactLibraryService,
+      windowAuthorityStore,
+    });
     const canvasRoutes = createCanvasRouteHandler({
       canvasProjection: persistence.canvasProjection,
       canvasService,
@@ -4438,6 +4460,7 @@ export function startOctantServer(
       (await workMutationRoutes(request)) ??
       (await previewRoutes(request)) ??
       (await canvasRoutes(request)) ??
+      (await artifactLibraryRoutes(request)) ??
       (await automationRoutes(request)) ??
       (await automationNotificationRoutes(request)) ??
       (await workPromotionRoutes(request)) ??

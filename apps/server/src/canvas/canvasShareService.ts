@@ -480,6 +480,25 @@ export class CanvasShareService {
   }
 
   /**
+   * Which Canvases carry a live share right now.
+   *
+   * Derived from the same lifecycle the overview publishes, so the library's
+   * Shared tab and a Canvas's own share panel can never disagree about whether
+   * something is shared. Expiry is time-derived, so this is recomputed on every
+   * ask rather than kept as a set that would quietly go stale.
+   */
+  liveShareCanvasIds(): ReadonlySet<string> {
+    const nowIso = this.#clock();
+    const live = new Set<string>();
+    for (const record of this.#records.values()) {
+      if (isLiveShareStatus(effectiveShareStatus(record, nowIso))) {
+        live.add(String(record.canvasId));
+      }
+    }
+    return live;
+  }
+
+  /**
    * How many of this Canvas's shares still carry authority at `nowIso`, counted
    * through the same lifecycle the overview publishes. Expiry frees capacity as
    * time passes, so this is derived from the clock on every ask rather than kept
