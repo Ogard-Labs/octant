@@ -35,7 +35,7 @@
     "build": "turbo run build",
     "dev": "bun scripts/dev-desktop.ts",
     "wiring:check": "bun test scripts/check-module-wiring.test.ts && bun scripts/check-module-wiring.ts",
-    "decisions:check": "bun test scripts/check-decisions.test.ts && bun scripts/check-decisions.ts",
+    "decisions:check": "bun test scripts/check-decisions.test.ts scripts/check-decision-history.test.ts && bun scripts/check-decisions.ts && bun scripts/check-decision-history.ts",
     "fmt": "oxfmt",
     "fmt:check": "oxfmt --check",
     "lint": "oxlint --report-unused-disable-directives",

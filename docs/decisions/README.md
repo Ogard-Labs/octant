@@ -42,4 +42,8 @@ distilled successor of the earlier long-form design specifications.
   no history to preserve until it is accepted, and superseding a proposal with a
   second proposal would leave two records describing one undecided direction.
 - Add the record to the index above in the same change. `bun run decisions:check`
-  gates numbering, status, required sections, and index agreement.
+  gates numbering, status, required sections, and index agreement, and checks
+  against the merge base that an `Accepted` number still holds the record it
+  held. That last check needs history: it skips with a stated reason on a
+  shallow or base-less clone rather than failing one. Set
+  `OCTANT_DECISIONS_BASE` to compare against a different ref.

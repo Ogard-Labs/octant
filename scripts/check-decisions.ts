@@ -139,8 +139,12 @@ function findNumberingGaps(
  * like — the conventions are written down here, examples and all. A matcher
  * that reads the whole file cannot tell an example from the real declaration,
  * so it would reject documentation for doing exactly what it should.
+ *
+ * Exported because the history gate reads the same declarations from the same
+ * documents. Two independent notions of "a real status line" would let a record
+ * be Accepted to one gate and something else to the other.
  */
-function linesOutsideFences(content: string): ReadonlyArray<string> {
+export function linesOutsideFences(content: string): ReadonlyArray<string> {
   const lines: Array<string> = [];
   // A fence closes only on its own marker, at least as long as the opener. A
   // four-backtick example holding a three-backtick snippet is how these
