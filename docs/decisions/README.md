@@ -32,6 +32,7 @@ distilled successor of the earlier long-form design specifications.
 | [0022](0022-pointed-at-product-feedback.md)             | Pointing at the running product                                   | Accepted |
 | [0023](0023-bringing-a-run-home.md)                     | Bringing a run home                                               | Accepted |
 | [0024](0024-curated-project-scaffolds.md)               | Curated project scaffolds                                         | Accepted |
+| [0025](0025-long-running-goal-loops.md)                 | Long-running goal loops                                           | Proposed |
 
 ## Adding an ADR
 
