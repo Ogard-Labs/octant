@@ -1381,8 +1381,7 @@ export function useProviderController(options: ProviderControllerOptions) {
           }
           return false;
         }
-        let credentialCleared = false;
-        if (
+        const mustClear =
           instance.driverKind === "openai-compatible" ||
           instance.driverKind === "azure-foundry" ||
           (instance.driverKind === "anthropic-compatible" &&
@@ -1393,24 +1392,16 @@ export function useProviderController(options: ProviderControllerOptions) {
             instance.driverKind === "mistral-vibe" ||
             instance.driverKind === "grok") &&
             (instance.configuration.authentication === "api-key" ||
-              credentialCleanupRequired.current.has(instanceId)))
-        ) {
-          if (hostBridge === undefined) {
-            if (mounted.current) {
-              setMessage("Provider credential management is unavailable on this host.");
-            }
-            return false;
+              credentialCleanupRequired.current.has(instanceId)));
+        // Only credential-bearing instances need the desktop bridge, so the
+        // requirement stays inside the branches that actually touch the
+        // Keychain.
+        const bridge = hostBridge;
+        if (mustClear && bridge === undefined) {
+          if (mounted.current) {
+            setMessage("Provider credential management is unavailable on this host.");
           }
-          try {
-            await hostBridge.clearProviderCredential(instanceId);
-            credentialCleanupRequired.current.delete(instanceId);
-            credentialCleared = true;
-          } catch {
-            if (mounted.current) {
-              setMessage("The provider credential could not be cleared, so removal was cancelled.");
-            }
-            return false;
-          }
+          return false;
         }
         try {
           applyResult(
@@ -1422,16 +1413,31 @@ export function useProviderController(options: ProviderControllerOptions) {
             current,
             install,
           );
-          return true;
         } catch (error) {
-          await recoverRegistryFailure(
-            error,
-            credentialCleared
-              ? "Provider removal failed after its credential was cleared."
-              : undefined,
-          );
+          // The server refuses this command while the instance has an active
+          // session. Clearing first left a still-configured API-key instance
+          // with no key to connect with and nothing able to put it back, so
+          // the key is only removed once the instance is gone.
+          await recoverRegistryFailure(error, "Provider removal failed.");
           return false;
         }
+        if (mustClear && bridge !== undefined) {
+          // The instance no longer exists. A clear that fails here leaves a
+          // secret behind rather than an unusable provider, so it is retried
+          // by the same deferred cleanup the other paths use.
+          try {
+            await bridge.clearProviderCredential(instanceId);
+            credentialCleanupRequired.current.delete(instanceId);
+          } catch {
+            credentialCleanupRequired.current.add(instanceId);
+            if (mounted.current) {
+              setMessage(
+                "The provider was removed, but its stored credential could not be cleared. Retry cleanup from the Octant host.",
+              );
+            }
+          }
+        }
+        return true;
       }),
     [client, hostBridge, install, recoverRegistryFailure],
   );

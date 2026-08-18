@@ -951,13 +951,13 @@ describe("useProviderController", () => {
       "credential.set",
       "provider.update",
       "field.clear",
-      "credential.clear",
       "provider.remove",
+      "credential.clear",
     ]);
     expect(result.current.instances).toHaveLength(0);
   });
 
-  it("clears cleanup-required credentials before removing a subscription provider", async () => {
+  it("clears cleanup-required credentials after removing a subscription provider", async () => {
     const calls: string[] = [];
     const apiKeyConfiguration = {
       kind: "claude-agent-sdk" as const,
@@ -1000,8 +1000,8 @@ describe("useProviderController", () => {
       "credential.clear",
       "provider.update",
       "field.clear",
-      "credential.clear",
       "provider.remove",
+      "credential.clear",
     ]);
     expect(result.current.instances).toHaveLength(0);
     expect(JSON.stringify(result.current)).not.toMatch(
@@ -1009,7 +1009,7 @@ describe("useProviderController", () => {
     );
   });
 
-  it("clears Claude API-key credentials before removal but skips subscription credentials", async () => {
+  it("clears Claude API-key credentials after removal but skips subscription credentials", async () => {
     for (const authentication of ["api-key", "subscription"] as const) {
       const calls: string[] = [];
       const instance = claudeProvider({
@@ -1036,14 +1036,14 @@ describe("useProviderController", () => {
 
       expect(calls).toEqual(
         authentication === "api-key"
-          ? ["credential.clear", "provider.remove"]
+          ? ["provider.remove", "credential.clear"]
           : ["provider.remove"],
       );
       unmount();
     }
   });
 
-  it("clears Anthropic-compatible credentials before removal", async () => {
+  it("clears Anthropic-compatible credentials after removal", async () => {
     for (const authentication of ["api-key", "bearer", "none"] as const) {
       const calls: string[] = [];
       const instance = anthropicProvider({
@@ -1072,7 +1072,7 @@ describe("useProviderController", () => {
       });
 
       expect(calls).toEqual(
-        authentication === "none" ? ["provider.remove"] : ["credential.clear", "provider.remove"],
+        authentication === "none" ? ["provider.remove"] : ["provider.remove", "credential.clear"],
       );
       unmount();
     }
@@ -1598,7 +1598,7 @@ describe("useProviderController", () => {
     );
   });
 
-  it("deletes the credential before removing a bearer provider", async () => {
+  it("deletes the credential after removing a bearer provider", async () => {
     const calls: string[] = [];
     const api = client(snapshot([httpProvider()]));
     vi.mocked(api.execute).mockImplementation(async () => {
@@ -1612,26 +1612,42 @@ describe("useProviderController", () => {
     await act(async () => {
       await expect(result.current.remove(id)).resolves.toBe(true);
     });
-    expect(calls).toEqual(["credential.clear", "provider.remove"]);
+    expect(calls).toEqual(["provider.remove", "credential.clear"]);
   });
 
-  it("blocks removal when credential deletion fails", async () => {
+  it("defers cleanup when credential deletion fails after removal", async () => {
     const api = client(snapshot([httpProvider()]));
+    vi.mocked(api.execute).mockResolvedValue({
+      kind: "provider-removed",
+      instanceId: id,
+      version: 2 as never,
+    });
     const host = credentialHost();
-    vi.mocked(host.clearProviderCredential).mockRejectedValue(
+    vi.mocked(host.clearProviderCredential).mockRejectedValueOnce(
       new Error("private-value raw Keychain diagnostic"),
     );
     const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
     await act(async () => {
-      await expect(result.current.remove(id)).resolves.toBe(false);
+      await expect(result.current.remove(id)).resolves.toBe(true);
     });
-    expect(api.execute).not.toHaveBeenCalled();
+    expect(result.current.instances).toHaveLength(0);
+    expect(result.current.message).toMatch(/removed.*credential could not be cleared/i);
     expect(result.current.message).not.toMatch(/private-value|Keychain/i);
+
+    // The stranded secret is retried by the same deferred cleanup the
+    // configuration paths use.
+    await act(async () => {
+      await result.current.retry();
+    });
+    expect(host.clearProviderCredential).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps an unauthenticated provider when registry removal fails after deletion", async () => {
+  // The server refuses removal while the instance still has an active session.
+  // Clearing the key first left the instance configured for API-key
+  // authentication with a write-only key that could not be put back.
+  it("keeps a rejected provider's credential when registry removal fails", async () => {
     const calls: string[] = [];
     const api = client(snapshot([httpProvider()]));
     vi.mocked(api.execute).mockImplementation(async () => {
@@ -1646,8 +1662,10 @@ describe("useProviderController", () => {
       await expect(result.current.remove(id)).resolves.toBe(false);
     });
 
-    expect(calls).toEqual(["credential.clear", "provider.remove"]);
+    expect(calls).toEqual(["provider.remove"]);
+    expect(host.clearProviderCredential).not.toHaveBeenCalled();
     expect(result.current.instances).toHaveLength(1);
+    expect(result.current.message).toMatch(/removal failed/i);
     expect(result.current.message).not.toContain("private registry diagnostic");
   });
 
