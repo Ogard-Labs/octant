@@ -104,6 +104,7 @@ describe("Zen takeover shell restore", () => {
         return { result: "mutation", space: makeSpace() };
       }),
       space: vi.fn() as never,
+      attachTerminal: vi.fn() as never,
       searchThreads: vi.fn() as never,
       attachThread: vi.fn() as never,
       continueThread: vi.fn() as never,

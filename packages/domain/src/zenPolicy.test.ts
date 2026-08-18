@@ -18,8 +18,8 @@ import {
   validateLocalHostSource,
   ZenPolicyRejected,
   MAX_ZEN_ELEMENTS,
-  MAX_LIVE_ZEN_THREAD_CARDS,
-  resolveZenThreadCardActivity,
+  MAX_LIVE_ZEN_CARDS,
+  resolveZenLiveCardActivity,
 } from "./zenPolicy";
 import { DEFAULT_ZEN_APPEARANCE, DEFAULT_ZEN_VIEWPORT } from "@octant/contracts/zen";
 import type {
@@ -88,6 +88,28 @@ function makeThreadElement(id: string = makeId("44444444"), zIndex: number = 1):
     minimized: false,
     locked: false,
   };
+}
+
+function makeTerminalElement(
+  id: string = makeId("4a4a4a4a"),
+): Extract<ZenElementPayload, { kind: "terminal" }> {
+  return {
+    elementId: id as ZenElementId,
+    kind: "terminal",
+    sourceContext: {
+      hostId: localHostId,
+      mode: "code",
+      projectId: null,
+      threadKind: "code",
+      threadId: makeId("5a5a5a5a"),
+    },
+    checkoutId: makeId("5b5b5b5b"),
+    terminalId: makeId("5c5c5c5c"),
+    geometry: { x: 100, y: 100, width: 520, height: 320 },
+    zIndex: 1,
+    minimized: false,
+    locked: false,
+  } as unknown as Extract<ZenElementPayload, { kind: "terminal" }>;
 }
 
 function makeTimerElement(
@@ -171,6 +193,31 @@ describe("addElement", () => {
     const space = makeSpace();
     const updated = addElement(space, makeThreadElement(), 0, localHostId);
     expect(updated.elements[0]?.kind).toBe("thread");
+  });
+
+  it("pins a terminal card under the thread that owns the shell", () => {
+    const space = makeSpace();
+    const updated = addElement(space, makeTerminalElement(), 0, localHostId);
+    expect(updated.elements[0]).toMatchObject({
+      kind: "terminal",
+      sourceContext: { threadKind: "code" },
+    });
+  });
+
+  it("refuses a terminal card naming a shell on some other host", () => {
+    const space = makeSpace();
+    const elsewhere = makeTerminalElement();
+    expect(() =>
+      addElement(
+        space,
+        {
+          ...elsewhere,
+          sourceContext: { ...elsewhere.sourceContext, hostId: makeId("99999999") },
+        } as ZenElementPayload,
+        0,
+        localHostId,
+      ),
+    ).toThrow(ZenPolicyRejected);
   });
 
   it("rejects stale version", () => {
@@ -961,7 +1008,7 @@ describe("processZenCommand", () => {
   });
 });
 
-describe("resolveZenThreadCardActivity", () => {
+describe("resolveZenLiveCardActivity", () => {
   const visibleRegion = { x: 0, y: 0, width: 1200, height: 800 };
 
   function threadCard(
@@ -974,6 +1021,51 @@ describe("resolveZenThreadCardActivity", () => {
     };
   }
 
+  function terminalCard(
+    id: string,
+    overrides: Partial<Extract<ZenElementPayload, { kind: "terminal" }>> = {},
+  ): Extract<ZenElementPayload, { kind: "terminal" }> {
+    const thread = makeThreadElement(id) as Extract<ZenElementPayload, { kind: "thread" }>;
+    return {
+      ...thread,
+      kind: "terminal",
+      sourceContext: { ...thread.sourceContext, mode: "code", threadKind: "code" },
+      checkoutId: makeId("cccc0000"),
+      terminalId: makeId("7e007e00"),
+      ...overrides,
+    } as unknown as Extract<ZenElementPayload, { kind: "terminal" }>;
+  }
+
+  it("spends one budget across every kind of card that streams", () => {
+    const conversation = threadCard(makeId("aaaaaaaa"), { zIndex: 1 as any });
+    const shell = terminalCard(makeId("bbbbbbbb"), { zIndex: 2 as any });
+
+    const activity = resolveZenLiveCardActivity({
+      elements: [conversation, shell],
+      visibleRegion,
+      budget: 1,
+    });
+
+    // A pinned shell costs the same stream a pinned conversation does, so it
+    // competes for the same slot rather than being waved through beside it.
+    expect(activity).toEqual([
+      { elementId: conversation.elementId, activity: "frozen", reason: "budget" },
+      { elementId: shell.elementId, activity: "live" },
+    ]);
+  });
+
+  it("freezes a pinned shell the reader has panned away from", () => {
+    const shell = terminalCard(makeId("bbbbbbbb"), {
+      geometry: { x: 4000, y: 4000, width: 520, height: 320 },
+    });
+
+    const activity = resolveZenLiveCardActivity({ elements: [shell], visibleRegion });
+
+    expect(activity).toEqual([
+      { elementId: shell.elementId, activity: "frozen", reason: "off-screen" },
+    ]);
+  });
+
   it("keeps only the cards a reader is actually looking at streaming", () => {
     const cards = [
       threadCard(makeId("aaaaaaaa"), { zIndex: 1 as any }),
@@ -982,7 +1074,7 @@ describe("resolveZenThreadCardActivity", () => {
       threadCard(makeId("dddddddd"), { zIndex: 4 as any }),
     ];
 
-    const activity = resolveZenThreadCardActivity({
+    const activity = resolveZenLiveCardActivity({
       elements: cards,
       visibleRegion,
       budget: 2,
@@ -1001,7 +1093,7 @@ describe("resolveZenThreadCardActivity", () => {
     const back = threadCard(makeId("aaaaaaaa"), { zIndex: 1 as any });
     const front = threadCard(makeId("bbbbbbbb"), { zIndex: 9 as any });
 
-    const activity = resolveZenThreadCardActivity({
+    const activity = resolveZenLiveCardActivity({
       elements: [back, front],
       visibleRegion,
       focusedElementId: back.elementId,
@@ -1021,7 +1113,7 @@ describe("resolveZenThreadCardActivity", () => {
     });
     const visible = threadCard(makeId("cccccccc"));
 
-    const activity = resolveZenThreadCardActivity({
+    const activity = resolveZenLiveCardActivity({
       elements: [minimized, offScreen, visible],
       visibleRegion,
     });
@@ -1034,7 +1126,7 @@ describe("resolveZenThreadCardActivity", () => {
   });
 
   it("reports nothing for the widgets sharing the space", () => {
-    const activity = resolveZenThreadCardActivity({
+    const activity = resolveZenLiveCardActivity({
       elements: [makeNotesElement(), makeTimerElement()],
       visibleRegion,
     });
@@ -1047,11 +1139,9 @@ describe("resolveZenThreadCardActivity", () => {
       threadCard(makeId(`${index}`.padStart(8, "a")), { zIndex: (index + 1) as any }),
     );
 
-    const activity = resolveZenThreadCardActivity({ elements: cards, visibleRegion });
+    const activity = resolveZenLiveCardActivity({ elements: cards, visibleRegion });
 
-    expect(activity.filter((card) => card.activity === "live")).toHaveLength(
-      MAX_LIVE_ZEN_THREAD_CARDS,
-    );
-    expect(MAX_LIVE_ZEN_THREAD_CARDS).toBeLessThan(MAX_ZEN_ELEMENTS);
+    expect(activity.filter((card) => card.activity === "live")).toHaveLength(MAX_LIVE_ZEN_CARDS);
+    expect(MAX_LIVE_ZEN_CARDS).toBeLessThan(MAX_ZEN_ELEMENTS);
   });
 });

@@ -16,6 +16,9 @@ import {
   type ZenWidgetMutation,
   type ZenThreadAttachRequest,
   type ZenThreadAttachResult,
+  type ZenTerminalAttachRequest,
+  type ZenTerminalAttachResult,
+  decodeZenThreadCatalogRef,
   type ZenThreadCatalogEntry,
   type ZenThreadContinuationTarget,
   decodeZenAssistantSnapshot,
@@ -34,6 +37,7 @@ import {
   normalizeZenReferenceUrl,
 } from "@octant/contracts/zen";
 import type { ChatThread, ChatThreadId, ChatThreadView } from "@octant/contracts/chat";
+import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
 import type { WindowId, HostId } from "@octant/contracts/shell";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
 import {
@@ -61,6 +65,24 @@ import type { ZenThreadCatalog } from "./zenThreadCatalog";
 
 /** The name a window's first space carries until someone renames it. */
 export const DEFAULT_ZEN_SPACE_NAME = "Focus";
+
+/**
+ * Code's answer to "does this window own that shell?".
+ *
+ * Zen never inspects a terminal itself. It asks the service that owns the
+ * ownership rule, and refuses the pin when that service refuses the read, so a
+ * pinned card can never name a terminal the window could not already reach.
+ */
+export interface ZenCodeTerminalPort {
+  readonly read: (
+    windowId: WindowId,
+    request: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly terminalId: CodeTerminalId;
+    },
+  ) => Promise<unknown>;
+}
 
 function focusZoneReason(code: ZenFocusZoneRejectionCode): ZenFailureReason {
   switch (code) {
@@ -98,6 +120,11 @@ export interface ZenServiceDependencies {
   readonly eventStore: ZenEventStore;
   readonly localHostId: HostId;
   readonly threadCatalog?: Pick<ZenThreadCatalog, "resolve" | "search">;
+  /**
+   * Whether a terminal is one this window's Code thread owns. Zen pins a shell
+   * it can name; whether the caller may reach it stays Code's decision.
+   */
+  readonly codeTerminals?: ZenCodeTerminalPort;
   readonly uuid?: () => string;
   readonly assistantChat?: ZenAssistantChatPort;
   readonly assistantProviderState?: (thread: ChatThread) => ZenAssistantProviderState;
@@ -336,6 +363,99 @@ export class ZenService {
       );
       const committed = this.deps.eventStore.append(updated, request.expectedVersion);
       return { result: "thread-attached", entry, elementId, space: committed };
+    } catch (error) {
+      if (error instanceof ZenPolicyRejected) {
+        throw new ZenError({ reason: error.code, spaceId: space.spaceId });
+      }
+      if (this.deps.eventStore.isConcurrencyConflict(error)) {
+        throw new ZenError({ reason: "stale-version", spaceId: space.spaceId });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Pin a terminal one of this window's Code threads owns.
+   *
+   * The card is written by the server from a terminal the caller merely names.
+   * Two questions are asked before it exists, and both are asked of whoever
+   * owns the answer: the catalog says whether this window may see the thread,
+   * and Code says whether that thread owns the shell. A caller cannot describe
+   * its way past either, and the card it gets reaches no further than the
+   * workspace tab already did.
+   */
+  async attachTerminal(
+    windowId: WindowId,
+    request: ZenTerminalAttachRequest,
+    signal?: AbortSignal,
+  ): Promise<ZenTerminalAttachResult> {
+    const space = this.#activeSpace(windowId);
+    if (space === null) throw new ZenError({ reason: "unknown-space" });
+    if (space.windowId !== windowId) {
+      throw new ZenError({ reason: "wrong-window", spaceId: space.spaceId });
+    }
+    if (
+      this.deps.threadCatalog === undefined ||
+      this.deps.codeTerminals === undefined ||
+      this.deps.uuid === undefined
+    ) {
+      throw new ZenError({ reason: "missing-capability", spaceId: space.spaceId });
+    }
+    if (signal?.aborted) throw new ZenError({ reason: "interrupted", spaceId: space.spaceId });
+    const entry = await this.deps.threadCatalog.resolve(
+      windowId,
+      decodeZenThreadCatalogRef(`code:${String(request.threadId)}`),
+    );
+    if (entry === undefined || entry.sourceContext.threadKind !== "code") {
+      throw new ZenError({ reason: "unavailable-source", spaceId: space.spaceId });
+    }
+    try {
+      await this.deps.codeTerminals.read(windowId, {
+        threadId: request.threadId,
+        checkoutId: request.checkoutId,
+        terminalId: request.terminalId,
+      });
+    } catch {
+      // Code refused the read, so this window does not own the shell. Which of
+      // its reasons applied is Code's to tell the Code surface, not Zen's to
+      // repeat about a terminal it was only asked to pin.
+      throw new ZenError({ reason: "unavailable-source", spaceId: space.spaceId });
+    }
+    if (signal?.aborted) throw new ZenError({ reason: "interrupted", spaceId: space.spaceId });
+    const elementId = decodeZenElementId(this.deps.uuid());
+    const element = {
+      elementId,
+      kind: "terminal" as const,
+      sourceContext: entry.sourceContext,
+      checkoutId: request.checkoutId,
+      terminalId: request.terminalId,
+      geometry: request.geometry ?? {
+        x: 64 + space.elements.length * 32,
+        y: 96 + space.elements.length * 32,
+        width: 520,
+        height: 320,
+      },
+      zIndex: Math.max(0, ...space.elements.map((existing) => existing.zIndex)) + 1,
+      minimized: false,
+      locked: false,
+      title: request.title ?? entry.title,
+    };
+    try {
+      const updated = processZenCommand(
+        space,
+        {
+          command: "add-element",
+          spaceId: space.spaceId,
+          element,
+          expectedVersion: request.expectedVersion,
+        },
+        this.deps.localHostId,
+      );
+      return {
+        result: "terminal-attached",
+        elementId,
+        space: this.deps.eventStore.append(updated, request.expectedVersion),
+      };
     } catch (error) {
       if (error instanceof ZenPolicyRejected) {
         throw new ZenError({ reason: error.code, spaceId: space.spaceId });

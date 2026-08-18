@@ -6,9 +6,10 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
 } from "react";
-import { resolveAccessibilityFallbacks, resolveZenThreadCardActivity } from "@octant/domain";
-import type { ZenThreadCardActivity } from "@octant/domain";
+import { resolveAccessibilityFallbacks, resolveZenLiveCardActivity } from "@octant/domain";
+import type { ZenLiveCardActivity } from "@octant/domain";
 import type {
   ZenAssistantSnapshot,
   ZenAppearance,
@@ -120,8 +121,18 @@ export interface ZenSurfaceProps {
   readonly renderLiveThread?: (input: {
     readonly sourceContext: ZenSourceContext;
     readonly entry: ZenThreadCatalogEntry;
-    readonly activity: ZenThreadCardActivity;
+    readonly activity: ZenLiveCardActivity;
   }) => ZenLiveThreadCard | undefined;
+  /**
+   * Builds the surface for one pinned terminal, or returns undefined when this
+   * window cannot open one. The focus zone holds no Code client of its own: it
+   * says which cards may stream and hands each one the shell it was pinned to,
+   * and the shell decides what that terminal is allowed to do.
+   */
+  readonly renderTerminal?: (input: {
+    readonly element: Extract<ZenElementPayload, { kind: "terminal" }>;
+    readonly activity: ZenLiveCardActivity;
+  }) => ReactNode | undefined;
   /**
    * Opens this window's Zen assistant surface. Awaited before a turn is sent,
    * because opening is what binds the surface to the conversation, and a turn
@@ -261,7 +272,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
   );
   const threadCardActivity = useMemo(() => {
     const focusedElementId = focusedElement?.elementId;
-    const resolved = resolveZenThreadCardActivity({
+    const resolved = resolveZenLiveCardActivity({
       elements: props.space.elements,
       visibleRegion: computeVisibleRegion(props.space.viewport, surfaceSize),
       ...(focusedElementId === undefined ? {} : { focusedElementId }),
@@ -295,6 +306,18 @@ export function ZenSurface(props: ZenSurfaceProps) {
     });
     return live === undefined ? { entry } : { entry, live };
   }
+  /**
+   * The card's own window onto its own shell, keyed by the terminal it was
+   * pinned to rather than by whatever Code the shell happens to be showing.
+   */
+  function renderTerminalCard(
+    element: Extract<ZenElementPayload, { kind: "terminal" }>,
+  ): ReactNode | undefined {
+    const activity = threadCardActivity.get(String(element.elementId));
+    if (props.renderTerminal === undefined || activity === undefined) return undefined;
+    return props.renderTerminal({ element, activity });
+  }
+
   const backgroundStyle = resolveZenBackgroundStyle(background, props.backgroundImageUrl);
   const overlay = Math.max(
     appearance.dimming,
@@ -493,7 +516,9 @@ export function ZenSurface(props: ZenSurfaceProps) {
                       (threadCard?.entry?.title ?? "Thread")
                     : element.kind === "timer"
                       ? "Timer"
-                      : element.kind;
+                      : element.kind === "terminal"
+                        ? "Terminal"
+                        : element.kind;
           const geometry =
             previewGeometry?.elementId === element.elementId
               ? previewGeometry.geometry
@@ -601,6 +626,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
                       />
                     ) : element.kind === "reference" ? (
                       <ZenReference element={element} />
+                    ) : element.kind === "terminal" ? (
+                      (renderTerminalCard(element) ?? (
+                        <p role="status">This window cannot open a terminal.</p>
+                      ))
                     ) : (
                       "Unsupported Zen element"
                     )}

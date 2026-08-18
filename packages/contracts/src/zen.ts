@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId, WindowId } from "./shell";
 import { ChatThreadId } from "./chat";
-import { CodeThreadId } from "./code";
+import { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
 
 import { OctantMode } from "./modes";
@@ -124,6 +124,7 @@ export type ZenViewport = typeof ZenViewport.Type;
 
 export const ZenElementKind = Schema.Literal(
   "thread",
+  "terminal",
   "notes",
   "checklist",
   "timer",
@@ -156,6 +157,32 @@ export const ZenThreadElementPayload = Schema.Struct({
   locked: Schema.Boolean,
 }).annotations(strict);
 export type ZenThreadElementPayload = typeof ZenThreadElementPayload.Type;
+
+/**
+ * A terminal one of this window's Code threads owns, pinned where the user can
+ * watch it.
+ *
+ * The terminal is addressed, never described: the shell belongs to the thread
+ * and checkout named here, and every keystroke the card sends is authorized
+ * against that pair exactly as it is from the workspace tab. Pinning grants
+ * nothing — a card naming a terminal this window does not own is refused, and
+ * a card naming one it does own reaches no further than the tab already could.
+ */
+export const ZenTerminalElementPayload = Schema.Struct({
+  elementId: ZenElementId,
+  kind: Schema.Literal("terminal"),
+  sourceContext: ZenSourceContext,
+  checkoutId: CodeCheckoutId,
+  terminalId: CodeTerminalId,
+  geometry: ZenGeometry,
+  zIndex: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(1000)),
+  minimized: Schema.Boolean,
+  locked: Schema.Boolean,
+  title: Schema.optional(Schema.NonEmptyTrimmedString),
+})
+  .pipe(Schema.filter((element) => element.sourceContext.threadKind === "code"))
+  .annotations(strict);
+export type ZenTerminalElementPayload = typeof ZenTerminalElementPayload.Type;
 
 export const ZenNotesElementPayload = Schema.Struct({
   elementId: ZenElementId,
@@ -323,6 +350,7 @@ export type ZenRecipeElementPayload = typeof ZenRecipeElementPayload.Type;
 
 export const ZenElementPayload = Schema.Union(
   ZenThreadElementPayload,
+  ZenTerminalElementPayload,
   ZenNotesElementPayload,
   ZenChecklistElementPayload,
   ZenTimerElementPayload,
@@ -775,6 +803,30 @@ export const ZenThreadAttachResult = Schema.Struct({
   space: ZenSpace,
 }).annotations(strict);
 export type ZenThreadAttachResult = typeof ZenThreadAttachResult.Type;
+
+/**
+ * Pin a terminal one of this window's Code threads already owns.
+ *
+ * The request names the terminal, never the element: the server resolves the
+ * thread and checkout that own the shell and writes the card itself, so a
+ * caller cannot pin a terminal by describing one.
+ */
+export const ZenTerminalAttachRequest = Schema.Struct({
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  terminalId: CodeTerminalId,
+  expectedVersion: AggregateVersion,
+  geometry: Schema.optional(ZenGeometry),
+  title: Schema.optional(Schema.NonEmptyTrimmedString),
+}).annotations(strict);
+export type ZenTerminalAttachRequest = typeof ZenTerminalAttachRequest.Type;
+
+export const ZenTerminalAttachResult = Schema.Struct({
+  result: Schema.Literal("terminal-attached"),
+  elementId: ZenElementId,
+  space: ZenSpace,
+}).annotations(strict);
+export type ZenTerminalAttachResult = typeof ZenTerminalAttachResult.Type;
 
 export const ZenThreadContinuationTarget = Schema.Struct({
   result: Schema.Literal("thread-continuation"),
@@ -1395,6 +1447,8 @@ export const decodeZenThreadCatalogEntry = Schema.decodeUnknownSync(ZenThreadCat
 export const decodeZenThreadCatalogResponse = Schema.decodeUnknownSync(ZenThreadCatalogResponse);
 export const decodeZenThreadAttachRequest = Schema.decodeUnknownSync(ZenThreadAttachRequest);
 export const decodeZenThreadAttachResult = Schema.decodeUnknownSync(ZenThreadAttachResult);
+export const decodeZenTerminalAttachRequest = Schema.decodeUnknownSync(ZenTerminalAttachRequest);
+export const decodeZenTerminalAttachResult = Schema.decodeUnknownSync(ZenTerminalAttachResult);
 export const decodeZenThreadContinuationTarget = Schema.decodeUnknownSync(
   ZenThreadContinuationTarget,
 );

@@ -5,6 +5,8 @@ import type {
   ZenFocusZone,
   ZenFocusZoneCommand,
   ZenFocusZoneResult,
+  ZenTerminalAttachRequest,
+  ZenTerminalAttachResult,
   ZenResult,
   ZenSpace,
   ZenSpaceId,
@@ -58,6 +60,12 @@ function makeZone(space: ZenSpace | null): ZenFocusZone | null {
 function createClient(overrides: Partial<ZenClient> = {}): ZenClient {
   let space: ZenSpace | null = null;
   return {
+    attachTerminal: vi.fn(
+      async (request: ZenTerminalAttachRequest): Promise<ZenTerminalAttachResult> =>
+        overrides.attachTerminal !== undefined
+          ? await overrides.attachTerminal(request)
+          : Promise.reject(new Error("This window pins no terminals.")),
+    ),
     space: vi.fn(
       async (command: ZenFocusZoneCommand): Promise<ZenFocusZoneResult> =>
         overrides.space !== undefined

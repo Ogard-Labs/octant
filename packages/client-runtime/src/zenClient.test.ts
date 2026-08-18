@@ -1,6 +1,8 @@
 import {
   LOCAL_HOST_ID,
   decodeChatThreadId,
+  decodeCodeCheckoutId,
+  decodeCodeThreadId,
   decodeProjectId,
   decodeProviderInstanceId,
   decodeWindowId,
@@ -287,6 +289,32 @@ describe("ZenClient thread catalog", () => {
     });
     expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
       "http://127.0.0.1:4242/api/zen/spaces",
+    ]);
+  });
+
+  it("pins a terminal by naming it, never by describing the card", async () => {
+    const pinned = {
+      result: "terminal-attached" as const,
+      elementId,
+      space,
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(Response.json(pinned));
+    const client = createZenClient({
+      baseUrl: "http://127.0.0.1:4242",
+      fetch,
+      windowCapability: `${"A".repeat(42)}A`,
+    });
+
+    await expect(
+      client.attachTerminal({
+        threadId: decodeCodeThreadId("00000000-0000-4000-8000-000000000021"),
+        checkoutId: decodeCodeCheckoutId("00000000-0000-4000-8000-000000000022"),
+        terminalId: "00000000-0000-4000-8000-000000000023" as never,
+        expectedVersion: 3 as AggregateVersion,
+      }),
+    ).resolves.toMatchObject({ result: "terminal-attached" });
+    expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
+      "http://127.0.0.1:4242/api/zen/terminals/attach",
     ]);
   });
 

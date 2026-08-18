@@ -2,6 +2,8 @@ import {
   decodeZenCommand,
   decodeZenBootstrapResponse,
   decodeZenResult,
+  decodeZenTerminalAttachRequest,
+  decodeZenTerminalAttachResult,
   decodeZenThreadAttachRequest,
   decodeZenThreadAttachResult,
   decodeZenThreadCatalogRef,
@@ -14,6 +16,8 @@ import {
   type ZenCommand,
   type ZenBootstrapResponse,
   type ZenResult,
+  type ZenTerminalAttachRequest,
+  type ZenTerminalAttachResult,
   type ZenThreadAttachRequest,
   type ZenThreadAttachResult,
   type ZenThreadCatalogRef,
@@ -44,6 +48,11 @@ export interface ZenClient {
   space(command: ZenFocusZoneCommand): Promise<ZenFocusZoneResult>;
   searchThreads(query?: string): Promise<ZenThreadCatalogResponse>;
   attachThread(request: ZenThreadAttachRequest): Promise<ZenThreadAttachResult>;
+  /**
+   * Pins a terminal one of this window's Code threads owns. The request names
+   * the terminal; the card itself is written by the server.
+   */
+  attachTerminal(request: ZenTerminalAttachRequest): Promise<ZenTerminalAttachResult>;
   continueThread(catalogRef: ZenThreadCatalogRef): Promise<ZenThreadContinuationTarget>;
   assistant(): Promise<ZenAssistantSnapshot>;
   /**
@@ -149,6 +158,17 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
         contentType: true,
       });
       return decodeZenThreadAttachResult(body);
+    },
+
+    async attachTerminal(request: ZenTerminalAttachRequest): Promise<ZenTerminalAttachResult> {
+      const input = decodeZenTerminalAttachRequest(request);
+      const url = new URL("/api/zen/terminals/attach", options.baseUrl);
+      const body = await zenRequest(fetch, url, options.windowCapability, {
+        method: "POST",
+        body: JSON.stringify(input),
+        contentType: true,
+      });
+      return decodeZenTerminalAttachResult(body);
     },
 
     async continueThread(catalogRef: ZenThreadCatalogRef): Promise<ZenThreadContinuationTarget> {

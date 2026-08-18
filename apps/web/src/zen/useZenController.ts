@@ -19,6 +19,7 @@ import type {
 import { MAX_ZEN_BACKGROUND_BYTES } from "@octant/contracts/zen";
 import { cycleZenSpace } from "@octant/domain";
 import type { WindowId } from "@octant/contracts/shell";
+import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export const ZEN_PRESENTATION_STORAGE_PREFIX = "octant:zen-presentation:";
@@ -742,6 +743,45 @@ export function useZenController(options: UseZenControllerOptions) {
   );
 
   /**
+   * Pin a terminal one of this window's Code threads owns.
+   *
+   * The request names the shell; the card is written by the server, so nothing
+   * here decides what a terminal card is allowed to be.
+   */
+  const pinTerminal = useCallback(
+    async (request: {
+      readonly threadId: CodeThreadId;
+      readonly checkoutId: CodeCheckoutId;
+      readonly terminalId: CodeTerminalId;
+      readonly title?: string;
+    }) => {
+      if (client === undefined || space === null) return;
+      setPanelBusy(true);
+      try {
+        const result = await client.attachTerminal({
+          threadId: request.threadId,
+          checkoutId: request.checkoutId,
+          terminalId: request.terminalId,
+          expectedVersion: space.version,
+          ...(request.title === undefined ? {} : { title: request.title }),
+        });
+        if (mounted.current) {
+          setSpace(result.space);
+          presentationSpace.current = result.space;
+          setMessage(undefined);
+        }
+      } catch (error) {
+        if (mounted.current) {
+          setMessage(error instanceof Error ? error.message : "That terminal could not be pinned.");
+        }
+      } finally {
+        if (mounted.current) setPanelBusy(false);
+      }
+    },
+    [client, space],
+  );
+
+  /**
    * Run one focus-zone command and adopt what came back.
    *
    * A space command changes which space the window is on, so the result
@@ -1203,6 +1243,7 @@ export function useZenController(options: UseZenControllerOptions) {
   return {
     active,
     space,
+    pinTerminal,
     focusZone,
     addSpace,
     renameSpace,

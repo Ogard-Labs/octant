@@ -59,6 +59,16 @@ and says so instead of showing a stale conversation as if it were live. Bring
 it back into view or select it to resume. **Continue** still opens the thread
 in the main workspace. Code threads stay a read-only card for now.
 
+A Code thread's terminal can be pinned into a space from the terminal itself
+— **Pin to focus zone** on the terminal tab — so you can watch a build while
+you work on something else. The pinned shell is a second window onto the same
+terminal, not a copy: what you type reaches it under the same thread and
+checkout as the workspace tab, under the same approval policy, and a thread
+that is planning stays read-only. A pinned shell is never started or
+restarted from the card; that stays with the Code thread. A pinned shell
+spends the same live-card budget a pinned conversation does, so it pauses on
+the same terms and picks the shell back up where it is when you return.
+
 When Zen state cannot be decoded, a **Recover Zen** path restores the main
 workspace instead of trapping you. Zen rebuilds from the event journal after
 a restart or reconnect.

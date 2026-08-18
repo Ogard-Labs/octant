@@ -99,6 +99,7 @@ import type { RootlessThreadNavigationStatus } from "../rootless/useRootlessThre
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
 
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
+type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 
 export interface WorkspaceViewProps {
   readonly appleToolchainClient?: AppleToolchainClient;
@@ -195,6 +196,8 @@ export interface WorkspaceViewProps {
    * Open must read that answer rather than assume the tab exists. An Open
    * naming no context has nothing to confirm and resolves `true`.
    */
+  /** Pins a Code thread's terminal to the focus zone. */
+  readonly onPinTerminal?: CodeWorkspaceProps["onPinTerminal"];
   readonly onOpenSurface?: (
     surface: WorkspaceSurfaceDescriptor["kind"],
     groupId: TabGroupId,
@@ -589,6 +592,7 @@ function renderCodeTab(
           : { appleToolchainClient: props.appleToolchainClient })}
         controller={codeController}
         onOpenCodeThread={props.onOpenCodeThread}
+        {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}
         {...(props.onOpenSurface === undefined
           ? {}
           : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}

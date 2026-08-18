@@ -77,6 +77,7 @@ import {
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
 import { decodeContextSubjectRef } from "@octant/contracts/context";
 import { decodeWorkThreadId, decodeWorkTurnId, decodeWorkTurnRequestId } from "@octant/contracts";
+import type { CodeOperationId } from "@octant/contracts";
 import { decodeWindowId, type WindowId } from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -213,6 +214,7 @@ import { CodeThreadBoard } from "./code/CodeThreadBoard";
 import type { ZenClient } from "@octant/client-runtime/zen-client";
 import { ZenRoot } from "./zen/ZenRoot";
 import { ZenSurface } from "./zen/ZenSurface";
+import { ZenTerminalCard } from "./zen/ZenTerminalCard";
 import { useZenController } from "./zen/useZenController";
 import { resolveZenLiveThreadCard, type ZenLiveThreadClients } from "./zen/ZenLiveThreadCards";
 import { useThemeController } from "./theme/useThemeController";
@@ -868,6 +870,10 @@ function LaunchedShell(
         windowCapability: props.projectWindowCapability,
       }),
     [props.codeClient, props.launch.serverUrl, props.projectWindowCapability],
+  );
+  const createCodeOperationId = useCallback(
+    () => globalThis.crypto.randomUUID() as CodeOperationId,
+    [],
   );
   const automationClient = useMemo(
     () =>
@@ -3256,6 +3262,25 @@ function LaunchedShell(
           <ZenSurface
             assistant={zen.assistant}
             focusZone={zen.focusZone}
+            renderTerminal={({ element, activity }) => {
+              // The card acts under the thread that owns the shell, so its
+              // posture is that thread's own. A thread this window can no
+              // longer see is a card that opens nothing.
+              const owner = codeController.bootstrap?.threads.find(
+                (candidate) => String(candidate.id) === String(element.sourceContext.threadId),
+              );
+              if (owner === undefined) return undefined;
+              return (
+                <ZenTerminalCard
+                  client={codeClient}
+                  createOperationId={createCodeOperationId}
+                  executionPolicy={owner.executionPolicy}
+                  live={activity.activity === "live"}
+                  scope={{ checkoutId: element.checkoutId, threadId: owner.id }}
+                  terminalId={element.terminalId}
+                />
+              );
+            }}
             spacesBusy={zen.panelBusy}
             onAddSpace={(name) => void zen.addSpace(name)}
             onRemoveSpace={(spaceId) => void zen.removeSpace(spaceId)}
@@ -3625,6 +3650,7 @@ function LaunchedShell(
                   chatClient={chatClient}
                   chatController={chatController}
                   chatReadCursorStore={chatReadCursorStore}
+                  onPinTerminal={(request) => void zen.pinTerminal(request)}
                   codeController={codeController}
                   codeControllers={codeThreadControllers}
                   extensionClient={extensionClient}
