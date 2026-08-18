@@ -37,6 +37,7 @@ distilled successor of the earlier long-form design specifications.
 | [0027](0027-plans-as-journaled-artifacts.md)            | Plans as journaled artifacts                                      | Accepted |
 | [0028](0028-the-artifact-library.md)                    | The artifact library                                              | Accepted |
 | [0029](0029-artifact-storage-mirror.md)                 | The artifact storage mirror                                       | Accepted |
+| [0030](0030-routines-that-run-themselves.md)            | Routines that run themselves                                      | Accepted |
 
 ## Adding an ADR
 
