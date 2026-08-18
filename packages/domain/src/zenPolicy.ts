@@ -1081,7 +1081,7 @@ export type ZenThreadCardActivity =
       readonly reason: ZenThreadCardFrozenReason;
     };
 
-/** The canvas rectangle a reader can currently see, in space coordinates. */
+/** The rectangle of a space a reader can currently see, in space coordinates. */
 export interface ZenVisibleRegion {
   readonly x: number;
   readonly y: number;

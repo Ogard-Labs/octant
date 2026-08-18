@@ -112,7 +112,7 @@ export interface ZenSurfaceProps {
   readonly onContinueThread?: (catalogRef: ZenThreadCatalogRef) => void;
   /**
    * Builds the live surface for one attached card, or returns undefined when
-   * this window hosts no live card for that source context. The canvas holds no
+   * this window hosts no live card for that source context. The focus zone holds no
    * thread clients of its own: it says which cards may stream and hands each
    * one its own source context, and the shell decides what that context is
    * allowed to open. Nothing here is shared between cards.
@@ -235,7 +235,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
   const [referenceLabel, setReferenceLabel] = useState("");
   const surfaceRef = useRef<HTMLDivElement>(null);
   // Which cards may stream depends on how much of the space is on screen, and
-  // the canvas fills the window, so the only thing that changes that size is a
+  // the surface fills the window, so the only thing that changes that size is a
   // window resize.
   const [surfaceSize, setSurfaceSize] = useState({ width: 0, height: 0 });
   useEffect(() => {

@@ -151,7 +151,7 @@ describe("resolveZenLiveThreadCard", () => {
     expect(requested).toEqual([]);
   });
 
-  it("offers no live card for a mode this window cannot host in the canvas", () => {
+  it("offers no live card for a mode this window cannot host in the focus zone", () => {
     const context = sourceContext("code", String(cardThreadId));
 
     expect(

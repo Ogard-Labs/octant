@@ -11,9 +11,9 @@ import { OctantButton } from "../ui/base/OctantButton";
  * What an attached card is doing with its thread right now.
  *
  * Omitted means this card was never a live one — a mode the window does not
- * host in the canvas, or a window with no thread surfaces to lend — and the
+ * host in the focus zone, or a window with no thread surfaces to lend — and the
  * card stays the metadata reading it has always been. A live card renders the
- * surface the shell built for *this* card's source context; the canvas lends it
+ * surface the shell built for *this* card's source context; the focus zone lends it
  * nothing and cannot reach into it.
  */
 export type ZenLiveThreadCard =

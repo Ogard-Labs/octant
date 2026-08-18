@@ -55,9 +55,9 @@ export interface ZenLiveThreadCardInput {
  *
  * The card's source context is the only thing consulted: it names the mode and
  * the exact thread, and the surface built from it holds its own controller and
- * its own stream. Two cards on the same canvas share nothing but the clients
+ * its own stream. Two cards in the same space share nothing but the clients
  * they each opened a connection with, so neither can read, steer, or approve
- * for the other, and the canvas itself grants no authority at all.
+ * for the other, and the focus zone itself grants no authority at all.
  */
 export function resolveZenLiveThreadCard(
   input: ZenLiveThreadCardInput,
@@ -150,7 +150,7 @@ function ZenChatCardSurface(props: {
     return (
       <div className="zen-thread-element__unreachable">
         <p role="alert">
-          {controller.errorMessage ?? "This thread could not be reached from the canvas."}
+          {controller.errorMessage ?? "This thread could not be reached from the focus zone."}
         </p>
         <OctantButton onClick={controller.retry} size="sm" type="button" variant="secondary">
           Try again
