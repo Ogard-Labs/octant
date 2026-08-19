@@ -42,6 +42,7 @@ distilled successor of the earlier long-form design specifications.
 | [0032](0032-a-refusal-a-person-can-clear.md)            | A refusal a person can clear                                      | Proposed |
 | [0033](0033-first-run-asks-what-to-call-you.md)         | First run asks what to call you                                   | Accepted |
 | [0034](0034-signed-updates.md)                          | Signed, notarized, user-controlled updates                        | Proposed |
+| [0035](0035-a-thread-starts-in-a-project.md)            | A thread starts in a Project                                      | Accepted |
 
 ## Adding an ADR
 

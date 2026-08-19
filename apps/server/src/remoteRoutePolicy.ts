@@ -220,7 +220,6 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     "/api/preview/",
     "/api/canvas/",
     "/api/projects/",
-    "/api/rootless/",
     "/api/theme/",
     "/api/usage/",
     "/api/validation/",

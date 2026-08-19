@@ -57,7 +57,6 @@ export const LinkedThreadWorkspaceScope = Schema.Union(
     projectId: ProjectId,
     rootId: ThreadCreationRootId,
   }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("work-rootless") }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("code-worktree"),
     projectId: ProjectId,
@@ -66,7 +65,6 @@ export const LinkedThreadWorkspaceScope = Schema.Union(
     checkoutId: CodeCheckoutId,
     verified: Schema.Boolean,
   }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("code-rootless") }).annotations(strict),
 );
 export type LinkedThreadWorkspaceScope = typeof LinkedThreadWorkspaceScope.Type;
 
@@ -79,10 +77,8 @@ export const LinkedThreadScope = Schema.Struct({
   .pipe(
     Schema.filter((scope) => {
       if (scope.mode === "chat") return scope.workspace.kind === "chat-virtual";
-      if (scope.mode === "work") {
-        return scope.workspace.kind === "work-root" || scope.workspace.kind === "work-rootless";
-      }
-      return scope.workspace.kind === "code-worktree" || scope.workspace.kind === "code-rootless";
+      if (scope.mode === "work") return scope.workspace.kind === "work-root";
+      return scope.workspace.kind === "code-worktree";
     }),
   );
 export type LinkedThreadScope = typeof LinkedThreadScope.Type;

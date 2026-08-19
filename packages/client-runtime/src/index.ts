@@ -51,7 +51,6 @@ export * from "./remoteProductMutations";
 export * from "./remoteProjectOverview";
 export * from "./remoteShellHealth";
 export * from "./remoteSurfaceMatrix";
-export * from "./rootlessThreadClient";
 export * from "./remotePairingClient";
 export * from "./remoteSessionBridge";
 export * from "./shellClient";

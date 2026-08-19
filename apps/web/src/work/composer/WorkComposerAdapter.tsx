@@ -41,8 +41,11 @@ export interface WorkComposerAdapterProps {
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
   const trimmed = prompt.trim();
-  const canSubmit = trimmed.length > 0 && !props.creating;
   const hasFolder = props.projectId !== undefined;
+  // A Work thread belongs to a Project (decision 0035), so the first turn
+  // cannot start until one is chosen. Blocking here is what makes the
+  // Project control a requirement rather than a suggestion.
+  const canSubmit = trimmed.length > 0 && !props.creating && hasFolder;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
@@ -73,7 +76,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
           <p className="work-composer-adapter__description">
             {hasFolder
               ? "Start a work thread inside this confined folder. Documents, presentations, spreadsheets, reports, and artifacts stay local."
-              : "Start a work thread without a folder. You can attach a folder later for file access."}
+              : "Choose a Project to work in. Its folder is the only place this thread can read or write."}
           </p>
         </div>
 
@@ -143,7 +146,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                 <span>{props.projectName}</span>
               </span>
             ) : (
-              <span className="work-composer-adapter__context-item work-composer-adapter__context-item--rootless">
+              <span className="work-composer-adapter__context-item">
                 <AlertTriangle aria-hidden="true" size={12} strokeWidth={1.8} />
                 <span>No folder</span>
                 {props.onAttachFolder !== undefined ? (

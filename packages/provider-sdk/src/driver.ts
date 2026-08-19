@@ -33,7 +33,6 @@ export interface ProviderAcquireInput {
   readonly instanceId: ProviderInstanceId;
   readonly projectRoot: string;
   readonly mode?: "chat" | "work" | "code";
-  readonly workspace?: { readonly kind: "rootless" | "project-backed" };
   /** Context used by the server-owned Work request projection subscriber. */
   readonly workRequest?: {
     readonly projectId: ProjectId;

@@ -171,7 +171,7 @@ export interface ProjectSidebarSectionProps {
   readonly onProjectOpen: (project: ProjectSummary) => void;
   readonly onSelectThread?: (threadId: string) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
-  readonly rootlessLabel?: "Unfiled" | "Recents";
+  readonly unfiledLabel?: "Unfiled" | "Recents";
   readonly threads?: ReadonlyArray<ChatThreadNavigationItem>;
   readonly threadGroups?: Readonly<Record<ThreadGroupId, ReadonlyArray<ChatThreadNavigationItem>>>;
   readonly threadStatus?: "loading" | "ready" | "unavailable";
@@ -225,7 +225,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     ? groupThreadsByProject(threads!, props.projects)
     : undefined;
   const unfiled = threadsByProject?.unfiled ?? [];
-  const rootlessLabel = props.rootlessLabel ?? "Unfiled";
+  const unfiledLabel = props.unfiledLabel ?? "Unfiled";
   const activity = useMemo(
     () =>
       buildSidebarActivityView({
@@ -234,10 +234,10 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           id: String(project.id),
           name: project.name,
         })),
-        rootlessLabel,
+        unfiledLabel,
         threads: threads ?? [],
       }),
-    [props.now, props.projects, rootlessLabel, threads],
+    [props.now, props.projects, unfiledLabel, threads],
   );
 
   useEffect(() => {
@@ -420,11 +420,8 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               : { threadsByProjectId: threadsByProject.byProjectId })}
           />
           {unfiled.length > 0 && props.onSelectThread !== undefined ? (
-            <section
-              aria-label={rootlessLabel}
-              className="project-section project-section--unfiled"
-            >
-              <h2>{rootlessLabel}</h2>
+            <section aria-label={unfiledLabel} className="project-section project-section--unfiled">
+              <h2>{unfiledLabel}</h2>
               <div className="project-threads">
                 <ProjectThreadRows
                   {...(props.activeThreadId === undefined

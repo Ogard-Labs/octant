@@ -20,7 +20,6 @@ import {
   decodeThreadWorkingDirectory,
   decodeCodeWorktreeRef,
   decodeCodeWorktreeSourcePreview,
-  decodeRootlessThreadId,
   decodeWindowId,
   ReplayCursor,
   type AgentRun,
@@ -249,11 +248,8 @@ import {
 } from "./agentRun/agentRunSessionRuntime";
 import { AgentRunSessionSupervisor } from "./agentRun/agentRunSessionSupervisor";
 import { createFolderBrowseRouteHandler } from "./folderBrowseRoutes";
-import { createRootlessThreadRouteHandler } from "./rootlessThreadRoutes";
 import { createLinkedThreadRouteHandler } from "./linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
-import { RootlessThreadService } from "./rootlessThreadService";
-import { RootlessTurnRuntime } from "./rootlessTurnRuntime";
 import { FolderBrowseService } from "./folderBrowseService";
 import { ProjectService } from "./projectService";
 import { ProjectRootPort } from "./projectRootPort";
@@ -433,7 +429,6 @@ import { RoutingBrowserRuntime } from "./browser/routingBrowserRuntime";
 import type { BrowserRuntimePort } from "./browser/browserRuntimePort";
 import { createBrowserAutomationRouteHandler } from "./browserAutomationRoutes";
 import { ValidationEventStore } from "./validation/validationEventStore";
-import { readRootlessThread } from "./persistence/rootlessProjection";
 import { AppleRuntimeStore } from "./apple/appleRuntimeStore";
 import {
   AppleToolchainService,
@@ -1706,7 +1701,6 @@ export function startOctantServer(
     const shellService = new ShellService({
       persistence,
       readWorkThread: (threadId) => workThreadProjection.read(threadId),
-      readRootlessThread: (threadId) => readRootlessThread(persistence.connection, threadId),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
@@ -2209,25 +2203,10 @@ export function startOctantServer(
             revision: Number(thread?.version ?? 0),
           };
         }
-        if (scope.mode === "code") {
-          const thread = persistence.readCodeThread(decodeCodeThreadId(scope.threadId));
-          if (thread !== undefined) {
-            return {
-              allowed: thread.lifecycle === "active" && thread.projectId === scope.projectId,
-              revision: Number(thread.version),
-            };
-          }
-        }
-        const rootless = readRootlessThread(
-          persistence.connection,
-          decodeRootlessThreadId(scope.threadId),
-        );
+        const thread = persistence.readCodeThread(decodeCodeThreadId(scope.threadId));
         return {
-          allowed:
-            rootless?.mode === scope.mode &&
-            rootless.hostId === scope.hostId &&
-            rootless.projectId === scope.projectId,
-          revision: rootless?.aggregateVersion ?? 0,
+          allowed: thread?.lifecycle === "active" && thread.projectId === scope.projectId,
+          revision: Number(thread?.version ?? 0),
         };
       },
     });
@@ -2511,41 +2490,6 @@ export function startOctantServer(
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
     };
-    const rootlessThreadService = new RootlessThreadService({
-      persistence,
-      journal: persistence.journal,
-      bindingReceiptStore,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-      now: Date.now,
-      hostConnected: (hostId) => {
-        try {
-          assertHostRoutable(hostId);
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      hasActiveTurn: () => false,
-      resolveProviderDriver: (providerInstanceId) => {
-        const instance = persistence.readProviderInstance(providerInstanceId);
-        if (instance === undefined || !instance.enabled) return undefined;
-        try {
-          return attachWorkRequestRuntime(
-            makeConfiguredProviderDriver(instance, configuredDriverOptions),
-            () => workRequestRuntime,
-          );
-        } catch {
-          return undefined;
-        }
-      },
-      turnRuntime: new RootlessTurnRuntime({ dataDirectory: providerDataDirectory }),
-    });
-    const rootlessThreadRoutes = createRootlessThreadRouteHandler({
-      service: rootlessThreadService,
-      windowAuthorityStore,
-      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-    });
     const browserAuthority = new ServerBrowserAuthorityResolver({
       hostId: deriveToolHostId(providerDataDirectory),
       persistence,
@@ -4916,7 +4860,6 @@ export function startOctantServer(
       (await githubCloneRoutes(request)) ??
       (await agentProfileRoutes(request)) ??
       (await folderBrowseRoutes(request)) ??
-      (await rootlessThreadRoutes(request)) ??
       (await linkedThreadRoutes(request)) ??
       (await codeOperationApprovalRoutes(request)) ??
       (await codeExternalEditorRoutes(request)) ??

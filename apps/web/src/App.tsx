@@ -28,11 +28,6 @@ import { UsageWorkspace } from "./usage/UsageWorkspace";
 import { createWorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import { createWorkRequestClient } from "@octant/client-runtime/work-request-client";
 import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
-import {
-  createRootlessThreadClient,
-  type RootlessFirstTurnPort,
-  type RootlessThreadClient,
-} from "@octant/client-runtime/rootless-thread-client";
 import { createUsageClient } from "@octant/client-runtime/usage-client";
 import { createDiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
@@ -90,17 +85,6 @@ import type { ThemeClient } from "@octant/client-runtime/theme-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProviderClient } from "@octant/client-runtime/provider-client";
 import { decodeProjectId, type ProjectId, type ProjectSummary } from "@octant/contracts/projects";
-import {
-  decodeCancelRootlessTurnCommand,
-  decodeRootlessThreadId,
-  decodeRootlessTurnId,
-  decodeRootlessTurnRequestId,
-  decodeStartRootlessThreadTurnCommand,
-  type ComposerFolderSelection,
-  type RootlessThreadSummary,
-  type RootlessTurnLookupResult,
-  type StartRootlessThreadTurnCommand,
-} from "@octant/contracts/rootless-thread";
 import { enabledModes } from "@octant/domain/mode-policy";
 import {
   defaultEnvironmentPresentationState,
@@ -151,7 +135,6 @@ import { WorkspaceView } from "./shell/WorkspaceView";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
 import { ShellState } from "./shell/ShellState";
 import { ProjectCreateDialog } from "./projects/ProjectCreateDialog";
-import { RootlessAttachFolderDialog } from "./rootless/RootlessAttachFolderDialog";
 import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./shell/ThreadSearchOverlay";
 import { FirstRunOnboarding } from "./onboarding/FirstRunOnboarding";
 import type { WorkspaceChoices } from "./onboarding/firstRunStepModel";
@@ -224,7 +207,6 @@ import { useAppleProjects } from "./apple/useAppleProjects";
 import { useThemeController } from "./theme/useThemeController";
 import { ExecutionProfileWorkflow } from "./agentProfile/ExecutionProfileWorkflow";
 import { useExecutionProfileController } from "./agentProfile/useExecutionProfileController";
-import { useRootlessThreadNavigation } from "./rootless/useRootlessThreadNavigation";
 import { useWorkThreadNavigation } from "./work/useWorkThreadNavigation";
 import type { ChatThreadNavigationItem } from "./shell/navigationModel";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
@@ -245,8 +227,6 @@ interface InspectorOpener {
   readonly logicalTarget: "dock";
 }
 
-const ROOTLESS_START_CANCELLED = Symbol("rootless-start-cancelled");
-
 /** Words for an agent profile's default policy, so a row never relies on colour. */
 const EXECUTION_POLICY_LABEL: Record<
   import("@octant/contracts/providers").ProviderExecutionPolicy,
@@ -257,65 +237,6 @@ const EXECUTION_POLICY_LABEL: Record<
   "auto-accept-edits": "Auto-accept edits",
   plan: "Plan",
 };
-
-interface ActiveRootlessFirstTurn {
-  readonly command: StartRootlessThreadTurnCommand;
-  readonly cancelled: Promise<typeof ROOTLESS_START_CANCELLED>;
-  readonly cancel: () => void;
-}
-
-function createActiveRootlessFirstTurn(
-  command: StartRootlessThreadTurnCommand,
-): ActiveRootlessFirstTurn {
-  let cancel!: () => void;
-  const cancelled = new Promise<typeof ROOTLESS_START_CANCELLED>((resolve) => {
-    cancel = () => resolve(ROOTLESS_START_CANCELLED);
-  });
-  return { cancel, cancelled, command };
-}
-
-async function resolveRootlessFirstTurnReceipt(
-  port: RootlessFirstTurnPort,
-  active: ActiveRootlessFirstTurn,
-  setPendingMessage: (message: string) => void,
-): Promise<RootlessTurnLookupResult | typeof ROOTLESS_START_CANCELLED> {
-  let receipt = await Promise.race([port.startFirstTurn(active.command), active.cancelled]);
-  let delayBeforeLookup = false;
-  while (receipt !== ROOTLESS_START_CANCELLED && receipt.kind === "ambiguous") {
-    if (!rootlessReceiptMatchesCommand(receipt, active.command)) {
-      throw new Error("The first-turn receipt did not match the requested source identity.");
-    }
-    setPendingMessage(`${receipt.message} Checking the authoritative receipt…`);
-    if (delayBeforeLookup) {
-      const wait = await Promise.race([
-        new Promise<"retry">((resolve) => globalThis.setTimeout(() => resolve("retry"), 1_000)),
-        active.cancelled,
-      ]);
-      if (wait === ROOTLESS_START_CANCELLED) return wait;
-    }
-    receipt = await Promise.race([
-      port.lookupFirstTurn(active.command.requestId),
-      active.cancelled,
-    ]);
-    delayBeforeLookup = true;
-  }
-  return receipt;
-}
-
-function rootlessReceiptMatchesCommand(
-  receipt: RootlessTurnLookupResult,
-  command: StartRootlessThreadTurnCommand,
-): boolean {
-  if (receipt.kind === "not-created") return receipt.requestId === command.requestId;
-  const identity = receipt.kind === "accepted" ? receipt.turn : receipt;
-  return (
-    identity.requestId === command.requestId &&
-    identity.threadId === command.threadId &&
-    identity.turnId === command.turnId &&
-    identity.prompt === command.prompt &&
-    identity.capabilities.workspace === "rootless"
-  );
-}
 
 const visuallyHiddenStyle = {
   border: 0,
@@ -357,8 +278,6 @@ export interface AppProps {
   readonly projectClient?: ProjectClient;
   readonly projectWindowCapability?: string;
   readonly providerClient?: ProviderClient;
-  readonly rootlessFirstTurnPort?: RootlessFirstTurnPort;
-  readonly rootlessThreadClient?: RootlessThreadClient;
   /** Optional injected settings; the shell otherwise derives them from its bootstrap. */
   readonly settings?: ProductSurfaceSettings;
   readonly typography?: ThemeTypography;
@@ -664,13 +583,7 @@ function LaunchedShell(
     void zen.refreshThreads();
   }, [zen.active, zen.refreshThreads]);
   const [createOpen, setCreateOpen] = useState(false);
-  const [attachDialogThread, setAttachDialogThread] = useState<RootlessThreadSummary | undefined>();
-  const handleAttachRootlessFolder = useCallback(
-    (thread: RootlessThreadSummary) => setAttachDialogThread(thread),
-    [],
-  );
   const [draftCreating, setDraftCreating] = useState(false);
-  const [draftRootlessFirstTurnPending, setDraftRootlessFirstTurnPending] = useState(false);
   const [draftError, setDraftError] = useState<string>();
   const [draftPendingMessage, setDraftPendingMessage] = useState<string>();
   const [railPlaceholder, setRailPlaceholder] = useState<{
@@ -805,7 +718,6 @@ function LaunchedShell(
     previousActiveDraftKey.current = activeDraftKey;
     if (previous === undefined || previous === activeDraftKey) return;
     setDraftCreating(false);
-    setDraftRootlessFirstTurnPending(false);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
   }, [activeDraftKey]);
@@ -1021,20 +933,7 @@ function LaunchedShell(
       }),
     [props.workTurnClient, props.launch.serverUrl, props.projectWindowCapability],
   );
-  const defaultRootlessThreadClient = useMemo(
-    () =>
-      createRootlessThreadClient({
-        baseUrl: props.launch.serverUrl,
-        fetch: globalThis.fetch,
-        windowCapability: props.projectWindowCapability,
-      }),
-    [props.launch.serverUrl, props.projectWindowCapability],
-  );
-  const rootlessThreadClient = props.rootlessThreadClient ?? defaultRootlessThreadClient;
-  const rootlessFirstTurnPort = props.rootlessFirstTurnPort ?? defaultRootlessThreadClient;
-  const rootlessNavigation = useRootlessThreadNavigation(rootlessThreadClient);
   const workNavigation = useWorkThreadNavigation(workThreadClient);
-  const activeRootlessFirstTurn = useRef<ActiveRootlessFirstTurn | undefined>(undefined);
   const usageClient = useMemo(
     () =>
       createUsageClient({
@@ -1320,25 +1219,10 @@ function LaunchedShell(
               String(candidate.projectId) === target.projectId,
           )
         : undefined;
-    const rootlessTargetThread =
-      target.kind === "project-thread"
-        ? [...rootlessNavigation.byNavigationId.values()].find(
-            (candidate) =>
-              String(candidate.threadId) === target.threadId &&
-              candidate.mode === target.mode &&
-              candidate.workspaceKind === "project-backed" &&
-              candidate.projectId !== undefined &&
-              String(candidate.projectId) === target.projectId,
-          )
-        : undefined;
     if (
       target.kind === "project-thread" &&
-      ((target.mode === "code" &&
-        codeTargetThread === undefined &&
-        rootlessTargetThread === undefined) ||
-        (target.mode === "work" &&
-          workTargetThread === undefined &&
-          rootlessTargetThread === undefined))
+      ((target.mode === "code" && codeTargetThread === undefined) ||
+        (target.mode === "work" && workTargetThread === undefined))
     ) {
       return;
     }
@@ -1353,26 +1237,12 @@ function LaunchedShell(
           undefined,
           codeTargetThread.projectId,
         );
-      } else if (target.mode === "code" && rootlessTargetThread !== undefined) {
-        await controller.openCodeThread(
-          decodeCodeThreadId(rootlessTargetThread.threadId),
-          rootlessTargetThread.title,
-          rootlessTargetThread.hostId,
-          rootlessTargetThread.projectId,
-        );
       } else if (target.mode === "work" && workTargetThread !== undefined) {
         await controller.openWorkThread(
           workTargetThread.id,
           workTargetThread.title,
           undefined,
           workTargetThread.projectId,
-        );
-      } else if (target.mode === "work" && rootlessTargetThread !== undefined) {
-        await controller.openWorkThread(
-          decodeWorkThreadId(rootlessTargetThread.threadId),
-          rootlessTargetThread.title,
-          rootlessTargetThread.hostId,
-          rootlessTargetThread.projectId,
         );
       }
     })();
@@ -1382,7 +1252,6 @@ function LaunchedShell(
     workNavigation.bootstrap?.threads,
     projectController.allProjects,
     props.hostBridge,
-    rootlessNavigation.byNavigationId,
   ]);
   const workOriginProjectId =
     activeProjectId !== undefined &&
@@ -1696,8 +1565,8 @@ function LaunchedShell(
   // A ready or degraded provider still lists chat-only and unverified-tool
   // models in the Code picker, each carrying the reason it cannot be used.
   // Those entries are not choices: offering them here would let create,
-  // rootless, promotion, and automation flows select a model the picker itself
-  // marks unusable and fail only after the work exists.
+  // promotion, and automation flows select a model the picker itself marks
+  // unusable and fail only after the work exists.
   const codeProviderChoices = useMemo<ReadonlyArray<CodeThreadProviderChoice>>(
     () =>
       codeProviderGroups.flatMap((group) =>
@@ -2233,7 +2102,6 @@ function LaunchedShell(
       : representedComputerUseSessions;
   const contextSidebarWidth = previewContextWidth ?? controller.settings.contextSidebarWidth;
   const sidebarWidth = previewSidebarWidth ?? controller.settings.sidebarWidth;
-  const rootlessThreadGroups = rootlessNavigation.groupsForMode(activeMode);
   const codeProjectThreads: ReadonlyArray<ChatThreadNavigationItem> =
     codeController.status === "ready"
       ? codeController.navigation.map((thread) => ({
@@ -2249,19 +2117,11 @@ function LaunchedShell(
       : [];
   const workProjectThreads = workNavigation.navigation;
   const sidebarThreadGroups =
-    activeMode === "code" && rootlessThreadGroups !== undefined
-      ? {
-          recents: [...rootlessThreadGroups.recents, ...codeProjectThreads],
-          all: [...rootlessThreadGroups.all, ...codeProjectThreads],
-          unfiled: rootlessThreadGroups.unfiled,
-        }
-      : activeMode === "work" && rootlessThreadGroups !== undefined
-        ? {
-            recents: [...rootlessThreadGroups.recents, ...workProjectThreads],
-            all: [...rootlessThreadGroups.all, ...workProjectThreads],
-            unfiled: rootlessThreadGroups.unfiled,
-          }
-        : rootlessThreadGroups;
+    activeMode === "code"
+      ? { recents: codeProjectThreads, all: codeProjectThreads, unfiled: [] }
+      : activeMode === "work"
+        ? { recents: workProjectThreads, all: workProjectThreads, unfiled: [] }
+        : undefined;
 
   // One thread-selection handler per mode. The sidebar and every Project
   // Overview call the same one, so a row opens the same thread wherever it is
@@ -2278,16 +2138,6 @@ function LaunchedShell(
   }
 
   function selectCodeThread(navigationId: string) {
-    const rootless = rootlessNavigation.byNavigationId.get(navigationId);
-    if (rootless !== undefined) {
-      void controller.openCodeThread(
-        decodeCodeThreadId(rootless.threadId),
-        rootless.title,
-        rootless.hostId,
-        rootless.projectId === undefined ? undefined : decodeProjectId(rootless.projectId),
-      );
-      return;
-    }
     const thread = codeController.navigation.find(
       (candidate) => String(candidate.threadId) === navigationId,
     );
@@ -2301,16 +2151,6 @@ function LaunchedShell(
   }
 
   function selectWorkThread(navigationId: string) {
-    const rootless = rootlessNavigation.byNavigationId.get(navigationId);
-    if (rootless !== undefined) {
-      void controller.openWorkThread(
-        decodeWorkThreadId(rootless.threadId),
-        rootless.title,
-        rootless.hostId,
-        rootless.projectId === undefined ? undefined : decodeProjectId(rootless.projectId),
-      );
-      return;
-    }
     const thread = workNavigation.navigation.find(
       (candidate) => String(candidate.threadId) === navigationId,
     );
@@ -2349,37 +2189,30 @@ function LaunchedShell(
             ...(codeController.status === "disconnected" &&
             codeController.errorMessage !== undefined
               ? { errorMessage: codeController.errorMessage }
-              : rootlessNavigation.status === "unavailable" &&
-                  rootlessNavigation.errorMessage !== undefined
-                ? { errorMessage: rootlessNavigation.errorMessage }
-                : {}),
-            onRetry: () => void rootlessNavigation.refresh(),
+              : {}),
+            onRetry: () => void codeController.retry(),
             onSelectThread: selectCodeThread,
             status:
-              codeController.status === "disconnected" ||
-              rootlessNavigation.status === "unavailable"
+              codeController.status === "disconnected"
                 ? "unavailable"
-                : codeController.status === "ready" && rootlessNavigation.status === "ready"
+                : codeController.status === "ready"
                   ? "ready"
                   : "loading",
-            threads: sidebarThreadGroups?.all ?? codeProjectThreads,
+            threads: codeProjectThreads,
           }
         : {
-            ...(rootlessNavigation.status === "unavailable" &&
-            rootlessNavigation.errorMessage !== undefined
-              ? { errorMessage: rootlessNavigation.errorMessage }
-              : workNavigation.status === "unavailable" && workNavigation.errorMessage !== undefined
-                ? { errorMessage: workNavigation.errorMessage }
-                : {}),
-            onRetry: () => void rootlessNavigation.refresh(),
+            ...(workNavigation.status === "unavailable" && workNavigation.errorMessage !== undefined
+              ? { errorMessage: workNavigation.errorMessage }
+              : {}),
+            onRetry: () => void workNavigation.refresh(),
             onSelectThread: selectWorkThread,
             status:
-              workNavigation.status === "unavailable" || rootlessNavigation.status === "unavailable"
+              workNavigation.status === "unavailable"
                 ? "unavailable"
-                : workNavigation.status === "ready" && rootlessNavigation.status === "ready"
+                : workNavigation.status === "ready"
                   ? "ready"
                   : "loading",
-            threads: sidebarThreadGroups?.all ?? workProjectThreads,
+            threads: workProjectThreads,
           };
 
   async function openSelectedProject(project: ProjectSummary) {
@@ -2698,7 +2531,7 @@ function LaunchedShell(
   async function handleDraftCreateThread(
     mode: string,
     prompt: string,
-    folderSelection?: ComposerFolderSelection,
+    draftProjectId?: ProjectId,
     // The confirmed delivery outcome from the composer. It is only ever set by
     // explicit user confirmation in the composer UI; this handler never derives
     // or auto-confirms a heuristic suggestion of its own.
@@ -2712,7 +2545,7 @@ function LaunchedShell(
       if (mode === "chat") {
         const title = prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt;
         const chatDraftProjectId =
-          (folderSelection?.kind === "project" ? folderSelection.projectId : undefined) ??
+          draftProjectId ??
           (controller.workspace === undefined || activeGroupId === undefined
             ? undefined
             : activeDraftProjectId(controller.workspace.layouts.chat, activeGroupId));
@@ -2770,12 +2603,6 @@ function LaunchedShell(
           setDraftError("The first message could not be sent. Retry from the open thread.");
         }
       } else if (mode === "code") {
-        if (folderSelection?.kind === "no-folder") {
-          await startRootlessThread("code", prompt);
-          return;
-        }
-        const draftProjectId =
-          folderSelection?.kind === "project" ? folderSelection.projectId : undefined;
         const resolution = resolveDraftProject({
           draftProjectId,
           candidates: projectController.projects,
@@ -2874,12 +2701,6 @@ function LaunchedShell(
           created.thread.projectId,
         );
       } else if (mode === "work") {
-        if (folderSelection?.kind === "no-folder") {
-          await startRootlessThread("work", prompt);
-          return;
-        }
-        const draftProjectId =
-          folderSelection?.kind === "project" ? folderSelection.projectId : undefined;
         const resolution = resolveDraftProject({
           draftProjectId,
           candidates: projectController.projects.filter(
@@ -2963,129 +2784,6 @@ function LaunchedShell(
     } finally {
       setDraftCreating(false);
       setDraftPendingMessage(undefined);
-    }
-  }
-
-  async function startRootlessThread(mode: "work" | "code", prompt: string): Promise<void> {
-    const providerChoice = mode === "code" ? codeProviderChoices[0] : workProviderChoice;
-    const rootlessDraftSelection = resolveDraftProviderSelection(
-      draftProviderGroups,
-      draftProviderInstanceId !== undefined && draftModelId !== undefined
-        ? { providerInstanceId: draftProviderInstanceId, modelId: draftModelId }
-        : undefined,
-    );
-    const providerInstanceId =
-      rootlessDraftSelection?.providerInstanceId ?? providerChoice?.instanceId;
-    const modelId = rootlessDraftSelection?.modelId ?? providerChoice?.modelId;
-    if (providerInstanceId === undefined || modelId === undefined) {
-      setDraftError(
-        `No provider is available. Configure a provider before starting a ${mode === "code" ? "Code" : "Work"} thread.`,
-      );
-      return;
-    }
-    const title = prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt;
-    const command = decodeStartRootlessThreadTurnCommand({
-      kind: "start-rootless-thread-turn",
-      requestId: decodeRootlessTurnRequestId(globalThis.crypto.randomUUID()),
-      threadId: decodeRootlessThreadId(globalThis.crypto.randomUUID()),
-      turnId: decodeRootlessTurnId(globalThis.crypto.randomUUID()),
-      prompt,
-      title,
-      context: {
-        hostId: createHostId,
-        mode,
-        providerInstanceId,
-        modelId,
-        workspace: { kind: "rootless" },
-      },
-    });
-    const active = createActiveRootlessFirstTurn(command);
-    activeRootlessFirstTurn.current = active;
-    setDraftRootlessFirstTurnPending(true);
-    try {
-      const receipt = await resolveRootlessFirstTurnReceipt(
-        rootlessFirstTurnPort,
-        active,
-        setDraftPendingMessage,
-      );
-      if (receipt === ROOTLESS_START_CANCELLED) return;
-      if (!rootlessReceiptMatchesCommand(receipt, command)) {
-        throw new Error("The first-turn receipt did not match the requested source identity.");
-      }
-      if (receipt.kind === "not-created") {
-        setDraftError(`${receipt.message} Retry or attach a folder.`);
-        return;
-      }
-      await openAcceptedRootlessFirstTurn(command);
-    } finally {
-      if (activeRootlessFirstTurn.current === active) activeRootlessFirstTurn.current = undefined;
-      setDraftRootlessFirstTurnPending(false);
-    }
-  }
-
-  async function cancelRootlessFirstTurn(): Promise<void> {
-    const active = activeRootlessFirstTurn.current;
-    if (active === undefined) return;
-    active.cancel();
-    setDraftPendingMessage("Cancelling the first turn…");
-    try {
-      const result = await rootlessFirstTurnPort.cancelFirstTurn(
-        decodeCancelRootlessTurnCommand({
-          kind: "cancel-rootless-turn",
-          requestId: active.command.requestId,
-          threadId: active.command.threadId,
-          turnId: active.command.turnId,
-        }),
-      );
-      if (
-        result.requestId !== active.command.requestId ||
-        result.threadId !== active.command.threadId ||
-        result.turnId !== active.command.turnId
-      ) {
-        throw new Error("The cancellation receipt did not match the pending first turn.");
-      }
-      if (result.kind === "turn-already-terminal") {
-        setDraftPendingMessage("The first turn already ended. Checking its receipt…");
-        const receipt = await rootlessFirstTurnPort.lookupFirstTurn(active.command.requestId);
-        if (!rootlessReceiptMatchesCommand(receipt, active.command)) {
-          throw new Error("The first-turn lookup did not match the cancelled request.");
-        }
-        if (receipt.kind === "accepted") {
-          setDraftError(undefined);
-          await openAcceptedRootlessFirstTurn(active.command);
-          return;
-        }
-        setDraftError(`${receipt.message} The local start was stopped. Retry or attach a folder.`);
-        return;
-      }
-      setDraftError("The first turn was cancelled. Retry or attach a folder.");
-    } catch (error) {
-      const detail =
-        error instanceof Error && error.message.trim() !== ""
-          ? error.message
-          : "Retry the cancellation.";
-      setDraftError(
-        `The first turn could not be cancelled. ${detail} The local start was stopped. Retry or attach a folder.`,
-      );
-    }
-  }
-
-  async function openAcceptedRootlessFirstTurn(
-    command: StartRootlessThreadTurnCommand,
-  ): Promise<void> {
-    await rootlessNavigation.refresh();
-    if (command.context.mode === "code") {
-      await controller.openCodeThread(
-        decodeCodeThreadId(command.threadId),
-        command.title,
-        command.context.hostId,
-      );
-    } else {
-      await controller.openWorkThread(
-        decodeWorkThreadId(command.threadId),
-        command.title,
-        command.context.hostId,
-      );
     }
   }
 
@@ -3601,7 +3299,7 @@ function LaunchedShell(
                       : {}
                     : {
                         onAddProject: () => setCreateOpen(true),
-                        rootlessLabel: "Recents" as const,
+                        unfiledLabel: "Recents" as const,
                       })}
                   onArchive={(projectId) => void projectController.setArchived(projectId, true)}
                   onMove={(projectId, pinned) => void projectController.move(projectId, pinned)}
@@ -3653,11 +3351,11 @@ function LaunchedShell(
                   {...(activeMode === "chat"
                     ? {}
                     : {
-                        threadStatus: rootlessNavigation.status,
-                        ...(rootlessNavigation.errorMessage === undefined
+                        threadStatus: projectThreadsAccess.status,
+                        ...(projectThreadsAccess.errorMessage === undefined
                           ? {}
-                          : { threadErrorMessage: rootlessNavigation.errorMessage }),
-                        onRetryThreads: () => void rootlessNavigation.refresh(),
+                          : { threadErrorMessage: projectThreadsAccess.errorMessage }),
+                        onRetryThreads: () => projectThreadsAccess.onRetry?.(),
                       })}
                   projects={projectController.projects}
                 />
@@ -3943,12 +3641,6 @@ function LaunchedShell(
                       />
                     );
                   }}
-                  onRetryRootlessThreads={() => void rootlessNavigation.refresh()}
-                  {...(rootlessNavigation.errorMessage === undefined
-                    ? {}
-                    : { rootlessThreadErrorMessage: rootlessNavigation.errorMessage })}
-                  rootlessThreadStatus={rootlessNavigation.status}
-                  rootlessThreads={rootlessNavigation.byNavigationId}
                   statusBar={
                     contextController.snapshot === undefined ? null : (
                       <ContextStatusBar
@@ -4032,9 +3724,6 @@ function LaunchedShell(
                   onDraftCreateCodeThread={handleDraftCreateCodeThread}
                   onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}
                   draftCodeExecute={codeController.execute}
-                  {...(draftRootlessFirstTurnPending
-                    ? { onDraftCancelFirstTurn: () => void cancelRootlessFirstTurn() }
-                    : {})}
                   onCreateProject={(mode, name, receiptId) =>
                     projectController.create(mode, name, receiptId, createHostId)
                   }
@@ -4044,7 +3733,6 @@ function LaunchedShell(
                     ? {}
                     : { onDraftPendingMessage: draftPendingMessage })}
                   onAttachFolder={() => setCreateOpen(true)}
-                  onAttachRootlessFolder={handleAttachRootlessFolder}
                   onOpenProviderSettings={() =>
                     void controller.openSettings({ section: "providers" })
                   }
@@ -4170,29 +3858,12 @@ function LaunchedShell(
             }
           />
         ) : null}
-        {attachDialogThread !== undefined ? (
-          <RootlessAttachFolderDialog
-            client={rootlessThreadClient}
-            folderBrowseClient={folderBrowseClient}
-            hostBridge={props.hostBridge}
-            thread={attachDialogThread}
-            onAddFolder={() => {
-              setAttachDialogThread(undefined);
-              setCreateOpen(true);
-            }}
-            onAttached={() => {
-              setAttachDialogThread(undefined);
-              void rootlessNavigation.refresh();
-            }}
-            onClose={() => setAttachDialogThread(undefined)}
-          />
-        ) : null}
         {searchOpen ? (
           <ThreadSearchOverlay
             mode={activeMode}
             threads={threadSearchThreads}
             projects={threadSearchProjects}
-            rootlessLabel={activeMode === "chat" ? "Unfiled" : "Recents"}
+            unfiledLabel={activeMode === "chat" ? "Unfiled" : "Recents"}
             listing={threadSearchListing}
             {...(activeMode === "chat"
               ? {
@@ -4508,7 +4179,7 @@ function activeDraftTabKey(
   if (group === undefined) return undefined;
   const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
   return tab?.kind === "draft-thread"
-    ? `${String(tab.id)}:${tab.projectId === undefined ? "rootless" : String(tab.projectId)}`
+    ? `${String(tab.id)}:${tab.projectId === undefined ? "unfiled" : String(tab.projectId)}`
     : undefined;
 }
 
