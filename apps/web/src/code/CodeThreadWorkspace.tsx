@@ -44,6 +44,7 @@ import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
 import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
+import { ThreadExportControl } from "../thread/ThreadExportControl";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -571,8 +572,17 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           </div>
         </div>
         {childRunStatus}
-        {props.agentRunClient === undefined ? null : (
-          <div className="code-thread-workspace__toolbar" role="toolbar" aria-label="Code surfaces">
+        <div className="code-thread-workspace__toolbar" role="toolbar" aria-label="Code surfaces">
+          <ThreadExportControl
+            mode="code"
+            threadId={String(props.threadId)}
+            title={thread.title}
+            {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+            {...(props.windowCapability === undefined
+              ? {}
+              : { windowCapability: props.windowCapability })}
+          />
+          {props.agentRunClient === undefined ? null : (
             <button
               aria-pressed={auxiliarySurface === "agents"}
               className="code-thread-workspace__tool window-no-drag"
@@ -584,8 +594,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               <Bot aria-hidden="true" size={14} strokeWidth={1.7} />
               <span>Agents</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </header>
 
       {props.controller.errorMessage === undefined ? null : (

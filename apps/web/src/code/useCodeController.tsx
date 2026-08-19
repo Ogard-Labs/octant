@@ -111,6 +111,7 @@ export interface CodeThreadNavigationItem {
   readonly executionPolicy: CodeThread["executionPolicy"];
   readonly lifecycle: CodeThread["lifecycle"];
   readonly projectId: CodeThread["projectId"];
+  readonly providerInstanceId: CodeThread["providerInstanceId"];
   readonly threadId: CodeThreadId;
   readonly title: string;
   readonly updatedAt?: CodeThread["updatedAt"];
@@ -146,6 +147,13 @@ export interface CodeThreadNavigationItem {
 export interface CodeReadCursorStore {
   readonly getSnapshot: () => ReadonlyMap<string, number>;
   readonly mark: (threadId: CodeThreadId, sequence: number) => void;
+  /**
+   * Drops what this sitting has seen of a thread, so its journaled activity
+   * reads as unread again. The cursor only ever moves forward on its own — a
+   * refresh must never spend a mark the user did not see — but a person asking
+   * for the thread back in their unread list is not the refresh path.
+   */
+  readonly unmark: (threadId: CodeThreadId) => void;
   readonly subscribe: (listener: () => void) => () => void;
 }
 
@@ -159,6 +167,14 @@ export function createCodeReadCursorStore(): CodeReadCursorStore {
       if (sequence <= (snapshot.get(key) ?? 0)) return;
       const next = new Map(snapshot);
       next.set(key, sequence);
+      snapshot = next;
+      for (const listener of listeners) listener();
+    },
+    unmark: (threadId) => {
+      const key = String(threadId);
+      if (!snapshot.has(key)) return;
+      const next = new Map(snapshot);
+      next.delete(key);
       snapshot = next;
       for (const listener of listeners) listener();
     },
@@ -1093,6 +1109,7 @@ export function useCodeController(options: CodeControllerOptions) {
           executionPolicy: thread.executionPolicy,
           lifecycle: thread.lifecycle,
           projectId: thread.projectId,
+          providerInstanceId: thread.providerInstanceId,
           threadId: thread.id,
           title: thread.title,
           followUp: followUps.get(String(thread.id))?.followUp?.state === "open",
@@ -1369,6 +1386,28 @@ export function useCodeController(options: CodeControllerOptions) {
         threadId,
         expectedVersion: thread.version,
         pinned,
+      });
+      return result !== undefined;
+    },
+    [execute],
+  );
+
+  /**
+   * Move a thread out of the lists without deleting it. Archiving carries the
+   * version the renderer last saw, so two windows archiving at once produce a
+   * stale failure the reload path already handles.
+   */
+  const archiveThread = useCallback(
+    async (threadId: CodeThreadId): Promise<boolean> => {
+      const thread = bootstrapRef.current?.threads.find(
+        (candidate) => String(candidate.id) === String(threadId),
+      );
+      if (thread === undefined) return false;
+      const result = await execute({
+        kind: "change-code-thread-lifecycle",
+        threadId,
+        expectedVersion: thread.version,
+        lifecycle: "archived",
       });
       return result !== undefined;
     },
@@ -1769,6 +1808,7 @@ export function useCodeController(options: CodeControllerOptions) {
   return {
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
     answerProviderRequest,
+    archiveThread,
     cancelQueuedFollowUp,
     queueFollowUp,
     queuedFollowUps,

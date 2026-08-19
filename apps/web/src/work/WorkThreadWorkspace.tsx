@@ -26,6 +26,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
+import { ThreadExportControl } from "../thread/ThreadExportControl";
 
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
@@ -38,6 +39,8 @@ export interface WorkThreadWorkspaceProps {
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly canvasClient?: CanvasClient;
   readonly hostId?: HostId;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   readonly onThreadUpdated?: (thread: WorkThread) => void;
   /**
@@ -272,6 +275,15 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               <span>Browser</span>
             </button>
           )}
+          <ThreadExportControl
+            mode="work"
+            threadId={String(props.threadId)}
+            title={props.title}
+            {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+            {...(props.windowCapability === undefined
+              ? {}
+              : { windowCapability: props.windowCapability })}
+          />
           {thread?.lifecycle === "active" && thread.completionConfirmed !== true ? (
             <OctantButton
               aria-label="Mark delivery target complete"
