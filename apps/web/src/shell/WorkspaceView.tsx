@@ -68,6 +68,7 @@ import { WorkResearchPanel } from "../work/WorkResearchPanel";
 import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
 import { ShipPanel } from "../ship/ShipPanel";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
+import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
@@ -754,6 +755,7 @@ function renderCodeTab(
           tab={tab}
           onExecute={codeController.execute}
           files={files}
+          plan={<ThreadPlanPanel />}
           onOpenChanges={() =>
             props.onOpenCodeSurface("code-diff", tab.threadId, codeSurfaceTitle("code-diff"))
           }

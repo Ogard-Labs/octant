@@ -150,8 +150,6 @@ import { useLaunchSession } from "./shell/useLaunchSession";
 import { WorkspaceView } from "./shell/WorkspaceView";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
 import { ShellState } from "./shell/ShellState";
-import { ThreadPlanProvider } from "./plan/ThreadPlanContext";
-import { ThreadPlanPanel } from "./plan/ThreadPlanPanel";
 import { ProjectCreateDialog } from "./projects/ProjectCreateDialog";
 import { RootlessAttachFolderDialog } from "./rootless/RootlessAttachFolderDialog";
 import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./shell/ThreadSearchOverlay";
@@ -187,8 +185,6 @@ import {
   autoConfigureChatDefaults,
   chatDefaultModelCommand,
 } from "./chat/autoConfigureChatDefaults";
-import { EnvironmentGitGroup } from "./environment/EnvironmentGitGroup";
-import { useCodeEnvironmentController } from "./environment/useCodeEnvironmentController";
 import { ShellFrame, ShellThemeRoot } from "./shell/ShellFrame";
 import { SettingsSurfaceErrorBoundary } from "./shell/SettingsSurfaceErrorBoundary";
 import { RemotePairingView } from "./remote/RemotePairingView";
@@ -1493,13 +1489,6 @@ function LaunchedShell(
       (surface) => surface.id === controller.settings?.lastContextSurface,
     ) ?? availableDockSurfaces[0];
   const dockOpen = dockResolution.kind === "surface";
-  const environmentController = useCodeEnvironmentController({
-    ...(props.projectClient === undefined ? {} : { client: props.projectClient }),
-    enabled: dockResolution.kind === "surface" && dockResolution.surface.id === "code-environment",
-    project: projectController.activeProject,
-    serverUrl: props.launch.serverUrl,
-    windowCapability: props.projectWindowCapability,
-  });
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
     serverUrl: props.launch.serverUrl,
@@ -1962,7 +1951,7 @@ function LaunchedShell(
     }
     initialDockRestoreAttempted.current = true;
     setDockProjectId(activeProjectId);
-    setDockSurface(savedSurface);
+    setDockSurface(restored.surface.id);
   }, [
     activeProjectId,
     controller.settings?.lastContextSurface,
@@ -2068,9 +2057,7 @@ function LaunchedShell(
     surface: unknown,
     surfaceProjectId: ProjectId | undefined,
     availability = surfaceAvailability(
-      surface === "code-environment" || surface === "context" || surface === "navigator"
-        ? surface
-        : "project-memory",
+      surface === "context" || surface === "navigator" ? surface : "project-memory",
     ),
   ): RightUtilityDockResolution {
     const project =
@@ -4120,17 +4107,6 @@ function LaunchedShell(
                   />
                 )
               }
-              codeEnvironment={
-                <EnvironmentGitGroup
-                  {...(environmentController.errorMessage === undefined
-                    ? {}
-                    : { errorMessage: environmentController.errorMessage })}
-                  {...(environmentController.observation === undefined
-                    ? {}
-                    : { observation: environmentController.observation })}
-                  status={environmentController.status}
-                />
-              }
               isNarrow={isNarrow}
               navigator={
                 <NavigatorPanel
@@ -4145,24 +4121,10 @@ function LaunchedShell(
                 void controller.updateSettings({ contextSidebarWidth: width });
               }}
               onPreviewWidth={setPreviewContextWidth}
-              onRefreshEnvironment={environmentController.refresh}
               onSelectSurface={(surface) => {
                 const opener = document.activeElement;
                 if (opener instanceof HTMLElement) openDockSurface(surface, opener);
               }}
-              plan={
-                activeCodeThreadId === undefined ? null : (
-                  // The dock sits outside the tab that renders the thread, so
-                  // it subscribes to the visible thread's plan itself rather
-                  // than reading a provider it is not inside.
-                  <ThreadPlanProvider
-                    {...(planClient === undefined ? {} : { client: planClient })}
-                    threadId={String(activeCodeThreadId)}
-                  >
-                    <ThreadPlanPanel />
-                  </ThreadPlanProvider>
-                )
-              }
               projectMemory={
                 dockProject === undefined ? null : (
                   <ProjectMemoryInspector

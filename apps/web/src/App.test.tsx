@@ -3307,7 +3307,7 @@ describe("App", () => {
     expect(document.querySelector(".shell")).toHaveStyle({ "--octant-sidebar-width": "320px" });
   });
 
-  it("uses one validated Right Utility Dock host for Code environment and Project memory", async () => {
+  it("uses one validated Right Utility Dock host for the Project's own surfaces", async () => {
     const user = userEvent.setup();
     const value = projectBootstrap();
     const secondProject = { ...value.active[0]!, id: otherProjectId, name: "Other Repository" };
@@ -3321,7 +3321,7 @@ describe("App", () => {
     });
     const shellApi = client({
       ...codeShellBootstrap(),
-      settings: { ...settingsPastFirstRun(), lastContextSurface: "code-environment" },
+      settings: { ...settingsPastFirstRun(), lastContextSurface: "project-memory" },
     });
     vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
     vi.mocked(projectApi.memory).mockResolvedValue({
@@ -3356,22 +3356,14 @@ describe("App", () => {
     await openSidebarProject(user, "Octant");
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByText(readyEnvironment.repositoryRoot)).toBeVisible();
+    expect(await within(dock).findByText("Keep this Project's memory visible.")).toBeVisible();
     expect(document.querySelectorAll("#right-utility-dock")).toHaveLength(1);
     expect(document.querySelector("#environment-hub, #context-sidebar")).toBeNull();
-
-    await user.click(within(dock).getByRole("button", { name: "Project memory" }));
-    expect(await within(dock).findByText("Keep this Project's memory visible.")).toBeVisible();
+    // The dock answers for a Project, so it never repeats the thread's own
+    // environment: that lives beside the thread it describes.
     expect(within(dock).queryByText(readyEnvironment.repositoryRoot)).toBeNull();
+    expect(within(dock).queryByRole("button", { name: "Code environment" })).toBeNull();
     expect(projectApi.memory).toHaveBeenCalledWith(projectId);
-    await waitFor(() =>
-      expect(shellApi.execute).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          kind: "replace-settings",
-          settings: expect.objectContaining({ lastContextSurface: "project-memory" }),
-        }),
-      ),
-    );
 
     await openSidebarProject(user, "Other Repository");
     expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
@@ -3593,7 +3585,7 @@ describe("App", () => {
         projectWindowCapability={projectWindowCapability}
         shellClient={client({
           ...shell,
-          settings: { ...shell.settings, lastContextSurface: "code-environment" },
+          settings: { ...shell.settings, lastContextSurface: "project-memory" },
         })}
       />,
     );
@@ -3602,8 +3594,8 @@ describe("App", () => {
       await screen.findByRole("heading", { name: "Controller foundation" }, { timeout: 5_000 }),
     ).toBeVisible();
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findByText(readyEnvironment.repositoryRoot)).toBeVisible();
-    expect(projectApi.environment).toHaveBeenCalledWith(projectId, expect.any(AbortSignal));
+    expect(await within(dock).findByRole("heading", { name: "Project memory" })).toBeVisible();
+    expect(projectApi.memory).toHaveBeenCalledWith(projectId);
   });
 
   it("restores the saved dock surface for the active Project after restart", async () => {
@@ -3631,7 +3623,7 @@ describe("App", () => {
     vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
     const shellApi = client({
       ...bootstrap(),
-      settings: { ...settingsPastFirstRun(), lastContextSurface: "code-environment" },
+      settings: { ...settingsPastFirstRun(), lastContextSurface: "project-memory" },
       workspace: restoredWorkspace,
       workspaceVersion: restoredWorkspace.version,
     });
@@ -3647,9 +3639,9 @@ describe("App", () => {
     );
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findByText(readyEnvironment.repositoryRoot)).toBeVisible();
-    expect(projectApi.environment).toHaveBeenCalledWith(projectId, expect.any(AbortSignal));
-    await user.click(within(dock).getByRole("button", { name: "Close Code environment" }));
+    expect(await within(dock).findByRole("heading", { name: "Project memory" })).toBeVisible();
+    expect(projectApi.memory).toHaveBeenCalledWith(projectId);
+    await user.click(within(dock).getByRole("button", { name: "Close Project memory" }));
     await waitFor(() =>
       expect(shellApi.execute).toHaveBeenLastCalledWith(
         expect.objectContaining({

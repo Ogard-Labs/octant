@@ -1,4 +1,4 @@
-import { RefreshCw, X } from "lucide-react";
+import { X } from "lucide-react";
 import type { ReactNode, Ref } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
@@ -11,13 +11,10 @@ import type {
 export interface RightUtilityDockSurfaceProps {
   readonly availableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly closeButtonRef?: Ref<HTMLButtonElement>;
-  readonly codeEnvironment: ReactNode;
   readonly context: ReactNode;
   readonly onClose: () => void;
-  readonly onRefreshEnvironment?: () => Promise<void> | void;
   readonly navigator: ReactNode;
   readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
-  readonly plan: ReactNode;
   readonly projectMemory: ReactNode;
   readonly resolution: RightUtilityDockResolution;
 }
@@ -34,13 +31,6 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           <h2>{activeSurface.label}</h2>
         </div>
         <div className="right-utility-dock__actions">
-          {activeSurface.id === "code-environment" && props.onRefreshEnvironment !== undefined ? (
-            <IconButton
-              icon={RefreshCw}
-              label="Refresh Code environment"
-              onClick={() => void props.onRefreshEnvironment?.()}
-            />
-          ) : null}
           <IconButton
             icon={X}
             label={`Close ${activeSurface.label}`}
@@ -70,8 +60,6 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
             context: props.context,
             "project-memory": props.projectMemory,
             navigator: props.navigator,
-            plan: props.plan,
-            "code-environment": props.codeEnvironment,
           }[activeSurface.id]
         }
       </div>
