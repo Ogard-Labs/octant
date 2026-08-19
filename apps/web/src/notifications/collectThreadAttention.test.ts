@@ -38,6 +38,7 @@ describe("collecting thread attention", () => {
           {
             executionPolicy: "approval-gated",
             lifecycle: "active",
+            providerInstanceId: "provider-one" as never,
             projectId: "project-1" as CodeThread["projectId"],
             threadId,
             title: "Diff pane",

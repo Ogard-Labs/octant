@@ -42,22 +42,33 @@ describe("useRootlessThreadNavigation", () => {
 
     expect(result.current.groupsForMode("code")).toMatchObject({
       recents: [
-        { navigationId: rootlessThreadNavigationId(rootless), meta: "model-one" },
+        {
+          navigationId: rootlessThreadNavigationId(rootless),
+          providerInstanceId: "20000000-0000-4000-8000-000000000011",
+        },
         {
           navigationId: rootlessThreadNavigationId(projectBacked),
-          meta: "model-one",
+          providerInstanceId: "20000000-0000-4000-8000-000000000011",
           projectId: String(projectBacked.projectId),
         },
       ],
       all: [
-        { navigationId: rootlessThreadNavigationId(rootless), meta: "model-one" },
+        {
+          navigationId: rootlessThreadNavigationId(rootless),
+          providerInstanceId: "20000000-0000-4000-8000-000000000011",
+        },
         {
           navigationId: rootlessThreadNavigationId(projectBacked),
-          meta: "model-one",
+          providerInstanceId: "20000000-0000-4000-8000-000000000011",
           projectId: String(projectBacked.projectId),
         },
       ],
-      unfiled: [{ navigationId: rootlessThreadNavigationId(rootless), meta: "model-one" }],
+      unfiled: [
+        {
+          navigationId: rootlessThreadNavigationId(rootless),
+          providerInstanceId: "20000000-0000-4000-8000-000000000011",
+        },
+      ],
     });
     expect(result.current.byNavigationId.get(rootlessThreadNavigationId(projectBacked))).toEqual(
       projectBacked,
