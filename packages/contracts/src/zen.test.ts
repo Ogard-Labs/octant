@@ -23,7 +23,7 @@ import {
   MIN_ZEN_ELEMENT_WIDTH,
   MAX_ZEN_ELEMENT_WIDTH,
   ZenAssistantSearchThreadsInput,
-  ZenAssistantAttachThreadInput,
+  ZenAssistantPinThreadInput,
   ZenAssistantPlacementInput,
   ZenAssistantAppearanceInput,
   ZenAssistantCreateWidgetInput,
@@ -43,7 +43,7 @@ const decodeRecipe = Schema.decodeUnknownSync(ZenWidgetRecipe);
 const decodeBootstrap = Schema.decodeUnknownSync(ZenBootstrapResponse);
 const decodeSourceContext = Schema.decodeUnknownSync(ZenSourceContext);
 const decodeAssistantSearch = Schema.decodeUnknownSync(ZenAssistantSearchThreadsInput);
-const decodeAssistantAttach = Schema.decodeUnknownSync(ZenAssistantAttachThreadInput);
+const decodeAssistantAttach = Schema.decodeUnknownSync(ZenAssistantPinThreadInput);
 const decodeAssistantPlacement = Schema.decodeUnknownSync(ZenAssistantPlacementInput);
 const decodeAssistantAppearance = Schema.decodeUnknownSync(ZenAssistantAppearanceInput);
 const decodeAssistantCreateWidget = Schema.decodeUnknownSync(ZenAssistantCreateWidgetInput);
@@ -1418,7 +1418,7 @@ describe("Zen Assistant typed actions", () => {
   it("decodes structured conflict results for provider continuation", () => {
     expect(
       decodeAssistantToolResult({
-        action: "attach-thread",
+        action: "pin-thread",
         status: "conflict",
         code: "stale-version",
         message: "Zen changed elsewhere.",

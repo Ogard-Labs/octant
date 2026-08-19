@@ -51,7 +51,7 @@ export interface ZenLiveThreadCardInput {
 }
 
 /**
- * Decide what one attached card shows.
+ * Decide what one pinned card shows.
  *
  * The card's source context is the only thing consulted: it names the mode and
  * the exact thread, and the surface built from it holds its own controller and

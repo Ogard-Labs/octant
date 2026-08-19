@@ -850,20 +850,20 @@ export const DEFAULT_ZEN_VIEWPORT: ZenViewport = {
   scale: 1,
 };
 
-export const ZenThreadAttachRequest = Schema.Struct({
+export const ZenThreadPinRequest = Schema.Struct({
   catalogRef: ZenThreadCatalogRef,
   expectedVersion: AggregateVersion,
   geometry: Schema.optional(ZenGeometry),
 }).annotations(strict);
-export type ZenThreadAttachRequest = typeof ZenThreadAttachRequest.Type;
+export type ZenThreadPinRequest = typeof ZenThreadPinRequest.Type;
 
-export const ZenThreadAttachResult = Schema.Struct({
-  result: Schema.Literal("thread-attached"),
+export const ZenThreadPinResult = Schema.Struct({
+  result: Schema.Literal("thread-pinned"),
   entry: ZenThreadCatalogEntry,
   elementId: ZenElementId,
   space: ZenSpace,
 }).annotations(strict);
-export type ZenThreadAttachResult = typeof ZenThreadAttachResult.Type;
+export type ZenThreadPinResult = typeof ZenThreadPinResult.Type;
 
 /**
  * Pin a terminal one of this window's Code threads already owns.
@@ -872,7 +872,7 @@ export type ZenThreadAttachResult = typeof ZenThreadAttachResult.Type;
  * thread and checkout that own the shell and writes the card itself, so a
  * caller cannot pin a terminal by describing one.
  */
-export const ZenTerminalAttachRequest = Schema.Struct({
+export const ZenTerminalPinRequest = Schema.Struct({
   threadId: CodeThreadId,
   checkoutId: CodeCheckoutId,
   terminalId: CodeTerminalId,
@@ -880,14 +880,14 @@ export const ZenTerminalAttachRequest = Schema.Struct({
   geometry: Schema.optional(ZenGeometry),
   title: Schema.optional(Schema.NonEmptyTrimmedString),
 }).annotations(strict);
-export type ZenTerminalAttachRequest = typeof ZenTerminalAttachRequest.Type;
+export type ZenTerminalPinRequest = typeof ZenTerminalPinRequest.Type;
 
-export const ZenTerminalAttachResult = Schema.Struct({
-  result: Schema.Literal("terminal-attached"),
+export const ZenTerminalPinResult = Schema.Struct({
+  result: Schema.Literal("terminal-pinned"),
   elementId: ZenElementId,
   space: ZenSpace,
 }).annotations(strict);
-export type ZenTerminalAttachResult = typeof ZenTerminalAttachResult.Type;
+export type ZenTerminalPinResult = typeof ZenTerminalPinResult.Type;
 
 /**
  * Dock a research browser onto a Work or Code thread this window may see.
@@ -929,20 +929,20 @@ export type ZenResearchDockResult = typeof ZenResearchDockResult.Type;
  * window may read the document and writes the card itself, so a caller cannot
  * pin a canvas by describing one.
  */
-export const ZenCanvasAttachRequest = Schema.Struct({
+export const ZenCanvasPinRequest = Schema.Struct({
   canvasId: CanvasId,
   expectedVersion: AggregateVersion,
   geometry: Schema.optional(ZenGeometry),
   title: Schema.optional(Schema.NonEmptyTrimmedString),
 }).annotations(strict);
-export type ZenCanvasAttachRequest = typeof ZenCanvasAttachRequest.Type;
+export type ZenCanvasPinRequest = typeof ZenCanvasPinRequest.Type;
 
-export const ZenCanvasAttachResult = Schema.Struct({
-  result: Schema.Literal("canvas-attached"),
+export const ZenCanvasPinResult = Schema.Struct({
+  result: Schema.Literal("canvas-pinned"),
   elementId: ZenElementId,
   space: ZenSpace,
 }).annotations(strict);
-export type ZenCanvasAttachResult = typeof ZenCanvasAttachResult.Type;
+export type ZenCanvasPinResult = typeof ZenCanvasPinResult.Type;
 
 export const ZenThreadContinuationTarget = Schema.Struct({
   result: Schema.Literal("thread-continuation"),
@@ -987,7 +987,7 @@ export type ZenAssistantSnapshot = typeof ZenAssistantSnapshot.Type;
 
 export const ZenAssistantToolName = Schema.Literal(
   "octant_zen_search_threads",
-  "octant_zen_attach_thread",
+  "octant_zen_pin_thread",
   "octant_zen_list_widgets",
   "octant_zen_create_widget",
   "octant_zen_preview_recipe",
@@ -1001,8 +1001,8 @@ export const ZenAssistantSearchThreadsInput = Schema.Struct({
 }).annotations(strict);
 export type ZenAssistantSearchThreadsInput = typeof ZenAssistantSearchThreadsInput.Type;
 
-export const ZenAssistantAttachThreadInput = ZenThreadAttachRequest;
-export type ZenAssistantAttachThreadInput = typeof ZenAssistantAttachThreadInput.Type;
+export const ZenAssistantPinThreadInput = ZenThreadPinRequest;
+export type ZenAssistantPinThreadInput = typeof ZenAssistantPinThreadInput.Type;
 
 export const ZenAssistantListWidgetsInput = Schema.Struct({}).annotations(strict);
 export type ZenAssistantListWidgetsInput = typeof ZenAssistantListWidgetsInput.Type;
@@ -1046,7 +1046,7 @@ export type ZenAssistantAppearanceInput = typeof ZenAssistantAppearanceInput.Typ
 
 export const ZenAssistantAction = Schema.Literal(
   "search-threads",
-  "attach-thread",
+  "pin-thread",
   "list-widgets",
   "create-widget",
   "preview-recipe",
@@ -1075,7 +1075,7 @@ export const ZenAssistantToolResult = Schema.Union(
     preview: ZenRecipePreview,
   }).annotations(strict),
   Schema.Struct({
-    action: Schema.Literal("attach-thread"),
+    action: Schema.Literal("pin-thread"),
     status: Schema.Literal("ok"),
     entry: ZenThreadCatalogEntry,
     elementId: ZenElementId,
@@ -1570,14 +1570,14 @@ export const decodeZenBackgroundAssetId = Schema.decodeUnknownSync(ZenBackground
 export const decodeZenThreadCatalogRef = Schema.decodeUnknownSync(ZenThreadCatalogRef);
 export const decodeZenThreadCatalogEntry = Schema.decodeUnknownSync(ZenThreadCatalogEntry);
 export const decodeZenThreadCatalogResponse = Schema.decodeUnknownSync(ZenThreadCatalogResponse);
-export const decodeZenThreadAttachRequest = Schema.decodeUnknownSync(ZenThreadAttachRequest);
-export const decodeZenThreadAttachResult = Schema.decodeUnknownSync(ZenThreadAttachResult);
+export const decodeZenThreadPinRequest = Schema.decodeUnknownSync(ZenThreadPinRequest);
+export const decodeZenThreadPinResult = Schema.decodeUnknownSync(ZenThreadPinResult);
 export const decodeZenResearchDockRequest = Schema.decodeUnknownSync(ZenResearchDockRequest);
 export const decodeZenResearchDockResult = Schema.decodeUnknownSync(ZenResearchDockResult);
-export const decodeZenCanvasAttachRequest = Schema.decodeUnknownSync(ZenCanvasAttachRequest);
-export const decodeZenCanvasAttachResult = Schema.decodeUnknownSync(ZenCanvasAttachResult);
-export const decodeZenTerminalAttachRequest = Schema.decodeUnknownSync(ZenTerminalAttachRequest);
-export const decodeZenTerminalAttachResult = Schema.decodeUnknownSync(ZenTerminalAttachResult);
+export const decodeZenCanvasPinRequest = Schema.decodeUnknownSync(ZenCanvasPinRequest);
+export const decodeZenCanvasPinResult = Schema.decodeUnknownSync(ZenCanvasPinResult);
+export const decodeZenTerminalPinRequest = Schema.decodeUnknownSync(ZenTerminalPinRequest);
+export const decodeZenTerminalPinResult = Schema.decodeUnknownSync(ZenTerminalPinResult);
 export const decodeZenThreadContinuationTarget = Schema.decodeUnknownSync(
   ZenThreadContinuationTarget,
 );
@@ -1585,8 +1585,8 @@ export const decodeZenAssistantSnapshot = Schema.decodeUnknownSync(ZenAssistantS
 export const decodeZenAssistantSearchThreadsInput = Schema.decodeUnknownSync(
   ZenAssistantSearchThreadsInput,
 );
-export const decodeZenAssistantAttachThreadInput = Schema.decodeUnknownSync(
-  ZenAssistantAttachThreadInput,
+export const decodeZenAssistantPinThreadInput = Schema.decodeUnknownSync(
+  ZenAssistantPinThreadInput,
 );
 export const decodeZenAssistantListWidgetsInput = Schema.decodeUnknownSync(
   ZenAssistantListWidgetsInput,

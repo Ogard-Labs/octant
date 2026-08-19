@@ -114,7 +114,7 @@ const live: ZenLiveCardActivity = {
 };
 
 describe("resolveZenLiveThreadCard", () => {
-  it("opens the conversation the card was attached to, not the one the shell has open", async () => {
+  it("opens the conversation the card was pinned to, not the one the shell has open", async () => {
     const requested: string[] = [];
     const context = sourceContext("chat", String(cardThreadId));
     const card = resolveZenLiveThreadCard({

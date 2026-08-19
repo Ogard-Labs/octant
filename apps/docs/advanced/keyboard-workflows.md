@@ -50,9 +50,9 @@ Switching space changes nothing about what is pinned to either one, and
 grants nothing: every pinned element still acts under its own source
 context.
 
-An attached Chat or Work thread is a live card: its transcript and composer
+A pinned Chat or Work thread is a live card: its transcript and composer
 run inside the card, so you can follow and answer that thread without leaving
-Zen. Each card acts only for the thread it was attached to. A few cards stream
+Zen. Each card acts only for the thread it was pinned to. A few cards stream
 at a time — the one you have selected first, then the ones nearest the front —
 and a card that is minimized, panned out of view, or waiting its turn pauses
 and says so instead of showing a stale conversation as if it were live. Bring

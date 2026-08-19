@@ -7,7 +7,7 @@ export interface ZenThreadPickerProps {
   readonly query: string;
   readonly busy?: boolean;
   readonly message?: string;
-  readonly onAttach: (catalogRef: ZenThreadCatalogRef) => void;
+  readonly onPin: (catalogRef: ZenThreadCatalogRef) => void;
   readonly onClose: () => void;
   readonly onQueryChange: (query: string) => void;
 }
@@ -18,7 +18,7 @@ export function ZenThreadPicker(props: ZenThreadPickerProps) {
       <header className="zen-panel__header">
         <div>
           <h2>Threads</h2>
-          <p>Authorized work on this Mac. Attachments keep their original authority.</p>
+          <p>Authorized work on this Mac. A pinned card keeps its original authority.</p>
         </div>
         <OctantButton onClick={props.onClose} type="button" variant="ghost">
           Close
@@ -48,12 +48,12 @@ export function ZenThreadPicker(props: ZenThreadPickerProps) {
               </p>
             </div>
             <OctantButton
-              aria-label={`Attach ${entry.title}`}
-              onClick={() => props.onAttach(entry.catalogRef)}
+              aria-label={`Pin ${entry.title}`}
+              onClick={() => props.onPin(entry.catalogRef)}
               type="button"
               variant="secondary"
             >
-              Attach
+              Pin
             </OctantButton>
           </article>
         ))}

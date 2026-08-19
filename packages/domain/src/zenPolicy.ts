@@ -75,7 +75,7 @@ export const MAX_ZEN_WIDGET_RECIPE_BYTES = 64 * 1024;
 export const MAX_ZEN_ELEMENT_Z_INDEX = 1000;
 
 /**
- * How many attached thread cards may hold a live transcript at once.
+ * How many pinned thread cards may hold a live transcript at once.
  *
  * `MAX_ZEN_ELEMENTS` was sized for widgets, which cost one render and nothing
  * more. A live card holds its own stream — a thread card its conversation, a
@@ -1105,7 +1105,7 @@ function stillBackground(background: ZenAppearance["background"]): ZenAppearance
   return { ...background, presetId: still.id };
 }
 
-/** Why an attached thread card is not streaming. */
+/** Why a pinned thread card is not streaming. */
 export type ZenLiveCardFrozenReason = "minimized" | "off-screen" | "budget";
 
 export type ZenLiveCardActivity =
@@ -1132,7 +1132,7 @@ export interface ZenLiveCardActivityInput {
 }
 
 /**
- * Decide which attached thread cards stream and which hold still.
+ * Decide which pinned thread cards stream and which hold still.
  *
  * A frozen card is not a degraded card: it keeps its identity and its metadata
  * reading, and the reader brings it back by looking at it. Ranking follows what

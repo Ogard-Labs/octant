@@ -286,15 +286,15 @@ describe("Zen routes", () => {
   it("attaches an exact catalog reference and rejects caller-supplied source authority", async () => {
     const windowAuthorityStore = new WindowAuthorityStore();
     windowAuthorityStore.register({ windowId, capability, now: 0 });
-    const attachThread = vi.fn(async () => ({ result: "thread-attached" as const }));
+    const pinThread = vi.fn(async () => ({ result: "thread-pinned" as const }));
     const handler = createZenRouteHandler({
       windowAuthorityStore,
-      zenService: { attachThread } as never,
+      zenService: { pinThread } as never,
       now: () => 0,
     });
 
     const accepted = await handler(
-      new Request("http://127.0.0.1/api/zen/threads/attach", {
+      new Request("http://127.0.0.1/api/zen/threads/pin", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -304,7 +304,7 @@ describe("Zen routes", () => {
       }),
     );
     const forged = await handler(
-      new Request("http://127.0.0.1/api/zen/threads/attach", {
+      new Request("http://127.0.0.1/api/zen/threads/pin", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -319,9 +319,9 @@ describe("Zen routes", () => {
     );
 
     expect(accepted?.status).toBe(200);
-    expect(attachThread).toHaveBeenCalledWith(windowId, { catalogRef, expectedVersion: 2 });
+    expect(pinThread).toHaveBeenCalledWith(windowId, { catalogRef, expectedVersion: 2 });
     expect(forged?.status).toBe(400);
-    expect(attachThread).toHaveBeenCalledTimes(1);
+    expect(pinThread).toHaveBeenCalledTimes(1);
   });
 
   it("resolves continuation from the exact source-qualified reference", async () => {
@@ -477,13 +477,13 @@ describe("Zen terminal routes", () => {
     expectedVersion: 2,
   };
 
-  function terminalRouteFixture(attachTerminal: () => unknown) {
+  function terminalRouteFixture(pinTerminal: () => unknown) {
     const windowAuthorityStore = new WindowAuthorityStore();
     windowAuthorityStore.register({ windowId, capability, now: 0 });
     return createZenRouteHandler({
       windowAuthorityStore,
       zenService: {
-        attachTerminal: vi.fn(async () => attachTerminal()),
+        pinTerminal: vi.fn(async () => pinTerminal()),
         handleCommand: vi.fn(),
       } as never,
       now: () => 0,
@@ -491,10 +491,10 @@ describe("Zen terminal routes", () => {
   }
 
   it("pins a terminal for the window that proved its own identity", async () => {
-    const handler = terminalRouteFixture(() => ({ result: "terminal-attached" }));
+    const handler = terminalRouteFixture(() => ({ result: "terminal-pinned" }));
 
     const response = await handler(
-      new Request("http://127.0.0.1/api/zen/terminals/attach", {
+      new Request("http://127.0.0.1/api/zen/terminals/pin", {
         method: "POST",
         headers: { "x-octant-window-capability": capability },
         body: JSON.stringify(terminalRequest),
@@ -502,11 +502,11 @@ describe("Zen terminal routes", () => {
     );
 
     expect(response?.status).toBe(200);
-    await expect(response?.json()).resolves.toMatchObject({ result: "terminal-attached" });
+    await expect(response?.json()).resolves.toMatchObject({ result: "terminal-pinned" });
   });
 
   it("refuses a terminal card the caller wrote itself instead of naming a terminal", async () => {
-    const handler = terminalRouteFixture(() => ({ result: "terminal-attached" }));
+    const handler = terminalRouteFixture(() => ({ result: "terminal-pinned" }));
 
     const response = await handler(
       new Request("http://127.0.0.1/api/zen/command", {
@@ -544,10 +544,10 @@ describe("Zen terminal routes", () => {
   });
 
   it("refuses to pin a terminal for a caller that cannot prove the window", async () => {
-    const handler = terminalRouteFixture(() => ({ result: "terminal-attached" }));
+    const handler = terminalRouteFixture(() => ({ result: "terminal-pinned" }));
 
     const response = await handler(
-      new Request("http://127.0.0.1/api/zen/terminals/attach", {
+      new Request("http://127.0.0.1/api/zen/terminals/pin", {
         method: "POST",
         body: JSON.stringify(terminalRequest),
       }),

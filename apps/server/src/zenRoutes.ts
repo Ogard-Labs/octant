@@ -1,10 +1,10 @@
 import {
   decodeZenCommand,
   decodeZenFocusZoneCommand,
-  decodeZenCanvasAttachRequest,
+  decodeZenCanvasPinRequest,
   decodeZenResearchDockRequest,
-  decodeZenTerminalAttachRequest,
-  decodeZenThreadAttachRequest,
+  decodeZenTerminalPinRequest,
+  decodeZenThreadPinRequest,
   decodeZenThreadCatalogRef,
   ZenError,
   type ZenCommand,
@@ -73,14 +73,14 @@ export function createZenRouteHandler(dependencies: ZenRouteDependencies) {
     if (url.pathname === "/api/zen/threads" && request.method === "GET") {
       return await handleZenThreadSearch(request, url, origin, dependencies, now);
     }
-    if (url.pathname === "/api/zen/threads/attach" && request.method === "POST") {
-      return await handleZenThreadAttach(request, url, origin, dependencies, now);
+    if (url.pathname === "/api/zen/threads/pin" && request.method === "POST") {
+      return await handleZenThreadPin(request, url, origin, dependencies, now);
     }
-    if (url.pathname === "/api/zen/terminals/attach" && request.method === "POST") {
-      return await handleZenTerminalAttach(request, url, origin, dependencies, now);
+    if (url.pathname === "/api/zen/terminals/pin" && request.method === "POST") {
+      return await handleZenTerminalPin(request, url, origin, dependencies, now);
     }
-    if (url.pathname === "/api/zen/canvases/attach" && request.method === "POST") {
-      return await handleZenCanvasAttach(request, url, origin, dependencies, now);
+    if (url.pathname === "/api/zen/canvases/pin" && request.method === "POST") {
+      return await handleZenCanvasPin(request, url, origin, dependencies, now);
     }
     if (url.pathname === "/api/zen/research/dock" && request.method === "POST") {
       return await handleZenResearchDock(request, url, origin, dependencies, now);
@@ -315,7 +315,7 @@ async function handleZenThreadSearch(
   }
 }
 
-async function handleZenThreadAttach(
+async function handleZenThreadPin(
   request: Request,
   url: URL,
   origin: string | null,
@@ -324,17 +324,17 @@ async function handleZenThreadAttach(
 ): Promise<Response> {
   let windowId: WindowId;
   try {
-    if (url.search !== "") return failureResponse("Zen thread attachment is invalid.", 400, origin);
+    if (url.search !== "") return failureResponse("Zen thread pin is invalid.", 400, origin);
     windowId = authenticateWindow(request, deps.windowAuthorityStore, now());
   } catch (error) {
-    return authenticationFailure(error, "Zen thread attachment", origin);
+    return authenticationFailure(error, "Zen thread pin", origin);
   }
   try {
-    const body = decodeZenThreadAttachRequest(await request.json());
-    return jsonResponse(await deps.zenService.attachThread(windowId, body), origin);
+    const body = decodeZenThreadPinRequest(await request.json());
+    return jsonResponse(await deps.zenService.pinThread(windowId, body), origin);
   } catch (error) {
     if (error instanceof ZenError) return zenFailureResponse(error, origin);
-    return failureResponse("Zen thread attachment is invalid.", 400, origin);
+    return failureResponse("Zen thread pin is invalid.", 400, origin);
   }
 }
 
@@ -345,7 +345,7 @@ async function handleZenThreadAttach(
  * are: the caller names a terminal, and the server writes the card. There is no
  * body here that could describe a shell into existence.
  */
-async function handleZenTerminalAttach(
+async function handleZenTerminalPin(
   request: Request,
   url: URL,
   origin: string | null,
@@ -355,21 +355,18 @@ async function handleZenTerminalAttach(
   let windowId: WindowId;
   try {
     if (url.search !== "") {
-      return failureResponse("Zen terminal attachment is invalid.", 400, origin);
+      return failureResponse("Zen terminal pin is invalid.", 400, origin);
     }
     windowId = authenticateWindow(request, deps.windowAuthorityStore, now());
   } catch (error) {
-    return authenticationFailure(error, "Zen terminal attachment", origin);
+    return authenticationFailure(error, "Zen terminal pin", origin);
   }
   try {
-    const body = decodeZenTerminalAttachRequest(await request.json());
-    return jsonResponse(
-      await deps.zenService.attachTerminal(windowId, body, request.signal),
-      origin,
-    );
+    const body = decodeZenTerminalPinRequest(await request.json());
+    return jsonResponse(await deps.zenService.pinTerminal(windowId, body, request.signal), origin);
   } catch (error) {
     if (error instanceof ZenError) return zenFailureResponse(error, origin);
-    return failureResponse("Zen terminal attachment is invalid.", 400, origin);
+    return failureResponse("Zen terminal pin is invalid.", 400, origin);
   }
 }
 
@@ -380,7 +377,7 @@ async function handleZenTerminalAttach(
  * terminal is: the caller names a canvas and Canvas answers whether this
  * window may read it, so no body here can describe a document into a card.
  */
-async function handleZenCanvasAttach(
+async function handleZenCanvasPin(
   request: Request,
   url: URL,
   origin: string | null,
@@ -390,18 +387,18 @@ async function handleZenCanvasAttach(
   let windowId: WindowId;
   try {
     if (url.search !== "") {
-      return failureResponse("Zen canvas attachment is invalid.", 400, origin);
+      return failureResponse("Zen canvas pin is invalid.", 400, origin);
     }
     windowId = authenticateWindow(request, deps.windowAuthorityStore, now());
   } catch (error) {
-    return authenticationFailure(error, "Zen canvas attachment", origin);
+    return authenticationFailure(error, "Zen canvas pin", origin);
   }
   try {
-    const body = decodeZenCanvasAttachRequest(await request.json());
-    return jsonResponse(await deps.zenService.attachCanvas(windowId, body, request.signal), origin);
+    const body = decodeZenCanvasPinRequest(await request.json());
+    return jsonResponse(await deps.zenService.pinCanvas(windowId, body, request.signal), origin);
   } catch (error) {
     if (error instanceof ZenError) return zenFailureResponse(error, origin);
-    return failureResponse("Zen canvas attachment is invalid.", 400, origin);
+    return failureResponse("Zen canvas pin is invalid.", 400, origin);
   }
 }
 
