@@ -141,11 +141,13 @@ describe("ShellSidebar", () => {
       const modes = screen.getByRole("group", { name: "Workspace mode" });
       const search = screen.getByRole("button", { name: "Search" });
       const projects = screen.getByRole("navigation", { name: "Projects" });
-      const settings = screen.getByRole("button", { name: "Settings" });
+      // The foot of the sidebar names the person, and their settings are one
+      // of the places their own row leads to.
+      const profile = screen.getByRole("button", { name: "Set your name" });
 
       expect(modes.compareDocumentPosition(search)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(search.compareDocumentPosition(projects)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-      expect(projects.compareDocumentPosition(settings)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(projects.compareDocumentPosition(profile)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(container.querySelector(".sidebar__utility--filled")).toBeNull();
       expect(search).toHaveClass("shell-icon-button");
       expect(search).not.toHaveTextContent("Search");
@@ -154,7 +156,8 @@ describe("ShellSidebar", () => {
       expect(screen.queryByRole("button", { name: "New Chat Project" })).not.toBeInTheDocument();
 
       await user.click(search);
-      await user.click(settings);
+      await user.click(profile);
+      await user.click(screen.getByRole("button", { name: "Settings" }));
       expect(onOpenSearch).toHaveBeenCalledOnce();
       expect(onOpenSettings).toHaveBeenCalledOnce();
     },
