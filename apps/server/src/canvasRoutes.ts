@@ -1,4 +1,5 @@
 import {
+  type CanvasId,
   decodeCanvasActionResult,
   decodeCanvasGetOutcome,
   decodeCanvasHistoryOutcome,
@@ -57,6 +58,35 @@ export interface CanvasRouteDependencies {
 export interface CanvasActiveContext {
   readonly mode: ShellBootstrap["workspace"]["activeMode"];
   readonly projectId: ProjectId | null;
+}
+
+/** What it takes to decide whether one window may read one Canvas. */
+export interface CanvasWindowReadDependencies {
+  readonly canvasProjection: Pick<CanvasProjection, "getById">;
+  readonly projects: Pick<ProjectService, "bootstrap">;
+  readonly activeContextResolver: CanvasRouteDependencies["activeContextResolver"];
+}
+
+/**
+ * May this window read this Canvas, and what is it called?
+ *
+ * The same authorization the read route performs, offered to surfaces that
+ * need to know a Canvas is reachable before they address it — Zen pins a card
+ * by naming a canvas, and whether the caller may reach it stays this decision
+ * rather than becoming a second one kept somewhere else. Returns nothing when
+ * the answer is no, for either reason: a surface that pins a canvas has no use
+ * for the difference, and repeating it would say more about the host's
+ * contents than the caller was authorized to learn.
+ */
+export async function readCanvasForWindow(
+  dependencies: CanvasWindowReadDependencies,
+  windowId: WindowId,
+  canvasId: CanvasId,
+): Promise<{ readonly title: string } | undefined> {
+  const context = await resolveAuthorizedContext(dependencies, windowId, canvasId);
+  if (context.kind !== "ok") return undefined;
+  const entry = dependencies.canvasProjection.getById(canvasId);
+  return entry === undefined ? undefined : { title: entry.currentVersion.definition.title };
 }
 
 export function resolveCanvasActiveContext(bootstrap: ShellBootstrap): CanvasActiveContext {
@@ -802,7 +832,7 @@ async function resolveThreadReferenceCards(
 }
 
 async function resolveAuthorizedContext(
-  dependencies: CanvasRouteDependencies,
+  dependencies: CanvasWindowReadDependencies,
   windowId: WindowId,
   canvasId: ReturnType<typeof decodeCanvasId>,
 ): Promise<AuthorizedCanvasContext> {

@@ -215,6 +215,7 @@ import { CodeThreadBoard } from "./code/CodeThreadBoard";
 import type { ZenClient } from "@octant/client-runtime/zen-client";
 import { ZenRoot } from "./zen/ZenRoot";
 import { ZenSurface } from "./zen/ZenSurface";
+import { ZenCanvasCard } from "./zen/ZenCanvasCard";
 import { ZenResearchDock } from "./zen/ZenResearchDock";
 import { ZenTerminalCard } from "./zen/ZenTerminalCard";
 import { useZenController } from "./zen/useZenController";
@@ -3323,6 +3324,13 @@ function LaunchedShell(
                 />
               );
             }}
+            renderCanvas={({ element }) => {
+              // The card reads the same document a workspace tab reads, so it
+              // needs the same client and no authority of its own. Without one
+              // the card says it cannot read rather than showing nothing.
+              if (canvasClient === undefined) return undefined;
+              return <ZenCanvasCard canvasId={element.canvasId} client={canvasClient} />;
+            }}
             renderResearchDock={({ dock }) => {
               // The dock shows the bound thread's own browsing context. Zen
               // holds no browser client of its own; it hands over the binding
@@ -3752,6 +3760,7 @@ function LaunchedShell(
                   chatController={chatController}
                   chatReadCursorStore={chatReadCursorStore}
                   onPinTerminal={(request) => void zen.pinTerminal(request)}
+                  onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
                   onDockResearch={(request) =>
                     void zen.dockResearch({
                       thread: {

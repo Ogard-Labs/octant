@@ -134,6 +134,15 @@ export interface ZenSurfaceProps {
     readonly activity: ZenLiveCardActivity;
   }) => ReactNode | undefined;
   /**
+   * Builds the surface for one pinned canvas, or returns undefined when this
+   * window cannot read one. The focus zone holds no Canvas client of its own:
+   * it hands over the document the card was pinned to, and the host decides
+   * whether that canvas may be read at all.
+   */
+  readonly renderCanvas?: (input: {
+    readonly element: Extract<ZenElementPayload, { kind: "canvas" }>;
+  }) => ReactNode | undefined;
+  /**
    * Builds the docked research browser, or returns undefined when this window
    * cannot show one. Rendered outside the canvas on purpose: the page is a
    * native view the host places by absolute window bounds, so it cannot live
@@ -529,7 +538,13 @@ export function ZenSurface(props: ZenSurfaceProps) {
                       ? "Timer"
                       : element.kind === "terminal"
                         ? "Terminal"
-                        : element.kind;
+                        : element.kind === "canvas"
+                          ? // A card that hosts a document is named by that
+                            // document; three cards all labelled "Canvas" tell
+                            // a keyboard reader nothing about which one they
+                            // are on.
+                            (element.title ?? "Canvas")
+                          : element.kind;
           const geometry =
             previewGeometry?.elementId === element.elementId
               ? previewGeometry.geometry
@@ -640,6 +655,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     ) : element.kind === "terminal" ? (
                       (renderTerminalCard(element) ?? (
                         <p role="status">This window cannot open a terminal.</p>
+                      ))
+                    ) : element.kind === "canvas" ? (
+                      (props.renderCanvas?.({ element }) ?? (
+                        <p role="status">This window cannot read a canvas.</p>
                       ))
                     ) : (
                       "Unsupported Zen element"

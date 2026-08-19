@@ -89,6 +89,7 @@ describe("Zen takeover shell restore", () => {
       bootstrap: vi.fn(
         async (): Promise<ZenBootstrapResponse> => ({ space: null, focusZone: null, windowId }),
       ),
+      attachCanvas: vi.fn(),
       dockResearch: vi.fn(),
       command: vi.fn(async (cmd: ZenCommand): Promise<ZenResult> => {
         if (cmd.command === "create-space") {

@@ -19,6 +19,7 @@ import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasInventoryEntry } from "@octant/contracts";
+import type { CanvasId } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type {
   CanvasContextSelection,
@@ -199,6 +200,10 @@ export interface WorkspaceViewProps {
    */
   /** Pins a Code thread's terminal to the focus zone. */
   readonly onPinTerminal?: CodeWorkspaceProps["onPinTerminal"];
+  readonly onPinCanvasInFocusZone?: (request: {
+    readonly canvasId: CanvasId;
+    readonly title: string;
+  }) => void;
   readonly onDockResearch?: (request: {
     readonly threadId: string;
     readonly mode: "work" | "code";
@@ -1003,6 +1008,9 @@ function renderNonCodeTab(
         tab={tab}
         onAttachContext={canvasContext.onAttachCanvasContext}
         {...(props.onToggleCanvasPin === undefined ? {} : { onTogglePin: props.onToggleCanvasPin })}
+        {...(props.onPinCanvasInFocusZone === undefined
+          ? {}
+          : { onPinCanvasInFocusZone: props.onPinCanvasInFocusZone })}
       />
     );
   }
