@@ -226,6 +226,22 @@ describe("Code file watch route", () => {
     expect(await response?.json()).toMatchObject({ category: "unavailable" });
   });
 
+  it("answers a watch the host cannot open with its status instead of a stream that closes", async () => {
+    const { handler } = createRoute({
+      watchFiles: () =>
+        Promise.reject(
+          new CodeServiceError({
+            category: "unavailable",
+            message: "Code file authority is unavailable.",
+          }),
+        ),
+    });
+    const response = await handler(get(watchUrl));
+
+    expect(response?.status).toBe(503);
+    expect(await response?.json()).toMatchObject({ category: "unavailable" });
+  });
+
   it("rejects an unknown query parameter and a mutating method", async () => {
     const watchFiles = vi.fn();
     const { handler } = createRoute({ watchFiles });

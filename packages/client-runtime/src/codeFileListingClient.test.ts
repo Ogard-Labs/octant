@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CodeCheckoutId, CodeRelativePath, CodeThreadId } from "@octant/contracts";
-import { createCodeFileListingClient, CodeFileListingClientFailure } from "./codeFileListingClient";
+import {
+  createCodeFileListingClient,
+  CodeFileListingClientFailure,
+  isRefusedCodeFileWatch,
+} from "./codeFileListingClient";
 
 const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const threadId = "00000000-0000-4000-8000-000000000903" as CodeThreadId;
@@ -69,6 +73,44 @@ describe("code file listing client", () => {
     await expect(
       client(failing as unknown as typeof globalThis.fetch).list({ threadId, checkoutId }),
     ).rejects.toMatchObject({ status: 401, message: "Code request is unauthorized." });
+  });
+
+  it("tells a refused watch apart from a dropped one", async () => {
+    const unauthorized = new Response("", { status: 401 });
+    const unavailable = new Response("", { status: 503 });
+    const dropped = new Response("", { status: 200 });
+    const controller = new AbortController();
+
+    const refusal = await client((async () => unauthorized) as unknown as typeof globalThis.fetch)
+      .watch({ threadId, checkoutId }, controller.signal)
+      .next()
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    // The host said no. Reopening the watch would only be refused again, so
+    // the caller has to be able to see that rather than reconnect forever.
+    expect(refusal).toBeInstanceOf(CodeFileListingClientFailure);
+    expect(isRefusedCodeFileWatch(refusal)).toBe(true);
+    expect((refusal as CodeFileListingClientFailure).status).toBe(401);
+
+    const missing = await client((async () => unavailable) as unknown as typeof globalThis.fetch)
+      .watch({ threadId, checkoutId }, controller.signal)
+      .next()
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    expect(isRefusedCodeFileWatch(missing)).toBe(true);
+    expect((missing as CodeFileListingClientFailure).status).toBe(503);
+
+    // A stream that opened and ended is an ordinary drop, unchanged.
+    const drop = await client((async () => dropped) as unknown as typeof globalThis.fetch)
+      .watch({ threadId, checkoutId }, controller.signal)
+      .next();
+    expect(drop.done).toBe(true);
+    expect(isRefusedCodeFileWatch(drop.value)).toBe(false);
   });
 
   it("refuses a base URL that is not loopback", () => {

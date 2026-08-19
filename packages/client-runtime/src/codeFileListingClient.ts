@@ -41,13 +41,25 @@ export interface CodeFileListingClient {
   list(query: CodeFileListingQuery, signal?: AbortSignal): Promise<CodeFileListingResult>;
   /**
    * Notices that files under the checkout changed, for as long as the caller
-   * keeps the signal open. The stream ends rather than erroring when the host
-   * cannot watch, so a caller treats its end as "no longer live" and may open
-   * another one; it never means the checkout is empty.
+   * keeps the signal open. A watch the host drops ends the stream, so a caller
+   * treats its end as "no longer live" and may open another one; it never
+   * means the checkout is empty. A watch the host refuses or cannot open
+   * throws instead, because reopening it would only fail the same way.
    */
   watch(query: CodeFileWatchQuery, signal: AbortSignal): AsyncGenerator<CodeFileChangeNotice>;
   /** Bounded search of the checkout by path or by content. */
   search(query: CodeSearchRequestQuery, signal?: AbortSignal): Promise<CodeSearchResult>;
+}
+
+/** Statuses that mean the host refused the watch rather than dropping it. */
+const REFUSED_WATCH_STATUSES: ReadonlySet<number> = new Set([401, 403, 503]);
+
+/**
+ * Whether a failure from `watch` means the host refused it or cannot open it,
+ * so reopening the watch would only fail the same way.
+ */
+export function isRefusedCodeFileWatch(error: unknown): boolean {
+  return error instanceof CodeFileListingClientFailure && REFUSED_WATCH_STATUSES.has(error.status);
 }
 
 export class CodeFileListingClientFailure extends Error {
@@ -150,6 +162,10 @@ export function createCodeFileListingClient(
  * A malformed line ends the stream instead of being skipped: the notice is the
  * only signal that the surface is stale, so a body this client cannot parse is
  * a reason to stop trusting the connection, not to keep reading it.
+ *
+ * A refused or unavailable watch is told apart from a dropped one, because
+ * they call for opposite responses: a drop is reopened, a refusal never
+ * becomes allowed by asking again.
  */
 async function* readNoticeStream(
   responsePromise: Promise<Response>,
@@ -161,7 +177,16 @@ async function* readNoticeStream(
   } catch {
     return;
   }
-  if (!response.ok || response.body === null) return;
+  if (!response.ok) {
+    if (REFUSED_WATCH_STATUSES.has(response.status)) {
+      throw new CodeFileListingClientFailure(
+        "Code file watching is unauthorized or unavailable.",
+        response.status,
+      );
+    }
+    return;
+  }
+  if (response.body === null) return;
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
