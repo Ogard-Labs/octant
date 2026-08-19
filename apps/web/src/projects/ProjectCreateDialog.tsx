@@ -115,19 +115,19 @@ function ChatProjectCreateDialog(props: ProjectCreateDialogProps) {
         />
         <div className="project-dialog__actions">
           <OctantButton
-            className="project-button project-button--quiet"
             disabled={submitting}
             onClick={requestClose}
             type="button"
+            className="project-button project-button--quiet"
             variant="ghost"
           >
             Cancel
           </OctantButton>
           <OctantButton
-            className="project-button"
             disabled={submitting || name.trim() === ""}
             type="submit"
-            variant="secondary"
+            className="project-button project-button--primary"
+            variant="ghost"
           >
             Create Project
           </OctantButton>
@@ -236,18 +236,18 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         <p>Choose one directory. Octant records the binding.</p>
         <div className="project-dialog__actions">
           <OctantButton
-            className="project-button project-button--quiet"
             onClick={props.onClose}
             type="button"
+            className="project-button project-button--quiet"
             variant="ghost"
           >
             Cancel
           </OctantButton>
           <OctantButton
-            className="project-button"
             onClick={() => void beginNativeSelection()}
             type="button"
-            variant="secondary"
+            className="project-button project-button--primary"
+            variant="ghost"
           >
             {submitting ? "Retry" : "Choose folder"}
           </OctantButton>
@@ -301,10 +301,10 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
       </p>
       <div className="project-dialog__actions">
         <OctantButton
-          className="project-button"
           onClick={props.onClose}
           type="button"
-          variant="secondary"
+          className="project-button project-button--primary"
+          variant="ghost"
         >
           Close
         </OctantButton>
