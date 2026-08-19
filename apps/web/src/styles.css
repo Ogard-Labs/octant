@@ -1023,11 +1023,22 @@ button:focus-visible {
   margin-top: 2px;
 }
 
+/* A nested thread lines its title up with its Project's name rather than
+   sitting to the left of it, so the list reads as belonging to the row above.
+   The 22px is the Project row's own leading columns: 8px of padding, the 12px
+   disclosure, the 16px folder, and the two 6px gaps, less the 12px marker
+   gutter and 6px gap every thread row reserves. */
 .project-threads {
   display: grid;
   gap: 2px;
   margin: 2px 0 6px;
-  padding-left: 14px;
+  padding-left: 22px;
+}
+
+/* Recents has no Project above it, so its rows start where a Project row's own
+   glyph does instead of indenting under nothing. */
+.project-section--unfiled .project-threads {
+  padding-left: 0;
 }
 
 .project-section__header {
