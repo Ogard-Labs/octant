@@ -1,5 +1,6 @@
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import type { ProjectViewSwitcherPresentation } from "@octant/contracts/shell";
+import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
 import {
   Box,
@@ -311,7 +312,12 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             persistProjectViewState(selectCodeProjectView(projectViewState, viewId))
           }
           presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
-          projectCount={visibleProjects.length}
+          projectCountFor={(viewId) =>
+            visibleCodeProjects(
+              props.projects.map((project) => ({ ...project, id: String(project.id) })),
+              { ...projectViewState, activeViewId: viewId },
+            ).length
+          }
           state={projectViewState}
         />
       ) : null}
@@ -636,8 +642,6 @@ function ProjectActionsMenu(props: {
   readonly project: ProjectSummary;
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const itemClass =
-    "window-no-drag relative flex cursor-default items-center rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground";
   return (
     <MenuPrimitive.Root>
       <MenuPrimitive.Trigger
@@ -654,7 +658,7 @@ function ProjectActionsMenu(props: {
             finalFocus={triggerRef}
           >
             <MenuPrimitive.Item
-              className={itemClass}
+              className={MENU_ITEM_CLASS}
               closeOnClick
               label="Open Project"
               onClick={() => props.onOpen(props.project)}
@@ -662,7 +666,7 @@ function ProjectActionsMenu(props: {
               Open Project
             </MenuPrimitive.Item>
             <MenuPrimitive.Item
-              className={itemClass}
+              className={MENU_ITEM_CLASS}
               closeOnClick
               label={props.project.pinned ? "Unpin Project" : "Pin Project"}
               onClick={() => props.onMove(props.project.id, !props.project.pinned)}
@@ -670,7 +674,7 @@ function ProjectActionsMenu(props: {
               {props.project.pinned ? "Unpin Project" : "Pin Project"}
             </MenuPrimitive.Item>
             <MenuPrimitive.Item
-              className={itemClass}
+              className={MENU_ITEM_CLASS}
               closeOnClick
               disabled={!props.canMoveUp}
               label="Move up"
@@ -681,7 +685,7 @@ function ProjectActionsMenu(props: {
               Move up
             </MenuPrimitive.Item>
             <MenuPrimitive.Item
-              className={itemClass}
+              className={MENU_ITEM_CLASS}
               closeOnClick
               disabled={!props.canMoveDown}
               label="Move down"
@@ -697,7 +701,7 @@ function ProjectActionsMenu(props: {
               Move down
             </MenuPrimitive.Item>
             <MenuPrimitive.Item
-              className={itemClass}
+              className={MENU_ITEM_CLASS}
               closeOnClick
               label="Archive Project"
               onClick={() => props.onArchive(props.project.id)}
@@ -818,7 +822,7 @@ function CodeProjectViewSwitcher(props: {
   readonly onEdit: (viewId: string) => void;
   readonly onSelect: (viewId: string) => void;
   readonly presentation: ProjectViewSwitcherPresentation;
-  readonly projectCount: number;
+  readonly projectCountFor: (viewId: string) => number;
   readonly state: CodeProjectViewState;
 }) {
   const allProjectsView = {
@@ -833,7 +837,6 @@ function CodeProjectViewSwitcher(props: {
   ];
   const active =
     options.find((option) => option.id === props.state.activeViewId) ?? allProjectsView;
-  const canEdit = props.state.activeViewId !== ALL_CODE_PROJECTS_VIEW_ID;
   const newViewButton = (
     <OctantButton
       aria-label="New project view"
@@ -852,67 +855,149 @@ function CodeProjectViewSwitcher(props: {
       {props.presentation === "inline" ? (
         <div aria-label="Project views" className="code-project-views__inline" role="group">
           {options.map((option) => (
-            <OctantButton
-              aria-label={option.name}
-              aria-pressed={option.id === active.id}
-              className="code-project-views__inline-button"
+            <CodeProjectViewChip
               key={option.id}
-              onClick={() => props.onSelect(option.id)}
-              size="icon"
-              title={option.name}
-              type="button"
-              variant="ghost"
-            >
-              <CodeProjectViewGlyph color={option.color} icon={option.icon} />
-            </OctantButton>
+              onDelete={props.onDelete}
+              onEdit={props.onEdit}
+              onSelect={props.onSelect}
+              projectCount={props.projectCountFor(option.id)}
+              selected={option.id === active.id}
+              view={option}
+            />
           ))}
           {newViewButton}
         </div>
       ) : (
         <div className="code-project-views__row">
-          <OctantMenu
-            items={options.map((option) => ({
-              icon: <CodeProjectViewGlyph color={option.color} icon={option.icon} />,
-              label: option.name,
-              value: option.id,
-            }))}
-            onValueChange={props.onSelect}
-            trigger={
-              <span className="code-project-views__trigger">
-                <CodeProjectViewGlyph color={active.color} icon={active.icon} />
-                <span>{active.name}</span>
-              </span>
-            }
-            triggerLabel="Project view"
-            value={props.state.activeViewId}
-          />
+          <ContextMenuPrimitive.Root>
+            <ContextMenuPrimitive.Trigger
+              render={<span className="code-project-views__trigger-wrap" />}
+            >
+              <OctantMenu
+                items={options.map((option) => ({
+                  icon: <CodeProjectViewGlyph color={option.color} icon={option.icon} />,
+                  label: option.name,
+                  value: option.id,
+                }))}
+                onValueChange={props.onSelect}
+                trigger={
+                  <span className="code-project-views__trigger">
+                    <CodeProjectViewGlyph color={active.color} icon={active.icon} />
+                    <span>{active.name}</span>
+                  </span>
+                }
+                triggerLabel="Project view"
+                value={props.state.activeViewId}
+              />
+            </ContextMenuPrimitive.Trigger>
+            <CodeProjectViewMenu
+              onDelete={props.onDelete}
+              onEdit={props.onEdit}
+              projectCount={props.projectCountFor(active.id)}
+              view={active}
+            />
+          </ContextMenuPrimitive.Root>
           {newViewButton}
         </div>
       )}
-      <div className="code-project-views__meta">
-        <span>Projects {props.projectCount}</span>
-        {canEdit ? (
-          <span className="code-project-views__actions">
-            <OctantButton
-              onClick={() => props.onEdit(props.state.activeViewId)}
-              type="button"
-              variant="ghost"
-            >
-              Edit view
-            </OctantButton>
-            <OctantButton
-              onClick={() => props.onDelete(props.state.activeViewId)}
-              type="button"
-              variant="ghost"
-            >
-              Delete view
-            </OctantButton>
-          </span>
-        ) : null}
-      </div>
     </div>
   );
 }
+
+/**
+ * One project view in the rail: click to switch to it, right-click to ask about
+ * it.
+ *
+ * The count and the two edits used to sit pinned under the rail, describing
+ * whichever view happened to be active. There they read as a permanent part of
+ * the sidebar and answered for a view the reader had not asked about. On the
+ * view itself they are about the one that was right-clicked, and they are only
+ * there when someone asks.
+ */
+function CodeProjectViewChip(props: {
+  readonly onDelete: (viewId: string) => void;
+  readonly onEdit: (viewId: string) => void;
+  readonly onSelect: (viewId: string) => void;
+  readonly projectCount: number;
+  readonly selected: boolean;
+  readonly view: Pick<CodeProjectView, "id" | "name" | "icon" | "color">;
+}) {
+  return (
+    <ContextMenuPrimitive.Root>
+      <ContextMenuPrimitive.Trigger
+        render={
+          <OctantButton
+            aria-label={props.view.name}
+            aria-pressed={props.selected}
+            className="code-project-views__inline-button"
+            onClick={() => props.onSelect(props.view.id)}
+            size="icon"
+            title={props.view.name}
+            type="button"
+            variant="ghost"
+          >
+            <CodeProjectViewGlyph color={props.view.color} icon={props.view.icon} />
+          </OctantButton>
+        }
+      />
+      <CodeProjectViewMenu
+        onDelete={props.onDelete}
+        onEdit={props.onEdit}
+        projectCount={props.projectCount}
+        view={props.view}
+      />
+    </ContextMenuPrimitive.Root>
+  );
+}
+
+/** What a project view answers when it is asked about: how many Projects it
+ * holds, and the two edits that only a saved view can take. */
+function CodeProjectViewMenu(props: {
+  readonly onDelete: (viewId: string) => void;
+  readonly onEdit: (viewId: string) => void;
+  readonly projectCount: number;
+  readonly view: Pick<CodeProjectView, "id" | "name">;
+}) {
+  // All Projects is not a saved view: it has no definition to edit and nothing
+  // to delete, so its menu says what it holds and stops there.
+  const savedView = String(props.view.id) !== String(ALL_CODE_PROJECTS_VIEW_ID);
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Positioner className="z-50 window-no-drag">
+        <ContextMenuPrimitive.Popup className="window-no-drag z-50 min-w-44 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none">
+          <ContextMenuPrimitive.Group>
+            <ContextMenuPrimitive.GroupLabel className="px-2 py-1.5 text-xs text-muted-foreground">
+              {props.view.name} &middot; Projects {props.projectCount}
+            </ContextMenuPrimitive.GroupLabel>
+          </ContextMenuPrimitive.Group>
+          {savedView ? (
+            <>
+              <ContextMenuPrimitive.Item
+                className={MENU_ITEM_CLASS}
+                closeOnClick
+                label="Edit view"
+                onClick={() => props.onEdit(props.view.id)}
+              >
+                Edit view
+              </ContextMenuPrimitive.Item>
+              <ContextMenuPrimitive.Item
+                className={MENU_ITEM_CLASS}
+                closeOnClick
+                label="Delete view"
+                onClick={() => props.onDelete(props.view.id)}
+              >
+                Delete view
+              </ContextMenuPrimitive.Item>
+            </>
+          ) : null}
+        </ContextMenuPrimitive.Popup>
+      </ContextMenuPrimitive.Positioner>
+    </ContextMenuPrimitive.Portal>
+  );
+}
+
+const MENU_ITEM_CLASS =
+  "window-no-drag relative flex cursor-default items-center rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground";
 
 function CodeProjectViewEditorDialog(props: {
   readonly mode: "create" | "edit";

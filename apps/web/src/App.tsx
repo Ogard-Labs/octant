@@ -3530,7 +3530,8 @@ function LaunchedShell(
             onAddFolder={() => setCreateOpen(true)}
             onOpenSearch={openThreadSearch}
             {...(isNarrow ? {} : { onCollapseSidebar: () => setSidebarCollapsedPersistent(true) })}
-            onOpenSettings={controller.openSettings}
+            onOpenSettings={(deepLink) => void controller.openSettings(deepLink)}
+            onOpenZen={() => void zen.enterZen()}
             onRetryChat={() => void chatController.retry()}
             onSelectMode={handleSelectMode}
             settings={presentedShellSettings ?? controller.settings}
