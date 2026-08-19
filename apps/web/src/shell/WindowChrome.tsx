@@ -1,12 +1,5 @@
-import { useEffect, useId, useRef, useState, type Ref } from "react";
-import {
-  Frame,
-  MoreHorizontal,
-  PanelLeftOpen,
-  PanelRight,
-  RotateCcw,
-  Sparkles,
-} from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { MoreHorizontal, PanelLeftOpen, PanelRight, Sparkles } from "lucide-react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
@@ -22,8 +15,6 @@ export interface WindowChromeProps {
   readonly material: ResolvedSidebarMaterial;
   readonly onOpenZen?: () => void;
   readonly onRecoverZen?: () => void;
-  readonly onResetLayout: () => void;
-  readonly onResetWindowBounds?: () => Promise<void> | void;
   readonly onToggleDock: () => void;
   /** Present only while the sidebar is hidden: the chrome takes over the leading edge. */
   readonly onExpandSidebar?: () => void;
@@ -31,7 +22,6 @@ export interface WindowChromeProps {
 }
 
 export function WindowChrome(props: WindowChromeProps) {
-  const resetWindowBounds = props.onResetWindowBounds;
   const openZen = props.onOpenZen;
   const recoverZen = props.onRecoverZen;
   return (
@@ -77,13 +67,11 @@ export function WindowChrome(props: WindowChromeProps) {
             dockAvailable={props.dockAvailable}
             dockExpanded={props.dockExpanded}
             dockLabel={props.dockLabel}
-            onResetLayout={props.onResetLayout}
             onToggleDock={props.onToggleDock}
             {...(openZen === undefined ? {} : { onOpenZen: openZen })}
             {...(recoverZen === undefined || !props.zenRecoveryNeeded
               ? {}
               : { onRecoverZen: recoverZen })}
-            {...(resetWindowBounds === undefined ? {} : { onResetWindowBounds: resetWindowBounds })}
           />
         ) : (
           <>
@@ -106,20 +94,6 @@ export function WindowChrome(props: WindowChromeProps) {
                 onClick={props.onToggleDock}
               />
             ) : null}
-            <IconButton
-              className="window-chrome__button"
-              icon={RotateCcw}
-              label="Reset layout"
-              onClick={props.onResetLayout}
-            />
-            {resetWindowBounds === undefined ? null : (
-              <IconButton
-                className="window-chrome__button"
-                icon={Frame}
-                label="Reset window bounds"
-                onClick={resetWindowBounds}
-              />
-            )}
           </>
         )}
       </div>
@@ -133,20 +107,19 @@ function NarrowOverflow(props: {
   readonly dockLabel: string;
   readonly onOpenZen?: () => void;
   readonly onRecoverZen?: () => void;
-  readonly onResetLayout: () => void;
-  readonly onResetWindowBounds?: () => Promise<void> | void;
   readonly onToggleDock: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const resetWindowBounds = props.onResetWindowBounds;
   const openZen = props.onOpenZen;
   const recoverZen = props.onRecoverZen;
   const disclosureId = useId();
   const trigger = useRef<HTMLButtonElement>(null);
-  const firstAction = useRef<HTMLButtonElement>(null);
+  const disclosure = useRef<HTMLDivElement>(null);
 
+  // Every action here is conditional, so the menu focuses whichever one is
+  // actually first rather than a named action that may not have rendered.
   useEffect(() => {
-    if (open) firstAction.current?.focus();
+    if (open) disclosure.current?.querySelector("button")?.focus();
   }, [open]);
 
   function close(): void {
@@ -181,12 +154,8 @@ function NarrowOverflow(props: {
             event.stopPropagation();
             close();
           }}
+          ref={disclosure}
         >
-          <DisclosureAction
-            buttonRef={firstAction}
-            label="Reset layout"
-            onClick={() => select(props.onResetLayout)}
-          />
           {openZen === undefined ? null : (
             <DisclosureAction label="Open Zen" onClick={() => select(openZen)} />
           )}
@@ -202,12 +171,6 @@ function NarrowOverflow(props: {
               onClick={() => select(props.onToggleDock)}
             />
           ) : null}
-          {resetWindowBounds === undefined ? null : (
-            <DisclosureAction
-              label="Reset window bounds"
-              onClick={() => select(resetWindowBounds)}
-            />
-          )}
         </div>
       ) : null}
     </div>
@@ -216,7 +179,6 @@ function NarrowOverflow(props: {
 
 function DisclosureAction(props: {
   readonly ariaControls?: string;
-  readonly buttonRef?: Ref<HTMLButtonElement>;
   readonly expanded?: boolean;
   readonly label: string;
   readonly logicalTarget?: "dock";
@@ -229,7 +191,6 @@ function DisclosureAction(props: {
       className="window-chrome__disclosure-action"
       data-dock-opener={props.logicalTarget === "dock" ? "true" : undefined}
       onClick={props.onClick}
-      ref={props.buttonRef}
       type="button"
       variant="ghost"
     >
