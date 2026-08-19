@@ -6,6 +6,7 @@ import { CodeSidebarSection } from "./CodeSidebarSection";
 const baseThread = {
   executionPolicy: "approval-gated",
   lifecycle: "active",
+  providerInstanceId: "provider-one" as never,
   projectId: "project-one" as never,
   threadId: "thread-one" as never,
   title: "Controller foundation",
@@ -86,6 +87,7 @@ describe("CodeSidebarSection", () => {
           {
             executionPolicy: "approval-gated",
             lifecycle: "active",
+            providerInstanceId: "provider-one" as never,
             projectId: "project-one" as never,
             threadId: "thread-active" as never,
             title: "Controller foundation",
@@ -93,6 +95,7 @@ describe("CodeSidebarSection", () => {
           {
             executionPolicy: "plan",
             lifecycle: "waiting",
+            providerInstanceId: "provider-one" as never,
             projectId: "project-one" as never,
             threadId: "thread-waiting" as never,
             title: "Review architecture",
@@ -126,6 +129,7 @@ describe("CodeSidebarSection", () => {
           {
             executionPolicy: "approval-gated",
             lifecycle: "active",
+            providerInstanceId: "provider-one" as never,
             projectId: "project-one" as never,
             threadId: "thread-follow" as never,
             title: "Needs approval",
@@ -134,6 +138,7 @@ describe("CodeSidebarSection", () => {
           {
             executionPolicy: "plan",
             lifecycle: "active",
+            providerInstanceId: "provider-one" as never,
             projectId: "project-one" as never,
             threadId: "thread-plain" as never,
             title: "Just browsing",
