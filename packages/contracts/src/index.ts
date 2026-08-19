@@ -72,6 +72,7 @@ export * from "./scaffolds";
 export * from "./workspacePresets";
 export * from "./threadCheckpoints";
 export * from "./threadCreation";
+export * from "./threadExport";
 export * from "./usage";
 export * from "./usageRpc";
 export * from "./usageDashboard";

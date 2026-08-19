@@ -43,6 +43,7 @@ import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
 import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
+import { ThreadExportControl } from "../thread/ThreadExportControl";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -556,63 +557,68 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             )}
           </div>
         </div>
-        {props.onOpenSurface === undefined &&
-        props.onOpenBrowser === undefined &&
-        props.agentRunClient === undefined ? null : (
-          <div className="code-thread-workspace__toolbar" role="toolbar" aria-label="Code surfaces">
-            {props.onOpenBrowser === undefined ? null : (
+        <div className="code-thread-workspace__toolbar" role="toolbar" aria-label="Code surfaces">
+          <ThreadExportControl
+            mode="code"
+            threadId={String(props.threadId)}
+            title={thread.title}
+            {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+            {...(props.windowCapability === undefined
+              ? {}
+              : { windowCapability: props.windowCapability })}
+          />
+          {props.onOpenBrowser === undefined ? null : (
+            <button
+              className="code-thread-workspace__tool window-no-drag"
+              onClick={props.onOpenBrowser}
+              type="button"
+            >
+              <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
+              <span>Browser</span>
+            </button>
+          )}
+          {props.onOpenSurface === undefined ? null : (
+            <>
               <button
                 className="code-thread-workspace__tool window-no-drag"
-                onClick={props.onOpenBrowser}
+                onClick={() => props.onOpenSurface?.("code-diff")}
                 type="button"
               >
-                <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
-                <span>Browser</span>
+                <GitCompare aria-hidden="true" size={14} strokeWidth={1.7} />
+                <span>Changes</span>
               </button>
-            )}
-            {props.onOpenSurface === undefined ? null : (
-              <>
-                <button
-                  className="code-thread-workspace__tool window-no-drag"
-                  onClick={() => props.onOpenSurface?.("code-diff")}
-                  type="button"
-                >
-                  <GitCompare aria-hidden="true" size={14} strokeWidth={1.7} />
-                  <span>Changes</span>
-                </button>
-                <button
-                  className="code-thread-workspace__tool window-no-drag"
-                  onClick={() => props.onOpenSurface?.("code-terminal")}
-                  type="button"
-                >
-                  <Terminal aria-hidden="true" size={14} strokeWidth={1.7} />
-                  <span>Terminal</span>
-                </button>
-                <button
-                  className="code-thread-workspace__tool window-no-drag"
-                  onClick={() => props.onOpenSurface?.("code-test")}
-                  type="button"
-                >
-                  <ListChecks aria-hidden="true" size={14} strokeWidth={1.7} />
-                  <span>Tests</span>
-                </button>
-              </>
-            )}
-            {props.agentRunClient === undefined ? null : (
               <button
-                aria-pressed={auxiliarySurface === "agents"}
                 className="code-thread-workspace__tool window-no-drag"
-                onClick={() =>
-                  setAuxiliarySurface((current) => (current === "agents" ? undefined : "agents"))
-                }
+                onClick={() => props.onOpenSurface?.("code-terminal")}
                 type="button"
               >
-                <Bot aria-hidden="true" size={14} strokeWidth={1.7} />
-                <span>Agents</span>
+                <Terminal aria-hidden="true" size={14} strokeWidth={1.7} />
+                <span>Terminal</span>
               </button>
-            )}
-          </div>
-        )}
+              <button
+                className="code-thread-workspace__tool window-no-drag"
+                onClick={() => props.onOpenSurface?.("code-test")}
+                type="button"
+              >
+                <ListChecks aria-hidden="true" size={14} strokeWidth={1.7} />
+                <span>Tests</span>
+              </button>
+            </>
+          )}
+          {props.agentRunClient === undefined ? null : (
+            <button
+              aria-pressed={auxiliarySurface === "agents"}
+              className="code-thread-workspace__tool window-no-drag"
+              onClick={() =>
+                setAuxiliarySurface((current) => (current === "agents" ? undefined : "agents"))
+              }
+              type="button"
+            >
+              <Bot aria-hidden="true" size={14} strokeWidth={1.7} />
+              <span>Agents</span>
+            </button>
+          )}
+        </div>
       </header>
 
       {props.controller.errorMessage === undefined ? null : (

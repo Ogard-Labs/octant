@@ -148,6 +148,12 @@ export function classifyProductAction(request: Request): string | undefined {
   if (path === "/api/diagnostics/export") {
     return method === "POST" ? "diagnostics.export" : undefined;
   }
+  if (path === "/api/threads/export") {
+    // A thread export is a read of a thread the caller can already Open.
+    // The service re-checks that Open and clamps to that one thread, so a
+    // paired device never dumps the host.
+    return method === "POST" ? "project.overview.read" : undefined;
+  }
   if (path.startsWith("/api/automations")) {
     // Ordinary Automation Center mutations are remote-approvable per the
     // design's per-command policy; the route still re-checks host, Project,
