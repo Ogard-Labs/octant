@@ -1240,9 +1240,61 @@ button:focus-visible {
   border-color: transparent;
 }
 
-.sidebar__utility--settings {
+.sidebar-profile {
+  position: relative;
   margin-top: auto;
-  margin-bottom: 0;
+}
+
+.sidebar-profile__trigger {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  gap: 8px;
+  padding: 0 8px;
+  color: var(--octant-text-primary);
+  border-radius: 8px;
+  font-size: 12.5px;
+}
+
+.sidebar-profile__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-profile__disclosure {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  display: grid;
+  min-width: 190px;
+  max-width: 100%;
+  gap: 1px;
+  padding: 4px;
+  background: var(--octant-surface);
+  border: 1px solid var(--octant-border-strong);
+  border-radius: 10px;
+  box-shadow: var(--octant-shadow-overlay);
+}
+
+.sidebar-profile__action {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 30px;
+  gap: 8px;
+  padding: 0 8px;
+  color: var(--octant-text-secondary);
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+
+.sidebar-profile__action:hover {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
 }
 
 .sidebar__utility kbd {
