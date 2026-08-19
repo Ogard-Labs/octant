@@ -42,6 +42,12 @@ describe("octantSettingsRegistry", () => {
         keywords:
           "automation notifications push waiting approval failure completion opt-in redacted destinations receipts apns fcm unavailable",
       },
+      {
+        id: "thread-retention",
+        label: "Thread retention",
+        scope: "host",
+        keywords: "thread retention window purge journal erase delete history",
+      },
     ]);
     expect(host?.keywords).toMatch(/lifecycle/);
     expect(host?.keywords).toMatch(/backup/);

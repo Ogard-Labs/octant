@@ -38,6 +38,7 @@ export * from "./workRequestPolicy";
 export * from "./workResearchPolicy";
 export * from "./workTurnPolicy";
 export * from "./dataLifecyclePolicy";
+export * from "./threadRetentionPolicy";
 export * from "./eventPolicy";
 export * from "./goalPolicy";
 export * from "./threadPlanPolicy";

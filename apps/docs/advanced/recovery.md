@@ -33,7 +33,10 @@ Operator commands cover the journal and projections:
 - `db:rebuild --projection <name>` — rebuild a single projection
 
 Rebuilds never edit or delete journal events. Quarantine retirement happens
-only after a successful explicit rebuild.
+only after a successful explicit rebuild. A confirmed thread purge is the
+separate data-lifecycle exception: it removes that thread's own journal
+events so a later rebuild cannot resurrect the transcript, and it records a
+tombstone rather than leaving a hole with no explanation.
 
 ## User-level recovery
 

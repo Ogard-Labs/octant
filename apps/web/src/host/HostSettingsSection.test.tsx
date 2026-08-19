@@ -74,6 +74,17 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
         kind: "refused-online",
         guidance: "Stop the Octant host, then run the offline restore command with --confirm.",
       })),
+    readThreadRetention: async () => ({ windows: [], tombstones: [] }),
+    setThreadRetention: async () => ({ windows: [], tombstones: [] }),
+    purgeThreads: async () => ({
+      operation: "purge-threads",
+      scope: { kind: "host" },
+      purged: [],
+      alreadyPurged: [],
+      retained: [],
+      deleted: [],
+      occurredAt: "2026-08-19T12:00:00.000Z" as never,
+    }),
   };
 }
 
@@ -100,7 +111,7 @@ describe("HostSettingsSection", () => {
 
     const headings = screen.getAllByRole("heading").map((h) => h.textContent);
     expect(headings).toEqual(
-      expect.arrayContaining(["Identity", "Service policy", "Readiness", "Backup", "Recovery"]),
+      expect.arrayContaining(["Identity", "Service policy", "Readiness", "Backup", "Recovery", "Thread retention"]),
     );
   });
 

@@ -9,6 +9,16 @@ import {
   type HostLifecycleOutcome,
   type HostRestoreOutcome,
 } from "@octant/contracts/host-control";
+import {
+  decodePurgeThreadsOutcome,
+  decodeSetThreadRetentionOutcome,
+  decodeThreadRetentionState,
+  type PurgeThreadsOutcome,
+  type PurgeThreadsRequest,
+  type SetThreadRetentionOutcome,
+  type SetThreadRetentionRequest,
+  type ThreadRetentionState,
+} from "@octant/contracts/thread-retention";
 import { bindFetchPort } from "./bindFetchPort";
 
 /**
@@ -28,6 +38,9 @@ export interface HostControlClient {
   lifecycle(action: HostLifecycleAction): Promise<HostLifecycleOutcome>;
   backup(label?: string): Promise<HostBackupOutcome>;
   restore(): Promise<HostRestoreOutcome>;
+  readThreadRetention(): Promise<ThreadRetentionState>;
+  setThreadRetention(request: SetThreadRetentionRequest): Promise<SetThreadRetentionOutcome>;
+  purgeThreads(request: PurgeThreadsRequest): Promise<PurgeThreadsOutcome>;
 }
 
 export class HostControlClientError extends Error {
@@ -114,6 +127,28 @@ export function createHostControlClient(options: HostControlClientOptions): Host
     async restore() {
       const body = await call({ path: "/api/host-control/restore", method: "POST", body: {} });
       return decodeOrThrow(decodeHostRestoreOutcome, body);
+    },
+    async readThreadRetention() {
+      const body = await call({ path: "/api/host-control/thread-retention", method: "GET" });
+      return decodeOrThrow(decodeThreadRetentionState, body);
+    },
+    async setThreadRetention(request) {
+      const body = await call({
+        path: "/api/host-control/thread-retention",
+        method: "POST",
+        body: request,
+        decodableStatuses: [403],
+      });
+      return decodeOrThrow(decodeSetThreadRetentionOutcome, body);
+    },
+    async purgeThreads(request) {
+      const body = await call({
+        path: "/api/host-control/thread-purge",
+        method: "POST",
+        body: request,
+        decodableStatuses: [403],
+      });
+      return decodeOrThrow(decodePurgeThreadsOutcome, body);
     },
   };
 }

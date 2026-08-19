@@ -163,9 +163,14 @@ flowchart LR
   append, explicit terminal reasons for turns, tools, terminals, and subagents,
   preservation of partial provider output, and recovery of outstanding
   approvals and user-input requests after restart.
-- **Data lifecycle.** Reset, remove-all, and delete-remote-host operations are
-  explicit, reported per scope, and never run implicitly. Removing a paired
-  host or Project deletes what it owns and reports what it retained.
+- **Data lifecycle.** Reset, remove-all, delete-remote-host, and thread
+  retention/purge operations are explicit, reported per scope, and never run
+  implicitly. Removing a paired host or Project deletes what it owns and
+  reports what it retained. A retention window (host default, Project
+  override, or thread override) never deletes on its own; only a confirmed
+  purge erases a thread's bulk content, derived projections, and that
+  thread's own journal events, then records a tombstone so a rebuild cannot
+  resurrect the transcript. See `docs/decisions/0032`.
 
 ## Providers
 

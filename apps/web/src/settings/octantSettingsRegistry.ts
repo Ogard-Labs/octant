@@ -219,7 +219,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Host",
       scope: "host",
       keywords:
-        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities backup recovery restore snapshot diagnostics headless automation notifications push waiting approval failure completion apns fcm",
+        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities backup recovery restore snapshot diagnostics headless automation notifications push waiting approval failure completion apns fcm retention purge thread journal",
       settings: [
         {
           id: settingId("automation-notifications"),
@@ -227,6 +227,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "automation notifications push waiting approval failure completion opt-in redacted destinations receipts apns fcm unavailable",
+        },
+        {
+          id: settingId("thread-retention"),
+          label: "Thread retention",
+          scope: "host",
+          keywords: "thread retention window purge journal erase delete history",
         },
       ],
     },
