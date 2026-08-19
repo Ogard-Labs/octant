@@ -49,6 +49,10 @@ import { SearxngClient } from "./chat/research/searxngClient";
 import { ThreadWorkService } from "./chat/threadWorkService";
 import { createChatRouteHandler } from "./chatRoutes";
 import { createScaffoldRouteHandler } from "./scaffoldRoutes";
+import { filterSkillCatalogForScope } from "@octant/plugin-host";
+import { decodeMentionableThreadId, decodeWorkspaceTabId } from "@octant/contracts";
+import { createWorkspacePresetRouteHandler } from "./workspacePresetRoutes";
+import { CURATED_WORKSPACE_PRESETS } from "./workspacePresets/curatedWorkspacePresets";
 import { createThreadCheckpointRouteHandler } from "./threadCheckpointRoutes";
 import { createProductFeedbackRouteHandler } from "./productFeedbackRoutes";
 import {
@@ -470,6 +474,7 @@ import {
   listHosts,
   resolveAgentRunLiveParentGrant,
   type PreviewPosture,
+  findWorkspacePresetTarget,
 } from "@octant/domain";
 import { ZenThreadCatalog } from "./zen/zenThreadCatalog";
 import { ZenAssistantTools } from "./zen/zenAssistantTools";
@@ -3253,6 +3258,57 @@ export function startOctantServer(
       availableTools: () => resolveAvailableTools(curatedScaffoldTools()),
       windowAuthorityStore,
     });
+    const workspacePresetRoutes = createWorkspacePresetRouteHandler(
+      {
+        presets: CURATED_WORKSPACE_PRESETS,
+        windowAuthorityStore,
+        // The thread and the group both come from the window's own workspace,
+        // never from the request, so a preset lands on a thread this window
+        // already has open rather than one the caller merely named.
+        resolveTarget: async (windowId, threadId) => {
+          const found = findWorkspacePresetTarget(
+            shellService.bootstrap(windowId).workspace.layouts.code,
+            threadId,
+          );
+          return found === undefined
+            ? undefined
+            : {
+                groupId: found.groupId,
+                mentionableThreadId: decodeMentionableThreadId(String(threadId)),
+                title: found.title,
+              };
+        },
+        applyOperations: async (windowId, operations) => {
+          let version = shellService.bootstrap(windowId).workspaceVersion;
+          for (const operation of operations) {
+            const result = shellService.execute({
+              kind: "apply-workspace-operation",
+              windowId,
+              expectedVersion: version,
+              operation,
+            });
+            if (result.kind !== "workspace-replaced") break;
+            version = result.version;
+          }
+          return version;
+        },
+        // What the thread's own catalog leaves it able to use. A preset reads
+        // this and reports; it never writes activation.
+        resolveSkills: async (windowId, threadId) => {
+          const thread = persistence.readCodeThread(threadId);
+          const scoped = filterSkillCatalogForScope(skillDiscoveryService.snapshot(), {
+            mode: "code",
+            projectId: thread === undefined ? null : String(thread.projectId),
+            threadRef: String(threadId),
+          });
+          return scoped.skills.map((record) => ({
+            name: String(record.skill.name),
+            enabled: record.effectiveState.kind === "effective",
+          }));
+        },
+      },
+      () => decodeWorkspaceTabId(randomUUID()),
+    );
     const workArtifactProjection = new WorkArtifactProjection();
     hydrateWorkArtifactProjectionFromJournal({
       replay: (cursor) =>
@@ -4646,6 +4702,7 @@ export function startOctantServer(
       (await chatRoutes(request)) ??
       (await threadCheckpointRoutes(request)) ??
       (await scaffoldRoutes(request)) ??
+      (await workspacePresetRoutes(request)) ??
       (await productFeedbackRoutes(request)) ??
       (await workThreadRoutes(request)) ??
       (await workTurnRoutes(request)) ??

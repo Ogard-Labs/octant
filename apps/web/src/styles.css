@@ -7971,3 +7971,64 @@ dialog.project-dialog {
 .environment-filter__reach[data-reach="unreachable"] {
   color: var(--octant-danger-text, #ff9b9b);
 }
+
+/*
+ * Curated workspace presets, offered beside the scaffolds and shaped like
+ * them: the same card, the same list, so choosing an arrangement reads as the
+ * same kind of decision as choosing a starting point.
+ */
+.workspace-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 520px;
+  margin: 12px auto 0;
+  padding: 12px;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 8px;
+  color: var(--octant-text-muted);
+  font-size: 12px;
+}
+
+.workspace-presets__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--octant-text-primary);
+}
+
+.workspace-presets__list,
+.workspace-presets__skills {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workspace-presets__entry {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspace-presets__entry p,
+.workspace-presets__panes {
+  margin: 2px 0 0;
+}
+
+.workspace-presets__skills li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspace-presets__skill-status {
+  color: var(--octant-text-muted);
+}
+
+.workspace-presets__message {
+  margin: 0;
+}

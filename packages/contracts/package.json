@@ -15,6 +15,7 @@
     "./linked-thread-aggregation": "./src/linkedThreadAggregation.ts",
     "./rootless-thread": "./src/rootlessThread.ts",
     "./scaffolds": "./src/scaffolds.ts",
+    "./workspace-presets": "./src/workspacePresets.ts",
     "./chat": "./src/chat.ts",
     "./code": "./src/code.ts",
     "./code-operations": "./src/codeOperations.ts",
