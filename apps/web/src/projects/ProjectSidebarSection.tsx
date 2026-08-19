@@ -62,6 +62,7 @@ import { IconButton } from "../shell/IconButton";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { groupThreadsByProject } from "./projectThreadGrouping";
 import { ProjectThreadList, ProjectThreadRows, ProjectThreadStatus } from "./ProjectThreadList";
+import type { ThreadRowActions } from "./ThreadRowMenu";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -170,6 +171,10 @@ export interface ProjectSidebarSectionProps {
   readonly addProjectLabel?: "chat-project" | "folder";
   readonly onProjectOpen: (project: ProjectSummary) => void;
   readonly onSelectThread?: (threadId: string) => void;
+  /** What a thread row offers on right-click. Absent leaves the rows without a menu. */
+  readonly threadActions?: ThreadRowActions;
+  /** Absent when the host cannot accept a thread rename, which hides the affordance. */
+  readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
   readonly rootlessLabel?: "Unfiled" | "Recents";
   readonly threads?: ReadonlyArray<ChatThreadNavigationItem>;
@@ -413,6 +418,10 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             {...(props.onSelectThread === undefined
               ? {}
               : { onSelectThread: props.onSelectThread })}
+            {...(props.threadActions === undefined ? {} : { threadActions: props.threadActions })}
+            {...(props.onRenameThread === undefined
+              ? {}
+              : { onRenameThread: props.onRenameThread })}
             projects={ordinary}
             sort={projectSort}
             {...(threadsByProject === undefined
@@ -427,9 +436,13 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               <h2>{rootlessLabel}</h2>
               <div className="project-threads">
                 <ProjectThreadRows
+                  {...(props.threadActions === undefined ? {} : { actions: props.threadActions })}
                   {...(props.activeThreadId === undefined
                     ? {}
                     : { activeThreadId: props.activeThreadId })}
+                  {...(props.onRenameThread === undefined
+                    ? {}
+                    : { onRenameThread: props.onRenameThread })}
                   onSelectThread={props.onSelectThread}
                   threads={unfiled}
                 />
@@ -486,6 +499,8 @@ function ProjectGroup(props: {
   readonly onProjectOpen: (project: ProjectSummary) => void;
   readonly onSortChange?: (sort: ProjectSort) => void;
   readonly onSelectThread?: (threadId: string) => void;
+  readonly threadActions?: ThreadRowActions;
+  readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly onToggleProject: (projectId: ProjectId) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
   readonly sort?: ProjectSort;
@@ -620,9 +635,13 @@ function ProjectGroup(props: {
             </div>
             {showNested && expanded && nestedThreads.length > 0 ? (
               <ProjectThreadList
+                {...(props.threadActions === undefined ? {} : { actions: props.threadActions })}
                 {...(props.activeThreadId === undefined
                   ? {}
                   : { activeThreadId: props.activeThreadId })}
+                {...(props.onRenameThread === undefined
+                  ? {}
+                  : { onRenameThread: props.onRenameThread })}
                 id={projectThreadListId(project.id)}
                 label={`Threads in ${project.name}`}
                 onSelectThread={props.onSelectThread!}
@@ -1147,10 +1166,20 @@ function CodeProjectViewEditorDialog(props: {
           ))}
         </fieldset>
         <div className="project-dialog__actions">
-          <OctantButton onClick={props.onClose} type="button" variant="outline">
+          <OctantButton
+            onClick={props.onClose}
+            type="button"
+            className="project-button project-button--quiet"
+            variant="ghost"
+          >
             Cancel
           </OctantButton>
-          <OctantButton disabled={name.trim() === ""} type="submit" variant="default">
+          <OctantButton
+            disabled={name.trim() === ""}
+            type="submit"
+            className="project-button project-button--primary"
+            variant="ghost"
+          >
             {props.mode === "create" ? "Create project view" : "Save project view"}
           </OctantButton>
         </div>

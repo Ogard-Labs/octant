@@ -49,9 +49,36 @@ export interface ChatThreadNavigationSource {
   readonly updatedAt?: string;
 }
 
+/**
+ * Which provider answers for a thread, resolved from its provider instance.
+ *
+ * The row shows the mark rather than the model name: the model changes inside a
+ * thread and reads as noise on every row, while the provider is what a reader
+ * scanning the list is actually distinguishing between.
+ */
+export interface ThreadProviderIdentity {
+  readonly displayName: string;
+  readonly driverKind: string;
+}
+
+/**
+ * What a thread row's status dot says, in the vocabulary the thread board
+ * already uses.
+ *
+ * `working` is only claimed for a thread whose turn this window is actually
+ * running: a dot that pulses on a thread nothing is doing would be a lie, and
+ * the host reports no per-thread run state to the sidebar yet.
+ */
+export type ThreadRowActivity = "working" | "attention" | "unread" | "idle";
+
 export interface ChatThreadNavigationItem {
+  /** Absent leaves the row's dot idle rather than inventing a state. */
+  readonly activity?: ThreadRowActivity;
   readonly followUp?: boolean;
   readonly meta?: string;
+  readonly provider?: ThreadProviderIdentity;
+  /** The provider instance the thread runs on, before it is resolved to a mark. */
+  readonly providerInstanceId?: string;
   readonly navigationId?: string;
   readonly projectId?: string;
   readonly threadId: string;
