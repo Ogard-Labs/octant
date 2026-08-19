@@ -571,5 +571,68 @@ describe("WorkMutationService", () => {
       if (reply.outcome.kind !== "failed") return;
       expect(reply.outcome.reason).toBe("read-failed");
     });
+
+    it("refuses to create through a symlink planted at the target name", async () => {
+      const fixture = workFilesystemFixture();
+      fixture.putFile("/outside/secret.md", new TextEncoder().encode("host credentials"));
+      fixture.putSymlink("/work/notes.md", "/outside/secret.md");
+      const { service } = createService(fixture);
+
+      const reply = await service.mutate(
+        {
+          kind: "create-artifact",
+          requestId: ids.request,
+          projectId: ids.project,
+          format: "markdown",
+          displayName: "notes.md",
+          content: "# Hello",
+        } satisfies WorkMutationRequest,
+        fullContext,
+      );
+
+      expect(reply.outcome.kind).toBe("failed");
+      if (reply.outcome.kind !== "failed") return;
+      expect(reply.outcome.reason).toBe("write-failed");
+      expect(new TextDecoder().decode(fixture.readBytes("/outside/secret.md"))).toBe(
+        "host credentials",
+      );
+    });
+
+    it("refuses to revise an artifact swapped for an escaping symlink after it was resolved", async () => {
+      const fixture = workFilesystemFixture();
+      let armSwap = false;
+      const racing: WorkFilesystemPort = {
+        ...fixture,
+        openWriteFile: async (path, options) => {
+          if (armSwap) {
+            fixture.putFile("/outside/secret.md", new TextEncoder().encode("host credentials"));
+            fixture.putSymlink(path, "/outside/secret.md");
+          }
+          return fixture.openWriteFile(path, options);
+        },
+      };
+      const { service } = createService(racing);
+      const artifactId = await createdNotes(service);
+      armSwap = true;
+
+      const reply = await service.mutate(
+        {
+          kind: "revise-artifact",
+          requestId: ids.request,
+          projectId: ids.project,
+          artifactId,
+          content: "# Revised",
+          expectedArtifactVersion: 1,
+        } satisfies WorkMutationRequest,
+        fullContext,
+      );
+
+      expect(reply.outcome.kind).toBe("failed");
+      if (reply.outcome.kind !== "failed") return;
+      expect(reply.outcome.reason).toBe("write-failed");
+      expect(new TextDecoder().decode(fixture.readBytes("/outside/secret.md"))).toBe(
+        "host credentials",
+      );
+    });
   });
 });
