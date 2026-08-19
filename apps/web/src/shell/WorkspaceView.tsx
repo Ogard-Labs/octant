@@ -52,6 +52,7 @@ import { CodeOverview } from "../code/CodeOverview";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
 import type { CodeOverviewSurfaceKind } from "../code/CodeOverview";
+import { codeSurfaceTitle } from "../code/codeSurfaces";
 import { WorkOverview } from "../work/WorkOverview";
 import { buildWorkOverviewModel } from "../work/buildWorkOverviewModel";
 import type { WorkOverviewModel } from "../work/WorkOverview";
@@ -63,7 +64,6 @@ import type { UsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { WorkResearchPanel } from "../work/WorkResearchPanel";
 import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
-import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
@@ -677,11 +677,6 @@ function renderCodeTab(
         threadId={String(tab.threadId)}
       />
       {content}
-      {/* The thread's plan, beside the thread it belongs to. A Plan-mode
-        thread may only read its checkout, but it may still write, revise, and
-        approve the plan — deciding what to do is the whole point of the
-        posture. */}
-      <ThreadPlanPanel />
     </ThreadActivityPictureInPicture>
   );
   const files = (
@@ -1344,21 +1339,6 @@ function renderNonCodeTab(
         : { providerMessage: props.providerBootstrapMessage })}
     />
   );
-}
-
-function codeSurfaceTitle(kind: CodeOverviewSurfaceKind): string {
-  switch (kind) {
-    case "code-diff":
-      return "Changes";
-    case "code-terminal":
-      return "Terminal";
-    case "code-test":
-      return "Tests";
-    case "code-git":
-      return "Git";
-    case "code-pr":
-      return "Pull request";
-  }
 }
 
 function resolveRootlessThread(
