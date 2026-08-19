@@ -135,7 +135,16 @@ export const ContextCommandResult = Schema.Union(
 export type ContextCommandResult = typeof ContextCommandResult.Type;
 
 export const ContextFailure = Schema.Struct({
-  category: Schema.Literal("unauthorized", "stale", "invalid", "unavailable", "blocked"),
+  category: Schema.Literal(
+    "unauthorized",
+    "stale",
+    "invalid",
+    "unavailable",
+    "blocked",
+    // A subject nothing has planned yet is not a failed service. Collapsing the
+    // two told a reader to retry a connection that was never down.
+    "not-planned",
+  ),
   message: Schema.NonEmptyTrimmedString,
 }).annotations(strict);
 export type ContextFailure = typeof ContextFailure.Type;

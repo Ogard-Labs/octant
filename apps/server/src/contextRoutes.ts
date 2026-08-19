@@ -3,6 +3,7 @@ import {
   decodeContextInspectorRequest,
   type ContextCommand,
   type ContextCommandResult,
+  type ContextFailure,
   type ContextInspectorSnapshot,
   type ContextSubjectRef,
 } from "@octant/contracts";
@@ -105,6 +106,8 @@ function harnessFailure(error: ContextHarnessError, origin: string | null): Resp
       return failure("blocked", "Context update is blocked by the safe budget.", 409, origin);
     case "invalid":
       return failure("invalid", "Context request is invalid.", 400, origin);
+    case "not-planned":
+      return failure("not-planned", "This thread has no context plan yet.", 404, origin);
     case "unavailable":
       return failure("unavailable", "Octant Context service is unavailable.", 503, origin);
   }
@@ -134,7 +137,7 @@ function response(body: unknown, status: number, origin: string | null): Respons
 }
 
 function failure(
-  category: "unauthorized" | "stale" | "invalid" | "unavailable" | "blocked",
+  category: ContextFailure["category"],
   message: string,
   status: number,
   origin: string | null,

@@ -3,7 +3,14 @@ import type { ContextEntryId, ContextSubjectRef } from "@octant/contracts/contex
 import type { ContextCommand, ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-export type ContextControllerStatus = "idle" | "loading" | "ready" | "updating" | "disconnected";
+export type ContextControllerStatus =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "updating"
+  | "disconnected"
+  /** The host answered, and nothing has planned this subject's context yet. */
+  | "not-planned";
 
 export interface ContextController {
   readonly errorMessage?: string;
@@ -71,6 +78,14 @@ export function useContextController(options: UseContextControllerOptions): Cont
         if (!controller.signal.aborted) accept(next);
       } catch (error) {
         if (controller.signal.aborted) return;
+        // A subject nothing has planned yet is an empty answer from a host that
+        // replied, so it must not raise an alert or offer a retry that cannot
+        // change anything.
+        if (error instanceof ContextClientFailure && error.category === "not-planned") {
+          setStatus("not-planned");
+          setErrorMessage(undefined);
+          return;
+        }
         setStatus("disconnected");
         setErrorMessage(publicError(error));
       }
