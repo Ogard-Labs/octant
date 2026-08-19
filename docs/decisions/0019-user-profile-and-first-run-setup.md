@@ -33,7 +33,7 @@ calls unless a decision record and the request authorise them.
   Navigator — in that order, because both model choices are picked from what the
   provider step found. No step is a gate: any of them can be walked past, and the
   surface states what stays unavailable rather than refusing to continue.
-  (Superseded for the profile step by [0032](0032-first-run-asks-what-to-call-you.md),
+  (Superseded for the profile step by [0033](0033-first-run-asks-what-to-call-you.md),
   which requires a name before first run goes on.)
 - The workspace step collects colour scheme, whether Chat and Work are enabled,
   and the mode switcher's presentation. These are opinions a user forms in the
