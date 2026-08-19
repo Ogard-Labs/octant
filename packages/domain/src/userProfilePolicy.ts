@@ -59,10 +59,23 @@ export function canImportGravatar(profile: Pick<UserProfile, "email">): boolean 
 }
 
 /**
+ * Whether the person has said what to call them.
+ *
+ * A name, unlike the rest of a profile, is the one thing the app needs to speak
+ * about the reader at all: the sidebar, threads, and shared surfaces name a
+ * human or they name nothing. First run asks for it and does not walk past the
+ * question. Nothing else about a profile is required, and a host upgraded from
+ * before this asked is not retroactively unnamed — it simply has no name.
+ */
+export function isNamed(profile: Pick<UserProfile, "displayName">): boolean {
+  return profile.displayName !== undefined && profile.displayName.trim().length > 0;
+}
+
+/**
  * Whether first-run has been told anything worth keeping about the person.
  *
- * Used to describe the profile step honestly in a summary; it is never a gate.
- * Someone who wants no profile at all may finish first run with none.
+ * Used to describe the profile step honestly in a summary. Only the name gates
+ * first run; the rest of a profile stays optional.
  */
 export function isProfileConfigured(profile: UserProfile): boolean {
   return (

@@ -112,6 +112,12 @@ import { createSidebarBackgroundRouteHandler } from "./theme/sidebarBackgroundRo
 import { SidebarBackgroundStore } from "./theme/backgroundStore";
 import { createThemeRouteHandler } from "./theme/themeRoutes";
 import { createGoalRouteHandler } from "./goal/goalRoutes";
+import { createGoalLoopRouteHandler } from "./goal/goalLoopRoutes";
+import { GoalLoopEventStore } from "./goal/goalLoopEventStore";
+import { GoalLoopService } from "./goal/goalLoopService";
+import { createShipRouteHandler } from "./ship/shipRoutes";
+import { ShipEventStore } from "./ship/shipEventStore";
+import { ShipService } from "./ship/shipService";
 import { createPlanRouteHandler } from "./plan/planRoutes";
 import { PlanService } from "./plan/planService";
 import { JournalPlanStore } from "./plan/journalPlanStore";
@@ -1711,34 +1717,121 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-    const themeRoutes = createThemeRouteHandler({ service: themeService, windowAuthorityStore });
-    // Goals persist through the journal, so they survive a restart and
-    // rebuild by replay. The in-memory view advances only after the append
-    // commits, so a failed write leaves both the journal and the served
-    // aggregate on the last durable state.
-    const goalRoutes = createGoalRouteHandler({
-      service: new GoalService({
-        store: new JournalGoalStore({ journal: persistence.journal, uuid: randomUUID }),
+    // Publishing to a target the person owns. Octant runs no deployment
+    // infrastructure and holds no service account: a target names a remote the
+    // checkout already has, and the only thing this host can do is push the
+    // reviewed revision to it. Targets arrive from extensions rather than being
+    // built in; with none installed the list is empty and nothing publishes.
+    const shipEvents = new ShipEventStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString() as never,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const shipTargets = new Map<string, import("@octant/contracts").ShipTarget>();
+    const shipService = new ShipService({
+      listTargets: () => [...shipTargets.values()],
+      writeTarget: (target) => {
+        shipTargets.set(String(target.id), target);
+      },
+      checkout: (threadId) => {
+        let thread;
+        try {
+          thread = persistence.readCodeThread(threadId as never);
+        } catch {
+          return undefined;
+        }
+        if (thread === undefined || thread.lifecycle !== "active") return undefined;
+        const checkout = persistence.readCodeCheckout(thread.checkoutId);
+        if (checkout === undefined || checkout.availability !== "available") return undefined;
+        const head = checkout.head;
+        return {
+          checkoutRoot: String(thread.checkoutId),
+          // A publication is refused on unproven work, so the host states what
+          // it can observe rather than assuming: without a live observation the
+          // checkout is treated as dirty and the revision as unreviewed, which
+          // fails in the safe direction.
+          clean: false,
+          headRevision: head.kind === "branch" ? head.oid : "",
+          reviewedRevision: undefined,
+          executionPolicy: thread.executionPolicy,
+        };
+      },
+      // The host has no build it watched being produced yet, so it vouches for
+      // nothing. Refusing here is the record's evidence rule doing its job, not
+      // a placeholder: a ship claims a build happened only when this host saw
+      // it happen.
+      observedArtifact: async () => undefined,
+      credentialHandle: async () => undefined,
+      publish: async () => ({
+        outcome: "failed",
+        detail: "This host has no publication path bound for that target.",
       }),
+      // Publishing is approved one act at a time, against the exact target,
+      // revision, and build. Nothing on this host issues such an approval yet,
+      // and a standing grant must never stand in for one.
+      approval: () => undefined,
+      journal: shipEvents,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString() as never,
+    });
+    const shipRoutes = createShipRouteHandler({
+      service: shipService,
       windowAuthorityStore,
-      // A Goal belongs to a Work thread, so the window must currently be in
-      // Work on the Project that owns the thread. Same shape as the AgentRun
-      // cancellation check below: read the window's own workspace, never a
-      // scope the caller supplied.
       authorizeThread: ({ threadId, windowId }) => {
         const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
         if (workspace === undefined) return false;
-        const context = workspace.contextByMode.work;
-        if (context.mode !== "work") return false;
+        const context = workspace.contextByMode.code;
+        if (context.mode !== "code") return false;
         let thread;
         try {
-          thread = workThreadProjection.read(threadId as never);
+          thread = persistence.readCodeThread(threadId as never);
         } catch {
           return false;
         }
         if (thread === undefined || thread.lifecycle !== "active") return false;
         return String(context.projectId) === String(thread.projectId);
       },
+    });
+    const themeRoutes = createThemeRouteHandler({ service: themeService, windowAuthorityStore });
+    // Goals persist through the journal, so they survive a restart and
+    // rebuild by replay. The in-memory view advances only after the append
+    // commits, so a failed write leaves both the journal and the served
+    // aggregate on the last durable state.
+    // A Goal and its loop both belong to a Work thread, so the window must
+    // currently be in Work on the Project that owns the thread. Read the
+    // window's own workspace, never a scope the caller supplied.
+    const authorizeWorkThreadForWindow = ({
+      threadId,
+      windowId,
+    }: {
+      readonly threadId: string;
+      readonly windowId: WindowId;
+    }): boolean => {
+      const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+      if (workspace === undefined) return false;
+      const context = workspace.contextByMode.work;
+      if (context.mode !== "work") return false;
+      let thread;
+      try {
+        thread = workThreadProjection.read(threadId as never);
+      } catch {
+        return false;
+      }
+      if (thread === undefined || thread.lifecycle !== "active") return false;
+      return String(context.projectId) === String(thread.projectId);
+    };
+    const goalService = new GoalService({
+      store: new JournalGoalStore({ journal: persistence.journal, uuid: randomUUID }),
+    });
+    const goalRoutes = createGoalRouteHandler({
+      service: goalService,
+      windowAuthorityStore,
+      // A Goal belongs to a Work thread, so the window must currently be in
+      // Work on the Project that owns the thread. Same shape as the AgentRun
+      // cancellation check below: read the window's own workspace, never a
+      // scope the caller supplied.
+      authorizeThread: authorizeWorkThreadForWindow,
     });
     // A plan belongs to a Code thread, so the window must currently be in Code
     // on the Project that owns it. Same shape as the Goal check above: read the
@@ -3366,6 +3459,139 @@ export function startOctantServer(
     // authority source. `withWorkflowLifecycle` wraps the thread route
     // service so every successful create/lifecycle-change also feeds the
     // rebuildable workflow projection Overview reads from.
+    // A goal loop keeps working on a Work thread's goal without a person
+    // watching. It runs ordinary Work turns through the same service a person's
+    // turn goes through, so it adds no place work happens and no authority the
+    // thread did not already have; everything it may or may not do is decided
+    // by the domain and journaled here.
+    // What a Work turn is fixed at, stated once. Work denies shell, Git, and
+    // reach outside the Project by construction rather than by asking, so this
+    // is a fact about the mode and not a grant anyone can change.
+    const WORK_TURN_POSTURE = {
+      filesystem: true,
+      shell: false,
+      git: false,
+      network: false,
+      tools: true,
+      subagents: false,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    } as const;
+    /** Any registered local window; the ordinary turn path rechecks Project access. */
+    const firstRegisteredWindowId = (): WindowId | undefined => {
+      for (const windowId of windowAuthorityStore.listWindowIds()) return windowId;
+      return undefined;
+    };
+    const goalLoopEvents = new GoalLoopEventStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString() as never,
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const goalLoopService = new GoalLoopService({
+      readGoal: (threadId) => goalService.read(threadId).goal,
+      recordUsage: async ({ threadId, goal, tokensSpent, elapsedMs, evidence, complete }) => {
+        const recorded = await goalService.execute({
+          kind: "record-thread-goal-usage",
+          threadId,
+          expectedVersion: goal.version,
+          goalId: goal.id,
+          deltaTokens: tokensSpent,
+          deltaElapsedMs: elapsedMs,
+          deltaTurns: 1,
+        });
+        if (!complete) return;
+        await goalService.execute({
+          kind: "complete-thread-goal",
+          threadId,
+          expectedVersion: recorded.goal.version,
+          goalId: goal.id,
+          evidence: evidence.slice(0, 16),
+        });
+      },
+      threadAuthority: (threadId) => {
+        let thread;
+        try {
+          thread = workThreadProjection.read(threadId as never);
+        } catch {
+          return undefined;
+        }
+        if (thread === undefined || thread.lifecycle !== "active") return undefined;
+        return WORK_TURN_POSTURE;
+      },
+      // What a Work turn is fixed at. There is no per-turn grant to narrow, so
+      // a ceiling asking for less than this is refused when the loop starts
+      // rather than quietly ignored on every round.
+      modePosture: () => WORK_TURN_POSTURE,
+      // Work has no approval queue of its own: its posture denies shell, Git,
+      // and reach outside the Project outright rather than asking. Saying so
+      // here is honest; inventing a source would make the pause untestable.
+      pendingApproval: () => undefined,
+      markCheckpoint: async (threadId) => {
+        const windowId = firstRegisteredWindowId();
+        if (windowId === undefined) return undefined;
+        const marked = await threadCheckpointService
+          .execute(windowId, {
+            kind: "mark-thread-checkpoint",
+            threadKind: "work",
+            threadId,
+            checkpointId: randomUUID(),
+            label: "Goal loop round",
+          })
+          .catch(() => undefined);
+        return marked === undefined || marked.kind !== "checkpoint-marked"
+          ? undefined
+          : String(marked.checkpoint.id);
+      },
+      runRound: async ({ threadId, objective }) => {
+        const windowId = firstRegisteredWindowId();
+        const thread = workThreadProjection.read(threadId as never);
+        if (windowId === undefined || thread === undefined) {
+          return {
+            outcome: "failed",
+            tokensSpent: 0,
+            elapsedMs: 0,
+            detail: "No local window is available to run the round.",
+          };
+        }
+        const startedAt = Date.now();
+        try {
+          await workTurnService.startFirstTurn(windowId, {
+            kind: "start-work-thread-turn",
+            requestId: randomUUID(),
+            threadId,
+            turnId: randomUUID(),
+            prompt: objective,
+            authority: {
+              hostId: LOCAL_HOST_ID,
+              projectId: thread.projectId,
+              bindingRevisionId: thread.bindingRevisionId,
+              workingDirectory: ".",
+              confinementPosture: "project-root-confined",
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+            },
+          });
+          return { outcome: "ran", tokensSpent: 0, elapsedMs: Date.now() - startedAt };
+        } catch (error) {
+          return {
+            outcome: "failed",
+            tokensSpent: 0,
+            elapsedMs: Date.now() - startedAt,
+            detail: error instanceof Error ? error.message : "The round could not be run.",
+          };
+        }
+      },
+      journal: goalLoopEvents,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString() as never,
+    });
+    const goalLoopRoutes = createGoalLoopRouteHandler({
+      service: goalLoopService,
+      windowAuthorityStore,
+      authorizeThread: authorizeWorkThreadForWindow,
+    });
+
     const workflowProjection = new WorkflowProjection();
     const workflowEventStore = new WorkflowEventStore({
       journal: persistence.journal,
@@ -4742,7 +4968,9 @@ export function startOctantServer(
       (await extensionRoutes(request)) ??
       (await browserAutomationRoutes(request)) ??
       (await shellRoutes(request)) ??
+      (await shipRoutes(request)) ??
       (await goalRoutes(request)) ??
+      (await goalLoopRoutes(request)) ??
       (await planRoutes(request)) ??
       (await workResearchRoutes(request)) ??
       (await themeRoutes(request));

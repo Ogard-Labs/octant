@@ -602,6 +602,7 @@ describe("createPhase1RuntimeRegistries", () => {
         // `completed`: only a genuinely new store — which has no persisted
         // settings at all — starts `pending`.
         firstRunOnboarding: "completed",
+        automaticUpdateChecks: true,
         lastContextSurface: null,
         modeSwitcherPresentation: "buttons",
         navigatorAssistant: {},
@@ -626,6 +627,7 @@ describe("createPhase1RuntimeRegistries", () => {
           ...legacyPayload.settings,
           contextSidebarWidth,
           firstRunOnboarding: "pending",
+          automaticUpdateChecks: true,
           lastContextSurface,
           modeSwitcherPresentation,
           navigatorAssistant: {},
@@ -661,6 +663,7 @@ describe("createPhase1RuntimeRegistries", () => {
         ...preSwitcherPayload.settings,
         // Pre-onboarding store: upgraded hosts must not re-run first run.
         firstRunOnboarding: "completed",
+        automaticUpdateChecks: true,
         modeSwitcherPresentation: "buttons",
         navigatorAssistant: {},
         projectViewSwitcherPresentation: "dropdown",
@@ -840,6 +843,7 @@ function validSettingsPayload() {
       sidebarWidth: 280,
       contextSidebarWidth: 360,
       firstRunOnboarding: "pending",
+      automaticUpdateChecks: true,
       lastContextSurface: null,
       sidebarMaterial: "system",
       modeSwitcherPresentation: "dropdown",
