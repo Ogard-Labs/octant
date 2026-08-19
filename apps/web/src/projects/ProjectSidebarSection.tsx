@@ -1136,10 +1136,10 @@ function CodeProjectViewEditorDialog(props: {
           ))}
         </fieldset>
         <div className="project-dialog__actions">
-          <OctantButton onClick={props.onClose} type="button" variant="ghost">
+          <OctantButton onClick={props.onClose} type="button" variant="outline">
             Cancel
           </OctantButton>
-          <OctantButton disabled={name.trim() === ""} type="submit" variant="secondary">
+          <OctantButton disabled={name.trim() === ""} type="submit" variant="default">
             {props.mode === "create" ? "Create project view" : "Save project view"}
           </OctantButton>
         </div>

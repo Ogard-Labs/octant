@@ -354,113 +354,112 @@ html[data-octant-reduced-transparency="true"] .folder-picker {
 .goal-loop__reason,
 .goal-loop__notice,
 .goal-loop__burn-text {
-  .ship-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 0.74rem;
+}
 
-  .ship-panel__title {
-    margin: 0;
-    font-size: 0.82rem;
-    font-weight: 600;
-  }
+.goal-loop__state {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0;
+  font-size: 0.78rem;
+}
 
-  .ship-panel__note,
-  .ship-panel__empty,
-  .ship-panel__notice,
-  .ship-panel__target-where,
-  .ship-panel__target-state {
-    margin: 0;
-    color: var(--octant-text-muted);
-    font-size: 0.74rem;
-  }
+.goal-loop__rounds {
+  color: var(--octant-text-muted);
+  font-size: 0.74rem;
+}
 
-  .goal-loop__state {
-    display: flex;
-    gap: 0.5rem;
-    align-items: baseline;
-    margin: 0;
-    font-size: 0.78rem;
-  }
+.goal-loop__burn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+}
 
-  .goal-loop__rounds {
-    color: var(--octant-text-muted);
-    font-size: 0.74rem;
-  }
+.goal-loop__burn-bar {
+  display: block;
+  block-size: 0.35rem;
+  inline-size: 100%;
+  border-radius: 999px;
+  background: var(--octant-surface-selected);
+  overflow: hidden;
+}
 
-  .goal-loop__burn {
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-    margin: 0;
-  }
+.goal-loop__burn-fill {
+  display: block;
+  block-size: 100%;
+  background: var(--octant-text-muted);
+}
 
-  .goal-loop__burn-bar {
-    display: block;
-    block-size: 0.35rem;
-    inline-size: 100%;
-    border-radius: 999px;
-    background: var(--octant-surface-selected);
-    overflow: hidden;
-  }
+.goal-loop__state[data-status="awaiting-approval"] .goal-loop__status,
+.goal-loop__state[data-status="budget-limited"] .goal-loop__status {
+  color: var(--octant-warning-text, #ffcf99);
+}
 
-  .goal-loop__burn-fill {
-    display: block;
-    block-size: 100%;
-    background: var(--octant-text-muted);
-  }
+.goal-loop__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
 
-  .goal-loop__state[data-status="awaiting-approval"] .goal-loop__status,
-  .goal-loop__state[data-status="budget-limited"] .goal-loop__status {
-    color: var(--octant-warning-text, #ffcf99);
-  }
+.ship-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
 
-  .goal-loop__actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.3rem;
-    .ship-panel__targets {
-      display: flex;
-      flex-direction: column;
-      gap: 0.4rem;
-      margin: 0;
-      padding: 0;
-      list-style: none;
-    }
+.ship-panel__note,
+.ship-panel__empty,
+.ship-panel__notice,
+.ship-panel__target-where,
+.ship-panel__target-state {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 0.74rem;
+}
 
-    .ship-panel__target {
-      display: flex;
-      flex-direction: column;
-      gap: 0.15rem;
-      padding: 0.4rem;
-      border: 1px solid var(--octant-border-subtle);
-      border-radius: 0.4rem;
-    }
+.ship-panel__targets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 
-    .ship-panel__target-name {
-      font-size: 0.78rem;
-    }
+.ship-panel__target {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 0.4rem;
+}
 
-    .ship-panel__plan {
-      display: flex;
-      flex-direction: column;
-      gap: 0.2rem;
-      padding: 0.4rem;
-      border: 1px solid var(--octant-border);
-      border-radius: 0.4rem;
-    }
+.ship-panel__target-name {
+  font-size: 0.78rem;
+}
 
-    .ship-panel__plan-line {
-      margin: 0;
-      font-size: 0.78rem;
-    }
+.ship-panel__plan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.4rem;
+  border: 1px solid var(--octant-border);
+  border-radius: 0.4rem;
+}
 
-    .ship-panel__plan-digest {
-      color: var(--octant-text-muted);
-      font-family: var(--octant-font-mono, monospace);
-      font-size: 0.7rem;
-      overflow-wrap: anywhere;
-    }
-  }
+.ship-panel__plan-line {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.ship-panel__plan-digest {
+  color: var(--octant-text-muted);
+  font-family: var(--octant-font-mono, monospace);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
 }

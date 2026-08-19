@@ -32,6 +32,8 @@ export interface CodeThreadEnvironmentProps {
   readonly children: ReactNode;
   /** Repository file explorer, mounted inside the collapsible Files group. */
   readonly files?: ReactNode;
+  /** Publishing controls, mounted inside the collapsible Publish group. */
+  readonly publish?: ReactNode;
   /** Opens the thread's Changes (diff) surface. Absent hides the control. */
   readonly onOpenChanges?: () => void;
   readonly onExecute?: (
@@ -133,6 +135,9 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         </EnvironmentGroup>
         {props.files === undefined ? null : (
           <EnvironmentGroup title="Files">{props.files}</EnvironmentGroup>
+        )}
+        {props.publish === undefined ? null : (
+          <EnvironmentGroup title="Publish">{props.publish}</EnvironmentGroup>
         )}
         <EnvironmentGroup
           onOpenChange={setLocalServersOpen}
