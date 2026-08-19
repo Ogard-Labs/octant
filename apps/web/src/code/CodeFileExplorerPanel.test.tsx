@@ -96,6 +96,28 @@ describe("CodeFileExplorerPanel", () => {
     expect(await screen.findByRole("treeitem", { name: /src\/added\.ts/ })).toBeVisible();
   });
 
+  it("relists the repository when the host cannot name every changed path", async () => {
+    render(
+      <CodeFileExplorerPanel
+        checkoutId={checkoutId}
+        client={watchingClient([
+          {
+            kind: "code-file-change",
+            threadId,
+            checkoutId,
+            paths: [],
+            truncated: true,
+            observedAt: "2026-08-14T08:00:01.000Z",
+          },
+        ])}
+        onOpenFile={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    expect(await screen.findByRole("treeitem", { name: /src\/added\.ts/ })).toBeVisible();
+  });
+
   it("renders the host's listing as a repository tree", async () => {
     render(
       <CodeFileExplorerPanel
