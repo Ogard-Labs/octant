@@ -40,6 +40,7 @@ export * from "./workTurnPolicy";
 export * from "./dataLifecyclePolicy";
 export * from "./eventPolicy";
 export * from "./goalPolicy";
+export * from "./goalLoopPolicy";
 export * from "./threadPlanPolicy";
 export * from "./hostControlPolicy";
 export * from "./hostPolicy";
