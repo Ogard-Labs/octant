@@ -335,3 +335,72 @@ html[data-octant-reduced-transparency="true"] .folder-picker {
   gap: 6px;
   padding: 0 12px 8px;
 }
+
+.goal-loop {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid var(--octant-border-subtle);
+}
+
+.goal-loop__title {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.goal-loop__note,
+.goal-loop__reason,
+.goal-loop__notice,
+.goal-loop__burn-text {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 0.74rem;
+}
+
+.goal-loop__state {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.goal-loop__rounds {
+  color: var(--octant-text-muted);
+  font-size: 0.74rem;
+}
+
+.goal-loop__burn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+}
+
+.goal-loop__burn-bar {
+  display: block;
+  block-size: 0.35rem;
+  inline-size: 100%;
+  border-radius: 999px;
+  background: var(--octant-surface-selected);
+  overflow: hidden;
+}
+
+.goal-loop__burn-fill {
+  display: block;
+  block-size: 100%;
+  background: var(--octant-text-muted);
+}
+
+.goal-loop__state[data-status="awaiting-approval"] .goal-loop__status,
+.goal-loop__state[data-status="budget-limited"] .goal-loop__status {
+  color: var(--octant-warning-text, #ffcf99);
+}
+
+.goal-loop__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}

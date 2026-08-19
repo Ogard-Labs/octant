@@ -1,13 +1,17 @@
 import { useState } from "react";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
+import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import { AlertTriangle, CloudOff, Loader, ShieldAlert, Target } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { GoalCard } from "./GoalCard";
+import { GoalLoopPanel } from "./GoalLoopPanel";
 import { useGoalController, type GoalStatus } from "./useGoalController";
 
 export interface ThreadGoalPanelProps {
   readonly client?: GoalClient;
+  /** Absent on a host that serves no loops, which keeps the surface off entirely. */
+  readonly loopClient?: GoalLoopClient;
   readonly threadId: string;
 }
 
@@ -60,6 +64,11 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
               setRevision(goal.objective);
               setRevising(true);
             }}
+          />
+          <GoalLoopPanel
+            {...(props.loopClient === undefined ? {} : { client: props.loopClient })}
+            goal={goal}
+            threadId={props.threadId}
           />
           {revising ? (
             <form
