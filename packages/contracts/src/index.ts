@@ -20,6 +20,7 @@ export * from "./events";
 export * from "./auditEvents";
 export * from "./goal";
 export * from "./goalLoop";
+export * from "./shipTarget";
 export * from "./threadPlan";
 export * from "./extensions";
 export * from "./extensionEvents";
