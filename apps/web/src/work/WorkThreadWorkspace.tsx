@@ -12,7 +12,14 @@ import type { WorkRequestClient } from "@octant/client-runtime/work-request-clie
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import { ArrowUp, Check, Globe2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -33,6 +40,11 @@ export interface WorkThreadWorkspaceProps {
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   readonly onThreadUpdated?: (thread: WorkThread) => void;
+  /**
+   * Compact live child-run chrome for this thread. Rendered in the thread
+   * header so it stays visible with the rest of the thread chrome.
+   */
+  readonly childRunStatus?: ReactNode;
 }
 
 function artifactNameFromPrompt(prompt: string): string {
@@ -248,6 +260,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           <h1>{props.title}</h1>
           <p>Confined Project transcript</p>
         </div>
+        {props.childRunStatus}
         <div aria-label="Work tools" className="work-thread-workspace__toolbar" role="toolbar">
           {props.onOpenBrowser === undefined ? null : (
             <button

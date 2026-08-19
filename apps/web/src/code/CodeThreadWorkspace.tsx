@@ -21,6 +21,7 @@ import type { CodeConversationMessage, CodeController } from "./useCodeControlle
 import { ChatRichText } from "../chat/ChatRichText";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
 import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
+import { ThreadChildRunStatusSlot } from "../agents/ThreadChildRunStatusSlot";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
@@ -225,37 +226,52 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     pathMentions.sync(value, caret);
   }
 
+  const childRunStatus =
+    props.agentRunClient === undefined ? undefined : (
+      <ThreadChildRunStatusSlot client={props.agentRunClient} threadId={String(props.threadId)} />
+    );
+
   if (props.controller.status === "disconnected") {
     return (
-      <ShellState
-        action={{ label: "Retry Code", onClick: props.controller.retry }}
-        eyebrow="Code workspace"
-        message={props.controller.errorMessage ?? "The local Code service is unavailable."}
-        role="alert"
-        state="disconnected"
-        title="Code is disconnected"
-      />
+      <section aria-label="Code thread" className="code-thread-workspace">
+        {childRunStatus === undefined ? null : (
+          <header className="code-thread-workspace__header">{childRunStatus}</header>
+        )}
+        <ShellState
+          action={{ label: "Retry Code", onClick: props.controller.retry }}
+          eyebrow="Code workspace"
+          message={props.controller.errorMessage ?? "The local Code service is unavailable."}
+          role="alert"
+          state="disconnected"
+          title="Code is disconnected"
+        />
+      </section>
     );
   }
 
   if (view === undefined) {
     const unavailable = props.controller.errorCategory;
     return (
-      <ShellState
-        {...(unavailable === undefined
-          ? {}
-          : { action: { label: "Retry Code", onClick: props.controller.retry } })}
-        eyebrow="Code workspace"
-        message={
-          props.controller.errorMessage ??
-          (props.controller.status === "conflict-reload"
-            ? "Loading current authoritative Code state."
-            : "Loading the selected Code thread.")
-        }
-        {...(unavailable === undefined ? {} : { role: "alert" as const })}
-        state={unavailable === undefined ? "loading" : "warning"}
-        title={unavailable === undefined ? "Loading Code thread" : "Code thread unavailable"}
-      />
+      <section aria-label="Code thread" className="code-thread-workspace">
+        {childRunStatus === undefined ? null : (
+          <header className="code-thread-workspace__header">{childRunStatus}</header>
+        )}
+        <ShellState
+          {...(unavailable === undefined
+            ? {}
+            : { action: { label: "Retry Code", onClick: props.controller.retry } })}
+          eyebrow="Code workspace"
+          message={
+            props.controller.errorMessage ??
+            (props.controller.status === "conflict-reload"
+              ? "Loading current authoritative Code state."
+              : "Loading the selected Code thread.")
+          }
+          {...(unavailable === undefined ? {} : { role: "alert" as const })}
+          state={unavailable === undefined ? "loading" : "warning"}
+          title={unavailable === undefined ? "Loading Code thread" : "Code thread unavailable"}
+        />
+      </section>
     );
   }
 
@@ -556,6 +572,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             )}
           </div>
         </div>
+        {childRunStatus}
         {props.onOpenSurface === undefined &&
         props.onOpenBrowser === undefined &&
         props.agentRunClient === undefined ? null : (

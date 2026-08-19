@@ -68,10 +68,8 @@ import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
-import { ChildRunStatusChrome } from "../agents/ChildRunStatusChrome";
+import { ThreadChildRunStatusSlot } from "../agents/ThreadChildRunStatusSlot";
 import { CodeFileExplorerPanel } from "../code/CodeFileExplorerPanel";
-import { useChildRunStatus } from "../agents/useChildRunStatus";
-import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
@@ -644,8 +642,8 @@ function renderCodeTab(
     </Suspense>
   );
   // Auxiliary Code surfaces (terminal, file, diff, tests, …) share the
-  // thread rail, child-run chrome, and Browser/Computer Use preview with the
-  // thread tab; mounting them per split pane just repeats the same rail and
+  // thread rail and Browser/Computer Use preview with the thread tab;
+  // mounting them per split pane just repeats the same rail and
   // "Browser is active" card beside every surface of one thread.
   if (tab.kind !== "code-overview") {
     return (
@@ -672,10 +670,6 @@ function renderCodeTab(
         : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
       threadId={tab.threadId as never}
     >
-      <ThreadChildRunStatusSlot
-        {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
-        threadId={String(tab.threadId)}
-      />
       {content}
       {/* The thread's plan, beside the thread it belongs to. A Plan-mode
         thread may only read its checkout, but it may still write, revise, and
@@ -853,45 +847,41 @@ function renderNonCodeTab(
   }
   if (tab.kind === "chat-thread") {
     return (
-      <>
-        <ThreadChildRunStatusSlot
-          {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
-          threadId={String(tab.threadId)}
-        />
-        <ChatThreadWorkspace
-          chatClient={props.chatClient}
-          chatReadCursorStore={props.chatReadCursorStore}
-          {...(props.extensionClient === undefined
-            ? {}
-            : { extensionClient: props.extensionClient })}
-          {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
-          environmentPresentation={props.environmentPresentation}
-          key={tab.threadId}
-          onClearCanvasSelections={canvasContext.clearCanvasSelections}
-          onRemoveCanvasSelection={canvasContext.onRemoveCanvasSelection}
-          onSetEnvironmentPresentation={props.onSetEnvironmentPresentation}
-          pendingCanvasSelections={canvasContext.pendingCanvasSelections}
-          projects={props.projects}
-          tab={tab}
-          providerController={props.providerController}
-          {...(props.projectServerUrl === undefined
-            ? {}
-            : { projectServerUrl: props.projectServerUrl })}
-          {...(props.projectWindowCapability === undefined
-            ? {}
-            : { projectWindowCapability: props.projectWindowCapability })}
-          {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
-          {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
-          {...(props.onOpenCanvasReference === undefined
-            ? {}
-            : { onOpenCanvasReference: props.onOpenCanvasReference })}
-          {...(props.onOpenChatThread === undefined
-            ? {}
-            : { onOpenThread: props.onOpenChatThread })}
-          {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
-          threadId={tab.threadId}
-        />
-      </>
+      <ChatThreadWorkspace
+        chatClient={props.chatClient}
+        chatReadCursorStore={props.chatReadCursorStore}
+        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
+        environmentPresentation={props.environmentPresentation}
+        key={tab.threadId}
+        onClearCanvasSelections={canvasContext.clearCanvasSelections}
+        onRemoveCanvasSelection={canvasContext.onRemoveCanvasSelection}
+        onSetEnvironmentPresentation={props.onSetEnvironmentPresentation}
+        pendingCanvasSelections={canvasContext.pendingCanvasSelections}
+        projects={props.projects}
+        tab={tab}
+        providerController={props.providerController}
+        {...(props.projectServerUrl === undefined
+          ? {}
+          : { projectServerUrl: props.projectServerUrl })}
+        {...(props.projectWindowCapability === undefined
+          ? {}
+          : { projectWindowCapability: props.projectWindowCapability })}
+        {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
+        {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
+        {...(props.onOpenCanvasReference === undefined
+          ? {}
+          : { onOpenCanvasReference: props.onOpenCanvasReference })}
+        {...(props.onOpenChatThread === undefined ? {} : { onOpenThread: props.onOpenChatThread })}
+        {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
+        threadId={tab.threadId}
+        childRunStatus={
+          <ThreadChildRunStatusSlot
+            {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
+            threadId={String(tab.threadId)}
+          />
+        }
+      />
     );
   }
   if (tab.kind === "work-thread") {
@@ -929,10 +919,6 @@ function renderNonCodeTab(
             : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
           threadId={tab.threadId as never}
         >
-          <ThreadChildRunStatusSlot
-            {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
-            threadId={String(tab.threadId)}
-          />
           <WorkThreadWorkspace
             {...(props.workMutationClient === undefined
               ? {}
@@ -956,6 +942,12 @@ function renderNonCodeTab(
             {...(props.onWorkThreadUpdated === undefined
               ? {}
               : { onThreadUpdated: props.onWorkThreadUpdated })}
+            childRunStatus={
+              <ThreadChildRunStatusSlot
+                {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
+                threadId={String(tab.threadId)}
+              />
+            }
           />
           <ThreadGoalPanel
             {...(props.goalClient === undefined ? {} : { client: props.goalClient })}
@@ -1556,6 +1548,7 @@ function ChatThreadWorkspace(props: {
   readonly providerController: ProviderController;
   readonly tab: Extract<WorkspaceTab, { kind: "chat-thread" }>;
   readonly threadId: Extract<WorkspaceTab, { kind: "chat-thread" }>["threadId"];
+  readonly childRunStatus?: ReactNode;
 }) {
   const controller = useChatController({
     activeThreadId: props.threadId,
@@ -1612,6 +1605,7 @@ function ChatThreadWorkspace(props: {
                 props.onOpenThread?.(thread.id, thread.title, thread.projectId),
             })}
         {...(props.onOpenSideChat === undefined ? {} : { onOpenSideChat: props.onOpenSideChat })}
+        {...(props.childRunStatus === undefined ? {} : { childRunStatus: props.childRunStatus })}
       />
     </ChatThreadEnvironment>
   );
@@ -1645,39 +1639,6 @@ function findTabInLayout(
 ): WorkspaceTab | undefined {
   if (layout.kind === "group") return layout.tabs.find((tab) => tab.id === tabId);
   return findTabInLayout(layout.first, tabId) ?? findTabInLayout(layout.second, tabId);
-}
-
-/**
- * Compact child-run status for one parent thread.
- *
- * A separate component so the hook is never called conditionally from the
- * branching workspace renderer, and so a thread with no children renders
- * nothing at all rather than empty chrome.
- */
-function ThreadChildRunStatusSlot(props: {
-  readonly client?: AgentRunClient;
-  readonly threadId: string;
-}) {
-  const childRuns = useChildRunStatus({
-    ...(props.client === undefined ? {} : { client: props.client }),
-    parentThreadId: decodeAgentRunParentThreadId(props.threadId),
-  });
-  // Two different silences, both correct: the host has not answered for this
-  // thread yet, or it answered that this thread has no children. Neither one
-  // may show the thread the user just switched away from.
-  if (childRuns.status !== "ready" || childRuns.entries.length === 0) return null;
-  return (
-    <ChildRunStatusChrome
-      entries={childRuns.entries}
-      summary={childRuns.summary}
-      onStopChildren={childRuns.stopAll}
-      onCancelRun={({ runId }) => void childRuns.cancelRun(runId)}
-      onAcknowledge={(input) => void childRuns.acknowledge(input)}
-      busy={childRuns.busy}
-      reconnecting={childRuns.reconnecting}
-      {...(childRuns.errorMessage === undefined ? {} : { errorMessage: childRuns.errorMessage })}
-    />
-  );
 }
 
 function WorkProjectOverviewSlot(props: {

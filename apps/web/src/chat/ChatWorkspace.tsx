@@ -21,7 +21,7 @@ import type { ProviderObservedState, ProviderRegistrySnapshot } from "@octant/co
 import { decodeProviderModelId } from "@octant/contracts/providers";
 import type { PickerGroup } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ComposerPoolControl } from "../providers/ComposerPoolControl";
 import {
   ChatComposer,
@@ -77,6 +77,11 @@ export interface ChatWorkspaceProps {
   readonly onOpenSideChat?: (sidecar: SideChatSidecar) => void;
   /** Called with the thread a branch command created, so the shell can open it. */
   readonly onThreadBranched?: (thread: ChatThread) => void;
+  /**
+   * Compact live child-run chrome for this thread. Rendered in the thread
+   * header so it stays visible with the rest of the thread chrome.
+   */
+  readonly childRunStatus?: ReactNode;
 }
 
 /**
@@ -249,6 +254,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
+        {props.childRunStatus === undefined ? null : (
+          <header className="chat-workspace__header">{props.childRunStatus}</header>
+        )}
         <div className="chat-workspace__load-state">
           <p role={props.controller.status === "disconnected" ? "alert" : "status"}>
             {props.controller.errorMessage ??
@@ -473,6 +481,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               {providerState.providerLabel} · {providerState.modelLabel}
             </p>
           </div>
+          {props.childRunStatus}
           <ChatExportControl
             connectionStatus={
               props.controller.status === "disconnected" ? "disconnected" : "connected"
