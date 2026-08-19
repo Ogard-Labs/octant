@@ -104,9 +104,20 @@ describe("WorkspaceView Code tab registration", () => {
 
   it("opens Code tools with concise surface titles instead of duplicating the thread title", async () => {
     const base = propsFor(codeTab("code-overview", "A very long Code thread title"));
-    render(<WorkspaceView {...base} />);
+    render(
+      <WorkspaceView
+        {...base}
+        availableSurfaces={{
+          chat: [],
+          work: [],
+          code: [{ kind: "thread", label: "Thread", available: true }],
+        }}
+        onOpenSurface={vi.fn()}
+      />,
+    );
     await screen.findByRole("heading", { name: "Composition" });
 
+    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
     fireEvent.click(screen.getByRole("button", { name: "Terminal" }));
 
     expect(base.onOpenCodeSurface).toHaveBeenCalledWith(

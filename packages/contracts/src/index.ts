@@ -69,6 +69,7 @@ export * from "./appleToolchain";
 export * from "./appleToolchainRpc";
 export * from "./artifactLibrary";
 export * from "./artifactMirror";
+export * from "./appUpdates";
 export * from "./scaffolds";
 export * from "./workspacePresets";
 export * from "./threadCheckpoints";
