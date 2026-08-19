@@ -223,6 +223,73 @@ describe("CodeWorkspaceTab code files", () => {
     );
   });
 
+  it("reloads a clean editor when the host reports that file changed", async () => {
+    const client = codeClient();
+    vi.mocked(client.openFile)
+      .mockResolvedValueOnce(openedFile(ids.content, "d".repeat(64)))
+      .mockResolvedValue(openedFile(reloadedContentId, "e".repeat(64)));
+    vi.mocked(client.content).mockImplementation(async (contentId) =>
+      new TextEncoder().encode(
+        contentId === reloadedContentId ? "changed on disk" : "opened before the edit",
+      ),
+    );
+    render(<CodeWorkspaceTab controller={controller(client)} tab={fileTab()} />);
+
+    expect(await screen.findByText("opened before the edit")).toBeVisible();
+    act(() => fileWatch.notify?.({ paths: ["src/index.ts"], truncated: false } as never));
+
+    expect(await screen.findByText("changed on disk")).toBeVisible();
+    expect(client.openFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("reloads a clean editor when a truncated notice cannot name every change", async () => {
+    const client = codeClient();
+    vi.mocked(client.openFile)
+      .mockResolvedValueOnce(openedFile(ids.content, "d".repeat(64)))
+      .mockResolvedValue(openedFile(reloadedContentId, "e".repeat(64)));
+    vi.mocked(client.content).mockImplementation(async (contentId) =>
+      new TextEncoder().encode(
+        contentId === reloadedContentId ? "checked out on disk" : "opened before the checkout",
+      ),
+    );
+    render(<CodeWorkspaceTab controller={controller(client)} tab={fileTab()} />);
+
+    expect(await screen.findByText("opened before the checkout")).toBeVisible();
+    act(() => fileWatch.notify?.({ paths: [], truncated: true } as never));
+
+    expect(await screen.findByText("checked out on disk")).toBeVisible();
+    expect(client.openFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("reloads a clean editor when the host names the directory that holds the file", async () => {
+    const client = codeClient();
+    vi.mocked(client.openFile)
+      .mockResolvedValueOnce(openedFile(ids.content, "d".repeat(64)))
+      .mockResolvedValue(openedFile(reloadedContentId, "e".repeat(64)));
+    vi.mocked(client.content).mockImplementation(async (contentId) =>
+      new TextEncoder().encode(
+        contentId === reloadedContentId ? "directory changed on disk" : "opened before the rename",
+      ),
+    );
+    render(<CodeWorkspaceTab controller={controller(client)} tab={fileTab()} />);
+
+    expect(await screen.findByText("opened before the rename")).toBeVisible();
+    act(() => fileWatch.notify?.({ paths: ["src"], truncated: false } as never));
+
+    expect(await screen.findByText("directory changed on disk")).toBeVisible();
+    expect(client.openFile).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reopen a file the notice does not concern", async () => {
+    const client = codeClient();
+    render(<CodeWorkspaceTab controller={controller(client)} tab={fileTab()} />);
+
+    expect(await screen.findByText("const answer = 42;")).toBeVisible();
+    act(() => fileWatch.notify?.({ paths: ["README.md"], truncated: false } as never));
+
+    expect(client.openFile).toHaveBeenCalledTimes(1);
+  });
+
   it("reports a watched external change as a conflict instead of saving over it", async () => {
     const client = codeClient();
     vi.mocked(client.openFile)
