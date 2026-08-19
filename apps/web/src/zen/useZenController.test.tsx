@@ -5,12 +5,12 @@ import type {
   ZenFocusZone,
   ZenFocusZoneCommand,
   ZenFocusZoneResult,
-  ZenCanvasAttachRequest,
-  ZenCanvasAttachResult,
+  ZenCanvasPinRequest,
+  ZenCanvasPinResult,
   ZenResearchDockRequest,
   ZenResearchDockResult,
-  ZenTerminalAttachRequest,
-  ZenTerminalAttachResult,
+  ZenTerminalPinRequest,
+  ZenTerminalPinResult,
   ZenResult,
   ZenSpace,
   ZenSpaceId,
@@ -65,16 +65,16 @@ function makeZone(space: ZenSpace | null): ZenFocusZone | null {
 function createClient(overrides: Partial<ZenClient> = {}): ZenClient {
   let space: ZenSpace | null = null;
   return {
-    attachTerminal: vi.fn(
-      async (request: ZenTerminalAttachRequest): Promise<ZenTerminalAttachResult> =>
-        overrides.attachTerminal !== undefined
-          ? await overrides.attachTerminal(request)
+    pinTerminal: vi.fn(
+      async (request: ZenTerminalPinRequest): Promise<ZenTerminalPinResult> =>
+        overrides.pinTerminal !== undefined
+          ? await overrides.pinTerminal(request)
           : Promise.reject(new Error("This window pins no terminals.")),
     ),
-    attachCanvas: vi.fn(
-      async (request: ZenCanvasAttachRequest): Promise<ZenCanvasAttachResult> =>
-        overrides.attachCanvas !== undefined
-          ? await overrides.attachCanvas(request)
+    pinCanvas: vi.fn(
+      async (request: ZenCanvasPinRequest): Promise<ZenCanvasPinResult> =>
+        overrides.pinCanvas !== undefined
+          ? await overrides.pinCanvas(request)
           : Promise.reject(new Error("This window pins no canvases.")),
     ),
     dockResearch: vi.fn(
@@ -124,7 +124,7 @@ function createClient(overrides: Partial<ZenClient> = {}): ZenClient {
       return { result: "mutation", space };
     }),
     searchThreads: vi.fn() as never,
-    attachThread: vi.fn() as never,
+    pinThread: vi.fn() as never,
     continueThread: vi.fn() as never,
     assistant: vi.fn() as never,
     ensureAssistant: vi.fn() as never,
@@ -235,8 +235,8 @@ describe("useZenController", () => {
     expect(result.current.space?.elements[0]).toMatchObject({ status: "running" });
   });
 
-  it("provides manual thread attachment and persistent assistant fallback state", async () => {
-    const attachedSpace = makeSpace({
+  it("provides manual thread pinning and persistent assistant fallback state", async () => {
+    const pinnedSpace = makeSpace({
       version: 2 as AggregateVersion,
       elements: [
         {
@@ -288,11 +288,11 @@ describe("useZenController", () => {
     };
     const client = createClient({
       searchThreads: vi.fn(async () => ({ query: "", entries: [entry] })),
-      attachThread: vi.fn(async () => ({
-        result: "thread-attached" as const,
+      pinThread: vi.fn(async () => ({
+        result: "thread-pinned" as const,
         entry,
-        elementId: attachedSpace.elements[0]!.elementId,
-        space: attachedSpace,
+        elementId: pinnedSpace.elements[0]!.elementId,
+        space: pinnedSpace,
       })),
       ensureAssistant: vi.fn(async () => assistant),
       // What the host holds for this window once a turn has been answered.
@@ -310,7 +310,7 @@ describe("useZenController", () => {
     expect(result.current.threadEntries).toEqual([entry]);
 
     await act(async () => {
-      await result.current.attachThread(catalogRef);
+      await result.current.pinThread(catalogRef);
       await result.current.openAssistant();
       await result.current.openThreads();
     });
@@ -337,7 +337,7 @@ describe("useZenController", () => {
     expect(result.current.assistant?.recipePreview).toMatchObject({
       recipe: { name: "Release focus" },
     });
-    expect(client.attachThread).toHaveBeenCalledWith({ catalogRef, expectedVersion: 1 });
+    expect(client.pinThread).toHaveBeenCalledWith({ catalogRef, expectedVersion: 1 });
   });
 
   it("restores an active space from the server on mount when session is active", async () => {

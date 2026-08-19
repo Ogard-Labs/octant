@@ -219,7 +219,7 @@ describe("ZenClient thread catalog", () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValueOnce(Response.json({ query: "release", entries: [entry] }))
-      .mockResolvedValueOnce(Response.json({ result: "thread-attached", entry, elementId, space }))
+      .mockResolvedValueOnce(Response.json({ result: "thread-pinned", entry, elementId, space }))
       .mockResolvedValueOnce(Response.json({ result: "thread-continuation", entry }));
     const client = createZenClient({
       baseUrl: "http://127.0.0.1:4242",
@@ -232,9 +232,9 @@ describe("ZenClient thread catalog", () => {
       entries: [entry],
     });
     await expect(
-      client.attachThread({ catalogRef, expectedVersion: 2 as AggregateVersion }),
+      client.pinThread({ catalogRef, expectedVersion: 2 as AggregateVersion }),
     ).resolves.toMatchObject({
-      result: "thread-attached",
+      result: "thread-pinned",
       elementId,
     });
     await expect(client.continueThread(catalogRef)).resolves.toEqual({
@@ -244,7 +244,7 @@ describe("ZenClient thread catalog", () => {
 
     expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
       "http://127.0.0.1:4242/api/zen/threads?q=release",
-      "http://127.0.0.1:4242/api/zen/threads/attach",
+      "http://127.0.0.1:4242/api/zen/threads/pin",
       `http://127.0.0.1:4242/api/zen/threads/continue?ref=${encodeURIComponent(catalogRef)}`,
     ]);
     expect(fetch.mock.calls[1]?.[1]).toMatchObject({
@@ -295,7 +295,7 @@ describe("ZenClient thread catalog", () => {
 
   it("pins a terminal by naming it, never by describing the card", async () => {
     const pinned = {
-      result: "terminal-attached" as const,
+      result: "terminal-pinned" as const,
       elementId,
       space,
     };
@@ -307,15 +307,15 @@ describe("ZenClient thread catalog", () => {
     });
 
     await expect(
-      client.attachTerminal({
+      client.pinTerminal({
         threadId: decodeCodeThreadId("00000000-0000-4000-8000-000000000021"),
         checkoutId: decodeCodeCheckoutId("00000000-0000-4000-8000-000000000022"),
         terminalId: "00000000-0000-4000-8000-000000000023" as never,
         expectedVersion: 3 as AggregateVersion,
       }),
-    ).resolves.toMatchObject({ result: "terminal-attached" });
+    ).resolves.toMatchObject({ result: "terminal-pinned" });
     expect(fetch.mock.calls.map(([url]) => String(url))).toEqual([
-      "http://127.0.0.1:4242/api/zen/terminals/attach",
+      "http://127.0.0.1:4242/api/zen/terminals/pin",
     ]);
   });
 

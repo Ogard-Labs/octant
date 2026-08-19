@@ -89,7 +89,7 @@ describe("Zen takeover shell restore", () => {
       bootstrap: vi.fn(
         async (): Promise<ZenBootstrapResponse> => ({ space: null, focusZone: null, windowId }),
       ),
-      attachCanvas: vi.fn(),
+      pinCanvas: vi.fn(),
       dockResearch: vi.fn(),
       command: vi.fn(async (cmd: ZenCommand): Promise<ZenResult> => {
         if (cmd.command === "create-space") {
@@ -107,9 +107,9 @@ describe("Zen takeover shell restore", () => {
         return { result: "mutation", space: makeSpace() };
       }),
       space: vi.fn() as never,
-      attachTerminal: vi.fn() as never,
+      pinTerminal: vi.fn() as never,
       searchThreads: vi.fn() as never,
-      attachThread: vi.fn() as never,
+      pinThread: vi.fn() as never,
       continueThread: vi.fn() as never,
       assistant: vi.fn() as never,
       ensureAssistant: vi.fn() as never,

@@ -14,16 +14,16 @@ import {
   decodeZenRecipePreviewId,
   decodeZenChecklistItemId,
   type ZenWidgetMutation,
-  type ZenThreadAttachRequest,
-  type ZenThreadAttachResult,
+  type ZenThreadPinRequest,
+  type ZenThreadPinResult,
   DEFAULT_ZEN_RESEARCH_DOCK_WIDTH,
   type ZenResearchDock,
   type ZenResearchDockRequest,
   type ZenResearchDockResult,
-  type ZenCanvasAttachRequest,
-  type ZenCanvasAttachResult,
-  type ZenTerminalAttachRequest,
-  type ZenTerminalAttachResult,
+  type ZenCanvasPinRequest,
+  type ZenCanvasPinResult,
+  type ZenTerminalPinRequest,
+  type ZenTerminalPinResult,
   decodeZenThreadCatalogRef,
   type ZenThreadCatalogEntry,
   type ZenThreadContinuationTarget,
@@ -165,7 +165,7 @@ export interface ZenAssistantChatPort {
    * a parallel thread, because the thread the user converses with must be the
    * thread Zen's bounded tool vocabulary is authorized against — otherwise the
    * assistant can be asked for a widget on one thread while the tools that
-   * would propose it are attached to another.
+   * would propose it are pinned to another.
    */
   readonly create: () => Promise<ChatThread>;
   readonly read: (threadId: ChatThreadId) => ChatThreadView | undefined;
@@ -338,11 +338,11 @@ export class ZenService {
     return await this.deps.threadCatalog.search(windowId, query);
   }
 
-  async attachThread(
+  async pinThread(
     windowId: WindowId,
-    request: ZenThreadAttachRequest,
+    request: ZenThreadPinRequest,
     signal?: AbortSignal,
-  ): Promise<ZenThreadAttachResult> {
+  ): Promise<ZenThreadPinResult> {
     const space = this.#activeSpace(windowId);
     if (space === null) throw new ZenError({ reason: "unknown-space" });
     if (space.windowId !== windowId) {
@@ -385,7 +385,7 @@ export class ZenService {
         this.deps.localHostId,
       );
       const committed = this.deps.eventStore.append(updated, request.expectedVersion);
-      return { result: "thread-attached", entry, elementId, space: committed };
+      return { result: "thread-pinned", entry, elementId, space: committed };
     } catch (error) {
       if (error instanceof ZenPolicyRejected) {
         throw new ZenError({ reason: error.code, spaceId: space.spaceId });
@@ -407,11 +407,11 @@ export class ZenService {
    * its way past either, and the card it gets reaches no further than the
    * workspace tab already did.
    */
-  async attachTerminal(
+  async pinTerminal(
     windowId: WindowId,
-    request: ZenTerminalAttachRequest,
+    request: ZenTerminalPinRequest,
     signal?: AbortSignal,
-  ): Promise<ZenTerminalAttachResult> {
+  ): Promise<ZenTerminalPinResult> {
     const space = this.#activeSpace(windowId);
     if (space === null) throw new ZenError({ reason: "unknown-space" });
     if (space.windowId !== windowId) {
@@ -475,7 +475,7 @@ export class ZenService {
         this.deps.localHostId,
       );
       return {
-        result: "terminal-attached",
+        result: "terminal-pinned",
         elementId,
         space: this.deps.eventStore.append(updated, request.expectedVersion),
       };
@@ -562,11 +562,11 @@ export class ZenService {
    * canvas's identity and where it sits and nothing else, so every read it
    * makes later goes back through the same authorization as a workspace tab's.
    */
-  async attachCanvas(
+  async pinCanvas(
     windowId: WindowId,
-    request: ZenCanvasAttachRequest,
+    request: ZenCanvasPinRequest,
     signal?: AbortSignal,
-  ): Promise<ZenCanvasAttachResult> {
+  ): Promise<ZenCanvasPinResult> {
     const space = this.#activeSpace(windowId);
     if (space === null) throw new ZenError({ reason: "unknown-space" });
     if (space.windowId !== windowId) {
@@ -609,7 +609,7 @@ export class ZenService {
         this.deps.localHostId,
       );
       return {
-        result: "canvas-attached",
+        result: "canvas-pinned",
         elementId,
         space: this.deps.eventStore.append(updated, request.expectedVersion),
       };
@@ -626,7 +626,7 @@ export class ZenService {
 
   async continueThread(
     windowId: WindowId,
-    catalogRef: ZenThreadAttachRequest["catalogRef"],
+    catalogRef: ZenThreadPinRequest["catalogRef"],
   ): Promise<ZenThreadContinuationTarget> {
     if (this.deps.threadCatalog === undefined) {
       throw new ZenError({ reason: "missing-capability" });

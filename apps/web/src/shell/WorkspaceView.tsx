@@ -336,7 +336,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   const [pendingCanvasSelections, setPendingCanvasSelections] = useState<
     ReadonlyArray<CanvasContextSelection>
   >([]);
-  const attachCanvasContext = useCallback((selection: CanvasContextSelection) => {
+  const pinCanvasContext = useCallback((selection: CanvasContextSelection) => {
     setPendingCanvasSelections((current) => [...current, selection]);
   }, []);
   const removeCanvasSelection = useCallback((selectionId: CanvasContextSelectionId) => {
@@ -350,7 +350,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   const canvasContext = {
     clearCanvasSelections,
     pendingCanvasSelections,
-    onAttachCanvasContext: attachCanvasContext,
+    onAttachCanvasContext: pinCanvasContext,
     onRemoveCanvasSelection: removeCanvasSelection,
   };
   const closeTab = useCallback(

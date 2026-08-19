@@ -51,7 +51,7 @@ function fixture(isAssistant = true) {
   const service = {
     isAssistantThread: vi.fn(() => isAssistant),
     searchThreads: vi.fn(async () => []),
-    attachThread: vi.fn(),
+    pinThread: vi.fn(),
     applyAssistantPlacement: vi.fn(),
     applyAssistantAppearance: vi.fn(),
     createTimerWidget: vi.fn(() => ({
@@ -136,7 +136,7 @@ describe("ZenAssistantTools", () => {
 
     expect(exact.tools.forThread(windowId, thread)?.definitions.map(({ name }) => name)).toEqual([
       "octant_zen_search_threads",
-      "octant_zen_attach_thread",
+      "octant_zen_pin_thread",
       "octant_zen_list_widgets",
       "octant_zen_create_widget",
       "octant_zen_preview_recipe",
@@ -178,12 +178,12 @@ describe("ZenAssistantTools", () => {
 
   it("returns structured conflict, Timer success, and sibling-widget unavailability", async () => {
     const { service, tools } = fixture(true);
-    service.attachThread.mockRejectedValueOnce(new ZenError({ reason: "stale-version" }));
+    service.pinThread.mockRejectedValueOnce(new ZenError({ reason: "stale-version" }));
     const toolSet = tools.forThread(windowId, thread)!;
     const catalogRef = decodeZenThreadCatalogRef(`chat:${threadId}`);
 
     const conflict = await toolSet.execute({
-      name: "octant_zen_attach_thread",
+      name: "octant_zen_pin_thread",
       inputJson: JSON.stringify({ catalogRef, expectedVersion: 2 }),
     });
     const created = await toolSet.execute({
@@ -197,7 +197,7 @@ describe("ZenAssistantTools", () => {
 
     expect(conflict).toMatchObject({
       isError: true,
-      result: { action: "attach-thread", status: "conflict", code: "stale-version" },
+      result: { action: "pin-thread", status: "conflict", code: "stale-version" },
     });
     expect(created).toMatchObject({
       result: {
@@ -330,21 +330,21 @@ describe("ZenAssistantTools", () => {
     expect(service.searchThreads).not.toHaveBeenCalled();
   });
 
-  it("returns an interrupted result when attachment authorization is cancelled", async () => {
+  it("returns an interrupted result when pin authorization is cancelled", async () => {
     const { service, tools } = fixture(true);
-    service.attachThread.mockRejectedValueOnce(new ZenError({ reason: "interrupted" }));
+    service.pinThread.mockRejectedValueOnce(new ZenError({ reason: "interrupted" }));
     const controller = new AbortController();
     const catalogRef = decodeZenThreadCatalogRef(`chat:${threadId}`);
 
     const result = await tools.forThread(windowId, thread)!.execute({
-      name: "octant_zen_attach_thread",
+      name: "octant_zen_pin_thread",
       inputJson: JSON.stringify({ catalogRef, expectedVersion: 2 }),
       signal: controller.signal,
     });
 
     expect(result).toMatchObject({
       isError: true,
-      result: { action: "attach-thread", status: "interrupted", code: "interrupted" },
+      result: { action: "pin-thread", status: "interrupted", code: "interrupted" },
     });
   });
 });

@@ -35,13 +35,13 @@ const entry = decodeZenThreadCatalogEntry({
 });
 
 describe("ZenThreadPicker", () => {
-  it("shows source identity and attaches the exact catalog reference", () => {
-    const onAttach = vi.fn();
+  it("shows source identity and pins the exact catalog reference", () => {
+    const onPin = vi.fn();
     const onQueryChange = vi.fn();
     render(
       <ZenThreadPicker
         entries={[entry]}
-        onAttach={onAttach}
+        onPin={onPin}
         onClose={vi.fn()}
         onQueryChange={onQueryChange}
         query=""
@@ -51,8 +51,8 @@ describe("ZenThreadPicker", () => {
     expect(screen.getByText("Release blocker")).toBeInTheDocument();
     expect(screen.getByText(/This Mac.*Chat.*AuroraDocs.*active/i)).toBeInTheDocument();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "release" } });
-    fireEvent.click(screen.getByRole("button", { name: "Attach Release blocker" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pin Release blocker" }));
     expect(onQueryChange).toHaveBeenCalledWith("release");
-    expect(onAttach).toHaveBeenCalledWith(catalogRef);
+    expect(onPin).toHaveBeenCalledWith(catalogRef);
   });
 });
