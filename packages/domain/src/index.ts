@@ -94,3 +94,4 @@ export * from "./githubRepositoryReadPolicy";
 export * from "./managedRepositoryPolicy";
 export * from "./canvasShareSnapshotPolicy";
 export * from "./canvasShareAccessLogPolicy";
+export * from "./workspacePresetPolicy";

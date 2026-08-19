@@ -52,6 +52,14 @@ adopting its lack of trust semantics.
   Project, and thread, resolved from the thread rather than from whichever mode
   the resolver was first written for. A skill scoped to Work or Code is not
   something Chat may quietly offer, and the reverse holds too.
+- A curated workspace preset may name the skills its kind of work usually
+  wants. Naming is all it does. Applying a preset installs nothing, trusts
+  nothing, enables nothing, and elevates nothing: the host reports where each
+  named skill stands for that thread — in use, installed but not enabled, or
+  not installed — and getting one stays the same deliberate climb it is
+  everywhere else. A preset that could enable a skill would be an installation
+  path around every step this ladder exists to require, which is exactly what a
+  convenience default must never become.
 - Composer addressing is structured: `@plugin` and `@plugin/component` chips
   and `$skill` invocations resolve only to already installed, trusted, enabled,
   and policy-allowed components. A reference can never install, trust, enable,
@@ -75,6 +83,9 @@ adopting its lack of trust semantics.
 
 ## Consequences
 
+- A preset can make a good default arrangement discoverable without becoming a
+  second, quieter way to enable things: the arrangement is applied and the
+  skills are only reported on.
 - Users can install freely and review deliberately; nothing runs or speaks
   until they say so, and the reason for a blocked component is always visible.
 - Third-party skills and MCP servers work without any particular provider
