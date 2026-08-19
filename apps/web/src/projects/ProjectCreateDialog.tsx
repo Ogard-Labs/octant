@@ -115,20 +115,14 @@ function ChatProjectCreateDialog(props: ProjectCreateDialogProps) {
         />
         <div className="project-dialog__actions">
           <OctantButton
-            className="project-button project-button--quiet"
             disabled={submitting}
             onClick={requestClose}
             type="button"
-            variant="ghost"
+            variant="outline"
           >
             Cancel
           </OctantButton>
-          <OctantButton
-            className="project-button"
-            disabled={submitting || name.trim() === ""}
-            type="submit"
-            variant="secondary"
-          >
+          <OctantButton disabled={submitting || name.trim() === ""} type="submit" variant="default">
             Create Project
           </OctantButton>
         </div>
@@ -235,20 +229,10 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         </div>
         <p>Choose one directory. Octant records the binding.</p>
         <div className="project-dialog__actions">
-          <OctantButton
-            className="project-button project-button--quiet"
-            onClick={props.onClose}
-            type="button"
-            variant="ghost"
-          >
+          <OctantButton onClick={props.onClose} type="button" variant="outline">
             Cancel
           </OctantButton>
-          <OctantButton
-            className="project-button"
-            onClick={() => void beginNativeSelection()}
-            type="button"
-            variant="secondary"
-          >
+          <OctantButton onClick={() => void beginNativeSelection()} type="button" variant="default">
             {submitting ? "Retry" : "Choose folder"}
           </OctantButton>
         </div>
@@ -300,12 +284,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         needs the native picker bridge.
       </p>
       <div className="project-dialog__actions">
-        <OctantButton
-          className="project-button"
-          onClick={props.onClose}
-          type="button"
-          variant="secondary"
-        >
+        <OctantButton onClick={props.onClose} type="button" variant="default">
           Close
         </OctantButton>
       </div>
