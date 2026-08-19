@@ -36,9 +36,13 @@ import {
 const repositoryRoot = resolve(import.meta.dirname, "..");
 
 describe("desktop packaging boundary", () => {
-  it("targets only the unsigned Apple Silicon technical preview", () => {
+  it("targets only the Apple Silicon technical preview, at a stated version", () => {
+    // The version is not cosmetic: the updater compares it against the feed,
+    // and a build that cannot say which version it is cannot refuse a
+    // downgrade.
     expect(createPackagerOptions("/tmp/octant-stage", "/tmp/octant-out")).toEqual({
       appBundleId: "app.octant.desktop",
+      appVersion: "0.1.0",
       arch: "arm64",
       asar: false,
       dir: "/tmp/octant-stage",
@@ -57,6 +61,7 @@ describe("desktop packaging boundary", () => {
     expect(DESKTOP_PACKAGE_IDENTITY).toEqual({
       bundleId: "app.octant.desktop",
       productName: "Octant",
+      version: "0.1.0",
     });
   });
 

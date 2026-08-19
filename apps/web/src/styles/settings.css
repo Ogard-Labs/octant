@@ -1055,3 +1055,52 @@
     margin-bottom: 6px;
   }
 }
+
+/*
+ * The update surface. The disclosure list sits with the switch rather than in a
+ * policy document, because the person deciding whether to leave automatic
+ * checks on is the person who should read what those checks send.
+ */
+.app-update {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.app-update__version {
+  margin: 0;
+  font-weight: 600;
+}
+
+.app-update__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.app-update__notice {
+  margin: 0;
+  font-size: 12px;
+  color: var(--octant-text-muted);
+}
+
+.app-update__automatic {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--octant-border-subtle);
+}
+
+.app-update__disclosure {
+  margin: 0;
+  font-size: 12px;
+  color: var(--octant-text-muted);
+}
+
+.app-update__disclosure-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--octant-text-muted);
+}
