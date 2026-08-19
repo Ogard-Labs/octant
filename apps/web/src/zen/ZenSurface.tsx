@@ -107,12 +107,12 @@ export interface ZenSurfaceProps {
   readonly threadEntries?: ReadonlyArray<ZenThreadCatalogEntry>;
   readonly threadPickerOpen?: boolean;
   readonly threadQuery?: string;
-  readonly onAttachThread?: (catalogRef: ZenThreadCatalogRef) => void;
+  readonly onPinThread?: (catalogRef: ZenThreadCatalogRef) => void;
   readonly onCloseAssistant?: () => void;
   readonly onCloseThreadPicker?: () => void;
   readonly onContinueThread?: (catalogRef: ZenThreadCatalogRef) => void;
   /**
-   * Builds the live surface for one attached card, or returns undefined when
+   * Builds the live surface for one pinned card, or returns undefined when
    * this window hosts no live card for that source context. The focus zone holds no
    * thread clients of its own: it says which cards may stream and hands each
    * one its own source context, and the shell decides what that context is
@@ -305,7 +305,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
    *
    * Every lookup is keyed by this element's source context, never by whatever
    * the shell happens to have open, so a card can only ever show the thread it
-   * was attached to.
+   * was pinned to.
    */
   function resolveThreadCard(element: Extract<ZenElementPayload, { kind: "thread" }>): {
     readonly entry?: ZenThreadCatalogEntry;
@@ -741,7 +741,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
           <ZenThreadPicker
             {...(props.panelBusy === undefined ? {} : { busy: props.panelBusy })}
             entries={props.threadEntries ?? []}
-            onAttach={(catalogRef) => props.onAttachThread?.(catalogRef)}
+            onPin={(catalogRef) => props.onPinThread?.(catalogRef)}
             onClose={() => props.onCloseThreadPicker?.()}
             onQueryChange={(query) => props.onOpenThreads?.(query)}
             query={props.threadQuery ?? ""}
@@ -801,7 +801,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                   type="button"
                   variant="secondary"
                 >
-                  Attach a thread
+                  Pin a thread
                 </OctantButton>
               ) : null}
               {manualPanel === "widgets" ? (

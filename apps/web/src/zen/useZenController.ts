@@ -585,19 +585,19 @@ export function useZenController(options: UseZenControllerOptions) {
     [refreshThreads],
   );
 
-  const attachThread = useCallback(
+  const pinThread = useCallback(
     async (catalogRef: ZenThreadCatalogRef) => {
       if (client === undefined || space === null) return;
       setPanelBusy(true);
       try {
-        const result = await client.attachThread({
+        const result = await client.pinThread({
           catalogRef,
           expectedVersion: space.version,
         });
         if (mounted.current) {
           setSpace(result.space);
           setThreadPickerOpen(false);
-          setMessage(`Attached ${result.entry.title} from ${result.entry.projectLabel}.`);
+          setMessage(`Pinned ${result.entry.title} from ${result.entry.projectLabel}.`);
         }
       } catch (error) {
         if (!mounted.current) return;
@@ -606,9 +606,9 @@ export function useZenController(options: UseZenControllerOptions) {
           if (refreshed !== null && mounted.current) setFocusZone(refreshed.focusZone);
           if (refreshed?.space !== null && refreshed?.space !== undefined)
             setSpace(refreshed.space);
-          setMessage("Zen changed elsewhere; refreshed before attachment.");
+          setMessage("Zen changed elsewhere; refreshed before pinning.");
         } else {
-          setMessage(error instanceof Error ? error.message : "Zen thread attachment failed.");
+          setMessage(error instanceof Error ? error.message : "That thread could not be pinned.");
         }
       } finally {
         if (mounted.current) setPanelBusy(false);
@@ -760,7 +760,7 @@ export function useZenController(options: UseZenControllerOptions) {
       if (client === undefined || space === null) return;
       setPanelBusy(true);
       try {
-        const result = await client.attachTerminal({
+        const result = await client.pinTerminal({
           threadId: request.threadId,
           checkoutId: request.checkoutId,
           terminalId: request.terminalId,
@@ -795,7 +795,7 @@ export function useZenController(options: UseZenControllerOptions) {
       if (client === undefined || space === null) return;
       setPanelBusy(true);
       try {
-        const result = await client.attachCanvas({
+        const result = await client.pinCanvas({
           canvasId: request.canvasId,
           expectedVersion: space.version,
           ...(request.title === undefined ? {} : { title: request.title }),
@@ -1349,7 +1349,7 @@ export function useZenController(options: UseZenControllerOptions) {
     panelBusy,
     openThreads,
     refreshThreads,
-    attachThread,
+    pinThread,
     continueThread,
     assistantOpen,
     setAssistantOpen,

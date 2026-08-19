@@ -105,17 +105,17 @@ function fixture(options: { readonly resolve?: typeof entry | undefined } = {}) 
   return { append, resolve, service };
 }
 
-describe("ZenService thread attachment", () => {
+describe("ZenService thread pinning", () => {
   it("resolves the exact catalog reference server-side before persisting its source context", async () => {
     const { append, resolve, service } = fixture();
 
-    const result = await service.attachThread(ids.window, {
+    const result = await service.pinThread(ids.window, {
       catalogRef,
       expectedVersion: 2 as AggregateVersion,
     });
 
     expect(resolve).toHaveBeenCalledWith(ids.window, catalogRef);
-    expect(result.result).toBe("thread-attached");
+    expect(result.result).toBe("thread-pinned");
     expect(result.elementId).toBe(ids.element);
     expect(result.space.elements[0]).toMatchObject({
       kind: "thread",
@@ -129,7 +129,7 @@ describe("ZenService thread attachment", () => {
     const { append, service } = fixture({ resolve: undefined });
 
     await expect(
-      service.attachThread(ids.window, {
+      service.pinThread(ids.window, {
         catalogRef,
         expectedVersion: 2 as AggregateVersion,
       }),
@@ -137,11 +137,11 @@ describe("ZenService thread attachment", () => {
     expect(append).not.toHaveBeenCalled();
   });
 
-  it("does not allow another window to attach through a valid reference", async () => {
+  it("does not allow another window to pin through a valid reference", async () => {
     const { append, service } = fixture();
 
     await expect(
-      service.attachThread(ids.otherWindow, {
+      service.pinThread(ids.otherWindow, {
         catalogRef,
         expectedVersion: 2 as AggregateVersion,
       }),
@@ -149,7 +149,7 @@ describe("ZenService thread attachment", () => {
     expect(append).not.toHaveBeenCalled();
   });
 
-  it("lets only one parallel attachment commit for the same expected version", async () => {
+  it("lets only one parallel pin commit for the same expected version", async () => {
     let current = space();
     const conflict = new Error("conflict");
     let committed = false;
@@ -178,8 +178,8 @@ describe("ZenService thread attachment", () => {
     });
 
     const results = await Promise.allSettled([
-      service.attachThread(ids.window, { catalogRef, expectedVersion: 2 as AggregateVersion }),
-      service.attachThread(ids.window, { catalogRef, expectedVersion: 2 as AggregateVersion }),
+      service.pinThread(ids.window, { catalogRef, expectedVersion: 2 as AggregateVersion }),
+      service.pinThread(ids.window, { catalogRef, expectedVersion: 2 as AggregateVersion }),
     ]);
 
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
@@ -189,7 +189,7 @@ describe("ZenService thread attachment", () => {
     );
   });
 
-  it("does not commit when attachment is interrupted during source authorization", async () => {
+  it("does not commit when a pin is interrupted during source authorization", async () => {
     let finishResolve!: (value: typeof entry) => void;
     const resolve = new Promise<typeof entry>((resolvePromise) => {
       finishResolve = resolvePromise;
@@ -207,7 +207,7 @@ describe("ZenService thread attachment", () => {
       uuid: () => ids.element,
     });
 
-    const attachment = service.attachThread(
+    const pinning = service.pinThread(
       ids.window,
       { catalogRef, expectedVersion: 2 as AggregateVersion },
       controller.signal,
@@ -215,7 +215,7 @@ describe("ZenService thread attachment", () => {
     controller.abort();
     finishResolve(entry);
 
-    await expect(attachment).rejects.toThrow("interrupted");
+    await expect(pinning).rejects.toThrow("interrupted");
     expect(append).not.toHaveBeenCalled();
   });
 });
@@ -1645,12 +1645,12 @@ describe("ZenService focus zone", () => {
       ids.window,
     );
 
-    const result = await service.attachThread(ids.window, {
+    const result = await service.pinThread(ids.window, {
       catalogRef,
       expectedVersion: service.bootstrap(ids.window).space!.version,
     });
 
-    expect(result.result).toBe("thread-attached");
+    expect(result.result).toBe("thread-pinned");
     expect(result.space.spaceId).toBe(added);
   });
 });
@@ -1715,14 +1715,14 @@ describe("ZenService terminal cards", () => {
   it("pins a terminal by naming it, and writes the card from what the server resolved", async () => {
     const { append, read, service } = terminalFixture();
 
-    const result = await service.attachTerminal(ids.window, request);
+    const result = await service.pinTerminal(ids.window, request);
 
     expect(read).toHaveBeenCalledWith(ids.window, {
       threadId: codeThread,
       checkoutId: checkout,
       terminalId: terminal,
     });
-    expect(result.result).toBe("terminal-attached");
+    expect(result.result).toBe("terminal-pinned");
     expect(append.mock.calls[0]?.[0].elements[0]).toMatchObject({
       kind: "terminal",
       checkoutId: checkout,
@@ -1735,7 +1735,7 @@ describe("ZenService terminal cards", () => {
   it("refuses to pin a terminal this window's Code thread does not own", async () => {
     const { append, service } = terminalFixture({ owned: false });
 
-    await expect(service.attachTerminal(ids.window, request)).rejects.toThrow(/unavailable-source/);
+    await expect(service.pinTerminal(ids.window, request)).rejects.toThrow(/unavailable-source/);
     expect(append).not.toHaveBeenCalled();
   });
 
@@ -1751,7 +1751,7 @@ describe("ZenService terminal cards", () => {
       uuid: () => ids.element,
     });
 
-    await expect(service.attachTerminal(ids.window, request)).rejects.toThrow(/missing-capability/);
+    await expect(service.pinTerminal(ids.window, request)).rejects.toThrow(/missing-capability/);
     expect(current.elements).toEqual([]);
   });
 });
@@ -1870,10 +1870,10 @@ describe("ZenService canvas cards", () => {
   it("pins a canvas by naming it, and titles the card from what Canvas answered", async () => {
     const { append, read, service } = canvasFixture();
 
-    const result = await service.attachCanvas(ids.window, request);
+    const result = await service.pinCanvas(ids.window, request);
 
     expect(read).toHaveBeenCalledWith(ids.window, canvasId);
-    expect(result.result).toBe("canvas-attached");
+    expect(result.result).toBe("canvas-pinned");
     expect(append.mock.calls[0]?.[0].elements[0]).toMatchObject({
       kind: "canvas",
       canvasId,
@@ -1884,7 +1884,7 @@ describe("ZenService canvas cards", () => {
   it("writes no canvas state into the card beyond where it sits", async () => {
     const { append, service } = canvasFixture();
 
-    await service.attachCanvas(ids.window, request);
+    await service.pinCanvas(ids.window, request);
 
     // A card that carried a version or a copy of the content could come to
     // disagree with the tab on the same canvas.
@@ -1903,7 +1903,7 @@ describe("ZenService canvas cards", () => {
   it("refuses to pin a canvas this window may not read", async () => {
     const { append, service } = canvasFixture({ readable: false });
 
-    await expect(service.attachCanvas(ids.window, request)).rejects.toThrow(/unavailable-source/);
+    await expect(service.pinCanvas(ids.window, request)).rejects.toThrow(/unavailable-source/);
     expect(append).not.toHaveBeenCalled();
   });
 
@@ -1918,7 +1918,7 @@ describe("ZenService canvas cards", () => {
       uuid: () => ids.element,
     });
 
-    await expect(service.attachCanvas(ids.window, request)).rejects.toThrow(/missing-capability/);
+    await expect(service.pinCanvas(ids.window, request)).rejects.toThrow(/missing-capability/);
     expect(current.elements).toEqual([]);
   });
 });

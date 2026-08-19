@@ -3376,7 +3376,7 @@ function LaunchedShell(
             threadPickerOpen={zen.threadPickerOpen}
             threadQuery={zen.threadQuery}
             onAddTimer={(durationMs) => void zen.addTimer(durationMs)}
-            onAttachThread={(catalogRef) => void zen.attachThread(catalogRef)}
+            onPinThread={(catalogRef) => void zen.pinThread(catalogRef)}
             onCloseAssistant={() => zen.setAssistantOpen(false)}
             onCloseThreadPicker={() => zen.setThreadPickerOpen(false)}
             onContinueThread={(catalogRef) => void continueZenThread(catalogRef)}

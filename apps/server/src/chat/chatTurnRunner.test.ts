@@ -1416,7 +1416,7 @@ describe("ChatTurnRunner", () => {
             kind: "tool-request",
             sessionId,
             requestId: "zen-request-1",
-            toolName: "octant_zen_attach_thread",
+            toolName: "octant_zen_pin_thread",
             inputJson: JSON.stringify({ catalogRef: "chat:exact", expectedVersion: 2 }),
           } as never;
           yield* Queue.offer(queue, request);
@@ -1461,7 +1461,7 @@ describe("ChatTurnRunner", () => {
           appManagedTools: {
             definitions: [
               {
-                name: "octant_zen_attach_thread",
+                name: "octant_zen_pin_thread",
                 inputSchema: { type: "object", properties: {}, required: [] },
               },
             ],
@@ -1478,7 +1478,7 @@ describe("ChatTurnRunner", () => {
       ),
     );
 
-    expect(sent[0]?.tools.map((tool) => tool.name)).toEqual(["octant_zen_attach_thread"]);
+    expect(sent[0]?.tools.map((tool) => tool.name)).toEqual(["octant_zen_pin_thread"]);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(answerTool).toHaveBeenCalledTimes(1);
     expect(answerTool).toHaveBeenCalledWith({

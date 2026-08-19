@@ -8,7 +8,7 @@ import type {
 import { OctantButton } from "../ui/base/OctantButton";
 
 /**
- * What an attached card is doing with its thread right now.
+ * What a pinned card is doing with its thread right now.
  *
  * Omitted means this card was never a live one — a mode the window does not
  * host in the focus zone, or a window with no thread surfaces to lend — and the

@@ -2,14 +2,14 @@ import {
   decodeZenCommand,
   decodeZenBootstrapResponse,
   decodeZenResult,
-  decodeZenCanvasAttachRequest,
-  decodeZenCanvasAttachResult,
+  decodeZenCanvasPinRequest,
+  decodeZenCanvasPinResult,
   decodeZenResearchDockRequest,
   decodeZenResearchDockResult,
-  decodeZenTerminalAttachRequest,
-  decodeZenTerminalAttachResult,
-  decodeZenThreadAttachRequest,
-  decodeZenThreadAttachResult,
+  decodeZenTerminalPinRequest,
+  decodeZenTerminalPinResult,
+  decodeZenThreadPinRequest,
+  decodeZenThreadPinResult,
   decodeZenThreadCatalogRef,
   decodeZenThreadCatalogResponse,
   decodeZenThreadContinuationTarget,
@@ -20,14 +20,14 @@ import {
   type ZenCommand,
   type ZenBootstrapResponse,
   type ZenResult,
-  type ZenCanvasAttachRequest,
-  type ZenCanvasAttachResult,
+  type ZenCanvasPinRequest,
+  type ZenCanvasPinResult,
   type ZenResearchDockRequest,
   type ZenResearchDockResult,
-  type ZenTerminalAttachRequest,
-  type ZenTerminalAttachResult,
-  type ZenThreadAttachRequest,
-  type ZenThreadAttachResult,
+  type ZenTerminalPinRequest,
+  type ZenTerminalPinResult,
+  type ZenThreadPinRequest,
+  type ZenThreadPinResult,
   type ZenThreadCatalogRef,
   type ZenThreadCatalogResponse,
   type ZenThreadContinuationTarget,
@@ -55,13 +55,13 @@ export interface ZenClient {
    */
   space(command: ZenFocusZoneCommand): Promise<ZenFocusZoneResult>;
   searchThreads(query?: string): Promise<ZenThreadCatalogResponse>;
-  attachThread(request: ZenThreadAttachRequest): Promise<ZenThreadAttachResult>;
+  pinThread(request: ZenThreadPinRequest): Promise<ZenThreadPinResult>;
   /**
    * Pins a terminal one of this window's Code threads owns. The request names
    * the terminal; the card itself is written by the server.
    */
-  attachTerminal(request: ZenTerminalAttachRequest): Promise<ZenTerminalAttachResult>;
-  attachCanvas(request: ZenCanvasAttachRequest): Promise<ZenCanvasAttachResult>;
+  pinTerminal(request: ZenTerminalPinRequest): Promise<ZenTerminalPinResult>;
+  pinCanvas(request: ZenCanvasPinRequest): Promise<ZenCanvasPinResult>;
   dockResearch(request: ZenResearchDockRequest): Promise<ZenResearchDockResult>;
   continueThread(catalogRef: ZenThreadCatalogRef): Promise<ZenThreadContinuationTarget>;
   assistant(): Promise<ZenAssistantSnapshot>;
@@ -159,37 +159,37 @@ export function createZenClient(options: ZenClientOptions): ZenClient {
       return decodeZenThreadCatalogResponse(body);
     },
 
-    async attachThread(request: ZenThreadAttachRequest): Promise<ZenThreadAttachResult> {
-      const input = decodeZenThreadAttachRequest(request);
-      const url = new URL("/api/zen/threads/attach", options.baseUrl);
+    async pinThread(request: ZenThreadPinRequest): Promise<ZenThreadPinResult> {
+      const input = decodeZenThreadPinRequest(request);
+      const url = new URL("/api/zen/threads/pin", options.baseUrl);
       const body = await zenRequest(fetch, url, options.windowCapability, {
         method: "POST",
         body: JSON.stringify(input),
         contentType: true,
       });
-      return decodeZenThreadAttachResult(body);
+      return decodeZenThreadPinResult(body);
     },
 
-    async attachTerminal(request: ZenTerminalAttachRequest): Promise<ZenTerminalAttachResult> {
-      const input = decodeZenTerminalAttachRequest(request);
-      const url = new URL("/api/zen/terminals/attach", options.baseUrl);
+    async pinTerminal(request: ZenTerminalPinRequest): Promise<ZenTerminalPinResult> {
+      const input = decodeZenTerminalPinRequest(request);
+      const url = new URL("/api/zen/terminals/pin", options.baseUrl);
       const body = await zenRequest(fetch, url, options.windowCapability, {
         method: "POST",
         body: JSON.stringify(input),
         contentType: true,
       });
-      return decodeZenTerminalAttachResult(body);
+      return decodeZenTerminalPinResult(body);
     },
 
-    async attachCanvas(request: ZenCanvasAttachRequest): Promise<ZenCanvasAttachResult> {
-      const input = decodeZenCanvasAttachRequest(request);
-      const url = new URL("/api/zen/canvases/attach", options.baseUrl);
+    async pinCanvas(request: ZenCanvasPinRequest): Promise<ZenCanvasPinResult> {
+      const input = decodeZenCanvasPinRequest(request);
+      const url = new URL("/api/zen/canvases/pin", options.baseUrl);
       const body = await zenRequest(fetch, url, options.windowCapability, {
         method: "POST",
         body: JSON.stringify(input),
         contentType: true,
       });
-      return decodeZenCanvasAttachResult(body);
+      return decodeZenCanvasPinResult(body);
     },
 
     async dockResearch(request: ZenResearchDockRequest): Promise<ZenResearchDockResult> {

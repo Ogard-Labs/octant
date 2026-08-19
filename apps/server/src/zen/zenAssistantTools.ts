@@ -1,6 +1,6 @@
 import {
   decodeZenAssistantAppearanceInput,
-  decodeZenAssistantAttachThreadInput,
+  decodeZenAssistantPinThreadInput,
   decodeZenAssistantCreateWidgetInput,
   decodeZenAssistantListWidgetsInput,
   decodeZenAssistantPlacementInput,
@@ -22,7 +22,7 @@ export interface ZenAssistantToolsDependencies {
     ZenService,
     | "isAssistantThread"
     | "searchThreads"
-    | "attachThread"
+    | "pinThread"
     | "bootstrap"
     | "handleCommand"
     | "applyAssistantPlacement"
@@ -63,20 +63,16 @@ export class ZenAssistantTools {
                 }),
               };
             }
-            case "octant_zen_attach_thread": {
-              const args = decodeZenAssistantAttachThreadInput(input);
-              const attached = await this.dependencies.zenService.attachThread(
-                windowId,
-                args,
-                signal,
-              );
+            case "octant_zen_pin_thread": {
+              const args = decodeZenAssistantPinThreadInput(input);
+              const pinned = await this.dependencies.zenService.pinThread(windowId, args, signal);
               return {
                 result: decodeZenAssistantToolResult({
-                  action: "attach-thread",
+                  action: "pin-thread",
                   status: "ok",
-                  entry: attached.entry,
-                  elementId: attached.elementId,
-                  version: attached.space.version,
+                  entry: pinned.entry,
+                  elementId: pinned.elementId,
+                  version: pinned.space.version,
                 }),
               };
             }
@@ -231,8 +227,8 @@ function toolAction(name: string) {
   switch (name) {
     case "octant_zen_search_threads":
       return "search-threads" as const;
-    case "octant_zen_attach_thread":
-      return "attach-thread" as const;
+    case "octant_zen_pin_thread":
+      return "pin-thread" as const;
     case "octant_zen_list_widgets":
       return "list-widgets" as const;
     case "octant_zen_create_widget":
@@ -259,7 +255,7 @@ const ZEN_ASSISTANT_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefinition> = [
     },
   },
   {
-    name: "octant_zen_attach_thread",
+    name: "octant_zen_pin_thread",
     inputSchema: {
       type: "object",
       properties: {
