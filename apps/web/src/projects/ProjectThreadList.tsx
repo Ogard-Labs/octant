@@ -161,7 +161,7 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
                 <ProviderGlyph
                   displayName={thread.provider.displayName}
                   driverKind={thread.provider.driverKind}
-                  size={13}
+                  size={15}
                 />
               </span>
             )}

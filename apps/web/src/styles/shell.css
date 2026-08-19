@@ -450,7 +450,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   display: inline-flex;
   flex: none;
   align-items: center;
-  opacity: 0.75;
+  opacity: 0.85;
 }
 
 .sidebar-navigation__thread:hover .sidebar-navigation__thread-provider,
