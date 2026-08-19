@@ -1,6 +1,6 @@
 # 0026. Shipping to a user-owned target
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -72,10 +72,15 @@ in the repository compose into it later rather than being widened for it.
 - Requiring the host to have observed the build means a hand-made artifact
   cannot be shipped through this path. Shipping it is an ordinary terminal
   command the person runs themselves, with no claim from Octant about it.
-- None of this is implemented. The credential broker, plugin seams, approval
-  classes, and journal exist; ship targets, the credential handle scope, and the
-  approval class do not, and connector/OAuth marketplace work stays outside the
-  first release boundary.
+- The target model, the per-act approval rule, the evidence rule, the
+  credential-handle boundary, the `publish-to-target` approval class, and the
+  journaled receipt for every outcome are implemented, and one destination kind
+  exists: a branch on a Git remote the user already has. Two of the facts a
+  publication rests on are not yet observable by the host — the build it watched
+  being produced, and a per-act approval receipt — so a publication is **refused
+  until they are**. That is the evidence rule working rather than a gap papered
+  over: a host that cannot prove a build happened must not claim one did.
+  Connector/OAuth marketplace work stays outside the first release boundary.
 
 ## Related
 

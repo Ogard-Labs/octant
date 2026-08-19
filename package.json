@@ -34,6 +34,7 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "bun scripts/dev-desktop.ts",
+    "paths:check": "bun test scripts/check-path-collisions.test.ts && bun scripts/check-path-collisions.ts",
     "wiring:check": "bun test scripts/check-module-wiring.test.ts && bun scripts/check-module-wiring.ts",
     "decisions:check": "bun test scripts/check-decisions.test.ts scripts/check-decision-history.test.ts && bun scripts/check-decisions.ts && bun scripts/check-decision-history.ts",
     "fmt": "oxfmt",
@@ -51,7 +52,7 @@
     "smoke:packaged-opencode": "bun scripts/smoke-packaged-opencode.ts",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "verify": "bun run wiring:check && bun run decisions:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build"
+    "verify": "bun run paths:check && bun run wiring:check && bun run decisions:check && bun run fmt:check && bun run lint && bun run typecheck && bun run test && bun run build"
   },
   "devDependencies": {
     "@types/node": "catalog:",
