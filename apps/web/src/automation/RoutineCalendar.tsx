@@ -2,7 +2,7 @@ import type { AutomationSummary } from "@octant/contracts";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo } from "react";
 import { OctantIconButton } from "../ui/base/OctantButton";
-import { buildRoutineCalendarMonth, stepRoutineCalendarMonth } from "./routineCalendar";
+import { buildRoutineCalendarMonth, stepRoutineCalendarMonth } from "./routineCalendarModel";
 
 const WEEKDAY_HEADINGS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
