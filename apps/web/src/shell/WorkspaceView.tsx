@@ -954,6 +954,10 @@ function renderNonCodeTab(
             providerGroups={props.workProviderGroups ?? []}
             {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
             {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
+            {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+            {...(props.projectWindowCapability === undefined
+              ? {}
+              : { windowCapability: props.projectWindowCapability })}
             {...(props.onOpenCanvasReference === undefined
               ? {}
               : { onOpenCanvas: props.onOpenCanvasReference })}

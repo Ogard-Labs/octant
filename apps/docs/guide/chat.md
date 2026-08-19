@@ -35,6 +35,21 @@ A Chat thread not assigned to a Project uses an explicit unfiled Chat context. I
 
 When you drag or drop a Chat thread into another workspace, the server resolves the action against the context key (host, mode, Project, bound root). A cross-Project drop does not silently change authority; it offers to open the thread in a new window instead.
 
+## Export
+
+**Export thread** downloads a portable JSON cut of what the host holds for
+this conversation: the active transcript, Canvas artifacts it originated,
+attachment names, citations, and provenance. The file says when it was cut.
+Attachment file bytes stay off the export and are listed as omissions.
+Secrets, credentials, and provider payloads never appear.
+
+**Copy Markdown** and **Save Markdown** remain a convenience for reading the
+prose. They are assembled from what this window last saw and are not the
+authoritative cut.
+
+A paired device can export a thread it can already open. It cannot dump the
+host.
+
 ## Next steps
 
 - [Work](/guide/work) for local knowledge work with a bound folder
