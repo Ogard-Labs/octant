@@ -821,11 +821,9 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 .draft-thread__input-row,
-.work-composer-adapter__input-row {
+.work-composer-adapter__card {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 10px 12px;
+  flex-direction: column;
   background: var(--octant-surface-raised, var(--octant-surface));
   border: 1px solid var(--octant-border);
   border-radius: var(--octant-radius-composer, 14px);
@@ -836,10 +834,22 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 .work-composer-adapter__input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.work-composer-adapter__input-row {
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
   padding: 12px 12px 8px 14px;
+}
+
+.work-composer-adapter__context-strip {
+  padding: 8px 12px 8px 14px;
+  border-top: 1px solid var(--octant-border-subtle, var(--octant-border));
 }
 
 .work-composer-adapter__composer-bar {
@@ -878,7 +888,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 .work-composer-adapter__context-strip {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .draft-thread__input-row:focus-within {
@@ -1206,7 +1216,20 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 12px;
-  padding: 0 2px;
+  padding: 8px 12px 8px 14px;
+  border-top: 1px solid var(--octant-border-subtle, var(--octant-border));
+}
+
+/* Panels a strip control expands into are further rows of the same card, so
+   they drop the frame they wore as free-standing panels: a bordered box inside
+   a bordered card reads as two cards, not as one that grew a row. */
+.code-composer-adapter__card > .code-worktree-source,
+.code-composer-adapter__card > .code-composer-adapter__delivery {
+  padding: 10px 12px 10px 14px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--octant-border-subtle, var(--octant-border));
+  border-radius: 0;
 }
 
 @media (max-width: 640px) {
@@ -1405,16 +1428,26 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   font-weight: 500;
 }
 
+/* The card is the composer. What the thread will be bound to — host, Project,
+   checkout, base, delivery — belongs inside the thing being started, divided
+   from the prompt by a hairline rather than floating below the card as loose
+   chrome. Only the error, the pending status, and the keyboard hint stay
+   outside it: they talk about the card, they are not part of it. */
+.code-composer-adapter__card {
+  display: flex;
+  flex-direction: column;
+  background: var(--octant-surface-raised, var(--octant-surface));
+  border: 1px solid var(--octant-border);
+  border-radius: var(--octant-radius-composer, 14px);
+  box-shadow: var(--octant-shadow-lg);
+}
+
 .code-composer-adapter__input-row {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
   padding: 12px 12px 8px 14px;
-  background: var(--octant-surface-raised, var(--octant-surface));
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-composer, 14px);
-  box-shadow: var(--octant-shadow-lg);
 }
 
 /* Bottom toolbar inside the composer card: model + policy left, send right. */
@@ -1453,12 +1486,14 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   margin-inline-start: auto;
 }
 
-/* The context strip sits below the card, centered like secondary context. */
+/* Inside the card the strip is a row of it, so it starts on the same edge as
+   the prompt and the toolbar above it rather than centring against nothing. */
 .code-composer-adapter__context-strip {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
-.code-composer-adapter__input-row:focus-within {
+/* The frame that reacts to focus is the one that draws the border. */
+.code-composer-adapter__card:focus-within {
   border-color: var(--octant-border-strong);
   box-shadow: var(--octant-shadow-lg);
 }
