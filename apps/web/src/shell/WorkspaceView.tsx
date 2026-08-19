@@ -60,6 +60,7 @@ import { useWorkOverviewController } from "../work/useWorkOverviewController";
 import type { WorkOverviewClient } from "@octant/client-runtime/work-overview-client";
 import type { WorkResearchClient } from "@octant/client-runtime/work-research-client";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
+import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
 import type { UsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
@@ -162,6 +163,7 @@ export interface WorkspaceViewProps {
   readonly workOverviewClient?: WorkOverviewClient;
   readonly workResearchClient?: WorkResearchClient;
   readonly goalClient?: GoalClient;
+  readonly goalLoopClient?: GoalLoopClient;
   readonly planClient?: PlanClient;
   readonly shipClient?: ShipClient;
   readonly usageDashboardClient?: UsageDashboardClient;
@@ -961,6 +963,7 @@ function renderNonCodeTab(
           />
           <ThreadGoalPanel
             {...(props.goalClient === undefined ? {} : { client: props.goalClient })}
+            {...(props.goalLoopClient === undefined ? {} : { loopClient: props.goalLoopClient })}
             threadId={String(tab.threadId)}
           />
           <ThreadUsagePanel

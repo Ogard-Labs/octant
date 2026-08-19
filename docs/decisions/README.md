@@ -32,7 +32,7 @@ distilled successor of the earlier long-form design specifications.
 | [0022](0022-pointed-at-product-feedback.md)             | Pointing at the running product                                   | Accepted |
 | [0023](0023-bringing-a-run-home.md)                     | Bringing a run home                                               | Accepted |
 | [0024](0024-curated-project-scaffolds.md)               | Curated project scaffolds                                         | Accepted |
-| [0025](0025-long-running-goal-loops.md)                 | Long-running goal loops                                           | Proposed |
+| [0025](0025-long-running-goal-loops.md)                 | Long-running goal loops                                           | Accepted |
 | [0026](0026-shipping-to-a-user-owned-target.md)         | Shipping to a user-owned target                                   | Accepted |
 | [0027](0027-plans-as-journaled-artifacts.md)            | Plans as journaled artifacts                                      | Accepted |
 | [0028](0028-the-artifact-library.md)                    | The artifact library                                              | Accepted |
