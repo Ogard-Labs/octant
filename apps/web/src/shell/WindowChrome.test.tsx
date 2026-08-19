@@ -31,8 +31,7 @@ function renderChrome(overrides: Partial<React.ComponentProps<typeof WindowChrom
     hostBridge: hostBridge(),
     isNarrow: false,
     material: "opaque",
-    onResetLayout: vi.fn(),
-    onResetWindowBounds: vi.fn(),
+    onOpenZen: vi.fn(),
     onToggleDock: vi.fn(),
     ...overrides,
   };
@@ -92,7 +91,7 @@ describe("WindowChrome", () => {
         dockLabel="Utility dock"
         isNarrow={false}
         material="opaque"
-        onResetLayout={() => undefined}
+        onOpenZen={() => undefined}
         onToggleDock={() => undefined}
       />,
     );
@@ -423,18 +422,20 @@ describe("WindowChrome", () => {
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
-    const resetLayout = screen.getByRole("button", { name: "Reset layout" });
-    expect(resetLayout).toHaveAttribute("title", "Reset layout");
-    expect(resetLayout).toHaveClass("window-no-drag");
-    resetLayout.focus();
+    const openZen = screen.getByRole("button", { name: "Open Zen" });
+    expect(openZen).toHaveAttribute("title", "Open Zen");
+    expect(openZen).toHaveClass("window-no-drag");
+    openZen.focus();
     await user.keyboard("{Enter}");
-    expect(props.onResetLayout).toHaveBeenCalledOnce();
+    expect(props.onOpenZen).toHaveBeenCalledOnce();
 
     expect(screen.queryByRole("group", { name: "Window controls" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Minimize window" })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Reset window bounds" }));
-    expect(props.onResetWindowBounds).toHaveBeenCalledOnce();
+    // The rail offers nothing that discards a layout or a window's size: both
+    // resets live in Settings, where a destructive action is deliberate.
+    expect(screen.queryByRole("button", { name: "Reset layout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reset window bounds" })).not.toBeInTheDocument();
     expect(bridge.resetBounds).not.toHaveBeenCalled();
   });
 
@@ -442,7 +443,7 @@ describe("WindowChrome", () => {
     const user = userEvent.setup();
     const { container, props } = renderChrome({ isNarrow: true });
 
-    expect(screen.queryByRole("button", { name: "Reset layout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
 
     const overflow = screen.getByRole("button", { name: "More window actions" });
     expect(overflow).toHaveAttribute("aria-expanded", "false");
@@ -453,17 +454,17 @@ describe("WindowChrome", () => {
     expect(overflow).toHaveAttribute("aria-expanded", "true");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(container.querySelector(".window-chrome__disclosure")).toBeInTheDocument();
-    const resetLayout = screen.getByRole("button", { name: "Reset layout" });
-    expect(resetLayout).toHaveFocus();
+    const openZen = screen.getByRole("button", { name: "Open Zen" });
+    expect(openZen).toHaveFocus();
 
     await user.keyboard("{Escape}");
     expect(overflow).toHaveAttribute("aria-expanded", "false");
     expect(overflow).toHaveFocus();
 
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Reset layout" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open Zen" })).toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(props.onResetLayout).toHaveBeenCalledOnce();
+    expect(props.onOpenZen).toHaveBeenCalledOnce();
     expect(overflow).toHaveAttribute("aria-expanded", "false");
     expect(overflow).toHaveFocus();
   });
@@ -473,7 +474,7 @@ describe("WindowChrome", () => {
     const { props, rerender } = renderChrome({ isNarrow: true });
 
     await user.click(screen.getByRole("button", { name: "More window actions" }));
-    expect(screen.getByRole("button", { name: "Reset layout" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open Zen" })).toHaveFocus();
 
     rerender(<WindowChrome {...props} isNarrow={false} />);
     expect(screen.queryByRole("button", { name: "More window actions" })).not.toBeInTheDocument();
@@ -482,12 +483,12 @@ describe("WindowChrome", () => {
     rerender(<WindowChrome {...props} isNarrow />);
     const overflow = screen.getByRole("button", { name: "More window actions" });
     expect(overflow).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("button", { name: "Reset layout" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
     expect(document.body).toHaveFocus();
 
     overflow.focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Reset layout" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open Zen" })).toHaveFocus();
   });
 
   it("marks only empty rail space draggable and exposes the opaque material fallback", () => {
@@ -499,7 +500,7 @@ describe("WindowChrome", () => {
         dockLabel="Project memory"
         isNarrow={false}
         material="opaque"
-        onResetLayout={vi.fn()}
+        onOpenZen={vi.fn()}
         onToggleDock={vi.fn()}
       />,
     );

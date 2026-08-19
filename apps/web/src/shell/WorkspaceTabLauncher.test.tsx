@@ -41,6 +41,39 @@ describe("WorkspaceTabLauncher", () => {
     expect(onOpenSurface).toHaveBeenCalledWith("browser");
   });
 
+  it("offers the Code thread's own surfaces beside the ones the host catalogs", () => {
+    const onOpenThreadSurface = vi.fn();
+    render(
+      <WorkspaceTabLauncher
+        catalog={catalog}
+        mode="code"
+        onOpenSurface={vi.fn()}
+        onOpenThreadSurface={onOpenThreadSurface}
+        threadSurfaces={[
+          { kind: "code-diff", label: "Changes" },
+          { kind: "code-terminal", label: "Terminal" },
+          { kind: "code-test", label: "Tests" },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tests" }));
+    expect(onOpenThreadSurface).toHaveBeenCalledWith("code-test");
+  });
+
+  it("offers no thread surfaces when the group is not showing a Code thread", () => {
+    render(
+      <WorkspaceTabLauncher
+        catalog={catalog}
+        mode="code"
+        onOpenSurface={vi.fn()}
+        threadSurfaces={[{ kind: "code-diff", label: "Changes" }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    expect(screen.queryByRole("button", { name: "Changes" })).not.toBeInTheDocument();
+  });
+
   it("disables the trigger when no surfaces are available", () => {
     const onOpenSurface = vi.fn();
     const empty: WorkspaceSurfaceCatalog = {

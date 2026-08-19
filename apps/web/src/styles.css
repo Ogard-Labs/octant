@@ -994,6 +994,7 @@ button:focus-visible {
 
 .activity-nav__glyph {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   min-width: 12px;
@@ -1773,6 +1774,18 @@ button:focus-visible {
 
 .settings-view__field {
   grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/*
+ * A control that is a block rather than a value: it stacks under its label and
+ * takes the row's width. In the trailing column a searchable list took its own
+ * natural width and ran off the pane, and the centred label floated in the
+ * middle of the empty space beside it.
+ */
+.settings-view__field--block {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
 }
 
 .settings-view__field--search {
@@ -5073,7 +5086,10 @@ dialog.project-dialog {
 
 .composer-model-picker__menu {
   position: absolute;
-  right: 0;
+  /* Anchored to the trigger's leading edge, not its trailing one. The trigger
+     is the composer's leftmost control, so a menu that grew leftward ran off
+     the workspace and was painted over by the sidebar. */
+  left: 0;
   bottom: calc(100% + 8px);
   z-index: 40;
   display: grid;
