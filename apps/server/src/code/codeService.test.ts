@@ -2074,6 +2074,51 @@ describe("CodeService.listFiles", () => {
  * reconnect.
  */
 describe("CodeService.watchFiles", () => {
+  it("fails closed as unavailable when no watcher was wired", async () => {
+    const fixture = serviceFixture();
+    await expect(
+      fixture.service.watchFiles(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+  });
+
+  it("reports unavailable when the root authority refuses to resolve", async () => {
+    const fixture = serviceFixture({
+      watcher: {
+        watch: () =>
+          (async function* (): AsyncGenerator<never> {
+            // A watch that never starts must not be subscribed when the root is gone.
+          })(),
+      },
+    });
+    fixture.roots.resolve.mockResolvedValueOnce(undefined as never);
+    await expect(
+      fixture.service.watchFiles(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unavailable" } });
+  });
+
+  it("refuses a window that cannot access the thread's Project", async () => {
+    const hidden = thread({ projectId: ids.unauthorizedProject });
+    const watch = vi.fn();
+    const fixture = serviceFixture({
+      threads: [hidden],
+      watcher: { watch },
+    });
+
+    await expect(
+      fixture.service.watchFiles(ids.window, {
+        threadId: ids.thread,
+        checkoutId: checkout.id,
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(watch).not.toHaveBeenCalled();
+  });
+
   it("ends the watches a revoked window left open", async () => {
     let observed: AbortSignal | undefined;
     const fixture = serviceFixture({
