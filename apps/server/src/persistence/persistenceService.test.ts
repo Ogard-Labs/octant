@@ -192,6 +192,7 @@ describe("PersistenceLive", () => {
       // `completed`; re-running the walkthrough on upgrade would be wrong.
       // Only a genuinely new store starts `pending`.
       firstRunOnboarding: "completed",
+      automaticUpdateChecks: true,
       lastContextSurface: null,
       modeSwitcherPresentation: "buttons",
       navigatorAssistant: {},

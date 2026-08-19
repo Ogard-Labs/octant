@@ -18,10 +18,22 @@ import { fileURLToPath } from "node:url";
 import { DESKTOP_PRELOAD_FILENAME } from "../apps/desktop/src/runtimePaths";
 import { buildCodeFileHelper } from "./build-code-file-helper";
 import { buildKeychainHelper } from "./build-keychain-helper";
+import {
+  requireSigned,
+  resolveSigningCredentials,
+  signAndNotarizeDesktop,
+  SIGNING_ENVIRONMENT_VARIABLES,
+} from "./sign-desktop";
 
 export const DESKTOP_PACKAGE_IDENTITY = {
   bundleId: "app.octant.desktop",
   productName: "Octant",
+  /**
+   * The release this build is. One place, because the updater compares it
+   * against the feed and an app that cannot say which version it is cannot
+   * refuse to go backwards (`docs/decisions/0032`).
+   */
+  version: "0.1.0",
 } as const;
 
 const ELECTRON_VERSION = "43.1.0";
@@ -253,6 +265,7 @@ function escapeAppleScriptString(appPath: string): string {
 export function createPackagerOptions(dir: string, out: string): PackagerOptions {
   return {
     appBundleId: DESKTOP_PACKAGE_IDENTITY.bundleId,
+    appVersion: DESKTOP_PACKAGE_IDENTITY.version,
     arch: "arm64",
     asar: false,
     dir,
@@ -448,6 +461,47 @@ async function packageDesktop(repositoryRoot: string): Promise<string> {
   }
   await validateBundleIdentity(finalApp);
   return finalApp;
+}
+
+export type DesktopSigningOutcome =
+  | { readonly kind: "signed"; readonly archivePath: string }
+  | { readonly kind: "unsigned"; readonly missing: ReadonlyArray<string> };
+
+/**
+ * Sign and notarize the packaged app, or say plainly that it is unsigned.
+ *
+ * A local build without credentials still produces a working app — a
+ * contributor has no certificate and should not need one. What it must never
+ * do is produce something that could be mistaken for a release, so an unsigned
+ * result is reported as unsigned and a declared release build refuses to
+ * finish without the credentials rather than shipping past them.
+ */
+export async function signPackagedDesktop(input: {
+  readonly repositoryRoot: string;
+  readonly appPath: string;
+  readonly environment: Record<string, string | undefined>;
+  readonly run: (argv: ReadonlyArray<string>) => Promise<void>;
+}): Promise<DesktopSigningOutcome> {
+  const resolution = resolveSigningCredentials(input.environment);
+  if (resolution.kind === "absent") {
+    if (requireSigned(input.environment)) {
+      throw new Error(
+        `A release build must be signed, but ${resolution.missing.join(", ")} ${
+          resolution.missing.length === 1 ? "is" : "are"
+        } not set. Set ${SIGNING_ENVIRONMENT_VARIABLES.join(", ")} or drop OCTANT_RELEASE_BUILD.`,
+      );
+    }
+    return { kind: "unsigned", missing: resolution.missing };
+  }
+  const archivePath = `${input.appPath.replace(/\.app$/, "")}-${DESKTOP_PACKAGE_IDENTITY.version}-arm64.zip`;
+  await signAndNotarizeDesktop({
+    repositoryRoot: input.repositoryRoot,
+    appPath: input.appPath,
+    archivePath,
+    credentials: resolution.credentials,
+    run: input.run,
+  });
+  return { kind: "signed", archivePath };
 }
 
 async function validatePackagedArm64(path: string): Promise<void> {
@@ -652,5 +706,33 @@ async function writeJson(path: string, value: unknown): Promise<void> {
 if (import.meta.main) {
   const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
   const appPath = await packageDesktop(repositoryRoot);
-  console.log(`Packaged unsigned Apple Silicon app: ${appPath}`);
+  const outcome = await signPackagedDesktop({
+    repositoryRoot,
+    appPath,
+    environment: process.env,
+    run: runCommand,
+  });
+  if (outcome.kind === "signed") {
+    console.log(`Packaged, signed, and notarized Apple Silicon app: ${appPath}`);
+    console.log(`Release archive for the update feed: ${outcome.archivePath}`);
+  } else {
+    // Said out loud rather than left to be discovered: this build cannot be
+    // updated in place, because there is no signature for the platform updater
+    // to check a replacement against.
+    console.log(`Packaged UNSIGNED Apple Silicon app: ${appPath}`);
+    console.log(`Unsigned because ${outcome.missing.join(", ")} not set; it will not auto-update.`);
+  }
+}
+
+async function runCommand(argv: ReadonlyArray<string>): Promise<void> {
+  const [command, ...args] = argv;
+  if (command === undefined) throw new Error("Empty command.");
+  const child = Bun.spawn([command, ...args], {
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
+  });
+  if ((await child.exited) !== 0) {
+    throw new Error(`${command} failed while signing the desktop app.`);
+  }
 }

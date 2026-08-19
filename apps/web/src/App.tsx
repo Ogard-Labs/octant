@@ -627,6 +627,7 @@ function LaunchedShell(
     props.hostBridge,
   );
   const sidebarVibrancySupported = useSidebarVibrancySupported(props.hostBridge);
+  useAutomaticUpdateCheckSync(props.hostBridge, controller.settings?.automaticUpdateChecks);
   const sidebarBackgroundFetcher = useSidebarBackgroundFetcher(
     props.launch.serverUrl,
     props.projectWindowCapability,
@@ -4375,6 +4376,25 @@ function useResolvedMaterial(
     };
   }, [hostBridge, preference]);
   return material;
+}
+
+/**
+ * Tell the host whether it may check for updates on its own.
+ *
+ * The preference is persisted with the rest of the shell settings, and the host
+ * process starts with automatic checks off, so this is what turns them on. That
+ * ordering is deliberate: a host that defaulted to on would check once on every
+ * launch before it learned the person had said not to.
+ */
+function useAutomaticUpdateCheckSync(
+  hostBridge: OctantHostBridge | undefined,
+  automaticUpdateChecks: boolean | undefined,
+): void {
+  const setAutomatic = hostBridge?.setAutomaticAppUpdateChecks;
+  useEffect(() => {
+    if (setAutomatic === undefined || automaticUpdateChecks === undefined) return;
+    void setAutomatic(automaticUpdateChecks).catch(() => undefined);
+  }, [automaticUpdateChecks, setAutomatic]);
 }
 
 function useSidebarVibrancySupported(hostBridge: OctantHostBridge | undefined): boolean {

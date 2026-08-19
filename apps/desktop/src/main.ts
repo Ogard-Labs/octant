@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   app,
+  autoUpdater as electronAutoUpdater,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -37,6 +38,9 @@ import {
   type PreviewHandoffRequest,
 } from "@octant/contracts/previews";
 import { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
+import type { AppVersion } from "@octant/contracts/app-updates";
+import { createAppUpdateService } from "./appUpdateService";
+import { OCTANT_UPDATE_FEED_URL } from "./appUpdateFeed";
 import {
   createBrowserSurfaceHost,
   type BrowserSurfaceTabCommand,
@@ -140,6 +144,11 @@ const IPC_CHANNELS = {
   browserSurfaceDetach: "octant:browser-surface:detach",
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
   browserSurfaceTab: "octant:browser-surface:tab",
+  appUpdateState: "octant:app-update:state",
+  appUpdateCheck: "octant:app-update:check",
+  appUpdateDownload: "octant:app-update:download",
+  appUpdateInstall: "octant:app-update:install",
+  appUpdateAutomatic: "octant:app-update:automatic",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
   hostCapabilities: "octant:window:host-capabilities",
@@ -803,6 +812,7 @@ let server: ChildProcess | undefined;
 let credentialBroker: CredentialBroker | undefined;
 let browserRuntimeBroker: BrowserRuntimeBroker | undefined;
 let browserSurfaceHost: ReturnTypeOfBrowserSurfaceHost | undefined;
+let appUpdateService: ReturnType<typeof createAppUpdateService> | undefined;
 let credentialStore: CredentialStore | undefined;
 let credentialPurgeStore: CredentialPurgeStore | undefined;
 let desktopBridgeSecret =
@@ -1927,6 +1937,31 @@ function installIpcHandlers(): void {
       request.command,
     );
   });
+  ipcMain.handle(IPC_CHANNELS.appUpdateCheck, async (event) => {
+    ownedTopLevelWindowContext(event);
+    return await appUpdates().check();
+  });
+  ipcMain.handle(IPC_CHANNELS.appUpdateDownload, async (event) => {
+    ownedTopLevelWindowContext(event);
+    return await appUpdates().download();
+  });
+  ipcMain.handle(IPC_CHANNELS.appUpdateInstall, (event) => {
+    ownedTopLevelWindowContext(event);
+    // Read here rather than taken from the renderer: this is the same activity
+    // the quit guard already trusts to decide whether stopping would interrupt
+    // something, and a second notion of "busy" would disagree with it exactly
+    // when it mattered.
+    const host = hostLifecycle.snapshot();
+    return appUpdates().install({
+      activeAgentCount: host.activeAgentCount,
+      attentionRequired: host.attentionRequired,
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.appUpdateAutomatic, (event, value: unknown) => {
+    ownedTopLevelWindowContext(event);
+    if (typeof value !== "boolean") throw new Error("Octant rejected an invalid update setting.");
+    return appUpdates().setAutomaticChecks(value);
+  });
   ipcMain.handle(IPC_CHANNELS.browserSurfaceOpenExternal, async (event, value: unknown) => {
     ownedTopLevelWindowContext(event);
     await shell.openExternal(validateExternalBrowserUrl(value));
@@ -2053,6 +2088,37 @@ function validateBrowserSurfaceTabCommand(
     throw new Error("Octant rejected an invalid Browser tab command.");
   }
   return { ...identity, command: { kind: command.kind, tabId: command.tabId } };
+}
+
+/**
+ * The one update service this app runs.
+ *
+ * Built from what the running app actually is — `app.getVersion()` rather than
+ * a constant a build could forget to bump — so the version the updater compares
+ * against the feed is the version on disk.
+ */
+function appUpdates(): ReturnType<typeof createAppUpdateService> {
+  appUpdateService ??= createAppUpdateService({
+    updater: electronAutoUpdater,
+    feedUrl: OCTANT_UPDATE_FEED_URL,
+    app: {
+      version: app.getVersion() as AppVersion,
+      platform: process.platform,
+      arch: process.arch,
+    },
+    // Starts off, and stays off until the renderer reports the persisted
+    // preference. A default of "on" would mean a host that had been told not to
+    // check still checked once on every launch, in the window before the
+    // setting was read — which is exactly what the switch promises it does not
+    // do.
+    automaticChecks: false,
+    onState: (state) => {
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.appUpdateState, state);
+      }
+    },
+  });
+  return appUpdateService;
 }
 
 function validateExternalBrowserUrl(value: unknown): string {

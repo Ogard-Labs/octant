@@ -235,6 +235,14 @@ export const ShellSettings = Schema.Struct({
   firstRunOnboarding: Schema.optionalWith(FirstRunOnboardingStatus, {
     default: () => "pending" as const,
   }),
+  /**
+   * Whether Octant may check for updates on its own. Off means no request is
+   * made at all rather than a check whose answer is withheld — what leaves the
+   * machine is the point of the switch (`docs/decisions/0032`). A store
+   * persisted before updates shipped decodes to on, which is the behaviour the
+   * release notes describe.
+   */
+  automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   // Navigator settings section. A store persisted before Navigator shipped
   // decodes to the empty section — both roles absent — which the snapshot
   // reports as `unconfigured` rather than inventing a default model.

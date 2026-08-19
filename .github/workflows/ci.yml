@@ -54,4 +54,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run --cwd apps/desktop typecheck
       - run: bun run --cwd apps/desktop test
+      # The scripts suite covers the signing pipeline: what would be run, in
+      # what order, and that a declared release refuses to finish unsigned. The
+      # signing itself needs the maintainer's Developer ID and notary
+      # credentials, so it is not exercised here — no secret is read on a pull
+      # request, and this job deliberately does not package a release.
       - run: bun run --cwd scripts test
