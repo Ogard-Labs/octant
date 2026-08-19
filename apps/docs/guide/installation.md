@@ -74,17 +74,26 @@ This attaches to a running local host or spawns one. The browser receives a sing
 
 Octant checks for updates, downloads them when you ask, and applies them the next time you relaunch. It never replaces itself while it is running, and it refuses to relaunch while an agent is still working or a thread is waiting on you — finish or checkpoint that work first.
 
-An update is only ever installed if Octant can prove where it came from. Two independent checks stand in the way: Octant verifies a signature over the release notice against a key built into the app, and macOS verifies the replacement's own code signature before swapping anything. If either refuses — a bad signature, a version that is not newer, a build for another kind of Mac, or an update service it cannot reach — Octant tells you which and installs nothing. There is no way to wave a failed check through.
+An update is only ever installed if Octant can prove where it came from. Trust comes from a signature, never from the server that answered: Octant verifies a signature over the release notice against a key built into the app, checks the downloaded bytes against the hash that notice named, and macOS then verifies the replacement's own code signature before swapping anything. If any of those refuses — a bad signature, a download that does not match, a version that is not newer, a build for another kind of Mac, or an update service it cannot reach — Octant tells you which and installs nothing. There is no way to wave a failed check through.
+
+Because the bytes are verified rather than the host, the download may be served from anywhere the release notice points, and pointing Octant at a different update service does not lower the bar an update has to clear.
+
+### Pointing Octant at a different update service
+
+Octant checks `https://octant.sh` by default. Set `OCTANT_UPDATE_FEED_URL` to an HTTPS URL to use your own — useful if you mirror releases inside a team. Octant refuses a non-HTTPS value rather than quietly falling back to the default, and a release served from your endpoint still has to carry a signature Octant's built-in key accepts.
 
 ### What an update check sends
 
-A check is a plain request for a small file listing the latest version. The comparison happens on your Mac, so the request has nothing it needs to carry about you. It sends:
+A check is a plain request for a small file listing the latest version. Octant still compares versions on your Mac, so a service that ignores what you send works identically. It sends:
 
+- The Octant version you are running, so the service can say whether anything is newer.
+- Your platform and processor architecture, so it offers a build that runs on this Mac.
 - The IP address the request comes from, as any network request discloses.
-- That an Octant client asked, from a user agent naming the app and no version.
 - The time of the request.
 
-Nothing else travels with it: no account, no Project or thread, no configuration, no usage, and no identifier. This path carries update checks and nothing else.
+From that, whoever serves the file learns that someone at that IP address runs Octant, which version, and roughly how often it is open. It learns nothing that names you: no account, no install identifier, no Project or thread, no configuration, no usage, and no cookie. This path carries update checks and nothing else.
+
+If the release notice points the download at a release hosted elsewhere, that host sees your IP address when the download itself is fetched — a download, not a check, and only when you ask for one.
 
 You can turn automatic checking off in **Settings → General → Updates**. Off means Octant does not contact the update service at all, rather than checking quietly; you can still check by hand whenever you want.
 

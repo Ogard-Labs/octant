@@ -1,15 +1,18 @@
 /**
  * The update feed and what Octant does with it.
  *
- * The feed is a static document served over HTTPS and signed with a key only
- * the maintainer holds. Octant verifies that signature against a public key
- * compiled into the app before it will look at anything the document says, so
- * a feed that was tampered with, served from somewhere else, or signed by a
- * key we do not hold is refused rather than read (see `docs/decisions/0032`).
+ * The feed is a document served over HTTPS and signed with a key only the
+ * maintainer holds. Octant verifies that signature against a public key
+ * compiled into the app before it will look at anything the document says.
+ * Trust comes from that signature and never from the host: a feed served from
+ * the expected domain over a valid certificate proves only that somebody
+ * controls that domain today (see `docs/decisions/0032`).
  *
- * The document names one release. Which release is newer is decided on the
- * device, so the request that fetches this carries no version and no
- * identifier — see `OCTANT_UPDATE_CHECK_DISCLOSURE`.
+ * The document names one release and where its bytes are. That location is not
+ * assumed to be anywhere in particular — the artifact may sit beside the feed
+ * or in a release on another host — because the artifact is verified against
+ * the signed hash before it is installed, which is what makes its location a
+ * free choice rather than something to trust.
  */
 
 import { Schema } from "effect";
@@ -48,15 +51,21 @@ export const AppUpdateRelease = Schema.Struct({
   platform: AppUpdatePlatform,
   arch: AppUpdateArchitecture,
   /**
-   * Where the replacement is. HTTPS only: the payload's own code signature is
-   * checked before it is installed, but a plaintext download is a needless
-   * disclosure of what the person is running.
+   * Where the replacement is. Any HTTPS location: the artifact is verified
+   * against `sha256` before anything is installed, so whichever host serves it
+   * is not being trusted. HTTPS is required as transport hygiene, so what a
+   * person is downloading is not readable on the wire.
    */
   url: Schema.String.pipe(
     Schema.maxLength(2048),
     Schema.filter((value) => value.startsWith("https://")),
   ),
-  /** Lowercase hex SHA-256 of the payload, so a truncated download is caught. */
+  /**
+   * Lowercase hex SHA-256 of the artifact. Signed, and checked against the
+   * downloaded bytes before the platform updater is told anything — this is
+   * what turns a signed notice into a verified artifact, and what stops
+   * whoever serves the download from substituting something else.
+   */
   sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
   releasedAt: UtcTimestamp,
   notes: Schema.optional(Schema.String.pipe(Schema.maxLength(4096))),
@@ -82,6 +91,13 @@ export const AppUpdateRefusal = Schema.Literal(
   "unreachable",
   "malformed",
   "untrusted-signature",
+  /**
+   * The artifact downloaded, but its bytes did not hash to what the signed
+   * release said they would. Distinct from a bad signature: the notice was
+   * genuine and the delivery was not, which is a different thing to tell
+   * somebody and a different thing to investigate.
+   */
+  "corrupt-artifact",
   "not-newer",
   "wrong-platform",
 );
@@ -125,9 +141,23 @@ export type AppUpdateState = typeof AppUpdateState.Type;
  * this, this list is wrong and the test that reads it fails.
  */
 export const OCTANT_UPDATE_CHECK_DISCLOSURE = [
+  "The Octant version you are running, so the service can say whether anything is newer.",
+  "Your platform and processor architecture, so it offers a build that runs on this Mac.",
   "The IP address the request comes from, as any network request discloses.",
-  "That an Octant client asked, from a user agent naming the app and no version.",
   "The time of the request.",
+] as const;
+
+/**
+ * What a server can work out from those, said plainly.
+ *
+ * Written down because "we send almost nothing" is easy to say and harder to
+ * keep honest. Anyone assessing this deserves the inference, not just the
+ * field list.
+ */
+export const OCTANT_UPDATE_CHECK_INFERENCE = [
+  "That someone at that IP address runs Octant, which version, and roughly how often it is open.",
+  "Nothing that names you: no account, no install identifier, no Project or thread, no usage, and no cookie.",
+  "Nothing across endpoints: an update check is the only request this path makes.",
 ] as const;
 
 export const decodeAppVersion = Schema.decodeUnknownSync(AppVersion);

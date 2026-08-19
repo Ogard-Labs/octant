@@ -1,4 +1,7 @@
-import { OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
+import {
+  OCTANT_UPDATE_CHECK_DISCLOSURE,
+  OCTANT_UPDATE_CHECK_INFERENCE,
+} from "@octant/contracts/app-updates";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppUpdateSettings } from "./AppUpdateSettings";
@@ -54,6 +57,29 @@ describe("AppUpdateSettings", () => {
     expect(screen.getByText(/no account, no Project, no thread, no usage/)).toBeTruthy();
   });
 
+  it("says what the update service can work out, not only what is sent", () => {
+    // A field list alone reads as reassurance; the inference is the part
+    // somebody weighing the switch actually needs.
+    view();
+
+    for (const item of OCTANT_UPDATE_CHECK_INFERENCE) {
+      expect(screen.getByText(item)).toBeTruthy();
+    }
+  });
+
+  it("keeps a manual check available when automatic checking is off", () => {
+    // Off means Octant stops asking on its own, not that the person loses the
+    // ability to ask.
+    view({}, false);
+
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeTruthy();
+    expect(
+      screen
+        .getByRole("switch", { name: "Check for updates automatically" })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+  });
+
   it("turns automatic checking off in the host as well as the settings", async () => {
     // Off has to mean no request leaves the machine, so the host is told too
     // rather than the preference only being remembered.
@@ -91,6 +117,23 @@ describe("AppUpdateSettings", () => {
       /2 agents are still working and a thread is waiting on you/,
     );
     expect(host.installAppUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("shows what the host refused rather than leaving the button spinning", async () => {
+    // A misconfigured endpoint is refused by the host, and the person who has
+    // to fix it needs to read why.
+    view({
+      checkForAppUpdate: vi.fn(async () => {
+        throw new Error("OCTANT_UPDATE_FEED_URL must be an https URL");
+      }),
+    } as Partial<OctantHostBridge>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/must be an https URL/);
+    expect(screen.getByRole("button", { name: "Check for updates" }).hasAttribute("disabled")).toBe(
+      false,
+    );
   });
 
   it("says plainly that a non-desktop client does not update itself", () => {

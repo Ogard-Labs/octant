@@ -1,5 +1,8 @@
 import type { AppUpdateState } from "@octant/contracts/app-updates";
-import { OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
+import {
+  OCTANT_UPDATE_CHECK_DISCLOSURE,
+  OCTANT_UPDATE_CHECK_INFERENCE,
+} from "@octant/contracts/app-updates";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -23,6 +26,7 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   const [state, setState] = useState<AppUpdateState>();
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState<Extract<AppUpdateInstallOutcome, { kind: "wait" }>>();
+  const [failure, setFailure] = useState<string>();
 
   useEffect(() => {
     if (bridge?.subscribeAppUpdateState === undefined) return;
@@ -47,8 +51,15 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
   async function run(action: () => Promise<AppUpdateState>): Promise<void> {
     setBusy(true);
     setWaiting(undefined);
+    setFailure(undefined);
     try {
       setState(await action());
+    } catch (error) {
+      // The host refuses rather than guessing when it cannot use the endpoint
+      // it was configured with. Saying so is the point; a rejected request that
+      // left the button spinning would read as a broken app instead of a
+      // setting to fix.
+      setFailure(error instanceof Error ? error.message : "Octant could not check for updates.");
     } finally {
       setBusy(false);
     }
@@ -113,6 +124,11 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
           {describeWaiting(waiting)}
         </p>
       )}
+      {failure === undefined ? null : (
+        <p className="app-update__notice" role="alert">
+          {failure}
+        </p>
+      )}
       {state?.message === undefined ? null : (
         <p className="app-update__notice" role="alert">
           {state.message}
@@ -129,12 +145,18 @@ export function AppUpdateSettings(props: AppUpdateSettingsProps) {
           }}
         />
         <p className="app-update__disclosure">
-          Turning this off stops Octant contacting the update service at all. A check is a plain
-          request for a file listing the latest version, and the comparison happens on this Mac. It
-          sends:
+          Turning this off stops Octant contacting the update service at all; you can still check by
+          hand whenever you want to. A check is a plain request for a file listing the latest
+          version, and Octant compares it on this Mac. It sends:
         </p>
         <ul className="app-update__disclosure-list">
           {OCTANT_UPDATE_CHECK_DISCLOSURE.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+        <p className="app-update__disclosure">From that, whoever serves the update file learns:</p>
+        <ul className="app-update__disclosure-list">
+          {OCTANT_UPDATE_CHECK_INFERENCE.map((item) => (
             <li key={item}>{item}</li>
           ))}
         </ul>

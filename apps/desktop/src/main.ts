@@ -40,7 +40,7 @@ import {
 import { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 import type { AppVersion } from "@octant/contracts/app-updates";
 import { createAppUpdateService } from "./appUpdateService";
-import { OCTANT_UPDATE_FEED_URL } from "./appUpdateFeed";
+import { resolveUpdateFeedUrl } from "./appUpdateFeed";
 import {
   createBrowserSurfaceHost,
   type BrowserSurfaceTabCommand,
@@ -2100,7 +2100,7 @@ function validateBrowserSurfaceTabCommand(
 function appUpdates(): ReturnType<typeof createAppUpdateService> {
   appUpdateService ??= createAppUpdateService({
     updater: electronAutoUpdater,
-    feedUrl: OCTANT_UPDATE_FEED_URL,
+    feedUrl: resolveUpdateFeedUrl(process.env),
     app: {
       version: app.getVersion() as AppVersion,
       platform: process.platform,

@@ -6,7 +6,12 @@ import {
   resolveUpdateOffer,
   type UpdateWorkInFlight,
 } from "@octant/domain";
-import { createFeedVerifier, fetchUpdateFeed, type FeedVerifier } from "./appUpdateFeed";
+import {
+  createFeedVerifier,
+  fetchUpdateFeed,
+  fetchVerifiedArtifact,
+  type FeedVerifier,
+} from "./appUpdateFeed";
 
 /**
  * The slice of Electron's `autoUpdater` this service drives.
@@ -28,6 +33,11 @@ export interface AppUpdaterPort {
 export interface AppUpdateServiceOptions {
   readonly updater: AppUpdaterPort;
   readonly feedUrl: string;
+  /**
+   * The largest release Octant will read into memory to verify. A release is a
+   * known size; a body far past it is not one.
+   */
+  readonly maxArtifactBytes?: number;
   readonly app: { readonly version: AppVersion; readonly platform: string; readonly arch: string };
   readonly automaticChecks: boolean;
   readonly verifier?: FeedVerifier;
@@ -72,7 +82,7 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
     currentVersion: options.app.version,
     automaticChecks,
   };
-  let staged: { readonly url: string; readonly close: () => void } | undefined;
+  let staged: { readonly feedUrl: string; readonly close: () => void } | undefined;
   let cancelScheduled: (() => void) | undefined;
 
   const publish = (next: Partial<AppUpdateState>): AppUpdateState => {
@@ -151,7 +161,16 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
           message: "This build carries no update signing key, so it cannot verify an update.",
         });
       }
-      const fetched = await fetchUpdateFeed(options.feedUrl, options.fetchImpl, signal);
+      const fetched = await fetchUpdateFeed(
+        options.feedUrl,
+        {
+          version: String(options.app.version),
+          platform: options.app.platform,
+          arch: options.app.arch,
+        },
+        options.fetchImpl,
+        signal,
+      );
       if (fetched.kind !== "fetched") {
         return publishWithoutOffer({
           status: "refused",
@@ -189,16 +208,41 @@ export function createAppUpdateService(options: AppUpdateServiceOptions) {
      * Refuses unless the current state is one it produced from a verified feed,
      * so a caller cannot skip the check and ask for bytes directly.
      */
-    async download(): Promise<AppUpdateState> {
+    async download(signal?: AbortSignal): Promise<AppUpdateState> {
       const release = state.available;
       if (state.status !== "available" || release === undefined) return state;
       releaseLoopback();
+      publish({ status: "downloading" });
+      // Downloaded and hashed here, before the platform updater is told
+      // anything. The feed said where the bytes are and what they must hash to,
+      // and both were inside the signature — checking it is what turns a signed
+      // notice into a verified artifact. Whoever serves the download, on
+      // whatever host, cannot substitute anything.
+      const artifact = await fetchVerifiedArtifact(
+        {
+          url: release.url,
+          sha256: release.sha256,
+          maxBytes: options.maxArtifactBytes ?? MAX_ARTIFACT_BYTES,
+        },
+        options.fetchImpl,
+        signal,
+      );
+      if (artifact.kind !== "verified") {
+        return publishWithoutOffer({
+          status: "refused",
+          refusal: artifact.kind === "corrupt" ? "corrupt-artifact" : "unreachable",
+          message:
+            artifact.kind === "corrupt"
+              ? "The downloaded update did not match the signed release, so it was discarded."
+              : "The update could not be downloaded.",
+        });
+      }
       try {
-        staged = await serveVerifiedRelease(release);
+        staged = await serveVerifiedArtifact(release, artifact.bytes);
       } catch {
         return publish({ status: "failed", message: "The update could not be prepared." });
       }
-      options.updater.setFeedURL({ url: staged.url, serverType: "json" });
+      options.updater.setFeedURL({ url: staged.feedUrl, serverType: "json" });
       options.updater.checkForUpdates();
       return publish({ status: "downloading" });
     },
@@ -258,24 +302,44 @@ function refusalMessage(refusal: string): string {
 }
 
 /**
- * Hand one verified release to the platform updater over loopback.
+ * Serve one already-verified artifact to the platform updater over loopback.
  *
- * The server answers exactly one thing: the URL this service already verified,
- * in the shape the platform updater expects. It binds to 127.0.0.1, lives only
- * as long as the download, and has no route that could return anything else —
- * so the platform updater has no way to reach a release we did not check.
+ * The bytes here have been downloaded and hashed against the signed release, so
+ * this hands over the verified artifact itself rather than a URL to fetch
+ * again. That closes the gap a second fetch would open — nothing can change
+ * between the check and the install — and it means the platform updater never
+ * makes a network request of its own, so wherever the artifact was hosted, it
+ * is contacted exactly once.
+ *
+ * The server binds to 127.0.0.1, lives only as long as the install, and has two
+ * routes: the feed the platform updater expects, and the bytes it names.
  */
-async function serveVerifiedRelease(
+async function serveVerifiedArtifact(
   release: AppUpdateRelease,
-): Promise<{ readonly url: string; readonly close: () => void }> {
-  const body = JSON.stringify({ url: release.url });
+  bytes: Uint8Array,
+): Promise<{ readonly feedUrl: string; readonly close: () => void }> {
+  const artifactPath = `/artifact/${String(release.version)}.zip`;
+  const body = Buffer.from(bytes);
+  let feed = "";
   const server = createServer((request, response) => {
     if (request.method !== "GET") {
       response.writeHead(405).end();
       return;
     }
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(body);
+    if (request.url === artifactPath) {
+      response.writeHead(200, {
+        "content-type": "application/zip",
+        "content-length": String(body.byteLength),
+      });
+      response.end(body);
+      return;
+    }
+    if (request.url === "/feed") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ url: feed }));
+      return;
+    }
+    response.writeHead(404).end();
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -289,11 +353,18 @@ async function serveVerifiedRelease(
     server.close();
     throw new Error("Octant could not prepare the update hand-off.");
   }
+  feed = `http://127.0.0.1:${address.port}${artifactPath}`;
   return {
-    url: `http://127.0.0.1:${address.port}/update`,
+    feedUrl: `http://127.0.0.1:${address.port}/feed`,
     close: () => {
       server.close();
       server.closeAllConnections();
     },
   };
 }
+
+/**
+ * How large a release Octant will read in to verify it. Generous for a packaged
+ * Electron app and far below what would exhaust memory.
+ */
+const MAX_ARTIFACT_BYTES = 600 * 1024 * 1024;

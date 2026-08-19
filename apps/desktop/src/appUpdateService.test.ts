@@ -1,20 +1,39 @@
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import type { AppUpdateRelease, AppVersion } from "@octant/contracts/app-updates";
-import { OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
+import {
+  OCTANT_UPDATE_CHECK_DISCLOSURE,
+  OCTANT_UPDATE_CHECK_INFERENCE,
+} from "@octant/contracts/app-updates";
 import { canonicalReleaseBytes } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
-import { createFeedVerifier, fetchUpdateFeed, UPDATE_CHECK_USER_AGENT } from "./appUpdateFeed";
+import {
+  createFeedVerifier,
+  DEFAULT_OCTANT_UPDATE_FEED_URL,
+  fetchUpdateFeed,
+  fetchVerifiedArtifact,
+  resolveUpdateFeedUrl,
+  UPDATE_CHECK_USER_AGENT,
+  UPDATE_FEED_URL_ENVIRONMENT_VARIABLE,
+} from "./appUpdateFeed";
 import { createAppUpdateService, type AppUpdaterPort } from "./appUpdateService";
 
 const keys = generateKeyPairSync("ed25519");
 const publicKeyBase64 = keys.publicKey.export({ format: "der", type: "spki" }).toString("base64");
+
+const artifactBytes = Buffer.from("octant-0.3.0-arm64-release");
+const artifactDigest = createHash("sha256").update(artifactBytes).digest("hex");
+
+/** A response body from bytes, in the shape `Response` accepts. */
+function served(bytes: Buffer): ArrayBuffer {
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+}
 
 const release = {
   version: "0.3.0",
   platform: "darwin",
   arch: "arm64",
   url: "https://updates.example.test/Octant-0.3.0-arm64.zip",
-  sha256: "a".repeat(64),
+  sha256: artifactDigest,
   releasedAt: "2026-08-19T09:00:00.000Z",
 } as unknown as AppUpdateRelease;
 
@@ -43,25 +62,36 @@ function updater(): AppUpdaterPort & {
   };
 }
 
+const FEED_URL = "https://updates.example.test/feed.json";
+
 function service(
   options: {
     readonly document?: unknown;
     readonly fetchFails?: boolean;
     readonly publicKey?: string;
     readonly currentVersion?: string;
+    readonly feedUrl?: string;
+    /** What the artifact host actually serves, when it disagrees with the signed hash. */
+    readonly serves?: Buffer;
+    readonly artifactUnreachable?: boolean;
   } = {},
 ) {
   const port = updater();
-  const fetchImpl = vi.fn(async () => {
+  const feedUrl = options.feedUrl ?? FEED_URL;
+  const fetchImpl = vi.fn(async (input: string) => {
     if (options.fetchFails === true) throw new Error("offline");
-    return new Response(JSON.stringify(options.document ?? signedFeed()), {
-      status: 200,
-      headers: { "content-type": "application/json" },
-    });
+    if (input.startsWith(feedUrl)) {
+      return new Response(JSON.stringify(options.document ?? signedFeed()), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (options.artifactUnreachable === true) return new Response("", { status: 404 });
+    return new Response(served(options.serves ?? artifactBytes), { status: 200 });
   }) as unknown as typeof globalThis.fetch;
   const updates = createAppUpdateService({
     updater: port,
-    feedUrl: "https://updates.example.test/feed.json",
+    feedUrl,
     app: {
       version: (options.currentVersion ?? "0.2.0") as AppVersion,
       platform: "darwin",
@@ -140,24 +170,137 @@ describe("update verification", () => {
 
     expect(await updates.check()).toMatchObject({ status: "up-to-date", refusal: "not-newer" });
   });
+
+  it("holds a feed served from somewhere else to exactly the same bar", async () => {
+    // Somebody self-hosting, or a team pointing Octant at their own endpoint,
+    // changes where the answer comes from and nothing about what it must prove.
+    const other = generateKeyPairSync("ed25519");
+    const payload = release;
+    const { updates } = service({
+      feedUrl: "https://updates.acme-internal.test/octant.json",
+      document: {
+        schemaVersion: 1,
+        release: payload,
+        signature: sign(null, canonicalReleaseBytes(payload), other.privateKey).toString("base64"),
+      },
+    });
+
+    expect(await updates.check()).toMatchObject({
+      status: "refused",
+      refusal: "untrusted-signature",
+    });
+  });
+});
+
+describe("where the feed is", () => {
+  it("uses the published endpoint when nothing is configured", () => {
+    expect(resolveUpdateFeedUrl({})).toBe(DEFAULT_OCTANT_UPDATE_FEED_URL);
+    expect(DEFAULT_OCTANT_UPDATE_FEED_URL.startsWith("https://")).toBe(true);
+  });
+
+  it("lets a team point Octant at their own endpoint", () => {
+    // The endpoint is configuration: the signature is what is trusted, so
+    // moving the feed is a deployment choice rather than a security one.
+    expect(
+      resolveUpdateFeedUrl({
+        [UPDATE_FEED_URL_ENVIRONMENT_VARIABLE]: "https://updates.acme-internal.test/octant.json",
+      }),
+    ).toBe("https://updates.acme-internal.test/octant.json");
+  });
+
+  it("refuses a configured endpoint it cannot reach securely rather than falling back", () => {
+    // Silently using the public feed would update somebody from a place they
+    // did not choose, which is worse than not updating.
+    expect(() =>
+      resolveUpdateFeedUrl({
+        [UPDATE_FEED_URL_ENVIRONMENT_VARIABLE]: "http://updates.test/f.json",
+      }),
+    ).toThrow(/https/);
+  });
+});
+
+describe("artifact integrity", () => {
+  it("accepts bytes that hash to the signed release", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(served(artifactBytes), { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
+
+    const outcome = await fetchVerifiedArtifact(
+      { url: release.url, sha256: artifactDigest, maxBytes: 1024 },
+      fetchImpl,
+    );
+
+    expect(outcome.kind).toBe("verified");
+  });
+
+  it("rejects bytes the artifact host substituted", async () => {
+    // The host serving the download is not trusted, wherever it is: the signed
+    // hash is what decides whether these are the bytes that were published.
+    const fetchImpl = vi.fn(
+      async () => new Response(served(Buffer.from("something else entirely")), { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
+
+    expect(
+      await fetchVerifiedArtifact(
+        { url: release.url, sha256: artifactDigest, maxBytes: 1024 },
+        fetchImpl,
+      ),
+    ).toEqual({ kind: "corrupt" });
+  });
+
+  it("refuses to read a body far larger than a release", async () => {
+    const fetchImpl = vi.fn(
+      async () => new Response(served(Buffer.alloc(4096)), { status: 200 }),
+    ) as unknown as typeof globalThis.fetch;
+
+    expect(
+      await fetchVerifiedArtifact(
+        { url: release.url, sha256: artifactDigest, maxBytes: 64 },
+        fetchImpl,
+      ),
+    ).toEqual({ kind: "corrupt" });
+  });
 });
 
 describe("download hand-off", () => {
   it("never lets the platform updater see a URL that was not verified", async () => {
-    // The platform updater is handed a loopback feed of ours, not the public
-    // one: pointing it at the public feed would have it download before we had
-    // checked anything.
+    // The platform updater is handed a loopback feed of ours naming bytes we
+    // already downloaded and hashed, not the public one: pointing it at the
+    // public feed would have it download before we had checked anything.
     const { port, updates } = service();
     await updates.check();
 
     await updates.download();
 
     expect(port.calls.setFeedURL).toHaveLength(1);
-    expect(port.calls.setFeedURL[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+\//);
+    const handedOver = port.calls.setFeedURL[0] ?? "";
+    expect(handedOver).toMatch(/^http:\/\/127\.0\.0\.1:\d+\//);
     expect(port.calls.checkForUpdates).toBe(1);
-    const answer = await fetch(port.calls.setFeedURL[0]!);
-    expect(await answer.json()).toEqual({ url: release.url });
+    const answer = (await (await fetch(handedOver)).json()) as { url: string };
+    expect(answer.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/artifact\/0\.3\.0\.zip$/);
+    expect(Buffer.from(await (await fetch(answer.url)).arrayBuffer())).toEqual(artifactBytes);
     updates.dispose();
+  });
+
+  it("refuses an artifact whose bytes are not the ones that were signed", async () => {
+    // A genuine notice and a substituted delivery: the signature was fine and
+    // the bytes were not, which is a different thing to tell somebody.
+    const { port, updates } = service({ serves: Buffer.from("not the release") });
+    await updates.check();
+
+    const state = await updates.download();
+
+    expect(state).toMatchObject({ status: "refused", refusal: "corrupt-artifact" });
+    expect(port.calls.setFeedURL).toHaveLength(0);
+    expect(port.calls.checkForUpdates).toBe(0);
+  });
+
+  it("says the artifact could not be fetched rather than staging nothing quietly", async () => {
+    const { port, updates } = service({ artifactUnreachable: true });
+    await updates.check();
+
+    expect(await updates.download()).toMatchObject({ status: "refused", refusal: "unreachable" });
+    expect(port.calls.setFeedURL).toHaveLength(0);
   });
 
   it("forgets a release once a later check withdraws the offer", async () => {
@@ -171,7 +314,7 @@ describe("download hand-off", () => {
     const other = generateKeyPairSync("ed25519");
     const stale = createAppUpdateService({
       updater: port,
-      feedUrl: "https://updates.example.test/feed.json",
+      feedUrl: FEED_URL,
       app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
       automaticChecks: false,
       verifier: createFeedVerifier(publicKeyBase64),
@@ -207,11 +350,12 @@ describe("download hand-off", () => {
   });
 
   it("downloads nothing when the check refused", async () => {
-    const { port, updates } = service({ publicKey: "" });
+    const { fetchImpl, port, updates } = service({ publicKey: "" });
     await updates.check();
 
     await updates.download();
 
+    expect(fetchImpl).not.toHaveBeenCalled();
     expect(port.calls.setFeedURL).toHaveLength(0);
     expect(port.calls.checkForUpdates).toBe(0);
   });
@@ -277,7 +421,7 @@ describe("automatic checking", () => {
     const timers: Array<() => void> = [];
     const updates = createAppUpdateService({
       updater: port,
-      feedUrl: "https://updates.example.test/feed.json",
+      feedUrl: FEED_URL,
       app: { version: "0.2.0" as AppVersion, platform: "darwin", arch: "arm64" },
       automaticChecks,
       verifier: createFeedVerifier(publicKeyBase64),
@@ -322,18 +466,24 @@ describe("automatic checking", () => {
 });
 
 describe("what an update check discloses", () => {
-  it("sends no version, no identifier, and no credentials", async () => {
-    // The feed is static and the comparison happens here, so the request has
-    // nothing it needs to carry. This is the claim the user guide makes.
+  const identity = { version: "0.2.0", platform: "darwin", arch: "arm64" };
+
+  it("sends the version and the machine it needs a build for, and nothing else", async () => {
+    // Three parameters select a release. Anything beyond them would be
+    // something this path had no reason to carry.
     const fetchImpl = vi.fn(
       async () => new Response("{}", { status: 200 }),
     ) as unknown as typeof globalThis.fetch;
 
-    await fetchUpdateFeed("https://updates.example.test/feed.json", fetchImpl);
+    await fetchUpdateFeed(FEED_URL, identity, fetchImpl);
 
-    const [, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
+    const [sent, init] = vi.mocked(fetchImpl).mock.calls[0] as [string, RequestInit];
+    const parameters = new URL(sent).searchParams;
+    expect([...parameters.keys()].sort()).toEqual(["arch", "platform", "version"]);
+    expect(parameters.get("version")).toBe("0.2.0");
     const headers = init.headers as Record<string, string>;
     expect(headers["user-agent"]).toBe(UPDATE_CHECK_USER_AGENT);
+    // Not the default agent string, which would add the Electron and OS build.
     expect(headers["user-agent"]).not.toMatch(/\d/);
     expect(init.credentials).toBe("omit");
     expect(Object.keys(headers).sort()).toEqual(["accept", "user-agent"]);
@@ -342,17 +492,24 @@ describe("what an update check discloses", () => {
   it("refuses to fetch a feed over plain HTTP", async () => {
     const fetchImpl = vi.fn() as unknown as typeof globalThis.fetch;
 
-    expect(await fetchUpdateFeed("http://updates.example.test/feed.json", fetchImpl)).toEqual({
-      kind: "unreachable",
-    });
+    expect(
+      await fetchUpdateFeed("http://updates.example.test/feed.json", identity, fetchImpl),
+    ).toEqual({ kind: "unreachable" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("keeps the documented disclosure to what the request actually sends", () => {
     // If the request ever carries more than this, the list is wrong.
-    expect(OCTANT_UPDATE_CHECK_DISCLOSURE).toHaveLength(3);
+    expect(OCTANT_UPDATE_CHECK_DISCLOSURE).toHaveLength(4);
     expect(OCTANT_UPDATE_CHECK_DISCLOSURE.join(" ")).not.toMatch(
-      /version number|identifier|device/i,
+      /account|identifier|thread|Project|usage/i,
     );
+  });
+
+  it("says what a server can work out, not only what is sent", () => {
+    // "We send almost nothing" is easy to say; the inference is the part
+    // somebody assessing this actually needs.
+    expect(OCTANT_UPDATE_CHECK_INFERENCE.join(" ")).toMatch(/IP address/);
+    expect(OCTANT_UPDATE_CHECK_INFERENCE.join(" ")).toMatch(/no cookie/i);
   });
 });
