@@ -359,10 +359,12 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 .sidebar-navigation__thread {
-  display: grid;
+  /* Flex, not a two-column grid: a row can carry a title, a state, an unread
+     dot, and a follow-up marker at once, and the grid wrapped the extras onto
+     a second line as a full-width bar under the thread. */
+  display: flex;
   width: 100%;
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
@@ -383,6 +385,10 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   color: var(--octant-text-primary);
   background: var(--octant-selection);
   box-shadow: var(--octant-shadow-hairline);
+}
+
+.sidebar-navigation__thread-copy {
+  flex: 1 1 auto;
 }
 
 .sidebar-navigation__thread-title {
