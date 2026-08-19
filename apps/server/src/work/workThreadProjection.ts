@@ -10,6 +10,7 @@ import {
   type ProjectId,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import { hydrateJournalProjection } from "../persistence/journalHydration";
 import type { WorkflowThreadLifecycleFact } from "./workflowService";
 
 const decodeWorkThreadCreated = Schema.decodeUnknownSync(WorkThreadCreatedSchema);
@@ -69,34 +70,33 @@ export class WorkThreadProjection {
 }
 
 export function hydrateWorkThreadProjectionFromJournal(input: {
-  readonly replay: (cursor: { afterSequence: number; limit: number }) => ReadonlyArray<{
+  readonly replay: (cursor: {
+    afterSequence: number;
+    limit: number;
+    aggregateType?: string;
+  }) => ReadonlyArray<{
     readonly globalSequence: number;
-    readonly aggregateType: string;
+    readonly aggregateType?: string;
     readonly eventName: string;
     readonly eventVersion: number;
     readonly payload: unknown;
   }>;
   readonly projection: WorkThreadProjection;
   readonly maxScan?: number;
-}): void {
-  const maxScan = input.maxScan ?? 100_000;
-  let afterSequence = 0;
-  let scanned = 0;
-  for (;;) {
-    const batch = input.replay({ afterSequence, limit: 1_000 });
-    if (batch.length === 0) break;
-    for (const envelope of batch) {
-      afterSequence = envelope.globalSequence;
-      scanned += 1;
-      if (scanned > maxScan) return;
+}): "ok" | "snapshot-required" {
+  return hydrateJournalProjection({
+    replay: input.replay,
+    aggregateType: "work-thread",
+    ...(input.maxScan === undefined ? {} : { maxScan: input.maxScan }),
+    apply: (envelope) => {
       if (
-        envelope.aggregateType !== "work-thread" ||
+        (envelope.aggregateType !== undefined && envelope.aggregateType !== "work-thread") ||
         envelope.eventVersion !== 1 ||
         (envelope.eventName !== "work.thread-created@1" &&
           envelope.eventName !== "work.thread-updated@1" &&
           envelope.eventName !== "work.thread-completion-confirmed@1")
       ) {
-        continue;
+        return;
       }
       try {
         input.projection.apply(
@@ -109,9 +109,8 @@ export function hydrateWorkThreadProjectionFromJournal(input: {
       } catch {
         // Ignore malformed historical records during best-effort hydration.
       }
-    }
-    if (batch.length < 1_000) break;
-  }
+    },
+  });
 }
 
 function compareIds(left: WorkThread, right: WorkThread): number {

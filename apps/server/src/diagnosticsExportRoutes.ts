@@ -1,7 +1,7 @@
 import { decodeDiagnosticsExportRequest, type DiagnosticsExportOutcome } from "@octant/contracts";
 import { authorizeDiagnosticsExportActor } from "@octant/domain";
 import { isLoopbackHostname } from "./shellRoutes";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import { exportDiagnosticsEvidence } from "./diagnosticsExportService";
 import type { Journal } from "./persistence/journal";
@@ -74,12 +74,14 @@ export function createDiagnosticsExportRouteHandler(
       return failureResponse("Diagnostics export requires POST.", 405, origin);
     }
 
+    let actorKind: "local-window" | "remote-device";
     try {
-      authenticateRouteWindowId({
+      const context = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
+      actorKind = context.principal.kind;
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failureResponse("Diagnostics export is unauthorized.", 401, origin);
@@ -87,13 +89,12 @@ export function createDiagnosticsExportRouteHandler(
       return failureResponse("Diagnostics export request is invalid.", 400, origin);
     }
 
-    // Defense in depth: the window-capability check above already guarantees
-    // a local-window actor, but every path to `exportDiagnosticsEvidence`
-    // must be provably gated by the same single source of truth used for
-    // remote-device, provider, automation, and extension callers.
-    const authorization = authorizeDiagnosticsExportActor("local-window");
+    // The bound principal is the only actor this route may name. Hardcoding
+    // local-window here would export host-wide evidence for a remote device
+    // that reached the loopback handler through product dispatch.
+    const authorization = authorizeDiagnosticsExportActor(actorKind);
     if (authorization.kind === "denied") {
-      return failureResponse("Diagnostics export is unauthorized.", 401, origin);
+      return failureResponse("Diagnostics export is unauthorized.", 403, origin);
     }
 
     const decoded = await readJson(request, BODY_LIMIT);

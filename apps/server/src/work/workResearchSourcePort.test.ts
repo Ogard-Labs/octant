@@ -67,6 +67,9 @@ function filesystem(
       };
     },
     readFile: async () => current.bytes,
+    openWriteFile: async () => {
+      throw new Error("write is not used during research source observation");
+    },
     writeFile: async () => undefined,
     mkdir: async () => undefined,
     unlink: async () => undefined,
