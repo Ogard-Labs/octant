@@ -337,15 +337,16 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   gap: 2px;
 }
 
+/* Space separates the navigation actions from the Project tree. A rule here
+   reads as a third section boundary in a rail that already has section
+   headings, and it is the only horizontal line in the sidebar. */
 .sidebar-navigation__projects {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  padding-top: 8px;
-  margin-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--octant-border) 72%, transparent);
+  margin-top: 16px;
 }
 
 .sidebar-navigation__item {

@@ -776,10 +776,12 @@ button:focus-visible {
   text-underline-offset: 3px;
 }
 
+/* The rail filters the Project tree below it, so it sits against that tree
+   rather than floating midway between the navigation and the first heading. */
 .code-project-views {
   display: grid;
   gap: 6px;
-  margin: 0 4px 10px;
+  margin: 0 4px 4px;
 }
 
 .code-project-views__row {
@@ -1052,10 +1054,29 @@ button:focus-visible {
   padding: 0 8px 6px;
 }
 
+/* The header's controls answer for the section the pointer is already on, so
+   they appear with it. Kept in flow and only faded, so focus still reaches
+   them and the heading never shifts when they arrive. An open menu holds them
+   visible: they must not vanish out from under the cursor that opened one. */
 .project-section__header-actions {
   display: flex;
   align-items: center;
   gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.project-section:hover .project-section__header-actions,
+.project-section:focus-within .project-section__header-actions,
+.project-section__header-actions:has([aria-expanded="true"]),
+.project-section__header-actions:has([data-popup-open]) {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-section__header-actions {
+    transition: none;
+  }
 }
 
 .project-section__add,
@@ -1164,16 +1185,19 @@ button:focus-visible {
   opacity: 0;
 }
 
+/* Reveal follows the pointer and focus only. The active row used to keep its
+   controls on permanently, which put a menu and an edit button on screen at
+   all times for the one row a user looks at most. */
 .project-row:hover .project-row__action--icon,
 .project-row:focus-within .project-row__action--icon,
-.project-row[data-active="true"] .project-row__action--icon {
+.project-row__action--icon:has([aria-expanded="true"]),
+.project-row__action--icon[aria-expanded="true"],
+.project-row__action--icon[data-popup-open] {
   opacity: 1;
 }
 
 .project-archive {
-  margin-top: 12px;
-  padding-top: 8px;
-  border-top: 1px solid var(--octant-border);
+  margin-top: 16px;
 }
 
 .project-archive summary {
