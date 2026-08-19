@@ -20,6 +20,7 @@ function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDock
     onCommitWidth: vi.fn(),
     onPreviewWidth: vi.fn(),
     onSelectSurface: vi.fn(),
+    plan: <p>Thread plan</p>,
     projectMemory: <p>Private Project memory</p>,
     resolution: {
       kind: "surface",
