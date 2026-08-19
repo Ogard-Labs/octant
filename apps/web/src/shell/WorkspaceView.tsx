@@ -64,7 +64,6 @@ import type { UsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { WorkResearchPanel } from "../work/WorkResearchPanel";
 import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
-import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
@@ -678,11 +677,6 @@ function renderCodeTab(
         threadId={String(tab.threadId)}
       />
       {content}
-      {/* The thread's plan, beside the thread it belongs to. A Plan-mode
-        thread may only read its checkout, but it may still write, revise, and
-        approve the plan — deciding what to do is the whole point of the
-        posture. */}
-      <ThreadPlanPanel />
     </ThreadActivityPictureInPicture>
   );
   const files = (
