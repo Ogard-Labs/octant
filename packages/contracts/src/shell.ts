@@ -663,6 +663,13 @@ export const WorkspaceOperation = Schema.Union(
     tabId: WorkspaceTabId,
     pinned: Schema.Boolean,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("set-side-chat-sidecar"),
+    ...ModeOperationFields,
+    groupId: TabGroupId,
+    tabId: WorkspaceTabId,
+    sidecarThreadId: ChatThreadId,
+  }).annotations(strict),
 );
 export type WorkspaceOperation = typeof WorkspaceOperation.Type;
 

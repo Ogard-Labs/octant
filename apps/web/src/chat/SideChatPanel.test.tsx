@@ -44,6 +44,13 @@ function renderPanel(overrides: Partial<Parameters<typeof SideChatPanel>[0]> = {
 }
 
 describe("SideChatPanel", () => {
+  it("hands the host's sidecar to the caller so the tab can persist it", async () => {
+    const onSidecarOpened = vi.fn();
+    renderPanel({ onSidecarOpened });
+
+    await waitFor(() => expect(onSidecarOpened).toHaveBeenCalledWith(sidecar));
+  });
+
   it("asks the host for the sidecar and renders the ordinary Chat surface it returns", async () => {
     const client = stubClient();
     const { renderSidecar } = renderPanel({ client });

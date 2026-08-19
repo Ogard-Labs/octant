@@ -1,6 +1,7 @@
 import { createThreadMentionClient, type ThreadMentionClient } from "@octant/client-runtime";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { ChatThreadId } from "@octant/contracts/chat";
+import type { SideChatSidecar } from "@octant/contracts";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { buildModelPickerGroups } from "@octant/domain";
 import { useMemo } from "react";
@@ -27,6 +28,8 @@ export interface SideChatWorkspaceTabProps {
   readonly providerController?: SideChatProviderView;
   /** Injected mention client; otherwise built from the loopback server URL. */
   readonly threadMentionClient?: ThreadMentionClient;
+  /** Called with the host's sidecar so the shell can persist the tab identity. */
+  readonly onSidecarOpened?: (sidecar: SideChatSidecar) => void;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -56,9 +59,13 @@ export function SideChatWorkspaceTab(props: SideChatWorkspaceTabProps) {
     }
   }, [serverUrl, threadMentionClient, windowCapability]);
   const tab = props.tab;
+  const onSidecarOpened = props.onSidecarOpened;
   return (
     <SideChatPanel
       {...(mentionClient === undefined ? {} : { client: mentionClient })}
+      {...(onSidecarOpened === undefined || tab.sidecarThreadId !== undefined
+        ? {}
+        : { onSidecarOpened })}
       sourceThreadId={tab.sourceThreadId}
       renderSidecar={(sidecarThreadId) =>
         // A restored tab names the sidecar it was showing. When the host answers

@@ -122,6 +122,15 @@ Done); Chat has no board. A Work or Code thread is Done only when its
 user-confirmed delivery target is objectively satisfied; ambiguous state
 resolves to Waiting.
 
+A `#thread` mention points at another thread the sender can already Open. The
+host resolves a bounded, read-only title, status, and transcript window at send
+time; the mentioned thread is not interrupted, steered, or mutated. Unknown `@`
+text stays ordinary text; `@plugin` / `$skill` addressing is unchanged. Side
+Chat is a Chat-mode sidecar about exactly one source thread: ordinary Chat with
+that thread's bounded context, no inherited Work or Code authority, and no path
+that approves, steers, or appends to the source. Unavailable, unauthorized, or
+deleted targets fail closed.
+
 ## Persistence
 
 ```mermaid

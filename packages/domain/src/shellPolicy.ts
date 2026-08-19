@@ -43,7 +43,7 @@ import { DEFAULT_SIDEBAR_BACKGROUND } from "@octant/contracts/theme";
 import { DEFAULT_AVATAR_ACCENT, DEFAULT_USER_AVATAR } from "@octant/contracts/user-profile";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
-import type { CodeEnvironmentObservation } from "@octant/contracts";
+import type { ChatThreadId, CodeEnvironmentObservation } from "@octant/contracts";
 import { resolveAvailableMode } from "./modePolicy";
 
 export const MAX_LAYOUT_DEPTH = 6;
@@ -1686,5 +1686,46 @@ export function applyWorkspaceOperation(
         activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, operation.groupId),
       );
     }
+
+    case "set-side-chat-sidecar": {
+      const group = requireGroup(layout, operation.groupId);
+      const tab = group.tabs.find((candidate) => candidate.id === operation.tabId);
+      if (tab === undefined) reject("missing-tab", "tab does not belong to the requested group");
+      if (tab.kind !== "side-chat") {
+        reject("invalid-layout", "only Side Chat tabs record a sidecar identity");
+      }
+      const mapped = mapGroup(layout, operation.groupId, (candidate) => ({
+        ...candidate,
+        tabs: candidate.tabs.map((entry) =>
+          entry.id === operation.tabId
+            ? withSideChatSidecar(entry, operation.sidecarThreadId)
+            : entry,
+        ),
+        activeTabId: operation.tabId,
+      }));
+      return finishOperation(
+        activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, operation.groupId),
+      );
+    }
   }
+}
+
+/**
+ * Record which sidecar a Side Chat tab was showing. A tab that already names a
+ * different sidecar is refused: swapping would present a fresh conversation as
+ * the restored one. Same-id is a no-op so a later Open of the same sidecar can
+ * still activate the tab.
+ */
+function withSideChatSidecar(tab: WorkspaceTab, sidecarThreadId: ChatThreadId): WorkspaceTab {
+  if (tab.kind !== "side-chat") return tab;
+  if (tab.sidecarThreadId !== undefined) {
+    if (String(tab.sidecarThreadId) !== String(sidecarThreadId)) {
+      reject(
+        "invalid-layout",
+        "Side Chat tab already records a different sidecar. Close it and open Side Chat again.",
+      );
+    }
+    return tab;
+  }
+  return { ...tab, sidecarThreadId };
 }

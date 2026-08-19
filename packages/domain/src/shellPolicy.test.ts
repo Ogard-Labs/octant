@@ -916,6 +916,108 @@ describe("workspace context validation", () => {
   });
 });
 
+describe("set-side-chat-sidecar", () => {
+  const sidecarThreadId = decodeChatThreadId("00000000-0000-4000-8000-000000000201");
+  const sourceThreadId = "00000000-0000-4000-8000-000000000101";
+
+  function workspaceWithSideChat(sidecar?: string) {
+    const base = defaultWindowWorkspace(ids.window);
+    const work = onlyGroup(base.layouts.work);
+    const tab = decodeWorkspaceTab({
+      kind: "side-chat",
+      id: ids.tabA,
+      mode: "work",
+      title: "Side Chat about Release notes",
+      sourceThreadId,
+      ...(sidecar === undefined ? {} : { sidecarThreadId: sidecar }),
+    });
+    return applyWorkspaceOperation(
+      base,
+      decodeWorkspaceOperation({
+        kind: "open-tab",
+        mode: "work",
+        groupId: work.groupId,
+        tab,
+      }),
+    );
+  }
+
+  it("records the sidecar a Side Chat tab was showing so a restart can reopen it", () => {
+    const opened = workspaceWithSideChat();
+    const work = onlyGroup(opened.layouts.work);
+    const recorded = applyWorkspaceOperation(
+      opened,
+      decodeWorkspaceOperation({
+        kind: "set-side-chat-sidecar",
+        mode: "work",
+        groupId: work.groupId,
+        tabId: ids.tabA,
+        sidecarThreadId,
+      }),
+    );
+    const tab = onlyGroup(recorded.layouts.work).tabs.find(
+      (candidate) => candidate.id === ids.tabA,
+    );
+    expect(tab?.kind).toBe("side-chat");
+    if (tab?.kind !== "side-chat") throw new Error("expected a Side Chat tab");
+    expect(String(tab.sidecarThreadId)).toBe(String(sidecarThreadId));
+  });
+
+  it("is a no-op when the tab already names that sidecar", () => {
+    const opened = workspaceWithSideChat(String(sidecarThreadId));
+    const work = onlyGroup(opened.layouts.work);
+    const recorded = applyWorkspaceOperation(
+      opened,
+      decodeWorkspaceOperation({
+        kind: "set-side-chat-sidecar",
+        mode: "work",
+        groupId: work.groupId,
+        tabId: ids.tabA,
+        sidecarThreadId,
+      }),
+    );
+    const tab = onlyGroup(recorded.layouts.work).tabs.find(
+      (candidate) => candidate.id === ids.tabA,
+    );
+    if (tab?.kind !== "side-chat") throw new Error("expected a Side Chat tab");
+    expect(String(tab.sidecarThreadId)).toBe(String(sidecarThreadId));
+  });
+
+  it("refuses to swap a Side Chat tab onto a different sidecar", () => {
+    const opened = workspaceWithSideChat("00000000-0000-4000-8000-000000000202");
+    const work = onlyGroup(opened.layouts.work);
+    expect(() =>
+      applyWorkspaceOperation(
+        opened,
+        decodeWorkspaceOperation({
+          kind: "set-side-chat-sidecar",
+          mode: "work",
+          groupId: work.groupId,
+          tabId: ids.tabA,
+          sidecarThreadId,
+        }),
+      ),
+    ).toThrow(ShellPolicyRejected);
+  });
+
+  it("rejects the operation for a tab that is not Side Chat", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const work = onlyGroup(base.layouts.work);
+    expect(() =>
+      applyWorkspaceOperation(
+        base,
+        decodeWorkspaceOperation({
+          kind: "set-side-chat-sidecar",
+          mode: "work",
+          groupId: work.groupId,
+          tabId: work.activeTabId,
+          sidecarThreadId,
+        }),
+      ),
+    ).toThrow(ShellPolicyRejected);
+  });
+});
+
 describe("workspace surface descriptors", () => {
   it("exposes Thread and Side Chat in every mode without a bound root", () => {
     const chat = resolveSurfaceDescriptors({

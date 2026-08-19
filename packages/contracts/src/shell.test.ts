@@ -436,6 +436,13 @@ describe("shell command contracts", () => {
     { kind: "unfocus-group", mode: "code" },
     { kind: "reset-mode", mode: "code" },
     { kind: "set-active-mode", mode: "chat" },
+    {
+      kind: "set-side-chat-sidecar",
+      mode: "work",
+      groupId: ids.workGroup,
+      tabId: ids.workTab,
+      sidecarThreadId: ids.thread,
+    },
   ] as const;
 
   it("decodes complete settings replacement", () => {
