@@ -42,6 +42,23 @@ describe("ThemeAppearanceEditor", () => {
       "open",
     );
   });
+
+  it("offers the Octant appearance pack while that plugin is effective", () => {
+    render(<ThemeAppearanceEditor controller={controller()} />);
+    expect(screen.getByLabelText("Light preset")).toHaveTextContent("Octant");
+  });
+
+  it("omits the Octant appearance pack when that plugin is not effective", () => {
+    render(
+      <ThemeAppearanceEditor
+        controller={controller()}
+        effectivePlugins={new Map([["appearance-pack", false]])}
+      />,
+    );
+    const light = screen.getByLabelText("Light preset");
+    expect(light).toHaveTextContent("System");
+    expect(light).not.toHaveTextContent("Octant");
+  });
 });
 
 describe("handing the theme to a project outside Octant", () => {

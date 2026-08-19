@@ -31,6 +31,15 @@ describe("effective extension activation", () => {
     ["work", "board", [], false],
     ["chat", "integration", ["network", "credentials"], false],
     ["code", "integration", ["network", "credentials"], true],
+    ["chat", "appearance-pack", [], true],
+    ["work", "appearance-pack", [], true],
+    ["code", "appearance-pack", [], true],
+    ["chat", "preview-viewer", [], true],
+    ["work", "preview-viewer", [], true],
+    ["code", "preview-viewer", [], true],
+    ["chat", "ui-surface", [], true],
+    ["work", "ui-surface", [], true],
+    ["code", "ui-surface", [], true],
   ] as const)(
     "maps %s %s mode safety from component kind and capabilities",
     (mode, kind, declaredCapabilities, expected) => {
