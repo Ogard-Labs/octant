@@ -40,7 +40,8 @@ distilled successor of the earlier long-form design specifications.
 | [0030](0030-routines-that-run-themselves.md)            | Routines that run themselves                                      | Accepted |
 | [0031](0031-hosts-as-environments.md)                   | Hosts as environments                                             | Accepted |
 | [0032](0032-a-refusal-a-person-can-clear.md)            | A refusal a person can clear                                      | Proposed |
-| [0033](0033-signed-updates.md)                          | Signed, notarized, user-controlled updates                        | Proposed |
+| [0033](0033-first-run-asks-what-to-call-you.md)         | First run asks what to call you                                   | Accepted |
+| [0034](0034-signed-updates.md)                          | Signed, notarized, user-controlled updates                        | Proposed |
 
 ## Adding an ADR
 

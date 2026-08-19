@@ -239,7 +239,7 @@ export const ShellSettings = Schema.Struct({
   /**
    * Whether Octant may check for updates on its own. Off means no request is
    * made at all rather than a check whose answer is withheld — what leaves the
-   * machine is the point of the switch (`docs/decisions/0033`). A store
+   * machine is the point of the switch (`docs/decisions/0034`). A store
    * persisted before updates shipped decodes to on, which is the behaviour the
    * release notes describe.
    */

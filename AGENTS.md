@@ -268,7 +268,7 @@ credentials, physical devices, release authority, or subjective judgment.
 ## Current Release Boundary
 
 The first release is the Apple Silicon technical preview with the
-provider-neutral plugin/skill marketplace. Per `docs/decisions/0033`, it is
+provider-neutral plugin/skill marketplace. Per `docs/decisions/0034`, it is
 signed with a Developer ID, notarized, and updates itself — those three are one
 deliverable, because an updater on an unsigned app is an unauthenticated
 code-delivery channel and macOS refuses the replacement anyway. Do not add
