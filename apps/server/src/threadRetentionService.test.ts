@@ -90,7 +90,10 @@ function seedChatThread(
     aggregate: { aggregateType: "chat-thread", aggregateId: threadId },
     expectedVersion: 0,
     events: [
-      pending("chat.thread-created@1", { kind: "thread-created", thread: chatThread(threadId, title) }),
+      pending("chat.thread-created@1", {
+        kind: "thread-created",
+        thread: chatThread(threadId, title),
+      }),
     ],
   });
   writeChatContent(connection, {

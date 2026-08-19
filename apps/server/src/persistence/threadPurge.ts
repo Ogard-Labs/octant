@@ -176,15 +176,18 @@ function purgeDerivedContent(
 function deleteThreadScopedProjectionRows(connection: SqliteConnection, threadId: string): void {
   const tables = (
     connection
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
-      )
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
       .all() as ReadonlyArray<{ readonly name: string }>
   )
     .map((row) => row.name)
-    .filter((table) => table !== "thread_purge_tombstone" && tableHasColumn(connection, table, "thread_id"));
+    .filter(
+      (table) =>
+        table !== "thread_purge_tombstone" && tableHasColumn(connection, table, "thread_id"),
+    );
   for (const table of tables) {
-    connection.prepare(`DELETE FROM "${table.replaceAll('"', '""')}" WHERE thread_id = ?`).run(threadId);
+    connection
+      .prepare(`DELETE FROM "${table.replaceAll('"', '""')}" WHERE thread_id = ?`)
+      .run(threadId);
   }
 }
 
@@ -201,7 +204,9 @@ function deleteJournalEvents(
       readonly global_sequence: number;
     }>;
     for (const row of sequences) {
-      connection.prepare(`DELETE FROM event_quarantine WHERE global_sequence = ?`).run(row.global_sequence);
+      connection
+        .prepare(`DELETE FROM event_quarantine WHERE global_sequence = ?`)
+        .run(row.global_sequence);
     }
     connection
       .prepare(`DELETE FROM event_journal WHERE aggregate_type = ? AND aggregate_id = ?`)

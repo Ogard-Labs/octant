@@ -138,7 +138,9 @@ export class ThreadRetentionService {
               threadId: request.scope.threadId,
               ...(this.#tombstoneProject(request.scope.mode, request.scope.threadId) === undefined
                 ? {}
-                : { projectId: this.#tombstoneProject(request.scope.mode, request.scope.threadId) }),
+                : {
+                    projectId: this.#tombstoneProject(request.scope.mode, request.scope.threadId),
+                  }),
             },
           ]
         : [];
@@ -197,7 +199,8 @@ export class ThreadRetentionService {
     if (scope.kind === "project") {
       try {
         return {
-          projectExists: readProject(this.#connection, decodeProjectId(scope.projectId)) !== undefined,
+          projectExists:
+            readProject(this.#connection, decodeProjectId(scope.projectId)) !== undefined,
         };
       } catch {
         return { projectExists: false };

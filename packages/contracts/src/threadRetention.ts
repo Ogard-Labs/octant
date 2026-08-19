@@ -128,10 +128,7 @@ export const ThreadRetentionRefusal = Schema.Struct({
 }).annotations(strict);
 export type ThreadRetentionRefusal = typeof ThreadRetentionRefusal.Type;
 
-export const SetThreadRetentionOutcome = Schema.Union(
-  ThreadRetentionState,
-  ThreadRetentionRefusal,
-);
+export const SetThreadRetentionOutcome = Schema.Union(ThreadRetentionState, ThreadRetentionRefusal);
 export type SetThreadRetentionOutcome = typeof SetThreadRetentionOutcome.Type;
 
 export const PurgeThreadsOutcome = Schema.Union(ThreadPurgeReport, ThreadRetentionRefusal);
@@ -169,6 +166,7 @@ export const decodeThreadRetentionRefusal = Schema.decodeUnknownSync(ThreadReten
 export const decodeSetThreadRetentionOutcome = Schema.decodeUnknownSync(SetThreadRetentionOutcome);
 export const decodePurgeThreadsOutcome = Schema.decodeUnknownSync(PurgeThreadsOutcome);
 export const decodeThreadRetentionWindowSet = Schema.decodeUnknownSync(ThreadRetentionWindowSet);
-export const decodeThreadRetentionThreadPurged =
-  Schema.decodeUnknownSync(ThreadRetentionThreadPurged);
+export const decodeThreadRetentionThreadPurged = Schema.decodeUnknownSync(
+  ThreadRetentionThreadPurged,
+);
 export const decodeThreadRetentionThreadId = Schema.decodeUnknownSync(ThreadRetentionThreadId);

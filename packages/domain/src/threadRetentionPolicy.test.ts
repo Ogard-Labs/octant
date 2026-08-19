@@ -30,12 +30,12 @@ describe("authorizeThreadRetentionAction", () => {
   it.each(["read", "set", "purge"] as const)(
     "allows a local window and denies a remote device for %s",
     (operation) => {
-      expect(
-        authorizeThreadRetentionAction({ principalKind: "local-window", operation }),
-      ).toEqual({ kind: "allow" });
-      expect(
-        authorizeThreadRetentionAction({ principalKind: "remote-device", operation }),
-      ).toEqual({ kind: "deny", reason: "local-host-required" });
+      expect(authorizeThreadRetentionAction({ principalKind: "local-window", operation })).toEqual({
+        kind: "allow",
+      });
+      expect(authorizeThreadRetentionAction({ principalKind: "remote-device", operation })).toEqual(
+        { kind: "deny", reason: "local-host-required" },
+      );
     },
   );
 });
@@ -208,7 +208,9 @@ describe("decidePurgeThreads", () => {
 
 describe("selectThreadsForPurge", () => {
   const younger = { ...subject, threadId: otherThreadId, updatedAt: yesterday };
-  const windows = [{ scope: { kind: "host" } as const, window: { kind: "duration-days" as const, days: 30 } }];
+  const windows = [
+    { scope: { kind: "host" } as const, window: { kind: "duration-days" as const, days: 30 } },
+  ];
 
   it("selects the named thread even when it is still inside the window", () => {
     expect(

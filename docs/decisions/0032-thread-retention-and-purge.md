@@ -17,7 +17,7 @@ named data-lifecycle operation, not a silent row delete.
   override. The narrower scope wins. Setting a window never deletes anything.
 - A window is `forever` or a positive day count. The host default is `forever`.
 - Retention is applied only by an explicit, user-confirmed purge (`confirm:
-  true` on the wire). A named thread may be purged even while it is still
+true` on the wire). A named thread may be purged even while it is still
   inside its window. Project and host scopes purge only threads that have aged
   past their effective window.
 - Purge is a data-lifecycle operation in the same class as reset, remove-all,

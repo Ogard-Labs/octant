@@ -357,20 +357,20 @@ export function HostSettingsSection({
   );
 }
 
-
 function formatRetentionWindow(state: ThreadRetentionState | undefined): string {
   const host = state?.windows.find((entry) => entry.scope.kind === "host");
   if (host === undefined || host.window.kind === "forever") return "forever";
   return `${host.window.days} days`;
 }
 
-const WINDOW_OPTIONS: ReadonlyArray<{ readonly value: string; readonly window: RetentionWindow }> = [
-  { value: "forever", window: { kind: "forever" } },
-  { value: "7", window: { kind: "duration-days", days: 7 } },
-  { value: "30", window: { kind: "duration-days", days: 30 } },
-  { value: "90", window: { kind: "duration-days", days: 90 } },
-  { value: "365", window: { kind: "duration-days", days: 365 } },
-];
+const WINDOW_OPTIONS: ReadonlyArray<{ readonly value: string; readonly window: RetentionWindow }> =
+  [
+    { value: "forever", window: { kind: "forever" } },
+    { value: "7", window: { kind: "duration-days", days: 7 } },
+    { value: "30", window: { kind: "duration-days", days: 30 } },
+    { value: "90", window: { kind: "duration-days", days: 90 } },
+    { value: "365", window: { kind: "duration-days", days: 365 } },
+  ];
 
 function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }) {
   const [state, setState] = useState<ThreadRetentionState | undefined>();
@@ -409,8 +409,8 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
     <div id="settings-thread-retention">
       <h2 className="host-settings__heading">Thread retention</h2>
       <p className="host-settings__note">
-        A retention window never deletes on its own. A confirmed purge removes the named thread —
-        or expired threads in a Project or on this host — from ordinary reads, including derived
+        A retention window never deletes on its own. A confirmed purge removes the named thread — or
+        expired threads in a Project or on this host — from ordinary reads, including derived
         projections and that thread's own journal events. Other threads, Projects, usage, and
         credentials stay. SQLite free pages may keep bytes until the next store rebuild.
       </p>
@@ -537,7 +537,8 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
           {outcome.alreadyPurged.length === 0
             ? ""
             : `, ${outcome.alreadyPurged.length} already purged`}
-          . Deleted {outcome.deleted.join(", ") || "nothing"}. Retained {outcome.retained.join(", ")}.
+          . Deleted {outcome.deleted.join(", ") || "nothing"}. Retained{" "}
+          {outcome.retained.join(", ")}.
         </p>
       ) : (
         <p className="host-settings__note" role="status">

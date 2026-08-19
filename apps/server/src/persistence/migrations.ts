@@ -330,7 +330,6 @@ CREATE INDEX thread_checkpoint_thread_idx
   ON thread_checkpoint_projection (thread_id, last_sequence);
 `;
 
-
 const THREAD_RETENTION_PROJECTION_SQL = `
 CREATE TABLE thread_retention_projection (
   scope_kind TEXT NOT NULL CHECK(scope_kind IN ('host', 'project', 'thread')),

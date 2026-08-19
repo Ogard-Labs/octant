@@ -111,7 +111,14 @@ describe("HostSettingsSection", () => {
 
     const headings = screen.getAllByRole("heading").map((h) => h.textContent);
     expect(headings).toEqual(
-      expect.arrayContaining(["Identity", "Service policy", "Readiness", "Backup", "Recovery", "Thread retention"]),
+      expect.arrayContaining([
+        "Identity",
+        "Service policy",
+        "Readiness",
+        "Backup",
+        "Recovery",
+        "Thread retention",
+      ]),
     );
   });
 

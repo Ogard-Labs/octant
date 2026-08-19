@@ -199,22 +199,23 @@ export function selectThreadsForPurge(input: {
   readonly windows: ReadonlyArray<RetentionWindowBinding>;
   readonly now: string;
 }): ReadonlyArray<ThreadRetentionSubject> {
-  if (input.scope.kind === "thread") {
+  const scope = input.scope;
+  if (scope.kind === "thread") {
+    const mode = scope.mode;
+    const threadId = scope.threadId;
     return input.subjects.filter(
-      (subject) =>
-        subject.mode === input.scope.mode &&
-        String(subject.threadId) === String(input.scope.threadId),
+      (subject) => subject.mode === mode && String(subject.threadId) === String(threadId),
     );
   }
 
-  const inScope =
-    input.scope.kind === "project"
-      ? input.subjects.filter(
-          (subject) =>
-            subject.projectId !== undefined &&
-            String(subject.projectId) === String(input.scope.projectId),
-        )
-      : input.subjects;
+  const inScope = (() => {
+    if (scope.kind !== "project") return input.subjects;
+    const projectId = scope.projectId;
+    return input.subjects.filter(
+      (subject) =>
+        subject.projectId !== undefined && String(subject.projectId) === String(projectId),
+    );
+  })();
 
   return inScope.filter((subject) =>
     isThreadPastRetention({
