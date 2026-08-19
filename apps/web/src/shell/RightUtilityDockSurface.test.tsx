@@ -8,6 +8,29 @@ import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
 
 describe("RightUtilityDockSurface", () => {
+  it("shows the thread's plan under the dock's own header", () => {
+    const plan = RIGHT_UTILITY_DOCK_SURFACES.find((surface) => surface.id === "plan");
+    if (plan === undefined) throw new Error("The dock offers no plan surface.");
+
+    render(
+      <RightUtilityDockSurface
+        availableSurfaces={RIGHT_UTILITY_DOCK_SURFACES}
+        codeEnvironment={<p>Repository environment</p>}
+        context={<p>Live context inspector</p>}
+        navigator={<p>Host Navigator</p>}
+        plan={<p>Thread plan</p>}
+        onClose={vi.fn()}
+        onSelectSurface={vi.fn()}
+        projectMemory={<p>Private Project memory</p>}
+        resolution={{ kind: "surface", projectId, surface: plan }}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Plan" })).toBeVisible();
+    expect(screen.getByText("Thread plan")).toBeVisible();
+    expect(screen.queryByText("Repository environment")).toBeNull();
+  });
+
   it("renders no stale content until the pure model returns a validated surface", () => {
     const ProjectMemory = vi.fn(() => <p>Private Project memory</p>);
     const CodeEnvironment = vi.fn(() => <p>Repository environment</p>);
@@ -17,6 +40,7 @@ describe("RightUtilityDockSurface", () => {
         codeEnvironment={<CodeEnvironment />}
         context={<p>Live context inspector</p>}
         navigator={<p>Host Navigator</p>}
+        plan={<p>Thread plan</p>}
         onClose={vi.fn()}
         onSelectSurface={vi.fn()}
         projectMemory={<ProjectMemory />}
@@ -34,6 +58,7 @@ describe("RightUtilityDockSurface", () => {
         codeEnvironment={<CodeEnvironment />}
         context={<p>Live context inspector</p>}
         navigator={<p>Host Navigator</p>}
+        plan={<p>Thread plan</p>}
         onClose={vi.fn()}
         onSelectSurface={vi.fn()}
         projectMemory={<ProjectMemory />}
@@ -60,6 +85,7 @@ describe("RightUtilityDockSurface", () => {
         codeEnvironment={<p>Repository environment</p>}
         context={<p>Live context inspector</p>}
         navigator={<p>Host Navigator</p>}
+        plan={<p>Thread plan</p>}
         onClose={onClose}
         onRefreshEnvironment={onRefreshEnvironment}
         onSelectSurface={onSelectSurface}
@@ -96,6 +122,7 @@ describe("RightUtilityDockSurface", () => {
         codeEnvironment={<p>Repository environment</p>}
         context={<p>Live context inspector</p>}
         navigator={<p>Host Navigator</p>}
+        plan={<p>Thread plan</p>}
         onClose={vi.fn()}
         onSelectSurface={vi.fn()}
         projectMemory={<p>Private Project memory</p>}

@@ -441,6 +441,7 @@ describe("database CLI runtime composition", () => {
       // A pre-onboarding store already finished its first run, so the upcast
       // stamps `completed` rather than re-running the walkthrough on upgrade.
       firstRunOnboarding: "completed",
+      automaticUpdateChecks: true,
       lastContextSurface: null,
       modeSwitcherPresentation: "buttons",
       navigatorAssistant: {},

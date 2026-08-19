@@ -96,6 +96,11 @@ function controller(
 }
 
 const emptyProfile: UserProfile = { accent: "indigo", avatar: { kind: "initials" } };
+/**
+ * First run does not walk past the name, so a test about any later step starts
+ * from a host that already has one.
+ */
+const namedProfile: UserProfile = { ...emptyProfile, displayName: "Ada Lovelace" };
 const encodedAvatar = "data:image/webp;base64,AAAA";
 const defaultWorkspace = {
   colorScheme: "system",
@@ -115,7 +120,7 @@ function mount(overrides: Partial<FirstRunOnboardingProps> = {}) {
     onOpenProviderSettings: vi.fn(),
     onRescan: vi.fn(),
     scanning: false,
-    profile: emptyProfile,
+    profile: namedProfile,
     onSaveProfile: vi.fn(async () => true),
     chatModelGroups: [],
     onSelectChatDefault: vi.fn(async () => true),
@@ -170,9 +175,27 @@ describe("FirstRunOnboarding", () => {
     expect(screen.getByText(/no account and signs you in to nothing/)).toBeVisible();
   });
 
+  it("will not go on, or be dismissed, until it knows what to call the user", async () => {
+    const user = userEvent.setup();
+    const props = mount({ profile: emptyProfile });
+
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Providers/ })).toBeDisabled();
+
+    // Dismissing is one of this dialog's exits, and it would leave the host
+    // with no name at all, so it refuses for the same reason Skip does.
+    await user.keyboard("{Escape}");
+    expect(props.controller.skip).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText("Name"), "Ada");
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled();
+  });
+
   it("saves the profile when the step is left, not on every keystroke", async () => {
     const user = userEvent.setup();
-    const props = mount();
+    const props = mount({ profile: emptyProfile });
 
     await user.type(screen.getByLabelText("Name"), "Ada");
     expect(props.onSaveProfile).not.toHaveBeenCalled();
@@ -186,7 +209,7 @@ describe("FirstRunOnboarding", () => {
 
   it("keeps a settled answer for someone who quits the app on the first step", async () => {
     const user = userEvent.setup();
-    const props = mount();
+    const props = mount({ profile: emptyProfile });
 
     await user.type(screen.getByLabelText("Name"), "Ada");
     await user.tab();
@@ -217,7 +240,7 @@ describe("FirstRunOnboarding", () => {
 
   it("walks forward and back without losing the draft", async () => {
     const user = userEvent.setup();
-    mount();
+    mount({ profile: emptyProfile });
 
     await user.type(screen.getByLabelText("Name"), "Ada");
     await goToStep(user, "Continue");
@@ -308,7 +331,7 @@ describe("FirstRunOnboarding", () => {
     // Another window changed shell settings, so the profile write conflicts.
     // The host recovers by reloading, which would leave the queued outcome
     // free to succeed against state that never took the name.
-    const props = mount({ onSaveProfile: vi.fn(async () => false) });
+    const props = mount({ onSaveProfile: vi.fn(async () => false), profile: emptyProfile });
 
     await user.type(screen.getByLabelText("Name"), "Ada");
     await user.click(screen.getByRole("button", { name: "Skip for now" }));
@@ -460,7 +483,7 @@ describe("FirstRunOnboarding", () => {
 
   it("keeps a name the user typed even when they skip the rest of first run", async () => {
     const user = userEvent.setup();
-    const props = mount();
+    const props = mount({ profile: emptyProfile });
 
     await user.type(screen.getByLabelText("Name"), "Ada");
     await user.click(screen.getByRole("button", { name: "Skip for now" }));
@@ -570,7 +593,7 @@ describe("FirstRunOnboarding", () => {
           onSelectNavigatorDefault={vi.fn(async () => true)}
           onToggleChat={vi.fn(async () => true)}
           onToggleWork={vi.fn(async () => true)}
-          profile={emptyProfile}
+          profile={namedProfile}
           readiness={summarizeFirstRunReadiness({
             providerStatus: "ready",
             instances: [instance],
@@ -632,7 +655,7 @@ describe("FirstRunOnboarding", () => {
 
   it("marks a step configured only once the host holds a real answer", async () => {
     const user = userEvent.setup();
-    mount({ profile: { ...emptyProfile, displayName: "Ada Lovelace" } });
+    mount({ profile: namedProfile });
 
     const profileStep = screen.getByRole("button", { name: /About you/ });
     expect(profileStep).toHaveAttribute("data-configured", "true");
