@@ -33,6 +33,7 @@ import {
   type WorkMutationPosture,
 } from "@octant/domain";
 import { readConfinedWorkFile } from "./workConfinedRead";
+import { writeConfinedWorkFile } from "./workConfinedWrite";
 import type { WorkFileIdentity, WorkFileStat, WorkFilesystemPort } from "./workFilesystemPort";
 import { WorkResolutionService, type WorkRootBinding } from "./workResolutionService";
 import type { WorkArtifactProjection } from "./workArtifactProjection";
@@ -250,11 +251,13 @@ export class WorkMutationService {
     if (outputRejection !== undefined) return failedReply(request, "oversize");
     const sourceVersion = computeSourceVersion(bytes, occurredAt);
 
-    try {
-      await this.#filesystem.writeFile(resolution.absolutePath, bytes);
-    } catch {
-      return failedReply(request, "write-failed");
-    }
+    const created = await writeConfinedWorkFile({
+      filesystem: this.#filesystem,
+      canonicalPath: resolution.absolutePath,
+      allowCreate: true,
+      bytes,
+    });
+    if (!created) return failedReply(request, "write-failed");
     if (context.signal?.aborted) return interruptedReply(request);
 
     const artifact: WorkArtifactIdentity = {
@@ -356,11 +359,14 @@ export class WorkMutationService {
     }
     const outputRejection = validateWorkOutputBudget(bytes.byteLength);
     if (outputRejection !== undefined) return failedReply(request, "oversize");
-    try {
-      await this.#filesystem.writeFile(resolved.absolutePath, bytes);
-    } catch {
-      return failedReply(request, "write-failed");
-    }
+    const revised = await writeConfinedWorkFile({
+      filesystem: this.#filesystem,
+      canonicalPath: resolved.absolutePath,
+      expected: resolved.sourceIdentity,
+      allowCreate: false,
+      bytes,
+    });
+    if (!revised) return failedReply(request, "write-failed");
     if (context.signal?.aborted) return interruptedReply(request);
 
     const sequence = entry.sequence + 1;
@@ -595,11 +601,15 @@ export class WorkMutationService {
     // path. This is the safer failure mode than journaling first (which would
     // advance the sequence on a write failure and block retries).
     if (!targetBytesAlreadyWritten) {
-      try {
-        await this.#filesystem.writeFile(targetAbsolutePath, targetBytes);
-      } catch {
-        return failedReply(request, "write-failed", request.artifactId);
-      }
+      const samePath = targetAbsolutePath === resolved.absolutePath;
+      const written = await writeConfinedWorkFile({
+        filesystem: this.#filesystem,
+        canonicalPath: targetAbsolutePath,
+        allowCreate: !samePath,
+        bytes: targetBytes,
+        ...(samePath ? { expected: resolved.sourceIdentity } : {}),
+      });
+      if (!written) return failedReply(request, "write-failed", request.artifactId);
     }
     // After the write succeeds, check for abort before journaling. If the
     // signal was aborted during the write, the file has new content but the
@@ -1057,11 +1067,13 @@ export class WorkMutationService {
       }
     }
     if (!exportBytesAlreadyWritten) {
-      try {
-        await this.#filesystem.writeFile(exportResolution.absolutePath, exportBytes);
-      } catch {
-        return failedReply(request, "write-failed", request.artifactId);
-      }
+      const written = await writeConfinedWorkFile({
+        filesystem: this.#filesystem,
+        canonicalPath: exportResolution.absolutePath,
+        allowCreate: true,
+        bytes: exportBytes,
+      });
+      if (!written) return failedReply(request, "write-failed", request.artifactId);
     }
     if (context.signal?.aborted) return interruptedReply(request);
 
