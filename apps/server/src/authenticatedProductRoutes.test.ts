@@ -94,6 +94,11 @@ describe("authenticated product route dispatch", () => {
     expect(
       classifyProductAction(new Request("https://octant.example/api/diagnostics/export")),
     ).toBeUndefined();
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/threads/export", { method: "POST" }),
+      ),
+    ).toBe("project.overview.read");
   });
 
   it("fails closed for a remote device attempting a diagnostics export before dispatch", async () => {
