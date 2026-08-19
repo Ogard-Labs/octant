@@ -1,4 +1,9 @@
-import type { WorkFileStat, WorkFilesystemPort, WorkOpenFile } from "./workFilesystemPort";
+import type {
+  WorkFileStat,
+  WorkFilesystemPort,
+  WorkOpenFile,
+  WorkOpenWriteFile,
+} from "./workFilesystemPort";
 
 /**
  * In-memory Work filesystem for tests, shared by every suite that drives the
@@ -35,6 +40,18 @@ export function workFilesystemFixture(root = "/work"): WorkFilesystemFixture {
     return String(nextInode);
   };
   const resolve = (path: string): string => symlinks.get(path) ?? path;
+  const writeHandle = (node: FileNode): WorkOpenWriteFile => ({
+    stat: async () => ({
+      isFile: true,
+      size: node.bytes.byteLength,
+      device: "1",
+      inode: node.inode,
+    }),
+    write: async (bytes) => {
+      node.bytes = bytes;
+    },
+    close: async () => {},
+  });
   const realpath = async (path: string): Promise<string> => resolve(path);
   const statFor = (path: string): WorkFileStat => {
     if (symlinks.has(path)) {
@@ -99,6 +116,20 @@ export function workFilesystemFixture(root = "/work"): WorkFilesystemFixture {
         read: async (maximumBytes) => opened.bytes.slice(0, Math.max(0, maximumBytes)),
         close: async () => {},
       };
+    },
+    openWriteFile: async (path, options): Promise<WorkOpenWriteFile> => {
+      if (symlinks.has(path)) throw new Error(`ELOOP ${path}`);
+      const dir = path.split("/").slice(0, -1).join("/") || "/";
+      if (!dirs.has(dir)) throw new Error(`missing dir ${dir}`);
+      if (options.exclusiveCreate) {
+        if (files.has(path) || dirs.has(path)) throw new Error(`EEXIST ${path}`);
+        const node: FileNode = { bytes: new Uint8Array(), inode: mintInode() };
+        files.set(path, node);
+        return writeHandle(node);
+      }
+      const opened = files.get(path);
+      if (opened === undefined) throw new Error(`no file at ${path}`);
+      return writeHandle(opened);
     },
     readFile: async (path) => {
       const node = files.get(resolve(path));

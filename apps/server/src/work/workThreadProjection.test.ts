@@ -101,6 +101,55 @@ describe("WorkThreadProjection", () => {
     );
   });
 
+  it("hydrates thread events from a host whose unrelated journal history exceeds the scan cap", () => {
+    const projection = new WorkThreadProjection();
+    let askedAggregate: string | undefined;
+    const status = hydrateWorkThreadProjectionFromJournal({
+      replay: (cursor) => {
+        askedAggregate = cursor.aggregateType;
+        if (cursor.afterSequence > 0) return [];
+        return [
+          {
+            globalSequence: 200_001,
+            aggregateType: "work-thread",
+            eventName: "work.thread-created@1",
+            eventVersion: 1,
+            payload: { kind: "thread-created", thread: thread() },
+          },
+        ];
+      },
+      projection,
+      maxScan: 1,
+    });
+    expect(askedAggregate).toBe("work-thread");
+    expect(status).toBe("ok");
+    expect(projection.read(ids.thread)?.title).toBe("Draft brief");
+  });
+
+  it("fails closed when the Work thread history itself exceeds the scan cap", () => {
+    const projection = new WorkThreadProjection();
+    const status = hydrateWorkThreadProjectionFromJournal({
+      replay: (cursor) =>
+        Array.from({ length: 2 }, (_unused, index) => ({
+          globalSequence: cursor.afterSequence + index + 1,
+          aggregateType: "work-thread",
+          eventName: "work.thread-created@1",
+          eventVersion: 1,
+          payload: {
+            kind: "thread-created",
+            thread: thread({
+              id: decodeWorkThreadId(
+                `71000000-0000-4000-8000-${(index + 10).toString(16).padStart(12, "0")}`,
+              ),
+            }),
+          },
+        })),
+      projection,
+      maxScan: 1,
+    });
+    expect(status).toBe("snapshot-required");
+  });
+
   it("retains lifecycle facts in application order for workflow reconciliation", () => {
     const projection = new WorkThreadProjection();
     const created = thread();

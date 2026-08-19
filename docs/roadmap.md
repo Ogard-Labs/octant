@@ -51,10 +51,6 @@ Hardening in progress for the preview:
   rather than freezing the thread, renews a session whose window closed while
   the machine slept, and stays paired through a moment of no network. What is
   still open is proving it on real hardware across a genuine sleep/wake cycle.
-- Standing security follow-ups: identity-bound confined writes, consistent
-  journal-hydration limits across projections, a gate that compares the remote
-  forward list against the route classifier, and scoping of the remaining
-  host-wide usage and diagnostics endpoints.
 - Dogfood-driven fixes as they surface.
 
 ## Next
