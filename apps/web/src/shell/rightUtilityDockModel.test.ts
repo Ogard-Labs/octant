@@ -56,6 +56,12 @@ describe("Right Utility Dock surface model", () => {
         modes: ["chat", "work", "code"],
         projectRequired: false,
       },
+      {
+        id: "plan",
+        label: "Plan",
+        modes: ["code"],
+        projectRequired: true,
+      },
     ]);
   });
 
@@ -91,7 +97,7 @@ describe("Right Utility Dock surface model", () => {
     ).toEqual({ kind: "closed", reason: "disconnected" });
   });
 
-  it.each(["context", "project-memory", "code-environment"] as const)(
+  it.each(["context", "project-memory", "code-environment", "plan"] as const)(
     "keeps Project-required surface %s closed with no active Project",
     (savedSurface) => {
       expect(
