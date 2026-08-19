@@ -497,6 +497,8 @@ import {
   type PrivateListenerTls,
 } from "./privateListener";
 import { createAuthenticatedProductDispatch } from "./authenticatedProductRoutes";
+import { compareRemoteForwardListToClassifier } from "./remoteForwardListClassifierGate";
+import { requireJournalHydration } from "./persistence/journalHydration";
 import {
   createRemoteGateway,
   type RemoteGateway,
@@ -1701,11 +1703,20 @@ export function startOctantServer(
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     const workThreadProjection = new WorkThreadProjection();
-    hydrateWorkThreadProjectionFromJournal({
-      replay: (cursor) =>
-        persistence.journal.replay(Schema.decodeUnknownSync(ReplayCursor)(cursor)),
-      projection: workThreadProjection,
-    });
+    requireJournalHydration(
+      hydrateWorkThreadProjectionFromJournal({
+        replay: (cursor) =>
+          persistence.journal.replayAggregateType({
+            ...Schema.decodeUnknownSync(ReplayCursor)({
+              afterSequence: cursor.afterSequence,
+              limit: cursor.limit,
+            }),
+            aggregateType: cursor.aggregateType ?? "work-thread",
+          }),
+        projection: workThreadProjection,
+      }),
+      "Work thread",
+    );
     const shellService = new ShellService({
       persistence,
       readWorkThread: (threadId) => workThreadProjection.read(threadId),
@@ -3406,11 +3417,20 @@ export function startOctantServer(
       () => decodeWorkspaceTabId(randomUUID()),
     );
     const workArtifactProjection = new WorkArtifactProjection();
-    hydrateWorkArtifactProjectionFromJournal({
-      replay: (cursor) =>
-        persistence.journal.replay(Schema.decodeUnknownSync(ReplayCursor)(cursor)),
-      projection: workArtifactProjection,
-    });
+    requireJournalHydration(
+      hydrateWorkArtifactProjectionFromJournal({
+        replay: (cursor) =>
+          persistence.journal.replayAggregateType({
+            ...Schema.decodeUnknownSync(ReplayCursor)({
+              afterSequence: cursor.afterSequence,
+              limit: cursor.limit,
+            }),
+            aggregateType: cursor.aggregateType ?? "work-artifact",
+          }),
+        projection: workArtifactProjection,
+      }),
+      "Work artifact",
+    );
     const workThreadService = new WorkThreadService({
       persistence,
       projects: projectService,
@@ -3422,11 +3442,20 @@ export function startOctantServer(
       probeProvider: (providerInstanceId) => probeProviderForThreads(providerInstanceId),
     });
     const workTurnProjection = new WorkTurnProjection();
-    hydrateWorkTurnProjectionFromJournal({
-      replay: (cursor) =>
-        persistence.journal.replay(Schema.decodeUnknownSync(ReplayCursor)(cursor)),
-      projection: workTurnProjection,
-    });
+    requireJournalHydration(
+      hydrateWorkTurnProjectionFromJournal({
+        replay: (cursor) =>
+          persistence.journal.replayAggregateType({
+            ...Schema.decodeUnknownSync(ReplayCursor)({
+              afterSequence: cursor.afterSequence,
+              limit: cursor.limit,
+            }),
+            aggregateType: cursor.aggregateType ?? "work-turn",
+          }),
+        projection: workTurnProjection,
+      }),
+      "Work turn",
+    );
     workTurnProjection.markInterruptedOnRestart(new Date().toISOString());
     const workTurnService = new WorkTurnService({
       persistence,
@@ -5032,6 +5061,12 @@ export function startOctantServer(
       (await workResearchRoutes(request)) ??
       (await themeRoutes(request));
 
+    const forwardListDrift = compareRemoteForwardListToClassifier();
+    if (forwardListDrift.length > 0) {
+      throw new Error(
+        "Remote forward list does not match the product classifier; a paired device would be admitted to a local-only action or denied a classified remote one.",
+      );
+    }
     const authenticatedProductDispatch = createAuthenticatedProductDispatch({
       dispatch: dispatchProductRoutes,
     });

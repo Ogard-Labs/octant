@@ -112,6 +112,9 @@ function filesystem(
         close: async () => {},
       };
     },
+    openWriteFile: async () => {
+      throw new Error("write is not used during resolution");
+    },
     // `readFile` follows a symlink, which is exactly the escape a confined read
     // must not be able to make on the strength of a name checked earlier.
     readFile: async (path) => {

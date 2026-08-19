@@ -62,6 +62,19 @@ export interface WorkOpenFile {
 }
 
 /**
+ * One open file opened for a confined write, held so every later fact and
+ * byte goes to this handle.
+ *
+ * A handle is bound to the object that was open at the moment it was created,
+ * so replacing the name it was opened under cannot redirect the write.
+ */
+export interface WorkOpenWriteFile {
+  stat(): Promise<WorkOpenFileStat>;
+  write(bytes: Uint8Array): Promise<void>;
+  close(): Promise<void>;
+}
+
+/**
  * Testable filesystem port for Work resolution and mutation. The live
  * implementation delegates to `node:fs/promises`; tests supply an in-memory
  * implementation so confinement, symlink, moved-root, and cancellation paths
@@ -73,6 +86,10 @@ export interface WorkOpenFile {
  * confinement resolved it is an error rather than an escape. `readFile` remains
  * for reads that are not confinement decisions and must not be used to fetch
  * bytes a containment check has already approved — see `readConfinedWorkFile`.
+ *
+ * `openWriteFile` is the only way a confined Work write may emit bytes. A
+ * path-based `writeFile` follows a final symlink the way the host's does and
+ * must not be used after a containment proof — see `writeConfinedWorkFile`.
  */
 export interface WorkFilesystemPort {
   realpath(path: string): Promise<string>;
@@ -80,6 +97,10 @@ export interface WorkFilesystemPort {
   stat(path: string): Promise<WorkFileStat>;
   readlink(path: string): Promise<string>;
   openFile(path: string): Promise<WorkOpenFile>;
+  openWriteFile(
+    path: string,
+    options: { readonly exclusiveCreate: boolean },
+  ): Promise<WorkOpenWriteFile>;
   readFile(path: string): Promise<Uint8Array>;
   writeFile(path: string, bytes: Uint8Array): Promise<void>;
   mkdir(path: string, options: { readonly recursive: true }): Promise<void>;
@@ -134,6 +155,39 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
           filled += bytesRead;
         }
         return new Uint8Array(buffer.subarray(0, filled));
+      },
+      close: () => handle.close(),
+    };
+  },
+  openWriteFile: async (path, options) => {
+    const flags = options.exclusiveCreate
+      ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW
+      : constants.O_WRONLY | constants.O_NOFOLLOW;
+    const handle = await open(path, flags, 0o600);
+    return {
+      stat: async () => {
+        const info = await handle.stat({ bigint: true });
+        return {
+          isFile: info.isFile(),
+          size: Number(info.size),
+          device: String(info.dev),
+          inode: String(info.ino),
+        };
+      },
+      write: async (bytes) => {
+        await handle.truncate(0);
+        const buffer = Buffer.from(bytes);
+        let offset = 0;
+        while (offset < buffer.byteLength) {
+          const { bytesWritten } = await handle.write(
+            buffer,
+            offset,
+            buffer.byteLength - offset,
+            offset,
+          );
+          if (bytesWritten === 0) throw new Error("short write");
+          offset += bytesWritten;
+        }
       },
       close: () => handle.close(),
     };
