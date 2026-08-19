@@ -85,6 +85,7 @@ export interface DraftThreadWorkspaceProps {
     prompt: string,
     folderSelection?: ComposerFolderSelection,
     deliveryOutcome?: CodeDeliveryOutcomeKind,
+    images?: ReadonlyArray<File>,
   ) => void | Promise<void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
@@ -326,7 +327,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { selectedModelId: props.selectedModelId })}
           onSelectProvider={props.onSelectProvider}
-          onCreateThread={(prompt) => props.onCreateThread(prompt, folderSelection)}
+          onCreateThread={(prompt, images) =>
+            images === undefined
+              ? props.onCreateThread(prompt, folderSelection)
+              : props.onCreateThread(prompt, folderSelection, undefined, images)
+          }
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined
             ? {}

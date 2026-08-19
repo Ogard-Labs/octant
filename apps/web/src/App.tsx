@@ -77,7 +77,16 @@ import {
 } from "@octant/contracts/code";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
 import { decodeContextSubjectRef } from "@octant/contracts/context";
-import { decodeWorkThreadId, decodeWorkTurnId, decodeWorkTurnRequestId } from "@octant/contracts";
+import {
+  decodeWorkAttachmentId,
+  decodeWorkAttachmentMediaType,
+  decodeWorkThreadId,
+  decodeWorkTurnId,
+  decodeWorkTurnRequestId,
+  type WorkAttachmentId,
+  type WorkThreadId,
+} from "@octant/contracts";
+import { pastedImageName } from "./chat/composerImagePaste";
 import type { CodeOperationId } from "@octant/contracts";
 import { decodeWindowId, type WindowId } from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
@@ -2461,7 +2470,11 @@ function LaunchedShell(
     }
   }
 
-  async function handleCreateWorkThread(projectId: ProjectId, prompt: string): Promise<boolean> {
+  async function handleCreateWorkThread(
+    projectId: ProjectId,
+    prompt: string,
+    images?: ReadonlyArray<File>,
+  ): Promise<boolean> {
     const project = projectController.allProjects.find(
       (
         candidate,
@@ -2502,6 +2515,7 @@ function LaunchedShell(
         created.thread.projectId,
       );
       await workNavigation.refresh();
+      const attachmentIds = await stageWorkImages(created.thread.id, images ?? []);
       const started = await workTurnClient.startFirstTurn({
         kind: "start-work-thread-turn",
         requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
@@ -2517,12 +2531,33 @@ function LaunchedShell(
           providerInstanceId,
           modelId,
         },
+        ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
       });
       if (started.kind !== "accepted") return false;
       return true;
     } catch {
       return false;
     }
+  }
+
+  async function stageWorkImages(
+    threadId: WorkThreadId,
+    images: ReadonlyArray<File>,
+  ): Promise<ReadonlyArray<WorkAttachmentId>> {
+    const attachmentIds: WorkAttachmentId[] = [];
+    for (const file of images) {
+      const attachmentId = decodeWorkAttachmentId(globalThis.crypto.randomUUID());
+      const mediaType = decodeWorkAttachmentMediaType(file.type);
+      await workTurnClient.putAttachment({
+        threadId,
+        attachmentId,
+        displayName: pastedImageName(file),
+        mediaType,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      });
+      attachmentIds.push(attachmentId);
+    }
+    return attachmentIds;
   }
 
   async function handleCreateChatProjectThread(
@@ -2693,6 +2728,7 @@ function LaunchedShell(
     // explicit user confirmation in the composer UI; this handler never derives
     // or auto-confirms a heuristic suggestion of its own.
     deliveryOutcome?: CodeDeliveryOutcomeKind,
+    images?: ReadonlyArray<File>,
   ): Promise<void> {
     setDraftCreating(true);
     setDraftError(undefined);
@@ -2922,6 +2958,7 @@ function LaunchedShell(
           created.thread.projectId,
         );
         await workNavigation.refresh();
+        const attachmentIds = await stageWorkImages(created.thread.id, images ?? []);
         const started = await workTurnClient.startFirstTurn({
           kind: "start-work-thread-turn",
           requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
@@ -2937,6 +2974,7 @@ function LaunchedShell(
             providerInstanceId,
             modelId,
           },
+          ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
         });
         if (started.kind !== "accepted") {
           setDraftError(

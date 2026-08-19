@@ -2,12 +2,20 @@ import type { ProjectId } from "@octant/contracts/projects";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
-import { ArrowUp, FolderOpen, AlertTriangle } from "lucide-react";
-import { useCallback, useState, type KeyboardEvent, type ReactNode } from "react";
+import { ArrowUp, FolderOpen, AlertTriangle, Paperclip } from "lucide-react";
+import {
+  useCallback,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import { ComposerModelPicker } from "../../providers/ComposerModelPicker";
 import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
+import { clipboardHasImage } from "../../chat/composerImagePaste";
+import { selectedModelReadsImages, useWorkComposerImages } from "./useWorkComposerImages";
 
 export interface WorkComposerAdapterProps {
   readonly projectId?: ProjectId;
@@ -26,7 +34,7 @@ export interface WorkComposerAdapterProps {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => void;
-  readonly onCreateThread: (prompt: string) => void | Promise<void>;
+  readonly onCreateThread: (prompt: string, images?: ReadonlyArray<File>) => void | Promise<void>;
   readonly onAttachFolder?: () => void;
   readonly folderControl?: ReactNode;
   /** Optional multi-model pool control slot rendered in the composer bar. */
@@ -40,14 +48,41 @@ export interface WorkComposerAdapterProps {
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
+  const images = useWorkComposerImages();
   const trimmed = prompt.trim();
   const canSubmit = trimmed.length > 0 && !props.creating;
   const hasFolder = props.projectId !== undefined;
+  const imageSupport = selectedModelReadsImages(props.providerGroups, {
+    ...(props.selectedProviderInstanceId === undefined
+      ? {}
+      : { providerInstanceId: props.selectedProviderInstanceId }),
+    ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
+  });
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    void props.onCreateThread(trimmed);
-  }, [canSubmit, props, trimmed]);
+    const staged = images.takeForSend();
+    if (staged.length === 0) {
+      void props.onCreateThread(trimmed);
+      return;
+    }
+    void props.onCreateThread(trimmed, staged);
+  }, [canSubmit, images, props, trimmed]);
+
+  function attachFromTransfer(items: DataTransfer | null): boolean {
+    if (items === null) return false;
+    if (!clipboardHasImage(items)) return false;
+    if (imageSupport === false) {
+      images.refuse("The selected model does not accept images. Choose an image-capable model.");
+      return true;
+    }
+    return images.consumePaste(items);
+  }
+
+  function onDraftPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    if (props.creating === true) return;
+    if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+  }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -79,18 +114,89 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
 
         <div className="work-composer-adapter__composer">
           <div className="work-composer-adapter__input-row">
+            {images.staged.length === 0 && images.message === undefined ? null : (
+              <div className="work-composer-adapter__attachments" aria-label="Attached images">
+                {images.staged.map((attachment) => (
+                  <span className="work-composer-adapter__attachment" key={attachment.id}>
+                    <img
+                      alt={attachment.displayName}
+                      className="work-composer-adapter__attachment-thumb"
+                      src={attachment.previewUrl}
+                    />
+                    <span className="work-composer-adapter__attachment-name">
+                      {attachment.displayName}
+                    </span>
+                    <button
+                      aria-label={`Remove ${attachment.displayName}`}
+                      className="work-composer-adapter__attachment-remove"
+                      onClick={() => images.remove(attachment.id)}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {images.message === undefined ? null : (
+                  <span className="work-composer-adapter__hint" role="status">
+                    {images.message}
+                  </span>
+                )}
+              </div>
+            )}
             <OctantTextarea
               aria-label="First message"
               autoFocus
               className="work-composer-adapter__textarea"
               disabled={props.creating}
               onChange={(event) => setPrompt(event.target.value)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                if (attachFromTransfer(event.dataTransfer)) event.preventDefault();
+              }}
               onKeyDown={handleKeyDown}
+              onPaste={onDraftPaste}
               placeholder="Describe the work…"
               rows={3}
               value={prompt}
             />
             <div className="work-composer-adapter__composer-bar">
+              <label>
+                <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                <input
+                  aria-label="Choose attachment file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="work-composer-adapter__file-input"
+                  disabled={props.creating === true || imageSupport === false}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.item(0);
+                    if (file !== null && file !== undefined) {
+                      if (imageSupport === false) {
+                        images.refuse(
+                          "The selected model does not accept images. Choose an image-capable model.",
+                        );
+                      } else {
+                        images.attach([file]);
+                      }
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                  type="file"
+                />
+              </label>
+              <OctantButton
+                aria-label="Add attachment"
+                disabled={props.creating === true || imageSupport === false}
+                onClick={(event) => {
+                  event.currentTarget.parentElement
+                    ?.querySelector<HTMLInputElement>('input[type="file"]')
+                    ?.click();
+                }}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+              </OctantButton>
               <span className="work-composer-adapter__context-picker">
                 <ComposerModelPicker
                   ariaLabel="Provider and model"

@@ -48,6 +48,36 @@ describe("work turn contracts", () => {
     expect(command.authority.workingDirectory).toBe(".");
   });
 
+  it("decodes a start-turn command that names staged image ids", () => {
+    const command = decodeStartWorkThreadTurnCommand({
+      kind: "start-work-thread-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      prompt: "Match this mockup",
+      authority,
+      attachmentIds: ["22222222-2222-4222-8222-222222222222"],
+    });
+    expect(command.attachmentIds).toEqual(["22222222-2222-4222-8222-222222222222"]);
+  });
+
+  it("rejects a start-turn command that names more images than a turn may carry", () => {
+    expect(() =>
+      decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Match this mockup",
+        authority,
+        attachmentIds: Array.from(
+          { length: 9 },
+          (_, index) => `22222222-2222-4222-8222-${String(index).padStart(12, "0")}`,
+        ),
+      }),
+    ).toThrow();
+  });
+
   it("rejects Code, shell, Git, worktree, or PR authority on the turn snapshot", () => {
     for (const excess of [
       { shell: true },
@@ -151,6 +181,29 @@ describe("work turn contracts", () => {
         acceptedAt: now,
       }).kind,
     ).toBe("turn-accepted");
+
+    const acceptedWithImage = decodeWorkTurnAccepted({
+      kind: "turn-accepted",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      projectId: ids.project,
+      authority,
+      providerSessionId: ids.session,
+      prompt: "Match this mockup",
+      attachments: [
+        {
+          attachmentId: "22222222-2222-4222-8222-222222222222",
+          displayName: "mockup.png",
+          mediaType: "image/png",
+          byteLength: 3,
+          digest: "a".repeat(64),
+        },
+      ],
+      capabilities: WORK_TURN_CAPABILITIES,
+      acceptedAt: now,
+    });
+    expect(acceptedWithImage.attachments?.[0]?.displayName).toBe("mockup.png");
 
     expect(
       decodeWorkTurnUpdated({

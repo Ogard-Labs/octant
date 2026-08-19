@@ -1,6 +1,7 @@
 import {
   MAX_WORK_TURN_RESPONSE_BYTES,
   type WorkTurnFailure,
+  type ProviderAttachmentInput,
   type ProviderFailure,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
@@ -34,6 +35,7 @@ export interface WorkTurnRuntimePort {
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
     readonly signal: AbortSignal;
+    readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly onDelta?: (response: string) => void;
   }): Promise<WorkTurnRuntimeOutcome>;
 }
@@ -61,6 +63,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
     readonly signal: AbortSignal;
+    readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
     readonly onDelta?: (response: string) => void;
   }): Promise<WorkTurnRuntimeOutcome> {
     try {
@@ -102,6 +105,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly projectRoot: string;
       readonly driver: ProviderDriver;
       readonly signal: AbortSignal;
+      readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
       readonly onDelta?: (response: string) => void;
     },
     idle: IdleTimeout,
@@ -166,7 +170,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         sessionId: input.providerSessionId,
         prompt: input.command.prompt,
         context: [],
-        attachments: [],
+        attachments: [...(input.attachments ?? [])],
         tools: [],
       });
       yield* Fiber.join(events);

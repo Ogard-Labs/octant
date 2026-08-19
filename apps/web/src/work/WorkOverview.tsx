@@ -1,7 +1,9 @@
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { CreateHostViewScope, PickerGroup, ModelPickerSelection } from "@octant/domain";
-import { FolderOpen, ShieldCheck } from "lucide-react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { FolderOpen, Paperclip, ShieldCheck } from "lucide-react";
+import { useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
+import { clipboardHasImage } from "../chat/composerImagePaste";
+import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
 import { HostSelector } from "../shell/HostSelector";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -58,7 +60,10 @@ export interface WorkOverviewProps {
     readonly displayName: string;
     readonly format: "markdown";
   }) => boolean | Promise<boolean>;
-  readonly onCreateThread: (draft: string) => boolean | Promise<boolean>;
+  readonly onCreateThread: (
+    draft: string,
+    images?: ReadonlyArray<File>,
+  ) => boolean | Promise<boolean>;
   readonly onOpenThread?: (threadId: string) => void;
   readonly onOpenSettings?: () => void;
   readonly projectName?: string;
@@ -86,6 +91,13 @@ export function WorkOverview(props: WorkOverviewProps) {
   );
   const [draft, setDraft] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const images = useWorkComposerImages();
+  const imageSupport = selectedModelReadsImages(providerGroups, {
+    ...(props.selectedProviderInstanceId === undefined
+      ? {}
+      : { providerInstanceId: props.selectedProviderInstanceId }),
+    ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
+  });
   const createStarterArtifactAvailable =
     props.createStarterArtifactAvailable === true && props.onCreateStarterArtifact !== undefined;
   const [starterArtifactPath, setStarterArtifactPath] = useState("notes.md");
@@ -98,7 +110,11 @@ export function WorkOverview(props: WorkOverviewProps) {
     if (!createAvailable || submitting || normalized === "") return;
     setSubmitting(true);
     try {
-      const created = await props.onCreateThread(normalized);
+      const staged = images.takeForSend();
+      const created =
+        staged.length === 0
+          ? await props.onCreateThread(normalized)
+          : await props.onCreateThread(normalized, staged);
       if (created) setDraft("");
     } finally {
       setSubmitting(false);
@@ -206,14 +222,92 @@ export function WorkOverview(props: WorkOverviewProps) {
           <label className="sr-only" htmlFor="work-overview-quick-start">
             Start a new Work thread
           </label>
+          {images.staged.length === 0 && images.message === undefined ? null : (
+            <div className="work-composer-adapter__attachments" aria-label="Attached images">
+              {images.staged.map((attachment) => (
+                <span className="work-composer-adapter__attachment" key={attachment.id}>
+                  <img
+                    alt={attachment.displayName}
+                    className="work-composer-adapter__attachment-thumb"
+                    src={attachment.previewUrl}
+                  />
+                  <span className="work-composer-adapter__attachment-name">
+                    {attachment.displayName}
+                  </span>
+                  <button
+                    aria-label={`Remove ${attachment.displayName}`}
+                    className="work-composer-adapter__attachment-remove"
+                    onClick={() => images.remove(attachment.id)}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {images.message === undefined ? null : (
+                <span className="work-composer-adapter__hint" role="status">
+                  {images.message}
+                </span>
+              )}
+            </div>
+          )}
           <OctantTextarea
             disabled={!createAvailable || submitting}
             id="work-overview-quick-start"
             onChange={(event) => setDraft(event.target.value)}
+            onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+              if (!clipboardHasImage(event.clipboardData)) return;
+              event.preventDefault();
+              if (imageSupport === false) {
+                images.refuse(
+                  "The selected model does not accept images. Choose an image-capable model.",
+                );
+                return;
+              }
+              images.consumePaste(event.clipboardData);
+            }}
             placeholder="Describe the next Work thread…"
             rows={3}
             value={draft}
           />
+          <label>
+            <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+            <input
+              aria-label="Choose attachment file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="work-composer-adapter__file-input"
+              disabled={!createAvailable || submitting || imageSupport === false}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.item(0);
+                if (file !== null && file !== undefined) {
+                  if (imageSupport === false) {
+                    images.refuse(
+                      "The selected model does not accept images. Choose an image-capable model.",
+                    );
+                  } else {
+                    images.attach([file]);
+                  }
+                }
+                event.currentTarget.value = "";
+              }}
+              type="file"
+            />
+          </label>
+          <OctantButton
+            aria-label="Add attachment"
+            disabled={!createAvailable || submitting || imageSupport === false}
+            onClick={(event) => {
+              event.preventDefault();
+              event.currentTarget.parentElement
+                ?.querySelector<HTMLInputElement>('input[type="file"]')
+                ?.click();
+            }}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+          </OctantButton>
           <OctantButton
             className="project-button"
             disabled={!createAvailable || submitting || draft.trim() === ""}

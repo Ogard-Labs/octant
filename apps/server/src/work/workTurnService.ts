@@ -13,6 +13,9 @@ import {
   decodeWorkTurnRequestId,
   decodeWorkTurnState,
   decodeStartWorkThreadTurnCommand,
+  type WorkAttachmentId,
+  type WorkAttachmentMediaType,
+  type WorkAttachmentReference,
   type WorkThread,
   type WorkThreadId,
   type WorkThreadTranscript,
@@ -22,6 +25,7 @@ import {
   type WorkTurnState,
   type Project,
   type ProjectId,
+  type ProviderAttachmentInput,
   type ProviderInstance,
   type ThreadWorkingDirectory,
   type WindowId,
@@ -32,6 +36,11 @@ import { Schema } from "effect";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import {
+  WorkAttachmentInvalid,
+  WorkAttachmentTooLarge,
+  type WorkAttachmentStore,
+} from "./workAttachmentStore";
 import type { WorkTurnProjection } from "./workTurnProjection";
 import {
   WorkTurnRuntime,
@@ -114,6 +123,16 @@ export interface WorkTurnServiceDependencies {
   readonly resolveDriver: (
     providerInstanceId: WorkThread["providerInstanceId"],
   ) => ProviderDriver | undefined;
+  readonly attachments?: WorkAttachmentStore;
+  /**
+   * Whether the selected provider and model honestly accept images. The host
+   * refuses a turn that names attachments when this is false, rather than
+   * sending the prompt with its pictures quietly removed.
+   */
+  readonly supportsAttachments?: (input: {
+    readonly providerInstanceId: WorkThread["providerInstanceId"];
+    readonly modelId: WorkThread["modelId"];
+  }) => boolean;
   readonly turnRuntime?: WorkTurnRuntimePort;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -127,6 +146,8 @@ export class WorkTurnService {
   readonly #projection: WorkTurnProjection;
   readonly #workingDirectories: WorkTurnServiceDependencies["workingDirectories"];
   readonly #resolveDriver: WorkTurnServiceDependencies["resolveDriver"];
+  readonly #attachments: WorkAttachmentStore | undefined;
+  readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #turnRuntime: WorkTurnRuntimePort;
   readonly #uuid: () => string;
   readonly #clock: () => string;
@@ -142,6 +163,8 @@ export class WorkTurnService {
     this.#projection = dependencies.projection;
     this.#workingDirectories = dependencies.workingDirectories;
     this.#resolveDriver = dependencies.resolveDriver;
+    this.#attachments = dependencies.attachments;
+    this.#supportsAttachments = dependencies.supportsAttachments;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
@@ -231,6 +254,21 @@ export class WorkTurnService {
       throw this.#failure("unavailable", "Selected provider cannot start a Work turn.");
     }
 
+    const starting = this.#startingAttachments(command.threadId, command.attachmentIds);
+    if (starting.status === "unknown") {
+      throw this.#failure("invalid", "An image attached to this turn is no longer staged.");
+    }
+    if (starting.attachments.length > 0 && !this.#modelReadsImages(command.authority)) {
+      throw this.#failure(
+        "unsupported",
+        "The selected model does not support images. Choose a vision model, or remove the attachments.",
+      );
+    }
+    const attachmentInputs = await this.#attachmentInputs(command.threadId, starting.attachments);
+    if (attachmentInputs === undefined) {
+      throw this.#failure("unavailable", "An image attached to this turn is unavailable.");
+    }
+
     const acceptedAt = decodeTimestamp(this.#clock());
     const providerSessionId = decodeProviderSessionId(this.#uuid());
     try {
@@ -243,6 +281,7 @@ export class WorkTurnService {
         authority: command.authority,
         providerSessionId,
         prompt: command.prompt,
+        ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
         capabilities: WORK_TURN_CAPABILITIES,
         acceptedAt,
       });
@@ -259,6 +298,12 @@ export class WorkTurnService {
     if (accepted === undefined) {
       throw this.#failure("unavailable", "Work turn acceptance could not be projected.");
     }
+    if (starting.attachments.length > 0) {
+      this.#attachments?.release(
+        command.threadId,
+        starting.attachments.map((attachment) => attachment.attachmentId),
+      );
+    }
 
     const controller = new AbortController();
     this.#controllers.set(String(command.requestId), controller);
@@ -267,6 +312,7 @@ export class WorkTurnService {
       providerSessionId,
       projectRoot,
       driver,
+      attachments: attachmentInputs,
       signal: controller.signal,
     }).finally(() => {
       this.#controllers.delete(String(command.requestId));
@@ -372,6 +418,7 @@ export class WorkTurnService {
     readonly providerSessionId: ProviderSessionId;
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
+    readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     readonly signal: AbortSignal;
   }): Promise<void> {
     const current = this.#projection.lookup(input.command.requestId);
@@ -384,6 +431,7 @@ export class WorkTurnService {
       projectRoot: input.projectRoot,
       driver: input.driver,
       signal: input.signal,
+      ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
       onDelta: (response) => {
         this.#liveResponses.set(String(input.command.requestId), response);
       },
@@ -500,11 +548,121 @@ export class WorkTurnService {
     if (
       String(existing.threadId) !== String(command.threadId) ||
       String(existing.turnId) !== String(command.turnId) ||
-      existing.prompt !== command.prompt
+      existing.prompt !== command.prompt ||
+      !sameAttachmentIds(existing.attachments, command.attachmentIds)
     ) {
       throw this.#failure("stale", "Work turn request identity conflict.");
     }
     return decodeWorkTurnLookupResult({ kind: "accepted", turn: existing });
+  }
+
+  /**
+   * Accept one image for a thread's next turn.
+   *
+   * Authority is the thread's own: whoever may send this thread a turn may
+   * attach a picture to it. Nothing the renderer claims about the bytes is
+   * kept — the store re-derives the name, size, and digest the journal will
+   * later record from what it actually wrote.
+   */
+  async stageAttachment(
+    authenticatedWindowId: WindowId,
+    input: {
+      readonly threadId: WorkThreadId;
+      readonly attachmentId: WorkAttachmentId;
+      readonly displayName: string;
+      readonly mediaType: WorkAttachmentMediaType;
+      readonly bytes: Uint8Array;
+      readonly signal?: AbortSignal;
+    },
+  ): Promise<WorkAttachmentReference> {
+    const attachments = await this.#authorizeAttachment(authenticatedWindowId, input.threadId);
+    try {
+      return await attachments.stage(input);
+    } catch (error) {
+      throw this.#failure(
+        error instanceof WorkAttachmentTooLarge || error instanceof WorkAttachmentInvalid
+          ? "invalid"
+          : "failed",
+        error instanceof WorkAttachmentTooLarge || error instanceof WorkAttachmentInvalid
+          ? error.message
+          : "Work attachment could not be staged.",
+      );
+    }
+  }
+
+  async discardAttachment(
+    authenticatedWindowId: WindowId,
+    threadId: WorkThreadId,
+    attachmentId: WorkAttachmentId,
+  ): Promise<void> {
+    const attachments = await this.#authorizeAttachment(authenticatedWindowId, threadId);
+    try {
+      await attachments.discard(threadId, attachmentId);
+    } catch {
+      throw this.#failure("failed", "Work attachment could not be discarded.");
+    }
+  }
+
+  async #authorizeAttachment(
+    authenticatedWindowId: WindowId,
+    threadId: WorkThreadId,
+  ): Promise<WorkAttachmentStore> {
+    this.#assertReady();
+    const bootstrap = await this.#threads.bootstrap(authenticatedWindowId);
+    const thread = bootstrap.threads.find((candidate) => String(candidate.id) === String(threadId));
+    if (thread === undefined) {
+      throw this.#failure("unauthorized", "Work thread is unavailable for this window.");
+    }
+    if (this.#attachments === undefined) {
+      throw this.#failure("unavailable", "Work attachments are unavailable.");
+    }
+    return this.#attachments;
+  }
+
+  #startingAttachments(
+    threadId: WorkThreadId,
+    attachmentIds: ReadonlyArray<WorkAttachmentId> | undefined,
+  ):
+    | { readonly status: "ok"; readonly attachments: ReadonlyArray<WorkAttachmentReference> }
+    | { readonly status: "unknown" } {
+    if (attachmentIds === undefined || attachmentIds.length === 0) {
+      return { status: "ok", attachments: [] };
+    }
+    if (this.#attachments === undefined) return { status: "unknown" };
+    const peeked = this.#attachments.peek(threadId, attachmentIds);
+    if (peeked.status !== "ok") return { status: "unknown" };
+    return { status: "ok", attachments: peeked.attachments };
+  }
+
+  async #attachmentInputs(
+    threadId: WorkThreadId,
+    references: ReadonlyArray<WorkAttachmentReference>,
+  ): Promise<ReadonlyArray<ProviderAttachmentInput> | undefined> {
+    if (references.length === 0) return [];
+    if (this.#attachments === undefined) return undefined;
+    const inputs: ProviderAttachmentInput[] = [];
+    for (const reference of references) {
+      let bytes: Uint8Array;
+      try {
+        bytes = await this.#attachments.read(threadId, reference);
+      } catch {
+        return undefined;
+      }
+      inputs.push({
+        attachmentId: String(reference.attachmentId),
+        displayName: reference.displayName,
+        mediaType: reference.mediaType,
+        bytes,
+      });
+    }
+    return inputs;
+  }
+
+  #modelReadsImages(authority: {
+    readonly providerInstanceId: WorkThread["providerInstanceId"];
+    readonly modelId: WorkThread["modelId"];
+  }): boolean {
+    return this.#supportsAttachments?.(authority) === true;
   }
 
   async #assertThreadAccess(
@@ -543,4 +701,14 @@ export class WorkTurnService {
   ): WorkTurnServiceError {
     return new WorkTurnServiceError(decodeWorkTurnFailure({ category, message }));
   }
+}
+
+function sameAttachmentIds(
+  recorded: ReadonlyArray<WorkAttachmentReference> | undefined,
+  named: ReadonlyArray<WorkAttachmentId> | undefined,
+): boolean {
+  const left = recorded?.map((attachment) => String(attachment.attachmentId)) ?? [];
+  const right = named?.map((attachmentId) => String(attachmentId)) ?? [];
+  if (left.length !== right.length) return false;
+  return left.every((id, index) => id === right[index]);
 }

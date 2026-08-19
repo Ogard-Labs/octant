@@ -1,11 +1,19 @@
 import {
+  MAX_WORK_ATTACHMENT_BYTES,
   decodeCancelWorkTurnCommand,
+  decodeWorkAttachmentId,
+  decodeWorkAttachmentMediaType,
+  decodeWorkAttachmentReference,
+  decodeWorkThreadId,
   decodeWorkThreadTranscript,
   decodeWorkTurnCancelResult,
   decodeWorkTurnLookupResult,
   decodeWorkTurnRequestId,
   decodeStartWorkThreadTurnCommand,
   type CancelWorkTurnCommand,
+  type WorkAttachmentId,
+  type WorkAttachmentMediaType,
+  type WorkAttachmentReference,
   type WorkThreadId,
   type WorkThreadTranscript,
   type WorkTurnCancelResult,
@@ -26,6 +34,20 @@ export interface WorkTurnClient {
   lookupFirstTurn(requestId: WorkTurnRequestId): Promise<WorkTurnLookupResult>;
   cancelFirstTurn(command: CancelWorkTurnCommand): Promise<WorkTurnCancelResult>;
   transcript(threadId: WorkThreadId): Promise<WorkThreadTranscript>;
+  /**
+   * Hand the host one image for a thread's next turn. The host answers with
+   * the reference a `start-work-thread-turn` names by id; nothing about the
+   * bytes is decided here.
+   */
+  putAttachment(input: {
+    readonly threadId: WorkThreadId;
+    readonly attachmentId: WorkAttachmentId;
+    readonly displayName: string;
+    readonly mediaType: WorkAttachmentMediaType;
+    readonly bytes: Uint8Array;
+  }): Promise<WorkAttachmentReference>;
+  /** Drop a staged image the composer no longer carries. */
+  discardAttachment(threadId: WorkThreadId, attachmentId: WorkAttachmentId): Promise<void>;
 }
 
 export class WorkTurnClientFailure extends Error {
@@ -97,6 +119,76 @@ export function createWorkTurnClient(options: WorkTurnClientOptions): WorkTurnCl
         decodeWorkThreadTranscript,
         "Work transcript lookup failed.",
       );
+    },
+    async putAttachment(input) {
+      try {
+        decodeWorkThreadId(input.threadId);
+        decodeWorkAttachmentId(input.attachmentId);
+        decodeWorkAttachmentMediaType(input.mediaType);
+      } catch {
+        throw new WorkTurnClientFailure("Work attachment is invalid.", 0);
+      }
+      if (input.bytes.byteLength === 0 || input.bytes.byteLength > MAX_WORK_ATTACHMENT_BYTES) {
+        throw new WorkTurnClientFailure("Work attachment is invalid.", 0);
+      }
+      if (input.displayName.trim().length === 0) {
+        throw new WorkTurnClientFailure("Work attachment is invalid.", 0);
+      }
+      let response: Response;
+      try {
+        response = await fetch(new URL("/api/work/attachments", options.baseUrl).toString(), {
+          method: "PUT",
+          headers: {
+            "content-type": input.mediaType,
+            "x-octant-window-capability": options.windowCapability,
+            "x-octant-work-thread-id": String(input.threadId),
+            "x-octant-work-attachment-id": String(input.attachmentId),
+            "x-octant-work-display-name": encodeURIComponent(input.displayName),
+          },
+          body: input.bytes as unknown as BodyInit,
+        });
+      } catch {
+        throw new WorkTurnClientFailure("Work turn service is unavailable.", 0);
+      }
+      const payload: unknown = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new WorkTurnClientFailure(
+          responseMessage(payload, "Work attachment upload failed."),
+          response.status,
+        );
+      }
+      try {
+        return decodeWorkAttachmentReference(payload);
+      } catch {
+        throw new WorkTurnClientFailure("Work turn service returned an invalid response.", 0);
+      }
+    },
+    async discardAttachment(threadId, attachmentId) {
+      try {
+        decodeWorkThreadId(threadId);
+        decodeWorkAttachmentId(attachmentId);
+      } catch {
+        throw new WorkTurnClientFailure("Work attachment is invalid.", 0);
+      }
+      const url = new URL("/api/work/attachments", options.baseUrl);
+      url.searchParams.set("thread", String(threadId));
+      url.searchParams.set("attachment", String(attachmentId));
+      let response: Response;
+      try {
+        response = await fetch(url.toString(), {
+          method: "DELETE",
+          headers: { "x-octant-window-capability": options.windowCapability },
+        });
+      } catch {
+        throw new WorkTurnClientFailure("Work turn service is unavailable.", 0);
+      }
+      if (!response.ok) {
+        const payload: unknown = await response.json().catch(() => ({}));
+        throw new WorkTurnClientFailure(
+          responseMessage(payload, "Work attachment discard failed."),
+          response.status,
+        );
+      }
     },
   };
 }
