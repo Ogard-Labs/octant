@@ -787,25 +787,27 @@ function ActivityThreadButton(props: {
       type="button"
       variant="ghost"
     >
-      <span className="sidebar-navigation__thread-copy">
-        <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
-        <span className="sidebar-navigation__thread-project">{props.thread.projectName}</span>
-      </span>
+      {/* The mark leads the row from a gutter every row reserves, so the marked
+          and unmarked titles start on the same edge. */}
       {props.thread.attention === "unread" ? (
         <span aria-label="Unread" className="activity-nav__glyph" data-indicator="unread">
           ●
         </span>
-      ) : null}
-      {props.thread.attention === "follow-up" ? (
+      ) : props.thread.attention === "follow-up" ? (
         <span aria-label="Follow-up" className="activity-nav__glyph" data-indicator="follow-up">
           ◆
         </span>
-      ) : null}
-      {props.thread.attention === "live" ? (
+      ) : props.thread.attention === "live" ? (
         <span aria-label="Live" className="activity-nav__glyph" data-indicator="live">
           ◐
         </span>
-      ) : null}
+      ) : (
+        <span aria-hidden="true" className="activity-nav__glyph" />
+      )}
+      <span className="sidebar-navigation__thread-copy">
+        <span className="sidebar-navigation__thread-title">{props.thread.title}</span>
+        <span className="sidebar-navigation__thread-project">{props.thread.projectName}</span>
+      </span>
     </OctantButton>
   );
 }

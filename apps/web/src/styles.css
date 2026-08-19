@@ -1001,6 +1001,7 @@ button:focus-visible {
 
 .activity-nav__glyph {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   min-width: 12px;
