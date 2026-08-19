@@ -278,7 +278,8 @@ function resolveThreadElevation(input: {
       input.entry.approvalClass === "destructive-irreversible" ||
       input.entry.approvalClass === "credential-secret-access" ||
       input.entry.approvalClass === "privilege-expansion" ||
-      input.entry.approvalClass === "access-outside-project"
+      input.entry.approvalClass === "access-outside-project" ||
+      input.entry.approvalClass === "publish-to-target"
     ) {
       return { kind: "deny", reason: "plan-mode-denied" };
     }
@@ -297,6 +298,14 @@ function resolveThreadElevation(input: {
     // The one class this posture decides without asking. Every other class
     // below is decided exactly as it would be under approval-gated.
     return { kind: "allow" };
+  }
+
+  // Publication is approved one act at a time, against the exact target and
+  // bytes about to leave the machine. A satisfied standing approval is exactly
+  // what must not carry it, so this sits above the postures rather than inside
+  // them: no execution policy, including full access, turns it into an allow.
+  if (input.entry.approvalClass === "publish-to-target") {
+    return { kind: "prompt", reason: "approval-required" };
   }
 
   if (

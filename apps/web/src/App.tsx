@@ -19,6 +19,8 @@ import { createCanvasClient } from "@octant/client-runtime/canvas-client";
 import { createWorkOverviewClient } from "@octant/client-runtime/work-overview-client";
 import { createWorkResearchClient } from "@octant/client-runtime/work-research-client";
 import { createGoalClient } from "@octant/client-runtime/goal-client";
+import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
+import { createShipClient } from "@octant/client-runtime/ship-client";
 import { createPlanClient } from "@octant/client-runtime/plan-client";
 import { createUsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
@@ -148,6 +150,8 @@ import { useLaunchSession } from "./shell/useLaunchSession";
 import { WorkspaceView } from "./shell/WorkspaceView";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
 import { ShellState } from "./shell/ShellState";
+import { ThreadPlanProvider } from "./plan/ThreadPlanContext";
+import { ThreadPlanPanel } from "./plan/ThreadPlanPanel";
 import { ProjectCreateDialog } from "./projects/ProjectCreateDialog";
 import { RootlessAttachFolderDialog } from "./rootless/RootlessAttachFolderDialog";
 import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./shell/ThreadSearchOverlay";
@@ -627,6 +631,7 @@ function LaunchedShell(
     props.hostBridge,
   );
   const sidebarVibrancySupported = useSidebarVibrancySupported(props.hostBridge);
+  useAutomaticUpdateCheckSync(props.hostBridge, controller.settings?.automaticUpdateChecks);
   const sidebarBackgroundFetcher = useSidebarBackgroundFetcher(
     props.launch.serverUrl,
     props.projectWindowCapability,
@@ -940,6 +945,24 @@ function LaunchedShell(
   const goalClient = useMemo(
     () =>
       createGoalClient({
+        baseUrl: props.launch.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.projectWindowCapability,
+      }),
+    [props.launch.serverUrl, props.projectWindowCapability],
+  );
+  const goalLoopClient = useMemo(
+    () =>
+      createGoalLoopClient({
+        baseUrl: props.launch.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.projectWindowCapability,
+      }),
+    [props.launch.serverUrl, props.projectWindowCapability],
+  );
+  const shipClient = useMemo(
+    () =>
+      createShipClient({
         baseUrl: props.launch.serverUrl,
         fetch: globalThis.fetch,
         windowCapability: props.projectWindowCapability,
@@ -3448,12 +3471,8 @@ function LaunchedShell(
               : {})}
             onOpenZen={() => void zen.enterZen()}
             onRecoverZen={() => void zen.recoverZen()}
-            onResetLayout={controller.resetActiveLayout}
             onToggleDock={toggleDock}
             zenRecoveryNeeded={zen.recoveryNeeded}
-            {...(nativeHost === undefined
-              ? {}
-              : { onResetWindowBounds: controller.resetNativeBounds })}
           />
         }
         contextSidebarWidth={contextSidebarWidth}
@@ -3531,7 +3550,8 @@ function LaunchedShell(
             onAddFolder={() => setCreateOpen(true)}
             onOpenSearch={openThreadSearch}
             {...(isNarrow ? {} : { onCollapseSidebar: () => setSidebarCollapsedPersistent(true) })}
-            onOpenSettings={controller.openSettings}
+            onOpenSettings={(deepLink) => void controller.openSettings(deepLink)}
+            onOpenZen={() => void zen.enterZen()}
             onRetryChat={() => void chatController.retry()}
             onSelectMode={handleSelectMode}
             settings={presentedShellSettings ?? controller.settings}
@@ -3843,6 +3863,8 @@ function LaunchedShell(
                   workOverviewClient={workOverviewClient}
                   workResearchClient={workResearchClient}
                   goalClient={goalClient}
+                  goalLoopClient={goalLoopClient}
+                  shipClient={shipClient}
                   planClient={planClient}
                   onOpenCodeFile={({ threadId, relativePath }) => {
                     void controller.openCodeSurface({
@@ -4113,6 +4135,19 @@ function LaunchedShell(
                 const opener = document.activeElement;
                 if (opener instanceof HTMLElement) openDockSurface(surface, opener);
               }}
+              plan={
+                activeCodeThreadId === undefined ? null : (
+                  // The dock sits outside the tab that renders the thread, so
+                  // it subscribes to the visible thread's plan itself rather
+                  // than reading a provider it is not inside.
+                  <ThreadPlanProvider
+                    {...(planClient === undefined ? {} : { client: planClient })}
+                    threadId={String(activeCodeThreadId)}
+                  >
+                    <ThreadPlanPanel />
+                  </ThreadPlanProvider>
+                )
+              }
               projectMemory={
                 dockProject === undefined ? null : (
                   <ProjectMemoryInspector
@@ -4375,6 +4410,25 @@ function useResolvedMaterial(
     };
   }, [hostBridge, preference]);
   return material;
+}
+
+/**
+ * Tell the host whether it may check for updates on its own.
+ *
+ * The preference is persisted with the rest of the shell settings, and the host
+ * process starts with automatic checks off, so this is what turns them on. That
+ * ordering is deliberate: a host that defaulted to on would check once on every
+ * launch before it learned the person had said not to.
+ */
+function useAutomaticUpdateCheckSync(
+  hostBridge: OctantHostBridge | undefined,
+  automaticUpdateChecks: boolean | undefined,
+): void {
+  const setAutomatic = hostBridge?.setAutomaticAppUpdateChecks;
+  useEffect(() => {
+    if (setAutomatic === undefined || automaticUpdateChecks === undefined) return;
+    void setAutomatic(automaticUpdateChecks).catch(() => undefined);
+  }, [automaticUpdateChecks, setAutomatic]);
 }
 
 function useSidebarVibrancySupported(hostBridge: OctantHostBridge | undefined): boolean {

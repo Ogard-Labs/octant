@@ -3,6 +3,7 @@ import {
   avatarInitials,
   canImportGravatar,
   gravatarImageUrl,
+  isNamed,
   isProfileConfigured,
   normalizeGravatarEmail,
 } from "./userProfilePolicy";
@@ -68,5 +69,13 @@ describe("profile completeness", () => {
     // the answer. An accent is never absent, so only a change from the shipped
     // one separates a choice from a default nobody looked at.
     expect(isProfileConfigured({ accent: "teal", avatar: { kind: "initials" } })).toBe(true);
+  });
+});
+
+describe("having a name", () => {
+  it("reads whitespace as no name, because a name made of spaces names nobody", () => {
+    expect(isNamed({ displayName: "Ada Lovelace" })).toBe(true);
+    expect(isNamed({})).toBe(false);
+    expect(isNamed({ displayName: "   " })).toBe(false);
   });
 });

@@ -170,7 +170,7 @@ flowchart LR
   JSON cut of the journal — transcript, evidence, and provenance, named with
   the instant it was taken. Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
-  journal are listed as omissions. See `docs/decisions/0032`.
+  journal are listed as omissions. See `docs/decisions/0036`.
 
 ## Providers
 

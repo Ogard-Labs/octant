@@ -175,6 +175,7 @@ describe("Journal", () => {
         sidebarWidth: 280,
         contextSidebarWidth: 640,
         firstRunOnboarding: "pending",
+        automaticUpdateChecks: true,
         lastContextSurface: "project-memory",
         sidebarMaterial: "system",
         modeSwitcherPresentation: "dropdown",

@@ -87,11 +87,13 @@ and never written to the event journal or returned to the renderer.
 
 ## Status
 
-Octant is an **unsigned Apple Silicon technical preview**. It is not signed or
-notarized, has no auto-updater, and ships no Intel, Windows, or Linux desktop
-builds. Expect rough edges and breaking changes to local data formats between
-previews. Remote clients, the Expo mobile app, and packaged native checks are
-separate evidence gates from the local test suite.
+Octant is an **Apple Silicon technical preview**. Releases are signed with a
+Developer ID, notarized, and update themselves — you choose when an update
+applies, and it never replaces a running app or interrupts work in flight. It
+ships no Intel, Windows, or Linux desktop builds. Expect rough edges and
+breaking changes to local data formats between previews. Remote clients, the
+Expo mobile app, and packaged native checks are separate evidence gates from the
+local test suite.
 
 ## Requirements
 
@@ -113,9 +115,11 @@ bun run package:desktop
 open out/Octant.app
 ```
 
-Because the app is unsigned, macOS Gatekeeper will warn on first launch;
-right-click the app and choose Open, or allow it under System Settings >
-Privacy & Security.
+A build you package yourself is unsigned, so macOS Gatekeeper will warn on
+first launch; right-click the app and choose Open, or allow it under System
+Settings > Privacy & Security. An unsigned build also does not update itself —
+the updater installs a replacement only when it satisfies the running app's code
+signature. Signed releases carry that signature and update in place.
 
 On first run, open **Settings > Providers**, enable or add a provider, run the
 connection check, then create a Project and start a thread. Local data lives

@@ -2,7 +2,7 @@ import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { NavigatorAssistantModelRef } from "@octant/contracts/navigator-assistant";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
-import { isProfileConfigured } from "@octant/domain";
+import { isNamed, isProfileConfigured } from "@octant/domain";
 import { Check } from "lucide-react";
 import { useRef, useState } from "react";
 import { ProfileEditor } from "../profile/ProfileEditor";
@@ -121,6 +121,11 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   // picture or a model the user explicitly chose, so an answer stays busy from
   // the click until the last of those writes has been accepted.
   const busy = controller.submitting !== undefined || importing || resolving;
+  // The one answer first run does not walk past. Everything the app says about
+  // the reader — the sidebar, a thread, a shared surface — needs something to
+  // call them, and it reads the draft rather than the saved profile so a name
+  // just typed unblocks the step whether or not its write has landed yet.
+  const unnamed = !isNamed(profileDraft);
 
   if (!controller.visible) return null;
 
@@ -190,6 +195,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     // would flush the profile without the picture and unmount the editor that
     // was going to report it.
     if (importing) return;
+    if (unnamed && target !== "profile") return;
     if (step === "profile" && target !== "profile") flushProfile();
     setStep(target);
   }
@@ -214,7 +220,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   }
 
   async function resolveWith(record: () => void) {
-    if (importing || resolving) return;
+    if (importing || resolving || unnamed) return;
     flushProfile();
     setResolving(true);
     const accepted = await settleWrites();
@@ -254,7 +260,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   aria-current={descriptor.current ? "step" : undefined}
                   className="first-run__rail-step"
                   data-configured={descriptor.configured}
-                  disabled={importing}
+                  disabled={importing || (unnamed && descriptor.id !== "profile")}
                   onClick={() => goTo(descriptor.id)}
                   type="button"
                 >
@@ -275,7 +281,8 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             <div className="first-run__step">
               <p className="first-run__intro">
                 Octant has no account and signs you in to nothing. This is only how you want to be
-                shown inside the app, and all of it is optional.
+                shown inside the app. Give a name Octant can call you by &mdash; a first name, a
+                nickname, a handle, whatever you answer to. Everything else here is optional.
               </p>
               <ProfileEditor
                 nameRef={nameField}
@@ -364,6 +371,12 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           ) : null}
         </div>
 
+        {unnamed ? (
+          <p className="first-run__notice" data-tone="attention" role="status">
+            Octant needs something to call you before it can go on. It stays on this Mac.
+          </p>
+        ) : null}
+
         {controller.blockedMessage === undefined ? null : (
           <p className="first-run__notice" data-tone="attention" role="alert">
             {controller.blockedMessage}
@@ -382,11 +395,16 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                 Back
               </OctantButton>
             )}
-            <OctantButton disabled={busy || blocked} onClick={skip} type="button" variant="ghost">
+            <OctantButton
+              disabled={busy || blocked || unnamed}
+              onClick={skip}
+              type="button"
+              variant="ghost"
+            >
               {controller.submitting === "skipped" ? "Skipping…" : "Skip for now"}
             </OctantButton>
             {isLastFirstRunStep(step) || forward === undefined ? (
-              <OctantButton disabled={busy || blocked} onClick={finish} type="button">
+              <OctantButton disabled={busy || blocked || unnamed} onClick={finish} type="button">
                 {controller.submitting === "completed"
                   ? "Saving…"
                   : importing
@@ -394,7 +412,11 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                     : "Start using Octant"}
               </OctantButton>
             ) : (
-              <OctantButton disabled={importing} onClick={() => goTo(forward)} type="button">
+              <OctantButton
+                disabled={importing || unnamed}
+                onClick={() => goTo(forward)}
+                type="button"
+              >
                 Continue
               </OctantButton>
             )}
