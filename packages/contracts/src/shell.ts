@@ -90,6 +90,7 @@ export const ContextSurfaceId = Schema.Literal(
   "project-memory",
   "code-environment",
   "navigator",
+  "plan",
 );
 export type ContextSurfaceId = typeof ContextSurfaceId.Type;
 
