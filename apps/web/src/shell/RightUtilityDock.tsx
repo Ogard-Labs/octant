@@ -11,16 +11,13 @@ import type {
 
 export interface RightUtilityDockProps {
   readonly availableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
-  readonly codeEnvironment: ReactNode;
   readonly context: ReactNode;
   readonly isNarrow: boolean;
   readonly navigator: ReactNode;
   readonly onClose: () => void;
   readonly onCommitWidth: (width: number) => void;
   readonly onPreviewWidth: (width: number) => void;
-  readonly onRefreshEnvironment?: () => Promise<void> | void;
   readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
-  readonly plan: ReactNode;
   readonly projectMemory: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
@@ -36,15 +33,10 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
     <RightUtilityDockSurface
       availableSurfaces={props.availableSurfaces}
       closeButtonRef={closeButton}
-      codeEnvironment={props.codeEnvironment}
       context={props.context}
       navigator={props.navigator}
       onClose={props.onClose}
-      {...(props.onRefreshEnvironment === undefined
-        ? {}
-        : { onRefreshEnvironment: props.onRefreshEnvironment })}
       onSelectSurface={props.onSelectSurface}
-      plan={props.plan}
       projectMemory={props.projectMemory}
       resolution={props.resolution}
     />
