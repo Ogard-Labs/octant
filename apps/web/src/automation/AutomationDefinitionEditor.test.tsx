@@ -1,5 +1,5 @@
 import type { AutomationDefinitionDraft } from "@octant/contracts";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AutomationDefinitionEditor, utcInstantFromLocalInput } from "./AutomationDefinitionEditor";
@@ -83,7 +83,8 @@ describe("AutomationDefinitionEditor creation", () => {
       screen.getByLabelText("Task for each run"),
       "Summarize the Project's open work.",
     );
-    expect(screen.getByLabelText("Host")).toHaveValue("local");
+    // The destination environment, named the way every other surface names it.
+    expect(screen.getByLabelText("Environment")).toHaveValue("local");
     await userEvent.selectOptions(screen.getByLabelText("Project"), String(workDraft.projectId));
     await userEvent.selectOptions(screen.getByLabelText("Execution profile"), [
       String(workDraft.executionProfile.profileId),
@@ -299,5 +300,28 @@ describe("AutomationDefinitionEditor editing", () => {
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent("The automation changed. Reload before editing.");
     expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  });
+});
+
+describe("choosing where a routine runs", () => {
+  it("calls this window's own host Local rather than by its machine name", () => {
+    render(
+      <AutomationDefinitionEditor
+        catalog={{
+          ...catalog(),
+          hosts: [
+            { hostId: "local", label: "This Mac" },
+            { hostId: "devbox", label: "Devbox" },
+          ],
+        }}
+        localHostId="local"
+        onCancel={() => undefined}
+        onSubmit={async () => undefined}
+      />,
+    );
+
+    const options = within(screen.getByLabelText("Environment")).getAllByRole("option");
+
+    expect(options.map((option) => option.textContent)).toEqual(["Local", "Devbox"]);
   });
 });

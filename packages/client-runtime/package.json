@@ -41,6 +41,7 @@
     "./artifact-mirror-client": "./src/artifactMirrorClient.ts",
     "./scaffold-client": "./src/scaffoldClient.ts",
     "./environment-selection": "./src/environmentSelection.ts",
+    "./list-arrangement": "./src/listArrangement.ts",
     "./thread-checkpoint-client": "./src/threadCheckpointClient.ts",
     "./code-file-listing-client": "./src/codeFileListingClient.ts",
     "./local-server-client": "./src/localServerClient.ts",

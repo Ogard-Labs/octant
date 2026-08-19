@@ -3731,6 +3731,14 @@ function LaunchedShell(
                   <AutomationCenter
                     catalog={automationEditorCatalog}
                     client={automationClient}
+                    // What each connected host is called, so a routine's row and
+                    // the environment filter never disagree about a name. The
+                    // host this window runs on is always "Local", whatever the
+                    // machine is called and whatever it runs.
+                    environmentNames={
+                      new Map(hosts.map((host) => [String(host.hostId), host.displayName] as const))
+                    }
+                    localHostId={String(LOCAL_HOST_ID)}
                     narrow={isNarrow}
                     notificationClient={automationNotificationClient}
                     onClose={() => setAutomationCenterOpen(false)}
