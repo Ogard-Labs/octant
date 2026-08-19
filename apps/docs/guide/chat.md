@@ -45,6 +45,21 @@ A chip you can no longer open is marked unavailable and contributes no content. 
 
 Side Chat is a separate Chat conversation about one source thread. Open it from a mention chip, or from the workspace launcher while that thread is focused. It can answer questions using the same bounded excerpt; it cannot approve, steer, change criteria, or write to the source thread. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation.
 
+## Export
+
+**Export thread** downloads a portable JSON cut of what the host holds for
+this conversation: the active transcript, Canvas artifacts it originated,
+attachment names, citations, and provenance. The file says when it was cut.
+Attachment file bytes stay off the export and are listed as omissions.
+Secrets, credentials, and provider payloads never appear.
+
+**Copy Markdown** and **Save Markdown** remain a convenience for reading the
+prose. They are assembled from what this window last saw and are not the
+authoritative cut.
+
+A paired device can export a thread it can already open. It cannot dump the
+host.
+
 ## Next steps
 
 - [Work](/guide/work) for local knowledge work with a bound folder

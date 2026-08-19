@@ -133,7 +133,7 @@ function toNavigationItems(
       navigationId: rootlessThreadNavigationId(thread),
       threadId: String(thread.threadId),
       title: thread.title,
-      meta: String(thread.modelId),
+      providerInstanceId: String(thread.providerInstanceId),
       updatedAt: thread.updatedAt,
       ...(thread.workspaceKind === "project-backed" && thread.projectId !== undefined
         ? { projectId: String(thread.projectId) }

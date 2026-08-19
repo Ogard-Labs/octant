@@ -174,7 +174,12 @@ flowchart LR
   approvals and user-input requests after restart.
 - **Data lifecycle.** Reset, remove-all, and delete-remote-host operations are
   explicit, reported per scope, and never run implicitly. Removing a paired
-  host or Project deletes what it owns and reports what it retained.
+  host or Project deletes what it owns and reports what it retained. A thread
+  the caller may already Open can be exported as an `octant.thread-bundle/1`
+  JSON cut of the journal — transcript, evidence, and provenance, named with
+  the instant it was taken. Secrets, raw provider payloads, and filesystem
+  paths never appear; attachment bytes and other bulk content outside the
+  journal are listed as omissions. See `docs/decisions/0036`.
 
 ## Providers
 
