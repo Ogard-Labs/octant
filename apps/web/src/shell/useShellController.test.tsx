@@ -1009,7 +1009,7 @@ describe("useShellController", () => {
     );
   });
 
-  it("keeps identical rootless thread IDs from different hosts in distinct durable tabs", async () => {
+  it("keeps identical thread IDs from different hosts in distinct durable tabs", async () => {
     const server = statefulClient();
     const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000899");
     const { result } = renderHook(() =>
@@ -1043,7 +1043,7 @@ describe("useShellController", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
     await act(async () =>
-      result.current.openCodeThread(threadId, "Remote rootless", decodeHostId("host-b")),
+      result.current.openCodeThread(threadId, "Remote host thread", decodeHostId("host-b")),
     );
     await act(async () => result.current.openCodeThread(threadId, "Project thread"));
 
@@ -1059,7 +1059,7 @@ describe("useShellController", () => {
     expect(group.activeTabId).toBe(tabs[1]!.id);
   });
 
-  it("preserves a Project-bound context when rootless Code opening returns a cross-context offer", async () => {
+  it("preserves a Project-bound context when opening Code returns a cross-context offer", async () => {
     const projectId = decodeProjectId("00000000-0000-4000-8000-000000000894");
     const base = codeBootstrap();
     const bootstrap: ShellBootstrap = {
@@ -1081,7 +1081,7 @@ describe("useShellController", () => {
       execute: vi.fn(async () => {
         throw {
           category: "cross-context",
-          message: "Rootless threads require an unbound Code workspace. Open it in a new window.",
+          message: "That thread belongs to another Project. Open it in a new window.",
         };
       }),
     };
@@ -1093,19 +1093,19 @@ describe("useShellController", () => {
     await act(async () =>
       result.current.openCodeThread(
         decodeCodeThreadId("00000000-0000-4000-8000-000000000895"),
-        "Rootless Code",
+        "Other Project Code",
         decodeHostId("local"),
       ),
     );
 
-    expect(result.current.crossContextOffer?.message).toContain("unbound Code workspace");
+    expect(result.current.crossContextOffer?.message).toContain("another Project");
     expect(result.current.workspace?.contextByMode.code).toMatchObject({
       projectId,
       boundRoot: "/repo",
     });
     expect(
       firstGroup(result.current.workspace!.layouts.code).tabs.some(
-        (tab) => tab.kind === "code-overview" && tab.title === "Rootless Code",
+        (tab) => tab.kind === "code-overview" && tab.title === "Other Project Code",
       ),
     ).toBe(false);
   });
@@ -1144,7 +1144,7 @@ describe("useShellController", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
     await act(async () =>
-      result.current.openWorkThread(threadId, "Remote rootless", decodeHostId("host-b")),
+      result.current.openWorkThread(threadId, "Remote host thread", decodeHostId("host-b")),
     );
     await act(async () => result.current.openWorkThread(threadId, "Project thread"));
 

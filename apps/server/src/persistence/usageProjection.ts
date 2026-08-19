@@ -188,8 +188,8 @@ export interface UsageQueryFilter {
  * `match` is spliced into the owning query as the `project_id` test, so the two
  * predicates below differ only in that test and cannot drift apart.
  *
- * Chat, Code, and rootless threads each carry their Project in a durable,
- * indexed `project_id` column. A Work thread has no SQL projection — its
+ * Chat and Code threads each carry their Project in a durable, indexed
+ * `project_id` column. A Work thread has no SQL projection — its
  * ownership lives in the event journal that `WorkThreadProjection` hydrates
  * from — but a Work thread binds exactly one OS-confined Project root, so
  * `WorkThread.projectId` is required and immutable across updates, and the
@@ -202,8 +202,6 @@ function projectBearingSubjectTerms(match: (projectColumn: string) => string): A
     AND subject_id IN (SELECT thread_id FROM chat_thread_projection WHERE ${match("project_id")}))`,
     `(subject_type = 'code-thread'
     AND subject_id IN (SELECT thread_id FROM code_thread_projection WHERE ${match("project_id")}))`,
-    `(subject_type = 'rootless-thread'
-    AND subject_id IN (SELECT thread_id FROM rootless_thread_projection WHERE ${match("project_id")}))`,
     `(subject_type = 'work-thread'
     AND subject_id IN (
       SELECT aggregate_id FROM event_journal
@@ -223,9 +221,9 @@ const PROJECT_BEARING_SUBJECT_COUNT = projectBearingSubjectTerms(() => "").lengt
  * Every usage read resolves Project the same way — from the host's own durable
  * ownership records — so a scoped read cannot report a Project the host would
  * not attribute to it. A subject the host cannot place (an unfiled Chat thread,
- * a genuinely rootless thread, or a subject type that carries no Project at all,
- * such as the `context-ledger` fallback used when no manifest names a subject)
- * is nobody's Project row and stays out.
+ * or a subject type that carries no Project at all, such as the
+ * `context-ledger` fallback used when no manifest names a subject) is nobody's
+ * Project row and stays out.
  *
  * Pass the parameters with `usageProjectConditionParams` so the repeated
  * Project list stays aligned with the placeholders emitted here.
@@ -345,16 +343,6 @@ export function queryUsageRecords(
  * SQL predicate for the rows belonging to one mode, or `undefined` for a mode
  * no subject can be in.
  *
- * A Work or Code thread created without a Project is recorded under the
- * `rootless-thread` subject type, which names no mode on its own: the thread's
- * mode lives in the durable `rootless_thread_projection.mode` column. Matching
- * the subject type alone would drop every such thread's usage from its own
- * mode and understate the totals, so the predicate also admits a rootless
- * subject whose thread resolves to the requested mode.
- *
- * Chat needs no rootless term: the projection's mode column admits only
- * 'work' and 'code', so no rootless row can ever be a Chat thread.
- *
  * Shared by both query paths, because two copies of this rule is exactly how
  * one endpoint kept the defect after the other was fixed.
  *
@@ -370,11 +358,7 @@ export function usageModeCondition(
       return { sql: "subject_type = ?", params: ["chat-thread"] };
     case "work":
     case "code":
-      return {
-        sql: `(subject_type = ? OR (subject_type = 'rootless-thread'
-    AND subject_id IN (SELECT thread_id FROM rootless_thread_projection WHERE mode = ?)))`,
-        params: [`${mode}-thread`, mode],
-      };
+      return { sql: "subject_type = ?", params: [`${mode}-thread`] };
     default:
       return undefined;
   }

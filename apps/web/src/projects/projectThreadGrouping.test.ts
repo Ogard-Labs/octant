@@ -13,7 +13,7 @@ const threads: ReadonlyArray<ChatThreadNavigationItem> = [
 ];
 
 describe("groupThreadsByProject", () => {
-  it("files a thread whose Project this mode cannot see with the rootless threads", () => {
+  it("files a thread whose Project this mode cannot see with the unfiled threads", () => {
     const grouping = groupThreadsByProject(threads, [{ id: "project-a" }]);
 
     expect(grouping.byProjectId.get("project-a")).toEqual([threads[0]]);

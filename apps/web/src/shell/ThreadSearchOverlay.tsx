@@ -8,7 +8,7 @@ import {
   flattenThreadSearchHits,
   type ThreadSearchHit,
   type ThreadSearchProject,
-  type ThreadSearchRootlessLabel,
+  type ThreadSearchUnfiledLabel,
   type ThreadSearchThread,
 } from "./threadSearchViewModel";
 
@@ -19,7 +19,7 @@ export interface ThreadSearchOverlayProps {
   /** Every current-mode thread the host listed for this window, live and archived. */
   readonly threads: ReadonlyArray<ThreadSearchThread>;
   readonly projects: ReadonlyArray<ThreadSearchProject>;
-  readonly rootlessLabel?: ThreadSearchRootlessLabel;
+  readonly unfiledLabel?: ThreadSearchUnfiledLabel;
   readonly listing?: ThreadSearchListingStatus;
   /**
    * State of the archived half of `threads` when the host lists it separately
@@ -79,7 +79,7 @@ export function ThreadSearchOverlay(props: ThreadSearchOverlayProps) {
     query,
     threads: props.threads,
     projects: props.projects,
-    ...(props.rootlessLabel === undefined ? {} : { rootlessLabel: props.rootlessLabel }),
+    ...(props.unfiledLabel === undefined ? {} : { unfiledLabel: props.unfiledLabel }),
   });
   const hits = flattenThreadSearchHits(results);
   const active = hits.length === 0 ? -1 : Math.min(activeIndex, hits.length - 1);

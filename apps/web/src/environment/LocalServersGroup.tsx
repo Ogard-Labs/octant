@@ -32,7 +32,7 @@ export interface LocalServersGroupProps {
   readonly onOpenTarget?: (target: LocalServerOpenTarget) => void | Promise<void>;
   /** Writes the URL to the host clipboard. Absent hides the Copy control. */
   readonly onCopyUrl?: (url: string) => void | Promise<void>;
-  /** Reason the section is unavailable, e.g. an unbound or rootless thread. */
+  /** Reason the section is unavailable, e.g. a thread with no bound root. */
   readonly unavailableReason?: string | undefined;
 }
 

@@ -28,7 +28,7 @@ const candidate = {
   threadId,
   mode: "chat",
   title: "Release notes",
-  placement: { kind: "unfiled" },
+  placement: { kind: "recents" },
   updatedAt: "2026-08-14T10:00:00.000Z",
 };
 

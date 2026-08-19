@@ -588,7 +588,7 @@ function buildDimensionSources(observed: {
       dimension: "project",
       status: observed.sawUnplacedProject ? "partial" : "recorded",
       detail:
-        "Project is resolved from the host's own ownership records for Chat, Work, Code, and rootless threads. A thread filed under no Project, and a subject that is not a thread, has no Project to report.",
+        "Project is resolved from the host's own ownership records for Chat, Work, and Code threads. A thread filed under no Project, and a subject that is not a thread, has no Project to report.",
     },
     {
       dimension: "thread",

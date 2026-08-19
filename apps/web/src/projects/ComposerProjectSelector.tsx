@@ -1,8 +1,5 @@
-import type {
-  ComposerFolderEntry,
-  ComposerFolderSelection,
-} from "@octant/contracts/rootless-thread";
-import { FolderOpen, FolderPlus, X } from "lucide-react";
+import type { ProjectId } from "@octant/contracts/projects";
+import { FolderOpen, FolderPlus } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -15,15 +12,36 @@ import {
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
-export interface ComposerFolderSelectorProps {
-  readonly entries: ReadonlyArray<ComposerFolderEntry>;
-  readonly selection: ComposerFolderSelection;
-  readonly onSelect: (entry: ComposerFolderEntry) => void;
+/**
+ * One row in the composer's Project picker: a Project already saved on this
+ * host, or the control that creates one from a folder. There is no "no folder"
+ * row — a Work or Code thread belongs to a Project (decision 0037), so the
+ * composer's job is to make choosing one easy, not optional.
+ */
+export type ComposerProjectEntry =
+  | {
+      readonly kind: "saved-project";
+      readonly projectId: ProjectId;
+      readonly displayName: string;
+      readonly rootPath: string;
+    }
+  | { readonly kind: "add-folder" };
+
+/** The Project the composer will start the thread in, if the person picked one. */
+export interface ComposerProjectSelection {
+  readonly projectId: ProjectId;
+  readonly displayName: string;
+}
+
+export interface ComposerProjectSelectorProps {
+  readonly entries: ReadonlyArray<ComposerProjectEntry>;
+  readonly selection?: ComposerProjectSelection;
+  readonly onSelect: (entry: ComposerProjectEntry) => void;
   readonly onAddFolder: () => void;
   readonly disabled?: boolean;
 }
 
-export function ComposerFolderSelector(props: ComposerFolderSelectorProps) {
+export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -46,10 +64,7 @@ export function ComposerFolderSelector(props: ComposerFolderSelectorProps) {
 
   const flatEntries = useMemo(() => filtered, [filtered]);
 
-  const selectionLabel = useMemo(() => {
-    if (props.selection.kind === "no-folder") return "No folder";
-    return props.selection.displayName;
-  }, [props.selection]);
+  const selectionLabel = props.selection?.displayName ?? "Choose a Project";
 
   const handleKeyDown = useCallback(
     (event: KeyboardEvent<HTMLDivElement>) => {
@@ -101,12 +116,12 @@ export function ComposerFolderSelector(props: ComposerFolderSelectorProps) {
   }, [open]);
 
   return (
-    <div className="composer-folder-selector" aria-label="Folder selector">
+    <div className="composer-folder-selector" aria-label="Project selector">
       <OctantButton
         aria-controls={open ? listboxId : undefined}
         aria-expanded={open}
         aria-haspopup="listbox"
-        aria-label={`Folder: ${selectionLabel}`}
+        aria-label={`Project: ${selectionLabel}`}
         className="composer-folder-selector__trigger"
         disabled={props.disabled}
         onClick={() => setOpen(!open)}
@@ -125,26 +140,24 @@ export function ComposerFolderSelector(props: ComposerFolderSelectorProps) {
             }
             aria-controls={listboxId}
             aria-expanded="true"
-            aria-label="Search folders"
+            aria-label="Search Projects"
             className="composer-folder-selector__search"
             onChange={(e) => {
               setQuery(e.target.value);
               setActiveIndex(-1);
             }}
-            placeholder="Search folders…"
+            placeholder="Search Projects…"
             ref={searchRef}
             role="combobox"
             type="search"
             value={query}
           />
-          <div aria-label="Folder options" id={listboxId} role="listbox">
+          <div aria-label="Project options" id={listboxId} role="listbox">
             {flatEntries.map((entry, index) => {
               const isActive = index === activeIndex;
               const isSelected =
                 entry.kind === "saved-project" &&
-                props.selection.kind === "project" &&
-                entry.projectId === props.selection.projectId;
-              const isNoFolder = entry.kind === "no-folder" && props.selection.kind === "no-folder";
+                String(entry.projectId) === String(props.selection?.projectId);
               const optionId = `${listboxId}-option-${index}`;
 
               if (entry.kind === "add-folder") {
@@ -165,33 +178,6 @@ export function ComposerFolderSelector(props: ComposerFolderSelectorProps) {
                   >
                     <FolderPlus aria-hidden="true" size={14} />
                     <span>Add local folder…</span>
-                  </OctantButton>
-                );
-              }
-
-              if (entry.kind === "no-folder") {
-                return (
-                  <OctantButton
-                    aria-selected={isNoFolder}
-                    className={`composer-folder-selector__option${isActive ? " composer-folder-selector__option--active" : ""}${isNoFolder ? " composer-folder-selector__option--selected" : ""}`}
-                    id={optionId}
-                    key="no-folder"
-                    onClick={() => {
-                      props.onSelect(entry);
-                      setOpen(false);
-                      setQuery("");
-                    }}
-                    role="option"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <X aria-hidden="true" size={14} />
-                    <span>No folder</span>
-                    {isNoFolder ? (
-                      <span aria-hidden="true" className="composer-folder-selector__check">
-                        ✓
-                      </span>
-                    ) : null}
                   </OctantButton>
                 );
               }
@@ -225,7 +211,7 @@ export function ComposerFolderSelector(props: ComposerFolderSelectorProps) {
             })}
             {flatEntries.length === 0 ? (
               <p className="composer-folder-selector__empty" role="status">
-                No folders match your search.
+                No Projects match your search.
               </p>
             ) : null}
           </div>
