@@ -1038,8 +1038,11 @@ button:focus-visible {
 /* 30px is where the Project's name starts, less the 12px marker gutter and the
    6px gap every thread row reserves ahead of its title. Only a nested list gets
    it: Recents has no Project above it to line up under. */
+/* Just enough to read as "inside this Project" and no more. The dot sits in
+   the indent, so the tree is legible from the marks alone rather than from a
+   deep left margin that pushes every title away from the edge. */
 .project-block .project-threads .sidebar-navigation__thread {
-  padding-left: 30px;
+  padding-left: 18px;
 }
 
 .project-section__header {
@@ -2567,7 +2570,7 @@ dialog.project-dialog {
   font-size: 12px;
 }
 
-.project-dialog input,
+.project-dialog input:not([type="checkbox"]):not([type="radio"]),
 .project-dialog select,
 .project-dialog textarea,
 .project-search input,
@@ -2579,7 +2582,7 @@ dialog.project-dialog {
   font: inherit;
 }
 
-.project-dialog input {
+.project-dialog input:not([type="checkbox"]):not([type="radio"]) {
   min-height: 38px;
   padding: 0 10px;
 }
@@ -2595,7 +2598,7 @@ dialog.project-dialog {
   resize: vertical;
 }
 
-.project-dialog input:focus-visible,
+.project-dialog input:not([type="checkbox"]):not([type="radio"]):focus-visible,
 .project-dialog select:focus-visible,
 .project-dialog textarea:focus-visible,
 .project-search input:focus-visible,
@@ -2625,6 +2628,26 @@ dialog.project-dialog {
 
 .project-button:hover {
   background: var(--octant-control-pressed);
+}
+
+/*
+ * The confirm in a dialog.
+ *
+ * It cannot get its fill from the button recipe: the element reset in this
+ * sheet is unlayered, and unlayered rules beat every Tailwind utility whatever
+ * its specificity, so `variant="default"` kept `background: transparent` and
+ * read as plain text beside Cancel. Releasing the reset would restyle every
+ * button in the app at once, so the dialog states its own fill here.
+ */
+.project-button--primary {
+  color: var(--octant-accent-foreground);
+  background: var(--octant-accent);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.project-button--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--octant-accent) 88%, #fff);
 }
 .project-button:disabled {
   cursor: default;

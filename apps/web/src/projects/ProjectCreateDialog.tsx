@@ -118,11 +118,17 @@ function ChatProjectCreateDialog(props: ProjectCreateDialogProps) {
             disabled={submitting}
             onClick={requestClose}
             type="button"
-            variant="outline"
+            className="project-button project-button--quiet"
+            variant="ghost"
           >
             Cancel
           </OctantButton>
-          <OctantButton disabled={submitting || name.trim() === ""} type="submit" variant="default">
+          <OctantButton
+            disabled={submitting || name.trim() === ""}
+            type="submit"
+            className="project-button project-button--primary"
+            variant="ghost"
+          >
             Create Project
           </OctantButton>
         </div>
@@ -229,10 +235,20 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         </div>
         <p>Choose one directory. Octant records the binding.</p>
         <div className="project-dialog__actions">
-          <OctantButton onClick={props.onClose} type="button" variant="outline">
+          <OctantButton
+            onClick={props.onClose}
+            type="button"
+            className="project-button project-button--quiet"
+            variant="ghost"
+          >
             Cancel
           </OctantButton>
-          <OctantButton onClick={() => void beginNativeSelection()} type="button" variant="default">
+          <OctantButton
+            onClick={() => void beginNativeSelection()}
+            type="button"
+            className="project-button project-button--primary"
+            variant="ghost"
+          >
             {submitting ? "Retry" : "Choose folder"}
           </OctantButton>
         </div>
@@ -284,7 +300,12 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         needs the native picker bridge.
       </p>
       <div className="project-dialog__actions">
-        <OctantButton onClick={props.onClose} type="button" variant="default">
+        <OctantButton
+          onClick={props.onClose}
+          type="button"
+          className="project-button project-button--primary"
+          variant="ghost"
+        >
           Close
         </OctantButton>
       </div>
