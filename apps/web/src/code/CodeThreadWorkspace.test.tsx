@@ -45,6 +45,33 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], []);
   });
 
+  /**
+   * A thread whose history could not be fetched has an empty transcript for a
+   * reason that has nothing to do with being new. Showing it the new-thread
+   * copy and the project scaffolds invites a user to scaffold a project into a
+   * checkout that already holds work, directly under a banner saying the
+   * thread's own history is missing.
+   */
+  it("does not offer new-thread scaffolding to a thread whose history could not be loaded", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [],
+          conversationHistory: "unavailable",
+          turnError: "Conversation history could not be loaded.",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("log")).not.toHaveTextContent(
+      "No messages yet. Send a prompt to start this thread.",
+    );
+    expect(screen.queryByRole("region", { name: "Start a project" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
+  });
+
   it("reads a plan the assistant wrote as a plan, not as one long line", () => {
     render(
       <CodeThreadWorkspace
@@ -1305,6 +1332,7 @@ function controller(
       },
     },
     conversation: [],
+    conversationHistory: "loaded",
     followUps: new Map(),
     markFollowUp: vi.fn(async () => true),
     completeFollowUp: vi.fn(async () => true),

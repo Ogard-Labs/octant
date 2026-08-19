@@ -267,7 +267,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const queued = props.controller.queuedFollowUps;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
-  const showEmptyConversation = messages.length === 0;
+  // An unreachable history is not an empty thread. Treating it as one puts the
+  // new-thread copy and the project scaffolds under a banner that says this
+  // thread's own turns are missing, and offers to scaffold into a checkout that
+  // may already hold work.
+  const showEmptyConversation =
+    messages.length === 0 && props.controller.conversationHistory === "loaded";
   // Restoring rewrites files on disk, so the control appears only where this
   // thread may change the checkout and the renderer can raise whatever
   // approval the posture demands.
