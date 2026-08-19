@@ -411,6 +411,12 @@ html[data-octant-reduced-transparency="true"] .folder-picker {
   gap: 0.4rem;
 }
 
+.ship-panel__title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
 .ship-panel__note,
 .ship-panel__empty,
 .ship-panel__notice,
