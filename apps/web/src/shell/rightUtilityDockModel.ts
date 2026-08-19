@@ -10,7 +10,8 @@ export type RightUtilityDockSurfaceId =
   | "context"
   | "project-memory"
   | "code-environment"
-  | "navigator";
+  | "navigator"
+  | "plan";
 
 export interface RightUtilityDockSurfaceDescriptor {
   readonly id: RightUtilityDockSurfaceId;
@@ -105,6 +106,14 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     modes: ["chat", "work", "code"],
     projectRequired: false,
   },
+  // A plan belongs to one Code thread, and that thread belongs to a Project, so
+  // it closes with the Project like every other Project-scoped surface.
+  {
+    id: "plan",
+    label: "Plan",
+    modes: ["code"],
+    projectRequired: true,
+  },
 ] as const satisfies ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 
 const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSurfaceDescriptor>> =
@@ -113,6 +122,7 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     "project-memory": RIGHT_UTILITY_DOCK_SURFACES[1],
     "code-environment": RIGHT_UTILITY_DOCK_SURFACES[2],
     navigator: RIGHT_UTILITY_DOCK_SURFACES[3],
+    plan: RIGHT_UTILITY_DOCK_SURFACES[4],
   };
 
 export function resolveRightUtilityDockSurface(
@@ -175,6 +185,7 @@ function isRightUtilityDockSurfaceId(value: unknown): value is RightUtilityDockS
     value === "context" ||
     value === "project-memory" ||
     value === "code-environment" ||
-    value === "navigator"
+    value === "navigator" ||
+    value === "plan"
   );
 }
