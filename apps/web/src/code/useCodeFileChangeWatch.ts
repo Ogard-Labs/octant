@@ -1,4 +1,8 @@
-import { createCodeFileListingClient, type CodeFileListingClient } from "@octant/client-runtime";
+import {
+  createCodeFileListingClient,
+  isRefusedCodeFileWatch,
+  type CodeFileListingClient,
+} from "@octant/client-runtime";
 import type { CodeCheckoutId, CodeFileChangeNotice, CodeThreadId } from "@octant/contracts";
 import { useEffect, useMemo, useRef } from "react";
 
@@ -24,6 +28,10 @@ export interface CodeFileChangeWatchOptions {
  * host ends is reopened rather than treated as "nothing changes here any more"
  * — a watcher can be dropped by the filesystem, and silently stopping would
  * leave the surface stale with no sign that it had.
+ *
+ * A watch the host refuses or cannot open is the one end that is not
+ * reopened: the answer to asking again is the same refusal, so retrying would
+ * be an endless request loop rather than a recovery.
  */
 export function useCodeFileChangeWatch(options: CodeFileChangeWatchOptions): void {
   const { enabled, threadId, checkoutId, serverUrl, windowCapability } = options;
@@ -51,9 +59,14 @@ export function useCodeFileChangeWatch(options: CodeFileChangeWatchOptions): voi
 
     const follow = async (): Promise<void> => {
       while (!signal.aborted) {
-        for await (const notice of client.watch({ threadId, checkoutId }, signal)) {
-          if (signal.aborted) return;
-          onChanged.current(notice);
+        try {
+          for await (const notice of client.watch({ threadId, checkoutId }, signal)) {
+            if (signal.aborted) return;
+            onChanged.current(notice);
+          }
+        } catch (error) {
+          if (isRefusedCodeFileWatch(error)) return;
+          // Any other failure is an ordinary broken stream, and is reopened.
         }
         if (signal.aborted) return;
         await pause(WATCH_RETRY_MS, signal);
@@ -86,7 +99,15 @@ async function pause(milliseconds: number, signal: AbortSignal): Promise<void> {
  * Whether one notice concerns a given path. A truncated notice concerns every
  * path by definition: the host observed more change than it could name, so a
  * surface that assumed it was unaffected would be assuming what nobody knows.
+ * A named directory concerns every file under it, because a checkout, rename,
+ * or delete often arrives as the directory rather than each child.
  */
 export function noticeTouches(notice: CodeFileChangeNotice, path: string): boolean {
-  return notice.truncated || notice.paths.some((candidate) => String(candidate) === path);
+  return (
+    notice.truncated ||
+    notice.paths.some((candidate) => {
+      const named = String(candidate);
+      return named === path || path.startsWith(`${named}/`);
+    })
+  );
 }
