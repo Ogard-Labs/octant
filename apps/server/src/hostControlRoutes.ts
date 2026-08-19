@@ -384,7 +384,7 @@ function handleSetRetention(
     return failure("Thread retention is unavailable while the owner is starting.", 503, origin);
   }
   const outcome = dependencies.threadRetention.setWindow(request, "local-window");
-  return json(outcome, outcome.kind === "refused" ? 403 : 200, origin);
+  return json(outcome, "kind" in outcome ? 403 : 200, origin);
 }
 
 async function handlePurgeThreads(
@@ -396,7 +396,7 @@ async function handlePurgeThreads(
     return failure("Thread retention is unavailable while the owner is starting.", 503, origin);
   }
   const outcome = await dependencies.threadRetention.purge(request, "local-window");
-  return json(outcome, outcome.kind === "refused" ? 403 : 200, origin);
+  return json(outcome, "kind" in outcome ? 403 : 200, origin);
 }
 
 function handleRestore(origin: string | null): Response {

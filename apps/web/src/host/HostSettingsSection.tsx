@@ -486,7 +486,8 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
               .setThreadRetention({ scope: next, window: selectedWindow })
               .then((result) => {
                 setOutcome(result);
-                if (result.kind !== "refused") setState(result);
+                // Success is the state snapshot; only a refusal carries `kind`.
+                if (!("kind" in result)) setState(result);
               })
               .finally(() => setBusy(false));
           }}
@@ -527,7 +528,7 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
           Purge
         </OctantButton>
       </div>
-      {outcome === undefined ? null : outcome.kind === "refused" ? (
+      {outcome === undefined ? null : "kind" in outcome ? (
         <p className="host-settings__note" role="alert">
           {outcome.guidance}
         </p>

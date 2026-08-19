@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeChatThread, decodeChatThreadId } from "@octant/contracts";
+import { decodeThreadRetentionThreadId } from "@octant/contracts/thread-retention";
 import { afterEach, describe, expect, it } from "vitest";
 import { writeChatContent, readChatThread, readChatThreads } from "./persistence/chatProjection";
 import { Journal } from "./persistence/journal";
@@ -18,7 +19,7 @@ const ids = {
   actor: "c1000000-0000-4000-8000-000000000001",
   correlation: "c1000000-0000-4000-8000-000000000002",
   provider: "c1000000-0000-4000-8000-000000000003",
-  thread: "c1000000-0000-4000-8000-000000000010",
+  thread: decodeThreadRetentionThreadId("c1000000-0000-4000-8000-000000000010"),
   other: "c1000000-0000-4000-8000-000000000011",
   content: "c1000000-0000-4000-8000-000000000030",
 } as const;
