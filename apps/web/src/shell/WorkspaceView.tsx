@@ -59,10 +59,12 @@ import { useWorkOverviewController } from "../work/useWorkOverviewController";
 import type { WorkOverviewClient } from "@octant/client-runtime/work-overview-client";
 import type { WorkResearchClient } from "@octant/client-runtime/work-research-client";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
+import type { ShipClient } from "@octant/client-runtime/ship-client";
 import type { UsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { WorkResearchPanel } from "../work/WorkResearchPanel";
 import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
+import { ShipPanel } from "../ship/ShipPanel";
 import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
@@ -161,6 +163,7 @@ export interface WorkspaceViewProps {
   readonly workResearchClient?: WorkResearchClient;
   readonly goalClient?: GoalClient;
   readonly planClient?: PlanClient;
+  readonly shipClient?: ShipClient;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
   readonly workOverviewModel?: WorkOverviewModel;
@@ -703,6 +706,10 @@ function renderCodeTab(
         {...(props.planClient === undefined ? {} : { client: props.planClient })}
         threadId={String(tab.threadId)}
       >
+        <ShipPanel
+          {...(props.shipClient === undefined ? {} : { client: props.shipClient })}
+          threadId={String(tab.threadId)}
+        />
         <CodeThreadEnvironment
           presentation={props.environmentPresentation}
           onChangePresentation={props.onSetEnvironmentPresentation}

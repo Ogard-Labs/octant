@@ -35,6 +35,7 @@
     "./work-overview-client": "./src/workOverviewClient.ts",
     "./work-research-client": "./src/workResearchClient.ts",
     "./goal-client": "./src/goalClient.ts",
+    "./ship-client": "./src/shipClient.ts",
     "./plan-client": "./src/planClient.ts",
     "./product-feedback-client": "./src/productFeedbackClient.ts",
     "./artifact-library-client": "./src/artifactLibraryClient.ts",

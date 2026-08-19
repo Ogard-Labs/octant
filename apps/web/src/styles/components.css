@@ -335,3 +335,68 @@ html[data-octant-reduced-transparency="true"] .folder-picker {
   gap: 6px;
   padding: 0 12px 8px;
 }
+
+.ship-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ship-panel__title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.ship-panel__note,
+.ship-panel__empty,
+.ship-panel__notice,
+.ship-panel__target-where,
+.ship-panel__target-state {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 0.74rem;
+}
+
+.ship-panel__targets {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ship-panel__target {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem;
+  border: 1px solid var(--octant-border-subtle);
+  border-radius: 0.4rem;
+}
+
+.ship-panel__target-name {
+  font-size: 0.78rem;
+}
+
+.ship-panel__plan {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.4rem;
+  border: 1px solid var(--octant-border);
+  border-radius: 0.4rem;
+}
+
+.ship-panel__plan-line {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.ship-panel__plan-digest {
+  color: var(--octant-text-muted);
+  font-family: var(--octant-font-mono, monospace);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}

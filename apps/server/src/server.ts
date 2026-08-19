@@ -111,6 +111,9 @@ import { createSidebarBackgroundRouteHandler } from "./theme/sidebarBackgroundRo
 import { SidebarBackgroundStore } from "./theme/backgroundStore";
 import { createThemeRouteHandler } from "./theme/themeRoutes";
 import { createGoalRouteHandler } from "./goal/goalRoutes";
+import { createShipRouteHandler } from "./ship/shipRoutes";
+import { ShipEventStore } from "./ship/shipEventStore";
+import { ShipService } from "./ship/shipService";
 import { createPlanRouteHandler } from "./plan/planRoutes";
 import { PlanService } from "./plan/planService";
 import { JournalPlanStore } from "./plan/journalPlanStore";
@@ -1709,6 +1712,82 @@ export function startOctantServer(
       persistence,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+    });
+    // Publishing to a target the person owns. Octant runs no deployment
+    // infrastructure and holds no service account: a target names a remote the
+    // checkout already has, and the only thing this host can do is push the
+    // reviewed revision to it. Targets arrive from extensions rather than being
+    // built in; with none installed the list is empty and nothing publishes.
+    const shipEvents = new ShipEventStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString() as never,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const shipTargets = new Map<string, import("@octant/contracts").ShipTarget>();
+    const shipService = new ShipService({
+      listTargets: () => [...shipTargets.values()],
+      writeTarget: (target) => {
+        shipTargets.set(String(target.id), target);
+      },
+      checkout: (threadId) => {
+        let thread;
+        try {
+          thread = persistence.readCodeThread(threadId as never);
+        } catch {
+          return undefined;
+        }
+        if (thread === undefined || thread.lifecycle !== "active") return undefined;
+        const checkout = persistence.readCodeCheckout(thread.checkoutId);
+        if (checkout === undefined || checkout.availability !== "available") return undefined;
+        const head = checkout.head;
+        return {
+          checkoutRoot: String(thread.checkoutId),
+          // A publication is refused on unproven work, so the host states what
+          // it can observe rather than assuming: without a live observation the
+          // checkout is treated as dirty and the revision as unreviewed, which
+          // fails in the safe direction.
+          clean: false,
+          headRevision: head.kind === "branch" ? head.oid : "",
+          reviewedRevision: undefined,
+          executionPolicy: thread.executionPolicy,
+        };
+      },
+      // The host has no build it watched being produced yet, so it vouches for
+      // nothing. Refusing here is the record's evidence rule doing its job, not
+      // a placeholder: a ship claims a build happened only when this host saw
+      // it happen.
+      observedArtifact: async () => undefined,
+      credentialHandle: async () => undefined,
+      publish: async () => ({
+        outcome: "failed",
+        detail: "This host has no publication path bound for that target.",
+      }),
+      // Publishing is approved one act at a time, against the exact target,
+      // revision, and build. Nothing on this host issues such an approval yet,
+      // and a standing grant must never stand in for one.
+      approval: () => undefined,
+      journal: shipEvents,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString() as never,
+    });
+    const shipRoutes = createShipRouteHandler({
+      service: shipService,
+      windowAuthorityStore,
+      authorizeThread: ({ threadId, windowId }) => {
+        const workspace = persistence.readWindowWorkspace(windowId)?.workspace;
+        if (workspace === undefined) return false;
+        const context = workspace.contextByMode.code;
+        if (context.mode !== "code") return false;
+        let thread;
+        try {
+          thread = persistence.readCodeThread(threadId as never);
+        } catch {
+          return false;
+        }
+        if (thread === undefined || thread.lifecycle !== "active") return false;
+        return String(context.projectId) === String(thread.projectId);
+      },
     });
     const themeRoutes = createThemeRouteHandler({ service: themeService, windowAuthorityStore });
     // Goals persist through the journal, so they survive a restart and
@@ -4730,6 +4809,7 @@ export function startOctantServer(
       (await extensionRoutes(request)) ??
       (await browserAutomationRoutes(request)) ??
       (await shellRoutes(request)) ??
+      (await shipRoutes(request)) ??
       (await goalRoutes(request)) ??
       (await planRoutes(request)) ??
       (await workResearchRoutes(request)) ??
