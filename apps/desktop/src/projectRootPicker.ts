@@ -14,8 +14,27 @@ export class ProjectRootPickerError extends Error {
   }
 }
 
+/**
+ * Marks a failure whose message is a fixed sentence about host state and holds
+ * no capability material, so the person at the screen may read it. Anything
+ * else that refuses a Project window keeps its message to itself: a rejection
+ * raised while handling a capability can carry that capability in its text.
+ */
+export interface NamesItsCause {
+  readonly namesItsCause: true;
+}
+
+export function namesItsCause(error: unknown): error is Error & NamesItsCause {
+  return error instanceof Error && "namesItsCause" in error && error.namesItsCause === true;
+}
+
 /** The server has paused window-authority issuance until host time recovers. */
-export class ProjectWindowAuthorityUnavailableError extends ProjectRootPickerError {
+export class ProjectWindowAuthorityUnavailableError
+  extends ProjectRootPickerError
+  implements NamesItsCause
+{
+  readonly namesItsCause = true;
+
   constructor() {
     super("Octant cannot authorize this Project window while host time recovery is required.");
     this.name = "ProjectWindowAuthorityUnavailableError";
