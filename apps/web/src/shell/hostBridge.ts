@@ -57,6 +57,33 @@ export interface BrowserSurfaceState {
   readonly activeTabId?: string;
 }
 
+import type { AppUpdateState as AppUpdateStateView } from "@octant/contracts/app-updates";
+
+export type { AppUpdateStateView };
+
+export interface AppUpdateReleaseView {
+  readonly version: string;
+  readonly platform: string;
+  readonly arch: string;
+  readonly url: string;
+  readonly sha256: string;
+  readonly releasedAt: string;
+  readonly notes?: string;
+}
+
+/**
+ * What the host is still busy with, as it already reports it for the quit
+ * guard. The renderer never supplies this — the host reads it itself.
+ */
+export type AppUpdateInstallOutcome =
+  | { readonly kind: "installing" }
+  | {
+      readonly kind: "wait";
+      readonly activeAgentCount: number;
+      readonly attentionRequired: boolean;
+    }
+  | { readonly kind: "not-ready" };
+
 export type BrowserSurfaceTabCommand =
   | { readonly kind: "open" }
   | { readonly kind: "select"; readonly tabId: string }
@@ -106,6 +133,15 @@ export interface OctantHostBridge {
       readonly command: BrowserSurfaceTabCommand;
     },
   ) => Promise<BrowserSurfaceState>;
+  /**
+   * The desktop app's own update path. Absent on a remote client, which is
+   * served by a host it does not update.
+   */
+  readonly checkForAppUpdate?: () => Promise<AppUpdateStateView>;
+  readonly downloadAppUpdate?: () => Promise<AppUpdateStateView>;
+  readonly installAppUpdate?: () => Promise<AppUpdateInstallOutcome>;
+  readonly setAutomaticAppUpdateChecks?: (enabled: boolean) => Promise<AppUpdateStateView>;
+  readonly subscribeAppUpdateState?: (listener: (state: AppUpdateStateView) => void) => () => void;
   readonly openBrowserExternal?: (url: string) => Promise<void>;
   readonly subscribeBrowserSurfaceState?: (
     listener: (state: BrowserSurfaceState) => void,

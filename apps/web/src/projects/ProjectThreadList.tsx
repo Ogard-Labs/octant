@@ -47,7 +47,11 @@ export interface ProjectThreadRowsProps {
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
 }
 
-/** One button per thread. Attention markers carry text, never colour alone. */
+/**
+ * One button per thread. Attention markers are never colour alone: the unread
+ * mark is a dot glyph carrying its own label, the way the Recents rows already
+ * mark one, so a reader who cannot see the colour still reads the state.
+ */
 export function ProjectThreadRows(props: ProjectThreadRowsProps) {
   return (
     <>
@@ -67,17 +71,21 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
           type="button"
           variant="ghost"
         >
+          {/* The mark leads the row from a gutter every row reserves, so the
+              marked and unmarked titles start on the same edge. */}
+          {thread.unread ? (
+            <span aria-label="Unread" className="activity-nav__glyph" data-indicator="unread">
+              ●
+            </span>
+          ) : (
+            <span aria-hidden="true" className="activity-nav__glyph" />
+          )}
           <span className="sidebar-navigation__thread-copy">
             <span className="sidebar-navigation__thread-title">{thread.title}</span>
           </span>
           {thread.meta !== undefined ? (
             <span className="sidebar-navigation__thread-follow-up" data-indicator="meta">
               {thread.meta}
-            </span>
-          ) : null}
-          {thread.unread ? (
-            <span className="sidebar-navigation__thread-unread" data-indicator="unread">
-              Unread
             </span>
           ) : null}
           {thread.followUp ? (

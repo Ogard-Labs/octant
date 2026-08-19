@@ -328,7 +328,9 @@ describe("ProjectOverview threads and recent activity", () => {
     ).toEqual(["thread-newer", "thread-older"]);
     expect(screen.queryByRole("button", { name: /Someone else's work/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Loose chat/ })).not.toBeInTheDocument();
-    expect(within(list).getByText("Unread")).toBeVisible();
+    // A dot beside the thread, not a bar wrapped underneath it.
+    expect(within(list).getByLabelText("Unread")).toBeVisible();
+    expect(within(list).queryByText("Unread")).not.toBeInTheDocument();
     expect(within(list).getByText("Follow-up")).toBeVisible();
 
     await user.click(within(list).getByRole("button", { name: /Launch checklist/ }));
