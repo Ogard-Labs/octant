@@ -1,4 +1,4 @@
-# 0032. Signed, notarized, user-controlled updates
+# 0033. Signed, notarized, user-controlled updates
 
 **Status:** Proposed
 

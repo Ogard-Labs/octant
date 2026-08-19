@@ -47,6 +47,7 @@ import {
 } from "./main";
 import type { RemoteDeviceControlService } from "./remoteDeviceControls";
 import type { CredentialStore } from "./credentialStore";
+import { ProjectWindowAuthorityUnavailableError } from "./projectRootPicker";
 
 describe("packaged desktop storage identity", () => {
   it("uses the canonical Octant Application Support directory", () => {
@@ -325,6 +326,21 @@ describe("Project window authority production lifecycle", () => {
     ).rejects.toMatchObject({ message: "Octant could not open its Project window." });
     expect(construct).not.toHaveBeenCalled();
     expect(load).not.toHaveBeenCalled();
+  });
+
+  it("tells the user which host state refused the window, not a generic sentence", async () => {
+    const lifecycle = createProjectWindowAuthorityLifecycle();
+
+    await expect(
+      lifecycle.open({
+        register: vi.fn().mockRejectedValue(new ProjectWindowAuthorityUnavailableError()),
+        construct: vi.fn(),
+        prepare: vi.fn(),
+        load: vi.fn(),
+      }),
+    ).rejects.toMatchObject({
+      message: "Octant cannot authorize this Project window while host time recovery is required.",
+    });
   });
 
   it("waits for close revocation before recreating with a distinct capability", async () => {

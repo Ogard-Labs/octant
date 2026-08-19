@@ -6,7 +6,7 @@
  * compiled into the app before it will look at anything the document says.
  * Trust comes from that signature and never from the host: a feed served from
  * the expected domain over a valid certificate proves only that somebody
- * controls that domain today (see `docs/decisions/0032`).
+ * controls that domain today (see `docs/decisions/0033`).
  *
  * The document names one release and where its bytes are. That location is not
  * assumed to be anywhere in particular — the artifact may sit beside the feed

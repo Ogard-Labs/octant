@@ -31,7 +31,7 @@ export const DESKTOP_PACKAGE_IDENTITY = {
   /**
    * The release this build is. One place, because the updater compares it
    * against the feed and an app that cannot say which version it is cannot
-   * refuse to go backwards (`docs/decisions/0032`).
+   * refuse to go backwards (`docs/decisions/0033`).
    */
   version: "0.1.0",
 } as const;

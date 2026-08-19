@@ -9,7 +9,7 @@ import { OCTANT_UPDATE_CHECK_DISCLOSURE } from "@octant/contracts/app-updates";
  * This, not the host the feed came from, is what makes an update trustworthy.
  * A feed served from the right domain over a valid certificate proves only that
  * somebody controls that domain today; the signature proves the release is one
- * we published. See `docs/decisions/0032`.
+ * we published. See `docs/decisions/0033`.
  *
  * Empty until a release key exists, and empty is not a permissive default:
  * `createFeedVerifier` refuses every signature while it is empty, so a build

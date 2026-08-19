@@ -77,6 +77,7 @@ import {
   createProjectRootPicker,
   createProjectWindowAuthority,
   generateProjectBridgeToken,
+  namesItsCause,
 } from "./projectRootPicker";
 import { createLocalPluginFolderPicker } from "./localPluginFolderPicker";
 import {
@@ -718,7 +719,7 @@ export function createProjectWindowAuthorityLifecycle() {
         options.prepare(window, close);
         await options.load(window);
         return Object.freeze({ window, close });
-      } catch {
+      } catch (cause) {
         if (window !== undefined) {
           try {
             options.dispose?.(window);
@@ -727,6 +728,12 @@ export function createProjectWindowAuthorityLifecycle() {
           }
         }
         if (tracked !== undefined) await revoke(tracked);
+        // A failure that names its own cause is a fixed sentence about host
+        // state, and the person looking at the error dialog needs it: the
+        // generic sentence sent them to the logs for a reason the app already
+        // knew. Every other rejection stays behind that sentence, because one
+        // raised while handling a capability can carry it in its message.
+        if (namesItsCause(cause)) throw cause;
         throw new Error("Octant could not open its Project window.");
       }
     });
