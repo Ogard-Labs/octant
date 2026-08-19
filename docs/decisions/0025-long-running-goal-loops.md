@@ -1,6 +1,6 @@
 # 0025. Long-running goal loops
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 
@@ -69,9 +69,14 @@ composes into it rather than having to be unpicked.
   optional as they are for hand-driven ones.
 - Clamping to the intersection means a person who lowers a thread's access mid
   loop lowers the loop too, with no separate gesture.
-- None of this is implemented. Goal, budget, usage, evidence, checkpoint, and
-  approval surfaces exist; the loop, the ceiling, and the scheduling trigger do
-  not, and scheduling stays outside the first release boundary.
+- The loop, the ceiling, budget-gated rounds, evidence-gated completion, and the
+  journaled record of every stop are implemented for Work threads. Two parts are
+  not, and both fail closed rather than pretending: a **schedule as a trigger**
+  is refused at the start command until the scheduler can hand a due occurrence
+  to a round, and a **ceiling narrower than the mode itself** is refused at the
+  same place, because a Work turn's posture is a property of Work and there is
+  no per-turn grant to hand it. A ceiling the host cannot impose is worse than
+  no ceiling: the person believes the loop is narrower than it is.
 
 ## Related
 
