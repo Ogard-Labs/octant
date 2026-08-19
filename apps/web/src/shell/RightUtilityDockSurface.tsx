@@ -17,6 +17,7 @@ export interface RightUtilityDockSurfaceProps {
   readonly onRefreshEnvironment?: () => Promise<void> | void;
   readonly navigator: ReactNode;
   readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
+  readonly plan: ReactNode;
   readonly projectMemory: ReactNode;
   readonly resolution: RightUtilityDockResolution;
 }
@@ -64,13 +65,15 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         </nav>
       ) : null}
       <div className="right-utility-dock__content">
-        {activeSurface.id === "context"
-          ? props.context
-          : activeSurface.id === "project-memory"
-            ? props.projectMemory
-            : activeSurface.id === "navigator"
-              ? props.navigator
-              : props.codeEnvironment}
+        {
+          {
+            context: props.context,
+            "project-memory": props.projectMemory,
+            navigator: props.navigator,
+            plan: props.plan,
+            "code-environment": props.codeEnvironment,
+          }[activeSurface.id]
+        }
       </div>
     </div>
   );

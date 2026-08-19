@@ -70,6 +70,8 @@ import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-se
 import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
+import { AppUpdateSettings } from "../settings/AppUpdateSettings";
+import type { OctantHostBridge } from "./hostBridge";
 import "../styles/settings.css";
 import "../styles/extensions-settings.css";
 
@@ -85,6 +87,7 @@ export interface SettingsViewProps {
   readonly search: string;
   readonly settings: ShellSettings;
   readonly sidebarVibrancySupported: boolean;
+  readonly hostBridge?: OctantHostBridge;
   /**
    * Implemented setting ids. Kept as a stable contract of what is implemented;
    * the registry is the source of truth for rendering and search.
@@ -564,6 +567,21 @@ function GeneralSection({ focusedSetting, props }: SectionProps) {
         settingId="keybindings"
       >
         <KeybindingSettings />
+      </SettingRow>
+      <SettingRow
+        description="Octant updates itself only when you ask it to, and never while work is running."
+        focused={focusedSetting === settingId("app-updates")}
+        label="Updates"
+        scope="app"
+        settingId="app-updates"
+      >
+        <AppUpdateSettings
+          automaticChecks={props.settings.automaticUpdateChecks}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          onAutomaticChecksChange={(enabled) =>
+            props.onSettingsChange({ automaticUpdateChecks: enabled })
+          }
+        />
       </SettingRow>
     </section>
   );

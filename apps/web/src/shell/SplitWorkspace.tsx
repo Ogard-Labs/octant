@@ -1,3 +1,4 @@
+import type { CodeThreadId } from "@octant/contracts/code";
 import type {
   LayoutNodeId,
   TabGroupId,
@@ -19,6 +20,8 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+import type { CodeOverviewSurfaceKind } from "../code/CodeOverview";
+import { LAUNCHABLE_CODE_SURFACES, codeSurfaceTitle } from "../code/codeSurfaces";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import { IconButton } from "./IconButton";
 import { WorkspaceTabLauncher } from "./WorkspaceTabLauncher";
@@ -45,6 +48,12 @@ export interface SplitWorkspaceProps {
     toGroupId: TabGroupId,
     tabId: WorkspaceTabId,
     index: number,
+  ) => void;
+  /** Opens one of a Code thread's own surfaces as a tab beside it. */
+  readonly onOpenCodeSurface?: (
+    kind: CodeOverviewSurfaceKind,
+    threadId: CodeThreadId,
+    title: string,
   ) => void;
   readonly onOpenSurface?: (
     surface: WorkspaceSurfaceDescriptor["kind"],
@@ -295,6 +304,10 @@ function WorkspaceGroup(props: WorkspaceNodeProps & { readonly group: WorkspaceT
   const activeTab = props.group.tabs.find((tab) => tab.id === props.group.activeTabId)!;
   const groupIndex = props.allGroups.findIndex((group) => group.groupId === props.group.groupId);
   const nextGroup = props.allGroups[(groupIndex + 1) % props.allGroups.length];
+  const openCodeSurface = props.onOpenCodeSurface;
+  // A thread's own surfaces are launchable only from the group showing that
+  // thread, so the id comes from the active tab rather than from window state.
+  const codeThreadId = activeTab.kind === "code-overview" ? activeTab.threadId : undefined;
   return (
     <section
       aria-label={`Tab group: ${activeTab.title}`}
@@ -334,6 +347,16 @@ function WorkspaceGroup(props: WorkspaceNodeProps & { readonly group: WorkspaceT
             catalog={props.availableSurfaces}
             mode={props.mode}
             onOpenSurface={(surface) => props.onOpenSurface?.(surface, props.group.groupId)}
+            {...(openCodeSurface === undefined || codeThreadId === undefined
+              ? {}
+              : {
+                  onOpenThreadSurface: (kind: CodeOverviewSurfaceKind) =>
+                    openCodeSurface(kind, codeThreadId, codeSurfaceTitle(kind)),
+                  threadSurfaces: LAUNCHABLE_CODE_SURFACES.map((kind) => ({
+                    kind,
+                    label: codeSurfaceTitle(kind),
+                  })),
+                })}
             owningThreadAvailable={hasBrowserOwningThread(activeTab)}
           />
         )}

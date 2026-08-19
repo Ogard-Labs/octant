@@ -306,7 +306,7 @@ nothing first-party.
 ```sh
 bun install --frozen-lockfile
 bun run dev        # Vite renderer + Electron with hot reload; server spawned from source
-bun run verify     # wiring:check, decisions:check, fmt:check, lint, typecheck, test, build
+bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint, typecheck, test, build
 ```
 
 - `bun run dev` starts Vite for `apps/web` and launches Electron against it.
