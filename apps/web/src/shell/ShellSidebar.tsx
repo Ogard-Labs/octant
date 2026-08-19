@@ -3,9 +3,11 @@ import type { FederatedHostState } from "@octant/client-runtime";
 import { EnvironmentFilter } from "./EnvironmentFilter";
 import type { OctantMode } from "@octant/contracts/modes";
 import { enabledModes } from "@octant/domain/mode-policy";
+import type { SettingsDeepLink } from "@octant/contracts";
 import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
+import { defaultShellSettings } from "@octant/domain/shell-policy";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
-import { PanelLeftClose, Search, Settings } from "lucide-react";
+import { PanelLeftClose, Search } from "lucide-react";
 import type { ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -16,6 +18,7 @@ import {
 import { IconButton } from "./IconButton";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
+import { SidebarProfile } from "./SidebarProfile";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
 
 /**
@@ -65,7 +68,9 @@ export interface ShellSidebarProps {
   };
   readonly onAddFolder: () => void;
   readonly onOpenSearch: () => void;
-  readonly onOpenSettings: () => void;
+  readonly onOpenSettings: (deepLink?: SettingsDeepLink) => void;
+  /** Absent on a window that cannot enter Zen, which keeps the row off the menu. */
+  readonly onOpenZen?: () => void;
   /** Hides the sidebar; the window chrome then offers the matching Show control. */
   readonly onCollapseSidebar?: () => void;
   readonly onRetryChat?: () => void;
@@ -198,21 +203,21 @@ export function ShellSidebar(props: ShellSidebarProps) {
               </OctantButton>
             ) : null}
             {props.chatErrorMessage === undefined ? null : (
-              <OctantButton onClick={props.onOpenSettings} type="button" variant="ghost">
+              <OctantButton
+                onClick={() => props.onOpenSettings({ section: "chat" })}
+                type="button"
+                variant="ghost"
+              >
                 Open Chat settings
               </OctantButton>
             )}
           </div>
         )}
-        <OctantButton
-          className="sidebar__utility sidebar__utility--settings justify-start"
-          onClick={props.onOpenSettings}
-          type="button"
-          variant="ghost"
-        >
-          <Settings aria-hidden="true" size={14} strokeWidth={1.7} />
-          <span>Settings</span>
-        </OctantButton>
+        <SidebarProfile
+          onOpenSettings={props.onOpenSettings}
+          {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}
+          profile={props.settings?.userProfile ?? defaultShellSettings().userProfile}
+        />
       </div>
     </aside>
   );

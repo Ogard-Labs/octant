@@ -1,4 +1,4 @@
-# 0032. Thread retention and explicit purge
+# 0035. Thread retention and explicit purge
 
 **Status:** Accepted
 

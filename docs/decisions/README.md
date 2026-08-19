@@ -32,14 +32,17 @@ distilled successor of the earlier long-form design specifications.
 | [0022](0022-pointed-at-product-feedback.md)             | Pointing at the running product                                   | Accepted |
 | [0023](0023-bringing-a-run-home.md)                     | Bringing a run home                                               | Accepted |
 | [0024](0024-curated-project-scaffolds.md)               | Curated project scaffolds                                         | Accepted |
-| [0025](0025-long-running-goal-loops.md)                 | Long-running goal loops                                           | Proposed |
-| [0026](0026-shipping-to-a-user-owned-target.md)         | Shipping to a user-owned target                                   | Proposed |
+| [0025](0025-long-running-goal-loops.md)                 | Long-running goal loops                                           | Accepted |
+| [0026](0026-shipping-to-a-user-owned-target.md)         | Shipping to a user-owned target                                   | Accepted |
 | [0027](0027-plans-as-journaled-artifacts.md)            | Plans as journaled artifacts                                      | Accepted |
 | [0028](0028-the-artifact-library.md)                    | The artifact library                                              | Accepted |
 | [0029](0029-artifact-storage-mirror.md)                 | The artifact storage mirror                                       | Accepted |
 | [0030](0030-routines-that-run-themselves.md)            | Routines that run themselves                                      | Accepted |
 | [0031](0031-hosts-as-environments.md)                   | Hosts as environments                                             | Accepted |
-| [0032](0032-thread-retention-and-purge.md)              | Thread retention and explicit purge                               | Accepted |
+| [0032](0032-a-refusal-a-person-can-clear.md)            | A refusal a person can clear                                      | Proposed |
+| [0033](0033-first-run-asks-what-to-call-you.md)         | First run asks what to call you                                   | Accepted |
+| [0034](0034-signed-updates.md)                          | Signed, notarized, user-controlled updates                        | Proposed |
+| [0035](0035-thread-retention-and-purge.md)              | Thread retention and explicit purge                               | Accepted |
 
 ## Adding an ADR
 

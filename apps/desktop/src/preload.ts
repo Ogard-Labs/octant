@@ -13,6 +13,11 @@ export const IPC_CHANNELS = {
   browserSurfaceOpenExternal: "octant:browser-surface:open-external",
   browserSurfaceState: "octant:browser-surface:state",
   browserSurfaceTab: "octant:browser-surface:tab",
+  appUpdateState: "octant:app-update:state",
+  appUpdateCheck: "octant:app-update:check",
+  appUpdateDownload: "octant:app-update:download",
+  appUpdateInstall: "octant:app-update:install",
+  appUpdateAutomatic: "octant:app-update:automatic",
   clearProviderCredential: "octant:provider-credential:clear",
   codeDeepLink: "octant:code:deep-link",
   close: "octant:window:close",
@@ -56,6 +61,35 @@ export interface HostCapabilities {
   readonly sidebarVibrancySupported: boolean;
   readonly liveBrowserSupported: boolean;
 }
+
+export interface AppUpdateRelease {
+  readonly version: string;
+  readonly platform: string;
+  readonly arch: string;
+  readonly url: string;
+  readonly sha256: string;
+  readonly releasedAt: string;
+  readonly notes?: string;
+}
+
+export interface AppUpdateState {
+  readonly status: string;
+  readonly currentVersion: string;
+  readonly available?: AppUpdateRelease;
+  readonly refusal?: string;
+  readonly message?: string;
+  readonly checkedAt?: string;
+  readonly automaticChecks: boolean;
+}
+
+export type AppUpdateInstallOutcome =
+  | { readonly kind: "installing" }
+  | {
+      readonly kind: "wait";
+      readonly activeAgentCount: number;
+      readonly attentionRequired: boolean;
+    }
+  | { readonly kind: "not-ready" };
 
 export interface BrowserSurfaceTabState {
   readonly tabId: string;
@@ -267,6 +301,11 @@ export interface OctantHostBridge {
       readonly command: BrowserSurfaceTabCommand;
     },
   ) => Promise<BrowserSurfaceState>;
+  readonly checkForAppUpdate: () => Promise<AppUpdateState>;
+  readonly downloadAppUpdate: () => Promise<AppUpdateState>;
+  readonly installAppUpdate: () => Promise<AppUpdateInstallOutcome>;
+  readonly setAutomaticAppUpdateChecks: (enabled: boolean) => Promise<AppUpdateState>;
+  readonly subscribeAppUpdateState: (listener: (state: AppUpdateState) => void) => () => void;
   readonly openBrowserExternal: (url: string) => Promise<void>;
   readonly subscribeBrowserSurfaceState: (
     listener: (state: BrowserSurfaceState) => void,
@@ -411,6 +450,29 @@ export function createHostBridge(
         return Promise.reject(new TypeError("Invalid Browser tab command."));
       }
       return decodeBrowserSurfaceState(await ipc.invoke(IPC_CHANNELS.browserSurfaceTab, request));
+    },
+    checkForAppUpdate: async () =>
+      decodeAppUpdateState(await ipc.invoke(IPC_CHANNELS.appUpdateCheck)),
+    downloadAppUpdate: async () =>
+      decodeAppUpdateState(await ipc.invoke(IPC_CHANNELS.appUpdateDownload)),
+    installAppUpdate: async () =>
+      decodeAppUpdateInstallOutcome(await ipc.invoke(IPC_CHANNELS.appUpdateInstall)),
+    setAutomaticAppUpdateChecks: async (enabled: boolean) => {
+      if (typeof enabled !== "boolean") {
+        return Promise.reject(new TypeError("Invalid update setting."));
+      }
+      return decodeAppUpdateState(await ipc.invoke(IPC_CHANNELS.appUpdateAutomatic, enabled));
+    },
+    subscribeAppUpdateState: (listener: (state: AppUpdateState) => void) => {
+      const receive: MaterialListener = (_event, value) => {
+        try {
+          listener(decodeAppUpdateState(value));
+        } catch {
+          // Ignore malformed native state instead of widening the bridge.
+        }
+      };
+      ipc.on(IPC_CHANNELS.appUpdateState, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.appUpdateState, receive);
     },
     openBrowserExternal: (url: string) => {
       validateExternalBrowserUrl(url);
@@ -1131,6 +1193,93 @@ function decodeBrowserSurfaceState(value: unknown): BrowserSurfaceState {
     control: value.control,
     tabs: Object.freeze(value.tabs.map(decodeBrowserSurfaceTabState)),
     activeTabId: value.activeTabId,
+  });
+}
+
+const APP_UPDATE_STATUSES = [
+  "idle",
+  "checking",
+  "up-to-date",
+  "available",
+  "downloading",
+  "ready",
+  "refused",
+  "failed",
+];
+
+/**
+ * Validate update state by hand rather than importing the contract decoder.
+ *
+ * The preload is sandboxed and must not pull a runtime package in with it, so
+ * this mirrors the shape the way the Browser surface state already does.
+ */
+function decodeAppUpdateState(value: unknown): AppUpdateState {
+  if (
+    !isRecord(value) ||
+    typeof value.status !== "string" ||
+    !APP_UPDATE_STATUSES.includes(value.status) ||
+    typeof value.currentVersion !== "string" ||
+    value.currentVersion.length > 64 ||
+    typeof value.automaticChecks !== "boolean" ||
+    (value.refusal !== undefined && typeof value.refusal !== "string") ||
+    (value.message !== undefined && typeof value.message !== "string") ||
+    (value.checkedAt !== undefined && typeof value.checkedAt !== "string")
+  ) {
+    throw new TypeError("Invalid update state.");
+  }
+  return Object.freeze({
+    status: value.status,
+    currentVersion: value.currentVersion,
+    automaticChecks: value.automaticChecks,
+    ...(value.available === undefined
+      ? {}
+      : { available: decodeAppUpdateRelease(value.available) }),
+    ...(value.refusal === undefined ? {} : { refusal: value.refusal }),
+    ...(value.message === undefined ? {} : { message: value.message }),
+    ...(value.checkedAt === undefined ? {} : { checkedAt: value.checkedAt }),
+  });
+}
+
+function decodeAppUpdateRelease(value: unknown): AppUpdateRelease {
+  if (
+    !isRecord(value) ||
+    typeof value.version !== "string" ||
+    typeof value.platform !== "string" ||
+    typeof value.arch !== "string" ||
+    typeof value.url !== "string" ||
+    !value.url.startsWith("https://") ||
+    typeof value.sha256 !== "string" ||
+    typeof value.releasedAt !== "string" ||
+    (value.notes !== undefined && typeof value.notes !== "string")
+  ) {
+    throw new TypeError("Invalid update release.");
+  }
+  return Object.freeze({
+    version: value.version,
+    platform: value.platform,
+    arch: value.arch,
+    url: value.url,
+    sha256: value.sha256,
+    releasedAt: value.releasedAt,
+    ...(value.notes === undefined ? {} : { notes: value.notes }),
+  });
+}
+
+function decodeAppUpdateInstallOutcome(value: unknown): AppUpdateInstallOutcome {
+  if (!isRecord(value)) throw new TypeError("Invalid update install outcome.");
+  if (value.kind === "installing" || value.kind === "not-ready")
+    return Object.freeze({ kind: value.kind });
+  if (
+    value.kind !== "wait" ||
+    !Number.isInteger(value.activeAgentCount) ||
+    typeof value.attentionRequired !== "boolean"
+  ) {
+    throw new TypeError("Invalid update install outcome.");
+  }
+  return Object.freeze({
+    kind: "wait",
+    activeAgentCount: value.activeAgentCount as number,
+    attentionRequired: value.attentionRequired,
   });
 }
 

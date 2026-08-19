@@ -170,7 +170,7 @@ flowchart LR
   override, or thread override) never deletes on its own; only a confirmed
   purge erases a thread's bulk content, derived projections, and that
   thread's own journal events, then records a tombstone so a rebuild cannot
-  resurrect the transcript. See `docs/decisions/0032`.
+  resurrect the transcript. See `docs/decisions/0035`.
 
 ## Providers
 

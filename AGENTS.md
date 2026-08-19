@@ -36,7 +36,7 @@ Read the record that owns your change before editing, not all of them:
 | Change area                                         | Owning record                                |
 | --------------------------------------------------- | -------------------------------------------- |
 | Journal, projections, replay, migrations            | `docs/decisions/0002`                        |
-| Thread retention, explicit purge, journal erasure   | `docs/decisions/0032`                        |
+| Thread retention, explicit purge, journal erasure   | `docs/decisions/0035`                        |
 | Modes, Projects, thread authority, checkout binding | `docs/decisions/0003`, `docs/decisions/0017` |
 | Package layering and dependency direction           | `docs/decisions/0004`                        |
 | Provider drivers, capabilities, registry, harness   | `docs/decisions/0005`–`docs/decisions/0007`  |
@@ -268,9 +268,12 @@ credentials, physical devices, release authority, or subjective judgment.
 
 ## Current Release Boundary
 
-The first release is the unsigned Apple Silicon technical preview with the
-provider-neutral plugin/skill marketplace. Do not add signing, notarization,
-updater, Intel, Windows/Linux packaging, native mobile store distribution,
-hosted relay, schedules, connector/OAuth marketplace, full LSP/extension host,
-or product features that mutate pull requests unless a decision record and an
-explicit request authorize that scope.
+The first release is the Apple Silicon technical preview with the
+provider-neutral plugin/skill marketplace. Per `docs/decisions/0034`, it is
+signed with a Developer ID, notarized, and updates itself — those three are one
+deliverable, because an updater on an unsigned app is an unauthenticated
+code-delivery channel and macOS refuses the replacement anyway. Do not add
+Intel, Windows/Linux packaging, native mobile store distribution, hosted relay,
+schedules, connector/OAuth marketplace, full LSP/extension host, or product
+features that mutate pull requests unless a decision record and an explicit
+request authorize that scope.
