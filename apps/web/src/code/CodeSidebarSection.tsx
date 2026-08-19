@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Pin, PinOff } from "lucide-react";
 import type { CodeThreadNavigationItem } from "./useCodeController";
+import { ThreadRenameField } from "../projects/ThreadRenameField";
 import { OctantButton } from "../ui/base/OctantButton";
-import { OctantInput } from "../ui/base/OctantInput";
 
 export interface CodeSidebarSectionProps {
   readonly activeThreadId?: string;
@@ -43,8 +43,9 @@ export function CodeSidebarSection(props: CodeSidebarSectionProps) {
         const threadId = String(thread.threadId);
         if (props.onRenameThread !== undefined && renamingThreadId === threadId) {
           return (
-            <ThreadRename
+            <ThreadRenameField
               key={threadId}
+              label="Rename Code thread"
               onCancel={() => setRenamingThreadId(undefined)}
               onRename={(title) => {
                 setRenamingThreadId(undefined);
@@ -125,55 +126,6 @@ export function CodeSidebarSection(props: CodeSidebarSectionProps) {
         );
       })}
     </nav>
-  );
-}
-
-/**
- * The rename field for one thread.
- *
- * Enter commits and Escape abandons, and a blank title is abandoned rather than
- * committed — a thread with no name is harder to find than one still carrying
- * the name Octant gave it.
- */
-function ThreadRename(props: {
-  readonly title: string;
-  readonly onRename: (title: string) => void;
-  readonly onCancel: () => void;
-}) {
-  const [value, setValue] = useState(props.title);
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    inputRef.current?.select();
-  }, []);
-  const commit = (): void => {
-    const next = value.trim();
-    if (next === "" || next === props.title) {
-      props.onCancel();
-      return;
-    }
-    props.onRename(next);
-  };
-  return (
-    <OctantInput
-      aria-label="Rename Code thread"
-      autoFocus
-      className="sidebar-navigation__thread-rename"
-      onBlur={commit}
-      onChange={(event) => setValue(event.target.value)}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.preventDefault();
-          commit();
-          return;
-        }
-        if (event.key === "Escape") {
-          event.preventDefault();
-          props.onCancel();
-        }
-      }}
-      ref={inputRef}
-      value={value}
-    />
   );
 }
 

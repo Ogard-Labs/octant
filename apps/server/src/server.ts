@@ -16,6 +16,7 @@ import {
   decodeCodeRelativePath,
   decodeCodeRepositoryId,
   decodeCodeThreadId,
+  decodeWorkThreadId,
   ThreadCreationRootId,
   decodeThreadWorkingDirectory,
   decodeCodeWorktreeRef,
@@ -360,6 +361,8 @@ import {
 import { createCodeThreadLocalServerScopeResolver } from "./localServers/localServerScopeResolver";
 import { LocalServerService } from "./localServers/localServerService";
 import { createDiagnosticsExportRouteHandler } from "./diagnosticsExportRoutes";
+import { createThreadExportRouteHandler } from "./threadExportRoutes";
+import { ThreadExportService } from "./threadExportService";
 import { createValidationEvidenceRouteHandler } from "./validationEvidenceRoutes";
 import { createValidationEvidenceLoader } from "./validation/validationEvidenceLoader";
 import { createExtensionRouteHandler } from "./extensionRoutes";
@@ -3442,6 +3445,71 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    const threadExportService = new ThreadExportService({
+      hostId: LOCAL_HOST_ID,
+      clock: () => new Date().toISOString(),
+      chat: {
+        read: (threadId) => {
+          try {
+            return chatService.read(decodeChatThreadId(threadId));
+          } catch {
+            return undefined;
+          }
+        },
+      },
+      work: {
+        read: async (windowId, threadId) => {
+          try {
+            const id = decodeWorkThreadId(threadId);
+            const transcript = await workTurnService.transcript(windowId, id);
+            const bootstrap = await workThreadService.bootstrap(windowId);
+            const thread = bootstrap.threads.find((candidate) => String(candidate.id) === threadId);
+            if (thread === undefined) return undefined;
+            return { thread, turns: transcript.turns };
+          } catch {
+            return undefined;
+          }
+        },
+      },
+      code: {
+        readThread: async (windowId, threadId) => {
+          try {
+            const view = await routeCodeService.read(windowId, decodeCodeThreadId(threadId));
+            return {
+              threadId: String(view.thread.id),
+              title: view.thread.title,
+              projectId: view.thread.projectId,
+              version: view.thread.version,
+              lastSequence: view.lastSequence,
+              providerInstanceId: view.thread.providerInstanceId,
+              modelId: view.thread.modelId,
+              createdAt: view.thread.createdAt,
+              updatedAt: view.thread.updatedAt,
+              ...(view.thread.forkedFrom === undefined
+                ? {}
+                : { forkedFrom: { threadId: String(view.thread.forkedFrom.threadId) } }),
+            };
+          } catch {
+            return undefined;
+          }
+        },
+        conversation: async (windowId, threadId, afterCursor, limit) => {
+          const read = routeCodeService.conversation;
+          if (read === undefined) throw new Error("Code conversation is unavailable.");
+          return await read(windowId, threadId, afterCursor, limit);
+        },
+        readEvidence: async (windowId, threadId, operationId, contentId) => {
+          const read = routeCodeService.readOperationContent;
+          if (read === undefined) throw new Error("Code operation evidence is unavailable.");
+          return await read(windowId, threadId, operationId, contentId);
+        },
+      },
+      canvases: persistence.canvasProjection,
+    });
+    const threadExportRoutes = createThreadExportRouteHandler({
+      service: threadExportService,
+      windowAuthorityStore,
+    });
     // Work workflow projection: a downstream side channel driven by
     // already-authorized Work thread lifecycle facts, never an independent
     // authority source. `withWorkflowLifecycle` wraps the thread route
@@ -4951,6 +5019,7 @@ export function startOctantServer(
       (await usageDashboardRoutes(request)) ??
       (await usageRoutes(request)) ??
       (await diagnosticsExportRoutes(request)) ??
+      (await threadExportRoutes(request)) ??
       (await computerUseRoutes(request)) ??
       (await validationEvidenceRoutes(request)) ??
       (await extensionRoutes(request)) ??

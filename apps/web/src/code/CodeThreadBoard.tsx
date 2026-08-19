@@ -86,11 +86,20 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
   const query = useMemo(() => buildQuery(filters), [filters]);
   const queryKey = JSON.stringify(query);
 
-  const { loadBoard } = props;
+  // The shell re-renders while threads stream, and its `loadBoard` is an inline
+  // arrow, so the prop's identity changes on every one of those renders. Keying
+  // the query on that identity dropped the board back to "Loading" each time and
+  // it never settled. The callback is held here instead: a fresh function is not
+  // a new question about the board.
+  const loadBoardRef = useRef(props.loadBoard);
+  useEffect(() => {
+    loadBoardRef.current = props.loadBoard;
+  });
+
   useEffect(() => {
     let active = true;
     setBoard({ status: "loading" });
-    loadBoard(query).then(
+    loadBoardRef.current(query).then(
       (view) => {
         if (active) setBoard({ status: "ready", view });
       },
@@ -108,10 +117,11 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
       active = false;
     };
     // queryKey captures every filter that affects the server result (`query` is
-    // recomputed from the same filters). Grouping is deliberately excluded:
-    // switching grouping is a pure client projection and must not re-query or
-    // mutate any authoritative state.
-  }, [queryKey, loadBoard, query]);
+    // recomputed from the same filters, so it moves only when queryKey does).
+    // Grouping is deliberately excluded: switching grouping is a pure client
+    // projection and must not re-query or mutate any authoritative state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryKey]);
 
   useEffect(() => {
     if (!filtersOpen) return;

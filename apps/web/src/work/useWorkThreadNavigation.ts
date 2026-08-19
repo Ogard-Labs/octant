@@ -14,7 +14,7 @@ export function buildWorkThreadNavigation(
       threadId: String(thread.id),
       title: thread.title,
       projectId: String(thread.projectId),
-      meta: `${thread.providerInstanceId} · ${thread.modelId}`,
+      providerInstanceId: String(thread.providerInstanceId),
       updatedAt: thread.updatedAt,
     }));
 }

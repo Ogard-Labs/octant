@@ -59,6 +59,7 @@ export * from "./threadMentionClient";
 export * from "./usageClient";
 export * from "./usageDashboardClient";
 export * from "./diagnosticsExportClient";
+export * from "./threadExportClient";
 export * from "./validationEvidenceClient";
 export * from "./expoSecureDeviceKeyStore";
 export * from "./mobileInboxClient";

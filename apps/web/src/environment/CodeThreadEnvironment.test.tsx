@@ -88,6 +88,28 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.getByTestId("code-workspace-content")).toBeVisible();
   });
 
+  it("keeps publishing in the environment panel rather than above the thread", async () => {
+    render(
+      <CodeThreadEnvironment
+        onChangePresentation={vi.fn()}
+        presentation={defaultEnvironmentPresentationState()}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        publish={<div data-testid="publish-controls">Publish controls</div>}
+        tab={codeTab()}
+      >
+        <div data-testid="code-workspace-content">Code surface</div>
+      </CodeThreadEnvironment>,
+    );
+
+    // Publishing acts on the checkout, so it belongs with the other groups that
+    // describe it, closed until asked for. Mounted as a sibling of the thread it
+    // took a share of the pane and split the workspace.
+    await userEvent.click(screen.getByRole("button", { name: /^Publish/ }));
+    const publish = screen.getByTestId("publish-controls");
+    expect(publish.closest(".code-thread-environment__content")).toBeNull();
+  });
+
   it("projects an authoritative identity from the ready observation", async () => {
     render(
       <CodeThreadEnvironment
