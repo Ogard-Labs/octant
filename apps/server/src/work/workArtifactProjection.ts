@@ -7,6 +7,7 @@ import type {
 } from "@octant/contracts/work-artifacts";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { PreviewSourceVersion } from "@octant/contracts/previews";
+import { hydrateJournalProjection } from "../persistence/journalHydration";
 
 export interface WorkArtifactEntry {
   readonly artifactId: WorkArtifactId;
@@ -173,4 +174,45 @@ export class WorkArtifactProjection {
 
 function relativePathFor(displayName: string): string {
   return canonicalizeWorkRelativePath(displayName);
+}
+
+/**
+ * Rebuild the artifact projection from the authoritative journal. Fails closed
+ * when the scan exceeds the shared hydration cap so a partial rebuild is never
+ * served as current.
+ */
+export function hydrateWorkArtifactProjectionFromJournal(input: {
+  readonly replay: (cursor: {
+    afterSequence: number;
+    limit: number;
+    aggregateType?: string;
+  }) => ReadonlyArray<{
+    readonly globalSequence: number;
+    readonly aggregateType?: string;
+    readonly eventName: string;
+    readonly eventVersion: number;
+    readonly payload: unknown;
+  }>;
+  readonly projection: WorkArtifactProjection;
+  readonly maxScan?: number;
+}): "ok" | "snapshot-required" {
+  return hydrateJournalProjection({
+    replay: input.replay,
+    aggregateType: "work-artifact",
+    ...(input.maxScan === undefined ? {} : { maxScan: input.maxScan }),
+    apply: (envelope) => {
+      if (
+        (envelope.aggregateType !== undefined && envelope.aggregateType !== "work-artifact") ||
+        envelope.eventName !== "work.artifact-mutation-recorded@1" ||
+        envelope.eventVersion !== 1
+      ) {
+        return;
+      }
+      try {
+        input.projection.apply(envelope.payload as Parameters<WorkArtifactProjection["apply"]>[0]);
+      } catch {
+        // Ignore invalid historical frames during best-effort hydration.
+      }
+    },
+  });
 }

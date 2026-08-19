@@ -161,45 +161,4 @@ function fidelityLabel(level: "full" | "limited"): string {
   return level === "full" ? "full fidelity" : "limited fidelity";
 }
 
-/**
- * Best-effort rebuild of the artifact projection from the authoritative journal.
- * Failures on individual frames are skipped so overview composition remains
- * available from valid frames.
- */
-export function hydrateWorkArtifactProjectionFromJournal(input: {
-  readonly replay: (cursor: { afterSequence: number; limit: number }) => ReadonlyArray<{
-    readonly globalSequence: number;
-    readonly aggregateType: string;
-    readonly eventName: string;
-    readonly eventVersion: number;
-    readonly payload: unknown;
-  }>;
-  readonly projection: WorkArtifactProjection;
-  readonly maxScan?: number;
-}): void {
-  const maxScan = input.maxScan ?? 100_000;
-  let afterSequence = 0;
-  let scanned = 0;
-  for (;;) {
-    const batch = input.replay({ afterSequence, limit: 1_000 });
-    if (batch.length === 0) break;
-    for (const envelope of batch) {
-      afterSequence = envelope.globalSequence;
-      scanned += 1;
-      if (scanned > maxScan) return;
-      if (
-        envelope.aggregateType !== "work-artifact" ||
-        envelope.eventName !== "work.artifact-mutation-recorded@1" ||
-        envelope.eventVersion !== 1
-      ) {
-        continue;
-      }
-      try {
-        input.projection.apply(envelope.payload as Parameters<WorkArtifactProjection["apply"]>[0]);
-      } catch {
-        // Ignore invalid historical frames during best-effort hydration.
-      }
-    }
-    if (batch.length < 1_000) break;
-  }
-}
+export { hydrateWorkArtifactProjectionFromJournal } from "./workArtifactProjection";

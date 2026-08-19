@@ -11,6 +11,7 @@ import {
   type ProjectId,
 } from "@octant/contracts";
 import { WORK_TURN_CAPABILITIES } from "@octant/contracts";
+import { hydrateJournalProjection } from "../persistence/journalHydration";
 
 /**
  * Rebuildable in-memory Work turn projection. Journaled turn-accepted and
@@ -138,31 +139,36 @@ export class WorkTurnProjection {
 }
 
 export function hydrateWorkTurnProjectionFromJournal(input: {
-  readonly replay: (cursor: { afterSequence: number; limit: number }) => ReadonlyArray<{
+  readonly replay: (cursor: {
+    afterSequence: number;
+    limit: number;
+    aggregateType?: string;
+  }) => ReadonlyArray<{
     readonly globalSequence: number;
+    readonly aggregateType?: string;
     readonly eventName: string;
     readonly eventVersion: number;
     readonly payload: unknown;
   }>;
   readonly projection: WorkTurnProjection;
   readonly maxScan?: number;
-}): void {
-  const maxScan = input.maxScan ?? 100_000;
-  let afterSequence = 0;
-  let scanned = 0;
-  while (scanned < maxScan) {
-    const batch = input.replay({ afterSequence, limit: 1_000 });
-    if (batch.length === 0) return;
-    for (const event of batch) {
-      scanned += 1;
-      afterSequence = event.globalSequence;
-      if (event.eventVersion !== 1) continue;
+}): "ok" | "snapshot-required" {
+  return hydrateJournalProjection({
+    replay: input.replay,
+    aggregateType: "work-turn",
+    ...(input.maxScan === undefined ? {} : { maxScan: input.maxScan }),
+    apply: (event) => {
+      if (
+        (event.aggregateType !== undefined && event.aggregateType !== "work-turn") ||
+        event.eventVersion !== 1
+      ) {
+        return;
+      }
       if (event.eventName === "work.turn-accepted@1") {
         input.projection.apply(event.payload as WorkTurnAccepted);
       } else if (event.eventName === "work.turn-updated@1") {
         input.projection.apply(event.payload as WorkTurnUpdated);
       }
-    }
-    if (batch.length < 1_000) return;
-  }
+    },
+  });
 }
