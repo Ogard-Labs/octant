@@ -1,0 +1,138 @@
+import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
+import type { ChatThreadNavigationItem } from "../shell/navigationModel";
+
+export const MENU_ITEM_CLASS =
+  "window-no-drag relative flex cursor-default items-center rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground";
+
+/**
+ * What a thread row can be asked to do without leaving the sidebar.
+ *
+ * Every action is optional, and an absent one renders no item. A menu that
+ * offers what the host cannot carry out reads as a broken feature, so the
+ * shorter menu is the honest one — the same rule the pin affordance in the Code
+ * sidebar already follows.
+ */
+export interface ThreadRowActions {
+  /** Absent when the host cannot archive this thread. */
+  readonly onArchiveThread?: (threadId: string) => void;
+  /** Absent when nothing tracks read state for this thread. */
+  readonly onMarkThreadUnread?: (threadId: string) => void;
+  /** Absent when the host cannot accept a pin. */
+  readonly onPinThread?: (threadId: string, pinned: boolean) => void;
+  /** Asks the list to open its rename field; the list owns the commit. */
+  readonly onStartRenameThread?: (threadId: string) => void;
+}
+
+export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boolean {
+  if (actions === undefined) return true;
+  return (
+    actions.onArchiveThread === undefined &&
+    actions.onMarkThreadUnread === undefined &&
+    actions.onPinThread === undefined &&
+    actions.onStartRenameThread === undefined
+  );
+}
+
+/**
+ * The right-click menu for one thread row.
+ *
+ * Copy is always offered because it needs nothing from the host, and it is the
+ * one answer that works even when a thread's own commands are unavailable.
+ */
+export function ThreadRowMenu(props: {
+  readonly actions: ThreadRowActions;
+  readonly thread: ChatThreadNavigationItem;
+}) {
+  const threadId = props.thread.navigationId ?? props.thread.threadId;
+  const pinned = props.thread.pinned === true;
+  return (
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Positioner className="z-50 window-no-drag">
+        <ContextMenuPrimitive.Popup className="window-no-drag z-50 min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none">
+          <ContextMenuPrimitive.Group>
+            <ContextMenuPrimitive.GroupLabel className="truncate px-2 py-1.5 text-xs text-muted-foreground">
+              {props.thread.title}
+            </ContextMenuPrimitive.GroupLabel>
+          </ContextMenuPrimitive.Group>
+          {props.actions.onPinThread === undefined ? null : (
+            <ContextMenuPrimitive.Item
+              className={MENU_ITEM_CLASS}
+              closeOnClick
+              label={pinned ? "Unpin" : "Pin"}
+              onClick={() => props.actions.onPinThread?.(threadId, !pinned)}
+            >
+              {pinned ? "Unpin" : "Pin"}
+            </ContextMenuPrimitive.Item>
+          )}
+          {props.actions.onStartRenameThread === undefined ? null : (
+            <ContextMenuPrimitive.Item
+              className={MENU_ITEM_CLASS}
+              closeOnClick
+              label="Rename"
+              onClick={() => props.actions.onStartRenameThread?.(threadId)}
+            >
+              Rename
+            </ContextMenuPrimitive.Item>
+          )}
+          {/* Marking an already-unread thread unread would change nothing, so
+              the item is absent rather than present and inert. */}
+          {props.actions.onMarkThreadUnread === undefined || props.thread.unread === true ? null : (
+            <ContextMenuPrimitive.Item
+              className={MENU_ITEM_CLASS}
+              closeOnClick
+              label="Mark as unread"
+              onClick={() => props.actions.onMarkThreadUnread?.(threadId)}
+            >
+              Mark as unread
+            </ContextMenuPrimitive.Item>
+          )}
+          <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
+          <ContextMenuPrimitive.Item
+            className={MENU_ITEM_CLASS}
+            closeOnClick
+            label="Copy title"
+            onClick={() => void copyText(props.thread.title)}
+          >
+            Copy title
+          </ContextMenuPrimitive.Item>
+          <ContextMenuPrimitive.Item
+            className={MENU_ITEM_CLASS}
+            closeOnClick
+            label="Copy thread ID"
+            onClick={() => void copyText(String(props.thread.threadId))}
+          >
+            Copy thread ID
+          </ContextMenuPrimitive.Item>
+          {props.actions.onArchiveThread === undefined ? null : (
+            <>
+              <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
+              <ContextMenuPrimitive.Item
+                className={MENU_ITEM_CLASS}
+                closeOnClick
+                label="Archive"
+                onClick={() => props.actions.onArchiveThread?.(threadId)}
+              >
+                Archive
+              </ContextMenuPrimitive.Item>
+            </>
+          )}
+        </ContextMenuPrimitive.Popup>
+      </ContextMenuPrimitive.Positioner>
+    </ContextMenuPrimitive.Portal>
+  );
+}
+
+/**
+ * Writes to the clipboard when the host exposes one. A host without clipboard
+ * access is not an error the reader can act on, so it stays silent — the same
+ * shape the conversation export already uses.
+ */
+async function copyText(value: string): Promise<void> {
+  const writeText = globalThis.navigator?.clipboard?.writeText;
+  if (typeof writeText !== "function") return;
+  try {
+    await writeText.call(globalThis.navigator.clipboard, value);
+  } catch {
+    // The host refused the clipboard; nothing was copied and nothing is claimed.
+  }
+}

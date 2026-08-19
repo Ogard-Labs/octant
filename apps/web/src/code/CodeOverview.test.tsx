@@ -72,6 +72,7 @@ describe("CodeOverview", () => {
       {
         executionPolicy: "approval-gated",
         lifecycle: "active",
+        providerInstanceId: "provider-one" as never,
         projectId: ids.project as never,
         threadId: ids.thread as never,
         title: "Controller foundation",
@@ -79,6 +80,7 @@ describe("CodeOverview", () => {
       {
         executionPolicy: "full-access",
         lifecycle: "active",
+        providerInstanceId: "provider-one" as never,
         projectId: "20000000-0000-4000-8000-000000000099" as never,
         threadId: "10000000-0000-4000-8000-000000000099" as never,
         title: "Another Project",
@@ -313,6 +315,7 @@ function controller(): CodeController {
   return {
     activeView: { checkout, lastSequence: 1, thread } as never,
     answerProviderRequest: vi.fn(async () => true),
+    archiveThread: vi.fn(async () => true),
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     restoreUndo: undefined,
     noteRestoreUndo: vi.fn(),
