@@ -123,8 +123,9 @@ describe("AutomationCenter default surface", () => {
       within(workRow).getByText("Weekly on Mon at 9:00 · Next run on Sep 1 at 9:00"),
     ).toBeVisible();
     expect(within(workRow).getByText("Recurring")).toBeVisible();
-    // The host that owns and runs it, named as an environment.
-    expect(within(workRow).getByText("Local")).toBeVisible();
+    // A routine on this machine carries no environment badge: badging every row
+    // would make the machine you are sitting at look like one more remote one.
+    expect(within(workRow).queryByText("Local")).toBeNull();
     expect(within(workRow).getByText("Enabled")).toBeVisible();
     expect(within(workRow).getByText("Last run: Completed")).toBeVisible();
 
@@ -563,5 +564,88 @@ describe("AutomationCenter calendar view", () => {
     await userEvent.click(screen.getByRole("button", { name: "Previous month" }));
 
     expect(within(heading).getByRole("heading").textContent).toBe(before);
+  });
+});
+
+describe("AutomationCenter arranging", () => {
+  const remoteSummary = automationSummaryFixture({
+    id: AUTOMATION_UI_TEST_IDS.otherAutomation,
+    displayName: "Devbox nightly",
+    hostId: "devbox",
+    lifecycle: "enabled",
+    latestRunLifecycle: "failed",
+  } as never);
+
+  function renderWithRemote() {
+    return renderCenter({
+      client: fakeClient({
+        list: vi.fn(async () => ({
+          kind: "automation-list" as const,
+          items: [workSummary, remoteSummary],
+        })),
+      } as Partial<AutomationClient>),
+      environmentNames: new Map([["devbox", "Devbox"]]),
+    });
+  }
+
+  it("badges a routine that belongs to another environment, and only that one", async () => {
+    renderWithRemote();
+    const rows = await screen.findByRole("list", { name: "Automations" });
+
+    const remote = within(rows).getByRole("listitem", { name: "Devbox nightly" });
+    expect(within(remote).getByText("Devbox")).toBeVisible();
+    const local = within(rows).getByRole("listitem", { name: "Weekly summary" });
+    expect(within(local).queryByText("Local")).toBeNull();
+  });
+
+  it("keeps only the routines whose status was asked for", async () => {
+    renderWithRemote();
+    await screen.findByRole("list", { name: "Automations" });
+
+    await userEvent.selectOptions(screen.getByLabelText("Status"), "needs-attention");
+
+    const rows = screen.getByRole("list", { name: "Automations" });
+    expect(within(rows).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(rows).getByRole("listitem", { name: "Devbox nightly" })).toBeVisible();
+  });
+
+  it("groups by environment under the same names the filter uses", async () => {
+    renderWithRemote();
+    await screen.findByRole("list", { name: "Automations" });
+
+    await userEvent.selectOptions(screen.getByLabelText("Group"), "environment");
+
+    const local = screen.getByRole("list", { name: "Automations in Local" });
+    const devbox = screen.getByRole("list", { name: "Automations in Devbox" });
+    // Grouping is arrangement, not authority: the same rows, under headings.
+    expect(
+      within(local)
+        .getAllByRole("listitem")
+        .map((row) => row.getAttribute("aria-label")),
+    ).toEqual(["Weekly summary"]);
+    expect(
+      within(devbox)
+        .getAllByRole("listitem")
+        .map((row) => row.getAttribute("aria-label")),
+    ).toEqual(["Devbox nightly"]);
+  });
+
+  it("says nothing matched rather than showing an empty group", async () => {
+    renderCenter({
+      client: fakeClient({
+        list: vi.fn(async () => ({
+          kind: "automation-list" as const,
+          items: [workSummary],
+        })),
+      } as Partial<AutomationClient>),
+    });
+    await screen.findByRole("list", { name: "Automations" });
+
+    await userEvent.selectOptions(screen.getByLabelText("Status"), "needs-attention");
+
+    expect(screen.queryByRole("list", { name: /Automations/ })).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "No automations match the current filters",
+    );
   });
 });

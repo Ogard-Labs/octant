@@ -8,6 +8,14 @@ import type {
 } from "@octant/contracts";
 import type { AutomationClient, AutomationClientCommand } from "@octant/client-runtime";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
+import { environmentLabel as sharedEnvironmentLabel } from "@octant/client-runtime/environment-selection";
+import {
+  arrangeItems,
+  DEFAULT_LIST_ARRANGEMENT,
+  matchesListStatus,
+  type ArrangeableItem,
+  type ListArrangement,
+} from "@octant/client-runtime/list-arrangement";
 import { ChevronDown, Plus, Search } from "lucide-react";
 import { RoutineCalendar } from "./RoutineCalendar";
 import { RoutineComposer } from "./RoutineComposer";
@@ -19,6 +27,7 @@ import {
 } from "./routinePresentation";
 import { useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
+import { ListArrangementMenu } from "../shell/ListArrangementMenu";
 import { OctantButton } from "../ui/base/OctantButton";
 import { AutomationDefinitionEditor } from "./AutomationDefinitionEditor";
 import {
@@ -99,20 +108,27 @@ export function AutomationCenter(props: AutomationCenterProps) {
   const [deliveryStatus, setDeliveryStatus] = useState<
     AutomationNotificationDeliveryQueryResponse["status"] | undefined
   >(undefined);
-  const listRef = useRef<HTMLUListElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [includeCompleted, setIncludeCompleted] = useState(false);
   const [view, setView] = useState<"list" | "calendar">("list");
   const [calendarMonth, setCalendarMonth] = useState<string | undefined>(undefined);
+  const [arrangement, setArrangement] = useState<ListArrangement>(DEFAULT_LIST_ARRANGEMENT);
   const generateId = props.generateId ?? (() => crypto.randomUUID());
   const format: AutomationFormatOptions =
     props.displayTimeZone === undefined ? {} : { timeZone: props.displayTimeZone };
   // Read once per render rather than per row, so every row on a page agrees
   // about what "tomorrow" means.
   const nowInstant = (props.now ?? (() => new Date().toISOString()))();
-  const environmentLabel = (hostId: string): string =>
-    hostId === props.localHostId
-      ? "Local"
-      : (props.environmentNames?.get(hostId) ?? "Another environment");
+  // One vocabulary for what an environment is called, shared with the sidebar
+  // filter, so a row and the filter above it never disagree about a host's name.
+  const environmentLabel = (hostId: string): string => {
+    const named = props.environmentNames?.get(hostId);
+    return sharedEnvironmentLabel({
+      hostId,
+      ...(named === undefined ? {} : { hostDisplayName: named }),
+      ...(props.localHostId === undefined ? {} : { localHostId: props.localHostId }),
+    });
+  };
 
   const projectNames = new Map(
     props.catalog.projects.map((project) => [String(project.projectId), project.name]),
@@ -286,6 +302,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                   value={controller.search}
                 />
               </label>
+              <ListArrangementMenu arrangement={arrangement} onChange={setArrangement} />
               <fieldset className="automation-center__views">
                 <legend className="sr-only">Choose a view</legend>
                 {(["list", "calendar"] as const).map((candidate) => (
@@ -345,15 +362,20 @@ export function AutomationCenter(props: AutomationCenterProps) {
                 onMonthChange={setCalendarMonth}
                 onSelect={selectRow}
                 // The calendar draws what the list would draw: the same search,
-                // the same filters, the same completed rows hidden or shown.
+                // the same filters, the same status, the same completed rows
+                // hidden or shown. Two views of one set that disagreed about
+                // which routines exist would be two answers to one question.
                 routines={controller.list.items.filter(
                   (summary) =>
-                    includeCompleted || !routineHasCompleted(summary.trigger, summary.nextDueAt),
+                    (includeCompleted ||
+                      !routineHasCompleted(summary.trigger, summary.nextDueAt)) &&
+                    matchesListStatus(arrangeableRoutine(summary, undefined), arrangement.status),
                 )}
                 timeZone={props.displayTimeZone ?? "UTC"}
               />
             ) : (
               <AutomationListBody
+                arrangement={arrangement}
                 controller={controller}
                 format={format}
                 listRef={listRef}
@@ -362,6 +384,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                 openMenuId={openMenuId}
                 projectNames={projectNames}
                 environmentLabel={environmentLabel}
+                {...(props.localHostId === undefined ? {} : { localHostId: props.localHostId })}
                 now={nowInstant}
                 includeCompleted={includeCompleted}
                 generateId={generateId}
@@ -375,6 +398,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
           <div className="automation-center__detail-pane">
             <AutomationDefinitionEditor
               catalog={props.catalog}
+              {...(props.localHostId === undefined ? {} : { localHostId: props.localHostId })}
               onCancel={() => setEditor({ kind: "closed" })}
               onSubmit={submitEditor}
               {...(props.now === undefined ? {} : { now: props.now })}
@@ -385,6 +409,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
           <div className="automation-center__detail-pane">
             <AutomationDefinitionEditor
               catalog={props.catalog}
+              {...(props.localHostId === undefined ? {} : { localHostId: props.localHostId })}
               initial={controller.detail.automation}
               onCancel={() => setEditor({ kind: "closed" })}
               onSubmit={submitEditor}
@@ -417,7 +442,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
 function AutomationListBody(props: {
   readonly controller: AutomationCenterController;
   readonly format: AutomationFormatOptions;
-  readonly listRef: React.RefObject<HTMLUListElement | null>;
+  readonly listRef: React.RefObject<HTMLDivElement | null>;
   readonly onRunCommand: (
     summary: AutomationSummary,
     command: AutomationClientCommand,
@@ -427,6 +452,8 @@ function AutomationListBody(props: {
   readonly openMenuId: string | undefined;
   readonly projectNames: ReadonlyMap<string, string>;
   readonly environmentLabel: (hostId: string) => string;
+  readonly localHostId?: string;
+  readonly arrangement: ListArrangement;
   readonly now: string;
   readonly includeCompleted: boolean;
   readonly generateId: () => string;
@@ -455,7 +482,14 @@ function AutomationListBody(props: {
       />
     );
   }
-  if (controller.list.items.length === 0) {
+  const groups = arrangeRoutines({
+    summaries: controller.list.items,
+    arrangement: props.arrangement,
+    includeCompleted: props.includeCompleted,
+    projectNames: props.projectNames,
+    environmentLabel: props.environmentLabel,
+  });
+  if (groups.length === 0) {
     return (
       <div className="automation-center__empty" role="status">
         <p>No automations match the current filters.</p>
@@ -464,153 +498,245 @@ function AutomationListBody(props: {
     );
   }
   return (
-    <ul aria-label="Automations" className="automation-center__rows" ref={props.listRef}>
-      {controller.list.items
-        .filter(
-          (summary) =>
-            props.includeCompleted || !routineHasCompleted(summary.trigger, summary.nextDueAt),
-        )
-        .map((summary) => (
-          <li aria-label={summary.displayName} className="automation-row" key={String(summary.id)}>
-            <button
-              className="automation-row__open"
-              data-automation-row={String(summary.id)}
-              onClick={() => props.onSelect(String(summary.id))}
-              type="button"
-            >
-              <span className="automation-row__name">{summary.displayName}</span>
-            </button>
-            <div className="automation-row__meta">
-              <span className="automation-row__project">
-                {props.projectNames.get(String(summary.projectId)) ?? "Project"}
-              </span>
-              <span className="automation-row__mode">{automationModeLabel(summary.mode)}</span>
-              <span className="automation-row__schedule">
-                {routineScheduleLine(summary.trigger, summary.nextDueAt, props.now, props.format)}
-              </span>
-              <span
-                className="automation-row__cadence"
-                data-cadence={routineCadence(summary.trigger)}
+    <div className="automation-center__groups" ref={props.listRef}>
+      {groups.map((group) => (
+        <section className="automation-center__group" key={group.heading}>
+          {group.heading === "" ? null : (
+            <h3 className="automation-center__group-heading">{group.heading}</h3>
+          )}
+          <ul
+            aria-label={group.heading === "" ? "Automations" : `Automations in ${group.heading}`}
+            className="automation-center__rows"
+          >
+            {group.items.map((summary) => (
+              <li
+                aria-label={summary.displayName}
+                className="automation-row"
+                key={String(summary.id)}
               >
-                {routineCadenceLabel(routineCadence(summary.trigger))}
-              </span>
-              <span className="automation-row__environment">
-                {props.environmentLabel(String(summary.hostId))}
-              </span>
-              <span className="automation-row__state" data-lifecycle={summary.lifecycle}>
-                {automationLifecycleLabel(summary.lifecycle)}
-              </span>
-              {summary.latestRunLifecycle === undefined ? null : (
-                <span
-                  className="automation-row__status"
-                  data-run-lifecycle={summary.latestRunLifecycle}
+                <button
+                  className="automation-row__open"
+                  data-automation-row={String(summary.id)}
+                  onClick={() => props.onSelect(String(summary.id))}
+                  type="button"
                 >
-                  {`Last run: ${automationRunStatusLabel(summary.latestRunLifecycle)}`}
-                </span>
-              )}
-            </div>
-            <div className="automation-row__menu-wrap">
-              <OctantButton
-                aria-expanded={props.openMenuId === String(summary.id)}
-                aria-haspopup="true"
-                aria-label={`Actions for ${summary.displayName}`}
-                className="automation-row__menu-toggle"
-                onClick={() =>
-                  props.setOpenMenuId(
-                    props.openMenuId === String(summary.id) ? undefined : String(summary.id),
-                  )
-                }
-                type="button"
-                variant="ghost"
-              >
-                <span>Actions</span>
-                <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
-              </OctantButton>
-              {props.openMenuId !== String(summary.id) ? null : (
-                <div className="automation-row__menu">
-                  {summary.lifecycle === "enabled" ? (
-                    <OctantButton
-                      onClick={() =>
-                        void props.onRunCommand(
-                          summary,
-                          {
-                            kind: "pause-automation",
-                            automationId: summary.id,
-                            expectedVersion: summary.version,
-                          },
-                          "Automation paused.",
-                        )
-                      }
-                      type="button"
-                      variant="ghost"
+                  <span className="automation-row__name">{summary.displayName}</span>
+                </button>
+                <div className="automation-row__meta">
+                  <span className="automation-row__project">
+                    {props.projectNames.get(String(summary.projectId)) ?? "Project"}
+                  </span>
+                  <span className="automation-row__mode">{automationModeLabel(summary.mode)}</span>
+                  <span className="automation-row__schedule">
+                    {routineScheduleLine(
+                      summary.trigger,
+                      summary.nextDueAt,
+                      props.now,
+                      props.format,
+                    )}
+                  </span>
+                  <span
+                    className="automation-row__cadence"
+                    data-cadence={routineCadence(summary.trigger)}
+                  >
+                    {routineCadenceLabel(routineCadence(summary.trigger))}
+                  </span>
+                  {String(summary.hostId) === props.localHostId ? null : (
+                    // Only a routine that belongs somewhere else is badged. Badging
+                    // every row would make the machine you are sitting at look like
+                    // one more remote environment.
+                    <span className="automation-row__environment">
+                      {props.environmentLabel(String(summary.hostId))}
+                    </span>
+                  )}
+                  <span className="automation-row__state" data-lifecycle={summary.lifecycle}>
+                    {automationLifecycleLabel(summary.lifecycle)}
+                  </span>
+                  {summary.latestRunLifecycle === undefined ? null : (
+                    <span
+                      className="automation-row__status"
+                      data-run-lifecycle={summary.latestRunLifecycle}
                     >
-                      Pause
-                    </OctantButton>
-                  ) : summary.lifecycle === "paused" ? (
-                    <OctantButton
-                      onClick={() =>
-                        void props.onRunCommand(
-                          summary,
-                          {
-                            kind: "resume-automation",
-                            automationId: summary.id,
-                            expectedVersion: summary.version,
-                          },
-                          "Automation resumed.",
-                        )
-                      }
-                      type="button"
-                      variant="ghost"
-                    >
-                      Resume
-                    </OctantButton>
-                  ) : null}
-                  {summary.lifecycle === "archived" ? null : (
-                    <>
-                      <OctantButton
-                        onClick={() =>
-                          void props.onRunCommand(
-                            summary,
-                            {
-                              kind: "run-now-automation",
-                              automationId: summary.id,
-                              expectedVersion: summary.version,
-                              runNowRequestId: props.generateId(),
-                            } as unknown as AutomationClientCommand,
-                            "Run requested.",
-                          )
-                        }
-                        type="button"
-                        variant="ghost"
-                      >
-                        Run now
-                      </OctantButton>
-                      <OctantButton
-                        onClick={() =>
-                          void props.onRunCommand(
-                            summary,
-                            {
-                              kind: "archive-automation",
-                              automationId: summary.id,
-                              expectedVersion: summary.version,
-                            },
-                            "Automation archived.",
-                          )
-                        }
-                        type="button"
-                        variant="ghost"
-                      >
-                        Archive
-                      </OctantButton>
-                    </>
+                      {`Last run: ${automationRunStatusLabel(summary.latestRunLifecycle)}`}
+                    </span>
                   )}
                 </div>
-              )}
-            </div>
-          </li>
-        ))}
-    </ul>
+                <div className="automation-row__menu-wrap">
+                  <OctantButton
+                    aria-expanded={props.openMenuId === String(summary.id)}
+                    aria-haspopup="true"
+                    aria-label={`Actions for ${summary.displayName}`}
+                    className="automation-row__menu-toggle"
+                    onClick={() =>
+                      props.setOpenMenuId(
+                        props.openMenuId === String(summary.id) ? undefined : String(summary.id),
+                      )
+                    }
+                    type="button"
+                    variant="ghost"
+                  >
+                    <span>Actions</span>
+                    <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
+                  </OctantButton>
+                  {props.openMenuId !== String(summary.id) ? null : (
+                    <div className="automation-row__menu">
+                      {summary.lifecycle === "enabled" ? (
+                        <OctantButton
+                          onClick={() =>
+                            void props.onRunCommand(
+                              summary,
+                              {
+                                kind: "pause-automation",
+                                automationId: summary.id,
+                                expectedVersion: summary.version,
+                              },
+                              "Automation paused.",
+                            )
+                          }
+                          type="button"
+                          variant="ghost"
+                        >
+                          Pause
+                        </OctantButton>
+                      ) : summary.lifecycle === "paused" ? (
+                        <OctantButton
+                          onClick={() =>
+                            void props.onRunCommand(
+                              summary,
+                              {
+                                kind: "resume-automation",
+                                automationId: summary.id,
+                                expectedVersion: summary.version,
+                              },
+                              "Automation resumed.",
+                            )
+                          }
+                          type="button"
+                          variant="ghost"
+                        >
+                          Resume
+                        </OctantButton>
+                      ) : null}
+                      {summary.lifecycle === "archived" ? null : (
+                        <>
+                          <OctantButton
+                            onClick={() =>
+                              void props.onRunCommand(
+                                summary,
+                                {
+                                  kind: "run-now-automation",
+                                  automationId: summary.id,
+                                  expectedVersion: summary.version,
+                                  runNowRequestId: props.generateId(),
+                                } as unknown as AutomationClientCommand,
+                                "Run requested.",
+                              )
+                            }
+                            type="button"
+                            variant="ghost"
+                          >
+                            Run now
+                          </OctantButton>
+                          <OctantButton
+                            onClick={() =>
+                              void props.onRunCommand(
+                                summary,
+                                {
+                                  kind: "archive-automation",
+                                  automationId: summary.id,
+                                  expectedVersion: summary.version,
+                                },
+                                "Automation archived.",
+                              )
+                            }
+                            type="button"
+                            variant="ghost"
+                          >
+                            Archive
+                          </OctantButton>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
+    </div>
   );
+}
+
+/**
+ * The routines a list shows, arranged.
+ *
+ * The include-completed toggle runs first because it answers a different
+ * question from the status filter: one is about a one-time routine whose day
+ * has passed, the other about how a routine is doing.
+ */
+function arrangeRoutines(input: {
+  readonly summaries: ReadonlyArray<AutomationSummary>;
+  readonly arrangement: ListArrangement;
+  readonly includeCompleted: boolean;
+  readonly projectNames: ReadonlyMap<string, string>;
+  readonly environmentLabel: (hostId: string) => string;
+}): ReadonlyArray<{
+  readonly heading: string;
+  readonly items: ReadonlyArray<AutomationSummary>;
+}> {
+  const visible = input.summaries.filter(
+    (summary) => input.includeCompleted || !routineHasCompleted(summary.trigger, summary.nextDueAt),
+  );
+  const byId = new Map(visible.map((summary) => [String(summary.id), summary]));
+  const arranged = arrangeItems(
+    visible.map((summary) =>
+      arrangeableRoutine(summary, input.projectNames.get(String(summary.projectId))),
+    ),
+    input.arrangement,
+    { environmentLabel: input.environmentLabel },
+  );
+  return arranged.map((group) => ({
+    heading: group.heading,
+    items: group.items.flatMap((item) => {
+      const summary = byId.get(item.id);
+      return summary === undefined ? [] : [summary];
+    }),
+  }));
+}
+
+/**
+ * One routine as an arranging view sees it.
+ *
+ * Shared by the list and the calendar so the status filter means the same
+ * thing in both. Two views of one set that disagreed about which routines
+ * exist would be two answers to one question.
+ */
+function arrangeableRoutine(
+  summary: AutomationSummary,
+  projectName: string | undefined,
+): ArrangeableItem {
+  return {
+    id: String(summary.id),
+    hostId: String(summary.hostId),
+    name: summary.displayName,
+    status: routineListStatus(summary),
+    ...(projectName === undefined ? {} : { groupName: projectName }),
+    updatedAt: summary.updatedAt,
+  };
+}
+
+/**
+ * What a routine's row says about how it is doing.
+ *
+ * A failed last run outranks being enabled: "this is on" is not the useful
+ * sentence when the last thing it did went wrong.
+ */
+function routineListStatus(summary: AutomationSummary): "active" | "needs-attention" | "finished" {
+  if (summary.latestRunLifecycle === "failed" || summary.latestRunLifecycle === "interrupted") {
+    return "needs-attention";
+  }
+  return summary.lifecycle === "enabled" ? "active" : "finished";
 }
 
 function AutomationDetail(props: {

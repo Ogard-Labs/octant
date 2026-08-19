@@ -673,3 +673,39 @@
   color: var(--octant-text-muted);
   font-size: 0.72rem;
 }
+.list-arrangement {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.list-arrangement__field select {
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--octant-border);
+  border-radius: 0.4rem;
+  background: var(--octant-surface-raised);
+  color: inherit;
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.automation-center__groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 0;
+}
+
+.automation-center__group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.automation-center__group-heading {
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
