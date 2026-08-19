@@ -114,19 +114,17 @@ export function MemoryEntryDialog(props: MemoryEntryDialogProps) {
         </label>
         <div className="project-dialog__actions">
           <OctantButton
-            className="project-button project-button--quiet"
             disabled={props.busy}
             onClick={requestClose}
             type="button"
-            variant="ghost"
+            variant="outline"
           >
             Cancel
           </OctantButton>
           <OctantButton
-            className="project-button"
             disabled={props.busy || value.trim() === ""}
             type="submit"
-            variant="secondary"
+            variant="default"
           >
             {props.mode.kind === "create"
               ? "Add memory"
