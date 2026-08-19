@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId, WindowId } from "./shell";
 import { ChatThreadId } from "./chat";
+import { CanvasId } from "./canvasIdentity";
 import { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
 
@@ -125,6 +126,7 @@ export type ZenViewport = typeof ZenViewport.Type;
 export const ZenElementKind = Schema.Literal(
   "thread",
   "terminal",
+  "canvas",
   "notes",
   "checklist",
   "timer",
@@ -183,6 +185,31 @@ export const ZenTerminalElementPayload = Schema.Struct({
   .pipe(Schema.filter((element) => element.sourceContext.threadKind === "code"))
   .annotations(strict);
 export type ZenTerminalElementPayload = typeof ZenTerminalElementPayload.Type;
+
+/**
+ * A canvas this window may already open, pinned where the user can watch it.
+ *
+ * The canvas is addressed, never described: the card names the document, and
+ * every read goes to the same journal a workspace tab reads, under the same
+ * authority the window already has for that Project. Pinning grants nothing —
+ * a card naming a canvas this window may not see is refused, and one naming a
+ * canvas it may see reaches no further than the tab already could.
+ *
+ * The card holds no canvas state of its own beyond where it sits: no copy of
+ * the content, no pinned version, no separate revision history. A card and a
+ * tab on one canvas therefore cannot come to disagree about what it says.
+ */
+export const ZenCanvasElementPayload = Schema.Struct({
+  elementId: ZenElementId,
+  kind: Schema.Literal("canvas"),
+  canvasId: CanvasId,
+  geometry: ZenGeometry,
+  zIndex: Schema.Int.pipe(Schema.positive(), Schema.lessThanOrEqualTo(1000)),
+  minimized: Schema.Boolean,
+  locked: Schema.Boolean,
+  title: Schema.optional(Schema.NonEmptyTrimmedString),
+}).annotations(strict);
+export type ZenCanvasElementPayload = typeof ZenCanvasElementPayload.Type;
 
 export const ZenNotesElementPayload = Schema.Struct({
   elementId: ZenElementId,
@@ -351,6 +378,7 @@ export type ZenRecipeElementPayload = typeof ZenRecipeElementPayload.Type;
 export const ZenElementPayload = Schema.Union(
   ZenThreadElementPayload,
   ZenTerminalElementPayload,
+  ZenCanvasElementPayload,
   ZenNotesElementPayload,
   ZenChecklistElementPayload,
   ZenTimerElementPayload,
@@ -893,6 +921,28 @@ export const ZenResearchDockResult = Schema.Struct({
   space: ZenSpace,
 }).annotations(strict);
 export type ZenResearchDockResult = typeof ZenResearchDockResult.Type;
+
+/**
+ * Pin a canvas this window may already open.
+ *
+ * The request names the canvas, never the card: the server confirms this
+ * window may read the document and writes the card itself, so a caller cannot
+ * pin a canvas by describing one.
+ */
+export const ZenCanvasAttachRequest = Schema.Struct({
+  canvasId: CanvasId,
+  expectedVersion: AggregateVersion,
+  geometry: Schema.optional(ZenGeometry),
+  title: Schema.optional(Schema.NonEmptyTrimmedString),
+}).annotations(strict);
+export type ZenCanvasAttachRequest = typeof ZenCanvasAttachRequest.Type;
+
+export const ZenCanvasAttachResult = Schema.Struct({
+  result: Schema.Literal("canvas-attached"),
+  elementId: ZenElementId,
+  space: ZenSpace,
+}).annotations(strict);
+export type ZenCanvasAttachResult = typeof ZenCanvasAttachResult.Type;
 
 export const ZenThreadContinuationTarget = Schema.Struct({
   result: Schema.Literal("thread-continuation"),
@@ -1524,6 +1574,8 @@ export const decodeZenThreadAttachRequest = Schema.decodeUnknownSync(ZenThreadAt
 export const decodeZenThreadAttachResult = Schema.decodeUnknownSync(ZenThreadAttachResult);
 export const decodeZenResearchDockRequest = Schema.decodeUnknownSync(ZenResearchDockRequest);
 export const decodeZenResearchDockResult = Schema.decodeUnknownSync(ZenResearchDockResult);
+export const decodeZenCanvasAttachRequest = Schema.decodeUnknownSync(ZenCanvasAttachRequest);
+export const decodeZenCanvasAttachResult = Schema.decodeUnknownSync(ZenCanvasAttachResult);
 export const decodeZenTerminalAttachRequest = Schema.decodeUnknownSync(ZenTerminalAttachRequest);
 export const decodeZenTerminalAttachResult = Schema.decodeUnknownSync(ZenTerminalAttachResult);
 export const decodeZenThreadContinuationTarget = Schema.decodeUnknownSync(

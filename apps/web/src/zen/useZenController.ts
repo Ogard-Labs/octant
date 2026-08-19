@@ -19,6 +19,7 @@ import type {
 import { MAX_ZEN_BACKGROUND_BYTES } from "@octant/contracts/zen";
 import { cycleZenSpace } from "@octant/domain";
 import type { WindowId } from "@octant/contracts/shell";
+import type { CanvasId } from "@octant/contracts/canvas";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -783,6 +784,39 @@ export function useZenController(options: UseZenControllerOptions) {
   );
 
   /**
+   * Pin a canvas this window may already open.
+   *
+   * The request names the document; the card is written by the server after
+   * Canvas confirms this window may read it, so nothing here decides what a
+   * canvas card is allowed to be.
+   */
+  const pinCanvas = useCallback(
+    async (request: { readonly canvasId: CanvasId; readonly title?: string }) => {
+      if (client === undefined || space === null) return;
+      setPanelBusy(true);
+      try {
+        const result = await client.attachCanvas({
+          canvasId: request.canvasId,
+          expectedVersion: space.version,
+          ...(request.title === undefined ? {} : { title: request.title }),
+        });
+        if (mounted.current) {
+          setSpace(result.space);
+          presentationSpace.current = result.space;
+          setMessage(undefined);
+        }
+      } catch (error) {
+        if (mounted.current) {
+          setMessage(error instanceof Error ? error.message : "That canvas could not be pinned.");
+        }
+      } finally {
+        if (mounted.current) setPanelBusy(false);
+      }
+    },
+    [client, space],
+  );
+
+  /**
    * Dock, rearrange, or close this space's research browser.
    *
    * The request names a thread, and the server resolves the source context it
@@ -1289,6 +1323,7 @@ export function useZenController(options: UseZenControllerOptions) {
     space,
     pinTerminal,
     dockResearch,
+    pinCanvas,
     focusZone,
     addSpace,
     renameSpace,

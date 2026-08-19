@@ -5,6 +5,8 @@ import type {
   ZenFocusZone,
   ZenFocusZoneCommand,
   ZenFocusZoneResult,
+  ZenCanvasAttachRequest,
+  ZenCanvasAttachResult,
   ZenResearchDockRequest,
   ZenResearchDockResult,
   ZenTerminalAttachRequest,
@@ -68,6 +70,12 @@ function createClient(overrides: Partial<ZenClient> = {}): ZenClient {
         overrides.attachTerminal !== undefined
           ? await overrides.attachTerminal(request)
           : Promise.reject(new Error("This window pins no terminals.")),
+    ),
+    attachCanvas: vi.fn(
+      async (request: ZenCanvasAttachRequest): Promise<ZenCanvasAttachResult> =>
+        overrides.attachCanvas !== undefined
+          ? await overrides.attachCanvas(request)
+          : Promise.reject(new Error("This window pins no canvases.")),
     ),
     dockResearch: vi.fn(
       async (request: ZenResearchDockRequest): Promise<ZenResearchDockResult> =>

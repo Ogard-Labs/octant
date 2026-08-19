@@ -20,6 +20,8 @@ import {
   type ZenResearchDock,
   type ZenResearchDockRequest,
   type ZenResearchDockResult,
+  type ZenCanvasAttachRequest,
+  type ZenCanvasAttachResult,
   type ZenTerminalAttachRequest,
   type ZenTerminalAttachResult,
   decodeZenThreadCatalogRef,
@@ -41,6 +43,7 @@ import {
   normalizeZenReferenceUrl,
 } from "@octant/contracts/zen";
 import type { ChatThread, ChatThreadId, ChatThreadView } from "@octant/contracts/chat";
+import type { CanvasId } from "@octant/contracts/canvas";
 import type { CodeCheckoutId, CodeTerminalId, CodeThreadId } from "@octant/contracts/code";
 import type { WindowId, HostId } from "@octant/contracts/shell";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
@@ -77,6 +80,17 @@ export const DEFAULT_ZEN_SPACE_NAME = "Focus";
  * ownership rule, and refuses the pin when that service refuses the read, so a
  * pinned card can never name a terminal the window could not already reach.
  */
+/**
+ * Whether a canvas is one this window may read. Zen pins a document it can
+ * name; whether the caller may reach it stays Canvas's decision.
+ */
+export interface ZenCanvasPort {
+  readonly read: (
+    windowId: WindowId,
+    canvasId: CanvasId,
+  ) => Promise<{ readonly title: string } | undefined>;
+}
+
 export interface ZenCodeTerminalPort {
   readonly read: (
     windowId: WindowId,
@@ -129,6 +143,11 @@ export interface ZenServiceDependencies {
    * it can name; whether the caller may reach it stays Code's decision.
    */
   readonly codeTerminals?: ZenCodeTerminalPort;
+  /**
+   * Whether a canvas is one this window may read. Without it there is nothing
+   * to authorize a card against, so Zen refuses to pin rather than assuming.
+   */
+  readonly canvases?: ZenCanvasPort;
   readonly uuid?: () => string;
   readonly assistantChat?: ZenAssistantChatPort;
   readonly assistantProviderState?: (thread: ChatThread) => ZenAssistantProviderState;
@@ -522,6 +541,76 @@ export class ZenService {
       );
       return {
         result: "research-docked",
+        space: this.deps.eventStore.append(updated, request.expectedVersion),
+      };
+    } catch (error) {
+      if (error instanceof ZenPolicyRejected) {
+        throw new ZenError({ reason: error.code, spaceId: space.spaceId });
+      }
+      if (this.deps.eventStore.isConcurrencyConflict(error)) {
+        throw new ZenError({ reason: "stale-version", spaceId: space.spaceId });
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Pin a canvas this window may already open.
+   *
+   * The request names the canvas, and Canvas answers whether this window may
+   * read it; the card is written from that answer. The card carries the
+   * canvas's identity and where it sits and nothing else, so every read it
+   * makes later goes back through the same authorization as a workspace tab's.
+   */
+  async attachCanvas(
+    windowId: WindowId,
+    request: ZenCanvasAttachRequest,
+    signal?: AbortSignal,
+  ): Promise<ZenCanvasAttachResult> {
+    const space = this.#activeSpace(windowId);
+    if (space === null) throw new ZenError({ reason: "unknown-space" });
+    if (space.windowId !== windowId) {
+      throw new ZenError({ reason: "wrong-window", spaceId: space.spaceId });
+    }
+    if (this.deps.canvases === undefined || this.deps.uuid === undefined) {
+      throw new ZenError({ reason: "missing-capability", spaceId: space.spaceId });
+    }
+    if (signal?.aborted) throw new ZenError({ reason: "interrupted", spaceId: space.spaceId });
+    const canvas = await this.deps.canvases.read(windowId, request.canvasId);
+    if (canvas === undefined) {
+      throw new ZenError({ reason: "unavailable-source", spaceId: space.spaceId });
+    }
+    if (signal?.aborted) throw new ZenError({ reason: "interrupted", spaceId: space.spaceId });
+    const elementId = decodeZenElementId(this.deps.uuid());
+    const element = {
+      elementId,
+      kind: "canvas" as const,
+      canvasId: request.canvasId,
+      geometry: request.geometry ?? {
+        x: 64 + space.elements.length * 32,
+        y: 96 + space.elements.length * 32,
+        width: 520,
+        height: 400,
+      },
+      zIndex: Math.max(0, ...space.elements.map((existing) => existing.zIndex)) + 1,
+      minimized: false,
+      locked: false,
+      title: request.title ?? canvas.title,
+    };
+    try {
+      const updated = processZenCommand(
+        space,
+        {
+          command: "add-element",
+          spaceId: space.spaceId,
+          element,
+          expectedVersion: request.expectedVersion,
+        },
+        this.deps.localHostId,
+      );
+      return {
+        result: "canvas-attached",
+        elementId,
         space: this.deps.eventStore.append(updated, request.expectedVersion),
       };
     } catch (error) {
