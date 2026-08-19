@@ -32,6 +32,7 @@ import {
   type ChatComposerProps,
   type ChatComposerResearchBackend,
 } from "./ChatComposer";
+import { ThreadExportControl } from "../thread/ThreadExportControl";
 import { ChatExportControl } from "./ChatExportControl";
 import { ChatTranscript } from "./ChatTranscript";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
@@ -478,6 +479,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
               props.controller.status === "disconnected" ? "disconnected" : "connected"
             }
             view={view}
+          />
+          <ThreadExportControl
+            mode="chat"
+            threadId={String(view.thread.id)}
+            title={view.thread.title}
+            {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+            {...(props.windowCapability === undefined
+              ? {}
+              : { windowCapability: props.windowCapability })}
           />
           {props.canvasClient === undefined ? null : (
             <OctantButton

@@ -406,6 +406,73 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 .sidebar-navigation__thread-copy {
   flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * The one state marker a thread row carries.
+ *
+ * It replaced a row of pill badges that said "active" beside nearly every
+ * thread. The shape differs with the state as well as the colour — a filled
+ * disc for something to attend to, a hollow ring for a thread at rest — so it
+ * survives a reader who cannot see hue, and each dot names its state through
+ * the label the row gives it.
+ */
+.sidebar-navigation__thread-status {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--octant-divider-strong);
+  border-radius: 999px;
+}
+
+.sidebar-navigation__thread-status[data-activity="unread"] {
+  background: var(--octant-accent);
+  border-color: var(--octant-accent);
+}
+
+.sidebar-navigation__thread-status[data-activity="attention"] {
+  background: var(--octant-warning-text);
+  border-color: var(--octant-warning-text);
+}
+
+.sidebar-navigation__thread-status[data-activity="working"] {
+  background: var(--octant-accent);
+  border-color: var(--octant-accent);
+  animation: octant-thread-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes octant-thread-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.72);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-navigation__thread-status[data-activity="working"] {
+    animation: none;
+  }
+}
+
+/* The provider's mark closes the row where the model name used to sit. The
+   model changes inside a thread and read as noise on every line; the provider
+   is what a reader scanning the list is telling apart. */
+.sidebar-navigation__thread-provider {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  opacity: 0.85;
+}
+
+.sidebar-navigation__thread:hover .sidebar-navigation__thread-provider,
+.sidebar-navigation__thread[aria-current="page"] .sidebar-navigation__thread-provider {
+  opacity: 1;
 }
 
 .sidebar-navigation__thread-title {

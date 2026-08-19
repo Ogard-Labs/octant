@@ -230,7 +230,12 @@ import { ExecutionProfileWorkflow } from "./agentProfile/ExecutionProfileWorkflo
 import { useExecutionProfileController } from "./agentProfile/useExecutionProfileController";
 import { useRootlessThreadNavigation } from "./rootless/useRootlessThreadNavigation";
 import { useWorkThreadNavigation } from "./work/useWorkThreadNavigation";
-import type { ChatThreadNavigationItem } from "./shell/navigationModel";
+import type { ThreadRowActions } from "./projects/ThreadRowMenu";
+import type {
+  ChatThreadNavigationItem,
+  ThreadProviderIdentity,
+  ThreadRowActivity,
+} from "./shell/navigationModel";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
@@ -2254,7 +2259,11 @@ function LaunchedShell(
           threadId: String(thread.threadId),
           title: thread.title,
           projectId: String(thread.projectId),
-          meta: thread.lifecycle,
+          providerInstanceId: String(thread.providerInstanceId),
+          // The lifecycle used to ride along as a badge on every row, which
+          // said "active" beside almost every thread and told the reader
+          // nothing. The status dot carries it instead.
+          activity: codeThreadActivity(thread),
           ...(thread.followUp === undefined ? {} : { followUp: thread.followUp }),
           ...(thread.unread === undefined ? {} : { unread: thread.unread }),
           ...(thread.pinned === undefined ? {} : { pinned: thread.pinned }),
@@ -2276,6 +2285,46 @@ function LaunchedShell(
             unfiled: rootlessThreadGroups.unfiled,
           }
         : rootlessThreadGroups;
+
+  // A row names its provider by mark, not by model, so the instance id every
+  // thread already carries is resolved once here rather than by each list that
+  // renders a row. A thread whose instance is gone keeps no mark rather than
+  // borrowing another provider's.
+  const providerIdentityById = new Map<string, ThreadProviderIdentity>(
+    providerController.instances.map((instance) => [
+      String(instance.id),
+      { displayName: instance.displayName, driverKind: instance.driverKind },
+    ]),
+  );
+  const withProviderMark = (thread: ChatThreadNavigationItem): ChatThreadNavigationItem => {
+    const provider =
+      thread.providerInstanceId === undefined
+        ? undefined
+        : providerIdentityById.get(thread.providerInstanceId);
+    return provider === undefined ? thread : { ...thread, provider };
+  };
+  const markedThreadGroups =
+    sidebarThreadGroups === undefined
+      ? undefined
+      : {
+          recents: sidebarThreadGroups.recents.map(withProviderMark),
+          all: sidebarThreadGroups.all.map(withProviderMark),
+          unfiled: sidebarThreadGroups.unfiled.map(withProviderMark),
+        };
+
+  // What a Code thread row offers on right-click. Each one carries the row's
+  // navigation id, which for a Project-backed thread is its Code thread id;
+  // the controller refuses anything its bootstrap does not hold rather than
+  // guessing at a thread it cannot see.
+  const codeThreadRowActions: ThreadRowActions = {
+    onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
+    onMarkThreadUnread: (threadId) => codeReadCursorStore.unmark(decodeCodeThreadId(threadId)),
+    onPinThread: (threadId, pinned) =>
+      void codeController.pinThread(decodeCodeThreadId(threadId), pinned),
+  };
+  const renameCodeThreadFromRow = (threadId: string, title: string): void => {
+    void codeController.renameThread(decodeCodeThreadId(threadId), title);
+  };
 
   // One thread-selection handler per mode. The sidebar and every Project
   // Overview call the same one, so a row opens the same thread wherever it is
@@ -3650,20 +3699,22 @@ function LaunchedShell(
                     : activeMode === "code"
                       ? {
                           onSelectThread: selectCodeThread,
-                          ...(sidebarThreadGroups === undefined
+                          threadActions: codeThreadRowActions,
+                          onRenameThread: renameCodeThreadFromRow,
+                          ...(markedThreadGroups === undefined
                             ? codeController.status === "ready"
-                              ? { threads: codeProjectThreads }
+                              ? { threads: codeProjectThreads.map(withProviderMark) }
                               : {}
-                            : { threadGroups: sidebarThreadGroups }),
+                            : { threadGroups: markedThreadGroups }),
                         }
                       : activeMode === "work"
                         ? {
                             onSelectThread: selectWorkThread,
-                            ...(sidebarThreadGroups === undefined
+                            ...(markedThreadGroups === undefined
                               ? workNavigation.status === "ready"
-                                ? { threads: workProjectThreads }
+                                ? { threads: workProjectThreads.map(withProviderMark) }
                                 : {}
-                              : { threadGroups: sidebarThreadGroups }),
+                              : { threadGroups: markedThreadGroups }),
                           }
                         : {})}
                   {...(activeMode === "chat"
@@ -4724,4 +4775,24 @@ function writeSidebarCollapsed(scope: { readonly localStorage?: Storage }, colla
   } catch {
     // Presentation persistence is best-effort.
   }
+}
+
+/**
+ * What a Code thread's status dot says.
+ *
+ * An open follow-up outranks everything: it is the one state a person has to
+ * come back to. A waiting or interrupted thread is asking for something too.
+ * `working` is deliberately absent — the host reports no per-thread run state
+ * to the sidebar, and a dot that pulses on a thread nothing is running would
+ * be a lie.
+ */
+function codeThreadActivity(thread: {
+  readonly followUp?: boolean;
+  readonly lifecycle: "active" | "waiting" | "interrupted" | "archived";
+  readonly unread?: boolean;
+}): ThreadRowActivity {
+  if (thread.followUp === true) return "attention";
+  if (thread.lifecycle === "waiting" || thread.lifecycle === "interrupted") return "attention";
+  if (thread.unread === true) return "unread";
+  return "idle";
 }
