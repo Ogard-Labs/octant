@@ -52,6 +52,7 @@ import { CodeOverview } from "../code/CodeOverview";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
 import type { CodeOverviewSurfaceKind } from "../code/CodeOverview";
+import { codeSurfaceTitle } from "../code/codeSurfaces";
 import { WorkOverview } from "../work/WorkOverview";
 import { buildWorkOverviewModel } from "../work/buildWorkOverviewModel";
 import type { WorkOverviewModel } from "../work/WorkOverview";
@@ -1338,21 +1339,6 @@ function renderNonCodeTab(
         : { providerMessage: props.providerBootstrapMessage })}
     />
   );
-}
-
-function codeSurfaceTitle(kind: CodeOverviewSurfaceKind): string {
-  switch (kind) {
-    case "code-diff":
-      return "Changes";
-    case "code-terminal":
-      return "Terminal";
-    case "code-test":
-      return "Tests";
-    case "code-git":
-      return "Git";
-    case "code-pr":
-      return "Pull request";
-  }
 }
 
 function resolveRootlessThread(
