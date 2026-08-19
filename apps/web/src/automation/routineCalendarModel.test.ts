@@ -1,7 +1,7 @@
 import { decodeAutomationTrigger } from "@octant/contracts/automation";
 import { describe, expect, it } from "vitest";
 import { automationSummaryFixture } from "./automationTestFixtures";
-import { buildRoutineCalendarMonth, stepRoutineCalendarMonth } from "./routineCalendar";
+import { buildRoutineCalendarMonth, stepRoutineCalendarMonth } from "./routineCalendarModel";
 
 const AUGUST = "2026-08-18T12:00:00.000Z";
 
