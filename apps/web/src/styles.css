@@ -1782,6 +1782,18 @@ button:focus-visible {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
+/*
+ * A control that is a block rather than a value: it stacks under its label and
+ * takes the row's width. In the trailing column a searchable list took its own
+ * natural width and ran off the pane, and the centred label floated in the
+ * middle of the empty space beside it.
+ */
+.settings-view__field--block {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+}
+
 .settings-view__field--search {
   grid-template-columns: 1fr;
   margin-bottom: 8px;
