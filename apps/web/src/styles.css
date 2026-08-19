@@ -790,6 +790,11 @@ button:focus-visible {
   gap: 4px;
 }
 
+.code-project-views__trigger-wrap {
+  display: inline-flex;
+  min-width: 0;
+}
+
 .code-project-views__row .octant-menu__trigger {
   justify-content: flex-start;
   text-align: start;
@@ -824,14 +829,26 @@ button:focus-visible {
 }
 
 .code-project-views__inline-button {
-  width: 27px;
-  min-height: 27px;
+  width: 28px;
+  min-height: 28px;
+  border-radius: 8px;
   color: var(--octant-text-muted);
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
-.code-project-views__inline-button[aria-pressed="true"] {
+.code-project-views__inline-button:hover {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
+}
+
+/* The chosen view keeps its own colour: the rail is glyphs only, so colour is
+   the fastest way to read which one is showing. */
+.code-project-views__inline-button[aria-pressed="true"] {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-pressed);
+  box-shadow: inset 0 0 0 1px var(--octant-border-subtle);
 }
 
 .code-project-views__glyph {
@@ -933,30 +950,6 @@ button:focus-visible {
   width: 27px;
   min-height: 27px;
   color: var(--octant-text-muted);
-}
-
-.code-project-views__meta {
-  display: flex;
-  min-height: 20px;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 0 8px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-}
-
-.code-project-views__actions {
-  display: inline-flex;
-  gap: 4px;
-}
-
-.code-project-views__actions button {
-  min-height: 22px;
-  padding: 0 6px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
 }
 
 .code-project-views__fieldset {
