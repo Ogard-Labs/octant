@@ -153,6 +153,38 @@ describe("CodeThreadBoard", () => {
     expect(screen.queryByRole("region", { name: "Done (0)" })).not.toBeInTheDocument();
   });
 
+  it("keeps the loaded board when its host re-renders with a fresh callback", async () => {
+    const loadBoard = vi.fn(async (_query: CodeBoardQuery) =>
+      view([card({ id: "01", status: "ready" })]),
+    );
+    const storage = memoryStorage();
+    const { rerender } = render(
+      <CodeThreadBoard
+        loadBoard={(query) => loadBoard(query)}
+        projects={projects}
+        storage={storage}
+      />,
+    );
+
+    await screen.findByText("Thread 01");
+    expect(loadBoard).toHaveBeenCalledTimes(1);
+
+    // The shell re-renders constantly while threads stream. A new inline
+    // callback each time is not a new question about the board, and treating
+    // it as one dropped the board back to "Loading" over and over.
+    rerender(
+      <CodeThreadBoard
+        loadBoard={(query) => loadBoard(query)}
+        projects={projects}
+        storage={storage}
+      />,
+    );
+
+    expect(screen.getByText("Thread 01")).toBeVisible();
+    expect(screen.queryByText("Loading the board.")).toBeNull();
+    expect(loadBoard).toHaveBeenCalledTimes(1);
+  });
+
   it("switches to Project grouping without issuing another board query", async () => {
     const loadBoard = vi.fn(async () =>
       view([

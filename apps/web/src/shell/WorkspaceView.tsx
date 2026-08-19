@@ -689,6 +689,7 @@ function renderCodeTab(
       {content}
     </ThreadActivityPictureInPicture>
   );
+  const shipClient = props.shipClient;
   const files = (
     <CodeFileExplorerPanel
       threadId={tab.threadId}
@@ -708,10 +709,6 @@ function renderCodeTab(
         {...(props.planClient === undefined ? {} : { client: props.planClient })}
         threadId={String(tab.threadId)}
       >
-        <ShipPanel
-          {...(props.shipClient === undefined ? {} : { client: props.shipClient })}
-          threadId={String(tab.threadId)}
-        />
         <CodeThreadEnvironment
           presentation={props.environmentPresentation}
           onChangePresentation={props.onSetEnvironmentPresentation}
@@ -754,6 +751,9 @@ function renderCodeTab(
           tab={tab}
           onExecute={codeController.execute}
           files={files}
+          {...(shipClient === undefined
+            ? {}
+            : { publish: <ShipPanel client={shipClient} threadId={String(tab.threadId)} /> })}
           onOpenChanges={() =>
             props.onOpenCodeSurface("code-diff", tab.threadId, codeSurfaceTitle("code-diff"))
           }
@@ -965,6 +965,10 @@ function renderNonCodeTab(
             providerGroups={props.workProviderGroups ?? []}
             {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
             {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
+            {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+            {...(props.projectWindowCapability === undefined
+              ? {}
+              : { windowCapability: props.projectWindowCapability })}
             {...(props.onOpenCanvasReference === undefined
               ? {}
               : { onOpenCanvas: props.onOpenCanvasReference })}

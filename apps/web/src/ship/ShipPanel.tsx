@@ -75,7 +75,6 @@ export function ShipPanel(props: ShipPanelProps) {
 
   return (
     <section aria-label="Publish" className="ship-panel">
-      <h3 className="ship-panel__title">Publish</h3>
       <p className="ship-panel__note">
         Octant publishes to a target you already own and runs none of its own. Nothing is routed
         through Octant, and each publication is approved on its own.

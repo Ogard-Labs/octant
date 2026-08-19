@@ -30,6 +30,13 @@ Capability-aware workspace surfaces available in Work include:
 
 Work does not expose Code Git/terminal authority. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
+## Export
+
+**Export thread** downloads a portable JSON cut of this Work thread: the
+transcript, Canvas artifacts it originated, completion evidence when you have
+confirmed delivery, and provenance. The file says when it was cut. Secrets
+and filesystem paths never appear.
+
 ## Research workflow
 
 Work supports a research workflow with citations and provenance. Research threads can produce briefs, sources, evidence, claims, and reports. Citations link back to verified sources within the confined root or approved external references.
