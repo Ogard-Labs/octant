@@ -202,6 +202,21 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["text/plain"] as const,
     maxBodyBytes: 64 * 1_024,
   },
+  {
+    kind: "exact" as const,
+    path: "/api/usage/dashboard",
+    methods: ["POST"] as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/usage/query",
+    methods: ["POST"] as const,
+  },
+  {
+    kind: "exact" as const,
+    path: "/api/usage/export",
+    methods: ["POST"] as const,
+  },
   ...[
     "/api/agent-profiles",
     "/api/apple/",
@@ -222,7 +237,6 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     "/api/projects/",
     "/api/rootless/",
     "/api/theme/",
-    "/api/usage/",
     "/api/validation/",
     "/api/zen",
   ].map((path) => ({
@@ -249,6 +263,11 @@ const DEFAULT_AUTHENTICATED_ROUTES: readonly RemoteRouteDefinition[] = [
   ...DEFAULT_AUTHENTICATED_SERVICE_ROUTES,
   ...DEFAULT_AUTHENTICATED_ROUTE_MATCHES,
 ];
+
+/** The product and remote-auth routes the private listener forwards by default. */
+export function listDefaultRemoteAuthenticatedRoutes(): readonly RemoteRouteDefinition[] {
+  return DEFAULT_AUTHENTICATED_ROUTES;
+}
 
 type RemoteHttpMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE";
 type RemoteRouteSurface = "pre-auth" | "authenticated-product";

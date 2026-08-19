@@ -7,8 +7,10 @@ import { openSqlite } from "./persistence/sqlitePort";
 import { Journal } from "./persistence/journal";
 import { createPhase1RuntimeRegistries } from "./persistence/runtimeRegistry";
 import { WindowAuthorityStore } from "./windowAuthorityStore";
+import { createRemoteDevicePrincipal } from "./clientPrincipal";
 import { createDiagnosticsExportRouteHandler } from "./diagnosticsExportRoutes";
 import * as diagnosticsExportService from "./diagnosticsExportService";
+import { bindPrincipalRouteContext } from "./principalRouteContext";
 
 const directories: Array<string> = [];
 const now = "2026-08-10T12:00:00.000Z";
@@ -105,6 +107,29 @@ describe("diagnostics export routes", () => {
     const body = (await response!.json()) as { kind: string; packet?: { redacted: boolean } };
     expect(body.kind).toBe("exported");
     expect(body.packet?.redacted).toBe(true);
+  });
+
+  it("fails closed for a bound remote principal even on loopback", async () => {
+    const { handler } = setup();
+    const exportSpy = vi.spyOn(diagnosticsExportService, "exportDiagnosticsEvidence");
+    const request = makeRequest("/api/diagnostics/export", {
+      body: { correlationId: failureCorrelationId, domain: "provider", summary: "x" },
+    });
+    bindPrincipalRouteContext(request, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "11111111-1111-4111-8111-111111111111" as never,
+        deviceId: "22222222-2222-4222-8222-222222222222" as never,
+        credentialGeneration: 1,
+        origin: "https://octant.example",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "33333333-3333-4333-8333-333333333333" as never,
+      }),
+      scopeId: windowId as never,
+    });
+    const response = await handler(request);
+    expect(response?.status).toBe(403);
+    expect(exportSpy).not.toHaveBeenCalled();
   });
 
   it("fails closed for a request that is not loopback (remote)", async () => {

@@ -11,7 +11,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { isLoopbackHostname } from "./shellRoutes";
-import { authenticateRouteWindowId } from "./principalRouteContext";
+import { authenticateRoutePrincipal } from "./principalRouteContext";
 import type { UsageProjectScope } from "./usageProjectScope";
 import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthorityStore";
 import {
@@ -89,12 +89,15 @@ export function createUsageRouteHandler(dependencies: UsageRouteDependencies) {
     }
 
     let windowId: WindowId;
+    let principalKind: "local-window" | "remote-device";
     try {
-      windowId = authenticateRouteWindowId({
+      const context = authenticateRoutePrincipal({
         request,
         store: dependencies.windowAuthorityStore,
         now: now(),
       });
+      windowId = context.scopeId;
+      principalKind = context.principal.kind;
     } catch (error) {
       if (error instanceof WindowAuthorityError) {
         return failureResponse("Usage query is unauthorized.", 401, origin);
@@ -117,11 +120,15 @@ export function createUsageRouteHandler(dependencies: UsageRouteDependencies) {
         ? handleQuery(request, dependencies, bodyLimit, clock, origin, projectScope)
         : handleExport(request, dependencies, EXPORT_BODY_LIMIT, clock, origin, projectScope);
     }
-    if (url.pathname === "/api/usage/reset") {
-      return handleReset(request, dependencies, bodyLimit, clock, origin);
-    }
-    if (url.pathname === "/api/usage/retain") {
-      return handleRetain(request, dependencies, bodyLimit, clock, origin);
+    if (url.pathname === "/api/usage/reset" || url.pathname === "/api/usage/retain") {
+      // Reset and retain purge the host-wide ledger. A remote principal that
+      // reached this loopback handler must not wipe every Project's rows.
+      if (principalKind !== "local-window") {
+        return failureResponse("Usage ledger changes stay on the host.", 403, origin);
+      }
+      return url.pathname === "/api/usage/reset"
+        ? handleReset(request, dependencies, bodyLimit, clock, origin)
+        : handleRetain(request, dependencies, bodyLimit, clock, origin);
     }
     return undefined;
   };
