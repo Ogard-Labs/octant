@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVITY_VIEW_STORAGE_KEY,
   buildSidebarActivityView,
+  filterSidebarActivityView,
+  matchesSidebarSearch,
   readActivityViewEnabled,
   writeActivityViewEnabled,
 } from "./activityViewModel";
@@ -167,6 +169,88 @@ describe("buildSidebarActivityView", () => {
         }),
       ],
     });
+  });
+});
+
+describe("filterSidebarActivityView", () => {
+  const now = new Date("2026-08-14T15:00:00.000Z");
+  const view = buildSidebarActivityView({
+    now,
+    projects: [{ id: projectId, name: "octant" }],
+    threads: [
+      thread({
+        projectId,
+        threadId: "today",
+        title: "Update AuroraDocs logos",
+        unread: true,
+        updatedAt: "2026-08-14T12:00:00.000Z",
+      }),
+      thread({
+        threadId: "yesterday",
+        title: "Estimate app rebrand effort",
+        updatedAt: "2026-08-13T18:00:00.000Z",
+      }),
+      thread({
+        pinned: true,
+        projectId,
+        threadId: "pinned",
+        title: "Always here",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ],
+  });
+
+  it("leaves the grouped presentation alone until the query has content", () => {
+    expect(filterSidebarActivityView(view, "   ")).toBe(view);
+  });
+
+  it("keeps a row whose title matches and drops groups that then have nothing", () => {
+    const filtered = filterSidebarActivityView(view, "aurora");
+    expect(filtered.groups.map((group) => group.id)).toEqual(["priority"]);
+    expect(filtered.groups[0]?.threads.map((item) => item.threadId)).toEqual(["today"]);
+    expect(filtered.groups[0]?.threads[0]).toMatchObject({
+      projectName: "octant",
+      title: "Update AuroraDocs logos",
+    });
+  });
+
+  it("matches the Project, Recents, or Unfiled folder word on the row", () => {
+    expect(
+      filterSidebarActivityView(view, "unfiled").groups.map((group) =>
+        group.threads.map((item) => item.threadId),
+      ),
+    ).toEqual([["yesterday"]]);
+    expect(
+      filterSidebarActivityView(view, "OCTANT").groups.flatMap((group) =>
+        group.threads.map((item) => item.threadId),
+      ),
+    ).toEqual(["pinned", "today"]);
+    expect(
+      filterSidebarActivityView(
+        buildSidebarActivityView({
+          now,
+          projects: [],
+          rootlessLabel: "Recents",
+          threads: [
+            thread({
+              threadId: "rootless",
+              title: "hei",
+              updatedAt: "2026-08-13T18:00:00.000Z",
+            }),
+          ],
+        }),
+        "recents",
+      ).groups[0]?.threads,
+    ).toEqual([expect.objectContaining({ projectName: "Recents", threadId: "rootless" })]);
+  });
+
+  it("ignores case and collapsed whitespace in the query", () => {
+    expect(matchesSidebarSearch("  AURORA  ", "Update AuroraDocs logos")).toBe(true);
+    expect(filterSidebarActivityView(view, "  AURORA  ").groups).toHaveLength(1);
+  });
+
+  it("returns no groups when nothing matches", () => {
+    expect(filterSidebarActivityView(view, "no such thread").groups).toEqual([]);
   });
 });
 

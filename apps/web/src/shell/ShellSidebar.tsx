@@ -6,9 +6,10 @@ import { enabledModes } from "@octant/domain/mode-policy";
 import type { ShellSettings, WindowWorkspace } from "@octant/contracts/shell";
 import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
 import { PanelLeftClose, Search, Settings } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import {
   resolveSidebarContributions,
   type FirstPartyPluginComponentId,
@@ -29,6 +30,12 @@ const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponentId, bo
   ["board", true],
   ["github-integration", true],
 ]);
+
+const MODE_SEARCH_LABEL: Record<OctantMode, string> = {
+  chat: "Chat",
+  work: "Work",
+  code: "Code",
+};
 
 export interface ShellSidebarProps {
   /**
@@ -64,8 +71,9 @@ export interface ShellSidebarProps {
     readonly actions: SidebarNavigationProps["actions"];
   };
   readonly onAddFolder: () => void;
-  readonly onOpenSearch: () => void;
   readonly onOpenSettings: () => void;
+  readonly onSearchQueryChange: (query: string) => void;
+  readonly searchQuery: string;
   /** Hides the sidebar; the window chrome then offers the matching Show control. */
   readonly onCollapseSidebar?: () => void;
   readonly onRetryChat?: () => void;
@@ -78,6 +86,8 @@ export interface ShellSidebarProps {
 }
 
 export function ShellSidebar(props: ShellSidebarProps) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchVisible = searchOpen || props.searchQuery.trim() !== "";
   const modes = enabledModes(props.settings);
   const activeMode = props.workspace.activeMode;
   const chatReady = activeMode === "chat" && props.chatNavigation !== undefined;
@@ -130,13 +140,15 @@ export function ShellSidebar(props: ShellSidebarProps) {
         <ModeSwitcher
           actions={
             <>
-              <IconButton
-                data-navigation-id="search"
-                icon={Search}
-                label="Search"
-                onClick={props.onOpenSearch}
-                title="Search ⌘K"
-              />
+              {searchVisible ? null : (
+                <IconButton
+                  data-navigation-id="search"
+                  icon={Search}
+                  label="Search"
+                  onClick={() => setSearchOpen(true)}
+                  title="Search"
+                />
+              )}
               {props.onCollapseSidebar === undefined ? null : (
                 <IconButton
                   data-navigation-id="hide-sidebar"
@@ -153,6 +165,14 @@ export function ShellSidebar(props: ShellSidebarProps) {
           onSelectMode={props.onSelectMode}
           presentation={props.settings.modeSwitcherPresentation}
         />
+        {searchVisible ? (
+          <SidebarSearchField
+            mode={activeMode}
+            onClose={() => setSearchOpen(false)}
+            onQueryChange={props.onSearchQueryChange}
+            query={props.searchQuery}
+          />
+        ) : null}
         <SidebarNavigation
           actions={{
             ...(chatReady ? props.chatNavigation.actions : {}),
@@ -215,5 +235,42 @@ export function ShellSidebar(props: ShellSidebarProps) {
         </OctantButton>
       </div>
     </aside>
+  );
+}
+
+function SidebarSearchField(props: {
+  readonly mode: OctantMode;
+  readonly onClose: () => void;
+  readonly onQueryChange: (query: string) => void;
+  readonly query: string;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  return (
+    <div className="sidebar__search" data-navigation-id="search">
+      <Search aria-hidden="true" size={14} strokeWidth={1.7} />
+      <OctantInput
+        aria-label={`Search ${MODE_SEARCH_LABEL[props.mode]} threads`}
+        autoComplete="off"
+        onChange={(event) => props.onQueryChange(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          if (props.query !== "") {
+            props.onQueryChange("");
+            return;
+          }
+          props.onClose();
+        }}
+        placeholder="Search threads"
+        ref={inputRef}
+        type="search"
+        value={props.query}
+      />
+    </div>
   );
 }

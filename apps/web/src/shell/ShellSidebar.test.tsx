@@ -2,6 +2,7 @@ import { decodeWindowId } from "@octant/contracts/shell";
 import { defaultShellSettings, defaultWindowWorkspace } from "@octant/domain/shell-policy";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
 import { ShellSidebar } from "./ShellSidebar";
@@ -13,8 +14,9 @@ describe("ShellSidebar", () => {
     const { container } = render(
       <ShellSidebar
         onAddFolder={vi.fn()}
-        onOpenSearch={vi.fn()}
+        onSearchQueryChange={vi.fn()}
         onOpenSettings={vi.fn()}
+        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={null}
         settings={defaultShellSettings()}
@@ -42,8 +44,9 @@ describe("ShellSidebar", () => {
         automationsEnabled={false}
         codeNavigation={{ actions }}
         onAddFolder={vi.fn()}
-        onOpenSearch={vi.fn()}
+        onSearchQueryChange={vi.fn()}
         onOpenSettings={vi.fn()}
+        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
         settings={defaultShellSettings()}
@@ -71,8 +74,9 @@ describe("ShellSidebar", () => {
         {...(automationsEnabled === undefined ? {} : { automationsEnabled })}
         codeNavigation={{ actions: { "new-code-thread": vi.fn(), automations } }}
         onAddFolder={vi.fn()}
-        onOpenSearch={vi.fn()}
+        onSearchQueryChange={vi.fn()}
         onOpenSettings={vi.fn()}
+        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
         settings={defaultShellSettings()}
@@ -96,8 +100,9 @@ describe("ShellSidebar", () => {
       <ShellSidebar
         codeNavigation={{ actions: { "new-code-thread": vi.fn() } }}
         onAddFolder={vi.fn()}
-        onOpenSearch={vi.fn()}
+        onSearchQueryChange={vi.fn()}
         onOpenSettings={vi.fn()}
+        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Nested project threads live here</nav>}
         settings={defaultShellSettings()}
@@ -116,9 +121,10 @@ describe("ShellSidebar", () => {
     async (mode) => {
       const user = userEvent.setup();
       const onAddFolder = vi.fn();
-      const onOpenSearch = vi.fn();
+      const onSearchQueryChange = vi.fn();
       const onOpenSettings = vi.fn();
       const workspace = { ...defaultWindowWorkspace(windowId), activeMode: mode };
+      const modeLabel = mode === "chat" ? "Chat" : mode === "work" ? "Work" : "Code";
       const { container } = render(
         <ShellSidebar
           {...(mode === "work"
@@ -129,8 +135,9 @@ describe("ShellSidebar", () => {
             : {})}
           {...(mode === "chat" ? { chatNavigation: { actions: { "new-chat": vi.fn() } } } : {})}
           onAddFolder={onAddFolder}
-          onOpenSearch={onOpenSearch}
+          onSearchQueryChange={onSearchQueryChange}
           onOpenSettings={onOpenSettings}
+          searchQuery=""
           onSelectMode={vi.fn()}
           projectSection={<nav aria-label="Projects">Project navigation</nav>}
           settings={defaultShellSettings()}
@@ -154,8 +161,10 @@ describe("ShellSidebar", () => {
       expect(screen.queryByRole("button", { name: "New Chat Project" })).not.toBeInTheDocument();
 
       await user.click(search);
+      const field = screen.getByRole("searchbox", { name: `Search ${modeLabel} threads` });
+      expect(field).toHaveFocus();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       await user.click(settings);
-      expect(onOpenSearch).toHaveBeenCalledOnce();
       expect(onOpenSettings).toHaveBeenCalledOnce();
     },
   );
@@ -164,8 +173,9 @@ describe("ShellSidebar", () => {
     render(
       <ShellSidebar
         onAddFolder={vi.fn()}
-        onOpenSearch={vi.fn()}
+        onSearchQueryChange={vi.fn()}
         onOpenSettings={vi.fn()}
+        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={null}
         settings={{ ...defaultShellSettings(), chatEnabled: false, workEnabled: false }}
@@ -186,8 +196,9 @@ describe("ShellSidebar", () => {
         chatNavigation={{ actions: { "new-chat": onNewChat } }}
         chatStatus="disconnected"
         onAddFolder={vi.fn()}
-        onOpenSearch={vi.fn()}
+        onSearchQueryChange={vi.fn()}
         onOpenSettings={vi.fn()}
+        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={<nav aria-label="Projects">Projects</nav>}
         settings={defaultShellSettings()}
@@ -207,8 +218,9 @@ describe("ShellSidebar", () => {
         chatErrorMessage="Configure a default Chat provider and model before creating a conversation."
         chatNavigation={{ actions: { "new-chat": vi.fn() } }}
         onAddFolder={vi.fn()}
-        onOpenSearch={vi.fn()}
+        onSearchQueryChange={vi.fn()}
         onOpenSettings={onOpenSettings}
+        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={null}
         settings={defaultShellSettings()}
@@ -229,8 +241,9 @@ describe("ShellSidebar", () => {
       <ShellSidebar
         chatNavigation={{ actions: { "new-chat": vi.fn() } }}
         onAddFolder={vi.fn()}
-        onOpenSearch={vi.fn()}
+        onSearchQueryChange={vi.fn()}
         onOpenSettings={vi.fn()}
+        searchQuery=""
         onSelectMode={vi.fn()}
         projectSection={
           <ProjectSidebarSection
@@ -262,5 +275,59 @@ describe("ShellSidebar", () => {
     expect(activity).toHaveClass("shell-icon-button");
     expect(activity).not.toHaveTextContent("Turn on activity view");
     expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar__utility");
+  });
+
+  it("keeps keyboard focus on sidebar Search while it filters the current-mode list", async () => {
+    const user = userEvent.setup();
+
+    function SearchableSidebar() {
+      const [query, setQuery] = useState("");
+      return (
+        <ShellSidebar
+          chatNavigation={{ actions: { "new-chat": vi.fn() } }}
+          onAddFolder={vi.fn()}
+          onOpenSettings={vi.fn()}
+          onSearchQueryChange={setQuery}
+          onSelectMode={vi.fn()}
+          projectSection={
+            <ProjectSidebarSection
+              archivedProjects={[]}
+              availabilityByProject={new Map()}
+              onArchive={vi.fn()}
+              onMove={vi.fn()}
+              onProjectOpen={vi.fn()}
+              onReorder={vi.fn()}
+              onRestore={vi.fn()}
+              onSelectThread={vi.fn()}
+              projects={[]}
+              searchQuery={query}
+              threads={[
+                { threadId: "thread-planning", title: "Planning" },
+                { threadId: "thread-notes", title: "Notes" },
+              ]}
+            />
+          }
+          searchQuery={query}
+          settings={defaultShellSettings()}
+          workspace={defaultWindowWorkspace(windowId)}
+        />
+      );
+    }
+
+    render(<SearchableSidebar />);
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    const field = screen.getByRole("searchbox", { name: "Search Chat threads" });
+    expect(field).toHaveFocus();
+    await user.type(field, "notes");
+    expect(field).toHaveFocus();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Notes/i })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
+
+    await user.clear(field);
+    expect(field).toHaveFocus();
+    expect(screen.getByRole("button", { name: /Planning/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Notes/i })).toBeVisible();
   });
 });

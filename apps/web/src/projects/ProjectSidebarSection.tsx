@@ -52,6 +52,8 @@ import {
 } from "../code/codeProjectViewModel";
 import {
   buildSidebarActivityView,
+  filterSidebarActivityView,
+  matchesSidebarSearch,
   readActivityViewEnabled,
   writeActivityViewEnabled,
   type SidebarActivityMode,
@@ -180,6 +182,8 @@ export interface ProjectSidebarSectionProps {
   readonly projectViewSwitcherPresentation?: ProjectViewSwitcherPresentation;
   readonly now?: Date;
   readonly activityMode?: SidebarActivityMode;
+  /** In-place filter of the current mode's visible thread rows. */
+  readonly searchQuery?: string;
 }
 
 export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
@@ -198,7 +202,24 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const [activityView, setActivityView] = useState(() =>
     readActivityViewEnabled(undefined, globalThis, activityMode),
   );
-  const threads = props.threadGroups?.all ?? props.threads;
+  const searchQuery = props.searchQuery ?? "";
+  const searching = searchQuery.trim() !== "";
+  const listedThreads = props.threadGroups?.all ?? props.threads;
+  const rootlessLabel = props.rootlessLabel ?? "Unfiled";
+  const projectNames = useMemo(
+    () => new Map(props.projects.map((project) => [String(project.id), project.name])),
+    [props.projects],
+  );
+  const folderLabelFor = (thread: ChatThreadNavigationItem): string =>
+    thread.projectId === undefined
+      ? rootlessLabel
+      : (projectNames.get(thread.projectId) ?? rootlessLabel);
+  const threads =
+    listedThreads === undefined || !searching
+      ? listedThreads
+      : listedThreads.filter((thread) =>
+          matchesSidebarSearch(searchQuery, thread.title, folderLabelFor(thread)),
+        );
   const visibleProjects =
     props.projectViewsEnabled === true && projectViewState !== undefined
       ? visibleCodeProjects(
@@ -209,35 +230,43 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           return match === undefined ? [] : [match];
         })
       : props.projects;
-  const pinned = sortProjects(
-    visibleProjects.filter((project) => project.pinned),
-    projectSort,
-  );
-  const ordinary = sortProjects(
-    visibleProjects.filter((project) => !project.pinned),
-    projectSort,
-  );
   const onNewThread = props.onNewThreadInProject ?? props.onNewChatInProject;
   const newThreadVerb = props.newThreadVerb ?? "chat";
   const nestThreads = threads !== undefined && props.onSelectThread !== undefined;
-  const threadsByProject = nestThreads
-    ? groupThreadsByProject(threads!, props.projects)
-    : undefined;
+  const threadsByProject =
+    threads !== undefined && props.onSelectThread !== undefined
+      ? groupThreadsByProject(threads, props.projects)
+      : undefined;
   const unfiled = threadsByProject?.unfiled ?? [];
-  const rootlessLabel = props.rootlessLabel ?? "Unfiled";
-  const activity = useMemo(
-    () =>
-      buildSidebarActivityView({
-        ...(props.now === undefined ? {} : { now: props.now }),
-        projects: props.projects.map((project) => ({
-          id: String(project.id),
-          name: project.name,
-        })),
-        rootlessLabel,
-        threads: threads ?? [],
-      }),
-    [props.now, props.projects, rootlessLabel, threads],
+  const projectHasVisibleThreads = (project: ProjectSummary): boolean =>
+    (threadsByProject?.byProjectId.get(String(project.id))?.length ?? 0) > 0;
+  const listedPinned = visibleProjects.filter((project) => project.pinned);
+  const listedOrdinary = visibleProjects.filter((project) => !project.pinned);
+  const pinned = sortProjects(
+    searching ? listedPinned.filter(projectHasVisibleThreads) : listedPinned,
+    projectSort,
   );
+  const ordinary = sortProjects(
+    searching ? listedOrdinary.filter(projectHasVisibleThreads) : listedOrdinary,
+    projectSort,
+  );
+  const activity = useMemo(() => {
+    const view = buildSidebarActivityView({
+      ...(props.now === undefined ? {} : { now: props.now }),
+      projects: props.projects.map((project) => ({
+        id: String(project.id),
+        name: project.name,
+      })),
+      rootlessLabel,
+      threads: listedThreads ?? [],
+    });
+    return searching ? filterSidebarActivityView(view, searchQuery) : view;
+  }, [listedThreads, props.now, props.projects, rootlessLabel, searchQuery, searching]);
+  const hasVisibleThreads =
+    (threadsByProject !== undefined &&
+      (unfiled.length > 0 ||
+        [...threadsByProject.byProjectId.values()].some((group) => group.length > 0))) ||
+    activity.groups.some((group) => group.threads.length > 0);
 
   useEffect(() => {
     setActivityView(readActivityViewEnabled(undefined, globalThis, activityMode));
@@ -343,12 +372,15 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           status={props.threadStatus}
         />
       ) : null}
-      {props.projects.length === 0 && unfiled.length === 0 ? (
+      {searching && !hasVisibleThreads ? (
+        <p className="project-nav__empty">No matching threads.</p>
+      ) : props.projects.length === 0 && unfiled.length === 0 ? (
         <p className="project-nav__empty">No Projects in this mode.</p>
       ) : null}
-      {nestThreads && activityView ? (
+      {searching && !hasVisibleThreads ? null : nestThreads && activityView ? (
         <ActivityThreadList
           {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+          {...(searching ? { emptyLabel: "No matching threads." } : {})}
           groups={activity.groups}
           onSelectThread={props.onSelectThread!}
         />
@@ -363,6 +395,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               : { activeThreadId: props.activeThreadId })}
             availabilityByProject={props.availabilityByProject}
             collapsedProjects={collapsedProjects}
+            hideWhenEmpty={searching}
             label="Pinned"
             onArchive={props.onArchive}
             onMove={props.onMove}
@@ -376,6 +409,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               ? {}
               : { onSelectThread: props.onSelectThread })}
             projects={pinned}
+            revealThreads={searching}
             sort={projectSort}
             {...(threadsByProject === undefined
               ? {}
@@ -390,6 +424,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               : { activeThreadId: props.activeThreadId })}
             availabilityByProject={props.availabilityByProject}
             collapsedProjects={collapsedProjects}
+            hideWhenEmpty={searching}
             label="Projects"
             onArchive={props.onArchive}
             onMove={props.onMove}
@@ -408,6 +443,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               ? {}
               : { onSelectThread: props.onSelectThread })}
             projects={ordinary}
+            revealThreads={searching}
             sort={projectSort}
             {...(threadsByProject === undefined
               ? {}
@@ -464,6 +500,7 @@ function ProjectGroup(props: {
   readonly activeThreadId?: string;
   readonly availabilityByProject: ReadonlyMap<ProjectId, ProjectAvailability>;
   readonly collapsedProjects: ReadonlySet<ProjectId>;
+  readonly hideWhenEmpty?: boolean;
   readonly label: string;
   readonly onAddProject?: () => void;
   readonly addProjectLabel?: "chat-project" | "folder";
@@ -482,10 +519,13 @@ function ProjectGroup(props: {
   readonly onSelectThread?: (threadId: string) => void;
   readonly onToggleProject: (projectId: ProjectId) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
+  readonly revealThreads?: boolean;
   readonly sort?: ProjectSort;
   readonly threadsByProjectId?: ReadonlyMap<string, ReadonlyArray<ChatThreadNavigationItem>>;
 }) {
-  if (props.projects.length === 0 && props.label !== "Projects") return null;
+  if (props.projects.length === 0 && (props.label !== "Projects" || props.hideWhenEmpty === true)) {
+    return null;
+  }
   return (
     <section aria-label={props.label} className="project-section">
       <div className="project-section__header">
@@ -530,7 +570,7 @@ function ProjectGroup(props: {
         const nestedThreads = props.threadsByProjectId?.get(String(project.id)) ?? [];
         const showNested =
           props.onSelectThread !== undefined && props.threadsByProjectId !== undefined;
-        const expanded = !props.collapsedProjects.has(project.id);
+        const expanded = props.revealThreads === true || !props.collapsedProjects.has(project.id);
         return (
           <div className="project-block" key={project.id}>
             <div
@@ -742,11 +782,12 @@ function ActivityViewToggle(props: { readonly enabled: boolean; readonly onToggl
 
 function ActivityThreadList(props: {
   readonly activeThreadId?: string;
+  readonly emptyLabel?: string;
   readonly groups: ReturnType<typeof buildSidebarActivityView>["groups"];
   readonly onSelectThread: (threadId: string) => void;
 }) {
   if (props.groups.length === 0) {
-    return <p className="project-nav__empty">No threads in this mode.</p>;
+    return <p className="project-nav__empty">{props.emptyLabel ?? "No threads in this mode."}</p>;
   }
   return (
     <div className="activity-nav">
