@@ -684,6 +684,7 @@ function renderCodeTab(
       {content}
     </ThreadActivityPictureInPicture>
   );
+  const shipClient = props.shipClient;
   const files = (
     <CodeFileExplorerPanel
       threadId={tab.threadId}
@@ -703,10 +704,6 @@ function renderCodeTab(
         {...(props.planClient === undefined ? {} : { client: props.planClient })}
         threadId={String(tab.threadId)}
       >
-        <ShipPanel
-          {...(props.shipClient === undefined ? {} : { client: props.shipClient })}
-          threadId={String(tab.threadId)}
-        />
         <CodeThreadEnvironment
           presentation={props.environmentPresentation}
           onChangePresentation={props.onSetEnvironmentPresentation}
@@ -749,6 +746,9 @@ function renderCodeTab(
           tab={tab}
           onExecute={codeController.execute}
           files={files}
+          {...(shipClient === undefined
+            ? {}
+            : { publish: <ShipPanel client={shipClient} threadId={String(tab.threadId)} /> })}
           onOpenChanges={() =>
             props.onOpenCodeSurface("code-diff", tab.threadId, codeSurfaceTitle("code-diff"))
           }
