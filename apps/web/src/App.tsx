@@ -3448,12 +3448,8 @@ function LaunchedShell(
               : {})}
             onOpenZen={() => void zen.enterZen()}
             onRecoverZen={() => void zen.recoverZen()}
-            onResetLayout={controller.resetActiveLayout}
             onToggleDock={toggleDock}
             zenRecoveryNeeded={zen.recoveryNeeded}
-            {...(nativeHost === undefined
-              ? {}
-              : { onResetWindowBounds: controller.resetNativeBounds })}
           />
         }
         contextSidebarWidth={contextSidebarWidth}
