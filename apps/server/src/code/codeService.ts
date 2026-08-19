@@ -116,14 +116,6 @@ const MANAGED_CREATION_REFUSAL_MESSAGES: Record<string, string> = {
   "invalid-grant": "Managed Code worktree creation is invalid.",
 };
 
-/**
- * An authorized watch that has nothing to report, because this host wired no
- * watcher or the checkout no longer resolves. It ends rather than refuses: the
- * client keeps its manual refresh instead of treating a missing capability as
- * lost access.
- */
-async function* noNotices(): AsyncGenerator<CodeFileChangeNotice> {}
-
 function stripProposedOutcome(
   deliveryTarget: CodeThread["deliveryTarget"],
 ): Omit<CodeThread["deliveryTarget"], "proposedOutcome"> {
@@ -1598,10 +1590,11 @@ export class CodeService {
    * authorized again.
    *
    * The authorization is awaited before the stream exists rather than inside a
-   * generator body, which does not run until its first `next()`. A refusal has
-   * to reach the caller while it can still become a status code; deferred, it
-   * would arrive as a stream that opened and immediately closed, which reads
-   * as a dropped watch and gets retried instead of shown.
+   * generator body, which does not run until its first `next()`. A refusal or
+   * missing capability has to reach the caller while it can still become a
+   * status code; deferred, it would arrive as a stream that opened and
+   * immediately closed, which reads as a dropped watch and gets retried
+   * instead of shown.
    */
   async watchFiles(
     authenticatedWindowId: WindowId,
@@ -1614,14 +1607,18 @@ export class CodeService {
       "Code file watching is unauthorized.",
     );
     const watcher = this.#watcher;
-    if (watcher === undefined) return noNotices();
+    if (watcher === undefined) {
+      throw this.#failure("unavailable", "Code file watching is unavailable.");
+    }
     const root = await this.#roots.resolve(
       authenticatedWindowId,
       authorized.effectiveThread,
       authorized.checkout,
       CODE_LISTING_ROOT_PROBE_PATH,
     );
-    if (root === undefined) return noNotices();
+    if (root === undefined) {
+      throw this.#failure("unavailable", "Code file authority is unavailable.");
+    }
     const revocation = new AbortController();
     const abort = () => revocation.abort();
     input.signal?.addEventListener("abort", abort, { once: true });
