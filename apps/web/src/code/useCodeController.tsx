@@ -285,6 +285,14 @@ export function useCodeController(options: CodeControllerOptions) {
   const [errorMessage, setErrorMessage] = useState<string>();
   const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
+  /*
+   * Whether the empty transcript means "nothing has been said yet" or "we could
+   * not fetch what was said". Both leave `conversation` empty, and only the
+   * first one is an invitation to start something.
+   */
+  const [conversationHistory, setConversationHistory] = useState<"loaded" | "unavailable">(
+    "loaded",
+  );
   const [followUps, setFollowUps] = useState<ReadonlyMap<string, CodeThreadFollowUpView>>(
     () => new Map(),
   );
@@ -684,6 +692,7 @@ export function useCodeController(options: CodeControllerOptions) {
       // reason: hydration may fail, and offering one thread's way back on
       // another thread's checkout would overwrite files nobody asked about.
       setRestoreUndo(undefined);
+      setConversationHistory("loaded");
       try {
         const initial = await client.thread(threadId);
         if (!isActive(request, threadGeneration, mounted)) return;
@@ -702,6 +711,7 @@ export function useCodeController(options: CodeControllerOptions) {
         } catch {
           if (!isActive(request, threadGeneration, mounted)) return;
           setConversation([]);
+          setConversationHistory("unavailable");
           setTurnError("Conversation history could not be loaded.");
         }
         if (!isActive(request, threadGeneration, mounted)) return;
@@ -1054,6 +1064,7 @@ export function useCodeController(options: CodeControllerOptions) {
     turnAbort.current?.abort();
     turnAbort.current = undefined;
     setConversation([]);
+    setConversationHistory("loaded");
     setProviderRequests([]);
     setTurnActivity(new Map());
     setTurnStatus(
@@ -1833,6 +1844,7 @@ export function useCodeController(options: CodeControllerOptions) {
     restoreUndo,
     noteRestoreUndo,
     retry: () => loadBootstrap("retry"),
+    conversationHistory,
     sendFollowUp,
     setPendingDraft,
     startThreadTurn,
