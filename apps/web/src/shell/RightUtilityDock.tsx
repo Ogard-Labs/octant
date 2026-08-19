@@ -20,6 +20,7 @@ export interface RightUtilityDockProps {
   readonly onPreviewWidth: (width: number) => void;
   readonly onRefreshEnvironment?: () => Promise<void> | void;
   readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
+  readonly plan: ReactNode;
   readonly projectMemory: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
@@ -43,6 +44,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
         ? {}
         : { onRefreshEnvironment: props.onRefreshEnvironment })}
       onSelectSurface={props.onSelectSurface}
+      plan={props.plan}
       projectMemory={props.projectMemory}
       resolution={props.resolution}
     />

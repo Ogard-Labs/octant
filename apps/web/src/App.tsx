@@ -148,6 +148,8 @@ import { useLaunchSession } from "./shell/useLaunchSession";
 import { WorkspaceView } from "./shell/WorkspaceView";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
 import { ShellState } from "./shell/ShellState";
+import { ThreadPlanProvider } from "./plan/ThreadPlanContext";
+import { ThreadPlanPanel } from "./plan/ThreadPlanPanel";
 import { ProjectCreateDialog } from "./projects/ProjectCreateDialog";
 import { RootlessAttachFolderDialog } from "./rootless/RootlessAttachFolderDialog";
 import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./shell/ThreadSearchOverlay";
@@ -4109,6 +4111,19 @@ function LaunchedShell(
                 const opener = document.activeElement;
                 if (opener instanceof HTMLElement) openDockSurface(surface, opener);
               }}
+              plan={
+                activeCodeThreadId === undefined ? null : (
+                  // The dock sits outside the tab that renders the thread, so
+                  // it subscribes to the visible thread's plan itself rather
+                  // than reading a provider it is not inside.
+                  <ThreadPlanProvider
+                    {...(planClient === undefined ? {} : { client: planClient })}
+                    threadId={String(activeCodeThreadId)}
+                  >
+                    <ThreadPlanPanel />
+                  </ThreadPlanProvider>
+                )
+              }
               projectMemory={
                 dockProject === undefined ? null : (
                   <ProjectMemoryInspector
