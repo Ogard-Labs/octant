@@ -153,8 +153,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           ? {}
           : { agentRunSettingsClient: props.agentRunSettingsClient })}
         controller={props.controller}
-        {...(props.onOpenBrowser === undefined ? {} : { onOpenBrowser: props.onOpenBrowser })}
-        {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
