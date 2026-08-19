@@ -841,6 +841,7 @@ describe("ShellProjection", () => {
         // A pre-onboarding store already finished its first run; the upcast
         // stamps `completed` so an upgrade never re-runs the walkthrough.
         firstRunOnboarding: "completed",
+        automaticUpdateChecks: true,
         // A store persisted before Navigator shipped decodes to the empty
         // section: both roles absent, so Navigator reports unconfigured.
         navigatorAssistant: {},
@@ -936,6 +937,7 @@ describe("ShellProjection", () => {
         // A pre-onboarding store already finished its first run; the upcast
         // stamps `completed` so an upgrade never re-runs the walkthrough.
         firstRunOnboarding: "completed",
+        automaticUpdateChecks: true,
         // A store persisted before Navigator shipped decodes to the empty
         // section: both roles absent, so Navigator reports unconfigured.
         navigatorAssistant: {},

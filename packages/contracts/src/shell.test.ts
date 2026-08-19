@@ -64,6 +64,7 @@ const settings = {
   },
   environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
   firstRunOnboarding: "pending",
+  automaticUpdateChecks: true,
   navigatorAssistant: {},
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;

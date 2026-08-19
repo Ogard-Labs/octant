@@ -280,9 +280,23 @@
 
 /* Compound editors (multi-field controls) stack under their label. */
 .settings-row[data-setting-id="sidebar-background"],
-.settings-row[data-setting-id="environment-presentation"] {
+.settings-row[data-setting-id="environment-presentation"],
+.settings-row[data-setting-id="default-model"],
+.settings-row[data-setting-id="vision-reviewer"] {
   grid-template-columns: 1fr;
   gap: 8px;
+}
+
+/*
+ * A model picker is a searchable list, not a value on the right of a label. In
+ * the trailing column it took its own natural width and ran off the pane, and
+ * centring a one-line label against a list that tall left the label floating in
+ * the middle of an empty block.
+ */
+.settings-row[data-setting-id="default-model"] > .settings-row__control,
+.settings-row[data-setting-id="vision-reviewer"] > .settings-row__control {
+  display: grid;
+  align-items: start;
 }
 
 .settings-row[data-setting-id="sidebar-background"] .settings-row__control,
@@ -1040,4 +1054,53 @@
   .github-settings__facts dd {
     margin-bottom: 6px;
   }
+}
+
+/*
+ * The update surface. The disclosure list sits with the switch rather than in a
+ * policy document, because the person deciding whether to leave automatic
+ * checks on is the person who should read what those checks send.
+ */
+.app-update {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.app-update__version {
+  margin: 0;
+  font-weight: 600;
+}
+
+.app-update__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.app-update__notice {
+  margin: 0;
+  font-size: 12px;
+  color: var(--octant-text-muted);
+}
+
+.app-update__automatic {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--octant-border-subtle);
+}
+
+.app-update__disclosure {
+  margin: 0;
+  font-size: 12px;
+  color: var(--octant-text-muted);
+}
+
+.app-update__disclosure-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--octant-text-muted);
 }
