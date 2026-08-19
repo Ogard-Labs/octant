@@ -442,6 +442,53 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  /**
+   * The renderer can be asking for the bootstrap before the local service has
+   * finished listening. Giving up on the first refusal left Code disconnected
+   * for the whole session on a host that was healthy seconds later, and there
+   * is no new thread and no transcript behind that state.
+   */
+  it("keeps asking for the bootstrap after the local service refuses, without a manual retry", async () => {
+    const bootstrapCall = vi
+      .fn()
+      .mockRejectedValueOnce({
+        category: "disconnected",
+        message: "The local Octant Code service is unavailable.",
+      })
+      .mockResolvedValue(bootstrap());
+    const client = fakeClient({ bootstrap: bootstrapCall });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ client, reconnectDelayMs: 0 }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(bootstrapCall.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(result.current.errorMessage).toBeUndefined();
+    unmount();
+  });
+
+  /**
+   * A refusal the host means is not a connection to wait on. Retrying it would
+   * hammer a service that has already given its answer.
+   */
+  it("stops asking for the bootstrap when the host refuses for a reason waiting cannot fix", async () => {
+    const bootstrapCall = vi
+      .fn()
+      .mockRejectedValue({ category: "unauthorized", message: "Code is not authorized here." });
+    const client = fakeClient({ bootstrap: bootstrapCall });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ client, reconnectDelayMs: 0 }),
+    );
+
+    await waitFor(() => expect(result.current.errorMessage).toBe("Code is not authorized here."));
+    const seen = bootstrapCall.mock.calls.length;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    expect(bootstrapCall.mock.calls.length).toBe(seen);
+    unmount();
+  });
+
   it("reloads authoritative state after a stale command and preserves the draft", async () => {
     const client = fakeClient({
       bootstrap: vi.fn().mockResolvedValueOnce(bootstrap()).mockResolvedValue(bootstrap(2)),
