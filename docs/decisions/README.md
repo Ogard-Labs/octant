@@ -43,6 +43,7 @@ distilled successor of the earlier long-form design specifications.
 | [0033](0033-first-run-asks-what-to-call-you.md)         | First run asks what to call you                                   | Accepted |
 | [0034](0034-signed-updates.md)                          | Signed, notarized, user-controlled updates                        | Proposed |
 | [0035](0035-thread-retention-and-purge.md)              | Thread retention and explicit purge                               | Accepted |
+| [0036](0036-thread-export.md)                           | Thread export                                                     | Accepted |
 
 ## Adding an ADR
 

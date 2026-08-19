@@ -28,6 +28,14 @@ and derived projections so a rebuild cannot resurrect the transcript. See
 [Recovery and troubleshooting](/advanced/recovery) for how the journal backs
 recovery.
 
+**Export thread** is a host-authoritative read of one thread you can already
+open. The JSON bundle carries transcript, evidence, and provenance, and
+names the instant it was cut. Credentials, OAuth tokens, raw provider
+payloads, resume cursors, and host filesystem paths never enter the file.
+Attachment bytes and other bulk content that live outside the journal are
+named as omissions rather than inlined. A paired device may export only a
+thread it can already read. This is not a host-wide dump.
+
 ## Credentials
 
 Provider credentials are write-only and stored as **indirect references in

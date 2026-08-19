@@ -37,6 +37,7 @@ Read the record that owns your change before editing, not all of them:
 | --------------------------------------------------- | -------------------------------------------- |
 | Journal, projections, replay, migrations            | `docs/decisions/0002`                        |
 | Thread retention, explicit purge, journal erasure   | `docs/decisions/0035`                        |
+| Thread export of transcript, evidence, provenance   | `docs/decisions/0036`                        |
 | Modes, Projects, thread authority, checkout binding | `docs/decisions/0003`, `docs/decisions/0017` |
 | Package layering and dependency direction           | `docs/decisions/0004`                        |
 | Provider drivers, capabilities, registry, harness   | `docs/decisions/0005`–`docs/decisions/0007`  |

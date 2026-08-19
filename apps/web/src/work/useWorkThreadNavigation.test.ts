@@ -28,7 +28,7 @@ describe("buildWorkThreadNavigation", () => {
         threadId: String(threadId),
         title: "Research brief",
         projectId: "20000000-0000-4000-8000-000000000101",
-        meta: "80000000-0000-4000-8000-0000000000b1 · model-one",
+        providerInstanceId: "80000000-0000-4000-8000-0000000000b1",
         updatedAt: "2026-08-01T20:00:00.000Z",
       },
     ]);

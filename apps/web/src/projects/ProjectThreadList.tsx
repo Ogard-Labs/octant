@@ -1,4 +1,9 @@
-import type { ChatThreadNavigationItem } from "../shell/navigationModel";
+import { useState } from "react";
+import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
+import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
+import { ProviderGlyph } from "../providers/ProviderGlyph";
+import { ThreadRenameField } from "./ThreadRenameField";
+import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
 import { OctantButton } from "../ui/base/OctantButton";
 
 /**
@@ -41,8 +46,54 @@ export function ProjectThreadStatus(props: ProjectThreadStatusProps) {
   );
 }
 
+const ACTIVITY_LABELS: Record<Exclude<ThreadRowActivity, "idle">, string> = {
+  working: "Working",
+  attention: "Needs attention",
+  unread: "New activity",
+};
+
+/**
+ * The row's state, as a dot that says what it means.
+ *
+ * A state worth noticing carries its word, so the mark is never colour alone.
+ * A thread at rest carries none: "Idle" in front of every quiet thread's title
+ * would bury the titles a screen reader is there to read.
+ */
+function ThreadStatusDot(props: { readonly activity: ThreadRowActivity }) {
+  if (props.activity === "idle") {
+    return (
+      <span aria-hidden="true" className="sidebar-navigation__thread-status" data-activity="idle" />
+    );
+  }
+  return (
+    <span
+      aria-label={ACTIVITY_LABELS[props.activity]}
+      className="sidebar-navigation__thread-status"
+      data-activity={props.activity}
+      role="img"
+      title={ACTIVITY_LABELS[props.activity]}
+    />
+  );
+}
+
+/**
+ * The state a row shows when the caller did not compute one. Follow-up and
+ * unread are the two the sidebar can always see for itself, so a caller that
+ * knows nothing more still gets an honest dot rather than a blank one.
+ */
+function activityOf(thread: ChatThreadNavigationItem): ThreadRowActivity {
+  if (thread.activity !== undefined) return thread.activity;
+  if (thread.followUp === true) return "attention";
+  if (thread.unread === true) return "unread";
+  return "idle";
+}
+
 export interface ProjectThreadRowsProps {
+  /** What the row offers on right-click. Absent leaves the rows without a menu. */
+  readonly actions?: ThreadRowActions;
   readonly activeThreadId?: string;
+  /** Absent when the host cannot accept a rename, which hides the affordance. */
+  readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly onSelectThread: (threadId: string) => void;
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
 }
@@ -51,56 +102,87 @@ export interface ProjectThreadRowsProps {
  * One button per thread. Attention markers are never colour alone: the unread
  * mark is a dot glyph carrying its own label, the way the Recents rows already
  * mark one, so a reader who cannot see the colour still reads the state.
+ *
+ * The row ends with the provider's mark rather than the model name. Right-click
+ * opens the row's own menu when the caller passed actions for it; renaming
+ * happens in place, replacing the row with its field.
  */
 export function ProjectThreadRows(props: ProjectThreadRowsProps) {
+  const [renamingThreadId, setRenamingThreadId] = useState<string>();
+  const renameable = props.onRenameThread !== undefined;
+  const actions: ThreadRowActions = {
+    ...props.actions,
+    ...(renameable ? { onStartRenameThread: setRenamingThreadId } : {}),
+  };
+  const hasMenu = !threadRowMenuIsEmpty(actions);
   return (
     <>
-      {props.threads.map((thread) => (
-        <OctantButton
-          aria-current={
-            props.activeThreadId === (thread.navigationId ?? thread.threadId) ? "page" : undefined
-          }
-          className="sidebar-navigation__thread project-threads__thread justify-start"
-          data-follow-up={
-            thread.followUp === undefined ? undefined : thread.followUp ? "true" : "false"
-          }
-          data-thread-id={thread.threadId}
-          data-unread={thread.unread === undefined ? undefined : thread.unread ? "true" : "false"}
-          key={thread.navigationId ?? thread.threadId}
-          onClick={() => props.onSelectThread(thread.navigationId ?? thread.threadId)}
-          type="button"
-          variant="ghost"
-        >
-          {/* The mark leads the row from a gutter every row reserves, so the
-              marked and unmarked titles start on the same edge. */}
-          {thread.unread ? (
-            <span aria-label="Unread" className="activity-nav__glyph" data-indicator="unread">
-              ●
+      {props.threads.map((thread) => {
+        const rowId = thread.navigationId ?? thread.threadId;
+        if (renameable && renamingThreadId === rowId) {
+          return (
+            <ThreadRenameField
+              key={rowId}
+              onCancel={() => setRenamingThreadId(undefined)}
+              onRename={(title) => {
+                setRenamingThreadId(undefined);
+                props.onRenameThread?.(rowId, title);
+              }}
+              title={thread.title}
+            />
+          );
+        }
+        const row = (
+          <OctantButton
+            aria-current={props.activeThreadId === rowId ? "page" : undefined}
+            className="sidebar-navigation__thread project-threads__thread justify-start"
+            data-follow-up={
+              thread.followUp === undefined ? undefined : thread.followUp ? "true" : "false"
+            }
+            data-pinned={thread.pinned === true ? "true" : undefined}
+            data-thread-id={thread.threadId}
+            data-unread={thread.unread === undefined ? undefined : thread.unread ? "true" : "false"}
+            onClick={() => props.onSelectThread(rowId)}
+            type="button"
+            variant="ghost"
+          >
+            {/* The dot leads the row from a gutter every row reserves, so a
+                busy and an idle title start on the same edge. It is never
+                colour alone: the label says the state in words. */}
+            <ThreadStatusDot activity={activityOf(thread)} />
+            <span className="sidebar-navigation__thread-copy">
+              <span className="sidebar-navigation__thread-title">{thread.title}</span>
             </span>
-          ) : (
-            <span aria-hidden="true" className="activity-nav__glyph" />
-          )}
-          <span className="sidebar-navigation__thread-copy">
-            <span className="sidebar-navigation__thread-title">{thread.title}</span>
-          </span>
-          {thread.meta !== undefined ? (
-            <span className="sidebar-navigation__thread-follow-up" data-indicator="meta">
-              {thread.meta}
-            </span>
-          ) : null}
-          {thread.followUp ? (
-            <span className="sidebar-navigation__thread-follow-up" data-indicator="follow-up">
-              Follow-up
-            </span>
-          ) : null}
-        </OctantButton>
-      ))}
+            {thread.provider === undefined ? null : (
+              <span
+                className="sidebar-navigation__thread-provider"
+                title={thread.provider.displayName}
+              >
+                <ProviderGlyph
+                  displayName={thread.provider.displayName}
+                  driverKind={thread.provider.driverKind}
+                  size={15}
+                />
+              </span>
+            )}
+          </OctantButton>
+        );
+        if (!hasMenu) return <div key={rowId}>{row}</div>;
+        return (
+          <ContextMenuPrimitive.Root key={rowId}>
+            <ContextMenuPrimitive.Trigger render={row} />
+            <ThreadRowMenu actions={actions} thread={thread} />
+          </ContextMenuPrimitive.Root>
+        );
+      })}
     </>
   );
 }
 
 export interface ProjectThreadListProps {
+  readonly actions?: ThreadRowActions;
   readonly activeThreadId?: string;
+  readonly onRenameThread?: (threadId: string, title: string) => void;
   /** Shown only when the list is ready and genuinely holds no threads. */
   readonly emptyMessage?: string;
   readonly errorMessage?: string;
@@ -141,7 +223,9 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
       )}
       {props.threads.length > 0 ? (
         <ProjectThreadRows
+          {...(props.actions === undefined ? {} : { actions: props.actions })}
           {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
+          {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
           onSelectThread={props.onSelectThread}
           threads={props.threads}
         />

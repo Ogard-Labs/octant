@@ -27,6 +27,13 @@ Code threads run in one of four server-enforced authority modes:
 
 Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The access control sits in the thread composer and applies from the next turn; raising a thread to Full access still needs the native confirmation.
 
+## Export
+
+**Export thread** downloads a portable JSON cut of this Code thread: the
+conversation the host holds, Canvas artifacts it originated, and provenance
+(provider, model, checkout identity, fork origin). The file says when it was
+cut. Checkout paths, credentials, and raw provider payloads never appear.
+
 ## Plans
 
 A Code thread's plan is a durable, ordered list of steps, not prose in the

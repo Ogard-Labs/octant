@@ -116,7 +116,7 @@ before work starts.
   Bedrock Converse/IAM adapters beyond the API-key paths.
 - **Remote SSH development environments**, **live guest sharing**, **thread
   retention and purge**, **usage spend ceilings**, **agent-to-agent
-  messaging**, **thread export**, and **in-app changelog** — each waits on the
+  messaging**, and **in-app changelog** — each waits on the
   foundation named in its own design note.
 
 ## Not planned
