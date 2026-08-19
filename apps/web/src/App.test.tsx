@@ -1102,6 +1102,15 @@ async function openSidebarProject(user: ReturnType<typeof userEvent.setup>, name
   await user.click(await screen.findByRole("menuitem", { name: "Open Project" }));
 }
 
+/**
+ * The sidebar names the person, and their settings hang off that row, so a test
+ * that wants Settings opens their row first.
+ */
+async function openSettingsFromSidebar(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: "Set your name" }));
+  await user.click(await screen.findByRole("button", { name: "Settings" }));
+}
+
 describe("App", () => {
   it("falls back to an available Work provider when the saved selection is stale", () => {
     const available = {
@@ -2067,7 +2076,7 @@ describe("App", () => {
     await user.click(screen.getByRole("option", { name: "Primary Gateway" }));
     await user.click(screen.getByRole("option", { name: "GPT-5" }));
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await openSettingsFromSidebar(user);
     fireEvent.click(await screen.findByRole("button", { name: "Providers & Models" }));
     await user.click(await screen.findByRole("button", { name: "Details for Primary Gateway" }));
     await user.click(await screen.findByRole("button", { name: "Disable Primary Gateway" }));
@@ -3841,7 +3850,7 @@ describe("App", () => {
       expect(document.querySelector(".shell")).toHaveClass("shell--material-translucent"),
     );
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await openSettingsFromSidebar(user);
     expect(document.querySelector(".shell")).toHaveClass(
       "shell-frame--standalone",
       "shell--material-translucent",
@@ -3852,7 +3861,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Back to app" }));
     expect(document.querySelector(".shell")).toHaveClass("shell--material-opaque");
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await openSettingsFromSidebar(user);
     fireEvent.click(await screen.findByRole("button", { name: "Advanced" }));
     await user.click(screen.getByRole("button", { name: "Reset native window bounds" }));
     expect(hostBridge.resetBounds).toHaveBeenCalledOnce();
@@ -3873,7 +3882,7 @@ describe("App", () => {
       />,
     );
 
-    await screen.findByRole("button", { name: "Settings" });
+    await screen.findByRole("button", { name: "Set your name" });
     await waitFor(() =>
       expect(document.querySelector(".shell")).toHaveClass("shell--material-translucent"),
     );
@@ -4282,9 +4291,11 @@ describe("App", () => {
     expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass(
       "shell-icon-button",
     );
-    expect(within(sidebar).getByRole("button", { name: "Settings" })).toHaveClass("window-no-drag");
-    expect(within(sidebar).getByRole("button", { name: "Settings" })).toHaveClass(
-      "sidebar__utility",
+    expect(within(sidebar).getByRole("button", { name: "Set your name" })).toHaveClass(
+      "window-no-drag",
+    );
+    expect(within(sidebar).getByRole("button", { name: "Set your name" })).toHaveClass(
+      "sidebar-profile__trigger",
     );
     for (const button of within(sidebar).getAllByRole("button")) {
       expect(button).toHaveClass("window-no-drag");
@@ -4608,7 +4619,7 @@ describe("App", () => {
     const activeTabId = (await screen.findByRole("tab", { selected: true })).getAttribute(
       "data-workspace-tab-id",
     );
-    await user.click(await screen.findByRole("button", { name: "Settings" }));
+    await openSettingsFromSidebar(user);
     expect(await screen.findByRole("heading", { level: 1, name: "General" })).toBeVisible();
     expect(screen.getByRole("complementary", { name: "Settings sidebar" })).toBeVisible();
     expect(screen.queryByRole("tab", { name: "Settings" })).not.toBeInTheDocument();
@@ -4626,7 +4637,7 @@ describe("App", () => {
       activeTabId,
     );
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await openSettingsFromSidebar(user);
     await screen.findByRole("searchbox", { name: "Search settings" });
 
     // Search is navigation: typing "material" shows a result list, and
@@ -4651,7 +4662,7 @@ describe("App", () => {
     await user.selectOptions(screen.getByLabelText("Mode switcher"), "dropdown");
     await user.click(screen.getByRole("button", { name: "Back to app" }));
     expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await openSettingsFromSidebar(user);
     await screen.findByRole("searchbox", { name: "Search settings" });
 
     // Search "providers" and deep-link to the Providers & Models section.

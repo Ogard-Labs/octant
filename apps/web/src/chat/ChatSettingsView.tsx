@@ -125,7 +125,7 @@ export function ChatSettingsView(props: ChatSettingsViewProps) {
           }
         }}
       >
-        <label className="settings-view__field">
+        <label className="settings-view__field settings-view__field--block">
           <span>Default provider and model</span>
           <ModelPicker
             ariaLabel="Default Chat provider and model"

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened runtime entitlements for the Developer ID build.
+
+  Deliberately short. Each entry below is here because Octant does not run
+  without it; anything that merely made signing easier is absent, because an
+  entitlement is a permanent widening of what this process may do and the
+  notarized build is the one users run.
+
+  Not granted, and worth naming so nobody adds them back by reflex:
+  `com.apple.security.cs.disable-library-validation` (every native module is
+  signed with the same Developer ID, so library validation passes on its own),
+  and `com.apple.security.cs.allow-dyld-environment-variables` (nothing here
+  needs the loader reconfigured from the environment, and it is a standard way
+  to get foreign code into a signed process).
+-->
+<plist version="1.0">
+  <dict>
+    <!-- V8 compiles JavaScript at runtime; without this the renderer cannot start. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- V8's code pages are written then executed, which the hardened runtime
+         otherwise refuses even with JIT allowed. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+  </dict>
+</plist>

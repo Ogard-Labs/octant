@@ -1,5 +1,5 @@
 import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectSidebarSection } from "./ProjectSidebarSection";
@@ -550,7 +550,72 @@ describe("ProjectSidebarSection code project views", () => {
     ).toMatchObject({ views: [{ name: "Main", icon: "rocket", color: "purple" }] });
     expect(screen.getByRole("button", { name: "Collapse octant" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Collapse auroradocs" })).not.toBeInTheDocument();
-    expect(screen.getByText("Projects 1")).toBeVisible();
+    // Nothing about the view is pinned under the rail: the count and the two
+    // edits are answers to a right-click, not a permanent row.
+    expect(screen.queryByText(/Projects 1/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Edit view" })).not.toBeInTheDocument();
+  });
+
+  it("tells a right-clicked view how many Projects it holds, and offers its two edits", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-views.v1",
+      JSON.stringify({
+        activeViewId: "all",
+        views: [{ id: "view-main", name: "Main", projectIds: [codeProjectA.id] }],
+      }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewSwitcherPresentation="inline"
+        projectViewsEnabled
+        projects={[codeProjectA, codeProjectB]}
+      />,
+    );
+
+    const group = screen.getByRole("group", { name: "Project views" });
+    fireEvent.contextMenu(within(group).getByRole("button", { name: "Main" }));
+
+    // The menu answers for the view that was right-clicked, not for the one
+    // currently showing: All Projects is active and holds both.
+    expect(await screen.findByText("Main · Projects 1")).toBeVisible();
+    await user.click(screen.getByRole("menuitem", { name: "Edit view" }));
+    expect(screen.getByLabelText("Project view name")).toHaveValue("Main");
+  });
+
+  it("keeps All Projects free of edits it cannot take", async () => {
+    window.localStorage.clear();
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewSwitcherPresentation="inline"
+        projectViewsEnabled
+        projects={[codeProjectA, codeProjectB]}
+      />,
+    );
+
+    const group = screen.getByRole("group", { name: "Project views" });
+    fireEvent.contextMenu(within(group).getByRole("button", { name: "All Projects" }));
+
+    expect(await screen.findByText("All Projects · Projects 2")).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Edit view" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Delete view" })).not.toBeInTheDocument();
   });
 
   it("offers saved views as inline icon buttons when configured, and a dropdown otherwise", async () => {
