@@ -574,7 +574,22 @@ export class CodeService {
             observedExistingCheckouts.set(projectId, prepared.checkout);
           }
           const observed = observedExistingCheckouts.get(projectId);
-          recovered = observed?.id === thread.checkoutId ? observed : undefined;
+          if (observed !== undefined && String(observed.id) !== String(thread.checkoutId)) {
+            // The Project binds a checkout this thread is not on. That id is
+            // derived from the binding revision the thread was created
+            // against, so once the Project is rebound no observation can
+            // produce the thread's own id again and Waiting will never end.
+            // Say Unavailable, which already tells the reader to relink the
+            // Project or start a fresh thread, rather than render a spinner
+            // for a reconnection nobody is attempting.
+            recovered = decodeCodeCheckoutIdentity({
+              ...persisted,
+              availability: "unavailable",
+              observedAt: this.#clock(),
+            });
+          } else {
+            recovered = observed;
+          }
         }
         if (recovered === undefined) continue;
         if (!sameAvailableCheckout(persisted, recovered)) {

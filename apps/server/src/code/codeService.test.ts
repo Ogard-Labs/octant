@@ -151,6 +151,29 @@ describe("CodeService reads", () => {
     expect(result.checkouts).toContainEqual(checkout);
   });
 
+  it("refuses a thread whose Project now binds a different checkout, instead of waiting on it", async () => {
+    const waiting = decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" });
+    // The Project was rebound, so observing it derives a checkout id from the
+    // newer binding revision. The thread stays pinned to the old one, which
+    // no observation can ever produce again.
+    const superseding = decodeCodeCheckoutIdentity({
+      ...checkout,
+      id: "00000000-0000-4000-8000-000000001014",
+      availability: "available",
+    });
+    const fixture = serviceFixture({
+      threads: [thread()],
+      checkout: waiting,
+      observedCheckout: superseding,
+    });
+
+    const result = await fixture.service.bootstrap(ids.window);
+
+    expect(result.checkouts).toContainEqual(
+      expect.objectContaining({ id: ids.checkout, availability: "unavailable" }),
+    );
+  });
+
   it("re-observes a shared existing checkout only once during restart bootstrap", async () => {
     const waiting = decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" });
     const secondThread = thread({
@@ -2518,6 +2541,7 @@ function serviceFixture(
     };
     readonly events?: EventEnvelope[];
     readonly checkout?: typeof checkout;
+    readonly observedCheckout?: typeof checkout;
     readonly allCheckouts?: ReadonlyArray<CodeCheckoutIdentity>;
     readonly activity?: ReturnType<CodePersistencePort["readCodeThreadActivity"]>;
     readonly approve?: boolean;
@@ -2577,7 +2601,7 @@ function serviceFixture(
   const checkouts = {
     observe: vi.fn(async () => ({
       bindingRevisionId: ids.binding,
-      checkout,
+      checkout: options.observedCheckout ?? checkout,
       ...(options.worktreeRemoteFacts === undefined
         ? {}
         : { worktreeRemoteFacts: options.worktreeRemoteFacts }),

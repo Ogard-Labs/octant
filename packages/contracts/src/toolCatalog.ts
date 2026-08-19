@@ -23,6 +23,12 @@ export const ToolApprovalClass = Schema.Literal(
   "credential-secret-access",
   "access-outside-project",
   "privilege-expansion",
+  /**
+   * Publishing to a target the user owns. Its own class rather than a variation
+   * on repository writes: it is outward-facing and usually irreversible, and no
+   * local checkpoint undoes something other people can already see.
+   */
+  "publish-to-target",
 );
 export type ToolApprovalClass = typeof ToolApprovalClass.Type;
 
