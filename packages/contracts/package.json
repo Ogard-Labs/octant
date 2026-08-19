@@ -10,6 +10,7 @@
     "./artifact-mirror": "./src/artifactMirror.ts",
     "./automation": "./src/automation.ts",
     "./goal-loop": "./src/goalLoop.ts",
+    "./ship-target": "./src/shipTarget.ts",
     "./automation-notifications": "./src/automationNotifications.ts",
     "./linked-thread": "./src/linkedThread.ts",
     "./linked-thread-prompt": "./src/linkedThreadPrompt.ts",

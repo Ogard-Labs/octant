@@ -20,6 +20,7 @@ import { createWorkOverviewClient } from "@octant/client-runtime/work-overview-c
 import { createWorkResearchClient } from "@octant/client-runtime/work-research-client";
 import { createGoalClient } from "@octant/client-runtime/goal-client";
 import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
+import { createShipClient } from "@octant/client-runtime/ship-client";
 import { createPlanClient } from "@octant/client-runtime/plan-client";
 import { createUsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
@@ -953,6 +954,15 @@ function LaunchedShell(
   const goalLoopClient = useMemo(
     () =>
       createGoalLoopClient({
+        baseUrl: props.launch.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.projectWindowCapability,
+      }),
+    [props.launch.serverUrl, props.projectWindowCapability],
+  );
+  const shipClient = useMemo(
+    () =>
+      createShipClient({
         baseUrl: props.launch.serverUrl,
         fetch: globalThis.fetch,
         windowCapability: props.projectWindowCapability,
@@ -3854,6 +3864,7 @@ function LaunchedShell(
                   workResearchClient={workResearchClient}
                   goalClient={goalClient}
                   goalLoopClient={goalLoopClient}
+                  shipClient={shipClient}
                   planClient={planClient}
                   onOpenCodeFile={({ threadId, relativePath }) => {
                     void controller.openCodeSurface({
