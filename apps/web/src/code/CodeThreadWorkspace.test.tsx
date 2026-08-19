@@ -19,15 +19,11 @@ const alternateModelId = "model-two" as never;
 describe("CodeThreadWorkspace", () => {
   it("renders the conversation center and sends follow-ups through the controller", async () => {
     const user = userEvent.setup();
-    const onOpenSurface = vi.fn();
-    const onOpenBrowser = vi.fn();
     const sendFollowUp = vi.fn(async () => true);
     const setPendingDraft = vi.fn();
     render(
       <CodeThreadWorkspace
         controller={controller({ sendFollowUp, setPendingDraft })}
-        onOpenBrowser={onOpenBrowser}
-        onOpenSurface={onOpenSurface}
         providerGroups={[providerGroup()]}
         threadId={threadId}
       />,
@@ -38,10 +34,11 @@ describe("CodeThreadWorkspace", () => {
       "No messages yet. Send a prompt to start this thread.",
     );
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Changes" }));
-    expect(onOpenSurface).toHaveBeenCalledWith("code-diff");
-    await user.click(screen.getByRole("button", { name: "Browser" }));
-    expect(onOpenBrowser).toHaveBeenCalledOnce();
+    // The header states what the thread is; opening a surface beside it is the
+    // tab launcher's job, so no row of openers competes with the title here.
+    expect(screen.queryByRole("button", { name: "Changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Browser" })).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
