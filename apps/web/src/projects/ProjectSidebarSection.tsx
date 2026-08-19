@@ -541,7 +541,18 @@ function ProjectGroup(props: {
           <div className="project-block" key={project.id}>
             <div
               className="project-row"
-              data-active={props.activeProjectId === project.id ? "true" : "false"}
+              // A selected thread already marks the row the reader chose. The
+              // Project it lives in stays the active Project, but it does not
+              // wear the same selected background and compete with it.
+              data-active={
+                props.activeProjectId === project.id &&
+                !nestedThreads.some(
+                  (thread) =>
+                    String(thread.navigationId ?? thread.threadId) === String(props.activeThreadId),
+                )
+                  ? "true"
+                  : "false"
+              }
             >
               <OctantButton
                 aria-expanded={showNested ? expanded : undefined}
