@@ -3781,6 +3781,7 @@ function LaunchedShell(
               ) : null}
               <ProjectMemoryInspectorProvider onOpen={openMemoryInspector}>
                 <WorkspaceView
+                  onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                   appleToolchainClient={appleToolchainClient}
                   agentRunClient={agentRunClient}
                   agentRunSettingsClient={agentRunSettingsClient}
@@ -4074,22 +4075,36 @@ function LaunchedShell(
               availableSurfaces={availableDockSurfaces}
               context={
                 contextController.snapshot === undefined ? (
-                  <ShellState
-                    {...(contextController.status === "disconnected"
-                      ? { action: { label: "Retry context", onClick: contextController.retry } }
-                      : {})}
-                    eyebrow="Context"
-                    message={
-                      contextController.errorMessage ?? "Loading the authoritative context plan."
-                    }
-                    {...(contextController.status === "disconnected" ? { role: "alert" } : {})}
-                    state={contextController.status === "disconnected" ? "disconnected" : "loading"}
-                    title={
-                      contextController.status === "disconnected"
-                        ? "Context is unavailable"
-                        : "Loading context"
-                    }
-                  />
+                  // A thread nothing has planned yet is an empty panel, not a
+                  // failed one: no alert, and no Retry that could not change
+                  // the answer.
+                  contextController.status === "not-planned" ? (
+                    <ShellState
+                      eyebrow="Context"
+                      message="It appears once this thread takes its first turn."
+                      state="neutral"
+                      title="No context plan yet"
+                    />
+                  ) : (
+                    <ShellState
+                      {...(contextController.status === "disconnected"
+                        ? { action: { label: "Retry context", onClick: contextController.retry } }
+                        : {})}
+                      eyebrow="Context"
+                      message={
+                        contextController.errorMessage ?? "Loading the authoritative context plan."
+                      }
+                      {...(contextController.status === "disconnected" ? { role: "alert" } : {})}
+                      state={
+                        contextController.status === "disconnected" ? "disconnected" : "loading"
+                      }
+                      title={
+                        contextController.status === "disconnected"
+                          ? "Context is unavailable"
+                          : "Loading context"
+                      }
+                    />
+                  )
                 ) : (
                   <ContextInspector
                     busy={contextController.status === "updating"}

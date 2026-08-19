@@ -1817,11 +1817,13 @@ describe("startOctantServer", () => {
               ),
             ).then(assertResponse),
           );
-          expect(response.status).toBe(503);
+          // The boundary is registered and authenticated; this subject simply
+          // has no plan, which is an empty answer rather than a failed service.
+          expect(response.status).toBe(404);
           const body = yield* Effect.promise(() => response.json());
           expect(body).toEqual({
-            category: "unavailable",
-            message: "Octant Context service is unavailable.",
+            category: "not-planned",
+            message: "This thread has no context plan yet.",
           });
         }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
       ),

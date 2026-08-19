@@ -271,6 +271,8 @@ export interface WorkspaceViewProps {
   readonly tabActivation?: TabActivationRegistry;
   readonly environmentPresentation: EnvironmentPresentationState;
   readonly onSetEnvironmentPresentation: (next: EnvironmentPresentationState) => void;
+  /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
+  readonly onNewThreadInProject?: (projectId: ProjectSummary["id"]) => void;
   readonly projectClient?: ProjectClient;
   readonly projectServerUrl?: string;
   readonly projectWindowCapability?: string;
@@ -711,6 +713,9 @@ function renderCodeTab(
           presentation={props.environmentPresentation}
           onChangePresentation={props.onSetEnvironmentPresentation}
           {...(project === undefined ? {} : { project })}
+          {...(props.onNewThreadInProject === undefined
+            ? {}
+            : { onNewThreadInProject: props.onNewThreadInProject })}
           {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
           {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
           {...(props.projectWindowCapability === undefined

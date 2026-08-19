@@ -1,6 +1,7 @@
 import { decodeProjectId, type CodeEnvironmentObservation } from "@octant/contracts";
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 
 const projectId = decodeProjectId("00000000-0000-4000-8000-000000000901");
@@ -138,5 +139,32 @@ describe("EnvironmentGitGroup", () => {
     ]) {
       expect(screen.queryByText(absent)).not.toBeInTheDocument();
     }
+  });
+});
+
+describe("EnvironmentGitGroup way out", () => {
+  it("offers a way forward when the checkout cannot be observed", async () => {
+    const onClick = vi.fn();
+    render(
+      <EnvironmentGitGroup
+        action={{ label: "New thread in this Project", onClick }}
+        errorMessage="The Code thread checkout is unavailable."
+        status="error"
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("The Code thread checkout is unavailable.");
+    await userEvent.click(screen.getByRole("button", { name: "New thread in this Project" }));
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("states the failure alone when the host offers nothing to press", () => {
+    render(
+      <EnvironmentGitGroup errorMessage="Repository environment is unavailable." status="error" />,
+    );
+
+    expect(screen.getByRole("alert")).toBeVisible();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

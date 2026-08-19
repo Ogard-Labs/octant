@@ -115,6 +115,18 @@ describe("useContextController", () => {
     expect(result.current.errorMessage).not.toContain("secret");
   });
 
+  it("says a thread has no context plan yet rather than reporting a broken connection", async () => {
+    const client = fakeClient({
+      inspect: vi.fn(async () => {
+        throw new ContextClientFailure("not-planned", "This thread has no context plan yet.");
+      }),
+    });
+    const { result } = renderHook(() => useContextController({ client, subject }));
+    await waitFor(() => expect(result.current.status).toBe("not-planned"));
+    // Nothing to retry and nothing broke, so the panel carries no error at all.
+    expect(result.current.errorMessage).toBeUndefined();
+  });
+
   it("replays from the accepted sequence and recovers a reconnected snapshot", async () => {
     const inspect = vi
       .fn<ContextClient["inspect"]>()

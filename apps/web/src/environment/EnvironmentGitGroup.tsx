@@ -4,6 +4,12 @@ import type { ReactNode } from "react";
 import type { CodeEnvironmentControllerStatus } from "./useCodeEnvironmentController";
 
 export interface EnvironmentGitGroupProps {
+  /**
+   * A way out of an unusable checkout. A thread whose Project was rebound can
+   * never observe its own checkout again, so the panel used to state that and
+   * stop — a dead end with nothing to press.
+   */
+  readonly action?: { readonly label: string; readonly onClick: () => void } | undefined;
   readonly errorMessage?: string | undefined;
   readonly observation?: CodeEnvironmentObservation | undefined;
   readonly status: CodeEnvironmentControllerStatus;
@@ -26,9 +32,12 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
   }
   if (props.status !== "ready" || props.observation === undefined) {
     return (
-      <p className="environment-git-group__error" role="alert">
-        {reason ?? "Repository environment is unavailable."}
-      </p>
+      <div className="environment-git-group__state">
+        <p className="environment-git-group__error" role="alert">
+          {reason ?? "Repository environment is unavailable."}
+        </p>
+        <WayOut {...(props.action === undefined ? {} : { action: props.action })} />
+      </div>
     );
   }
   if (props.observation.status !== "ready") {
@@ -38,6 +47,7 @@ export function EnvironmentGitGroup(props: EnvironmentGitGroupProps) {
         <p className="environment-git-group__error" role="alert">
           {props.observation.reason}
         </p>
+        <WayOut {...(props.action === undefined ? {} : { action: props.action })} />
       </div>
     );
   }
@@ -128,4 +138,19 @@ function PathIdentity(props: {
 
 function pathBasename(path: string): string {
   return path.split("/").filter(Boolean).at(-1) ?? path;
+}
+
+function WayOut(props: {
+  readonly action?: { readonly label: string; readonly onClick: () => void };
+}) {
+  if (props.action === undefined) return null;
+  return (
+    <button
+      className="environment-group__action window-no-drag"
+      onClick={props.action.onClick}
+      type="button"
+    >
+      {props.action.label}
+    </button>
+  );
 }
