@@ -491,4 +491,19 @@ describe("findUncalledEndpoints", () => {
 
     expect(violations).toEqual([]);
   });
+
+  it("does not treat path strings in an unreachable island as served endpoints", () => {
+    const island = [...KNOWN_ISLANDS.keys()].find((path) => path.startsWith("apps/server/src/"));
+    if (island === undefined) {
+      throw new Error("expected at least one server-tree island for this assertion");
+    }
+    const violations = findUncalledEndpoints([
+      {
+        path: island,
+        content: `authenticatedFetch({ path: "/api/example/island-only" });`,
+      },
+    ]);
+
+    expect(violations).toEqual([]);
+  });
 });
