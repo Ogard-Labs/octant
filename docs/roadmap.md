@@ -12,7 +12,7 @@ The first release is an unsigned Apple Silicon technical preview. Everything
 here is merged or being hardened for it.
 
 - **Chat, Work, and Code as server-enforced modes** — virtual Chat Projects, one
-  confined root per Work Project, one repository root per Code Project,
+  confined root per Work Project, one confined directory per Code Project,
   approval-gated Code with read-only Plan mode, explicit Work-to-Code promotion.
 - **Durable event platform** — SQLite journal, rebuildable projections,
   forward-only migrations with backup, crash and restart recovery, `db:*`

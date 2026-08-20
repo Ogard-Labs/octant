@@ -90,9 +90,7 @@ describe("ProjectCreateDialog web folder parity", () => {
     const user = userEvent.setup();
     const selectProjectRoot = vi
       .fn()
-      .mockRejectedValueOnce(
-        new Error("Choose the top-level Git repository or linked-worktree folder."),
-      )
+      .mockRejectedValueOnce(new Error("Choose an accessible directory."))
       .mockResolvedValueOnce({ kind: "cancelled" });
     const hostBridge = { selectProjectRoot } as unknown as OctantHostBridge;
     const onClose = vi.fn();
@@ -107,9 +105,7 @@ describe("ProjectCreateDialog web folder parity", () => {
       />,
     );
 
-    expect(
-      await screen.findByText("Choose the top-level Git repository or linked-worktree folder."),
-    ).toBeVisible();
+    expect(await screen.findByText("Choose an accessible directory.")).toBeVisible();
     expect(screen.getByRole("dialog", { name: "Add folder" })).toHaveClass(
       "octant-dialog__popup",
       "project-dialog",

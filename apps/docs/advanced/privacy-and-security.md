@@ -80,7 +80,7 @@ native receipts; desktop admin routes are loopback-only.
 - **Work** uses OS-enforced macOS project confinement for one bound root.
 - **Code** starts approval-gated; Plan mode is strictly read-only, and Full
   access must be explicitly selected. Full access is still confined to the
-  repository root for user work; merge authority is never granted.
+  bound folder for user work; merge authority is never granted.
 - Provider execution and app-managed filesystem and shell tools cross an
   Octant-owned sandbox boundary; path checks alone are insufficient.
 - Extensions stay quarantined until explicitly reviewed and trusted.
