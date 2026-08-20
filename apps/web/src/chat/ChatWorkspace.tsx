@@ -34,8 +34,7 @@ import {
   type ChatComposerProps,
   type ChatComposerResearchBackend,
 } from "./ChatComposer";
-import { ThreadExportControl } from "../thread/ThreadExportControl";
-import { ChatExportControl } from "./ChatExportControl";
+import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ChatTranscript } from "./ChatTranscript";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
@@ -54,7 +53,6 @@ import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { OctantButton } from "../ui/base/OctantButton";
-import { PanelsTopLeft } from "lucide-react";
 
 export interface ChatWorkspaceProps {
   readonly controller: ChatController;
@@ -150,6 +148,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const queued = useQueuedSend({
     threadKey: activeThreadId === undefined ? undefined : String(activeThreadId),
     settlement: chatTurnSettlement(view),
+    ready: uploadingAttachments.length === 0 && attachmentStatus.kind !== "removing",
     send: async () => submitTurnRef.current(props.controller.pendingDraft),
   });
   const checkpoints = useThreadCheckpoints({
@@ -161,6 +160,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const followsConversationRef = useRef(true);
   const followedThreadRef = useRef<string | undefined>(undefined);
   const pendingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
+  const cancelledUploadsRef = useRef(new Set<string>());
   // Every composer command that carries the thread's expected version shares
   // one queue. Two of them dispatched before the first round trip returns
   // would otherwise both send the rendered version, so the second is rejected
@@ -264,7 +264,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
         {props.childRunStatus === undefined ? null : (
-          <header className="chat-workspace__header">{props.childRunStatus}</header>
+          <header className="chat-workspace__header thread-column">{props.childRunStatus}</header>
         )}
         <div className="chat-workspace__load-state">
           <p role={props.controller.status === "disconnected" ? "alert" : "status"}>
@@ -476,7 +476,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     // thread they pointed at once. This check is the composer's own
     // report: a chip the host refuses is shown as unavailable rather
     // than silently dropped.
+    const sendingThreadId = String(view.thread.id);
     const threadMentionIds = await threadMentions.resolveForSend();
+    if (activeThreadIdRef.current !== sendingThreadId) return false;
     let sent = false;
     try {
       // Behind the same queue as a model or option change: a turn sent
@@ -562,7 +564,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         }}
         ref={conversationRef}
       >
-        <header className="chat-workspace__header">
+        <header className="chat-workspace__header thread-column">
           <div>
             <h1>{view.thread.title}</h1>
             <p className="chat-workspace__meta">
@@ -571,37 +573,31 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             </p>
           </div>
           {props.childRunStatus}
-          <ChatExportControl
+          <ChatThreadActionsMenu
             connectionStatus={
               props.controller.status === "disconnected" ? "disconnected" : "connected"
             }
             view={view}
-          />
-          <ThreadExportControl
-            mode="chat"
-            threadId={String(view.thread.id)}
-            title={view.thread.title}
             {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
             {...(props.windowCapability === undefined
               ? {}
               : { windowCapability: props.windowCapability })}
+            {...(props.canvasClient === undefined
+              ? {}
+              : {
+                  canvas: {
+                    open: canvasPanelOpen,
+                    onToggle: () => setCanvasPanelOpen((current) => !current),
+                  },
+                })}
           />
-          {props.canvasClient === undefined ? null : (
-            <OctantButton
-              aria-controls={canvasPanelId}
-              aria-expanded={canvasPanelOpen}
-              onClick={() => setCanvasPanelOpen((current) => !current)}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              <PanelsTopLeft aria-hidden="true" size={14} strokeWidth={1.7} />
-              Canvas
-            </OctantButton>
-          )}
         </header>
         {props.canvasClient === undefined || !canvasPanelOpen ? null : (
-          <section aria-label="Canvas tools" className="chat-workspace__canvas" id={canvasPanelId}>
+          <section
+            aria-label="Canvas tools"
+            className="chat-workspace__canvas thread-column"
+            id={canvasPanelId}
+          >
             <CanvasCreatePanel
               client={props.canvasClient}
               context={buildCanvasCreationContext({
@@ -762,14 +758,42 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           queued.discard();
           props.controller.setPendingDraft("");
           threadMentions.clear();
-          const claimed = pendingAttachmentsRef.current;
-          pendingAttachmentsRef.current = [];
-          setPendingAttachments([]);
-          for (const attachment of claimed) {
-            void discardAttachmentRef
-              .current({ threadId: view.thread.id, attachmentId: attachment.id })
-              .catch(() => undefined);
+          setPendingPreviewSelections([]);
+          if (props.pendingCanvasSelections === undefined) {
+            setLocalCanvasSelections([]);
+          } else {
+            props.onClearCanvasSelections?.();
           }
+          if (props.pendingExtensionSelections === undefined) extensionDraft.clear();
+          for (const upload of uploadingAttachments) {
+            cancelledUploadsRef.current.add(String(upload.id));
+          }
+          setUploadingAttachments([]);
+          const claimed = pendingAttachmentsRef.current;
+          void (async () => {
+            const kept: PendingAttachment[] = [];
+            for (const attachment of claimed) {
+              try {
+                await discardAttachmentRef.current({
+                  threadId: view.thread.id,
+                  attachmentId: attachment.id,
+                });
+              } catch {
+                kept.push(attachment);
+              }
+            }
+            if (!mountedRef.current || activeThreadIdRef.current !== String(view.thread.id)) {
+              return;
+            }
+            pendingAttachmentsRef.current = kept;
+            setPendingAttachments(kept);
+            if (kept[0] !== undefined) {
+              setAttachmentStatus({
+                kind: "failed",
+                message: `${kept[0].displayName} could not be removed. Try again.`,
+              });
+            }
+          })();
         }}
         {...(queued.state.status === "held" && queued.statusMessage !== undefined
           ? { statusMessage: queued.statusMessage }
@@ -805,8 +829,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           void (async () => {
             try {
               const buffer = await file.arrayBuffer();
-              if (!mountedRef.current || activeThreadIdRef.current !== String(view.thread.id)) {
+              if (
+                !mountedRef.current ||
+                activeThreadIdRef.current !== String(view.thread.id) ||
+                cancelledUploadsRef.current.has(String(attachmentId))
+              ) {
+                cancelledUploadsRef.current.delete(String(attachmentId));
                 settleUpload();
+                await discardAttachmentRef
+                  .current({ threadId: view.thread.id, attachmentId })
+                  .catch(() => undefined);
                 return;
               }
               await props.controller.upload({
@@ -816,7 +848,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 mediaType: file.type,
                 bytes: new Uint8Array(buffer),
               });
-              if (!mountedRef.current || activeThreadIdRef.current !== String(view.thread.id)) {
+              if (
+                !mountedRef.current ||
+                activeThreadIdRef.current !== String(view.thread.id) ||
+                cancelledUploadsRef.current.has(String(attachmentId))
+              ) {
+                cancelledUploadsRef.current.delete(String(attachmentId));
                 settleUpload();
                 await discardAttachmentRef
                   .current({ threadId: view.thread.id, attachmentId })
@@ -884,7 +921,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         }
         onSend={async (draft) => {
           if (isSending) return queued.enqueue();
-          return await submitTurn(draft);
+          const sent = await submitTurn(draft);
+          if (sent) queued.discard();
+          return sent;
         }}
         pendingCanvasSelections={pendingCanvasSelections}
         pendingAttachments={pendingAttachments}
@@ -1064,8 +1103,9 @@ function chatTurnSettlement(view: ChatThreadView | undefined): TurnSettlement | 
   switch (latest.outcome) {
     case "queued":
     case "streaming":
-    case "waiting":
       return "running";
+    case "waiting":
+      return "waiting";
     case "completed":
       return "completed";
     case "cancelled":

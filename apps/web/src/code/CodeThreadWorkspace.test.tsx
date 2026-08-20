@@ -107,6 +107,45 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
   });
 
+  it("offers a retry beside the unloadable-history notice and keeps the composer usable", async () => {
+    const user = userEvent.setup();
+    const retry = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [],
+          conversationHistory: "unavailable",
+          retry,
+          turnError: "Conversation history could not be loaded.",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    // The notice and the way out sit together; an ordinary turn error carries
+    // no retry, so the control appears only while history is unreachable.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Conversation history could not be loaded.",
+    );
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledOnce();
+    // The thread itself is live even without its history.
+    expect(screen.getByLabelText("Follow-up message")).toBeEnabled();
+  });
+
+  it("keeps the retry control off an ordinary turn error", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ turnError: "The provider refused the turn." })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("The provider refused the turn.");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
   it("reads a plan the assistant wrote as a plan, not as one long line", () => {
     render(
       <CodeThreadWorkspace
@@ -1118,6 +1157,73 @@ describe("CodeThreadWorkspace", () => {
     );
     await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
     expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], []);
+  });
+
+  it("keeps a later Code draft when the queued send settles", async () => {
+    const user = userEvent.setup();
+    let finish: ((value: boolean) => void) | undefined;
+    const sendFollowUp = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("Follow-up message"), "and then push");
+    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ pendingDraft: "and then push", sendFollowUp, turnStatus: "idle" })}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], []));
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "later draft");
+    finish?.(true);
+    await waitFor(() => expect(composer).toHaveValue("later draft"));
+    expect(sendFollowUp).toHaveBeenCalledOnce();
+  });
+
+  it("discards staged images with a queued Code message", async () => {
+    const user = userEvent.setup();
+    const discardAttachment = vi.fn(async () => undefined);
+    const reference = {
+      attachmentId: "40000000-0000-4000-8000-000000000009",
+      displayName: "pasted.png",
+      mediaType: "image/png" as const,
+      byteLength: 3,
+      digest: "c".repeat(64),
+    };
+    render(
+      <CodeThreadWorkspace
+        attachmentClient={
+          {
+            putAttachment: vi.fn(async () => reference),
+            discardAttachment,
+            attachment: vi.fn(),
+          } as never
+        }
+        controller={controller({ turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "with a picture");
+    pasteImage(composer);
+    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
+    await waitFor(() => expect(discardAttachment).toHaveBeenCalled());
+    expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
+    expect(composer).toHaveValue("");
   });
 
   it("leaves a queued follow-up unsent when the turn fails, and lets the user discard it", async () => {

@@ -368,6 +368,89 @@ describe("WorkThreadWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Discard queued message" }));
     expect(screen.getByLabelText("Work prompt")).toHaveValue("");
   });
+
+  it("does not send a queued Work follow-up after the user confirms the thread Done", async () => {
+    const user = userEvent.setup();
+    const startFirstTurn = vi.fn();
+    let turns = [workTurn({ status: "running" })];
+    const execute = vi.fn(async () => ({
+      kind: "thread-completion-confirmed" as const,
+      thread: workThread({ version: 2, completionConfirmed: true }),
+    }));
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute,
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns })),
+      startFirstTurn,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await user.type(await screen.findByLabelText("Work prompt"), "After done");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Mark delivery target complete" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Delivery satisfaction evidence" }),
+      "The reviewed draft is saved in the bound folder.",
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm delivery target completion" }));
+    expect(await screen.findByText("Delivery target marked complete.")).toBeInTheDocument();
+    turns = [workTurn({ status: "completed" })];
+    await waitFor(
+      () =>
+        expect(
+          (turnClient.transcript as { mock: { calls: unknown[] } }).mock.calls.length,
+        ).toBeGreaterThan(1),
+      { timeout: 2500 },
+    );
+    expect(startFirstTurn).not.toHaveBeenCalled();
+  });
+
+  it("holds a queued Work follow-up when the turn ends as waiting", async () => {
+    const user = userEvent.setup();
+    const startFirstTurn = vi.fn();
+    let turns = [workTurn({ status: "running" })];
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns })),
+      startFirstTurn,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await user.type(await screen.findByLabelText("Work prompt"), "Hold this");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    turns = [workTurn({ status: "waiting" })];
+    await waitFor(
+      () =>
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "The response is waiting. The queued message was not sent.",
+        ),
+      { timeout: 2500 },
+    );
+    expect(startFirstTurn).not.toHaveBeenCalled();
+  });
 });
 
 function workTurn(overrides: Record<string, unknown> = {}) {

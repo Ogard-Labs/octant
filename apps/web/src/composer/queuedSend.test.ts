@@ -47,6 +47,18 @@ describe("queued send", () => {
     expect(settleQueuedSend(queued, "thread-a", "completed").fire).toBe(true);
   });
 
+  it("holds the message when the turn ends as waiting", () => {
+    const queued = enqueueQueuedSend(EMPTY_QUEUED_SEND, "thread-a", "running");
+    expect(settleQueuedSend(queued, "thread-a", "waiting")).toEqual({
+      next: {
+        status: "held",
+        threadKey: "thread-a",
+        reason: queuedHoldReason("waiting"),
+      },
+      fire: false,
+    });
+  });
+
   it("does not fire after the user discards it or leaves the thread", () => {
     const queued = enqueueQueuedSend(EMPTY_QUEUED_SEND, "thread-a", "running");
     expect(settleQueuedSend(discardQueuedSend(), "thread-a", "completed").fire).toBe(false);

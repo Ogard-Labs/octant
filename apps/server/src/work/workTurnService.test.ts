@@ -228,6 +228,34 @@ describe("WorkTurnService", () => {
       { role: "assistant", text: "Provider reply", status: "completed" },
     ]);
   });
+
+  it("hands a follow-up turn the prior transcript as provider context", async () => {
+    const run = vi.fn();
+    run.mockImplementationOnce(async () => ({
+      kind: "completed" as const,
+      response: "Provider reply",
+    }));
+    run.mockImplementation(async () => ({ kind: "completed" as const, response: "Shorter." }));
+    const fixture = serviceFixture({ turnRuntime: { run } });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+
+    const followUp = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+      turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+      prompt: "Make that summary shorter",
+    });
+    expect(followUp.kind).toBe("accepted");
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1]?.[0]).toMatchObject({
+      command: expect.objectContaining({ prompt: "Make that summary shorter" }),
+      context: [
+        { kind: "user-message", text: "Summarize the brief" },
+        { kind: "assistant-message", text: "Provider reply" },
+      ],
+    });
+  });
 });
 
 function startCommand() {

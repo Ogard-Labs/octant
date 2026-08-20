@@ -4,6 +4,7 @@ import {
   discardQueuedSend,
   disarmQueuedSend,
   enqueueQueuedSend,
+  queuedHoldReason,
   queuedSendStatusMessage,
   settleQueuedSend,
   type QueuedSendState,
@@ -15,6 +16,11 @@ export interface UseQueuedSendInput {
   readonly settlement: TurnSettlement | "idle";
   /** Ordinary send path. Invoked only when a queued intent is allowed to fire. */
   readonly send: () => Promise<boolean>;
+  /**
+   * When false, a completed turn does not fire yet. Used to wait for in-flight
+   * uploads or a provider change that has not reached the server.
+   */
+  readonly ready?: boolean;
 }
 
 export interface QueuedSend {
@@ -32,8 +38,15 @@ export interface QueuedSend {
  */
 export function useQueuedSend(input: UseQueuedSendInput): QueuedSend {
   const [state, setState] = useState<QueuedSendState>(EMPTY_QUEUED_SEND);
+  const [release, setRelease] = useState(0);
   const sendRef = useRef(input.send);
   sendRef.current = input.send;
+  const threadKeyRef = useRef(input.threadKey);
+  threadKeyRef.current = input.threadKey;
+  const settlementRef = useRef(input.settlement);
+  settlementRef.current = input.settlement;
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const firing = useRef(false);
 
   useEffect(() => {
@@ -44,26 +57,45 @@ export function useQueuedSend(input: UseQueuedSendInput): QueuedSend {
     if (firing.current) return;
     const decision = settleQueuedSend(state, input.threadKey, input.settlement);
     if (decision.fire) {
+      if (input.ready === false) return;
+      const threadKey = input.threadKey;
+      if (threadKey === undefined) return;
       firing.current = true;
-      setState(EMPTY_QUEUED_SEND);
-      void sendRef.current().finally(() => {
-        firing.current = false;
-      });
+      void (async () => {
+        let sent = false;
+        let failed = false;
+        try {
+          if (threadKeyRef.current !== threadKey) return;
+          sent = await sendRef.current();
+        } catch {
+          failed = true;
+        } finally {
+          firing.current = false;
+          setRelease((current) => current + 1);
+        }
+        if (threadKeyRef.current !== threadKey) return;
+        setState((current) => {
+          if (current.status !== "queued" || current.threadKey !== threadKey) return current;
+          if (sent) return EMPTY_QUEUED_SEND;
+          return {
+            status: "held",
+            threadKey,
+            reason: queuedHoldReason(failed ? "failed" : "refused"),
+          };
+        });
+      })();
       return;
     }
     if (decision.next !== state) setState(decision.next);
-  }, [input.settlement, input.threadKey, state]);
+  }, [input.ready, input.settlement, input.threadKey, release, state]);
 
   const enqueue = useCallback((): boolean => {
-    if (input.threadKey === undefined) return false;
-    let accepted = false;
-    setState((current) => {
-      const next = enqueueQueuedSend(current, input.threadKey!, input.settlement);
-      accepted = next.status === "queued";
-      return next;
-    });
-    return accepted;
-  }, [input.settlement, input.threadKey]);
+    const threadKey = threadKeyRef.current;
+    if (threadKey === undefined) return false;
+    const next = enqueueQueuedSend(stateRef.current, threadKey, settlementRef.current);
+    setState(next);
+    return next.status === "queued";
+  }, []);
 
   const discard = useCallback((): void => {
     setState(discardQueuedSend());

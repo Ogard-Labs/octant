@@ -11,7 +11,13 @@ export type QueuedSendState =
   | { readonly status: "queued"; readonly threadKey: string }
   | { readonly status: "held"; readonly threadKey: string; readonly reason: string };
 
-export type TurnSettlement = "running" | "completed" | "cancelled" | "failed" | "refused";
+export type TurnSettlement =
+  | "running"
+  | "completed"
+  | "cancelled"
+  | "failed"
+  | "refused"
+  | "waiting";
 
 export const EMPTY_QUEUED_SEND: QueuedSendState = { status: "idle" };
 
@@ -61,17 +67,27 @@ export function settleQueuedSend(
       : { next: current, fire: false };
   }
   if (current.status === "held") return { next: current, fire: false };
-  return {
-    next: {
-      status: "held",
-      threadKey: current.threadKey,
-      reason: queuedHoldReason(settlement),
-    },
-    fire: false,
-  };
+  if (
+    settlement === "cancelled" ||
+    settlement === "failed" ||
+    settlement === "refused" ||
+    settlement === "waiting"
+  ) {
+    return {
+      next: {
+        status: "held",
+        threadKey: current.threadKey,
+        reason: queuedHoldReason(settlement),
+      },
+      fire: false,
+    };
+  }
+  return { next: current, fire: false };
 }
 
-export function queuedHoldReason(settlement: "cancelled" | "failed" | "refused"): string {
+export function queuedHoldReason(
+  settlement: "cancelled" | "failed" | "refused" | "waiting",
+): string {
   switch (settlement) {
     case "cancelled":
       return "The response was cancelled. The queued message was not sent.";
@@ -79,6 +95,8 @@ export function queuedHoldReason(settlement: "cancelled" | "failed" | "refused")
       return "The response failed. The queued message was not sent.";
     case "refused":
       return "The response was refused. The queued message was not sent.";
+    case "waiting":
+      return "The response is waiting. The queued message was not sent.";
   }
 }
 

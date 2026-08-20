@@ -26,6 +26,7 @@ import {
   type Project,
   type ProjectId,
   type ProviderAttachmentInput,
+  type ProviderContextBlock,
   type ProviderInstance,
   type ThreadWorkingDirectory,
   type WindowId,
@@ -44,6 +45,7 @@ import {
 import type { WorkTurnProjection } from "./workTurnProjection";
 import {
   WorkTurnRuntime,
+  workTurnFollowUpContext,
   type WorkTurnRuntimeOutcome,
   type WorkTurnRuntimePort,
 } from "./workTurnRuntime";
@@ -313,6 +315,10 @@ export class WorkTurnService {
       projectRoot,
       driver,
       attachments: attachmentInputs,
+      context: workTurnFollowUpContext(
+        this.#projection.listForThread(command.threadId),
+        command.requestId,
+      ),
       signal: controller.signal,
     }).finally(() => {
       this.#controllers.delete(String(command.requestId));
@@ -419,6 +425,7 @@ export class WorkTurnService {
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
+    readonly context: ReadonlyArray<ProviderContextBlock>;
     readonly signal: AbortSignal;
   }): Promise<void> {
     const current = this.#projection.lookup(input.command.requestId);
@@ -432,6 +439,7 @@ export class WorkTurnService {
       driver: input.driver,
       signal: input.signal,
       ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
+      ...(input.context.length === 0 ? {} : { context: input.context }),
       onDelta: (response) => {
         this.#liveResponses.set(String(input.command.requestId), response);
       },

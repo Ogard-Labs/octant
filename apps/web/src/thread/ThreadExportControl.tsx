@@ -16,24 +16,64 @@ export interface ThreadExportControlProps {
 }
 
 /**
- * Downloads the host's portable cut of this thread.
+ * The export client for a surface's props: an injected client wins, otherwise
+ * one is built from the window's own server URL and capability. Shared with
+ * the chat thread-actions menu so both surfaces resolve export availability
+ * the same way.
+ */
+export function resolveThreadExportClient(input: {
+  readonly client?: ThreadExportClient;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
+}): ThreadExportClient | undefined {
+  if (input.client !== undefined) return input.client;
+  if (input.serverUrl === undefined || input.windowCapability === undefined) return undefined;
+  return createThreadExportClient({
+    baseUrl: input.serverUrl,
+    fetch: globalThis.fetch,
+    windowCapability: input.windowCapability,
+  });
+}
+
+/**
+ * Asks the host for its portable cut of the thread and downloads it. Returns
+ * the user-facing outcome message so any surface (button, menu item) can show
+ * the same receipt.
  *
  * The file is whatever the server assembled — transcript, evidence,
  * provenance, and a stated cut time. The renderer never invents the bundle
  * from a local cache.
  */
+export async function exportThreadBundle(
+  client: ThreadExportClient,
+  input: { readonly mode: OctantMode; readonly threadId: string; readonly title: string },
+): Promise<string> {
+  try {
+    const outcome = await client.exportThread({ mode: input.mode, threadId: input.threadId });
+    if (outcome.kind !== "exported") return "This thread could not be exported.";
+    const fileName = `${exportFileSlug(input.title)}.octant-thread.json`;
+    const saved = saveJson(serializeThreadExportBundle(outcome.bundle), fileName);
+    return saved ? `Saved ${fileName}.` : "The thread could not be saved from this window.";
+  } catch {
+    return "This thread could not be exported.";
+  }
+}
+
+/** Downloads the host's portable cut of this thread. */
 export function ThreadExportControl(props: ThreadExportControlProps) {
   const [status, setStatus] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
-  const client = useMemo(() => {
-    if (props.client !== undefined) return props.client;
-    if (props.serverUrl === undefined || props.windowCapability === undefined) return undefined;
-    return createThreadExportClient({
-      baseUrl: props.serverUrl,
-      fetch: globalThis.fetch,
-      windowCapability: props.windowCapability,
-    });
-  }, [props.client, props.serverUrl, props.windowCapability]);
+  const client = useMemo(
+    () =>
+      resolveThreadExportClient({
+        ...(props.client === undefined ? {} : { client: props.client }),
+        ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+        ...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability }),
+      }),
+    [props.client, props.serverUrl, props.windowCapability],
+  );
 
   if (client === undefined) return null;
 
@@ -46,21 +86,13 @@ export function ThreadExportControl(props: ThreadExportControlProps) {
           setStatus(undefined);
           void (async () => {
             try {
-              const outcome = await client.exportThread({
-                mode: props.mode,
-                threadId: props.threadId,
-              });
-              if (outcome.kind !== "exported") {
-                setStatus("This thread could not be exported.");
-                return;
-              }
-              const fileName = `${exportFileSlug(props.title)}.octant-thread.json`;
-              const saved = saveJson(serializeThreadExportBundle(outcome.bundle), fileName);
               setStatus(
-                saved ? `Saved ${fileName}.` : "The thread could not be saved from this window.",
+                await exportThreadBundle(client, {
+                  mode: props.mode,
+                  threadId: props.threadId,
+                  title: props.title,
+                }),
               );
-            } catch {
-              setStatus("This thread could not be exported.");
             } finally {
               setBusy(false);
             }

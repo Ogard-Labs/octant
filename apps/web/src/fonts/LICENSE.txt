@@ -1,0 +1,14 @@
+octant-display.woff2
+====================
+
+A latin subset of Space Grotesk, variable weight axis 300-700.
+
+Copyright 2020 The Space Grotesk Project Authors
+https://github.com/floriankarsten/space-grotesk
+
+Licensed under the SIL Open Font License, Version 1.1.
+The full license and its FAQ: https://scripts.sil.org/OFL
+
+The copyright and license notices are retained in the font file's own name
+table. Because this file is a subset — a modification of the original — it is
+served under the family name "Octant Display" rather than the original name.
