@@ -41,6 +41,15 @@ single source of visual truth.
   where a system recipe targets a native element an owned wrapper does not
   render, the wrapper's product class is drawn to the system's metrics
   instead.
+- **A treatment shared by more than one surface is defined exactly once, in
+  `octant.css`.** Chat, Work, and Code render the same component the same
+  way because they share the same classes, not because per-surface CSS
+  mirrors the same declarations. Copying a recipe into a second stylesheet
+  is the drift this ADR exists to end: when two surfaces need the same look,
+  the rule is hoisted into the system sheet (scoped by vocabulary, e.g.
+  `.composer-row`, not by surface) and the copies are deleted. Per-surface
+  CSS may position and size a component within its layout; it may not
+  restyle it.
 - The styleguide's audits are the acceptance bar for visual changes: 4.5:1
   for text, 3:1 for UI marks, 24px minimum pointer targets. The brand marks
   (aperture shear included) are canonical and are not redrawn.
