@@ -156,6 +156,7 @@ import {
 import {
   readSidebarCollapsed,
   useAutomaticUpdateCheckSync,
+  useHostReportedSidebarVibrancy,
   useNarrowViewport,
   useResolvedMaterial,
   useSidebarBackgroundFetcher,
@@ -439,6 +440,21 @@ function LaunchedShell(
       delete root.dataset.octantNativeHost;
     };
   }, [props.hostBridge]);
+  // The near-opaque native sidebar wash relaxes only on the host's word that
+  // window vibrancy is applied — never on the renderer's own preference, which
+  // the host may have refused (Reduce Transparency, thermals, high contrast).
+  const hostSidebarVibrancyActive = useHostReportedSidebarVibrancy(props.hostBridge);
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (!hostSidebarVibrancyActive) {
+      delete root.dataset.octantHostVibrancy;
+      return;
+    }
+    root.dataset.octantHostVibrancy = "active";
+    return () => {
+      delete root.dataset.octantHostVibrancy;
+    };
+  }, [hostSidebarVibrancyActive]);
   const viewportIsNarrow = useNarrowViewport();
   const isNarrow = props.isNarrow ?? viewportIsNarrow;
   const nativeHost = props.nativeHost ?? props.hostBridge;
