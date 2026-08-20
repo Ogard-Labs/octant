@@ -162,7 +162,7 @@ rewritten.
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | -------- | ---------------- |
 | Kanban / thread board         | `codeThreadBoardService` and `CodeThreadBoard` derive Ready/In progress/Waiting/Done cards; Work board too | Pure projection over thread metadata plus one sidebar destination          | low      | bundled, enabled |
 | GitHub integration            | `gh` auth, repository catalogue, clone, PR create/observe/mergeability, PR pane, PR list sidebar entry     | All behind `gh` ports and `/api/github/*`; Code works without it           | medium   | bundled, enabled |
-| Linear integration (planned)  | Not yet built; issue intake and delivery-target sync                                                       | New code, no existing coupling; first proof of the integration kind        | low      | bundled, off     |
+| Linear integration (planned)  | Not yet built; Settings connection, issue browse, later intake and delivery-target sync                    | New code, no existing coupling; first proof of the Integration kind. Add as a plugin; do not compile it into the host first. | low      | bundled, off     |
 | Canvas artifacts              | Canvas event store, share service, skill contributions, renderer blocks and panels                         | Own contracts and store; large surface with its own skill hooks            | medium   | bundled, enabled |
 | Browser / computer use panes  | `BrowserWorkspace`, computer-use lifecycle surface, desktop runtime broker                                 | UI is separable; the capability itself stays app-managed per invariants    | high     | later            |
 | Preview viewers               | PDF, slides, table, workbook, document viewers behind `PreviewRegistry`                                    | Registry already exists; each viewer is an independent module              | low      | bundled, enabled |
@@ -209,9 +209,20 @@ not be acceptable for kinds whose contribution points do not exist yet.
    where unbounded reach costs the most.
 4. **First integration and board plugins.** Move the thread board and the
    GitHub integration behind the integration and board component kinds with
-   typed server ports; add Linear as the first bundled-off integration. Second
-   because external services change on their own schedule, so these surfaces are
-   revised without the change ever originating in Octant.
+   typed server ports. Add Linear as the first bundled-off integration plugin
+   through those same ports — new code, not an extraction. Do not wire Linear
+   into server internals the way GitHub is today and extract it later; that is
+   the migration risk this record warns about. Linear may land before GitHub is
+   extracted, because it has no existing coupling and is the proving case for
+   the kind. Credentials stay on the host (Keychain / credential broker by
+   opaque reference); the plugin never receives raw token material. The
+   Integration kind's executable is currently Code-mode-safe, and Chat forbids
+   the `credentials` capability. Host-scoped Settings and renderer contributions
+   (`settings.section`, `sidebar.destination`) already exist. If Linear browse
+   must appear in Chat or Work, extend that mode policy as part of proving the
+   kind, rather than compiling Linear into the host. Second because external
+   services change on their own schedule, so these surfaces are revised without
+   the change ever originating in Octant.
 5. **Appearance and preview kinds.** Package zen backgrounds and preview viewers
    as `@octant/*` plugins loaded from the bundled catalog and enabled by
    default. Last because they are the surfaces that change least, so moving them
@@ -241,10 +252,12 @@ static first-party manifest catalog and the effective activation map; it does
 not decide availability. Bundled `@octant` appearance-pack and preview-viewer
 plugins prove the new points: the branded Octant theme preset and the
 structured preview viewers come from those contributions and disappear when
-the component is not effective. Extracting the thread board, GitHub, and
-Linear remains step 4. Packaging remaining zen/appearance assets and every
-viewer as separable `@octant/*` plugins remains step 5. Marketplace/host
-stays in the host.
+the component is not effective. Extracting the thread board and GitHub
+remains step 4. Linear is not on that extraction list: it is added as a
+bundled-off plugin through the Integration kind. Packaging remaining
+zen/appearance assets and every viewer as separable `@octant/*` plugins
+remains step 5. Marketplace/host stays in the host. Connector/OAuth
+marketplace stays Later; a first-party Linear plugin is not that marketplace.
 
 ## Consequences
 
