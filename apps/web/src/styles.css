@@ -884,15 +884,16 @@ button:focus-visible {
 
 .activity-nav {
   display: grid;
-  gap: 14px;
+  gap: 0;
 }
 
-.activity-nav__group h2 {
-  margin: 0;
-  padding: 0 8px 6px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 500;
+/* Group labels are h2s for the document outline wearing the system's quiet
+   .sidebar-section treatment; only the heading's own UA weight and bottom
+   margin need resetting — the class supplies the rest. */
+.activity-nav__group > h2,
+.project-section--unfiled > h2 {
+  margin-bottom: 0;
+  font-weight: 400;
 }
 
 .activity-nav__threads {
@@ -967,12 +968,14 @@ button:focus-visible {
   font-size: 13px;
 }
 
+/* 8px wide like the thread-status dot, so activity titles and tree titles
+   start on the same edge. */
 .activity-nav__glyph {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  min-width: 12px;
+  min-width: 8px;
   color: var(--octant-text-muted);
   font-size: 10px;
   line-height: 1;
@@ -990,56 +993,34 @@ button:focus-visible {
   color: var(--octant-text-secondary);
 }
 
-.project-section + .project-section {
-  margin-top: 18px;
-}
-
+/* A Project name is a section header over its thread rows, not a row among
+   them: generous room above each header, none below, and no per-row seams. */
 .project-block + .project-block {
-  margin-top: 2px;
+  margin-top: var(--oct-space-3);
 }
 
-/* Nested threads keep the Project row's left edge, so the column of rows reads
-   as one list rather than a narrower list inset inside it. The indent that
-   shows the nesting is carried by the row's own padding below, which puts the
-   title under the Project's name instead of leaving the pill empty on the
-   left. */
+/* Nested threads keep the header's left edge: the header's chevron gutter plus
+   its gap equals the dot plus the row gap, so thread titles line up under the
+   Project's name with no extra indent. */
 .project-threads {
   display: grid;
   gap: 2px;
-  margin: 2px 0 6px;
+  margin: 2px 0 0;
   padding-left: 0;
 }
 
-/* 30px is where the Project's name starts, less the 12px marker gutter and the
-   6px gap every thread row reserves ahead of its title. Only a nested list gets
-   it: Recents has no Project above it to line up under. */
-/* Just enough to read as "inside this Project" and no more. The dot sits in
-   the indent, so the tree is legible from the marks alone rather than from a
-   deep left margin that pushes every title away from the edge. */
-.project-block .project-threads .sidebar-navigation__thread {
-  padding-left: 18px;
-}
-
+/* The container carries the system's .sidebar-section label treatment; the h2
+   inside exists for the outline and simply wears the container's quiet type. */
 .project-section__header {
   display: flex;
-  min-height: 28px;
+  min-height: 24px;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4px 0 8px;
 }
 
-.project-section__header h2,
-.project-section--unfiled h2 {
+.project-section__header h2 {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.project-section--unfiled h2 {
-  padding: 0 8px 6px;
+  font: inherit;
 }
 
 /* The header's controls answer for the section the pointer is already on, so
@@ -1067,13 +1048,16 @@ button:focus-visible {
   }
 }
 
+/* The system's .btn-icon recipe, compacted: a full 34px square would give the
+   quiet header back the item weight this port removes. */
 .project-section__add,
 .project-section__header .octant-menu__trigger {
-  width: 26px;
-  min-height: 26px;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
   justify-content: center;
   padding: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
   border-radius: 6px;
 }
 
@@ -1081,8 +1065,8 @@ button:focus-visible {
 .project-section__add:focus-visible,
 .project-section__header .octant-menu__trigger:hover,
 .project-section__header .octant-menu__trigger:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .project-row {
@@ -1090,41 +1074,34 @@ button:focus-visible {
   min-width: 0;
   grid-template-columns: minmax(0, 1fr) repeat(2, auto);
   align-items: center;
-  min-height: 29px;
+  min-height: 24px;
   border: 0;
-  border-radius: 8px;
+  color: var(--oct-meta);
 }
 
-.project-row:hover {
-  background: var(--octant-control-hover);
-}
-
+/* The active Project is marked by its label's ink alone: a filled pill would
+   turn the header back into the row the reader keeps mistaking for one. */
 .project-row[data-active="true"] {
-  background: var(--octant-selection);
+  color: var(--oct-fg);
 }
 
 .project-row__select {
   display: grid;
   min-width: 0;
-  grid-template-columns: 12px 16px minmax(0, 1fr);
-  gap: 6px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: var(--oct-space-2);
   align-items: center;
-  min-height: 29px;
-  padding: 0 7px 0 8px;
+  min-height: 24px;
+  padding: 0 var(--oct-space-2);
+  color: inherit;
   cursor: pointer;
   text-align: left;
 }
 
-.project-row__disclosure,
-.project-row__folder {
+.project-row__disclosure {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--octant-text-muted);
-}
-
-.project-row__folder {
-  color: var(--octant-text-secondary);
 }
 
 .project-row__copy {
@@ -1133,11 +1110,14 @@ button:focus-visible {
   gap: 2px;
 }
 
+/* The Project's name wears the system's section-label type, so the tree reads
+   header-over-rows instead of two competing row styles. */
 .project-row__copy > span {
   overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
-  font-weight: 500;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1145,21 +1125,23 @@ button:focus-visible {
 .project-row__copy small {
   color: var(--octant-warning-text);
   font-size: 10px;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .project-row__action {
-  min-height: 25px;
-  padding: 0 7px;
-  color: var(--octant-text-muted);
-  border-radius: 5px;
+  min-height: 24px;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  border-radius: 6px;
   cursor: pointer;
   font-size: 10px;
 }
 
 .project-row__action:hover,
 .project-row__action:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .project-row__action:disabled {
@@ -1168,7 +1150,9 @@ button:focus-visible {
 }
 
 .project-row__action--icon {
-  width: 27px;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
   padding: 0;
   opacity: 0;
 }
@@ -1185,18 +1169,18 @@ button:focus-visible {
 }
 
 .project-archive {
-  margin-top: 16px;
+  margin-top: var(--oct-space-4);
 }
 
 .project-archive summary {
   display: flex;
-  min-height: 29px;
+  min-height: 24px;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px;
-  color: var(--octant-text-muted);
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--oct-text-xs);
   list-style: none;
 }
 
@@ -5339,8 +5323,8 @@ dialog.project-dialog {
   height: 100%;
   flex: 1 1 auto;
   flex-direction: column;
-  color: var(--octant-text-primary);
-  background: var(--octant-workspace);
+  color: var(--oct-fg);
+  background: var(--oct-bg);
 }
 
 .code-thread-workspace__header {
@@ -5351,28 +5335,26 @@ dialog.project-dialog {
   gap: 8px 16px;
   min-height: 44px;
   padding: 6px clamp(16px, 3vw, 28px);
-  border-bottom: 1px solid var(--octant-border);
+  border-bottom: 1px solid var(--oct-border);
 }
 
 .code-thread-workspace__identity h1 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--oct-text-base);
   font-weight: 600;
   letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
+/* Metadata line: system meta typography; the lifecycle fact wears `.badge`. */
 .code-thread-workspace__meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px 12px;
   margin-top: 2px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-}
-
-.code-thread-workspace__lifecycle {
-  color: var(--octant-text-secondary);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .code-thread-workspace__follow-up {
@@ -5395,11 +5377,11 @@ dialog.project-dialog {
   max-width: min(60ch, 60vw);
   padding: 2px 8px;
   overflow: hidden;
-  color: var(--octant-warning-text);
-  background: var(--octant-warning-surface);
-  border: 1px solid var(--octant-warning-border);
-  border-radius: 999px;
-  font-size: 11px;
+  color: var(--oct-warn-fg);
+  background: var(--oct-warn-soft);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5414,27 +5396,27 @@ dialog.project-dialog {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
+  min-height: var(--oct-control-height-sm);
   padding: 0 10px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
   background: transparent;
-  border: 1px solid var(--octant-border);
-  border-radius: 6px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--oct-text-xs);
 }
 
 .code-thread-workspace__tool:hover,
 .code-thread-workspace__tool:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .code-thread-workspace__tool[aria-pressed="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border-color: var(--octant-border-strong);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+  border-color: var(--oct-border);
 }
 
 .code-thread-workspace__auxiliary {
@@ -5442,22 +5424,22 @@ dialog.project-dialog {
   width: min(100% - 40px, 760px);
   max-height: min(42vh, 360px);
   gap: 10px;
-  padding: 12px;
+  padding: var(--oct-space-3);
   margin: 12px auto 0;
   overflow: auto;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .code-thread-workspace__error,
 .code-thread-workspace__banner {
   margin: 0;
   padding: 10px clamp(20px, 4vw, 48px);
-  color: var(--octant-warning-text);
-  background: var(--octant-warning-surface);
-  border-bottom: 1px solid var(--octant-warning-border);
-  font-size: 12px;
+  color: var(--oct-warn-fg);
+  background: var(--oct-warn-soft);
+  border-bottom: 1px solid var(--oct-border);
+  font-size: var(--oct-text-sm);
 }
 
 .code-thread-workspace__provider-request {
@@ -5474,9 +5456,9 @@ dialog.project-dialog {
 .code-thread-workspace__provider-request > input {
   flex: 1 1 200px;
   padding: 4px 8px;
-  border: 1px solid var(--octant-border);
-  border-radius: 6px;
-  background: var(--octant-surface-raised);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
   color: inherit;
 }
 
@@ -5499,14 +5481,14 @@ dialog.project-dialog {
 
 .code-thread-workspace__empty {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 13px;
-  line-height: 1.5;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-body);
 }
 
 .code-thread-workspace__message {
   min-width: 0;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .code-thread-workspace__message header {
@@ -5514,21 +5496,22 @@ dialog.project-dialog {
   align-items: center;
   gap: 7px;
   margin: 0 0 6px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
   font-weight: 600;
 }
 
 .code-thread-workspace__turn-status {
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
   font-weight: 400;
 }
 
 .code-thread-workspace__message p {
   margin: 0;
-  color: var(--octant-text-primary);
-  font-size: 13.5px;
-  line-height: 1.55;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-transcript);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-body);
   white-space: pre-wrap;
   text-wrap: pretty;
 }
@@ -5538,9 +5521,9 @@ dialog.project-dialog {
   max-width: min(88%, 600px);
   justify-self: end;
   padding: 10px 12px;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  background: var(--oct-surface-warm);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .code-thread-workspace__message--agent {
@@ -5552,9 +5535,9 @@ dialog.project-dialog {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--octant-text-muted);
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }
 
@@ -5563,76 +5546,90 @@ dialog.project-dialog {
   height: 1px;
   flex: 1;
   content: "";
-  background: var(--octant-border);
+  background: var(--oct-border);
 }
 
+/* The composer's frame, focus border, input, chips, bottom row, and send
+   control are the system's (`.composer` vocabulary, as in Chat); this block
+   only places the composer in the workspace column and pads the pieces the
+   system does not know about. */
 .code-thread-workspace__composer {
   position: relative;
   z-index: 2;
-  width: min(100%, 760px);
+  width: min(100% - 40px, 760px);
   flex: 0 0 auto;
-  padding: 8px clamp(16px, 3vw, 28px) 12px;
-  margin: 0 auto;
-  background: var(--octant-workspace);
+  margin: 0 auto 16px;
 }
 
-.code-thread-workspace__composer-shell {
-  display: grid;
-  gap: 8px;
-  padding: 10px 12px;
-  background: var(--octant-surface);
-  border: 1px solid var(--octant-border);
-  border-radius: 12px;
+/* The message field label must lay out as a block: an inline label sizes the
+   content-sized textarea to its typed text (same defect Chat fixed). */
+.code-thread-workspace__message-field {
+  display: block;
 }
 
-.code-thread-workspace__input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
+/* The typeaheads sit between the input and the row so the open list never
+   covers the message; the frameless children carry the frame's gutter. */
+.code-thread-workspace__composer .thread-mention__typeahead {
+  margin: var(--oct-space-2) var(--oct-space-3) 0;
 }
 
-/* Attached images, in the composer and on the message that carried them. */
+/* Chips, queued turns, and attachments are frameless rows of the frame, so
+   they take the same gutter the system gives `.composer-chips`. */
+.code-thread-workspace__composer .thread-mention__chips,
+.code-thread-workspace__queue,
+.code-thread-workspace__attachments {
+  margin: 0;
+  padding: var(--oct-space-3) var(--oct-space-3) 0;
+}
+
+/* Attached images, in the composer and on the message that carried them.
+   The chip itself is the system's; only the thumbnail and the name's
+   ellipsis are this surface's own. */
 .code-thread-workspace__attachments {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: var(--oct-space-2);
 }
 
 .code-thread-workspace__attachment {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   max-width: 240px;
-  padding: 3px 6px 3px 3px;
-  border: 1px solid var(--octant-border, rgb(0 0 0 / 12%));
-  border-radius: 8px;
 }
 
 .code-thread-workspace__attachment-thumb {
-  width: 32px;
-  height: 32px;
-  border-radius: 5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
   object-fit: cover;
-  background: var(--octant-surface-muted, rgb(0 0 0 / 6%));
+  background: var(--oct-fg-soft);
 }
 
 .code-thread-workspace__attachment-name {
   overflow: hidden;
-  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.code-thread-workspace__attachment-remove {
-  padding: 0 4px;
-  border: 0;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
+/* The transcript gallery reuses the attachment classes without the composer's
+   chip frame, so the message rows keep a frame and a readable thumbnail. */
+.code-thread-workspace__message .code-thread-workspace__attachments {
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.code-thread-workspace__message .code-thread-workspace__attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 3px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-thread-workspace__message .code-thread-workspace__attachment-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 5px;
 }
 
 /*
@@ -5654,8 +5651,8 @@ dialog.project-dialog {
 
 .code-transcript-row__disclosure > summary {
   cursor: default;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
   list-style: none;
 }
 
@@ -5687,28 +5684,29 @@ dialog.project-dialog {
   display: flex;
   gap: 8px;
   align-items: baseline;
-  font-size: 12px;
+  font-size: var(--oct-text-sm);
 }
 
 .code-transcript-row__step-name {
   flex: none;
-  color: var(--octant-text-primary);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }
 
 .code-transcript-row__step-state {
   flex: none;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
 }
 
 .code-transcript-row__step[data-state="failed"] .code-transcript-row__step-state {
-  color: var(--octant-danger-text);
+  color: var(--oct-danger-fg);
 }
 
 .code-transcript-row__step-summary {
   flex: 1;
   overflow: hidden;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -5716,8 +5714,8 @@ dialog.project-dialog {
 .code-transcript-row__reasoning {
   margin: 4px 0 0;
   padding: 0 0 0 12px;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
   white-space: pre-wrap;
 }
 
@@ -5725,26 +5723,24 @@ dialog.project-dialog {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 0 0 6px;
-  padding: 0;
   list-style: none;
 }
 
 .code-thread-workspace__queue-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-2);
   padding: 4px 4px 4px 8px;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 6px;
-  background: var(--octant-surface-raised);
-  font-size: 12px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface-warm);
+  font-size: var(--oct-text-xs);
 }
 
 .code-thread-workspace__queue-position {
   flex: none;
   min-width: 16px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -5752,46 +5748,14 @@ dialog.project-dialog {
 .code-thread-workspace__queue-prompt {
   flex: 1;
   overflow: hidden;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.code-thread-workspace__input {
-  flex: 1;
-  width: auto;
-  min-height: 44px;
-  max-height: 160px;
-  height: auto;
-  padding: 6px 0;
-  resize: none;
-  color: var(--octant-text-primary);
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  font: inherit;
-  font-size: 13.5px;
-  line-height: 1.5;
-}
-
-.code-thread-workspace__input:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
-.code-thread-workspace__composer-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
 }
 
 .code-thread-workspace__access {
   display: inline-flex;
   align-items: center;
-  min-width: 168px;
 }
 
 .code-thread-workspace__profile {
@@ -5799,28 +5763,40 @@ dialog.project-dialog {
   align-items: center;
   gap: 5px;
   padding: 3px 8px;
-  border: 1px solid var(--octant-border);
-  border-radius: 999px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+
+/* Quiet meta line under the composer row: keyboard hint, access/restore/fork
+   receipts, usage, and provider limits share one unobtrusive strip. */
+.code-thread-workspace__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  margin: 0;
+  padding: 0 var(--oct-space-3) var(--oct-space-2);
+  line-height: 1.35;
 }
 
 .code-thread-workspace__hint {
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .code-thread-workspace__limit {
-  font-size: 11px;
-  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
 }
 
 .code-thread-workspace__limit--warning {
-  color: var(--octant-warning-text);
+  color: var(--oct-warn-fg);
 }
 
 .code-thread-workspace__limit--exhausted {
-  color: var(--octant-danger-text);
+  color: var(--oct-danger-fg);
 }
 
 .parallel-runs {
@@ -6083,29 +6059,59 @@ dialog.project-dialog {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
-.code-thread-workspace__provider-binding {
-  color: var(--octant-text-secondary);
-  font-size: 11px;
+/* The bar's selects match the chat bar's quiet combobox: transparent, muted,
+   xs, borrowing a border only on hover. */
+.code-thread-workspace__composer .composer-row [role="combobox"] {
+  width: auto;
+  max-width: 190px;
+  min-height: 27px;
+  padding-inline: 7px 24px;
+  color: var(--oct-muted);
+  background: transparent;
+  border-color: transparent;
+  font-size: var(--oct-text-xs);
 }
 
-.code-thread-workspace__send {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  min-height: 30px;
-  flex-shrink: 0;
-  place-items: center;
-  padding: 0;
+.code-thread-workspace__composer .composer-row [role="combobox"]:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+  border-color: var(--oct-border);
 }
 
-.code-thread-workspace__send:disabled {
-  cursor: default;
-  opacity: 0.35;
+/* The shared provider/model picker is rendered by providers/; its trigger
+   takes the design system's small-picker look here without that surface
+   adopting the class itself (same treatment as the Chat composer). */
+.code-thread-workspace__composer .composer-model-picker__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: var(--oct-control-height-sm);
+  padding-block: 0;
+  padding-inline: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  text-align: left;
+}
+
+.code-thread-workspace__composer .composer-model-picker__trigger:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+}
+
+.code-thread-workspace__composer .composer-model-picker__trigger[aria-expanded="true"] {
+  border-color: var(--oct-accent-fg);
+}
+
+.code-thread-workspace__composer .composer-model-picker__menu {
+  right: auto;
+  left: 0;
 }
 
 .code-thread-workspace .visually-hidden {

@@ -213,10 +213,10 @@ describe("WindowChrome", () => {
     const activeMode = systemStyles.match(/\.mode\[aria-current="page"\]\s*{[^}]*}/)?.[0] ?? "";
     expect(activeMode).toContain("var(--oct-fg-soft)");
     expect(activeMode).not.toMatch(/accent|purple/i);
-    expect(cssRule('.project-row[data-active="true"]')).toContain(
-      "background: var(--octant-selection);",
-    );
-    expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple/i);
+    // The Project header is a quiet section label, so its active state is
+    // carried by ink alone rather than a filled pill.
+    expect(cssRule('.project-row[data-active="true"]')).toContain("color: var(--oct-fg);");
+    expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple|background/i);
     expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])')).toContain(
       "background: var(--octant-selection);",
     );
