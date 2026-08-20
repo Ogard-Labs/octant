@@ -406,25 +406,30 @@ describe("ExtensionsSettingsView", () => {
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
 
+    // Each lifecycle command reloads the snapshot: the card unmounts while
+    // status is loading, then remounts disabled until busy clears. Waiting
+    // only for the command to be recorded races the next click against that
+    // reload. Uninstall is present and enabled only after the card has settled.
+    const expectCommandThenSettled = async (match: (command: ExtensionCommand) => boolean) => {
+      await waitFor(() => {
+        expect(c.calls.some(match)).toBe(true);
+        expect(screen.getByRole("button", { name: /uninstall/i })).toBeEnabled();
+      });
+    };
+
     fireEvent.click(screen.getByRole("button", { name: /trust source/i }));
-    await waitFor(() =>
-      expect(
-        c.calls.some((command) => command.kind === "set-source-trust" && command.trusted),
-      ).toBe(true),
+    await expectCommandThenSettled(
+      (command) => command.kind === "set-source-trust" && command.trusted,
     );
 
     fireEvent.click(screen.getByRole("switch", { name: /enable plugin/i }));
-    await waitFor(() =>
-      expect(
-        c.calls.some((command) => command.kind === "set-plugin-desired" && command.desired),
-      ).toBe(true),
+    await expectCommandThenSettled(
+      (command) => command.kind === "set-plugin-desired" && command.desired,
     );
 
     fireEvent.click(screen.getByRole("switch", { name: /enable component/i }));
-    await waitFor(() =>
-      expect(
-        c.calls.some((command) => command.kind === "set-component-desired" && command.desired),
-      ).toBe(true),
+    await expectCommandThenSettled(
+      (command) => command.kind === "set-component-desired" && command.desired,
     );
 
     fireEvent.click(screen.getByRole("button", { name: /uninstall/i }));
