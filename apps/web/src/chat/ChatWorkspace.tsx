@@ -254,7 +254,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
         {props.childRunStatus === undefined ? null : (
-          <header className="chat-workspace__header">{props.childRunStatus}</header>
+          <header className="chat-workspace__header thread-column">{props.childRunStatus}</header>
         )}
         <div className="chat-workspace__load-state">
           <p role={props.controller.status === "disconnected" ? "alert" : "status"}>
@@ -472,7 +472,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         }}
         ref={conversationRef}
       >
-        <header className="chat-workspace__header">
+        <header className="chat-workspace__header thread-column">
           <div>
             <h1>{view.thread.title}</h1>
             <p className="chat-workspace__meta">
@@ -501,7 +501,11 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           />
         </header>
         {props.canvasClient === undefined || !canvasPanelOpen ? null : (
-          <section aria-label="Canvas tools" className="chat-workspace__canvas" id={canvasPanelId}>
+          <section
+            aria-label="Canvas tools"
+            className="chat-workspace__canvas thread-column"
+            id={canvasPanelId}
+          >
             <CanvasCreatePanel
               client={props.canvasClient}
               context={buildCanvasCreationContext({

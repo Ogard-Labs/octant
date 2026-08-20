@@ -95,7 +95,11 @@ export function ExecutionProfileWorkflow(props: {
 
       {!open ? null : (
         <div
-          className="execution-profile-workflow__body"
+          className={
+            isComposerPopover
+              ? "popover-panel execution-profile-workflow__body"
+              : "execution-profile-workflow__body"
+          }
           {...(isComposerPopover
             ? { "aria-label": "Execution profile options", id: popoverId, role: "dialog" as const }
             : {})}

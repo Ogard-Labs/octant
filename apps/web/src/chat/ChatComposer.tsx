@@ -397,7 +397,7 @@ export function ChatComposer(props: ChatComposerProps) {
   }
 
   return (
-    <section aria-label="Chat composer" className="composer chat-composer">
+    <section aria-label="Chat composer" className="composer chat-composer thread-column">
       <ThreadMentionChips
         chips={props.threadMentions?.chips ?? []}
         disabled={controlDisabled}
@@ -694,7 +694,7 @@ export function ChatComposer(props: ChatComposerProps) {
               {modelOptionsOpen ? (
                 <div
                   aria-label="Model options"
-                  className="chat-composer__model-options-panel"
+                  className="popover-panel chat-composer__model-options-panel"
                   id={modelOptionsPanelId}
                   role="dialog"
                 >

@@ -267,4 +267,15 @@ describe("ThreadEnvironmentPanel", () => {
       /@media \(max-width: 680px\)[\s\S]*\.thread-environment-wrapper--pinned \.thread-environment-panel__resizer[\s\S]*display: none;/,
     );
   });
+
+  it("keeps the thread pane readable when a pinned Environment shares the row", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    // The pane holds the shell's readable primary floor and the pinned panel
+    // yields: a wide dock plus a 360px pinned panel crushed the pane to
+    // ~146px otherwise.
+    expect(styles).toMatch(
+      /\.thread-environment-wrapper--pinned \.thread-environment-wrapper__content,\s*\.code-thread-environment--pinned \.code-thread-environment__content \{[^}]*min-width: min\(var\(--octant-wide-primary-min\), 100%\);/,
+    );
+    expect(styles).toMatch(/\.thread-environment-panel--pinned \{[^}]*flex: 0 1 auto;/);
+  });
 });
