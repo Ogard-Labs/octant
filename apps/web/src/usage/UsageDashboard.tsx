@@ -685,6 +685,11 @@ function ActivitySection({ view, onViewChange, series, isNarrow }: ActivitySecti
               key={option}
               onClick={() => onViewChange(option)}
               type="button"
+              // One of three mutually exclusive views, so only the chosen one
+              // reads as chosen. Left to the default recipe all three would
+              // look like the primary action and `aria-pressed` would be the
+              // only thing saying which is on.
+              variant={view === option ? "default" : "outline"}
             >
               {option === "daily" ? "Daily" : option === "weekly" ? "Weekly" : "Cumulative"}
             </OctantButton>

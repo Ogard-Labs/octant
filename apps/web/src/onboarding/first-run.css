@@ -86,6 +86,15 @@
   flex-direction: column;
   gap: 0.75rem;
   min-width: 0;
+
+  /*
+   * Five steps and a title can outgrow the row they share with the panel when
+   * the dialog is wide but short — a wide window at 200% zoom. The rail takes
+   * its own scrolling there rather than spilling over the notice and the
+   * footer beneath it. Stacked, its row grows instead and this never engages.
+   */
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .first-run__rail-list {
@@ -150,7 +159,8 @@
   opacity: 0.75;
 }
 
-/* The only scrolling region: the rail and the footer stay put beside it. */
+/* The step's own scroller. The footer stays put beside it; the rail scrolls
+   only if it has to. */
 .first-run__panel {
   grid-area: panel;
   min-width: 0;
