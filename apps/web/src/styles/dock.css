@@ -136,12 +136,9 @@
  */
 .octant-dialog__popup {
   width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px));
-  /*
-   * The shared dialog recipe carries Tailwind's `max-w-lg`, which clamps every
-   * popup at 32rem no matter what width it asked for. A dialog that declares a
-   * wider `--octant-dialog-width` means it; restating the same expression as a
-   * max-width is what lets it actually reach that size.
-   */
+  /* A dialog that declares a wider `--octant-dialog-width` means it; the
+     explicit max-width guards it against any clamp a shared recipe might
+     reintroduce (the old Tailwind `max-w-lg` did exactly that). */
   max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px));
   height: auto;
   max-height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));

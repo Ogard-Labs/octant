@@ -4555,30 +4555,11 @@ button:focus-visible {
   min-height: 96px;
 }
 
-/* The provider control rides the composer row as a quiet trigger; the menu
-   opens downward because the quick-start sits mid-page, not at the window's
-   bottom edge. */
-.chat-project-overview__quick-start .composer-row .composer-model-picker__trigger {
-  min-height: 27px;
-  padding: 0 7px;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-  font-size: var(--oct-text-xs);
-}
-
-.chat-project-overview__quick-start
-  .composer-row
-  .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
+/* Placement only: the quick-start sits mid-page, so the picker menu opens
+   downward. The trigger's look is the system's (ADR 0038). */
 .chat-project-overview__quick-start .composer-row .composer-model-picker__menu {
   top: calc(100% + 8px);
-  right: auto;
   bottom: auto;
-  left: 0;
 }
 
 @media (max-width: 760px) {
@@ -4804,6 +4785,8 @@ button:focus-visible {
   max-width: min(100%, 280px);
 }
 
+/* Base look for the picker outside a composer row; inside one, the system's
+   `.composer-row` treatment out-specifies this (ADR 0038). */
 .composer-model-picker__trigger {
   display: inline-flex;
   align-items: center;
@@ -4811,22 +4794,22 @@ button:focus-visible {
   max-width: 100%;
   min-height: 28px;
   padding: 0 10px;
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 8px;
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--oct-text-xs);
   font-weight: 500;
 }
 
 .composer-model-picker__trigger:hover {
-  background: var(--octant-control-hover);
+  background: var(--oct-fg-soft);
 }
 
 .composer-model-picker__trigger:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-accent-fg);
   outline-offset: 2px;
 }
 
@@ -5434,12 +5417,6 @@ button:focus-visible {
   margin: 0 auto 16px;
 }
 
-/* The message field label must lay out as a block: an inline label sizes the
-   content-sized textarea to its typed text (same defect Chat fixed). */
-.code-thread-workspace__message-field {
-  display: block;
-}
-
 /* The typeaheads sit between the input and the row so the open list never
    covers the message; the frameless children carry the frame's gutter. */
 .code-thread-workspace__composer .thread-mention__typeahead {
@@ -5936,56 +5913,8 @@ button:focus-visible {
   font-size: var(--oct-text-xs);
 }
 
-/* The bar's selects match the chat bar's quiet combobox: transparent, muted,
-   xs, borrowing a border only on hover. */
-.code-thread-workspace__composer .composer-row [role="combobox"] {
-  width: auto;
-  max-width: 190px;
-  min-height: 27px;
-  padding-inline: 7px 24px;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-  font-size: var(--oct-text-xs);
-}
-
-.code-thread-workspace__composer .composer-row [role="combobox"]:hover {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-  border-color: var(--oct-border);
-}
-
-/* The shared provider/model picker is rendered by providers/; its trigger
-   takes the design system's small-picker look here without that surface
-   adopting the class itself (same treatment as the Chat composer). */
-.code-thread-workspace__composer .composer-model-picker__trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-  min-height: var(--oct-control-height-sm);
-  padding-block: 0;
-  padding-inline: var(--oct-space-3);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
-  color: var(--oct-fg);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  text-align: left;
-}
-
-.code-thread-workspace__composer .composer-model-picker__trigger:hover:not(:disabled) {
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
-}
-
-.code-thread-workspace__composer .composer-model-picker__trigger[aria-expanded="true"] {
-  border-color: var(--oct-accent-fg);
-}
-
-.code-thread-workspace__composer .composer-model-picker__menu {
-  right: auto;
-  left: 0;
-}
+/* The bar controls' look is the system's `.composer-row` treatment
+   (ADR 0038); nothing to restate here. */
 
 .code-thread-workspace .visually-hidden {
   position: absolute;

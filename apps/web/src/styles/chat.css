@@ -16,8 +16,8 @@
   height: 100%;
   flex: 1 1 auto;
   flex-direction: column;
-  color: var(--octant-text-primary);
-  background: var(--octant-workspace);
+  color: var(--oct-fg);
+  background: var(--oct-bg);
 }
 
 .chat-welcome .draft-thread__canvas {
@@ -59,28 +59,11 @@
   min-height: 96px;
 }
 
-/* The provider control rides the composer row as a quiet trigger, and its
-   menu opens downward because this composer sits mid-screen rather than at
-   the window's bottom edge. */
-.chat-welcome .composer-row .composer-model-picker__trigger {
-  min-height: 27px;
-  padding: 0 7px;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-  font-size: var(--oct-text-xs);
-}
-
-.chat-welcome .composer-row .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
+/* Placement only: this composer sits mid-screen, so the picker menu opens
+   downward. The trigger's look is the system's (ADR 0038). */
 .chat-welcome .composer-row .composer-model-picker__menu {
   top: calc(100% + 8px);
-  right: auto;
   bottom: auto;
-  left: 0;
 }
 
 /* The hint sits below the card, like secondary context under the composer. */
@@ -136,7 +119,7 @@
 
 .chat-workspace__load-state > p {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -153,13 +136,13 @@
   gap: 12px;
   padding: 14px 0 8px;
   margin: 0 auto;
-  background: var(--octant-workspace);
+  background: var(--oct-bg);
 }
 
 .chat-workspace__header h1 {
   max-width: 52rem;
   margin: 0;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-size: 13px;
   font-weight: 500;
   letter-spacing: -0.015em;
@@ -168,7 +151,7 @@
 
 .chat-workspace__meta {
   margin: 2px 0 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 10px;
   line-height: 1.35;
 }
@@ -193,9 +176,9 @@
   width: min(100% - 40px, 720px);
   margin: 10px auto 0;
   padding: 8px 10px;
-  color: var(--octant-danger-text);
-  background: color-mix(in srgb, var(--octant-danger-text) 10%, var(--octant-workspace));
-  border: 1px solid color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
+  color: var(--oct-danger-fg);
+  background: color-mix(in srgb, var(--oct-danger-fg) 10%, var(--oct-bg));
+  border: 1px solid color-mix(in srgb, var(--oct-danger-fg) 32%, var(--oct-border));
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.4;
@@ -209,9 +192,9 @@
   align-items: center;
   padding: 10px 12px;
   margin: 0 auto 8px;
-  border: 1px solid var(--octant-border);
+  border: 1px solid var(--oct-border);
   border-radius: 10px;
-  background: var(--octant-surface-raised);
+  background: var(--oct-surface);
   box-shadow: var(--octant-shadow-sm);
 }
 
@@ -223,7 +206,7 @@
 
 .chat-workspace__tool-approval span,
 .chat-workspace__tool-approval code {
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 11px;
 }
 
@@ -385,7 +368,7 @@
 .chat-workspace__export-status {
   flex-basis: 100%;
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 10.5px;
   line-height: 1.4;
   text-align: end;
@@ -606,8 +589,8 @@
   flex: 0 0 auto;
   padding: 0 clamp(20px, 4vw, 48px);
   margin: 0 auto;
-  background: var(--octant-workspace);
-  border-top: 1px solid var(--octant-border);
+  background: var(--oct-bg);
+  border-top: 1px solid var(--oct-border);
 }
 
 .thread-work-shelf__summary {
@@ -625,7 +608,7 @@
   align-items: center;
   gap: 6px;
   padding: 0 6px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   border-radius: 5px;
   cursor: pointer;
   font-size: 11px;
@@ -634,8 +617,8 @@
 
 .thread-work-shelf__toggle:hover,
 .thread-work-shelf__history > button:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .thread-work-shelf__narrow-label {
@@ -647,7 +630,7 @@
   padding: 3px 6px;
   margin: 0;
   overflow: hidden;
-  color: var(--octant-warning-text);
+  color: var(--oct-warn-fg);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -665,7 +648,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 6px;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .thread-work-shelf__item-copy {
@@ -676,18 +659,18 @@
 .thread-work-shelf__history li > span {
   display: block;
   margin-bottom: 2px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 10px;
   line-height: 1.3;
 }
 
 .thread-work-shelf__current-items li[data-status="blocked"] .thread-work-shelf__item-copy > span {
-  color: var(--octant-warning-text);
+  color: var(--oct-warn-fg);
 }
 
 .thread-work-shelf__item-copy strong {
   display: block;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
@@ -695,7 +678,7 @@
 
 .thread-work-shelf__item-copy p {
   margin: 3px 0 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -713,9 +696,9 @@
 .thread-work-shelf form button {
   min-height: 24px;
   padding: 0 5px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   background: transparent;
-  border: 1px solid var(--octant-border);
+  border: 1px solid var(--oct-border);
   border-radius: 4px;
   cursor: pointer;
   font-size: 10px;
@@ -723,8 +706,8 @@
 
 .thread-work-shelf__item-actions button:hover,
 .thread-work-shelf form button:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
   border-color: var(--octant-border-strong);
 }
 
@@ -735,7 +718,7 @@
 .thread-work-shelf form label {
   display: grid;
   gap: 3px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 10px;
 }
 
@@ -743,7 +726,7 @@
   min-width: 120px;
   min-height: 24px;
   padding: 3px 5px;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   background: var(--octant-control);
   border: 1px solid var(--octant-border-strong);
   border-radius: 4px;
@@ -752,14 +735,14 @@
 
 .thread-work-shelf__history {
   padding: 7px 0 0;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .thread-work-shelf__history ol {
   display: grid;
   gap: 4px;
   padding: 6px 6px 2px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 11px;
 }
 
@@ -817,70 +800,16 @@
   flex: 1 1 auto;
 }
 
-/* Only toolbar labels shrink-wrap their control. The message field's label
-   must not match: `.chat-composer label` out-specified the lone
-   `.chat-composer__message-field` class and shrank the content-sized
-   textarea to its typed text. */
+/* Only toolbar labels shrink-wrap their control; the message field's block
+   layout comes from the system's `.composer > label` rule. */
 .chat-composer__bar label {
   display: inline-flex;
   min-width: 0;
   align-items: center;
 }
 
-.chat-composer__message-field {
-  display: block;
-}
-
-.chat-composer__selectors [role="combobox"],
-.chat-composer__research [role="combobox"] {
-  width: auto;
-  max-width: 150px;
-  min-height: 27px;
-  padding-inline: 7px 24px;
-  color: var(--oct-muted);
-  background: transparent;
-  border-color: transparent;
-  font-size: var(--oct-text-xs);
-}
-
-.chat-composer__selectors [role="combobox"]:hover,
-.chat-composer__research [role="combobox"]:hover {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-  border-color: var(--oct-border);
-}
-
-/* The shared provider/model picker is rendered by providers/; its trigger
-   takes the design system's `.picker picker-sm` look here without that
-   surface adopting the class itself. */
-.chat-composer .composer-model-picker__trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-  min-height: var(--oct-control-height-sm);
-  padding-block: 0;
-  padding-inline: var(--oct-space-3);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
-  color: var(--oct-fg);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
-  text-align: left;
-}
-
-.chat-composer .composer-model-picker__trigger:hover:not(:disabled) {
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
-}
-
-.chat-composer .composer-model-picker__trigger[aria-expanded="true"] {
-  border-color: var(--oct-accent-fg);
-}
-
-.chat-composer .composer-model-picker__menu {
-  right: auto;
-  left: 0;
-}
+/* The row controls' look is the system's `.composer-row` treatment
+   (ADR 0038); nothing to restate here. */
 
 .chat-composer .composer-pool-control {
   min-width: 132px;
@@ -1187,7 +1116,7 @@ html[data-octant-reduced-motion="true"]
 
   .thread-work-shelf__item-actions button,
   .thread-work-shelf form button {
-    border-color: var(--octant-text-secondary);
+    border-color: var(--oct-muted);
   }
 }
 

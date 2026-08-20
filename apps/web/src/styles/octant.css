@@ -4026,6 +4026,56 @@ input.switch:checked::after {
 .composer-row .composer-gap {
   flex: 1;
 }
+/* Controls riding the composer row are one treatment across Chat, Work, and
+   Code; a surface may position them, never restyle them (ADR 0038). Selects
+   are quiet until pointed at; the provider/model picker trigger is the small
+   bordered picker, opening from the row's left edge. */
+.composer-row [role="combobox"] {
+  width: auto;
+  max-width: 190px;
+  min-height: 27px;
+  padding-inline: 7px 24px;
+  color: var(--oct-muted);
+  background: transparent;
+  border-color: transparent;
+  font-size: var(--oct-text-xs);
+}
+.composer-row [role="combobox"]:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+  border-color: var(--oct-border);
+}
+.composer-row .composer-model-picker__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: var(--oct-control-height-sm);
+  padding-block: 0;
+  padding-inline: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  text-align: left;
+}
+.composer-row .composer-model-picker__trigger:hover:not(:disabled) {
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+}
+.composer-row .composer-model-picker__trigger[aria-expanded="true"] {
+  border-color: var(--oct-accent-fg);
+}
+.composer-row .composer-model-picker__menu {
+  right: auto;
+  left: 0;
+}
+/* The frame's direct labels are its message fields; they must be blocks so
+   the content-sized textarea has a full-width box to fill (an inline label
+   shrink-wraps it to the typed text). */
+.composer > label {
+  display: block;
+}
 /* an attachment, a mentioned file, a scoped folder */
 .chip {
   display: inline-flex;
