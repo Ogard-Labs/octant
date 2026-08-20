@@ -219,6 +219,207 @@ describe("extension package contracts", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts non-executable appearance-pack, preview-viewer, and ui-surface kinds", () => {
+    const decoded = decodeExtensionPackageManifest({
+      ...manifest(),
+      declaredCapabilities: [],
+      primaryComponentId: "appearance",
+      components: [
+        {
+          id: "appearance",
+          kind: "appearance-pack",
+          displayName: "Octant appearance",
+          declaredCapabilities: [],
+        },
+        {
+          id: "preview",
+          kind: "preview-viewer",
+          displayName: "Structured preview",
+          declaredCapabilities: [],
+        },
+        {
+          id: "surface",
+          kind: "ui-surface",
+          displayName: "Workspace surface",
+          declaredCapabilities: [],
+        },
+      ],
+    });
+    expect(decoded.components.map((component) => component.kind)).toEqual([
+      "appearance-pack",
+      "preview-viewer",
+      "ui-surface",
+    ]);
+  });
+
+  it("rejects an appearance-pack that claims an executable entry point", () => {
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...manifest(),
+        declaredCapabilities: [],
+        primaryComponentId: "appearance",
+        components: [
+          {
+            id: "appearance",
+            kind: "appearance-pack",
+            displayName: "Octant appearance",
+            declaredCapabilities: [],
+            entryPoint: "must-not-execute",
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("accepts every renderer contribution point on the current manifest version", () => {
+    const decoded = decodeExtensionPackageManifest({
+      ...manifest(),
+      declaredCapabilities: [],
+      primaryComponentId: "surface",
+      components: [
+        {
+          id: "surface",
+          kind: "ui-surface",
+          displayName: "Renderer surface",
+          declaredCapabilities: [],
+        },
+        {
+          id: "appearance",
+          kind: "appearance-pack",
+          displayName: "Octant appearance",
+          declaredCapabilities: [],
+        },
+        {
+          id: "preview",
+          kind: "preview-viewer",
+          displayName: "Structured preview",
+          declaredCapabilities: [],
+        },
+        {
+          id: "board",
+          kind: "board",
+          displayName: "Thread board",
+          declaredCapabilities: [],
+          entryPoint: "builtin:board",
+        },
+      ],
+      contributions: [
+        {
+          point: "sidebar.destination",
+          componentId: "board",
+          destinationId: "thread-board",
+          label: "Thread board",
+          modes: ["code"],
+        },
+        {
+          point: "settings.section",
+          componentId: "surface",
+          sectionId: "github",
+          label: "GitHub",
+          scope: "host",
+          keywords: "github",
+        },
+        {
+          point: "workspace.tab",
+          componentId: "surface",
+          tabId: "preview",
+          label: "Preview",
+          modes: ["work", "code"],
+        },
+        {
+          point: "thread.pane",
+          componentId: "surface",
+          paneId: "pull-request",
+          label: "Pull request",
+          modes: ["code"],
+        },
+        {
+          point: "preview.viewer",
+          componentId: "preview",
+          viewerId: "structured-documents",
+          label: "Structured documents",
+          kinds: ["pdf", "table", "workbook", "document", "slides"],
+        },
+        {
+          point: "appearance.preset",
+          componentId: "appearance",
+          presetId: "octant",
+          label: "Octant",
+        },
+        {
+          point: "board.view",
+          componentId: "board",
+          viewId: "thread-status",
+          label: "Thread board",
+          modes: ["work", "code"],
+        },
+      ],
+    });
+    expect(decoded.manifestVersion).toBe(1);
+    expect(decoded.contributions?.map((contribution) => contribution.point)).toEqual([
+      "sidebar.destination",
+      "settings.section",
+      "workspace.tab",
+      "thread.pane",
+      "preview.viewer",
+      "appearance.preset",
+      "board.view",
+    ]);
+  });
+
+  it("rejects an unknown contribution point so a future host cannot silently accept it", () => {
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...manifest(),
+        declaredCapabilities: [],
+        primaryComponentId: "surface",
+        components: [
+          {
+            id: "surface",
+            kind: "ui-surface",
+            displayName: "Renderer surface",
+            declaredCapabilities: [],
+          },
+        ],
+        contributions: [
+          {
+            point: "composer.palette",
+            componentId: "surface",
+            commandId: "open-preview",
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a board.view that names Chat, which has no board", () => {
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...manifest(),
+        declaredCapabilities: [],
+        primaryComponentId: "board",
+        components: [
+          {
+            id: "board",
+            kind: "board",
+            displayName: "Thread board",
+            declaredCapabilities: [],
+            entryPoint: "builtin:board",
+          },
+        ],
+        contributions: [
+          {
+            point: "board.view",
+            componentId: "board",
+            viewId: "thread-status",
+            label: "Thread board",
+            modes: ["chat"],
+          },
+        ],
+      }),
+    ).toThrow();
+  });
 });
 
 describe("extension state and selection contracts", () => {

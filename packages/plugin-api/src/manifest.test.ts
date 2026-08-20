@@ -107,4 +107,64 @@ describe("plugin-api manifest re-exports", () => {
       ),
     ).toThrow();
   });
+
+  it("accepts appearance-pack and preview-viewer kinds without an entry point", () => {
+    const decoded = decodeExtensionPackageManifest(
+      manifest({
+        slug: "appearance",
+        components: [
+          {
+            id: "appearance-pack",
+            kind: "appearance-pack",
+            displayName: "Octant appearance",
+            declaredCapabilities: [],
+          },
+          {
+            id: "preview-viewers",
+            kind: "preview-viewer",
+            displayName: "Structured preview",
+            declaredCapabilities: [],
+          },
+        ],
+        contributions: [
+          {
+            point: "appearance.preset",
+            componentId: "appearance-pack",
+            presetId: "octant",
+            label: "Octant",
+          },
+          {
+            point: "preview.viewer",
+            componentId: "preview-viewers",
+            viewerId: "structured-documents",
+            label: "Structured documents",
+            kinds: ["pdf", "table", "workbook", "document", "slides"],
+          },
+        ],
+      }),
+    );
+    expect(decoded.components.map((component) => component.kind)).toEqual([
+      "appearance-pack",
+      "preview-viewer",
+    ]);
+    expect(decoded.contributions?.map((contribution) => contribution.point)).toEqual([
+      "appearance.preset",
+      "preview.viewer",
+    ]);
+  });
+
+  it("rejects an unknown contribution point through the public package", () => {
+    expect(() =>
+      decodeExtensionPackageManifest(
+        manifest({
+          contributions: [
+            {
+              point: "marketplace.slot",
+              componentId: "board",
+            },
+          ],
+        }),
+      ),
+    ).toThrow();
+  });
 });
