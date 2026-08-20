@@ -824,7 +824,9 @@ describe("WorkspaceView child-run status chrome", () => {
         mode="chat"
       />,
     );
-    expect(await screen.findByRole("region", { name: "Child run status" })).toBeVisible();
+    const chrome = await screen.findByRole("region", { name: "Child run status" });
+    expect(chrome).toBeVisible();
+    expect(chrome.closest("header")).not.toBeNull();
     // Chat keeps observability only. Whether Chat should be able to start a
     // subagent is a product decision, so this surface must not acquire one by
     // accident alongside the Code thread's creation affordance.
@@ -849,7 +851,9 @@ describe("WorkspaceView child-run status chrome", () => {
         mode="work"
       />,
     );
-    expect(await screen.findByRole("region", { name: "Child run status" })).toBeVisible();
+    const chrome = await screen.findByRole("region", { name: "Child run status" });
+    expect(chrome).toBeVisible();
+    expect(chrome.closest("header")).not.toBeNull();
   });
 
   it("mounts the chrome on a Code thread overview", async () => {
@@ -859,9 +863,13 @@ describe("WorkspaceView child-run status chrome", () => {
         agentRunClient={agentRunClient()}
       />,
     );
-    expect(
-      await screen.findByRole("region", { name: "Child run status" }, { timeout: 5_000 }),
-    ).toBeVisible();
+    const chrome = await screen.findByRole(
+      "region",
+      { name: "Child run status" },
+      { timeout: 5_000 },
+    );
+    expect(chrome).toBeVisible();
+    expect(chrome.closest("header")).not.toBeNull();
   });
 });
 
