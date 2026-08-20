@@ -43,6 +43,10 @@ export class WorkThreadProjection {
     return this.#threads.get(threadId);
   }
 
+  forget(threadId: WorkThreadId): void {
+    this.#threads.delete(threadId);
+  }
+
   list(): ReadonlyArray<WorkThread> {
     return [...this.#threads.values()]
       .filter((thread) => thread.lifecycle !== "deleted")

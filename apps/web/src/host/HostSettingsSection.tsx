@@ -6,7 +6,15 @@ import type {
   HostLifecycleAction,
   HostRestoreOutcome,
 } from "@octant/contracts/host-control";
+import type {
+  PurgeThreadsOutcome,
+  RetentionScope,
+  RetentionWindow,
+  SetThreadRetentionOutcome,
+  ThreadRetentionState,
+} from "@octant/contracts/thread-retention";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
   AutomationNotificationSettings,
@@ -336,6 +344,8 @@ export function HostSettingsSection({
         </p>
       )}
 
+      <ThreadRetentionPanel client={client} />
+
       {automationNotifications === undefined ? null : (
         <AutomationNotificationSettings client={automationNotifications} />
       )}
@@ -344,6 +354,199 @@ export function HostSettingsSection({
         <FederatedHostsLifecyclePanel lifecycle={hostFederationLifecycle} />
       )}
     </section>
+  );
+}
+
+function formatRetentionWindow(state: ThreadRetentionState | undefined): string {
+  const host = state?.windows.find((entry) => entry.scope.kind === "host");
+  if (host === undefined || host.window.kind === "forever") return "forever";
+  return `${host.window.days} days`;
+}
+
+const WINDOW_OPTIONS: ReadonlyArray<{ readonly value: string; readonly window: RetentionWindow }> =
+  [
+    { value: "forever", window: { kind: "forever" } },
+    { value: "7", window: { kind: "duration-days", days: 7 } },
+    { value: "30", window: { kind: "duration-days", days: 30 } },
+    { value: "90", window: { kind: "duration-days", days: 90 } },
+    { value: "365", window: { kind: "duration-days", days: 365 } },
+  ];
+
+function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }) {
+  const [state, setState] = useState<ThreadRetentionState | undefined>();
+  const [scopeKind, setScopeKind] = useState<RetentionScope["kind"]>("host");
+  const [mode, setMode] = useState<"chat" | "work" | "code">("chat");
+  const [threadId, setThreadId] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [windowValue, setWindowValue] = useState("forever");
+  const [confirmPurge, setConfirmPurge] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<SetThreadRetentionOutcome | PurgeThreadsOutcome>();
+
+  const load = useCallback(async () => {
+    setState(await client.readThreadRetention());
+  }, [client]);
+
+  useEffect(() => {
+    void load().catch(() => undefined);
+  }, [load]);
+
+  const scope = (): RetentionScope | undefined => {
+    if (scopeKind === "host") return { kind: "host" };
+    if (scopeKind === "project") {
+      const trimmed = projectId.trim();
+      return trimmed === "" ? undefined : { kind: "project", projectId: trimmed as never };
+    }
+    const trimmed = threadId.trim();
+    return trimmed === "" ? undefined : { kind: "thread", mode, threadId: trimmed as never };
+  };
+
+  const selectedWindow =
+    WINDOW_OPTIONS.find((option) => option.value === windowValue)?.window ??
+    ({ kind: "forever" } as const);
+
+  return (
+    <div id="settings-thread-retention">
+      <h2 className="host-settings__heading">Thread retention</h2>
+      <p className="host-settings__note">
+        A retention window never deletes on its own. A confirmed purge removes the named thread — or
+        expired threads in a Project or on this host — from ordinary reads, including derived
+        projections and that thread's own journal events. Other threads, Projects, usage, and
+        credentials stay. SQLite free pages may keep bytes until the next store rebuild.
+      </p>
+      <p className="host-settings__note">Host default: {formatRetentionWindow(state)}.</p>
+      <div className="host-settings__field">
+        <label htmlFor="thread-retention-scope">Scope</label>
+        <OctantNativeSelect
+          id="thread-retention-scope"
+          onChange={(event) => setScopeKind(event.currentTarget.value as RetentionScope["kind"])}
+          value={scopeKind}
+        >
+          <option value="host">This host</option>
+          <option value="project">One Project</option>
+          <option value="thread">One thread</option>
+        </OctantNativeSelect>
+      </div>
+      {scopeKind === "project" ? (
+        <div className="host-settings__field">
+          <label htmlFor="thread-retention-project">Project id</label>
+          <OctantInput
+            id="thread-retention-project"
+            onChange={(event) => setProjectId(event.currentTarget.value)}
+            value={projectId}
+          />
+        </div>
+      ) : null}
+      {scopeKind === "thread" ? (
+        <>
+          <div className="host-settings__field">
+            <label htmlFor="thread-retention-mode">Mode</label>
+            <OctantNativeSelect
+              id="thread-retention-mode"
+              onChange={(event) => setMode(event.currentTarget.value as "chat" | "work" | "code")}
+              value={mode}
+            >
+              <option value="chat">Chat</option>
+              <option value="work">Work</option>
+              <option value="code">Code</option>
+            </OctantNativeSelect>
+          </div>
+          <div className="host-settings__field">
+            <label htmlFor="thread-retention-thread">Thread id</label>
+            <OctantInput
+              id="thread-retention-thread"
+              onChange={(event) => setThreadId(event.currentTarget.value)}
+              value={threadId}
+            />
+          </div>
+        </>
+      ) : null}
+      <div className="host-settings__field">
+        <label htmlFor="thread-retention-window">Retention window</label>
+        <OctantNativeSelect
+          id="thread-retention-window"
+          onChange={(event) => setWindowValue(event.currentTarget.value)}
+          value={windowValue}
+        >
+          <option value="forever">Keep forever</option>
+          <option value="7">7 days</option>
+          <option value="30">30 days</option>
+          <option value="90">90 days</option>
+          <option value="365">365 days</option>
+        </OctantNativeSelect>
+      </div>
+      <div className="host-settings__controls">
+        <OctantButton
+          disabled={busy || scope() === undefined}
+          onClick={() => {
+            const next = scope();
+            if (next === undefined) return;
+            setBusy(true);
+            void client
+              .setThreadRetention({ scope: next, window: selectedWindow })
+              .then((result) => {
+                setOutcome(result);
+                // Success is the state snapshot; only a refusal carries `kind`.
+                if (!("kind" in result)) setState(result);
+              })
+              .finally(() => setBusy(false));
+          }}
+          type="button"
+        >
+          Set retention window
+        </OctantButton>
+      </div>
+      <label className="host-settings__note">
+        <input
+          checked={confirmPurge}
+          onChange={(event) => setConfirmPurge(event.currentTarget.checked)}
+          type="checkbox"
+        />{" "}
+        I understand this permanently erases the selected thread history.
+      </label>
+      <div className="host-settings__controls">
+        <OctantButton
+          disabled={busy || !confirmPurge || scope() === undefined}
+          onClick={() => {
+            const next = scope();
+            if (next === undefined) return;
+            setBusy(true);
+            void client
+              .purgeThreads({ scope: next, confirm: true })
+              .then(async (result) => {
+                setOutcome(result);
+                await load();
+              })
+              .finally(() => {
+                setBusy(false);
+                setConfirmPurge(false);
+              });
+          }}
+          type="button"
+          variant="secondary"
+        >
+          Purge
+        </OctantButton>
+      </div>
+      {outcome === undefined ? null : "kind" in outcome ? (
+        <p className="host-settings__note" role="alert">
+          {outcome.guidance}
+        </p>
+      ) : "operation" in outcome ? (
+        <p className="host-settings__note" role="status">
+          Purged {outcome.purged.length} thread{outcome.purged.length === 1 ? "" : "s"}
+          {outcome.alreadyPurged.length === 0
+            ? ""
+            : `, ${outcome.alreadyPurged.length} already purged`}
+          . Deleted {outcome.deleted.join(", ") || "nothing"}. Retained{" "}
+          {outcome.retained.join(", ")}.
+        </p>
+      ) : (
+        <p className="host-settings__note" role="status">
+          Retention window saved.
+        </p>
+      )}
+    </div>
   );
 }
 

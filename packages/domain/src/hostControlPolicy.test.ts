@@ -15,21 +15,30 @@ describe("authorizeHostControlAction", () => {
       disable: "host.service.disable",
       backup: "host.store.backup",
       restore: "host.store.restore",
+      retention: "host.store.retention",
+      purge: "host.store.purge",
     });
   });
 
-  it.each(["status", "stop", "restart", "enable", "disable", "backup", "restore"] as const)(
-    "allows a local window and denies a remote device for %s",
-    (operation) => {
-      expect(authorizeHostControlAction({ principalKind: "local-window", operation })).toEqual({
-        kind: "allow",
-      });
-      expect(authorizeHostControlAction({ principalKind: "remote-device", operation })).toEqual({
-        kind: "deny",
-        reason: "local-host-required",
-      });
-    },
-  );
+  it.each([
+    "status",
+    "stop",
+    "restart",
+    "enable",
+    "disable",
+    "backup",
+    "restore",
+    "retention",
+    "purge",
+  ] as const)("allows a local window and denies a remote device for %s", (operation) => {
+    expect(authorizeHostControlAction({ principalKind: "local-window", operation })).toEqual({
+      kind: "allow",
+    });
+    expect(authorizeHostControlAction({ principalKind: "remote-device", operation })).toEqual({
+      kind: "deny",
+      reason: "local-host-required",
+    });
+  });
 });
 
 describe("deriveHostLifecycleControls", () => {

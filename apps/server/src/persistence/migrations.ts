@@ -330,6 +330,27 @@ CREATE INDEX thread_checkpoint_thread_idx
   ON thread_checkpoint_projection (thread_id, last_sequence);
 `;
 
+const THREAD_RETENTION_PROJECTION_SQL = `
+CREATE TABLE thread_retention_projection (
+  scope_kind TEXT NOT NULL CHECK(scope_kind IN ('host', 'project', 'thread')),
+  scope_key TEXT NOT NULL CHECK(length(trim(scope_key)) > 0),
+  window_json TEXT NOT NULL CHECK(json_valid(window_json)),
+  updated_at TEXT NOT NULL,
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+  PRIMARY KEY (scope_kind, scope_key)
+) STRICT;
+
+CREATE TABLE thread_purge_tombstone (
+  mode TEXT NOT NULL CHECK(mode IN ('chat', 'work', 'code')),
+  thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+  project_id TEXT CHECK(project_id IS NULL OR length(trim(project_id)) > 0),
+  purged_at TEXT NOT NULL,
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+  PRIMARY KEY (mode, thread_id)
+) STRICT;
+`;
+
 const PRODUCT_FEEDBACK_PROJECTION_SQL = `
 CREATE TABLE product_feedback_projection (
   note_id TEXT PRIMARY KEY CHECK(length(trim(note_id)) > 0),
@@ -1475,6 +1496,11 @@ ALTER TABLE code_runtime_projection
     version: 50,
     name: "drop_rootless_projections",
     sql: DROP_ROOTLESS_PROJECTIONS_SQL,
+  },
+  {
+    version: 51,
+    name: "create_thread_retention_projection",
+    sql: THREAD_RETENTION_PROJECTION_SQL,
   },
 ];
 
