@@ -103,11 +103,11 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         </div>
 
         <div className="draft-thread__composer">
-          <div className="draft-thread__input-row">
+          <div className="composer">
             <OctantTextarea
               aria-label="First message"
               autoFocus
-              className="draft-thread__textarea"
+              className="composer-input"
               disabled={!ready || props.creating}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={handleKeyDown}
@@ -116,9 +116,7 @@ export function ChatWelcome(props: ChatWelcomeProps) {
               rows={3}
               value={prompt}
             />
-          </div>
-          <div className="draft-thread__composer-bar" aria-label="Thread context">
-            <span className="draft-thread__context-picker">
+            <div className="composer-row" aria-label="Thread context">
               <ComposerModelPicker
                 ariaLabel="Provider and model"
                 disabled={!ready || props.creating === true}
@@ -134,18 +132,18 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                   ? {}
                   : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
               />
-            </span>
-            <OctantButton
-              aria-label="Start chat"
-              className="draft-thread__send"
-              disabled={!canSubmit}
-              onClick={submit}
-              size="icon"
-              type="button"
-              variant="default"
-            >
-              <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-            </OctantButton>
+              <span className="composer-gap" />
+              <OctantButton
+                aria-label="Start chat"
+                disabled={!canSubmit}
+                onClick={submit}
+                size="icon"
+                type="button"
+                variant="default"
+              >
+                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+              </OctantButton>
+            </div>
           </div>
           {statusMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">

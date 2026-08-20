@@ -65,9 +65,9 @@ export function PdfViewer(props: {
         <nav className="preview-nav" aria-label="PDF page navigation">
           <OctantButton
             aria-label="Previous page"
-            className="preview-nav__button"
             disabled={currentPage <= 1}
             onClick={() => movePage(-1)}
+            size="icon"
             type="button"
             variant="ghost"
           >
@@ -78,9 +78,9 @@ export function PdfViewer(props: {
           </span>
           <OctantButton
             aria-label="Next page"
-            className="preview-nav__button"
             disabled={currentPage >= pageCount}
             onClick={() => movePage(1)}
+            size="icon"
             type="button"
             variant="ghost"
           >

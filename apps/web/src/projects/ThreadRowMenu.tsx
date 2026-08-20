@@ -16,6 +16,8 @@ export interface ThreadRowActions {
   /** Absent when the host cannot archive this thread. */
   readonly onArchiveThread?: (threadId: string) => void;
   /** Absent when nothing tracks read state for this thread. */
+  readonly onMarkThreadRead?: (threadId: string) => void;
+  /** Absent when nothing tracks read state for this thread. */
   readonly onMarkThreadUnread?: (threadId: string) => void;
   /** Absent when the host cannot accept a pin. */
   readonly onPinThread?: (threadId: string, pinned: boolean) => void;
@@ -27,6 +29,7 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
   if (actions === undefined) return true;
   return (
     actions.onArchiveThread === undefined &&
+    actions.onMarkThreadRead === undefined &&
     actions.onMarkThreadUnread === undefined &&
     actions.onPinThread === undefined &&
     actions.onStartRenameThread === undefined
@@ -74,9 +77,21 @@ export function ThreadRowMenu(props: {
               Rename
             </ContextMenuPrimitive.Item>
           )}
-          {/* Marking an already-unread thread unread would change nothing, so
-              the item is absent rather than present and inert. */}
-          {props.actions.onMarkThreadUnread === undefined || props.thread.unread === true ? null : (
+          {/* A row offers the one read-state action that would change the
+              thread: marking it with the state it is already in would render
+              as present and inert. An unread thread used to get neither. */}
+          {props.thread.unread === true ? (
+            props.actions.onMarkThreadRead === undefined ? null : (
+              <ContextMenuPrimitive.Item
+                className={MENU_ITEM_CLASS}
+                closeOnClick
+                label="Mark as read"
+                onClick={() => props.actions.onMarkThreadRead?.(threadId)}
+              >
+                Mark as read
+              </ContextMenuPrimitive.Item>
+            )
+          ) : props.actions.onMarkThreadUnread === undefined ? null : (
             <ContextMenuPrimitive.Item
               className={MENU_ITEM_CLASS}
               closeOnClick

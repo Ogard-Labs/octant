@@ -284,12 +284,18 @@ export function GitHubRepositoryOnboarding(props: GitHubRepositoryOnboardingProp
                     setSelection(undefined);
                     setPhase({ kind: "pick" });
                   }}
+                  size="sm"
                   type="button"
                   variant="secondary"
                 >
                   Clear GitHub selection
                 </OctantButton>
-                <OctantButton onClick={() => setOpen(false)} type="button" variant="ghost">
+                <OctantButton
+                  onClick={() => setOpen(false)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
                   Close
                 </OctantButton>
               </div>
@@ -301,7 +307,12 @@ export function GitHubRepositoryOnboarding(props: GitHubRepositoryOnboardingProp
                 in the composer to onboard a different GitHub repository.
               </p>
               <div className="github-onboarding__actions">
-                <OctantButton onClick={() => setOpen(false)} type="button" variant="ghost">
+                <OctantButton
+                  onClick={() => setOpen(false)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
                   Close
                 </OctantButton>
               </div>
@@ -390,6 +401,7 @@ function FlowBody(props: FlowBodyProps) {
           <div className="github-onboarding__actions">
             <OctantButton
               onClick={() => props.onCancelClone(phase.operation)}
+              size="sm"
               type="button"
               variant="secondary"
             >
@@ -403,7 +415,12 @@ function FlowBody(props: FlowBodyProps) {
         <div className="github-onboarding__body">
           <p role="alert">{phase.remediation ?? REFUSAL_FALLBACKS[phase.reason]}</p>
           <div className="github-onboarding__actions">
-            <OctantButton onClick={props.onBackToPicker} type="button" variant="secondary">
+            <OctantButton
+              onClick={props.onBackToPicker}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
               Choose another repository
             </OctantButton>
           </div>
@@ -420,10 +437,15 @@ function FlowBody(props: FlowBodyProps) {
             attached; any staging remains quarantined on the host.
           </p>
           <div className="github-onboarding__actions">
-            <OctantButton onClick={props.onRetryRequest} type="button" variant="secondary">
+            <OctantButton
+              onClick={props.onRetryRequest}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
               Try again
             </OctantButton>
-            <OctantButton onClick={props.onBackToPicker} type="button" variant="ghost">
+            <OctantButton onClick={props.onBackToPicker} size="sm" type="button" variant="ghost">
               Choose another repository
             </OctantButton>
           </div>
@@ -434,10 +456,15 @@ function FlowBody(props: FlowBodyProps) {
         <div className="github-onboarding__body">
           <p role="status">The clone was cancelled. Nothing was attached.</p>
           <div className="github-onboarding__actions">
-            <OctantButton onClick={props.onRetryRequest} type="button" variant="secondary">
+            <OctantButton
+              onClick={props.onRetryRequest}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
               Try again
             </OctantButton>
-            <OctantButton onClick={props.onBackToPicker} type="button" variant="ghost">
+            <OctantButton onClick={props.onBackToPicker} size="sm" type="button" variant="ghost">
               Choose another repository
             </OctantButton>
           </div>
@@ -459,6 +486,7 @@ function FlowBody(props: FlowBodyProps) {
           <div className="github-onboarding__actions">
             <OctantButton
               onClick={() => props.onRetryProjectCreation(phase.receipt, phase.operation)}
+              size="sm"
               type="button"
               variant="secondary"
             >
@@ -474,7 +502,7 @@ function FlowBody(props: FlowBodyProps) {
             The Code Project is ready. “{phase.projectName}” is bound to the verified checkout.
           </p>
           <div className="github-onboarding__actions">
-            <OctantButton onClick={props.onDone} type="button" variant="secondary">
+            <OctantButton onClick={props.onDone} size="sm" type="button" variant="secondary">
               Done
             </OctantButton>
           </div>
@@ -526,10 +554,10 @@ function ConfirmationCard(props: {
         </p>
       )}
       <div className="github-onboarding__actions">
-        <OctantButton onClick={props.onConfirm} type="button" variant="default">
+        <OctantButton onClick={props.onConfirm} size="sm" type="button" variant="default">
           {attach ? "Attach existing checkout" : "Clone repository"}
         </OctantButton>
-        <OctantButton onClick={props.onBack} type="button" variant="ghost">
+        <OctantButton onClick={props.onBack} size="sm" type="button" variant="ghost">
           Back
         </OctantButton>
       </div>

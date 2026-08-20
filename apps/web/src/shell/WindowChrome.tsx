@@ -42,7 +42,10 @@ export function WindowChrome(props: WindowChromeProps) {
       )}
       <span aria-hidden="true" className="window-chrome__drag-space window-drag-region" />
       {props.developmentAuthentication ? (
-        <span className="window-chrome__development-auth window-no-drag" role="status">
+        <span
+          className="badge badge-warn window-chrome__development-auth window-no-drag"
+          role="status"
+        >
           Development authentication
         </span>
       ) : null}
