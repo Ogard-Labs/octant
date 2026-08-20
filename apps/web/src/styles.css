@@ -528,14 +528,9 @@ strong {
   font-weight: 600;
 }
 
-/*
- * The bare-button reset belongs in the base layer, not outside every layer.
- * Unlayered, it outranked the whole cascade — including the button recipe's
- * own utilities — so a styled <Button> rendered as plain text and each site
- * that wanted a real button had to restate the recipe by hand. In `base` it
- * still strips the user-agent button for the many controls Octant draws
- * itself, and the recipe wins where a recipe was asked for.
- */
+/* Unlayered element rules beat every Tailwind utility, so a filled Button
+   rendered as bare text. Keep the reset in the base layer so recipes can
+   paint; leave the focus outline unlayered so keyboard rings stay as they are. */
 @layer base {
   button {
     appearance: none;
@@ -545,11 +540,11 @@ strong {
     border: 0;
     font: inherit;
   }
+}
 
-  button:focus-visible {
-    outline: 2px solid var(--octant-focus-ring);
-    outline-offset: 2px;
-  }
+button:focus-visible {
+  outline: 2px solid var(--octant-focus-ring);
+  outline-offset: 2px;
 }
 
 .sr-only {
@@ -2664,25 +2659,6 @@ dialog.project-dialog {
   background: var(--octant-control-pressed);
 }
 
-/*
- * The confirm in a dialog.
- *
- * It cannot get its fill from the button recipe: the element reset in this
- * sheet is unlayered, and unlayered rules beat every Tailwind utility whatever
- * its specificity, so `variant="default"` kept `background: transparent` and
- * read as plain text beside Cancel. Releasing the reset would restyle every
- * button in the app at once, so the dialog states its own fill here.
- */
-.project-button--primary {
-  color: var(--octant-accent-foreground);
-  background: var(--octant-accent);
-  border-color: transparent;
-  font-weight: 600;
-}
-
-.project-button--primary:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--octant-accent) 88%, #fff);
-}
 .project-button:disabled {
   cursor: default;
   opacity: 0.45;
