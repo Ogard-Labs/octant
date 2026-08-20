@@ -101,7 +101,7 @@ describe("buildChildRunStatusSummary", () => {
     const summary = buildChildRunStatusSummary([entry("a", "completed", { required: true })]);
 
     expect(summary.state).toBe("none");
-    expect(summary.detail).toBe("1 finished child run need acknowledgement.");
+    expect(summary.detail).toBe("1 finished child run needs acknowledgement.");
   });
 
   it("does not count an acknowledged blocked run as blocked", () => {
@@ -111,5 +111,14 @@ describe("buildChildRunStatusSummary", () => {
 
     expect(summary.blocked).toBe(0);
     expect(summary.outstanding).toBe(0);
+  });
+
+  it("does not treat a finished run that needs no acknowledgement as blocked", () => {
+    const summary = buildChildRunStatusSummary([entry("a", "failed"), entry("b", "cancelled")]);
+
+    expect(summary.blocked).toBe(0);
+    expect(summary.outstanding).toBe(0);
+    expect(summary.state).toBe("none");
+    expect(summary.label).toBe("No child runs · Idle");
   });
 });
