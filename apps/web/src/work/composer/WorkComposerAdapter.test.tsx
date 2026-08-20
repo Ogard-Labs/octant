@@ -1,7 +1,10 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { WorkComposerAdapter } from "./WorkComposerAdapter";
 import type { ProjectId } from "@octant/contracts/projects";
+import type { PickerGroup } from "@octant/domain";
 
 const baseProps = {
   providerGroups: [],
@@ -130,6 +133,84 @@ describe("WorkComposerAdapter interactions", () => {
     container.remove();
   });
 
+  it("turns a pasted PNG into a pending attachment and omits it after remove", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(
+      <WorkComposerAdapter
+        providerGroups={[visionProviderGroup()]}
+        selectedProviderInstanceId={"80000000-0000-4000-8000-0000000000a1" as never}
+        selectedModelId={"model-one" as never}
+        onSelectProvider={() => {}}
+        onCreateThread={onCreateThread}
+        onCancel={() => {}}
+        projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+        projectName="My Docs"
+        projectRoot="/home/user/docs"
+      />,
+    );
+
+    const composer = screen.getByLabelText("First message");
+    pasteImage(composer);
+    expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Remove pasted.png" }));
+    expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
+
+    await user.type(composer, "Draft the brief");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread).toHaveBeenCalledWith("Draft the brief");
+  });
+
+  it("sends a file-attached image with the first turn", async () => {
+    const user = userEvent.setup();
+    const onCreateThread = vi.fn();
+    render(
+      <WorkComposerAdapter
+        providerGroups={[visionProviderGroup()]}
+        selectedProviderInstanceId={"80000000-0000-4000-8000-0000000000a1" as never}
+        selectedModelId={"model-one" as never}
+        onSelectProvider={() => {}}
+        onCreateThread={onCreateThread}
+        onCancel={() => {}}
+        projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+        projectName="My Docs"
+        projectRoot="/home/user/docs"
+      />,
+    );
+
+    await user.upload(
+      screen.getByLabelText("Choose attachment file"),
+      new File([new Uint8Array([137, 80, 78])], "diagram.png", { type: "image/png" }),
+    );
+    expect(await screen.findByAltText("diagram.png")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("First message"), "Match this mockup");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    expect(onCreateThread).toHaveBeenCalledWith("Match this mockup", [
+      expect.objectContaining({ name: "diagram.png", type: "image/png" }),
+    ]);
+  });
+
+  it("says a text-only model cannot take the image instead of attaching it", async () => {
+    render(
+      <WorkComposerAdapter
+        providerGroups={[textOnlyProviderGroup()]}
+        selectedProviderInstanceId={"80000000-0000-4000-8000-0000000000a1" as never}
+        selectedModelId={"model-one" as never}
+        onSelectProvider={() => {}}
+        onCreateThread={vi.fn()}
+        onCancel={() => {}}
+      />,
+    );
+
+    pasteImage(screen.getByLabelText("First message"));
+    const attached = await screen.findByLabelText("Attached images");
+    expect(attached).toHaveTextContent(
+      "The selected model does not accept images. Choose an image-capable model.",
+    );
+    expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
+  });
+
   it("refuses to start the first turn until a Project is chosen", async () => {
     const onCreateThread = vi.fn();
     const container = document.createElement("div");
@@ -162,3 +243,45 @@ describe("WorkComposerAdapter interactions", () => {
     container.remove();
   });
 });
+
+function pasteImage(composer: HTMLElement): void {
+  const file = new File([new Uint8Array([137, 80, 78])], "pasted.png", { type: "image/png" });
+  fireEvent.paste(composer, { clipboardData: { files: [file], items: [] } });
+}
+
+function visionProviderGroup(): PickerGroup {
+  return providerGroup({ inputModalities: ["text", "image"] });
+}
+
+function textOnlyProviderGroup(): PickerGroup {
+  return providerGroup({ inputModalities: ["text"] });
+}
+
+function providerGroup(input: {
+  readonly inputModalities: ReadonlyArray<"text" | "image">;
+}): PickerGroup {
+  return {
+    driverLabel: "OpenCode",
+    endpointHost: "local",
+    executionHost: "local",
+    instance: {
+      id: "80000000-0000-4000-8000-0000000000a1",
+      displayName: "Local OpenCode",
+    },
+    readiness: "ready",
+    sections: [
+      {
+        label: "Models",
+        models: [
+          {
+            model: {
+              id: "model-one",
+              displayName: "Model One",
+              inputModalities: input.inputModalities,
+            },
+          },
+        ],
+      },
+    ],
+  } as never;
+}

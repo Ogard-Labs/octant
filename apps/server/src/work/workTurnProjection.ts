@@ -37,6 +37,9 @@ export class WorkTurnProjection {
         status: "accepted",
         prompt: accepted.prompt,
         transcript: [{ role: "user", text: accepted.prompt }],
+        ...(accepted.attachments === undefined || accepted.attachments.length === 0
+          ? {}
+          : { attachments: accepted.attachments }),
         capabilities: accepted.capabilities,
         version: 1,
         acceptedAt: accepted.acceptedAt,

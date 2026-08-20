@@ -1,10 +1,17 @@
 import {
+  MAX_WORK_ATTACHMENT_BYTES,
   WorkTurnFailure as WorkTurnFailureSchema,
+  decodeWorkAttachmentId,
+  decodeWorkAttachmentMediaType,
+  decodeWorkAttachmentReference,
   decodeWorkThreadId,
   decodeWorkThreadTranscript,
   decodeWorkTurnCancelResult,
   decodeWorkTurnLookupResult,
   decodeWorkTurnRequestId,
+  type WorkAttachmentId,
+  type WorkAttachmentMediaType,
+  type WorkAttachmentReference,
   type WorkThreadId,
   type WorkThreadTranscript,
   type WorkTurnCancelResult,
@@ -19,8 +26,9 @@ import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthori
 import { WorkTurnServiceError } from "./work/workTurnService";
 
 const JSON_BODY_LIMIT = 1_048_576;
-const METHODS = "GET, POST, OPTIONS";
-const HEADERS = "content-type, x-octant-window-capability";
+const METHODS = "GET, POST, PUT, DELETE, OPTIONS";
+const HEADERS =
+  "content-type, x-octant-window-capability, x-octant-work-thread-id, x-octant-work-attachment-id, x-octant-work-display-name";
 const decodeWorkTurnFailure = Schema.decodeUnknownSync(WorkTurnFailureSchema);
 
 export interface WorkTurnRouteService {
@@ -34,21 +42,82 @@ export interface WorkTurnRouteService {
     windowId: WindowId,
     threadId: WorkThreadId,
   ) => Promise<WorkThreadTranscript>;
+  readonly stageAttachment?: (
+    windowId: WindowId,
+    input: {
+      readonly threadId: WorkThreadId;
+      readonly attachmentId: WorkAttachmentId;
+      readonly displayName: string;
+      readonly mediaType: WorkAttachmentMediaType;
+      readonly bytes: Uint8Array;
+      readonly signal?: AbortSignal;
+    },
+  ) => Promise<WorkAttachmentReference>;
+  readonly discardAttachment?: (
+    windowId: WindowId,
+    threadId: WorkThreadId,
+    attachmentId: WorkAttachmentId,
+  ) => Promise<void>;
 }
 
 export interface WorkTurnRouteDependencies {
   readonly service: WorkTurnRouteService;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly maxJsonBodySize?: number;
+  readonly maxFileBodySize?: number;
   readonly now?: () => number;
 }
 
 export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependencies) {
   const now = dependencies.now ?? Date.now;
   const jsonLimit = dependencies.maxJsonBodySize ?? JSON_BODY_LIMIT;
+  const fileLimit = dependencies.maxFileBodySize ?? MAX_WORK_ATTACHMENT_BYTES;
+
+  async function handleAttachment(
+    request: Request,
+    url: URL,
+    authenticatedWindowId: WindowId,
+    origin: string | null,
+  ): Promise<Response> {
+    const service = dependencies.service;
+    if (service.stageAttachment === undefined || service.discardAttachment === undefined) {
+      return failureResponse(
+        { category: "unavailable", message: "Work attachments are unavailable." },
+        503,
+        origin,
+      );
+    }
+    if (request.method === "PUT") {
+      if (url.search !== "") {
+        throw new WorkTurnRouteRejected("Work turn request is invalid.", 400);
+      }
+      const upload = readAttachmentUpload(request);
+      const bytes = await readBoundedBytes(request, fileLimit);
+      return jsonResponse(
+        decodeWorkAttachmentReference(
+          await service.stageAttachment(authenticatedWindowId, {
+            ...upload,
+            bytes,
+            signal: request.signal,
+          }),
+        ),
+        200,
+        origin,
+      );
+    }
+    if (request.method === "DELETE") {
+      const target = readAttachmentTarget(url);
+      await service.discardAttachment(authenticatedWindowId, target.threadId, target.attachmentId);
+      return jsonResponse({ status: "discarded" }, 200, origin);
+    }
+    throw new WorkTurnRouteRejected("Work turn request is invalid.", 400);
+  }
+
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith("/api/work/turns")) return undefined;
+    if (!url.pathname.startsWith("/api/work/turns") && url.pathname !== "/api/work/attachments") {
+      return undefined;
+    }
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
       return failureResponse(
@@ -68,13 +137,14 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
+    const isAttachment = url.pathname === "/api/work/attachments";
     const isStart = url.pathname === "/api/work/turns" && request.method === "POST";
     const isCancel = url.pathname === "/api/work/turns/cancel" && request.method === "POST";
     const lookupMatch = url.pathname.match(/^\/api\/work\/turns\/([^/]+)$/);
     const isLookup = lookupMatch !== null && request.method === "GET";
     const transcriptMatch = url.pathname.match(/^\/api\/work\/turns\/transcript\/([^/]+)$/);
     const isTranscript = transcriptMatch !== null && request.method === "GET";
-    if (!isStart && !isCancel && !isLookup && !isTranscript) return undefined;
+    if (!isAttachment && !isStart && !isCancel && !isLookup && !isTranscript) return undefined;
 
     let authenticatedWindowId: WindowId;
     try {
@@ -102,6 +172,9 @@ export function createWorkTurnRouteHandler(dependencies: WorkTurnRouteDependenci
     }
 
     try {
+      if (isAttachment) {
+        return await handleAttachment(request, url, authenticatedWindowId, origin);
+      }
       if (isLookup) {
         if (url.search !== "") {
           throw new WorkTurnRouteRejected("Work turn request is invalid.", 400);
@@ -262,4 +335,55 @@ function parseJson(body: Uint8Array): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function readAttachmentUpload(request: Request): {
+  readonly threadId: WorkThreadId;
+  readonly attachmentId: WorkAttachmentId;
+  readonly displayName: string;
+  readonly mediaType: WorkAttachmentMediaType;
+} {
+  const threadHeader = request.headers.get("x-octant-work-thread-id");
+  const attachmentHeader = request.headers.get("x-octant-work-attachment-id");
+  const encodedDisplayName = request.headers.get("x-octant-work-display-name");
+  if (threadHeader === null || threadHeader.trim() === "") {
+    throw new WorkTurnRouteRejected("Work attachment requires a thread identity.", 400);
+  }
+  if (attachmentHeader === null || attachmentHeader.trim() === "") {
+    throw new WorkTurnRouteRejected("Work attachment requires an attachment identity.", 400);
+  }
+  if (encodedDisplayName === null || encodedDisplayName.trim() === "") {
+    throw new WorkTurnRouteRejected("Work attachment requires a display name.", 400);
+  }
+  const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  let displayName: string;
+  try {
+    displayName = decodeURIComponent(encodedDisplayName);
+  } catch {
+    throw new WorkTurnRouteRejected("Work attachment display name is invalid.", 400);
+  }
+  try {
+    return {
+      threadId: decodeWorkThreadId(threadHeader),
+      attachmentId: decodeWorkAttachmentId(attachmentHeader),
+      displayName,
+      mediaType: decodeWorkAttachmentMediaType(mediaType),
+    };
+  } catch {
+    throw new WorkTurnRouteRejected("Work attachment metadata is invalid.", 400);
+  }
+}
+
+function readAttachmentTarget(url: URL): {
+  readonly threadId: WorkThreadId;
+  readonly attachmentId: WorkAttachmentId;
+} {
+  try {
+    return {
+      threadId: decodeWorkThreadId(url.searchParams.get("thread") ?? ""),
+      attachmentId: decodeWorkAttachmentId(url.searchParams.get("attachment") ?? ""),
+    };
+  } catch {
+    throw new WorkTurnRouteRejected("Work attachment reference is invalid.", 400);
+  }
 }

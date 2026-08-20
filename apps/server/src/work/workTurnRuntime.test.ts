@@ -109,6 +109,74 @@ describe("WorkTurnRuntime", () => {
     expect(outcome).toEqual({ kind: "completed", response: "Hello from Work" });
   });
 
+  it("hands the provider the images the host already accepted", async () => {
+    const sent: unknown[] = [];
+    const events: ProviderRuntimeEvent[] = [
+      {
+        instanceId: ids.provider,
+        sequence: 1,
+        correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+        kind: "completed",
+        sessionId: ids.session as never,
+      },
+    ];
+    const driver: ProviderDriver = {
+      kind: "openai-compatible",
+      probe: () => Effect.die("unused"),
+      acquire: () =>
+        Effect.succeed({
+          events: Stream.fromIterable(events),
+          start: () => Effect.void,
+          send: (input: unknown) => {
+            sent.push(input);
+            return Effect.void;
+          },
+          resume: () => Effect.void,
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        } as never),
+    };
+    const attachment = {
+      attachmentId: "attachment-1",
+      displayName: "mockup.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([137, 80, 78]),
+    };
+
+    await new WorkTurnRuntime().run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Match this mockup",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver,
+      attachments: [attachment],
+      signal: new AbortController().signal,
+    });
+
+    expect(sent[0]).toMatchObject({
+      prompt: "Match this mockup",
+      attachments: [attachment],
+    });
+  });
+
   it("cancels before provider launch when the signal is already aborted", async () => {
     const acquire = vi.fn();
     const driver: ProviderDriver = {
