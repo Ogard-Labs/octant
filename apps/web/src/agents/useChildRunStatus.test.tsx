@@ -163,6 +163,32 @@ describe("useChildRunStatus", () => {
     expect(screen.getByLabelText("stopped")).toHaveTextContent("failed");
   });
 
+  it("treats a failed cancel receipt as a failed stop instead of inventing success", async () => {
+    const user = userEvent.setup();
+    const client = stubClient({
+      cancel: vi.fn().mockResolvedValue({
+        results: [
+          {
+            kind: "run-command-failed",
+            reason: "unsupported-transition",
+            message: "AgentRun process did not confirm termination; cancellation remains pending.",
+          },
+        ],
+      }),
+    });
+    render(<Harness client={client} parentThreadId={parentThreadId} />);
+    await waitFor(() => expect(screen.getByLabelText("stoppable")).toHaveTextContent("a,b"));
+
+    await user.click(screen.getByRole("button", { name: "stop" }));
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("error")).toHaveTextContent(
+        "Child runs could not be stopped. They are still running.",
+      ),
+    );
+    expect(screen.getByLabelText("stopped")).toHaveTextContent("failed");
+  });
+
   it("says the runs are still running when the cancel fails", async () => {
     const user = userEvent.setup();
     const client = stubClient({ cancel: vi.fn().mockRejectedValue(new Error("denied")) });

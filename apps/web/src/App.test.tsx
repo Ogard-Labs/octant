@@ -1416,7 +1416,11 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
+    // Child-run polling on the Code overview can unmount the Suspense fallback
+    // heading after findByRole resolves, so wait for a heading that stays up.
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Controller foundation" })).toBeVisible();
+    });
     await user.click(screen.getByRole("button", { name: "Automations" }));
 
     expect(await screen.findByRole("heading", { name: "Automation Center" })).toBeVisible();
