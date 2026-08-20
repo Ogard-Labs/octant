@@ -14,6 +14,7 @@ import {
   createChatReadCursorStore,
   useChatController,
 } from "./useChatController";
+import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 
 const capability = "A".repeat(43);
 const threadId = decodeChatThreadId("00000000-0000-4000-8000-000000000802");
@@ -1173,7 +1174,189 @@ describe("useChatController", () => {
     ).toBe(false);
     expect(acceptChatEventFrame(frame(2, otherThreadId), threadId, 1)).toBe(false);
   });
+
+  it("restores Chat text and caret after leaving the thread", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async (requested) =>
+        String(requested) === String(threadId)
+          ? threadView(1)
+          : decodeChatThreadView({
+              ...threadView(1),
+              thread: bootstrap().threads[1]!,
+            }),
+      ),
+      subscribe: vi.fn(async function* () {}),
+    });
+    const { result, rerender } = renderHook(
+      ({ activeThreadId }) =>
+        useChatController({
+          activeThreadId,
+          client,
+          draftStore: store,
+          reconnectDelayMs: 60_000,
+          serverUrl: "http://127.0.0.1",
+          windowCapability: capability,
+        }),
+      { initialProps: { activeThreadId: threadId } },
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(threadId));
+    act(() => result.current.setPendingDraft("half-written plan", 4));
+
+    rerender({ activeThreadId: otherThreadId });
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(otherThreadId));
+    expect(result.current.pendingDraft).toBe("");
+
+    rerender({ activeThreadId: threadId });
+    await waitFor(() => expect(result.current.pendingDraft).toBe("half-written plan"));
+    expect(result.current.pendingDraftCaret).toBe(4);
+  });
+
+  it("restores a Chat draft after the controller remounts", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+    });
+    const first = renderHook(() =>
+      useChatController({
+        activeThreadId: threadId,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+    await waitFor(() => expect(first.result.current.status).toBe("ready"));
+    act(() => first.result.current.setPendingDraft("survives restart", 3));
+    first.unmount();
+
+    const second = renderHook(() =>
+      useChatController({
+        activeThreadId: threadId,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+    await waitFor(() => expect(second.result.current.pendingDraft).toBe("survives restart"));
+    expect(second.result.current.pendingDraftCaret).toBe(3);
+    second.unmount();
+  });
+
+  it("does not restore a Chat draft after a successful send", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute: vi.fn(async () => ({
+        kind: "turn-created" as const,
+        turn: {
+          id: "00000000-0000-4000-8000-000000000901",
+          threadId,
+          sequence: 1,
+          userMessageRef: {
+            contentId: "00000000-0000-4000-8000-000000000902",
+            digest: "a".repeat(64),
+            byteLength: 1,
+          },
+          attachmentIds: [],
+          attempts: [],
+          createdAt: now,
+        },
+      })) as never,
+    });
+    const { result, unmount } = renderHook(() =>
+      useChatController({
+        activeThreadId: threadId,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    act(() => result.current.setPendingDraft("send this"));
+    await act(async () => {
+      await result.current.sendTurn("send this");
+    });
+    expect(result.current.pendingDraft).toBe("");
+    unmount();
+
+    const remounted = renderHook(() =>
+      useChatController({
+        activeThreadId: threadId,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+    expect(remounted.result.current.pendingDraft).toBe("");
+    remounted.unmount();
+  });
+
+  it("removes a Chat draft when the thread is deleted", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute: vi.fn(async () => ({
+        kind: "deleted" as const,
+        threadId,
+        deletedAt: now,
+      })) as never,
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        activeThreadId: threadId,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    act(() => result.current.setPendingDraft("do not keep"));
+    await act(async () => {
+      await result.current.execute({
+        kind: "delete-chat-thread",
+        threadId,
+        expectedVersion: threadView(1).thread.version,
+      });
+    });
+    expect(result.current.pendingDraft).toBe("");
+    expect(store.read("chat", String(threadId))).toBeUndefined();
+  });
 });
+
+function memoryDraftStorage(): Storage {
+  const data = new Map<string, string>();
+  return {
+    get length() {
+      return data.size;
+    },
+    clear: () => data.clear(),
+    getItem: (key) => data.get(key) ?? null,
+    key: (index) => [...data.keys()][index] ?? null,
+    removeItem: (key) => {
+      data.delete(key);
+    },
+    setItem: (key, value) => {
+      data.set(key, value);
+    },
+  };
+}
 
 function createMockClient(
   overrides: Partial<ChatClient> & Pick<ChatClient, "bootstrap" | "thread" | "subscribe">,

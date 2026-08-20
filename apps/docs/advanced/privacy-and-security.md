@@ -28,6 +28,11 @@ and derived projections so a rebuild cannot resurrect the transcript. See
 [Recovery and troubleshooting](/advanced/recovery) for how the journal backs
 recovery.
 
+An unsent composer draft is ordinary local client storage on the machine
+where it was typed. It never enters the journal, diagnostics, or a provider
+request until you send it. Deleting or purging the thread removes that
+client's draft as well.
+
 **Export thread** is a host-authoritative read of one thread you can already
 open. The JSON bundle carries transcript, evidence, and provenance, and
 names the instant it was cut. Credentials, OAuth tokens, raw provider

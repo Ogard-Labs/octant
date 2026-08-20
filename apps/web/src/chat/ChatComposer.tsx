@@ -28,6 +28,7 @@ import type {
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
+import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -90,6 +91,11 @@ const MODEL_OPTION_DEFAULT_ID = "(provider default)";
 export interface ChatComposerProps {
   /** Caller-owned pending text. The component never persists or clears this value itself. */
   readonly draft: string;
+  /** Restored caret for this thread. Applied when `caretRestoreKey` changes. */
+  readonly caretIndex?: number;
+  /** Identity of the thread whose caret should be restored, typically its id. */
+  readonly caretRestoreKey?: string;
+  readonly onCaretIndexChange?: (caretIndex: number) => void;
   readonly isSending: boolean;
   readonly model: ChatComposerSelection;
   readonly onDraftChange: (draft: string) => void;
@@ -237,6 +243,16 @@ export function ChatComposer(props: ChatComposerProps) {
     message.style.height = `${Math.min(Math.max(message.scrollHeight, 28), 180)}px`;
   }, [props.draft]);
 
+  useLayoutEffect(() => {
+    if (props.caretRestoreKey === undefined || props.caretIndex === undefined) return;
+    applyComposerCaret(messageRef.current, props.caretIndex, props.draft.length);
+  }, [props.caretRestoreKey]);
+
+  function rememberCaret(caretIndex: number | null) {
+    if (caretIndex === null) return;
+    props.onCaretIndexChange?.(caretIndex);
+  }
+
   function send() {
     if (props.isSending || sendDisabledReason !== undefined) return;
     void props.onSend(props.draft);
@@ -289,6 +305,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   function onDraftKeyUp(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Escape") return;
+    rememberCaret(event.currentTarget.selectionStart);
     syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
   }
 
@@ -373,11 +390,13 @@ export function ChatComposer(props: ChatComposerProps) {
           disabled={controlDisabled}
           onChange={(event) => {
             props.onDraftChange(event.currentTarget.value);
+            rememberCaret(event.currentTarget.selectionStart);
             syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
           }}
-          onClick={(event) =>
-            syncTokens(event.currentTarget.value, event.currentTarget.selectionStart)
-          }
+          onClick={(event) => {
+            rememberCaret(event.currentTarget.selectionStart);
+            syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
+          }}
           onKeyDown={onDraftKeyDown}
           onKeyUp={onDraftKeyUp}
           onPaste={onDraftPaste}

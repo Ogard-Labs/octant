@@ -14,6 +14,7 @@ import {
   supportsAttachmentFile,
 } from "./composerAttachmentCapability";
 import { pastedImageName } from "./composerImagePaste";
+import { COMPOSER_STAGED_DROPPED_NOTE } from "../composer/composerThreadDraftStore";
 import { useThreadMentions } from "./useThreadMentions";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
@@ -162,11 +163,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     Promise.resolve(undefined),
   );
   const discardAttachmentRef = useRef(props.controller.discard);
+  const markDraftStagedDroppedRef = useRef(props.controller.markDraftStagedDropped);
   const mountedRef = useRef(true);
   const activeThreadIdRef = useRef<string | undefined>(
     activeThread === undefined ? undefined : String(activeThread.id),
   );
   discardAttachmentRef.current = props.controller.discard;
+  markDraftStagedDroppedRef.current = props.controller.markDraftStagedDropped;
   activeThreadIdRef.current = activeThread === undefined ? undefined : String(activeThread.id);
   useEffect(() => {
     mountedRef.current = true;
@@ -183,6 +186,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       // Keep the visible chips in step with the cleared ledger; on unmount
       // this is a no-op, on a thread change it drops the old thread's chips.
       setPendingAttachments([]);
+      if (abandoned.length > 0) {
+        markDraftStagedDroppedRef.current?.();
+      }
       for (const attachment of abandoned) {
         void discardAttachmentRef
           .current({ threadId, attachmentId: attachment.id })
@@ -668,6 +674,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         attachmentBusy={uploadingMessage !== undefined || attachmentStatus.kind === "removing"}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
         draft={props.controller.pendingDraft}
+        caretRestoreKey={String(thread.id)}
+        {...(props.controller.pendingDraftCaret === undefined
+          ? {}
+          : { caretIndex: props.controller.pendingDraftCaret })}
+        {...(props.controller.setPendingDraftCaret === undefined
+          ? {}
+          : { onCaretIndexChange: props.controller.setPendingDraftCaret })}
         isSending={isSending}
         model={{ options: providerState.modelOptions, value: view.thread.modelId }}
         onDraftChange={props.controller.setPendingDraft}
@@ -955,8 +968,14 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             : attachmentStatus.kind === "removing"
               ? { sendDisabledReason: `Removing ${attachmentStatus.fileName}.` }
               : attachmentStatus.kind === "failed"
-                ? { statusMessage: attachmentStatus.message }
-                : {}
+                ? {
+                    statusMessage: props.controller.draftStagedDropped
+                      ? `${COMPOSER_STAGED_DROPPED_NOTE} ${attachmentStatus.message}`
+                      : attachmentStatus.message,
+                  }
+                : props.controller.draftStagedDropped
+                  ? { statusMessage: COMPOSER_STAGED_DROPPED_NOTE }
+                  : {}
           : { sendDisabledReason: "Choose an available provider and model before sending." })}
       />
       <LinkedThreadParallelReviewFlow

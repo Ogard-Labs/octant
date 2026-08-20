@@ -11,7 +11,11 @@ import { decidesCodeEffectsByApproval, type PickerGroup } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { ArrowUp, Bot, X } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  applyComposerCaret,
+  COMPOSER_STAGED_DROPPED_NOTE,
+} from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -174,6 +178,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     setDraft(props.controller.pendingDraft);
   }, [props.controller.pendingDraft, props.threadId]);
 
+  useLayoutEffect(() => {
+    applyComposerCaret(
+      textareaRef.current,
+      props.controller.pendingDraftCaret ?? draft.length,
+      draft.length,
+    );
+  }, [props.threadId]);
+
   // §8.1: `#` must open the same cross-mode picker here as in Chat. The host
   // owns which threads are mentionable and how much of each transcript rides
   // along; this composer only names them.
@@ -219,6 +231,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
     threadId: props.attachmentClient === undefined ? undefined : props.threadId,
   });
+  const peekAttachments = attachments.peekForSend;
+  const markDraftStagedDropped = props.controller.markDraftStagedDropped;
+  useEffect(() => {
+    return () => {
+      if (peekAttachments().length > 0) {
+        markDraftStagedDropped?.();
+      }
+    };
+  }, [markDraftStagedDropped, peekAttachments, props.threadId]);
 
   function syncMentions(value: string, caret: number | null) {
     mention.sync(value, caret);
@@ -963,6 +984,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               )}
             </div>
           )}
+          {props.controller.draftStagedDropped === true ? (
+            <p className="code-thread-workspace__hint" role="status">
+              {COMPOSER_STAGED_DROPPED_NOTE}
+            </p>
+          ) : null}
           <div className="code-thread-workspace__input-row">
             <label
               className="visually-hidden"
@@ -987,12 +1013,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               id={`code-thread-composer-${String(thread.id)}`}
               onChange={(event) => {
                 setDraft(event.currentTarget.value);
-                props.controller.setPendingDraft?.(event.currentTarget.value);
+                props.controller.setPendingDraft?.(
+                  event.currentTarget.value,
+                  event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+                );
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
-              onClick={(event) =>
-                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart)
-              }
+              onClick={(event) => {
+                const caret = event.currentTarget.selectionStart;
+                if (caret !== null) {
+                  props.controller.setPendingDraft?.(event.currentTarget.value, caret);
+                }
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
               onDragOver={(event) => {
                 if (props.attachmentClient === undefined) return;
                 event.preventDefault();
@@ -1003,6 +1036,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               onKeyDown={onKeyDown}
               onKeyUp={(event) => {
                 if (event.key === "Escape") return;
+                const caret = event.currentTarget.selectionStart;
+                if (caret !== null) {
+                  props.controller.setPendingDraft?.(event.currentTarget.value, caret);
+                }
                 syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
               onPaste={(event) => {

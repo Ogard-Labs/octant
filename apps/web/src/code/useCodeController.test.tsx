@@ -13,6 +13,7 @@ import { decodeProjectId } from "@octant/contracts/projects";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createCodeReadCursorStore, useCodeController } from "./useCodeController";
+import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 
 const now = "2026-07-21T12:00:00.000Z";
 const ids = {
@@ -571,6 +572,81 @@ describe("useCodeController", () => {
     rerender({ activeThreadId: nextThreadId });
     await waitFor(() => expect(result.current.pendingDraft).toBe("Draft for the second thread"));
     unmount();
+  });
+
+  it("restores a Code draft after the controller remounts", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const client = fakeClient();
+    const first = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(first.result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => first.result.current.setPendingDraft("fix the flaky test", 8));
+    first.unmount();
+
+    const second = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(second.result.current.pendingDraft).toBe("fix the flaky test"));
+    expect(second.result.current.pendingDraftCaret).toBe(8);
+    second.unmount();
+  });
+
+  it("does not restore a Code draft after it is cleared", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const client = fakeClient();
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => result.current.setPendingDraft("follow-up"));
+    act(() => result.current.setPendingDraft(""));
+    expect(result.current.pendingDraft).toBe("");
+    unmount();
+
+    const remounted = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    expect(remounted.result.current.pendingDraft).toBe("");
+    remounted.unmount();
+  });
+
+  it("purges a Code draft with its thread", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const client = fakeClient();
+    const { result } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => result.current.setPendingDraft("do not keep"));
+    act(() => result.current.purgeThreadDraft(String(ids.thread)));
+    expect(result.current.pendingDraft).toBe("");
+    expect(store.read("code", String(ids.thread))).toBeUndefined();
   });
 
   it("stages prompt evidence and starts a provider turn for follow-ups", async () => {
@@ -1778,4 +1854,22 @@ function deferred<T>() {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+function memoryDraftStorage(): Storage {
+  const data = new Map<string, string>();
+  return {
+    get length() {
+      return data.size;
+    },
+    clear: () => data.clear(),
+    getItem: (key) => data.get(key) ?? null,
+    key: (index) => [...data.keys()][index] ?? null,
+    removeItem: (key) => {
+      data.delete(key);
+    },
+    setItem: (key, value) => {
+      data.set(key, value);
+    },
+  };
 }

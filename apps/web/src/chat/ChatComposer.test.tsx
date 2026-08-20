@@ -71,6 +71,17 @@ describe("ChatComposer", () => {
     expect(screen.getByLabelText("Message")).toHaveValue("");
   });
 
+  it("restores the caret when returning to a thread", () => {
+    renderComposer({
+      caretIndex: 4,
+      caretRestoreKey: "thread-a",
+      draft: "half-written",
+    });
+    const message = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    expect(message.selectionStart).toBe(4);
+    expect(message.selectionEnd).toBe(4);
+  });
+
   it("sends with Enter, keeps Shift+Enter for newlines, and exposes Stop while streaming", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => true);
