@@ -237,6 +237,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
                 setNotice(undefined);
                 props.onAddSelectionToChat?.(selected);
               }}
+              size="sm"
               type="button"
               variant="secondary"
             >
@@ -244,13 +245,19 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
             </OctantButton>
           )}
           {props.onPinTerminal === undefined ? null : (
-            <OctantButton onClick={() => props.onPinTerminal?.()} type="button" variant="secondary">
+            <OctantButton
+              onClick={() => props.onPinTerminal?.()}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
               Pin to focus zone
             </OctantButton>
           )}
           {props.onOpenAnotherTerminal === undefined ? null : (
             <OctantButton
               onClick={() => props.onOpenAnotherTerminal?.()}
+              size="sm"
               type="button"
               variant="secondary"
             >
@@ -258,14 +265,24 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
             </OctantButton>
           )}
           {props.executionPolicy !== "plan" && result.state === "running" ? (
-            <OctantButton onClick={() => void control("stop")} type="button" variant="secondary">
+            <OctantButton
+              onClick={() => void control("stop")}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
               Stop terminal
             </OctantButton>
           ) : null}
           {props.executionPolicy !== "plan" &&
           result.state !== "running" &&
           props.restart !== undefined ? (
-            <OctantButton onClick={() => void control("restart")} type="button" variant="secondary">
+            <OctantButton
+              onClick={() => void control("restart")}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
               Restart terminal
             </OctantButton>
           ) : null}

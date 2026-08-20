@@ -35,6 +35,7 @@ export const IPC_CHANNELS = {
   setProviderCredential: "octant:provider-credential:set",
   hostCapabilities: "octant:window:host-capabilities",
   resolvedMaterial: "octant:window:resolved-material",
+  resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
   sidebarMaterialPreference: "octant:window:sidebar-material-preference",
   sidebarVibrancyMode: "octant:window:sidebar-vibrancy-mode",
   privateListenerStatus: "octant:private-listener:status",
@@ -335,6 +336,9 @@ export interface OctantHostBridge {
   readonly subscribeResolvedMaterial: (
     listener: (material: ResolvedSidebarMaterial) => void,
   ) => () => void;
+  readonly subscribeResolvedSidebarVibrancy: (
+    listener: (vibrancy: "sidebar" | null) => void,
+  ) => () => void;
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
@@ -595,6 +599,13 @@ export function createHostBridge(
       };
       ipc.on(IPC_CHANNELS.resolvedMaterial, receive);
       return () => ipc.removeListener(IPC_CHANNELS.resolvedMaterial, receive);
+    },
+    subscribeResolvedSidebarVibrancy: (listener: (vibrancy: "sidebar" | null) => void) => {
+      const receive: MaterialListener = (_event, vibrancy) => {
+        if (vibrancy === "sidebar" || vibrancy === null) listener(vibrancy);
+      };
+      ipc.on(IPC_CHANNELS.resolvedSidebarVibrancy, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.resolvedSidebarVibrancy, receive);
     },
     subscribeBrowserSurfaceState: (listener: (state: BrowserSurfaceState) => void) => {
       const receive: MaterialListener = (_event, value) => {

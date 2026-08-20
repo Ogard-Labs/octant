@@ -4,7 +4,13 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ShellFrame } from "./ShellFrame";
 
-const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
+// Comments are stripped before matching: `cssRule` reads a rule's prelude as
+// "everything since the last brace", so a comment above a rule would become
+// part of the selector it documents and the rule would stop being found.
+const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
 
 function cssRule(selector: string): string {
   const match = [...shellStyles.matchAll(/([^{}]+)\{([^{}]*)\}/gs)].find((candidate) =>

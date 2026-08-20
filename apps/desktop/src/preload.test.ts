@@ -99,6 +99,7 @@ describe("desktop preload bridge", () => {
       "subscribeBrowserSurfaceState",
       "subscribeCodeDeepLinks",
       "subscribeResolvedMaterial",
+      "subscribeResolvedSidebarVibrancy",
       "subscribeStartNewAgent",
       "tabBrowserSurface",
       "updateBrowserSurfaceBounds",
@@ -472,6 +473,35 @@ describe("desktop preload bridge", () => {
     expect(listener.mock.calls).toEqual([["translucent"], ["opaque"]]);
     unsubscribe();
     expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.resolvedMaterial, registered);
+  });
+
+  it("relays only an honest host vibrancy report and removes only its own subscription", () => {
+    let registered: ((event: unknown, vibrancy: unknown) => void) | undefined;
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(),
+      on: vi.fn((_channel, listener) => {
+        registered = listener;
+      }),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(
+      ipc,
+      projectWindowCapability,
+    ).subscribeResolvedSidebarVibrancy(listener);
+
+    registered?.({}, "sidebar");
+    registered?.({}, "under-window");
+    registered?.({}, { vibrancy: "sidebar" });
+    registered?.({}, undefined);
+    registered?.({}, null);
+
+    expect(listener.mock.calls).toEqual([["sidebar"], [null]]);
+    unsubscribe();
+    expect(ipc.removeListener).toHaveBeenCalledWith(
+      IPC_CHANNELS.resolvedSidebarVibrancy,
+      registered,
+    );
   });
 
   it("forwards menu-bar start-new-agent events without exposing IPC", () => {

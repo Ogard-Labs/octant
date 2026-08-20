@@ -1,6 +1,5 @@
 import { Blocks, Bot, Code2, GitPullRequest, Kanban, MessageSquarePlus } from "lucide-react";
 import type { ReactNode } from "react";
-import { OctantButton } from "../ui/base/OctantButton";
 import {
   buildSidebarNavigation,
   type SidebarNavigationDescriptorId,
@@ -29,39 +28,23 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
             </div>
           );
         }
-        if (descriptor.id === "new-chat") {
-          const action = props.actions["new-chat"];
-          if (action === undefined) return null;
-          return (
-            <OctantButton
-              className="sidebar-navigation__item sidebar__utility justify-start"
-              data-navigation-id={descriptor.id}
-              key={descriptor.id}
-              onClick={() => action()}
-              type="button"
-              variant="ghost"
-            >
-              <MessageSquarePlus aria-hidden="true" size={14} strokeWidth={1.7} />
-              <span>{descriptor.label}</span>
-            </OctantButton>
-          );
-        }
         const action = props.actions[descriptor.id];
         if (action === undefined) return null;
         const Icon = navigationIcon(descriptor.id);
         if (Icon === undefined) return null;
         return (
-          <OctantButton
-            className="sidebar-navigation__item sidebar__utility justify-start"
+          <button
+            className="sidebar-item window-no-drag"
             data-navigation-id={descriptor.id}
             key={descriptor.id}
-            onClick={action}
+            // Invoked without arguments: some handlers take an optional payload
+            // (New chat's prompt) and must not receive the click event as one.
+            onClick={() => action()}
             type="button"
-            variant="ghost"
           >
-            <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
-            <span>{descriptor.label}</span>
-          </OctantButton>
+            <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+            <span className="sidebar-label">{descriptor.label}</span>
+          </button>
         );
       })}
     </div>
@@ -70,6 +53,8 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
 
 function navigationIcon(id: SidebarNavigationDescriptorId) {
   switch (id) {
+    case "new-chat":
+      return MessageSquarePlus;
     case "new-code-thread":
       return Code2;
     case "new-work-thread":

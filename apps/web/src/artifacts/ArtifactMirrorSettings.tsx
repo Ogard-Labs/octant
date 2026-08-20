@@ -55,7 +55,7 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
       </p>
 
       {TIERS.map((tier) => (
-        <label className="artifact-mirror__tier" key={tier.kind}>
+        <label className="artifact-mirror__tier check" key={tier.kind}>
           <input
             checked={current === tier.kind}
             disabled={props.busy}
@@ -88,6 +88,7 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
       <label className="artifact-mirror__field">
         <span>Folder</span>
         <input
+          className="input"
           disabled={props.busy}
           onChange={(event) => setFolder(event.target.value)}
           placeholder="/Users/you/Artifacts"
@@ -98,6 +99,7 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
       <label className="artifact-mirror__field">
         <span>Folder inside the repository</span>
         <input
+          className="input"
           disabled={props.busy}
           onChange={(event) => setDirectory(event.target.value)}
           placeholder="docs/artifacts"
@@ -105,7 +107,7 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
         />
       </label>
 
-      <label className="artifact-mirror__auto-commit">
+      <label className="artifact-mirror__auto-commit check">
         <input
           checked={props.settings?.autoCommit === true}
           disabled={props.busy || current !== "project-repository"}

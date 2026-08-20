@@ -12,6 +12,8 @@ export interface OctantMenuProps {
   readonly items: ReadonlyArray<OctantMenuItem>;
   readonly onValueChange: (value: string) => void;
   readonly trigger: ReactNode;
+  /** Replaces the default trigger recipe when a surface owns one (e.g. `mode-trigger`). */
+  readonly triggerClassName?: string;
   readonly triggerLabel: string;
   readonly value: string;
 }
