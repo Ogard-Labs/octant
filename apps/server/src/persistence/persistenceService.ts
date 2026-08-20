@@ -58,6 +58,7 @@ import {
   MigrationHistoryMismatch,
 } from "./migrationErrors";
 import { MIGRATIONS } from "./migrations";
+import { compactSupersededCheckoutObservations } from "./journalCompaction";
 import {
   CheckpointAheadOfJournal,
   ProjectionQuarantined,
@@ -313,6 +314,15 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
 
     for (const projection of projections.all()) {
       catchUpProjection({ connection, journal, projection, clock });
+    }
+    // After catch-up so heads and the checkout projection are current, and
+    // before restart reconciliation so its append continues from the compacted
+    // head rather than racing the renumbering.
+    const compaction = compactSupersededCheckoutObservations(connection);
+    if (compaction.eventsRemoved > 0) {
+      console.warn(
+        `Octant journal compaction removed ${compaction.eventsRemoved} superseded checkout observation(s) across ${compaction.checkoutsCompacted} checkout(s).`,
+      );
     }
     reconcileCodeRestart({ connection, journal, reconciledAt: clock() });
 

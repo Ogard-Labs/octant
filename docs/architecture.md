@@ -179,7 +179,12 @@ flowchart LR
   override, or thread override) never deletes on its own; only a confirmed
   purge erases a thread's bulk content, derived projections, and that
   thread's own journal events, then records a tombstone so a rebuild cannot
-  resurrect the transcript. See `docs/decisions/0035`. A thread the caller
+  resurrect the transcript. See `docs/decisions/0035`. The one self-applying
+  exception is startup journal compaction, which removes a
+  `code.checkout-observed@1` event only when the next event of the same
+  checkout observes the identical state; it preserves every answer a
+  projection, rebuild, subscription, or export can give and reports how many
+  events it removed. See `docs/decisions/0039`. A thread the caller
   may already Open can be exported as an `octant.thread-bundle/1` JSON cut
   of the journal — transcript, evidence, and provenance, named with the
   instant it was taken. Secrets, raw provider payloads, and filesystem
