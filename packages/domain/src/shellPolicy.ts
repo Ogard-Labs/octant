@@ -1083,22 +1083,6 @@ export function resolveWorkspaceContext(
 
   const candidate = resolves.tabContext(tab);
   if (candidate === undefined) {
-    if ((tab.kind === "code-overview" || tab.kind === "work-thread") && tab.hostId !== undefined) {
-      if (tab.hostId !== current.host) {
-        throw new WorkspaceContextRejected(
-          "This surface belongs to a different host. Open it in a new window to switch hosts.",
-        );
-      }
-      if (current.projectId !== null || current.boundRoot !== null) {
-        throw new WorkspaceContextRejected(
-          "This rootless thread has no Project or root. Open it in a new window to keep its unbound context.",
-        );
-      }
-      // A source-qualified rootless thread intentionally has no Project or
-      // bound root to resolve. Preserve the unbound context; the tab host and
-      // mode still have to match the current workspace exactly.
-      return workspace;
-    }
     // Context-free tabs (welcome, settings, side-chat) carry no Project binding
     // and are always acceptable. Thread/project tabs that fail to resolve a
     // context must fail closed rather than journaling a durable tab with no

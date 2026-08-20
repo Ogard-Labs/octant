@@ -157,7 +157,7 @@ export class ContextHarnessError extends Error {
   override readonly name = "ContextHarnessError";
 
   constructor(
-    readonly category: "stale" | "invalid" | "unavailable" | "blocked",
+    readonly category: "stale" | "invalid" | "unavailable" | "blocked" | "not-planned",
     message: string,
   ) {
     super(message);
@@ -693,7 +693,11 @@ export class ContextHarnessService {
     this.#assertReady();
     const snapshot = this.#snapshots.get(subjectKey(subject));
     if (snapshot === undefined) {
-      throw new ContextHarnessError("unavailable", "Context is unavailable.");
+      // Nothing has planned this subject's context yet — a thread before its
+      // first turn has none. That is an empty answer, not a broken service, and
+      // reporting it as one sent readers to a Retry button that could never
+      // help.
+      throw new ContextHarnessError("not-planned", "This thread has no context plan yet.");
     }
     if (afterSequence !== undefined && snapshot.sequence < afterSequence) {
       throw new ContextHarnessError("stale", "Context projection has not reached that sequence.");

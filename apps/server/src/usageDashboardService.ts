@@ -50,7 +50,6 @@ export function readUsageDashboard(
 
   const { rows, truncated } = selectRows(connection, request, scanLimit, options.projectScope);
   const projectCache = new Map<string, string | undefined>();
-  const modeCache = new Map<string, string | undefined>();
   const sourceRows: Array<UsageDashboardSourceRow> = [];
   let unreadableRecordCount = 0;
 
@@ -60,7 +59,7 @@ export function readUsageDashboard(
       unreadableRecordCount += 1;
       continue;
     }
-    const mode = resolveMode(connection, modeCache, row.subject_type, row.subject_id);
+    const mode = deriveModeFromSubjectType(row.subject_type);
     const projectId = resolveProjectId(connection, projectCache, row.subject_type, row.subject_id);
     sourceRows.push({
       reconciliationId: row.reconciliation_id,
@@ -184,37 +183,6 @@ function selectRows(
 }
 
 /**
- * The mode a row is reported under, resolved from the same records the mode
- * predicate filters on so the filter and the reported dimension agree.
- *
- * Most subject types name their mode outright, which is what
- * `deriveModeFromSubjectType` maps. A rootless thread does not: it is a Work
- * or Code thread whose mode is only in the durable projection, so placing it
- * needs a per-subject lookup. That lookup belongs here beside `resolveProjectId`
- * — the persistence helper is a pure subject-type mapping with no connection to
- * read from — and it memoises the same way so one scan cannot issue a query per
- * row.
- */
-function resolveMode(
-  connection: SqliteConnection,
-  cache: Map<string, string | undefined>,
-  subjectType: string,
-  subjectId: string,
-): string | undefined {
-  const derived = deriveModeFromSubjectType(subjectType);
-  if (derived !== undefined) return derived;
-  if (subjectType !== "rootless-thread") return undefined;
-  if (cache.has(subjectId)) return cache.get(subjectId);
-
-  const row = connection
-    .prepare("SELECT mode FROM rootless_thread_projection WHERE thread_id = ?")
-    .get(subjectId) as { readonly mode: string } | undefined;
-  const mode = row?.mode;
-  cache.set(subjectId, mode);
-  return mode;
-}
-
-/**
  * A row whose attribution cannot be read, or whose projection schema this build
  * does not understand, is unreadable rather than empty: counting it keeps the
  * reader aware that a durable record exists outside the totals.
@@ -258,7 +226,6 @@ function resolveProjectId(
   const ownership: Record<string, string | undefined> = {
     "chat-thread": "SELECT project_id FROM chat_thread_projection WHERE thread_id = ?",
     "code-thread": "SELECT project_id FROM code_thread_projection WHERE thread_id = ?",
-    "rootless-thread": "SELECT project_id FROM rootless_thread_projection WHERE thread_id = ?",
     // A Work thread has no SQL projection; its required, immutable Project is
     // recorded on the create event the in-memory projection hydrates from.
     "work-thread": `

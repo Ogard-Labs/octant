@@ -79,8 +79,6 @@ function sameWorkspace(
         left.projectId === right.projectId &&
         left.rootId === right.rootId
       );
-    case "work-rootless":
-      return right.kind === "work-rootless";
     case "code-worktree":
       return (
         right.kind === "code-worktree" &&
@@ -90,8 +88,6 @@ function sameWorkspace(
         left.checkoutId === right.checkoutId &&
         left.verified === right.verified
       );
-    case "code-rootless":
-      return right.kind === "code-rootless";
   }
 }
 
@@ -266,21 +262,6 @@ function assertModeAuthorityCeiling(authority: AgentRunAuthority, scope: LinkedT
     reject("authority-widening", "Work linked threads cannot receive shell or Git authority.");
   }
   if (
-    (workspace.kind === "work-rootless" || workspace.kind === "code-rootless") &&
-    authority.filesystem
-  ) {
-    reject("authority-widening", "Rootless linked threads cannot receive filesystem authority.");
-  }
-  if (
-    (workspace.kind === "work-rootless" || workspace.kind === "code-rootless") &&
-    authority.permissionPersistence === "project-default"
-  ) {
-    reject(
-      "authority-widening",
-      "Rootless linked threads cannot persist permissions at Project scope.",
-    );
-  }
-  if (
     workspace.kind === "chat-virtual" &&
     workspace.projectId === null &&
     authority.permissionPersistence === "project-default"
@@ -288,12 +269,6 @@ function assertModeAuthorityCeiling(authority: AgentRunAuthority, scope: LinkedT
     reject(
       "authority-widening",
       "Unprojected Chat linked threads cannot persist permissions at Project scope.",
-    );
-  }
-  if (workspace.kind === "code-rootless" && (authority.shell || authority.git)) {
-    reject(
-      "authority-widening",
-      "Rootless Code linked threads cannot receive shell or Git authority.",
     );
   }
 }

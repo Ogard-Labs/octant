@@ -1466,18 +1466,18 @@ describe("workspace context resolution", () => {
   });
 
   it.each(["code", "work"] as const)(
-    "allows a local source-qualified rootless %s thread to remain unbound",
+    "refuses to open a %s thread tab whose Project cannot be resolved",
     (mode) => {
       const base = defaultWindowWorkspace(ids.window);
       const layout = onlyGroup(base.layouts[mode]);
-      const rootlessTab = decodeWorkspaceTab(
+      const unresolvableTab = decodeWorkspaceTab(
         mode === "code"
           ? {
               kind: "code-overview",
               id: ids.tabA,
               threadId: ids.codeThread,
               mode,
-              title: "Rootless Code",
+              title: "Issue 204",
               hostId: base.contextByMode.code.host,
             }
           : {
@@ -1485,89 +1485,20 @@ describe("workspace context resolution", () => {
               id: ids.tabA,
               threadId: decodeWorkThreadId("00000000-0000-4000-8000-000000000603"),
               mode,
-              title: "Rootless Work",
+              title: "Quarterly brief",
               hostId: base.contextByMode.work.host,
             },
       );
-      const resolved = resolveWorkspaceContext(
-        base,
-        { kind: "open-tab", mode, groupId: layout.groupId, tab: rootlessTab },
-        { tabContext: () => undefined },
-      );
-
-      expect(resolved.contextByMode[mode].projectId).toBeNull();
-      expect(resolved.contextByMode[mode].boundRoot).toBeNull();
-    },
-  );
-
-  it.each(["code", "work"] as const)(
-    "rejects a source-qualified rootless %s thread in a Project-bound context",
-    (mode) => {
-      const base = defaultWindowWorkspace(ids.window);
-      const layout = onlyGroup(base.layouts[mode]);
-      const rootlessTab = decodeWorkspaceTab(
-        mode === "code"
-          ? {
-              kind: "code-overview",
-              id: ids.tabA,
-              threadId: ids.codeThread,
-              mode,
-              title: "Rootless Code",
-              hostId: base.contextByMode.code.host,
-            }
-          : {
-              kind: "work-thread",
-              id: ids.tabA,
-              threadId: decodeWorkThreadId("00000000-0000-4000-8000-000000000603"),
-              mode,
-              title: "Rootless Work",
-              hostId: base.contextByMode.work.host,
-            },
-      );
-      const bound: WindowWorkspace = {
-        ...base,
-        contextByMode: {
-          ...base.contextByMode,
-          [mode]: {
-            ...base.contextByMode[mode],
-            projectId: ids.project,
-            boundRoot: mode === "code" ? "/home/repo" : "/home/folder",
-          },
-        },
-      };
 
       expect(() =>
         resolveWorkspaceContext(
-          bound,
-          { kind: "open-tab", mode, groupId: layout.groupId, tab: rootlessTab },
+          base,
+          { kind: "open-tab", mode, groupId: layout.groupId, tab: unresolvableTab },
           { tabContext: () => undefined },
         ),
       ).toThrow(WorkspaceContextRejected);
-      expect(bound.contextByMode[mode].projectId).toBe(ids.project);
-      expect(bound.contextByMode[mode].boundRoot).not.toBeNull();
     },
   );
-
-  it("rejects a source-qualified rootless Work thread from another host", () => {
-    const base = defaultWindowWorkspace(ids.window);
-    const layout = onlyGroup(base.layouts.work);
-    const rootlessTab = decodeWorkspaceTab({
-      kind: "work-thread",
-      id: ids.tabA,
-      threadId: decodeWorkThreadId("00000000-0000-4000-8000-000000000603"),
-      mode: "work",
-      title: "Remote rootless Work",
-      hostId: "host-b",
-    });
-
-    expect(() =>
-      resolveWorkspaceContext(
-        base,
-        { kind: "open-tab", mode: "work", groupId: layout.groupId, tab: rootlessTab },
-        { tabContext: () => undefined },
-      ),
-    ).toThrow(WorkspaceContextRejected);
-  });
 
   it("anchors an unbound context to the opened preview tab's Project", () => {
     const base = defaultWindowWorkspace(ids.window);
