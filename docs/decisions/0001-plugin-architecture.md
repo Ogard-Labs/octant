@@ -231,11 +231,20 @@ schema relocation. The manifest composes core primitives (`OctantMode`,
 zero-first-party-dependency invariant (0004). Re-export preserves that
 invariant and still gives third parties a narrow, named import surface;
 physical extraction would require first factoring those shared primitives
-into a package below both, which is out of scope here. Step 2 landed narrowly:
-a `sidebar.destination` contribution registry (`apps/web/src/shell/contributionRegistry.ts`)
-replaces the hard-coded thread-board/pull-requests availability check;
-`settings.section` and the remaining contribution points (panes, preview
-viewers, appearance) are not yet built.
+into a package below both, which is out of scope here. Step 2 landed: renderer
+contribution-point schemas (`sidebar.destination`, `settings.section`,
+`workspace.tab`, `thread.pane`, `preview.viewer`, `appearance.preset`,
+`board.view`) live on the existing manifest version, and unknown points are
+rejected. The renderer registry
+(`apps/web/src/shell/contributionRegistry.ts`) resolves each point from a
+static first-party manifest catalog and the effective activation map; it does
+not decide availability. Bundled `@octant` appearance-pack and preview-viewer
+plugins prove the new points: the branded Octant theme preset and the
+structured preview viewers come from those contributions and disappear when
+the component is not effective. Extracting the thread board, GitHub, and
+Linear remains step 4. Packaging remaining zen/appearance assets and every
+viewer as separable `@octant/*` plugins remains step 5. Marketplace/host
+stays in the host.
 
 ## Consequences
 

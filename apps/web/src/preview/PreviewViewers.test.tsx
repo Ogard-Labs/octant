@@ -342,4 +342,19 @@ describe("renderPreviewViewer", () => {
     const { container } = render(<>{renderPreviewViewer({ manifest, chunks: [] })}</>);
     expect(container.querySelector(".preview-empty")).toBeInTheDocument();
   });
+
+  it("renders structured formats as unsupported when the preview-viewers plugin is not effective", () => {
+    const manifest = buildManifest({ kind: "pdf", displayName: "report.pdf" });
+    const { container } = render(
+      <>
+        {renderPreviewViewer({
+          manifest,
+          chunks: [],
+          effectivePlugins: new Map([["preview-viewers", false]]),
+        })}
+      </>,
+    );
+    expect(container.querySelector(".preview-empty")).toBeInTheDocument();
+    expect(container.querySelector(".preview-pdf__page")).not.toBeInTheDocument();
+  });
 });

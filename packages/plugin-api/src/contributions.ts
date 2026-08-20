@@ -5,8 +5,15 @@
  * `componentId` against the manifest's own components.
  */
 export {
+  ExtensionAppearancePresetContribution,
+  ExtensionBoardMode,
+  ExtensionBoardViewContribution,
   ExtensionContribution,
   ExtensionContributionPoint,
+  ExtensionPreviewViewerContribution,
+  ExtensionPreviewViewerKind,
   ExtensionSettingsSectionContribution,
   ExtensionSidebarDestinationContribution,
+  ExtensionThreadPaneContribution,
+  ExtensionWorkspaceTabContribution,
 } from "@octant/contracts/extensions";
