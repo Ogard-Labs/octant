@@ -1,3 +1,14 @@
+/*
+ * Residual Chat styles. The transcript and composer adopt the design system's
+ * chat vocabulary (`.thread-column`, `.turn-user`/`.bubble`, `.turn-agent`,
+ * `.runstatus`, `.composer`, `.composer-input`, `.composer-chips`,
+ * `.composer-row`, `.btn-send`, `.chip`) from styles/octant.css; the welcome
+ * screen rides the same composer vocabulary with hero-scale overrides. What remains here is
+ * either a sub-surface that has not been ported (work shelf, workspace chrome)
+ * or behavior the system has no vocabulary for (streaming state,
+ * edit-in-place, typeahead placement).
+ */
+
 .chat-workspace {
   display: flex;
   width: 100%;
@@ -5,12 +16,16 @@
   height: 100%;
   flex: 1 1 auto;
   flex-direction: column;
-  color: var(--octant-text-primary);
-  background: var(--octant-workspace);
+  color: var(--oct-fg);
+  background: var(--oct-bg);
 }
 
+/* The un-ported draft-thread base (shell.css) imports after the system sheet
+   and wins width ties against `.thread-column`, so the welcome hero restates
+   the shared measure through its token instead of wearing the class. The
+   literal goes when the draft-thread surface itself is ported. */
 .chat-welcome .draft-thread__canvas {
-  width: min(100% - 40px, 760px);
+  width: min(100% - 40px, var(--oct-thread-measure));
   gap: 18px;
 }
 
@@ -20,11 +35,14 @@
   gap: 8px;
 }
 
+/* The h1 element already wears the system display face; only the hero scale
+   and balance are this surface's own. */
 .chat-welcome .draft-thread__heading {
   max-width: 22ch;
+  color: var(--oct-fg);
   font-size: clamp(26px, 3vw, 34px);
   font-weight: 400;
-  letter-spacing: -0.025em;
+  letter-spacing: var(--oct-tracking-tight);
   line-height: 1.15;
   text-wrap: balance;
 }
@@ -32,86 +50,24 @@
 .chat-welcome .draft-thread__description {
   max-width: 52ch;
   margin-top: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 13px;
   line-height: 1.55;
   text-wrap: pretty;
 }
 
-.chat-welcome .draft-thread__composer {
-  gap: 0;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-composer, 14px);
-  box-shadow: var(--octant-shadow-lg);
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease;
+/* The frame, focus accent, input, row, and send circle are the system's
+   `.composer` vocabulary; the welcome hero only asks for a taller first
+   message than the in-thread composer's single line. */
+.chat-welcome .composer-input {
+  min-height: 96px;
 }
 
-.chat-welcome .draft-thread__composer:focus-within {
-  border-color: var(--octant-border-strong);
-  box-shadow: var(--octant-shadow-lg);
-}
-
-.chat-welcome .draft-thread__input-row {
-  min-height: 88px;
-  padding: 14px 16px 2px;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.chat-welcome .draft-thread__input-row:focus-within {
-  box-shadow: none;
-}
-
-.chat-welcome .draft-thread__textarea {
-  align-self: stretch;
-  min-height: 64px;
-  font-size: 14px;
-}
-
-/* Bottom toolbar: quiet model control on the left, round send on the right. */
-.chat-welcome .draft-thread__composer-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px 8px 10px;
-}
-
-.chat-welcome .draft-thread__composer-bar .draft-thread__context-picker {
-  min-width: 0;
-  margin-inline-start: 0;
-}
-
-.chat-welcome .draft-thread__composer-bar .composer-model-picker__trigger {
-  min-height: 26px;
-  padding: 0 7px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border-color: transparent;
-  font-size: 11.5px;
-}
-
-.chat-welcome .draft-thread__composer-bar .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.chat-welcome .draft-thread__composer-bar .composer-model-picker__menu {
+/* Placement only: this composer sits mid-screen, so the picker menu opens
+   downward. The trigger's look is the system's (ADR 0038). */
+.chat-welcome .composer-row .composer-model-picker__menu {
   top: calc(100% + 8px);
-  right: auto;
   bottom: auto;
-  left: 0;
-}
-
-.chat-welcome .draft-thread__send {
-  color: var(--octant-accent-foreground);
-  background: var(--octant-accent);
-  border-radius: var(--octant-radius-pill, 999px);
 }
 
 /* The hint sits below the card, like secondary context under the composer. */
@@ -120,7 +76,8 @@
   padding: 0;
   margin-top: -8px;
   border-top: 0;
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
   opacity: 0.7;
   text-align: center;
@@ -134,45 +91,26 @@
   gap: 6px;
 }
 
+/* Starter categories are the system ghost button reshaped into a pill. */
 .chat-welcome__suggestions button {
   min-height: 32px;
   gap: 7px;
   padding-inline: 11px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-pill, 999px);
-  font-size: 12px;
+  color: var(--oct-muted);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
   font-weight: 500;
 }
 
 .chat-welcome__suggestions button:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-  border-color: var(--octant-border-strong);
-}
-
-.chat-welcome .draft-thread__error {
-  padding: 0 12px 10px;
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
 }
 
 .chat-welcome__retry {
-  min-height: 28px;
-  padding: 0 10px;
-  margin: 0 12px 12px;
-  align-self: flex-start;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.chat-welcome__retry:hover {
-  color: var(--octant-text-primary);
-  border-color: var(--octant-text-primary);
+  align-self: center;
 }
 
 .chat-workspace__load-state {
@@ -185,30 +123,30 @@
 
 .chat-workspace__load-state > p {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 13px;
   line-height: 1.5;
 }
 
+/* The measure is the shared `.thread-column`; this block only makes the
+   header stick and lays out its row. */
 .chat-workspace__header {
   position: sticky;
   z-index: 2;
   top: 0;
   display: flex;
-  width: min(100% - 40px, 760px);
   min-height: 36px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 14px 0 8px;
-  margin: 0 auto;
-  background: var(--octant-workspace);
+  background: var(--oct-bg);
 }
 
 .chat-workspace__header h1 {
   max-width: 52rem;
   margin: 0;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-size: 13px;
   font-weight: 500;
   letter-spacing: -0.015em;
@@ -217,30 +155,33 @@
 
 .chat-workspace__meta {
   margin: 2px 0 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 10px;
   line-height: 1.35;
 }
 
-.chat-workspace__header button {
-  min-height: 28px;
-  gap: 5px;
-  padding-inline: 8px;
-  color: var(--octant-text-secondary);
+/* The overflow trigger and its outcome receipt stack at the header's end.
+   The receipt exists only after an action ran, so the column must not
+   reserve height for it and push the title row apart when it is absent. */
+.chat-workspace__thread-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-inline-start: auto;
 }
 
 .chat-workspace__canvas {
-  width: min(100% - 40px, 760px);
-  margin: 8px auto 0;
+  margin-block: 8px 0;
 }
 
 .chat-workspace__error {
   width: min(100% - 40px, 720px);
   margin: 10px auto 0;
   padding: 8px 10px;
-  color: var(--octant-danger-text);
-  background: color-mix(in srgb, var(--octant-danger-text) 10%, var(--octant-workspace));
-  border: 1px solid color-mix(in srgb, var(--octant-danger-text) 32%, var(--octant-border));
+  color: var(--oct-danger-fg);
+  background: color-mix(in srgb, var(--oct-danger-fg) 10%, var(--oct-bg));
+  border: 1px solid color-mix(in srgb, var(--oct-danger-fg) 32%, var(--oct-border));
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.4;
@@ -254,9 +195,9 @@
   align-items: center;
   padding: 10px 12px;
   margin: 0 auto 8px;
-  border: 1px solid var(--octant-border);
+  border: 1px solid var(--oct-border);
   border-radius: 10px;
-  background: var(--octant-surface-raised);
+  background: var(--oct-surface);
   box-shadow: var(--octant-shadow-sm);
 }
 
@@ -268,7 +209,7 @@
 
 .chat-workspace__tool-approval span,
 .chat-workspace__tool-approval code {
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 11px;
 }
 
@@ -296,10 +237,8 @@
 
 .chat-transcript {
   flex: 1 1 auto;
-  width: min(100% - 40px, 760px);
   min-height: 0;
   padding: 18px 0 32px;
-  margin: 0 auto;
   overflow: auto;
   overscroll-behavior: contain;
 }
@@ -314,7 +253,7 @@
   min-height: 0;
   align-content: center;
   justify-items: center;
-  gap: 6px;
+  gap: var(--oct-space-2);
   margin: 0;
   text-align: center;
 }
@@ -325,7 +264,7 @@
 }
 
 .chat-transcript__empty h2 {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-size: 24px;
   font-weight: 400;
   letter-spacing: -0.02em;
@@ -334,17 +273,17 @@
 
 .chat-transcript__empty p {
   max-width: 44ch;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 13px;
   line-height: 1.5;
 }
 
 .chat-transcript__connection {
-  padding: 7px 9px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   margin: 0 0 20px;
-  color: var(--octant-warning-text);
-  background: var(--octant-warning-surface);
-  border: 1px solid var(--octant-warning-border);
+  color: var(--oct-warn-fg);
+  background: var(--oct-warn-soft);
+  border: 1px solid color-mix(in oklab, var(--oct-warn-fg) 32%, transparent);
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.4;
@@ -353,20 +292,33 @@
 /* Provenance the transcript states rather than implies: a branched thread, or
    a conversation whose earlier revisions stay in history. */
 .chat-transcript__provenance {
-  padding: 6px 9px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   margin: 0 0 20px;
-  color: var(--octant-text-muted);
-  background: var(--octant-control);
+  color: var(--oct-muted);
+  background: var(--oct-surface-warm);
   border-radius: 6px;
-  font-size: 11.5px;
+  font-size: var(--oct-text-xs);
   line-height: 1.45;
+}
+
+/* A user turn carries more than the styleguide's bubble — edit and checkpoint
+   affordances follow it — so the flex row becomes a right-aligned column. */
+.chat-transcript .turn-user {
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* User messages are plain text, so hard newlines must survive rendering. */
+.chat-transcript .bubble p {
+  margin: 0;
+  white-space: pre-wrap;
 }
 
 .chat-transcript__turn-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 4px;
-  margin-top: 6px;
+  gap: var(--oct-space-1);
+  margin-top: var(--oct-space-2);
   opacity: 0;
   transition: opacity 120ms ease;
 }
@@ -378,32 +330,33 @@
 
 .chat-transcript__editor {
   display: grid;
-  gap: 8px;
+  gap: var(--oct-space-2);
+  align-self: stretch;
 }
 
 .chat-transcript__editor textarea {
   width: 100%;
   min-height: 72px;
-  padding: 8px 9px;
-  color: var(--octant-text-primary);
-  background: var(--octant-workspace);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
   font: inherit;
   resize: vertical;
 }
 
 .chat-transcript__editor-note {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
 }
 
 .chat-transcript__editor-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  gap: var(--oct-space-2);
 }
 
 .chat-workspace__export {
@@ -418,7 +371,7 @@
 .chat-workspace__export-status {
   flex-basis: 100%;
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 10.5px;
   line-height: 1.4;
   text-align: end;
@@ -438,39 +391,9 @@
   gap: 14px;
 }
 
-.chat-transcript__message {
-  min-width: 0;
-  color: var(--octant-text-primary);
-  font-size: 14.5px;
-  line-height: 1.65;
-}
-
-.chat-transcript__message > p {
-  margin: 0;
-  white-space: pre-wrap;
-}
-
-.chat-transcript__message > p + p {
-  margin-top: 12px;
-}
-
-.chat-transcript__message--user {
-  width: fit-content;
-  max-width: min(88%, 600px);
-  justify-self: end;
-  padding: 10px 13px;
-  background: var(--octant-control);
-  border: 0;
-  border-radius: var(--octant-radius-panel, 12px);
-}
-
-.chat-transcript__message--assistant {
-  padding: 0 2px;
-}
-
 .chat-rich-text {
   display: grid;
-  gap: 12px;
+  gap: var(--oct-space-3);
   max-width: 72ch;
 }
 
@@ -488,7 +411,7 @@
 .chat-rich-text h2,
 .chat-rich-text h3,
 .chat-rich-text h4 {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.3;
@@ -509,7 +432,7 @@
 .chat-rich-text p,
 .chat-rich-text li,
 .chat-rich-text blockquote {
-  line-height: 1.65;
+  line-height: var(--oct-leading-body);
 }
 
 /* Tailwind preflight strips list markers; restore them for message content. */
@@ -529,37 +452,37 @@
 }
 
 .chat-rich-text li::marker {
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .chat-rich-text blockquote {
-  padding-left: 12px;
-  color: var(--octant-text-secondary);
-  border-left: 1px solid var(--octant-border-strong);
+  padding-left: var(--oct-space-3);
+  color: var(--oct-fg-2);
+  border-left: 1px solid var(--oct-border);
 }
 
 .chat-rich-text code {
   padding: 1px 4px;
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
+  color: var(--oct-fg);
+  background: var(--oct-surface-warm);
+  border: 1px solid var(--oct-border);
   border-radius: 4px;
-  font-family: var(--octant-editor-font-family, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  font-family: var(--oct-font-mono);
   font-size: 0.9em;
 }
 
 .chat-rich-text__code {
   overflow: hidden;
-  background: var(--octant-surface-inset);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  background: var(--oct-bg);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
 }
 
 .chat-rich-text__code > span {
   display: block;
   padding: 6px 10px;
-  color: var(--octant-text-muted);
-  border-bottom: 1px solid var(--octant-border);
+  color: var(--oct-meta);
+  border-bottom: 1px solid var(--oct-border);
   font-size: 10px;
 }
 
@@ -577,8 +500,8 @@
 }
 
 .chat-rich-text a {
-  color: var(--octant-text-primary);
-  text-decoration-color: var(--octant-border-strong);
+  color: var(--oct-fg);
+  text-decoration-color: var(--oct-border);
   text-underline-offset: 2px;
 }
 
@@ -586,16 +509,16 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  padding-top: 9px;
-  margin-top: 9px;
-  border-top: 1px solid var(--octant-border);
+  padding-top: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-border-soft);
 }
 
 .chat-transcript__attachments li {
   max-width: 100%;
   overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -603,9 +526,9 @@
 .chat-transcript__handoff {
   display: flex;
   align-items: center;
-  gap: 9px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  gap: var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
   line-height: 1.3;
 }
 
@@ -613,20 +536,12 @@
 .chat-transcript__handoff::after {
   height: 1px;
   flex: 1 1 auto;
-  background: var(--octant-border);
+  background: var(--oct-border);
   content: "";
 }
 
-.chat-transcript__attempt-status {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin: 10px 0 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  line-height: 1.3;
-}
-
+/* The attempt status line rides the system's .runstatus; only the streaming
+   and completed states below are residual. */
 .chat-transcript__attempt-status--completed {
   position: absolute;
   width: 1px;
@@ -645,12 +560,7 @@
 
 /* Shimmer sweep across the streaming label so live state reads at a glance. */
 .chat-transcript__attempt-status--streaming > span:first-of-type {
-  background: linear-gradient(
-    90deg,
-    var(--octant-text-muted) 20%,
-    var(--octant-text-primary) 50%,
-    var(--octant-text-muted) 80%
-  );
+  background: linear-gradient(90deg, var(--oct-meta) 20%, var(--oct-fg) 50%, var(--oct-meta) 80%);
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -658,43 +568,25 @@
   animation: chat-status-shimmer 1.4s linear infinite;
 }
 
-.chat-transcript__message--assistant button,
-.chat-transcript__citations a {
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.chat-transcript__message--assistant button {
-  padding: 4px 6px;
-  margin-top: 8px;
-  background: transparent;
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.chat-transcript__message--assistant button:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
 .chat-transcript__citations {
   display: flex;
   flex-wrap: wrap;
   gap: 5px 12px;
-  padding-top: 10px;
-  margin-top: 11px;
-  border-top: 1px solid var(--octant-border);
+  padding-top: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-border-soft);
 }
 
 .chat-transcript__citations a {
-  text-decoration-color: var(--octant-border-strong);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+  text-decoration-color: var(--oct-border);
   text-underline-offset: 2px;
 }
 
 .chat-transcript__citations a:hover {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   text-decoration-color: currentColor;
 }
 
@@ -705,8 +597,8 @@
   flex: 0 0 auto;
   padding: 0 clamp(20px, 4vw, 48px);
   margin: 0 auto;
-  background: var(--octant-workspace);
-  border-top: 1px solid var(--octant-border);
+  background: var(--oct-bg);
+  border-top: 1px solid var(--oct-border);
 }
 
 .thread-work-shelf__summary {
@@ -724,7 +616,7 @@
   align-items: center;
   gap: 6px;
   padding: 0 6px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   border-radius: 5px;
   cursor: pointer;
   font-size: 11px;
@@ -733,8 +625,8 @@
 
 .thread-work-shelf__toggle:hover,
 .thread-work-shelf__history > button:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .thread-work-shelf__narrow-label {
@@ -746,7 +638,7 @@
   padding: 3px 6px;
   margin: 0;
   overflow: hidden;
-  color: var(--octant-warning-text);
+  color: var(--oct-warn-fg);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -764,7 +656,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 6px;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .thread-work-shelf__item-copy {
@@ -775,18 +667,18 @@
 .thread-work-shelf__history li > span {
   display: block;
   margin-bottom: 2px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 10px;
   line-height: 1.3;
 }
 
 .thread-work-shelf__current-items li[data-status="blocked"] .thread-work-shelf__item-copy > span {
-  color: var(--octant-warning-text);
+  color: var(--oct-warn-fg);
 }
 
 .thread-work-shelf__item-copy strong {
   display: block;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
@@ -794,7 +686,7 @@
 
 .thread-work-shelf__item-copy p {
   margin: 3px 0 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -812,9 +704,9 @@
 .thread-work-shelf form button {
   min-height: 24px;
   padding: 0 5px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   background: transparent;
-  border: 1px solid var(--octant-border);
+  border: 1px solid var(--oct-border);
   border-radius: 4px;
   cursor: pointer;
   font-size: 10px;
@@ -822,8 +714,8 @@
 
 .thread-work-shelf__item-actions button:hover,
 .thread-work-shelf form button:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
   border-color: var(--octant-border-strong);
 }
 
@@ -834,7 +726,7 @@
 .thread-work-shelf form label {
   display: grid;
   gap: 3px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 10px;
 }
 
@@ -842,7 +734,7 @@
   min-width: 120px;
   min-height: 24px;
   padding: 3px 5px;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   background: var(--octant-control);
   border: 1px solid var(--octant-border-strong);
   border-radius: 4px;
@@ -851,44 +743,32 @@
 
 .thread-work-shelf__history {
   padding: 7px 0 0;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .thread-work-shelf__history ol {
   display: grid;
   gap: 4px;
   padding: 6px 6px 2px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 11px;
 }
 
+/* The composer's frame, focus ring, input, chips row, bottom row, and send
+   control are the system's; this block only places the composer in the
+   workspace column and pads the pieces the system does not know about. */
 .chat-composer {
   position: relative;
   z-index: 2;
-  display: grid;
-  width: min(calc(100% - 40px), 760px);
   flex: 0 0 auto;
-  gap: 6px;
-  padding: 10px;
-  margin: 0 auto 20px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-composer, 14px);
-  box-shadow: var(--octant-shadow-lg);
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.chat-composer:focus-within {
-  border-color: var(--octant-border-strong);
-  box-shadow: var(--octant-shadow-lg);
+  margin-block: 0 20px;
 }
 
 .chat-composer__status {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  padding: 0 var(--oct-space-3) var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
   line-height: 1.35;
 }
 
@@ -905,11 +785,7 @@
 }
 
 .chat-composer__bar {
-  display: flex;
   min-width: 0;
-  align-items: center;
-  gap: 6px;
-  padding-top: 2px;
 }
 
 .chat-composer__leading,
@@ -919,7 +795,7 @@
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 4px;
+  gap: var(--oct-space-1);
 }
 
 .chat-composer__selectors {
@@ -931,97 +807,61 @@
   flex: 1 1 auto;
 }
 
-.chat-composer label {
+/* Only toolbar labels shrink-wrap their control; the message field's block
+   layout comes from the system's `.composer > label` rule. */
+.chat-composer__bar label {
   display: inline-flex;
   min-width: 0;
   align-items: center;
 }
 
-.chat-composer__message-field {
-  display: block;
-}
-
-.chat-composer__selectors [role="combobox"],
-.chat-composer__research [role="combobox"] {
-  width: auto;
-  max-width: 150px;
-  min-height: 27px;
-  padding-inline: 7px 24px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border-color: transparent;
-  font-size: 11px;
-}
-
-.chat-composer__selectors [role="combobox"]:hover,
-.chat-composer__research [role="combobox"]:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-  border-color: var(--octant-border);
-}
-
-/* The shared provider/model picker adopts the quiet toolbar treatment. */
-.chat-composer__selectors .composer-model-picker__trigger {
-  min-height: 27px;
-  padding: 0 7px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border-color: transparent;
-  font-size: 11px;
-}
-
-.chat-composer__selectors .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.chat-composer__selectors .composer-model-picker__menu {
-  right: auto;
-  left: 0;
-}
-
-.chat-composer textarea {
-  display: block;
-  width: 100%;
-  min-height: 64px;
-  max-height: 220px;
-  padding: 7px 6px 9px;
-  resize: none;
-  color: var(--octant-text-primary);
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  font: inherit;
-  font-size: 14px;
-  line-height: 1.5;
-}
-
-.chat-composer textarea:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
-.chat-composer textarea::placeholder {
-  color: var(--octant-text-muted);
-  opacity: 1;
-}
-
-.chat-composer button {
-  min-height: 28px;
-  padding: 0 7px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border-color: transparent;
-  border-radius: 7px;
-  cursor: pointer;
-  font-size: 11px;
-}
+/* The row controls' look is the system's `.composer-row` treatment
+   (ADR 0038); nothing to restate here. */
 
 .chat-composer .composer-pool-control {
   min-width: 132px;
   flex: 0 0 auto;
   max-width: 100%;
+}
+
+/* Declared model options and the pool control live behind one trigger, so the
+   composer row shows a single control instead of one select per option. */
+.chat-composer__model-options {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+/* The active dot is positioned against the trigger's own corner. */
+.chat-composer__model-options > button {
+  position: relative;
+}
+
+/* A non-default option choice must be visible while the panel is closed;
+   the trigger icon alone cannot say the model is running off its defaults. */
+.chat-composer__model-options-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--oct-accent-fg);
+}
+
+/* Opens upward: the composer sits at the window's bottom edge, so a panel
+   growing downward would clip. Mirrors the model picker's anchoring. The
+   chrome is the system's `.popover-panel`; only anchoring and width are
+   this surface's own. */
+.chat-composer__model-options-panel {
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--oct-space-2);
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 32px));
 }
 
 .chat-composer .composer-pool-control__trigger {
@@ -1030,58 +870,9 @@
   white-space: nowrap;
 }
 
-.chat-composer button:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.chat-composer__research > button[aria-pressed="true"],
-.chat-composer__actions > button:last-child:not(:disabled) {
-  color: var(--octant-accent-foreground);
-  background: var(--octant-accent);
-  border-color: var(--octant-accent);
-}
-
-.chat-composer__research > button[aria-pressed="true"]:hover:not(:disabled),
-.chat-composer__actions > button:last-child:not(:disabled):hover {
-  color: var(--octant-accent-foreground);
-  background: color-mix(in srgb, var(--octant-accent) 88%, var(--octant-text-primary));
-}
-
-.chat-composer button:disabled,
-.chat-composer select:disabled,
-.chat-composer textarea:disabled,
-.chat-composer input:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.chat-composer__leading label,
-.chat-composer__actions label {
-  display: contents;
-}
-
 .chat-composer__actions {
   flex: 0 0 auto;
   margin-left: auto;
-}
-
-.chat-composer__leading > button,
-.chat-composer__actions > button {
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  min-height: 30px;
-  padding: 0;
-}
-
-.chat-composer__leading > button {
-  border-radius: var(--octant-radius-pill, 999px);
-  border: 1px solid var(--octant-border);
-}
-
-.chat-composer__actions > button:last-child {
-  border-radius: var(--octant-radius-pill, 999px);
 }
 
 .chat-composer__leading input[type="file"],
@@ -1108,30 +899,23 @@
   border: 0;
 }
 
-.chat-composer__selections {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0;
+/* Selection lists are ULs so assistive technology counts them; the chips
+   themselves are the system's. */
+.chat-composer .composer-chips {
   margin: 0;
   list-style: none;
 }
 
-.chat-composer__selection {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 4px 3px 8px;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-pill, 999px);
-  color: var(--octant-text-secondary);
-  background: var(--octant-control);
-  font-size: 11px;
+.chat-composer__selection-receipt {
+  color: var(--oct-meta);
 }
 
-.chat-composer__selection-receipt {
-  color: var(--octant-text-muted);
+/* The typeaheads live between the input and the row so the open list never
+   covers the message being composed. The frameless composer children carry
+   their own gutters, so the typeaheads take the same one. */
+.chat-composer .chat-composer__command-typeahead,
+.chat-composer .thread-mention__typeahead {
+  margin: var(--oct-space-2) var(--oct-space-3) 0;
 }
 
 /*
@@ -1143,9 +927,9 @@
 .thread-mention__typeahead {
   max-height: 220px;
   overflow-y: auto;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-md, 8px);
-  background: var(--octant-surface, var(--octant-control));
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
 }
 
 .thread-mention__list {
@@ -1164,57 +948,33 @@
 
 .thread-mention__meta {
   margin-left: auto;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .thread-mention__empty {
-  padding: 8px 10px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .thread-mention__chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--oct-space-2);
   padding: 0;
   margin: 0;
   list-style: none;
 }
 
-.thread-mention__chip {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 4px 3px 8px;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-pill, 999px);
-  color: var(--octant-text-secondary);
-  background: var(--octant-control);
-  font-size: 11px;
+/* Inside the Chat composer the mention chips form the leading chips row. */
+.chat-composer .thread-mention__chips {
+  padding: var(--oct-space-3) var(--oct-space-3) 0;
 }
 
 .thread-mention__chip-receipt {
-  color: var(--octant-text-muted);
-}
-
-.thread-mention__chip > button {
-  width: 22px;
-  min-width: 22px;
-  height: 22px;
-  min-height: 22px;
-  padding: 0;
-}
-
-.chat-composer__selection > button {
-  width: 22px;
-  min-width: 22px;
-  height: 22px;
-  min-height: 22px;
-  padding: 0;
+  color: var(--oct-meta);
 }
 
 @keyframes chat-status-spin {
@@ -1231,7 +991,6 @@
 
 @media (max-width: 680px) {
   .chat-welcome .draft-thread__canvas {
-    width: calc(100% - 24px);
     justify-content: center;
     padding: 28px 0;
   }
@@ -1244,26 +1003,19 @@
     padding-inline: 9px;
   }
 
-  .chat-workspace__header {
-    width: min(100% - 32px, 720px);
-  }
-
   .chat-transcript {
-    width: min(100% - 32px, 720px);
     padding-top: 22px;
   }
 
-  .chat-transcript__message--user {
+  .chat-transcript .bubble {
     max-width: 94%;
   }
 
-  .thread-work-shelf,
-  .chat-composer {
+  .thread-work-shelf {
     padding-inline: 16px;
   }
 
   .chat-composer {
-    width: calc(100% - 24px);
     margin-bottom: 10px;
   }
 
@@ -1319,13 +1071,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-transcript__attempt-status--streaming svg,
-  .chat-transcript__message--assistant button,
-  .chat-transcript__citations a,
-  .thread-work-shelf button,
-  .chat-composer button,
-  .chat-composer select,
-  .chat-composer textarea {
+  .chat-transcript__turn-actions {
     transition: none;
   }
 
@@ -1335,18 +1081,12 @@
 
   .chat-transcript__attempt-status--streaming > span:first-of-type {
     background: none;
-    color: var(--octant-text-muted);
+    color: var(--oct-meta);
     animation: none;
   }
 }
 
-html[data-octant-reduced-motion="true"] .chat-transcript__attempt-status--streaming svg,
-html[data-octant-reduced-motion="true"] .chat-transcript__message--assistant button,
-html[data-octant-reduced-motion="true"] .chat-transcript__citations a,
-html[data-octant-reduced-motion="true"] .thread-work-shelf button,
-html[data-octant-reduced-motion="true"] .chat-composer button,
-html[data-octant-reduced-motion="true"] .chat-composer select,
-html[data-octant-reduced-motion="true"] .chat-composer textarea {
+html[data-octant-reduced-motion="true"] .chat-transcript__turn-actions {
   transition: none;
 }
 
@@ -1358,26 +1098,20 @@ html[data-octant-reduced-motion="true"]
   .chat-transcript__attempt-status--streaming
   > span:first-of-type {
   background: none;
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
   animation: none;
 }
 
 @media (prefers-contrast: more) {
   .chat-workspace__header,
   .thread-work-shelf,
-  .chat-composer,
-  .chat-transcript__message--user,
-  .chat-composer select,
-  .chat-composer textarea,
   .thread-work-shelf input {
     border-color: var(--octant-border-strong);
   }
 
-  .chat-transcript__message--assistant button,
   .thread-work-shelf__item-actions button,
-  .thread-work-shelf form button,
-  .chat-composer button {
-    border-color: var(--octant-text-secondary);
+  .thread-work-shelf form button {
+    border-color: var(--oct-muted);
   }
 }
 
@@ -1393,8 +1127,8 @@ html[data-octant-reduced-motion="true"]
 .side-chat__header {
   display: grid;
   gap: 2px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--octant-border);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border);
 }
 
 .side-chat__title {
@@ -1402,23 +1136,23 @@ html[data-octant-reduced-motion="true"]
   align-items: center;
   gap: 6px;
   margin: 0;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-size: 13px;
   font-weight: 500;
 }
 
 .side-chat__notice {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .side-chat__empty {
   display: grid;
   justify-items: start;
-  gap: 8px;
-  padding: 16px;
-  color: var(--octant-text-muted);
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-4);
+  color: var(--oct-muted);
   font-size: 12px;
 }
 

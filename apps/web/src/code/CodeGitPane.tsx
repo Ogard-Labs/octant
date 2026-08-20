@@ -143,6 +143,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
           {props.onReviewPullRequest === undefined ? null : (
             <OctantButton
               onClick={() => props.onReviewPullRequest?.()}
+              size="sm"
               type="button"
               variant="ghost"
             >
@@ -193,6 +194,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
                 ...props.scope,
               })
             }
+            size="sm"
             type="button"
             variant="secondary"
           >
@@ -210,6 +212,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
                 ...props.scope,
               })
             }
+            size="sm"
             type="button"
             variant="secondary"
           >
@@ -235,6 +238,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
                     ...props.scope,
                   });
                 }}
+                size="sm"
                 type="button"
                 variant="destructive"
               >
@@ -242,6 +246,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
               </OctantButton>
               <OctantButton
                 onClick={() => setConfirmingDiscard(false)}
+                size="sm"
                 type="button"
                 variant="ghost"
               >
@@ -252,6 +257,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
             <OctantButton
               disabled={selectedTracked.length === 0}
               onClick={() => setConfirmingDiscard(true)}
+              size="sm"
               type="button"
               variant="ghost"
             >
@@ -268,6 +274,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
           <OctantButton
             disabled={suggesting || props.observation.status.length === 0}
             onClick={() => void suggest()}
+            size="sm"
             type="button"
             variant="ghost"
           >
@@ -290,6 +297,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
                 },
               )
             }
+            size="sm"
             type="button"
             variant="secondary"
           >
@@ -315,6 +323,7 @@ export function CodeGitPane(props: CodeGitPaneProps) {
                 ...props.scope,
               } as never);
             }}
+            size="sm"
             type="button"
             variant="secondary"
           >

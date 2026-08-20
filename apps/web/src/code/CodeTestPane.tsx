@@ -139,11 +139,11 @@ export function CodeTestPane(props: CodeTestPaneProps) {
           {props.executionPolicy === "plan" ? (
             <p>Plan mode is read-only.</p>
           ) : result?.state === "running" ? (
-            <OctantButton onClick={() => void cancel()} type="button" variant="secondary">
+            <OctantButton onClick={() => void cancel()} size="sm" type="button" variant="secondary">
               Cancel test
             </OctantButton>
           ) : (
-            <OctantButton onClick={() => void run()} type="button" variant="secondary">
+            <OctantButton onClick={() => void run()} size="sm" type="button" variant="secondary">
               Run {selected.name}
             </OctantButton>
           )}

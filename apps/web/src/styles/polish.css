@@ -2,7 +2,7 @@
 
 .sidebar-navigation__thread-unread {
   color: var(--octant-text-primary);
-  background: var(--octant-selection);
+  background: var(--oct-selection);
   border-color: var(--octant-border-strong);
 }
 

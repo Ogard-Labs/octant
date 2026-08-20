@@ -1,7 +1,6 @@
 import type { ExecutionContextPickerEntry } from "@octant/contracts/agent-profile";
 import { Shield, ShieldCheck, ShieldAlert, Monitor, Cpu, User } from "lucide-react";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
 export interface ExecutionContextPickerProps {
@@ -93,7 +92,11 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
               props.selectedEntry.modelId === entry.modelId &&
               props.selectedEntry.profileId === entry.profileId;
             return (
-              <OctantButton
+              // A plain button, not the `.btn` recipe: the recipe centers one
+              // non-wrapping label at a fixed control height, which clipped
+              // model names against the card's bottom border. This row is
+              // content-sized so provider, model, and facts always fit.
+              <button
                 aria-disabled={!isAvailable}
                 aria-selected={isSelected}
                 className={`execution-context-picker__option${isActive ? " execution-context-picker__option--active" : ""}${isSelected ? " execution-context-picker__option--selected" : ""}`}
@@ -102,33 +105,34 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
                 onClick={() => isAvailable && props.onSelect(entry)}
                 role="option"
                 type="button"
-                variant="ghost"
               >
-                <div className="execution-context-picker__option-main">
+                <span className="execution-context-picker__option-main">
                   <Cpu aria-hidden="true" size={12} strokeWidth={1.8} />
                   <span className="execution-context-picker__provider">
                     {entry.providerDisplayName}
                   </span>
                   <span className="execution-context-picker__model">{entry.modelDisplayName}</span>
                   {entry.profileDisplayName !== undefined ? (
-                    <span className="execution-context-picker__profile">
+                    <span className="chip execution-context-picker__profile">
                       <User aria-hidden="true" size={10} strokeWidth={1.8} />
                       {entry.profileDisplayName}
                     </span>
                   ) : null}
-                </div>
-                <div className="execution-context-picker__option-meta">
-                  <span className="execution-context-picker__host">
+                </span>
+                <span className="execution-context-picker__option-meta">
+                  <span className="chip execution-context-picker__host">
                     <Monitor aria-hidden="true" size={10} strokeWidth={1.8} />
                     {entry.hostLabel}
                   </span>
                   <PolicyBadge policy={entry.executionPolicy} />
                   <PermissionSummary permissions={entry.effectivePermissions} />
-                </div>
+                </span>
                 {entry.unavailableReason !== undefined ? (
-                  <p className="execution-context-picker__unavailable">{entry.unavailableReason}</p>
+                  <span className="execution-context-picker__unavailable">
+                    {entry.unavailableReason}
+                  </span>
                 ) : null}
-              </OctantButton>
+              </button>
             );
           })}
         </div>
@@ -155,9 +159,7 @@ function PolicyBadge(props: { readonly policy: string }) {
           ? "Auto edits"
           : "Full";
   return (
-    <span
-      className={`execution-context-picker__policy execution-context-picker__policy--${props.policy}`}
-    >
+    <span className={`chip execution-context-picker__policy--${props.policy}`}>
       {icon}
       {label}
     </span>
@@ -174,6 +176,8 @@ function PermissionSummary(props: {
   if (props.permissions.tools) items.push("Tools");
   if (props.permissions.network) items.push("Net");
   if (props.permissions.subagents) items.push("Sub");
-  if (items.length === 0) return <span className="execution-context-picker__perms">Read-only</span>;
-  return <span className="execution-context-picker__perms">{items.join(" · ")}</span>;
+  if (items.length === 0) {
+    return <span className="chip execution-context-picker__perms">Read-only</span>;
+  }
+  return <span className="chip execution-context-picker__perms">{items.join(" · ")}</span>;
 }

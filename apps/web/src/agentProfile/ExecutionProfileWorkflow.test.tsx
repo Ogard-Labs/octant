@@ -1,5 +1,5 @@
 import type { AgentProfile, ExecutionResolutionReceipt } from "@octant/contracts/agent-profile";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ExecutionProfileWorkflow } from "./ExecutionProfileWorkflow";
@@ -92,6 +92,43 @@ describe("ExecutionProfileWorkflow", () => {
     expect(
       screen.getByText(/one-off override → Project default → mode default → user default/i),
     ).toBeVisible();
+  });
+
+  it("closes the composer popover on Escape and returns focus to the trigger", async () => {
+    const user = userEvent.setup();
+    render(<ExecutionProfileWorkflow controller={controller()} variant="composer" />);
+    const trigger = screen.getByRole("button", { name: "Execution profile: Code reviewer" });
+
+    await user.click(trigger);
+    expect(screen.getByRole("dialog", { name: "Execution profile options" })).toBeVisible();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Execution profile options" })).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("closes the composer popover when the pointer goes down outside it", async () => {
+    const user = userEvent.setup();
+    render(<ExecutionProfileWorkflow controller={controller()} variant="composer" />);
+
+    await user.click(screen.getByRole("button", { name: "Execution profile: Code reviewer" }));
+    expect(screen.getByRole("dialog", { name: "Execution profile options" })).toBeVisible();
+
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "Execution profile options" })).toBeNull();
+  });
+
+  it("keeps the composer popover open while the pointer goes down inside it", async () => {
+    const user = userEvent.setup();
+    render(<ExecutionProfileWorkflow controller={controller()} variant="composer" />);
+
+    await user.click(screen.getByRole("button", { name: "Execution profile: Code reviewer" }));
+    const popover = screen.getByRole("dialog", { name: "Execution profile options" });
+
+    fireEvent.pointerDown(
+      screen.getByRole("searchbox", { name: "Search providers, models, and profiles" }),
+    );
+    expect(popover).toBeVisible();
   });
 
   it("shows actionable unsupported resolution reasons", () => {

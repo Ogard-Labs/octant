@@ -3,6 +3,7 @@ import { ProjectClientFailure, type ProjectClient } from "@octant/client-runtime
 import type { ProjectId } from "@octant/contracts/projects";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
+import { ArrowUp } from "lucide-react";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ProjectMemoryOpenButton } from "../projects/ProjectMemoryInspector";
@@ -139,40 +140,47 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
           <label className="sr-only" htmlFor={inputId}>
             Start a new Chat thread
           </label>
-          <ComposerModelPicker
-            ariaLabel="Provider and model"
-            disabled={!createAvailable || submitting}
-            groups={props.providerGroups ?? []}
-            onSelect={props.onSelectProvider ?? (() => undefined)}
-            {...(props.onOpenSettings === undefined
-              ? {}
-              : { onOpenSettings: props.onOpenSettings })}
-            {...(props.selectedModelId === undefined
-              ? {}
-              : { selectedModelId: props.selectedModelId })}
-            {...(props.selectedProviderInstanceId === undefined
-              ? {}
-              : {
-                  selectedProviderInstanceId: props.selectedProviderInstanceId,
-                })}
-          />
-          <OctantTextarea
-            disabled={!createAvailable || submitting}
-            id={inputId}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Describe the next Chat thread…"
-            ref={input}
-            rows={3}
-            value={draft}
-          />
-          <OctantButton
-            className="project-button"
-            disabled={!createAvailable || submitting || draft.trim() === ""}
-            type="submit"
-            variant="secondary"
-          >
-            Start thread
-          </OctantButton>
+          <div className="composer">
+            <OctantTextarea
+              className="composer-input"
+              disabled={!createAvailable || submitting}
+              id={inputId}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Describe the next Chat thread…"
+              ref={input}
+              rows={3}
+              value={draft}
+            />
+            <div className="composer-row">
+              <ComposerModelPicker
+                ariaLabel="Provider and model"
+                disabled={!createAvailable || submitting}
+                groups={props.providerGroups ?? []}
+                onSelect={props.onSelectProvider ?? (() => undefined)}
+                {...(props.onOpenSettings === undefined
+                  ? {}
+                  : { onOpenSettings: props.onOpenSettings })}
+                {...(props.selectedModelId === undefined
+                  ? {}
+                  : { selectedModelId: props.selectedModelId })}
+                {...(props.selectedProviderInstanceId === undefined
+                  ? {}
+                  : {
+                      selectedProviderInstanceId: props.selectedProviderInstanceId,
+                    })}
+              />
+              <span className="composer-gap" />
+              <OctantButton
+                aria-label="Start thread"
+                disabled={!createAvailable || submitting || draft.trim() === ""}
+                size="icon"
+                type="submit"
+                variant="default"
+              >
+                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+              </OctantButton>
+            </div>
+          </div>
         </form>
       </section>
       {visibleSections.length === 0 ? null : (

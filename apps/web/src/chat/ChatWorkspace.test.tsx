@@ -820,6 +820,11 @@ describe("ChatWorkspace", () => {
       <ChatWorkspace controller={controller} providerSnapshot={withOptions} />,
     );
 
+    // A non-default value must be visible while the panel is closed.
+    expect(screen.getByRole("button", { name: "Model options" })).toHaveAttribute(
+      "data-customized",
+    );
+    await user.click(screen.getByRole("button", { name: "Model options" }));
     expect(screen.getByRole("combobox", { name: "Speed" })).toHaveTextContent("Speed: fast");
     await user.click(screen.getByRole("combobox", { name: "Effort" }));
     await user.click(await screen.findByRole("option", { name: "Effort: high" }));
@@ -875,6 +880,7 @@ describe("ChatWorkspace", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Model options" }));
     await user.click(screen.getByRole("combobox", { name: "Effort" }));
     await user.click(await screen.findByRole("option", { name: "Effort: high" }));
     await user.click(screen.getByRole("combobox", { name: "Speed" }));
@@ -921,6 +927,7 @@ describe("ChatWorkspace", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Model options" }));
     await user.click(screen.getByRole("combobox", { name: "Effort" }));
     await user.click(await screen.findByRole("option", { name: "Effort: high" }));
     await user.click(screen.getByRole("button", { name: "Enable web research" }));
@@ -970,6 +977,7 @@ describe("ChatWorkspace", () => {
     await user.click(await screen.findByRole("option", { name: "Model B" }));
     // The option controls still belong to model A: the switch has not settled,
     // so nothing has re-rendered them for model B yet.
+    await user.click(screen.getByRole("button", { name: "Model options" }));
     await user.click(screen.getByRole("combobox", { name: "Effort" }));
     await user.click(await screen.findByRole("option", { name: "Effort: high" }));
     // A third command, queued behind both, marks where the queue has got to:
@@ -1028,6 +1036,7 @@ describe("ChatWorkspace", () => {
     }
     render(<Harness />);
 
+    await user.click(screen.getByRole("button", { name: "Model options" }));
     await user.click(screen.getByRole("combobox", { name: "Effort" }));
     await user.click(await screen.findByRole("option", { name: "Effort: high" }));
     await user.type(screen.getByRole("textbox", { name: "Message" }), "Think hard{Enter}");
@@ -1417,19 +1426,35 @@ describe("ChatWorkspace", () => {
     expect(controller.discard).not.toHaveBeenCalled();
   });
 
-  it("links the Canvas disclosure to its controlled region", () => {
+  it("collapses copy, markdown, export, and canvas into one thread actions menu", async () => {
+    const user = userEvent.setup();
     render(
       <ChatWorkspace
-        canvasClient={{} as never}
+        canvasClient={{ threadReferenceCards: async () => ({ cards: [] }) } as never}
         controller={controllerFixture()}
         providerSnapshot={providerSnapshot()}
+        serverUrl="http://127.0.0.1"
+        windowCapability="window-capability"
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Canvas" })).toHaveAttribute(
-      "aria-controls",
-      `chat-canvas-panel-${threadId}`,
-    );
+    // The header shows one trigger, not a row of always-visible controls.
+    expect(screen.queryByRole("button", { name: "Copy Markdown" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Export thread" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Canvas tools" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Copy conversation" })).toBeVisible();
+    expect(screen.getByRole("menuitemradio", { name: "Save as Markdown" })).toBeVisible();
+    expect(screen.getByRole("menuitemradio", { name: "Export…" })).toBeVisible();
+
+    await user.click(screen.getByRole("menuitemradio", { name: "Show canvas" }));
+    expect(await screen.findByRole("region", { name: "Canvas tools" })).toBeVisible();
+
+    // The item reflects the open panel, and choosing it again closes the panel.
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Hide canvas" }));
+    expect(screen.queryByRole("region", { name: "Canvas tools" })).toBeNull();
   });
 
   it("opens the linked-thread preview dialog when $review-in-parallel is resolved from the composer", async () => {
@@ -1611,6 +1636,7 @@ describe("ChatWorkspace", () => {
     const controller = controllerFixture({ execute });
     render(<ChatWorkspace controller={controller} providerSnapshot={pooledProviderSnapshot()} />);
 
+    await user.click(screen.getByRole("button", { name: "Model options" }));
     await user.click(screen.getByRole("button", { name: "Use multiple models" }));
     await user.click(screen.getByRole("checkbox", { name: "OpenCode — Model B" }));
     await user.click(screen.getByRole("button", { name: "Apply pool" }));
@@ -1657,6 +1683,7 @@ describe("ChatWorkspace", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Model options" }));
     const trigger = screen.getByRole("button", { name: "Use multiple models" });
     expect(trigger).toHaveAttribute("aria-pressed", "true");
     await user.click(trigger);
@@ -1670,10 +1697,12 @@ describe("ChatWorkspace", () => {
     });
   });
 
-  it("offers no multi-model pool when Settings define none", () => {
+  it("offers no multi-model pool when Settings define none", async () => {
+    const user = userEvent.setup();
     render(
       <ChatWorkspace controller={controllerFixture()} providerSnapshot={providerSnapshot()} />,
     );
+    await user.click(screen.getByRole("button", { name: "Model options" }));
     const trigger = screen.getByRole("button", { name: "Use multiple models" });
     expect(trigger).toBeDisabled();
     expect(trigger).toHaveAccessibleDescription(/no agent-eligible models/i);
@@ -1788,6 +1817,7 @@ describe("ChatWorkspace", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Model options" }));
     await user.click(screen.getByRole("combobox", { name: "Effort" }));
     await user.click(await screen.findByRole("option", { name: "Effort: high" }));
     await scenario.act(user);
@@ -1983,7 +2013,8 @@ describe("ChatWorkspace", () => {
       <ChatWorkspace controller={controllerFixture()} providerSnapshot={providerSnapshot()} />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Copy Markdown" }));
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Copy conversation" }));
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining("# Calm planning"));
     expect(await screen.findByText(/Conversation copied as Markdown\./)).toBeVisible();
     vi.unstubAllGlobals();
@@ -1996,7 +2027,8 @@ describe("ChatWorkspace", () => {
       <ChatWorkspace controller={controllerFixture()} providerSnapshot={providerSnapshot()} />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Copy Markdown" }));
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Copy conversation" }));
     expect(
       await screen.findByText("The conversation could not be copied to the clipboard."),
     ).toBeVisible();

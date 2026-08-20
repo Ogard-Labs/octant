@@ -322,63 +322,61 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           {/* One card holds the prompt and everything the thread will be bound
               to. The strip used to sit outside it, which read as loose chrome
               under the composer rather than as part of what is being started. */}
-          <div className="code-composer-adapter__card">
-            <div className="code-composer-adapter__input-row">
-              <OctantTextarea
-                aria-label="First message"
-                autoFocus
-                className="code-composer-adapter__textarea"
-                disabled={props.creating}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Describe the change…"
-                rows={3}
-                value={prompt}
-              />
-              <div className="code-composer-adapter__composer-bar">
-                <span className="code-composer-adapter__context-picker">
-                  <ComposerModelPicker
-                    ariaLabel="Provider and model"
-                    groups={props.providerGroups}
-                    onSelect={props.onSelectProvider}
-                    {...(props.selectedModelId === undefined
-                      ? {}
-                      : { selectedModelId: props.selectedModelId })}
-                    {...(props.selectedProviderInstanceId === undefined
-                      ? {}
-                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                  />
-                </span>
-                {props.poolControl}
-                {props.profileControl}
-                <span className="code-composer-adapter__context-item">
-                  <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
-                  <OctantNativeSelect
-                    aria-label="Access policy"
-                    className="code-composer-adapter__policy-select"
-                    onChange={(e) => setExecutionPolicy(e.target.value as ProviderExecutionPolicy)}
-                    value={executionPolicy}
-                  >
-                    <option value="plan">Plan</option>
-                    <option value="approval-gated">Approval</option>
-                    <option value="auto-accept-edits">Auto-accept edits</option>
-                    <option value="full-access">Full access</option>
-                  </OctantNativeSelect>
-                </span>
-                <OctantButton
-                  aria-label={
-                    props.errorMessage === undefined ? "Create thread" : "Retry creating thread"
-                  }
-                  className="code-composer-adapter__send"
-                  disabled={!canSubmit}
-                  onClick={submit}
-                  size="icon"
-                  type="button"
-                  variant="default"
+          <div className="composer code-composer-adapter__card">
+            <OctantTextarea
+              aria-label="First message"
+              autoFocus
+              className="composer-input"
+              disabled={props.creating}
+              onChange={(event) => setPrompt(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Describe the change…"
+              rows={3}
+              value={prompt}
+            />
+            <div className="composer-row code-composer-adapter__composer-bar">
+              <span className="code-composer-adapter__context-picker">
+                <ComposerModelPicker
+                  ariaLabel="Provider and model"
+                  groups={props.providerGroups}
+                  onSelect={props.onSelectProvider}
+                  {...(props.selectedModelId === undefined
+                    ? {}
+                    : { selectedModelId: props.selectedModelId })}
+                  {...(props.selectedProviderInstanceId === undefined
+                    ? {}
+                    : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                />
+              </span>
+              {props.poolControl}
+              {props.profileControl}
+              <span className="code-composer-adapter__context-item">
+                <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
+                <OctantNativeSelect
+                  aria-label="Access policy"
+                  className="code-composer-adapter__policy-select"
+                  onChange={(e) => setExecutionPolicy(e.target.value as ProviderExecutionPolicy)}
+                  value={executionPolicy}
                 >
-                  <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-                </OctantButton>
-              </div>
+                  <option value="plan">Plan</option>
+                  <option value="approval-gated">Approval</option>
+                  <option value="auto-accept-edits">Auto-accept edits</option>
+                  <option value="full-access">Full access</option>
+                </OctantNativeSelect>
+              </span>
+              <span className="composer-gap" />
+              <OctantButton
+                aria-label={
+                  props.errorMessage === undefined ? "Create thread" : "Retry creating thread"
+                }
+                disabled={!canSubmit}
+                onClick={submit}
+                size="icon"
+                type="button"
+                variant="default"
+              >
+                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+              </OctantButton>
             </div>
 
             <div className="code-composer-adapter__context-strip" aria-label="Thread context">

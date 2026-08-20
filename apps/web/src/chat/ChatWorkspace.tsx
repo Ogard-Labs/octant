@@ -32,8 +32,7 @@ import {
   type ChatComposerProps,
   type ChatComposerResearchBackend,
 } from "./ChatComposer";
-import { ThreadExportControl } from "../thread/ThreadExportControl";
-import { ChatExportControl } from "./ChatExportControl";
+import { ChatThreadActionsMenu } from "./ChatThreadActionsMenu";
 import { ChatTranscript } from "./ChatTranscript";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ThreadWorkShelf } from "./ThreadWorkShelf";
@@ -52,7 +51,6 @@ import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { OctantButton } from "../ui/base/OctantButton";
-import { PanelsTopLeft } from "lucide-react";
 
 export interface ChatWorkspaceProps {
   readonly controller: ChatController;
@@ -243,7 +241,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
         {props.childRunStatus === undefined ? null : (
-          <header className="chat-workspace__header">{props.childRunStatus}</header>
+          <header className="chat-workspace__header thread-column">{props.childRunStatus}</header>
         )}
         <div className="chat-workspace__load-state">
           <p role={props.controller.status === "disconnected" ? "alert" : "status"}>
@@ -453,7 +451,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         </p>
       )}
       <div className="chat-workspace__conversation">
-        <header className="chat-workspace__header">
+        <header className="chat-workspace__header thread-column">
           <div>
             <h1>{view.thread.title}</h1>
             <p className="chat-workspace__meta">
@@ -462,37 +460,31 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             </p>
           </div>
           {props.childRunStatus}
-          <ChatExportControl
+          <ChatThreadActionsMenu
             connectionStatus={
               props.controller.status === "disconnected" ? "disconnected" : "connected"
             }
             view={view}
-          />
-          <ThreadExportControl
-            mode="chat"
-            threadId={String(view.thread.id)}
-            title={view.thread.title}
             {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
             {...(props.windowCapability === undefined
               ? {}
               : { windowCapability: props.windowCapability })}
+            {...(props.canvasClient === undefined
+              ? {}
+              : {
+                  canvas: {
+                    open: canvasPanelOpen,
+                    onToggle: () => setCanvasPanelOpen((current) => !current),
+                  },
+                })}
           />
-          {props.canvasClient === undefined ? null : (
-            <OctantButton
-              aria-controls={canvasPanelId}
-              aria-expanded={canvasPanelOpen}
-              onClick={() => setCanvasPanelOpen((current) => !current)}
-              size="sm"
-              type="button"
-              variant="ghost"
-            >
-              <PanelsTopLeft aria-hidden="true" size={14} strokeWidth={1.7} />
-              Canvas
-            </OctantButton>
-          )}
         </header>
         {props.canvasClient === undefined || !canvasPanelOpen ? null : (
-          <section aria-label="Canvas tools" className="chat-workspace__canvas" id={canvasPanelId}>
+          <section
+            aria-label="Canvas tools"
+            className="chat-workspace__canvas thread-column"
+            id={canvasPanelId}
+          >
             <CanvasCreatePanel
               client={props.canvasClient}
               context={buildCanvasCreationContext({

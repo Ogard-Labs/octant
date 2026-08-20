@@ -1,4 +1,14 @@
 @import "./styles/tailwind.css";
+/* Octant design system, then the adapter that repoints its colour and font
+   tokens at the runtime theme. Import order is deliberate and load-bearing:
+   Tailwind's preflight lives in @layer base, so the system's unlayered base
+   rules always beat it regardless of position — but the app's own stylesheets
+   below must come AFTER the system so that, on surfaces not yet ported,
+   existing app rules win ties and nothing restyles out from under them.
+   Porting a surface means moving its markup onto system classes and deleting
+   its old rules, not fighting this order. */
+@import "./styles/octant.css";
+@import "./styles/octant-bridge.css";
 @import "./styles/shadcn-theme.css";
 @import "./styles/chat.css";
 @import "./styles/code.css";
@@ -17,42 +27,43 @@
   color-scheme: dark;
   color: var(--octant-text-primary);
   background: var(--octant-workspace);
-  --octant-focus-ring: #7ec0ff;
-  --octant-focus: #7ec0ff;
-  --octant-selection: #323232;
-  --octant-border: #323232;
-  --octant-border-subtle: #323232;
-  --octant-border-strong: #414141;
-  --octant-workspace: #1e1e1e;
-  --octant-surface: #1e1e1e;
-  --octant-surface-canvas: #1e1e1e;
-  --octant-chrome: #1a1a1a;
-  --octant-sidebar-opaque: #191919;
-  --octant-sidebar-translucent: rgb(25 25 25 / 88%);
-  --octant-sidebar-translucent-subtle: rgb(25 25 25 / 62%);
-  --octant-sidebar-translucent-strong: rgb(25 25 25 / 34%);
+  --octant-focus-ring: #d9a441;
+  --octant-focus: #d9a441;
+  --octant-selection: #353430;
+  --octant-border: #312f2c;
+  --octant-border-subtle: #312f2c;
+  --octant-border-strong: #494844;
+  --octant-workspace: #14130f;
+  --octant-surface: #14130f;
+  --octant-surface-canvas: #14130f;
+  --octant-chrome: #12110d;
+  --octant-sidebar-opaque: #11100c;
+  --octant-sidebar-translucent: rgb(17 16 12 / 88%);
+  --octant-sidebar-translucent-subtle: rgb(17 16 12 / 62%);
+  --octant-sidebar-translucent-strong: rgb(17 16 12 / 34%);
   --octant-scrim: rgb(0 0 0 / 70%);
-  --octant-floating: #282828;
-  --octant-control: #2a2a2a;
-  --octant-surface-muted: #2a2a2a;
-  --octant-control-hover: #313131;
-  --octant-surface-hover: #313131;
-  --octant-control-pressed: #393939;
-  --octant-surface-selected: #323232;
-  --octant-surface-raised: #282828;
-  --octant-surface-inset: #141414;
-  --octant-text-primary: #ededed;
-  --octant-text-secondary: #a8a8a8;
-  --octant-text-muted: #8b8b8b;
+  --octant-floating: #1c1b16;
+  --octant-control: #232219;
+  --octant-surface-muted: #232219;
+  --octant-control-hover: #2a2920;
+  --octant-surface-hover: #2a2920;
+  --octant-control-pressed: #322f25;
+  --octant-surface-selected: #353430;
+  --octant-surface-raised: #1c1b16;
+  --octant-surface-inset: #0e0d0a;
+  --octant-text-primary: #f2f1ed;
+  --octant-text-secondary: #959490;
+  --octant-text-muted: #787773;
   --octant-text-primary-high-contrast: #ffffff;
-  --octant-text-secondary-high-contrast: #c8c8c8;
-  --octant-text-muted-high-contrast: #a4a4a4;
-  --octant-primary-foreground: #06111c;
-  --octant-accent: #3d9aff;
-  --octant-accent-foreground: #06111c;
+  --octant-text-secondary-high-contrast: #c9c8c3;
+  --octant-text-muted-high-contrast: #a5a4a0;
+  --octant-primary-foreground: #14130f;
+  --octant-accent: #d9a441;
+  --octant-accent-foreground: #14130f;
+  --octant-accent-text: #d9a441;
   --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 16%, transparent);
-  --octant-divider-strong: #6f6f6f;
-  --octant-destructive: #ee5c61;
+  --octant-divider-strong: #787773;
+  --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
   --octant-shadow-sm: 0 0 0 1px var(--octant-border-strong), 0 1px 2px rgb(0 0 0 / 30%);
   --octant-shadow-md:
@@ -78,22 +89,22 @@
   --octant-space-8: 32px;
   --octant-wide-primary-min: 360px;
   --octant-context-sidebar-min: 280px;
-  --octant-success-surface: #233229;
-  --octant-success-text: #8fd8ab;
-  --octant-warning-surface: #372d1d;
-  --octant-warning-border: #a98443;
-  --octant-warning-text: #f0c383;
-  --octant-danger-text: #ee5c61;
-  --octant-addition-text: #8fd8ab;
-  --octant-deletion-text: #ee5c61;
-  --octant-palette-red: #ee5c61;
-  --octant-palette-orange: #f0954a;
-  --octant-palette-yellow: #f0c383;
-  --octant-palette-green: #8fd8ab;
-  --octant-palette-teal: #5ccfc9;
-  --octant-palette-blue: #3d9aff;
-  --octant-palette-purple: #b48cf2;
-  --octant-palette-pink: #f08ac0;
+  --octant-success-surface: #16281f;
+  --octant-success-text: #6bb299;
+  --octant-warning-surface: #342b0e;
+  --octant-warning-border: #a3801f;
+  --octant-warning-text: #edbc26;
+  --octant-danger-text: #e17d96;
+  --octant-addition-text: #6bb299;
+  --octant-deletion-text: #e17d96;
+  --octant-palette-red: #d95778;
+  --octant-palette-orange: #e09b52;
+  --octant-palette-yellow: #d9a441;
+  --octant-palette-green: #93cb58;
+  --octant-palette-teal: #45c8bc;
+  --octant-palette-blue: #74b0f3;
+  --octant-palette-purple: #ab98f2;
+  --octant-palette-pink: #f4809a;
   --octant-ui-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
   --octant-ui-font-size: 13px;
   --octant-ui-font-weight: 400;
@@ -516,6 +527,12 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  /* octant.css sets a 16px reading scale on body for document surfaces; the
+     app's chrome runs on the user's typography settings instead. Components
+     ported to the design system carry their own explicit sizes, so this
+     override costs them nothing. */
+  font-family: var(--octant-ui-font-family);
+  font-size: var(--octant-ui-font-size);
 }
 
 h1,
@@ -560,20 +577,6 @@ button:focus-visible {
   border: 0;
 }
 
-.mode-switcher {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  gap: 2px;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-}
-
-.mode-switcher--dropdown {
-  display: block;
-}
-
 .octant-menu__trigger {
   display: flex;
   width: 100%;
@@ -605,11 +608,6 @@ button:focus-visible {
 .octant-menu__item:focus-visible {
   outline: 2px solid var(--octant-focus-ring);
   outline-offset: 1px;
-}
-
-.octant-menu__trigger-chevron {
-  margin-left: auto;
-  color: var(--octant-text-muted);
 }
 
 .octant-menu__positioner {
@@ -679,41 +677,12 @@ button:focus-visible {
   color: var(--octant-focus-ring);
 }
 
-.mode-button,
 .new-project {
   border: 0;
   cursor: pointer;
   transition:
     background-color 140ms ease,
     color 140ms ease;
-}
-
-.mode-button {
-  display: inline-flex;
-  height: 30px;
-  min-width: 0;
-  min-height: 30px;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 0 7px;
-  color: var(--octant-text-muted);
-  background: transparent;
-  border-radius: 7px;
-  font-size: 12px;
-  font-weight: 500;
-  box-shadow: none;
-}
-
-.mode-button:hover {
-  color: var(--octant-text-secondary);
-  background: var(--octant-control-hover);
-}
-
-.mode-button[aria-pressed="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-selection);
-  box-shadow: var(--octant-shadow-hairline);
 }
 
 .new-project {
@@ -749,7 +718,6 @@ button:focus-visible {
 }
 
 .new-project:active,
-.sidebar__utility:active,
 .workspace-group__action:active,
 .settings-view__action:active,
 .shell-boundary__action:active {
@@ -916,15 +884,16 @@ button:focus-visible {
 
 .activity-nav {
   display: grid;
-  gap: 14px;
+  gap: 0;
 }
 
-.activity-nav__group h2 {
-  margin: 0;
-  padding: 0 8px 6px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 500;
+/* Group labels are h2s for the document outline wearing the system's quiet
+   .sidebar-section treatment; only the heading's own UA weight and bottom
+   margin need resetting — the class supplies the rest. */
+.activity-nav__group > h2,
+.project-section--unfiled > h2 {
+  margin-bottom: 0;
+  font-weight: 400;
 }
 
 .activity-nav__threads {
@@ -994,17 +963,19 @@ button:focus-visible {
 .project-dialog .code-project-views__choice {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--octant-text-secondary);
-  font-size: 13px;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
 }
 
+/* 8px wide like the thread-status dot, so activity titles and tree titles
+   start on the same edge. */
 .activity-nav__glyph {
   display: inline-flex;
   flex: none;
   align-items: center;
   justify-content: center;
-  min-width: 12px;
+  min-width: 8px;
   color: var(--octant-text-muted);
   font-size: 10px;
   line-height: 1;
@@ -1022,56 +993,34 @@ button:focus-visible {
   color: var(--octant-text-secondary);
 }
 
-.project-section + .project-section {
-  margin-top: 18px;
-}
-
+/* A Project name is a section header over its thread rows, not a row among
+   them: generous room above each header, none below, and no per-row seams. */
 .project-block + .project-block {
-  margin-top: 2px;
+  margin-top: var(--oct-space-3);
 }
 
-/* Nested threads keep the Project row's left edge, so the column of rows reads
-   as one list rather than a narrower list inset inside it. The indent that
-   shows the nesting is carried by the row's own padding below, which puts the
-   title under the Project's name instead of leaving the pill empty on the
-   left. */
+/* Nested threads keep the header's left edge: the header's chevron gutter plus
+   its gap equals the dot plus the row gap, so thread titles line up under the
+   Project's name with no extra indent. */
 .project-threads {
   display: grid;
   gap: 2px;
-  margin: 2px 0 6px;
+  margin: 2px 0 0;
   padding-left: 0;
 }
 
-/* 30px is where the Project's name starts, less the 12px marker gutter and the
-   6px gap every thread row reserves ahead of its title. Only a nested list gets
-   it: Recents has no Project above it to line up under. */
-/* Just enough to read as "inside this Project" and no more. The dot sits in
-   the indent, so the tree is legible from the marks alone rather than from a
-   deep left margin that pushes every title away from the edge. */
-.project-block .project-threads .sidebar-navigation__thread {
-  padding-left: 18px;
-}
-
+/* The container carries the system's .sidebar-section label treatment; the h2
+   inside exists for the outline and simply wears the container's quiet type. */
 .project-section__header {
   display: flex;
-  min-height: 28px;
+  min-height: 24px;
   align-items: center;
   justify-content: space-between;
-  padding: 0 4px 0 8px;
 }
 
-.project-section__header h2,
-.project-section--unfiled h2 {
+.project-section__header h2 {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.project-section--unfiled h2 {
-  padding: 0 8px 6px;
+  font: inherit;
 }
 
 /* The header's controls answer for the section the pointer is already on, so
@@ -1099,13 +1048,16 @@ button:focus-visible {
   }
 }
 
+/* The system's .btn-icon recipe, compacted: a full 34px square would give the
+   quiet header back the item weight this port removes. */
 .project-section__add,
 .project-section__header .octant-menu__trigger {
-  width: 26px;
-  min-height: 26px;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
   justify-content: center;
   padding: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
   border-radius: 6px;
 }
 
@@ -1113,8 +1065,8 @@ button:focus-visible {
 .project-section__add:focus-visible,
 .project-section__header .octant-menu__trigger:hover,
 .project-section__header .octant-menu__trigger:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .project-row {
@@ -1122,41 +1074,34 @@ button:focus-visible {
   min-width: 0;
   grid-template-columns: minmax(0, 1fr) repeat(2, auto);
   align-items: center;
-  min-height: 29px;
+  min-height: 24px;
   border: 0;
-  border-radius: 8px;
+  color: var(--oct-meta);
 }
 
-.project-row:hover {
-  background: var(--octant-control-hover);
-}
-
+/* The active Project is marked by its label's ink alone: a filled pill would
+   turn the header back into the row the reader keeps mistaking for one. */
 .project-row[data-active="true"] {
-  background: var(--octant-selection);
+  color: var(--oct-fg);
 }
 
 .project-row__select {
   display: grid;
   min-width: 0;
-  grid-template-columns: 12px 16px minmax(0, 1fr);
-  gap: 6px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: var(--oct-space-2);
   align-items: center;
-  min-height: 29px;
-  padding: 0 7px 0 8px;
+  min-height: 24px;
+  padding: 0 var(--oct-space-2);
+  color: inherit;
   cursor: pointer;
   text-align: left;
 }
 
-.project-row__disclosure,
-.project-row__folder {
+.project-row__disclosure {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--octant-text-muted);
-}
-
-.project-row__folder {
-  color: var(--octant-text-secondary);
 }
 
 .project-row__copy {
@@ -1165,11 +1110,14 @@ button:focus-visible {
   gap: 2px;
 }
 
+/* The Project's name wears the system's section-label type, so the tree reads
+   header-over-rows instead of two competing row styles. */
 .project-row__copy > span {
   overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
-  font-weight: 500;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1177,21 +1125,23 @@ button:focus-visible {
 .project-row__copy small {
   color: var(--octant-warning-text);
   font-size: 10px;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .project-row__action {
-  min-height: 25px;
-  padding: 0 7px;
-  color: var(--octant-text-muted);
-  border-radius: 5px;
+  min-height: 24px;
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  border-radius: 6px;
   cursor: pointer;
   font-size: 10px;
 }
 
 .project-row__action:hover,
 .project-row__action:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .project-row__action:disabled {
@@ -1200,7 +1150,9 @@ button:focus-visible {
 }
 
 .project-row__action--icon {
-  width: 27px;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
   padding: 0;
   opacity: 0;
 }
@@ -1217,18 +1169,18 @@ button:focus-visible {
 }
 
 .project-archive {
-  margin-top: 16px;
+  margin-top: var(--oct-space-4);
 }
 
 .project-archive summary {
   display: flex;
-  min-height: 29px;
+  min-height: 24px;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px;
-  color: var(--octant-text-muted);
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-meta);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--oct-text-xs);
   list-style: none;
 }
 
@@ -1256,56 +1208,9 @@ button:focus-visible {
   font-size: 11px;
 }
 
-.sidebar__utility {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  width: 100%;
-  min-height: 30px;
-  gap: 8px;
-  margin: 4px 0 0;
-  padding: 0 9px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 12px;
-  text-align: left;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-}
-
-.sidebar__utility:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-  border-color: transparent;
-}
-
 .sidebar-profile {
   position: relative;
   margin-top: auto;
-}
-
-.sidebar-profile__trigger {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 34px;
-  gap: 8px;
-  padding: 0 8px;
-  color: var(--octant-text-primary);
-  border-radius: 8px;
-  font-size: 12.5px;
-}
-
-.sidebar-profile__name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .sidebar-profile__disclosure {
@@ -1339,13 +1244,6 @@ button:focus-visible {
 .sidebar-profile__action:hover {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
-}
-
-.sidebar__utility kbd {
-  margin-left: auto;
-  color: var(--octant-text-muted);
-  font: inherit;
-  font-size: 10px;
 }
 
 .shell-icon-button {
@@ -1571,6 +1469,7 @@ button:focus-visible {
 .workspace-tabs {
   display: flex;
   flex: 1 1 auto;
+  align-items: center;
   min-width: 0;
   min-height: 30px;
   gap: 4px;
@@ -1585,6 +1484,11 @@ button:focus-visible {
   overflow: visible;
 }
 
+/* The dock-tab precedent (.right-utility-dock__tabs button): compact ghost
+   items in a 34px chrome rail. At rest a tab is meta ink on nothing; pointing
+   at one, or the one that is active, takes the system's fg ink over the soft
+   fill. The single filled pill at rest is the active affordance — selection
+   stays neutral, with no accent and no border. */
 .workspace-tab-item {
   position: relative;
   display: inline-flex;
@@ -1592,10 +1496,15 @@ button:focus-visible {
   align-items: center;
   min-width: 0;
   max-width: min(184px, 24vw);
+  min-height: 26px;
   overflow: visible;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
+}
+
+.workspace-tab-item:hover {
+  background: var(--oct-fg-soft);
 }
 
 .workspace-tab-slot {
@@ -1610,9 +1519,9 @@ button:focus-visible {
   width: 2px;
   min-height: 28px;
   align-self: center;
-  background: var(--octant-focus-ring);
+  background: var(--oct-accent);
   border-radius: 999px;
-  box-shadow: 0 0 0 1px var(--octant-workspace);
+  box-shadow: 0 0 0 1px var(--oct-bg);
   pointer-events: none;
 }
 
@@ -1673,20 +1582,20 @@ button:focus-visible {
 }
 
 .workspace-tab-item:has(.workspace-tab[aria-selected="true"]) {
-  background: var(--octant-selection);
+  background: var(--oct-fg-soft);
 }
 
 .workspace-tab {
   width: auto;
   max-width: 100%;
   min-width: 96px;
-  min-height: 28px;
+  min-height: 26px;
   padding: 0 56px 0 9px;
   overflow: hidden;
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
   border-radius: inherit;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--oct-text-xs);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1694,29 +1603,32 @@ button:focus-visible {
 
 .workspace-tab:hover,
 .workspace-tab[aria-selected="true"] {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
+/* The btn-icon recipe's states at the 26px square this rail's pills can hold
+   — the same compromise .window-chrome__button makes in the 34px titlebar
+   row, pressed feedback included. */
 .workspace-tab__action {
   display: grid;
   width: 26px;
   height: 26px;
   place-items: center;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   background: transparent;
   border-radius: 5px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--oct-text-xs);
 }
 
 .workspace-tab__action:hover,
 .workspace-tab__action[aria-expanded="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .workspace-tab__action:active {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   background: var(--octant-control-pressed);
 }
 
@@ -1821,37 +1733,43 @@ button:focus-visible {
   background: var(--octant-workspace);
 }
 
+/* Drawn to the system's .btn btn-secondary btn-sm recipe until these
+   surfaces adopt the classes themselves. */
 .workspace-group__action,
 .settings-view__action,
 .shell-boundary__action {
-  min-height: 28px;
-  padding: 0 10px;
-  color: var(--octant-text-secondary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 7px;
+  min-height: var(--oct-control-height-sm);
+  padding: 0 var(--oct-space-4);
+  color: var(--oct-fg);
+  background: transparent;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--oct-text-xs);
   font-weight: 500;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+    background-color var(--oct-motion-fast) var(--oct-ease-standard),
+    border-color var(--oct-motion-fast) var(--oct-ease-standard),
+    color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .workspace-group__action:hover,
 .settings-view__action:hover,
 .shell-boundary__action:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-  border-color: var(--octant-border-strong);
+  color: var(--oct-fg);
+  background: var(--oct-surface-warm);
+  border-color: var(--oct-fg);
 }
 
+/* Reads as a .setgroup-head so in-pane subheadings match group heads. */
 .settings-view__section-heading {
-  margin: 18px 0 4px;
-  color: var(--octant-text-primary);
-  font-size: 13px;
-  font-weight: 600;
+  margin: var(--oct-space-6) 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
 }
 
 .settings-view__field,
@@ -1861,11 +1779,11 @@ button:focus-visible {
   align-items: center;
   gap: 16px;
   padding: 6px 0;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
   background: transparent;
   border: 0;
   border-radius: 0;
-  font-size: 12.5px;
+  font-size: var(--oct-text-sm);
 }
 
 .settings-view__field {
@@ -1895,18 +1813,19 @@ button:focus-visible {
   cursor: pointer;
 }
 
+/* Drawn to the system's .input/.select recipe at the small control height. */
 .settings-view__text-input,
 .settings-view__select {
   width: auto;
   min-width: 150px;
-  min-height: 30px;
-  padding: 0 9px;
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 7px;
+  min-height: var(--oct-control-height-sm);
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--oct-text-sm);
 }
 
 .settings-view__field--search .settings-view__text-input {
@@ -1921,7 +1840,7 @@ button:focus-visible {
 
 .settings-view__text-input:hover,
 .settings-view__select:hover {
-  border-color: var(--octant-border-strong);
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
 }
 
 .settings-view__text-input:focus-visible,
@@ -1932,8 +1851,9 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+/* No forced color-scheme: the root's declared scheme keeps the native
+   popup matched to the active theme, which "dark" broke in light mode. */
 .settings-view__select {
-  color-scheme: dark;
   cursor: pointer;
 }
 
@@ -1971,86 +1891,27 @@ button:focus-visible {
   gap: 16px;
 }
 
-.provider-discovery {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+/* Discovery is a .setgroup of .setrow candidates (octant.css); only the
+   pieces the system has no vocabulary for remain here. */
+.provider-discovery .setgroup-note:last-child {
+  padding-bottom: var(--oct-space-4);
 }
 
-.provider-discovery__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+.provider-discovery__version {
+  margin-left: var(--oct-space-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-meta);
 }
 
-.provider-discovery__header h3,
-.provider-discovery__header p,
-.provider-discovery__empty,
-.provider-discovery__notice,
 .provider-discovery__guidance {
-  margin: 0;
+  display: block;
+  margin-top: 2px;
 }
 
-.provider-discovery__header h3 {
-  font-size: 13px;
-}
-
-.provider-discovery__header p,
-.provider-discovery__empty,
-.provider-discovery__notice,
-.provider-discovery__guidance {
-  margin-top: 3px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.provider-discovery__list {
-  display: grid;
-  gap: 8px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.provider-discovery__card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 5px 12px;
-  align-items: center;
-  padding: 10px 12px;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-}
-
-.provider-discovery__card-info,
-.provider-discovery__card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-}
-
-.provider-discovery__card-name {
-  color: var(--octant-text-primary);
-  font-weight: 600;
-}
-
-.provider-discovery__card-version,
-.provider-discovery__card-path,
-.provider-discovery__readiness,
 .provider-discovery__connected {
-  color: var(--octant-text-muted);
-  font-size: 10.5px;
-}
-
-.provider-discovery__guidance {
-  grid-column: 1 / -1;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-meta);
 }
 
 .provider-settings h2,
@@ -2089,7 +1950,6 @@ button:focus-visible {
   line-height: 1.5;
 }
 
-.provider-settings__permission,
 .provider-settings__create label,
 .provider-card__edit label {
   display: grid;
@@ -2103,10 +1963,6 @@ button:focus-visible {
   min-height: 58px;
   padding: 8px 10px;
   resize: vertical;
-}
-
-.provider-settings__permission {
-  min-width: 220px;
 }
 
 .provider-settings__alert,
@@ -2140,32 +1996,6 @@ button:focus-visible {
   border-radius: 9px;
 }
 
-.provider-settings__manual {
-  display: grid;
-  overflow: hidden;
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
-}
-
-.provider-settings__manual-trigger {
-  display: flex;
-  min-height: 38px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 12px;
-  color: var(--octant-text-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.provider-settings__manual-trigger:hover,
-.provider-settings__manual-trigger:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
 .provider-settings__disclosure-icon,
 .provider-card__disclosure-icon {
   flex: 0 0 auto;
@@ -2177,14 +2007,12 @@ button:focus-visible {
   transform: rotate(180deg);
 }
 
+/* Sits inside the provider card's .setgroup-foot, which already carries
+   the horizontal padding. */
 .provider-settings__manual-body {
   display: grid;
   gap: 12px;
-  padding: 0 12px 12px;
-}
-
-.provider-settings__manual[data-expanded="false"] .provider-settings__manual-body {
-  display: none;
+  padding: 12px 0 0;
 }
 
 .provider-settings__create--openai-compatible,
@@ -2209,22 +2037,72 @@ button:focus-visible {
   margin: 0;
 }
 
-.provider-settings__list {
+/* The provider list is a .setgroup of .provrow items (octant.css). The
+   rules below are the app-side residue that vocabulary does not cover. */
+
+/* Inside a .setgroup card the empty state needs the card's own padding. */
+.setgroup > .provider-settings__empty {
+  margin: 0;
+  padding: var(--oct-space-4);
+}
+
+.setgroup > .setgroup-note + .provlist {
+  margin-top: var(--oct-space-2);
+}
+
+/* Reordering keeps the pre-port up/down mechanism; the grip column just
+   presents it as two stacked 24px targets (the WCAG 2.5.8 floor the
+   system's .prov-grip comment cites). */
+.prov-grip-slot {
+  display: grid;
+}
+
+.prov-grip-slot .prov-grip {
+  cursor: pointer;
+}
+
+.prov-grip-slot .prov-grip:disabled {
+  cursor: default;
+  color: var(--oct-meta);
+  background: none;
+  opacity: var(--oct-disabled-opacity);
+}
+
+/* The system's narrow-viewport rule targets input.switch; the app's switch
+   is the owned OctantSwitch button recipe and the details chevron rides
+   beside it, so the pair travels as one grid item. */
+.prov-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.prov-details-icon {
+  transition: transform 140ms ease;
+}
+
+.prov-details-trigger[aria-expanded="true"] .prov-details-icon {
+  transform: rotate(180deg);
+}
+
+/* Expanded details bleed to the card edges so the divider reads as part of
+   the card, not a box floating inside the row. */
+.prov-details {
   display: grid;
   gap: 12px;
+  grid-column: 1 / -1;
+  margin: var(--oct-space-3) calc(-1 * var(--oct-space-4)) calc(-1 * var(--oct-space-3));
+  border-top: 1px solid var(--oct-border-soft);
+  padding: var(--oct-space-4);
 }
 
-.provider-card {
-  display: grid;
-  gap: 0;
-  padding: 0;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--octant-control) 64%, transparent);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
+@media (max-width: 560px) {
+  .provrow > .prov-actions {
+    grid-area: 1 / 3;
+    justify-self: end;
+  }
 }
 
-.provider-card__header,
 .provider-card__actions,
 .provider-card__facts {
   display: flex;
@@ -2233,75 +2111,16 @@ button:focus-visible {
   gap: 8px;
 }
 
-.provider-card__header {
-  justify-content: space-between;
-  min-height: 54px;
-  padding: 10px 12px;
-}
-
-.provider-card__header h3 {
-  font-size: 15px;
-}
-
-.provider-card__header p,
 .provider-card__facts {
   margin-top: 3px;
   color: var(--octant-text-muted);
   font-size: 11px;
 }
 
-.provider-card__header-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.provider-card__details-trigger {
-  min-height: 26px;
-  padding: 0 7px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-}
-
-.provider-card__details-icon {
-  transition: transform 140ms ease;
-}
-
-.provider-card__details-trigger[aria-expanded="true"] .provider-card__details-icon {
-  transform: rotate(180deg);
-}
-
-.provider-card__details {
-  display: grid;
-  gap: 12px;
-  padding: 12px;
-  border-top: 1px solid var(--octant-border);
-}
-
 .provider-card__facts span:not(:last-child)::after {
   margin-left: 8px;
   color: var(--octant-divider-strong);
   content: "·";
-}
-
-.provider-card__status {
-  padding: 4px 8px;
-  color: var(--octant-text-secondary);
-  background: var(--octant-control);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.provider-card__status--ready {
-  color: var(--octant-success-text);
-  background: var(--octant-success-surface);
-}
-
-.provider-card__status--checking,
-.provider-card__status--starting {
-  color: var(--octant-text-secondary);
-  background: var(--octant-control-hover);
 }
 
 .provider-card__actions button,
@@ -2432,7 +2251,7 @@ button:focus-visible {
   height: 30px;
   place-items: center;
   color: var(--octant-text-muted);
-  background: var(--octant-selection);
+  background: var(--oct-selection);
   border: 1px solid var(--octant-border);
   border-radius: 7px;
 }
@@ -2503,32 +2322,23 @@ button:focus-visible {
   }
 }
 
-.project-dialog,
-.project-search,
 .folder-picker {
   position: fixed;
   z-index: 50;
   color: inherit;
 }
 
-.project-dialog::backdrop,
-.project-search::backdrop,
 .folder-picker::backdrop {
   background: var(--octant-scrim);
 }
 
 .project-dialog {
-  inset: auto;
-  top: auto;
-  right: auto;
-  bottom: auto;
-  left: auto;
-
   /*
    * Said as the shared dialog's own variable, not as a competing max-width.
    * These dialogs also carry `.octant-dialog__popup`, whose rule is imported
    * later at the same specificity, so a flat cap here would simply lose and
-   * the dialog would open at the shared default.
+   * the dialog would open at the shared default. Surface, border, radius,
+   * and shadow come from the shared dialog chrome and the material layer.
    */
   --octant-dialog-width: 380px;
 
@@ -2538,19 +2348,7 @@ button:focus-visible {
   max-height: min(80vh, 560px);
   margin: 0;
   overflow: auto;
-  padding: 16px;
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 12px;
-  box-shadow: none;
-}
-
-/* Native <dialog> path still uses the top-biased sheet layout. */
-dialog.project-dialog {
-  inset: 44px 0 0;
-  margin: auto;
-  max-height: none;
+  padding: var(--oct-space-4);
 }
 
 .project-dialog__header {
@@ -2559,97 +2357,89 @@ dialog.project-dialog {
   justify-content: space-between;
 }
 
+/* Mono meta, matching the system's .menu-label/.eyebrow treatment. */
 .project-dialog__header span,
 .project-overview__type,
 .project-overview__root > span {
-  color: var(--octant-text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }
 
 .project-dialog h1 {
   margin: 2px 0 0;
-  font-size: 16px;
+  font-size: var(--oct-text-base);
   font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.project-dialog__header > button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  color: var(--octant-text-muted);
-  border-radius: 6px;
-  cursor: pointer;
-  place-items: center;
-}
-
-.project-dialog__header > button:hover {
-  background: var(--octant-selection);
+  letter-spacing: var(--oct-tracking-tight);
 }
 
 .project-dialog > p {
-  margin: 8px 0 14px;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-  line-height: 1.45;
+  margin: var(--oct-space-2) 0 var(--oct-space-4);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-snug);
 }
 
 .project-dialog form,
 .project-dialog label {
   display: grid;
-  gap: 7px;
+  gap: var(--oct-space-2);
 }
 
+/* Reads as the system's .field label. */
 .project-dialog label {
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
 }
 
+/* Drawn to the system's .input/.select/.textarea recipe at the small
+   control height until these controls adopt the classes themselves. */
 .project-dialog input:not([type="checkbox"]):not([type="radio"]),
 .project-dialog select,
 .project-dialog textarea,
-.project-search input,
 .project-overview__name {
-  color: var(--octant-text-primary);
-  background: var(--octant-workspace);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 7px;
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
   font: inherit;
+  font-size: var(--oct-text-sm);
 }
 
 .project-dialog input:not([type="checkbox"]):not([type="radio"]) {
-  min-height: 38px;
-  padding: 0 10px;
+  min-height: var(--oct-control-height-sm);
+  padding: 0 var(--oct-space-3);
 }
 
 .project-dialog select,
 .project-dialog textarea {
   width: 100%;
-  padding: 9px 10px;
+  padding: var(--oct-space-2) var(--oct-space-3);
 }
 
 .project-dialog textarea {
   min-height: 112px;
   resize: vertical;
+  line-height: var(--oct-leading-snug);
 }
 
 .project-dialog input:not([type="checkbox"]):not([type="radio"]):focus-visible,
 .project-dialog select:focus-visible,
 .project-dialog textarea:focus-visible,
-.project-search input:focus-visible,
 .project-overview__name:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
+  border-color: var(--oct-accent-fg);
+  outline: none;
+  box-shadow: var(--oct-focus-ring);
 }
 
 .project-dialog__actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
 }
 
 .project-button {
@@ -2679,8 +2469,9 @@ dialog.project-dialog {
 
 .project-dialog__status {
   min-height: 17px;
-  margin: 8px 0 0 !important;
-  color: var(--octant-warning-text) !important;
+  margin: var(--oct-space-2) 0 0 !important;
+  color: var(--oct-warn-fg) !important;
+  font-size: var(--oct-text-xs);
 }
 
 .folder-picker {
@@ -2935,93 +2726,6 @@ dialog.project-dialog {
   justify-content: flex-end;
 }
 
-.project-search {
-  top: 102px;
-  width: min(100%, 590px);
-  overflow: hidden;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 11px;
-  box-shadow: var(--octant-shadow-overlay);
-}
-
-.project-search__field {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border-bottom: 1px solid var(--octant-border);
-}
-
-.project-search__field > span {
-  color: var(--octant-text-muted);
-  font-size: 18px;
-}
-
-.project-search input {
-  min-width: 0;
-  min-height: 34px;
-  padding: 0 9px;
-}
-
-.project-search__field button {
-  min-height: 25px;
-  padding: 0 7px;
-  color: var(--octant-text-muted);
-  background: var(--octant-selection);
-  border: 1px solid var(--octant-border);
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 10px;
-}
-
-.project-search__results {
-  max-height: min(52vh, 420px);
-  padding: 5px;
-  overflow-y: auto;
-}
-
-.project-search__status:not(.sr-only) {
-  margin: 0;
-  padding: 18px 12px;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-}
-
-.project-search__retry {
-  margin: -10px 12px 14px;
-}
-
-.project-search__result {
-  display: grid;
-  width: 100%;
-  gap: 3px;
-  padding: 9px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.project-search__results > button.project-search__result:hover,
-.project-search__results > button.project-search__result:focus-visible {
-  background: var(--octant-selection);
-}
-.project-search__result--archived {
-  color: var(--octant-text-muted);
-  cursor: default;
-}
-.project-search__results span {
-  font-size: 12px;
-}
-.project-search__results small {
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .project-overview {
   display: flex;
   width: 100%;
@@ -3244,7 +2948,7 @@ dialog.project-dialog {
 
 .project-memory-inspector__header button:hover {
   color: var(--octant-text-primary);
-  background: var(--octant-selection);
+  background: var(--oct-selection);
 }
 
 .project-memory-inspector__toolbar {
@@ -3470,9 +3174,12 @@ dialog.project-dialog {
   overflow: hidden;
 }
 
+/* flex-basis auto keeps the user's stored width, but the panel may shrink:
+   with flex-shrink 0 a wide dock plus this panel crushed the thread pane
+   instead, and the pane is the surface the user is reading. */
 .thread-environment-panel--pinned {
   position: relative;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   border-radius: 0;
   border-top: none;
   border-bottom: none;
@@ -3923,6 +3630,17 @@ dialog.project-dialog {
   min-height: 0;
 }
 
+/* A wide right dock plus a pinned environment panel crushed the flexible
+   thread pane to ~146px (observed at a 1440px viewport with a 640px stored
+   dock width and a 360px pinned panel). The pane keeps the shell's readable
+   primary floor and the pinned panel yields instead. min(…, 100%) stands
+   down on panes narrower than the floor — below 680px the pinned panel
+   already overlays rather than sharing the row. */
+.thread-environment-wrapper--pinned .thread-environment-wrapper__content,
+.code-thread-environment--pinned .code-thread-environment__content {
+  min-width: min(var(--octant-wide-primary-min), 100%);
+}
+
 .project-memory-scroll {
   grid-area: scroll;
   min-height: 0;
@@ -4078,13 +3796,13 @@ dialog.project-dialog {
 }
 
 .memory-entry-dialog__original {
-  margin: 0 0 14px;
-  padding: 10px 11px;
-  color: var(--octant-text-muted);
-  background: var(--octant-chrome);
-  border-left: 2px solid var(--octant-divider-strong);
-  font-size: 11px;
-  line-height: 1.45;
+  margin: 0 0 var(--oct-space-4);
+  padding: var(--oct-space-3);
+  color: var(--oct-muted);
+  background: var(--oct-surface-warm);
+  border-left: 2px solid var(--oct-border);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
 }
 
 .project-overview__prompt {
@@ -4334,20 +4052,34 @@ dialog.project-dialog {
   color: var(--octant-text-muted);
 }
 
-/* Code Project Overview: bounded, host-authoritative projections. */
+/* Code Project Overview: one thread-major list over host-authoritative
+   projections. Cards, chips, facts, and callouts are the system recipes
+   (.setgroup, .badge, .tag, .kv, .callout); this surface only places them. */
 .code-project-overview {
   display: flex;
   min-width: 0;
   flex-direction: column;
 }
 
+.code-project-overview__facts,
 .code-project-overview__sessions,
-.code-project-overview__projection,
-.code-project-overview__details,
 .code-project-overview__quick-start {
   min-width: 0;
   padding: 20px 28px;
   border-bottom: 1px solid var(--octant-border);
+}
+
+.code-project-overview__facts {
+  display: grid;
+  gap: 12px;
+}
+
+.code-project-overview__authority {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
 }
 
 .code-project-overview__quick-start {
@@ -4391,175 +4123,94 @@ dialog.project-dialog {
   color: var(--octant-success-text);
 }
 
-.code-project-overview__thread-list,
-.code-project-overview__items,
-.code-project-overview__activity-group ul {
+.code-project-overview__threads {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.code-project-overview__thread-list .project-button {
-  display: flex;
-  width: 100%;
-  min-height: 42px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 11px;
-  text-align: left;
-}
-
-.code-project-overview__thread-list .project-button span:first-child {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--octant-text-primary);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-project-overview__thread-list .project-button span:last-child {
-  flex: none;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-}
-
-.code-project-overview__sections {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.code-project-overview__projection {
-  border-right: 1px solid var(--octant-border);
-}
-
-.code-project-overview__projection:nth-child(even) {
-  border-right: 0;
-}
-
-.code-project-overview__item {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-  padding: 10px 12px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-}
-
-.code-project-overview__item strong {
-  overflow: hidden;
-  color: var(--octant-text-primary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-project-overview__item p,
 .code-project-overview__sessions > p,
 .code-project-overview__quick-start > p,
-.code-project-overview__state p,
-.code-project-overview__activity-group > p {
+.code-project-overview__state p {
   margin: 0;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  line-height: 1.45;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
-.code-project-overview__empty {
-  color: var(--octant-text-muted) !important;
-}
-
-.code-project-overview__status {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 5px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.code-project-overview__status svg {
-  flex: none;
-  margin-top: 1px;
-}
-
+/* The unavailable alert is the system callout; the surface only keeps the
+   retry control beside the copy instead of under it. */
 .code-project-overview__state {
-  display: flex;
   align-items: flex-start;
-  gap: 8px;
-  color: var(--octant-warning-text);
 }
 
 .code-project-overview__state > div {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
   flex: 1;
-}
-
-.code-project-overview__state strong {
-  font-size: 12px;
-}
-
-.code-project-overview__state .octant-button {
-  flex: none;
-}
-
-.code-project-overview__activity-group + .code-project-overview__activity-group {
-  margin-top: 12px;
-}
-
-.code-project-overview__activity-group h3 {
-  margin: 0 0 5px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.code-project-overview__activity-group li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--octant-border);
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-}
-
-.code-project-overview__activity-group li strong {
   min-width: 0;
+}
+
+.code-project-overview__state svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* Each thread card is the system setgroup recipe; the surface owns only the
+   interior placement of the title row, inline facts, and disclosure. */
+.code-project-thread {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 14px 12px;
+}
+
+.code-project-thread__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.code-project-thread__title {
+  flex: 1 1 220px;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.code-project-thread__title span {
   overflow: hidden;
-  color: var(--octant-text-primary);
-  font-weight: 500;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.code-project-overview__activity-group li span {
-  flex: none;
-  color: var(--octant-text-muted);
-}
-
-.code-project-overview__details summary {
+.code-project-thread__chips {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
-  cursor: pointer;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
+  gap: 6px;
 }
 
-.code-project-overview__details[open] summary {
-  margin-bottom: 12px;
-  color: var(--octant-text-primary);
+.code-project-thread__pin {
+  flex: none;
+}
+
+.code-project-thread__more summary {
+  cursor: pointer;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
+}
+
+.code-project-thread__more[open] summary {
+  margin-bottom: 8px;
+  color: var(--oct-fg-2);
 }
 
 .code-project-overview__quick-start-copy {
@@ -4586,20 +4237,10 @@ dialog.project-dialog {
 }
 
 @media (max-width: 760px) {
+  .code-project-overview__facts,
   .code-project-overview__sessions,
-  .code-project-overview__projection,
-  .code-project-overview__details,
   .code-project-overview__quick-start {
     padding-inline: 18px;
-  }
-
-  .code-project-overview__sections {
-    grid-template-columns: 1fr;
-  }
-
-  .code-project-overview__projection,
-  .code-project-overview__projection:nth-child(even) {
-    border-right: 0;
   }
 }
 
@@ -4614,7 +4255,7 @@ dialog.project-dialog {
 .work-overview__section {
   min-width: 0;
   padding: 14px 0;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .work-overview__section:first-child {
@@ -4629,8 +4270,8 @@ dialog.project-dialog {
 
 .work-overview__section p {
   margin: 6px 0 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   line-height: 1.5;
 }
 
@@ -4650,14 +4291,14 @@ dialog.project-dialog {
   align-items: baseline;
   justify-content: space-between;
   min-width: 0;
-  color: var(--octant-text);
+  color: var(--oct-fg);
   font-size: 12px;
   line-height: 1.4;
 }
 
 .work-overview__items li > span:last-child {
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .work-overview__composer {
@@ -4667,7 +4308,7 @@ dialog.project-dialog {
   min-width: 0;
   margin: 0 16px 16px;
   padding: 14px 0 0;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .work-overview__composer form {
@@ -4688,8 +4329,8 @@ dialog.project-dialog {
   gap: 5px;
   align-items: center;
   min-width: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .work-overview__context-item span {
@@ -4698,25 +4339,8 @@ dialog.project-dialog {
   white-space: nowrap;
 }
 
-.work-overview__composer textarea {
-  width: 100%;
-  min-height: 72px;
-  padding: 10px 12px;
-  resize: vertical;
-  color: var(--octant-text);
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.work-overview__composer textarea:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 1px;
-}
-
+/* The quick-start field and buttons are the system's Textarea and button
+   recipes; only their column placement is this surface's own. */
 .work-overview__composer button {
   align-self: flex-start;
 }
@@ -4764,13 +4388,13 @@ dialog.project-dialog {
 .chat-project-overview__section {
   min-width: 0;
   padding: 14px 16px 14px 0;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .chat-project-overview__section:nth-child(even) {
   padding-right: 0;
   padding-left: 16px;
-  border-left: 1px solid var(--octant-border);
+  border-left: 1px solid var(--oct-border);
 }
 
 .chat-project-overview__section:nth-child(-n + 2) {
@@ -4786,8 +4410,8 @@ dialog.project-dialog {
 .chat-project-overview__section p,
 .chat-project-overview__scope {
   margin: 6px 0 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   line-height: 1.5;
 }
 
@@ -4807,15 +4431,15 @@ dialog.project-dialog {
   align-items: baseline;
   justify-content: space-between;
   min-width: 0;
-  color: var(--octant-text);
+  color: var(--oct-fg);
   font-size: 12px;
   line-height: 1.4;
 }
 
 .chat-project-overview__items li > span:last-child,
 .chat-project-overview__items .project-button span:last-child {
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .chat-project-overview__archived {
@@ -4829,8 +4453,8 @@ dialog.project-dialog {
 .chat-project-overview__archived > .project-button {
   min-height: 0;
   padding: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .chat-project-overview__archived .chat-project-overview__items {
@@ -4847,7 +4471,7 @@ dialog.project-dialog {
 }
 
 .chat-project-overview:not(.chat-project-overview--home) .chat-project-overview__quick-start {
-  border-bottom: 1px solid var(--octant-border);
+  border-bottom: 1px solid var(--oct-border);
   padding-bottom: 16px;
 }
 
@@ -4876,27 +4500,17 @@ dialog.project-dialog {
   gap: 10px;
 }
 
-.chat-project-overview__quick-start textarea {
-  width: 100%;
+/* The frame, input, row, and send circle are the system's `.composer`
+   vocabulary; the quick-start only asks for a taller first message. */
+.chat-project-overview__quick-start .composer-input {
   min-height: 96px;
-  padding: 12px 14px;
-  resize: vertical;
-  color: var(--octant-text);
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 12px;
-  font: inherit;
-  font-size: 14px;
-  line-height: 1.5;
 }
 
-.chat-project-overview__quick-start textarea:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 1px;
-}
-
-.chat-project-overview__quick-start button {
-  align-self: flex-start;
+/* Placement only: the quick-start sits mid-page, so the picker menu opens
+   downward. The trigger's look is the system's (ADR 0038). */
+.chat-project-overview__quick-start .composer-row .composer-model-picker__menu {
+  top: calc(100% + 8px);
+  bottom: auto;
 }
 
 @media (max-width: 760px) {
@@ -4909,7 +4523,7 @@ dialog.project-dialog {
   .chat-project-overview__section:nth-child(-n + 2) {
     padding-right: 0;
     padding-left: 0;
-    border-top: 1px solid var(--octant-border);
+    border-top: 1px solid var(--oct-border);
     border-left: 0;
   }
 
@@ -4923,14 +4537,9 @@ dialog.project-dialog {
     grid-template-columns: 1fr;
   }
 
-  .provider-settings__intro,
-  .provider-card__header {
+  .provider-settings__intro {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .provider-settings__permission {
-    min-width: 0;
   }
 
   .provider-card__edit,
@@ -4940,12 +4549,6 @@ dialog.project-dialog {
 
   .provider-card__discovery dl {
     grid-template-columns: 1fr;
-  }
-}
-
-@media (min-width: 681px) and (max-width: 960px) {
-  .mode-button {
-    padding-inline: 5px;
   }
 }
 
@@ -4988,14 +4591,9 @@ dialog.project-dialog {
     grid-template-columns: 1fr;
   }
 
-  .provider-settings__intro,
-  .provider-card__header {
+  .provider-settings__intro {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .provider-settings__permission {
-    min-width: 0;
   }
 
   .provider-settings__create,
@@ -5017,10 +4615,6 @@ dialog.project-dialog {
   }
 
   .project-dialog {
-    max-width: calc(100vw - 32px);
-  }
-  .project-search {
-    top: 66px;
     max-width: calc(100vw - 32px);
   }
 
@@ -5070,11 +4664,9 @@ dialog.project-dialog {
     animation: none;
   }
 
-  .mode-button,
   .octant-menu__trigger,
   .octant-menu__item,
   .new-project,
-  .sidebar__utility,
   .workspace-split__resize::before,
   .workspace-split__resize,
   .workspace-group__action,
@@ -5094,10 +4686,6 @@ dialog.project-dialog {
 
   .workspace-group__header {
     border-color: var(--octant-border-strong);
-  }
-
-  .mode-switcher {
-    border: 1px solid var(--octant-border-strong);
   }
 
   .octant-menu__popup,
@@ -5148,6 +4736,8 @@ dialog.project-dialog {
   max-width: min(100%, 280px);
 }
 
+/* Base look for the picker outside a composer row; inside one, the system's
+   `.composer-row` treatment out-specifies this (ADR 0038). */
 .composer-model-picker__trigger {
   display: inline-flex;
   align-items: center;
@@ -5155,22 +4745,22 @@ dialog.project-dialog {
   max-width: 100%;
   min-height: 28px;
   padding: 0 10px;
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 8px;
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--oct-text-xs);
   font-weight: 500;
 }
 
 .composer-model-picker__trigger:hover {
-  background: var(--octant-control-hover);
+  background: var(--oct-fg-soft);
 }
 
 .composer-model-picker__trigger:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-accent-fg);
   outline-offset: 2px;
 }
 
@@ -5540,40 +5130,44 @@ dialog.project-dialog {
   height: 100%;
   flex: 1 1 auto;
   flex-direction: column;
-  color: var(--octant-text-primary);
-  background: var(--octant-workspace);
+  color: var(--oct-fg);
+  background: var(--oct-bg);
 }
 
+/* The bar spans the surface for its rule; its content sits in the shared
+   thread column so the title starts where the transcript below it does. */
 .code-thread-workspace__header {
+  flex: 0 0 auto;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-thread-workspace__header-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
   min-height: 44px;
-  padding: 6px clamp(16px, 3vw, 28px);
-  border-bottom: 1px solid var(--octant-border);
 }
 
 .code-thread-workspace__identity h1 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--oct-text-base);
   font-weight: 600;
   letter-spacing: -0.02em;
   text-wrap: balance;
 }
 
+/* Metadata line: system meta typography; the lifecycle fact wears `.badge`. */
 .code-thread-workspace__meta {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px 12px;
   margin-top: 2px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-}
-
-.code-thread-workspace__lifecycle {
-  color: var(--octant-text-secondary);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .code-thread-workspace__follow-up {
@@ -5596,11 +5190,11 @@ dialog.project-dialog {
   max-width: min(60ch, 60vw);
   padding: 2px 8px;
   overflow: hidden;
-  color: var(--octant-warning-text);
-  background: var(--octant-warning-surface);
-  border: 1px solid var(--octant-warning-border);
-  border-radius: 999px;
-  font-size: 11px;
+  color: var(--oct-warn-fg);
+  background: var(--oct-warn-soft);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5615,50 +5209,64 @@ dialog.project-dialog {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
+  min-height: var(--oct-control-height-sm);
   padding: 0 10px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
   background: transparent;
-  border: 1px solid var(--octant-border);
-  border-radius: 6px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--oct-text-xs);
 }
 
 .code-thread-workspace__tool:hover,
 .code-thread-workspace__tool:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .code-thread-workspace__tool[aria-pressed="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border-color: var(--octant-border-strong);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+  border-color: var(--oct-border);
 }
 
 .code-thread-workspace__auxiliary {
   display: grid;
-  width: min(100% - 40px, 760px);
   max-height: min(42vh, 360px);
   gap: 10px;
-  padding: 12px;
+  padding: var(--oct-space-3);
   margin: 12px auto 0;
   overflow: auto;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
-.code-thread-workspace__error,
-.code-thread-workspace__banner {
+/* Kept for AgentRunHierarchy, which still reports its errors under this
+   class inside the auxiliary panel. The workspace's own notices moved to
+   the system `.callout` recipe in the thread column below. */
+.code-thread-workspace__error {
   margin: 0;
   padding: 10px clamp(20px, 4vw, 48px);
-  color: var(--octant-warning-text);
-  background: var(--octant-warning-surface);
-  border-bottom: 1px solid var(--octant-warning-border);
-  font-size: 12px;
+  color: var(--oct-warn-fg);
+  background: var(--oct-warn-soft);
+  border-bottom: 1px solid var(--oct-border);
+  font-size: var(--oct-text-sm);
+}
+
+/* Placement only: the recipe is the system's `.callout`, the measure the
+   shared `.thread-column`. A notice about this thread spans the thread's
+   own column — running it edge to edge made it read as window chrome. */
+.code-thread-workspace__callout {
+  flex: 0 0 auto;
+  align-items: center;
+  margin: 12px auto 0;
+}
+
+.code-thread-workspace__callout > p {
+  flex: 1 1 auto;
 }
 
 .code-thread-workspace__provider-request {
@@ -5675,9 +5283,9 @@ dialog.project-dialog {
 .code-thread-workspace__provider-request > input {
   flex: 1 1 200px;
   padding: 4px 8px;
-  border: 1px solid var(--octant-border);
-  border-radius: 6px;
-  background: var(--octant-surface-raised);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
   color: inherit;
 }
 
@@ -5686,14 +5294,13 @@ dialog.project-dialog {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
+  padding: clamp(20px, 3vh, 36px) 0 28px;
   overflow: auto;
   overscroll-behavior: contain;
 }
 
 .code-thread-workspace__transcript {
   position: relative;
-  width: min(100% - 40px, 760px);
-  padding: clamp(20px, 3vh, 36px) 0 28px;
   margin: 0 auto;
 }
 
@@ -5705,14 +5312,14 @@ dialog.project-dialog {
 
 .code-thread-workspace__empty {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 13px;
-  line-height: 1.5;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-body);
 }
 
 .code-thread-workspace__message {
   min-width: 0;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .code-thread-workspace__message header {
@@ -5720,21 +5327,22 @@ dialog.project-dialog {
   align-items: center;
   gap: 7px;
   margin: 0 0 6px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
   font-weight: 600;
 }
 
 .code-thread-workspace__turn-status {
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
   font-weight: 400;
 }
 
 .code-thread-workspace__message p {
   margin: 0;
-  color: var(--octant-text-primary);
-  font-size: 13.5px;
-  line-height: 1.55;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-transcript);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-body);
   white-space: pre-wrap;
   text-wrap: pretty;
 }
@@ -5744,9 +5352,9 @@ dialog.project-dialog {
   max-width: min(88%, 600px);
   justify-self: end;
   padding: 10px 12px;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  background: var(--oct-surface-warm);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .code-thread-workspace__message--agent {
@@ -5758,9 +5366,9 @@ dialog.project-dialog {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--octant-text-muted);
-  font-size: 10px;
-  letter-spacing: 0.04em;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }
 
@@ -5769,79 +5377,87 @@ dialog.project-dialog {
   height: 1px;
   flex: 1;
   content: "";
-  background: var(--octant-border);
+  background: var(--oct-border);
 }
 
+/* The composer's frame, focus border, input, chips, bottom row, and send
+   control are the system's (`.composer` vocabulary, as in Chat); this block
+   only places the composer in the workspace column and pads the pieces the
+   system does not know about. */
 .code-thread-workspace__composer {
   position: relative;
   z-index: 2;
-  width: min(100%, 760px);
   flex: 0 0 auto;
-  padding: 8px clamp(16px, 3vw, 28px) 12px;
-  margin: 0 auto;
-  background: var(--octant-workspace);
+  margin: 0 auto 16px;
 }
 
-.code-thread-workspace__composer-shell {
-  display: grid;
-  gap: 8px;
-  padding: 10px 12px;
-  background: var(--octant-surface);
-  border: 1px solid var(--octant-border);
-  border-radius: 12px;
+/* The typeaheads sit between the input and the row so the open list never
+   covers the message; the frameless children carry the frame's gutter. */
+.code-thread-workspace__composer .thread-mention__typeahead {
+  margin: var(--oct-space-2) var(--oct-space-3) 0;
 }
 
-.code-thread-workspace__input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
+/* Chips, queued turns, and attachments are frameless rows of the frame, so
+   they take the same gutter the system gives `.composer-chips`. */
+.code-thread-workspace__composer .thread-mention__chips,
+.code-thread-workspace__queue,
+.code-thread-workspace__attachments {
+  margin: 0;
+  padding: var(--oct-space-3) var(--oct-space-3) 0;
 }
 
-/* Attached images, in the composer and on the message that carried them. */
+/* Attached images, in the composer and on the message that carried them.
+   The chip itself is the system's; only the thumbnail and the name's
+   ellipsis are this surface's own. */
 .code-thread-workspace__attachments {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: var(--oct-space-2);
 }
 
 .code-thread-workspace__attachment {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
   max-width: 240px;
-  padding: 3px 6px 3px 3px;
-  border: 1px solid var(--octant-border, rgb(0 0 0 / 12%));
-  border-radius: 8px;
 }
 
 .code-thread-workspace__attachment-thumb {
-  width: 32px;
-  height: 32px;
-  border-radius: 5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
   object-fit: cover;
-  background: var(--octant-surface-muted, rgb(0 0 0 / 6%));
+  background: var(--oct-fg-soft);
 }
 
 .code-thread-workspace__attachment-name {
   overflow: hidden;
-  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.code-thread-workspace__attachment-remove {
-  padding: 0 4px;
-  border: 0;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
+/* The transcript gallery reuses the attachment classes without the composer's
+   chip frame, so the message rows keep a frame and a readable thumbnail. */
+.code-thread-workspace__message .code-thread-workspace__attachments {
+  margin: 6px 0 0;
+  padding: 0;
+}
+
+.code-thread-workspace__message .code-thread-workspace__attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 3px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+}
+
+.code-thread-workspace__message .code-thread-workspace__attachment-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 5px;
 }
 
 .code-thread-workspace__row {
+  display: grid;
   min-width: 0;
 }
 
@@ -5854,8 +5470,8 @@ dialog.project-dialog {
 
 .code-transcript-row__disclosure > summary {
   cursor: default;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
   list-style: none;
 }
 
@@ -5887,28 +5503,29 @@ dialog.project-dialog {
   display: flex;
   gap: 8px;
   align-items: baseline;
-  font-size: 12px;
+  font-size: var(--oct-text-sm);
 }
 
 .code-transcript-row__step-name {
   flex: none;
-  color: var(--octant-text-primary);
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }
 
 .code-transcript-row__step-state {
   flex: none;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
 }
 
 .code-transcript-row__step[data-state="failed"] .code-transcript-row__step-state {
-  color: var(--octant-danger-text);
+  color: var(--oct-danger-fg);
 }
 
 .code-transcript-row__step-summary {
   flex: 1;
   overflow: hidden;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -5916,8 +5533,8 @@ dialog.project-dialog {
 .code-transcript-row__reasoning {
   margin: 4px 0 0;
   padding: 0 0 0 12px;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
   white-space: pre-wrap;
 }
 
@@ -5925,26 +5542,24 @@ dialog.project-dialog {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin: 0 0 6px;
-  padding: 0;
   list-style: none;
 }
 
 .code-thread-workspace__queue-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-2);
   padding: 4px 4px 4px 8px;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 6px;
-  background: var(--octant-surface-raised);
-  font-size: 12px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface-warm);
+  font-size: var(--oct-text-xs);
 }
 
 .code-thread-workspace__queue-position {
   flex: none;
   min-width: 16px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -5952,46 +5567,14 @@ dialog.project-dialog {
 .code-thread-workspace__queue-prompt {
   flex: 1;
   overflow: hidden;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   white-space: nowrap;
   text-overflow: ellipsis;
-}
-
-.code-thread-workspace__input {
-  flex: 1;
-  width: auto;
-  min-height: 44px;
-  max-height: 160px;
-  height: auto;
-  padding: 6px 0;
-  resize: none;
-  color: var(--octant-text-primary);
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-  font: inherit;
-  font-size: 13.5px;
-  line-height: 1.5;
-}
-
-.code-thread-workspace__input:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-
-.code-thread-workspace__composer-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
 }
 
 .code-thread-workspace__access {
   display: inline-flex;
   align-items: center;
-  min-width: 168px;
 }
 
 .code-thread-workspace__profile {
@@ -5999,28 +5582,40 @@ dialog.project-dialog {
   align-items: center;
   gap: 5px;
   padding: 3px 8px;
-  border: 1px solid var(--octant-border);
-  border-radius: 999px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+}
+
+/* Quiet meta line under the composer row: keyboard hint, access/restore/fork
+   receipts, usage, and provider limits share one unobtrusive strip. */
+.code-thread-workspace__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  margin: 0;
+  padding: 0 var(--oct-space-3) var(--oct-space-2);
+  line-height: 1.35;
 }
 
 .code-thread-workspace__hint {
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .code-thread-workspace__limit {
-  font-size: 11px;
-  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-fg-2);
 }
 
 .code-thread-workspace__limit--warning {
-  color: var(--octant-warning-text);
+  color: var(--oct-warn-fg);
 }
 
 .code-thread-workspace__limit--exhausted {
-  color: var(--octant-danger-text);
+  color: var(--oct-danger-fg);
 }
 
 .parallel-runs {
@@ -6283,30 +5878,12 @@ dialog.project-dialog {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 6px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
-.code-thread-workspace__provider-binding {
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-}
-
-.code-thread-workspace__send {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  min-height: 30px;
-  flex-shrink: 0;
-  place-items: center;
-  padding: 0;
-}
-
-.code-thread-workspace__send:disabled {
-  cursor: default;
-  opacity: 0.35;
-}
+/* The bar controls' look is the system's `.composer-row` treatment
+   (ADR 0038); nothing to restate here. */
 
 .code-thread-workspace .visually-hidden {
   position: absolute;
@@ -6595,93 +6172,6 @@ dialog.project-dialog {
 
 .model-picker--narrow .model-picker__readiness {
   margin-left: 0;
-}
-
-.provider-order {
-  display: grid;
-  overflow: hidden;
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-}
-
-.provider-order__trigger {
-  display: flex;
-  min-height: 38px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-}
-
-.provider-order__trigger:hover,
-.provider-order__trigger:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.provider-order__count {
-  margin-left: auto;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.provider-order__disclosure-icon {
-  transition: transform 140ms ease;
-}
-
-.provider-order[data-expanded="true"] .provider-order__disclosure-icon {
-  transform: rotate(180deg);
-}
-
-.provider-order__body {
-  display: grid;
-  gap: 8px;
-  padding: 0 10px 10px;
-  border-top: 1px solid var(--octant-border);
-}
-
-.provider-order__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 0.25rem;
-}
-
-.provider-order__item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: 0.4rem;
-  border: 1px solid var(--octant-border, rgba(255, 255, 255, 0.12));
-  background: var(--octant-surface-raised, rgba(255, 255, 255, 0.03));
-}
-
-.provider-order__name {
-  flex: 1;
-}
-
-.provider-order__move {
-  padding: 0.2rem 0.5rem;
-  border-radius: 0.3rem;
-  border: 1px solid var(--octant-border, rgba(255, 255, 255, 0.12));
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-
-.provider-order__move:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .agent-eligible-models {
@@ -7307,49 +6797,54 @@ dialog.project-dialog {
   }
 }
 
-/* Code Thread Board */
+/* Code Thread Board.
+   Columns and cards come from the design system (.board, .board-col,
+   .board-card, .st, .fact in octant.css). Everything here is the app-specific
+   frame around them — header, toolbar, filter popovers — plus the two grouping
+   layouts and semantic markup (h2 headings, card lists, button titles) the
+   system board vocabulary does not carry. */
 .code-board-layer {
   position: absolute;
   inset: 0;
   z-index: 5;
   overflow: hidden;
-  background: var(--octant-surface-inset);
+  background: var(--oct-bg);
 }
 
 .code-board {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--oct-space-3);
   height: 100%;
   min-height: 0;
-  padding: 18px 20px 0;
+  padding: 18px var(--oct-space-5) 0;
 }
 
 .code-board__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--oct-space-4);
 }
 
 .code-board__identity {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: var(--oct-space-1) 10px;
   min-width: 0;
 }
 
 .code-board__title {
   margin: 0;
   font-size: 1rem;
-  font-weight: 600;
-  color: var(--octant-text-primary);
+  font-weight: var(--oct-weight-strong);
+  color: var(--oct-fg);
 }
 
 .code-board__subtitle {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 12px;
 }
 
@@ -7360,16 +6855,16 @@ dialog.project-dialog {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--octant-border);
+  gap: var(--oct-space-2);
+  padding-bottom: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
 }
 
 .code-board__primary-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .code-board__toolbar fieldset {
@@ -7382,9 +6877,9 @@ dialog.project-dialog {
   display: flex;
   gap: 2px;
   padding: 2px;
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-  background: var(--octant-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
 }
 
 .code-board__grouping-option {
@@ -7405,19 +6900,19 @@ dialog.project-dialog {
 .code-board__grouping-option span {
   padding: 4px 10px;
   border-radius: 6px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
   font-size: 0.78rem;
   line-height: 1.2;
 }
 
 .code-board__grouping-option input:checked + span {
-  color: var(--octant-text-primary);
-  background: var(--octant-surface-raised);
-  box-shadow: var(--octant-shadow-hairline);
+  color: var(--oct-fg);
+  background: var(--oct-bg);
+  box-shadow: var(--oct-elev-ring);
 }
 
 .code-board__grouping-option input:focus-visible + span {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-accent-fg);
   outline-offset: 1px;
 }
 
@@ -7429,15 +6924,15 @@ dialog.project-dialog {
   min-width: 160px;
   height: 30px;
   padding: 0 9px;
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-  color: var(--octant-text-muted);
-  background: var(--octant-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+  background: var(--oct-surface);
 }
 
 .code-board__search:focus-within {
-  border-color: var(--octant-focus-ring);
-  box-shadow: 0 0 0 1px var(--octant-focus-ring);
+  border-color: var(--oct-accent-fg);
+  box-shadow: 0 0 0 1px var(--oct-accent-fg);
 }
 
 .code-board__toolbar .code-board__search input[type="search"] {
@@ -7448,7 +6943,7 @@ dialog.project-dialog {
   outline: 0;
   font-size: 0.8rem;
   background: transparent;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .code-board__filters {
@@ -7457,32 +6952,25 @@ dialog.project-dialog {
 
 .code-board__filters-toggle {
   gap: 6px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
 }
 
 .code-board__filters-toggle[aria-expanded="true"],
 .code-board__filters-toggle[data-active="true"],
 .code-board__filters-toggle:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-surface-raised);
-}
-
-.code-board__filter-count,
-.code-board__active-filter,
-.code-board__column-count {
-  border-radius: 999px;
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .code-board__filter-count {
   min-width: 18px;
   padding: 0 6px;
+  border-radius: var(--oct-radius-pill);
   font-size: 0.68rem;
   line-height: 18px;
   text-align: center;
-  color: var(--octant-accent-foreground);
-  background: var(--octant-accent);
+  color: var(--oct-accent-on);
+  background: var(--oct-accent);
 }
 
 .code-board__filters-panel,
@@ -7493,19 +6981,19 @@ dialog.project-dialog {
   left: auto;
   max-width: 100%;
   z-index: 6;
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 10px;
-  background: var(--octant-surface-raised);
-  box-shadow: var(--octant-shadow-overlay);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  box-shadow: var(--oct-elev-raised);
 }
 
 .code-board__filters-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--oct-space-3);
   width: 440px;
   max-height: calc(100vh - 220px);
-  padding: 12px;
+  padding: var(--oct-space-3);
   overflow-y: auto;
 }
 
@@ -7514,9 +7002,9 @@ dialog.project-dialog {
   margin-bottom: 5px;
   font-size: 0.7rem;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .code-board__filters-panel legend {
@@ -7549,37 +7037,37 @@ dialog.project-dialog {
   align-items: center;
   gap: 6px;
   padding: 3px 10px 3px 8px;
-  border: 1px solid var(--octant-border);
-  border-radius: 999px;
-  color: var(--octant-text-muted);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  color: var(--oct-muted);
   background: transparent;
   font-size: 0.76rem;
   line-height: 1.3;
 }
 
-.code-board__status-option > span .code-board__status-dot {
+.code-board__status-option > span .st {
   opacity: 0.45;
 }
 
 .code-board__status-option input:checked + span {
-  color: var(--octant-text-primary);
-  border-color: var(--octant-border-strong);
-  background: var(--octant-surface-selected);
+  color: var(--oct-fg);
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  background: var(--oct-fg-soft);
 }
 
-.code-board__status-option input:checked + span .code-board__status-dot {
+.code-board__status-option input:checked + span .st {
   opacity: 1;
 }
 
 .code-board__status-option input:focus-visible + span {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-accent-fg);
   outline-offset: 1px;
 }
 
 .code-board__filter-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 12px;
+  gap: 10px var(--oct-space-3);
 }
 
 .code-board__filter-fields label {
@@ -7593,21 +7081,21 @@ dialog.project-dialog {
   min-width: 0;
   padding: 6px 8px;
   font-size: 0.8rem;
-  color: var(--octant-text-primary);
-  background: var(--octant-surface);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 7px;
+  color: var(--oct-fg);
+  background: var(--oct-bg);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
 }
 
 .code-board__filters-footer {
   display: flex;
   justify-content: flex-end;
-  padding-top: 8px;
-  border-top: 1px solid var(--octant-border);
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-border);
 }
 
 .code-board__reset-filters {
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
 }
 
 .code-board__view-options {
@@ -7622,7 +7110,7 @@ dialog.project-dialog {
   gap: 5px;
   cursor: pointer;
   list-style: none;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
   font-size: 0.78rem;
 }
 
@@ -7640,8 +7128,8 @@ dialog.project-dialog {
 .code-board__view-options summary:hover,
 .code-board__view-options[open] summary,
 .code-board__card-details summary:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-surface-raised);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .code-board__view-options[open] summary svg,
@@ -7653,7 +7141,7 @@ dialog.project-dialog {
   left: auto;
   right: 0;
   min-width: 190px;
-  padding: 8px;
+  padding: var(--oct-space-2);
 }
 
 .code-board__view-popover label {
@@ -7661,7 +7149,7 @@ dialog.project-dialog {
   flex-direction: row;
   align-items: center;
   gap: 7px;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-size: 0.78rem;
 }
 
@@ -7672,221 +7160,126 @@ dialog.project-dialog {
   gap: 6px;
 }
 
-.code-board__active-filter {
-  padding: 2px 8px;
-  font-size: 0.72rem;
-}
-
 /*
- * The board body owns all scrolling. Status grouping is a horizontal row of
- * equal-width columns that scroll vertically inside themselves; the page never
- * scrolls horizontally. Project grouping stacks its sections and scrolls
- * vertically as one list.
+ * The board body owns all scrolling. Status grouping hands the horizontal
+ * scroll to the system .board row, whose columns scroll vertically inside
+ * themselves; the page never scrolls horizontally. Project grouping stacks
+ * its sections and scrolls vertically as one list.
  */
 .code-board__body {
   flex: 1 1 auto;
   min-height: 0;
-  padding-bottom: 16px;
+  padding-bottom: var(--oct-space-4);
   overflow: auto;
 }
 
 .code-board__body[data-grouping="status"] {
   display: flex;
   flex-direction: column;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
 }
 
-.code-board__columns {
-  display: flex;
+/* the system .board sizes to its content; here it must fill the body's
+   height so each column can pin its head and scroll on its own */
+.code-board__body[data-grouping="status"] .board {
   flex: 1 1 auto;
-  gap: 12px;
-  align-items: stretch;
   min-height: 0;
 }
 
-.code-board__columns[data-grouping="project"] {
-  flex: 0 0 auto;
-  flex-direction: column;
-  gap: 20px;
+/* cards render in a semantic list; the system class carries the layout,
+   this strips the list chrome the styleguide's plain divs never had */
+ul.board-col-body {
+  margin: 0;
+  list-style: none;
 }
 
-.code-board__column {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  min-width: 260px;
-  max-width: 420px;
-  min-height: 0;
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
-  background: var(--octant-surface);
-  overflow-y: auto;
+/* the placeholder is a paragraph here and nothing resets paragraph margins
+   globally; the system padding is the whole intended spacing */
+p.board-col-empty {
+  margin: 0;
 }
 
-.code-board__columns[data-grouping="project"] .code-board__column {
-  flex: 0 0 auto;
-  max-width: none;
-  overflow: visible;
-}
-
-.code-board__column-header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--octant-border);
-  background: var(--octant-surface);
-}
-
-.code-board__column-header h2 {
+/* the column heading is an h2 for the document outline; it takes the
+   head's mono styling rather than heading styling */
+.board-col-head h2 {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font: inherit;
+  letter-spacing: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--octant-text-primary);
 }
 
-.code-board__column-count {
-  min-width: 22px;
-  padding: 1px 7px;
-  text-align: center;
-  font-size: 0.72rem;
-}
-
-.code-board__column-empty {
-  margin: 0;
-  padding: 24px 12px;
-  color: var(--octant-text-muted);
-  font-size: 0.78rem;
-  text-align: center;
-}
-
-.code-board__cards {
-  display: flex;
+/* Project grouping stacks full-width sections that flow their cards in a
+   grid; the recovery column follows the same shape in either grouping */
+.board[data-grouping="project"] {
   flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 10px;
-  list-style: none;
+  gap: var(--oct-space-5);
+  overflow-x: visible;
 }
 
-.code-board__columns[data-grouping="project"] .code-board__cards {
+.board[data-grouping="project"] .board-col {
+  flex: 0 0 auto;
+  /* a project section is a full-width row of the stack, not a kanban
+     column, so the system column's growth ceiling does not apply */
+  max-width: none;
+}
+
+.board[data-grouping="project"] .board-col-body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  overflow: visible;
 }
 
-.code-board__card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-  background: var(--octant-surface-raised);
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.code-board__card:hover {
-  border-color: var(--octant-border-strong);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-.code-board__card-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.code-board__card-head .code-board__status-dot {
-  flex: 0 0 auto;
-  margin-top: 5px;
-}
-
-.code-board__card-status {
-  flex: 0 0 auto;
-  margin-top: 1px;
-  white-space: nowrap;
-}
-
+/* the whole card title is the click target; the system card supplies all
+   chrome, so the button contributes none of its own */
 .code-board__card-open {
   flex: 1 1 auto;
   min-width: 0;
   padding: 0;
-  color: var(--octant-text-primary);
-  font: inherit;
-  font-size: 0.84rem;
-  font-weight: 500;
-  line-height: 1.35;
-  text-align: left;
-  background: none;
   border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
-.code-board__card-open:hover .code-board__card-title {
+.code-board__card-open:hover .board-card-title {
   text-decoration: underline;
 }
 
-.code-board__card-title {
-  display: -webkit-box;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+/* the visible status chip must not compress against a long title */
+.board-card-top .badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
-.code-board__card-meta-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  margin: 0;
-  padding-left: 16px;
+.code-board__card-details {
+  margin-top: var(--oct-space-1);
+}
+
+.code-board__card-details summary {
+  width: fit-content;
+  padding: 2px 6px;
+  border-radius: 5px;
   font-size: 0.72rem;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
-.code-board__card-meta-line span:not(:first-child)::before {
-  content: "·";
-  margin-right: 6px;
-}
-
-.code-board__status-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--octant-text-secondary);
-}
-
-.code-board__status-dot[data-status="in-progress"] {
-  background: #4c9ffe;
-}
-
-.code-board__status-dot[data-status="waiting"] {
-  background: #e0a516;
-}
-
-.code-board__status-dot[data-status="done"] {
-  background: #3ea672;
+.code-board__card-details[open] summary {
+  color: var(--oct-fg);
 }
 
 .code-board__card-meta {
   display: grid;
-  gap: 4px;
-  margin: 8px 0 0;
+  gap: var(--oct-space-1);
+  margin: var(--oct-space-2) 0 0;
+  padding: 0 6px 4px;
   font-size: 0.74rem;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
 }
 
 .code-board__card-meta div {
@@ -7896,94 +7289,27 @@ dialog.project-dialog {
 
 .code-board__card-meta dt {
   min-width: 84px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .code-board__card-meta dd {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--oct-space-1);
   margin: 0;
-  color: var(--octant-text-primary);
-}
-
-.code-board__card-flags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 0;
-  padding-left: 16px;
-}
-
-.code-board__card-flags:empty {
-  display: none;
-}
-
-.code-board__card-details {
-  margin-top: 2px;
-}
-
-.code-board__card-details summary {
-  width: fit-content;
-  padding: 2px 6px;
-  margin-left: 10px;
-  border-radius: 5px;
-  font-size: 0.72rem;
-  color: var(--octant-text-muted);
-}
-
-.code-board__card-details[open] summary {
-  color: var(--octant-text-primary);
-}
-
-.code-board__card-details .code-board__card-meta {
-  padding: 0 6px 4px 16px;
-}
-
-.code-board__flag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 7px;
-  font-size: 0.68rem;
-  line-height: 1.5;
-  color: var(--octant-text-secondary);
-  background: var(--octant-surface);
-  border: 1px solid var(--octant-border);
-  border-radius: 999px;
-}
-
-.code-board__flag--recovery,
-.code-board__flag--blocked {
-  color: #e0a516;
-  border-color: color-mix(in srgb, #e0a516 40%, transparent);
-}
-
-.code-board__flag--stale {
-  color: var(--octant-text-muted);
-  border-style: dashed;
-}
-
-/*
- * Durable follow-up marker on a board card. Distinguished by more than color:
- * an amber palette plus a leading diamond glyph and the "Follow-up" label.
- */
-.code-board__flag--follow-up {
-  color: var(--octant-warning-text);
-  background: var(--octant-warning-surface);
-  border-color: var(--octant-warning-border);
+  color: var(--oct-fg);
 }
 
 .code-board__empty {
   display: grid;
   gap: 6px;
   max-width: 460px;
-  margin: 24px auto;
-  padding: 20px;
-  color: var(--octant-text-secondary);
+  margin: var(--oct-space-6) auto;
+  padding: var(--oct-space-5);
+  color: var(--oct-fg-2);
   text-align: center;
-  border: 1px dashed var(--octant-border-strong);
-  border-radius: 12px;
+  border: 1px dashed var(--oct-border);
+  border-radius: var(--oct-radius-lg);
 }
 
 @media (max-width: 560px) {

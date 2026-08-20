@@ -159,35 +159,12 @@ export interface ProviderSettingsViewProps {
 }
 
 export function ProviderSettingsView(props: ProviderSettingsViewProps) {
+  // The settings shell already renders the pane's `.setpane-title` and
+  // `.setpane-note`; repeating an identity heading here read as three titles
+  // in a row, so the pane goes straight to content and keeps global knobs in
+  // a trailing Defaults group.
   return (
     <div className="provider-settings">
-      <div className="provider-settings__intro">
-        <div>
-          <h2>Providers</h2>
-          <p>Configure provider runtimes and inspect their normalized capabilities.</p>
-        </div>
-        <label className="provider-settings__permission">
-          <span>Permission persistence</span>
-          <OctantNativeSelect
-            aria-label="Permission persistence"
-            className="settings-view__select window-no-drag"
-            disabled={props.busy}
-            onChange={(event) =>
-              void props.onPermissionPersistenceChange(
-                event.currentTarget.value as PermissionPersistence,
-              )
-            }
-            value={props.defaults.permissionPersistence}
-          >
-            <option value="current-session">Current session only</option>
-            <option value="project-default">Remember for this Project</option>
-          </OctantNativeSelect>
-        </label>
-      </div>
-      <p className="provider-settings__hint">
-        CLI authentication remains provider-managed. Compatible HTTP credentials are stored
-        write-only in the Octant host Keychain.
-      </p>
       {props.status === "loading" ? <p role="status">Loading providers…</p> : null}
       {props.status === "disconnected" ? (
         <OctantButton
@@ -204,22 +181,22 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         </p>
       )}
       {props.discovery}
-      {props.status === "ready" ? (
-        <ProviderCreateForm
-          busy={props.busy}
-          credentialManagementAvailable={props.credentialManagementAvailable}
-          onCreate={props.onCreate}
-          onCreateAnthropicCompatible={props.onCreateAnthropicCompatible}
-          onCreateAzureFoundry={props.onCreateAzureFoundry}
-          onCreateClaude={props.onCreateClaude}
-          onCreateGrok={props.onCreateGrok}
-          onCreateMistralVibe={props.onCreateMistralVibe}
-          onCreateOllama={props.onCreateOllama}
-          onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
-        />
-      ) : null}
       <ProviderSettingsList
         busy={props.busy}
+        createForm={
+          <ProviderCreateForm
+            busy={props.busy}
+            credentialManagementAvailable={props.credentialManagementAvailable}
+            onCreate={props.onCreate}
+            onCreateAnthropicCompatible={props.onCreateAnthropicCompatible}
+            onCreateAzureFoundry={props.onCreateAzureFoundry}
+            onCreateClaude={props.onCreateClaude}
+            onCreateGrok={props.onCreateGrok}
+            onCreateMistralVibe={props.onCreateMistralVibe}
+            onCreateOllama={props.onCreateOllama}
+            onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
+          />
+        }
         credentialManagementAvailable={props.credentialManagementAvailable}
         defaults={props.defaults}
         discoverySnapshot={props.discoverySnapshot}
@@ -251,6 +228,33 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onSetEnabled={props.onSetEnabled}
         onVerifyFoundryTools={props.onVerifyFoundryTools}
       />
+      <section aria-label="Defaults" className="setgroup">
+        <div className="setgroup-head">
+          <span>Defaults</span>
+        </div>
+        <div className="setrow">
+          <span className="setrow-label">Permission persistence</span>
+          <p className="setrow-hint">
+            <span>How long a granted provider approval lasts.</span>
+          </p>
+          <div className="setrow-control">
+            <OctantNativeSelect
+              aria-label="Permission persistence"
+              className="settings-view__select window-no-drag"
+              disabled={props.busy}
+              onChange={(event) =>
+                void props.onPermissionPersistenceChange(
+                  event.currentTarget.value as PermissionPersistence,
+                )
+              }
+              value={props.defaults.permissionPersistence}
+            >
+              <option value="current-session">Current session only</option>
+              <option value="project-default">Remember for this Project</option>
+            </OctantNativeSelect>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

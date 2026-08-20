@@ -24,6 +24,19 @@ function transcriptLayoutSize(element: HTMLElement, kind: "width" | "height"): n
       ? transcriptRowHeight
       : Number(childHeight);
   }
+  if (
+    element.hasAttribute("data-transcript-lead") ||
+    element.hasAttribute("data-transcript-trail")
+  ) {
+    if (kind === "width") return 800;
+    let height = 0;
+    for (const child of element.children) {
+      if (!(child instanceof HTMLElement)) continue;
+      const named = child.getAttribute("data-row-height");
+      height += named === null ? transcriptRowHeight : Number(named);
+    }
+    return height;
+  }
   return 0;
 }
 
@@ -61,17 +74,24 @@ Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     if (!this.hasAttribute("data-transcript-window")) {
       return transcriptLayoutSize(this, "height");
     }
-    const sized = [...this.querySelectorAll("ol, [style]")].find((node) => {
-      if (!(node instanceof HTMLElement)) return false;
-      const height = Number.parseFloat(node.style.height);
-      return Number.isFinite(height) && height > 0;
-    });
-    if (!(sized instanceof HTMLElement)) return transcriptWindowHeight;
-    return Number.parseFloat(sized.style.height);
+    const sized = this.querySelector("[data-transcript-list]");
+    const listHeight =
+      sized instanceof HTMLElement && Number.isFinite(Number.parseFloat(sized.style.height))
+        ? Number.parseFloat(sized.style.height)
+        : transcriptWindowHeight;
+    let extra = 0;
+    for (const node of this.querySelectorAll(
+      "[data-transcript-lead] > *, [data-transcript-trail] > *",
+    )) {
+      if (!(node instanceof HTMLElement)) continue;
+      const named = node.getAttribute("data-row-height");
+      extra += named === null ? transcriptRowHeight : Number(named);
+    }
+    return listHeight + extra;
   },
 });
 
 afterEach(() => {
-  resetTranscriptScrollMemory();
   cleanup();
+  resetTranscriptScrollMemory();
 });

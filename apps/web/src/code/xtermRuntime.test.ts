@@ -40,8 +40,38 @@ vi.mock("@xterm/xterm", () => ({
 
 import { mount } from "./xtermRuntime";
 
+const THEME_ROLES: Readonly<Record<string, string>> = {
+  "text-primary": "#f2f1ed",
+  workspace: "#14130f",
+  "app-background": "#0e0d0a",
+  "text-muted": "#787773",
+  selection: "#353430",
+  "palette-red": "#d95778",
+  "palette-green": "#93cb58",
+  "palette-yellow": "#d9a441",
+  "palette-blue": "#74b0f3",
+  "palette-purple": "#ab98f2",
+  "palette-teal": "#45c8bc",
+};
+
+function publishThemeRoles(): void {
+  for (const [role, color] of Object.entries(THEME_ROLES)) {
+    document.documentElement.style.setProperty(`--octant-${role}`, color);
+  }
+}
+
+function clearThemeRoles(): void {
+  for (const role of Object.keys(THEME_ROLES)) {
+    document.documentElement.style.removeProperty(`--octant-${role}`);
+  }
+  delete document.documentElement.dataset.octantThemeMode;
+}
+
 describe("Xterm runtime", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    clearThemeRoles();
+  });
 
   it("appends replay deltas and resets only when retained history diverges", () => {
     const session = mount(document.createElement("div"), {
@@ -109,6 +139,77 @@ describe("Xterm runtime", () => {
       lineHeight: 1.5,
     });
     expect(element.style.fontVariantLigatures).toBe("none");
+    session.dispose();
+  });
+
+  it("paints the terminal with the resolved theme roles instead of xterm's stock palette", () => {
+    publishThemeRoles();
+    document.documentElement.dataset.octantThemeMode = "dark";
+    const session = mount(document.createElement("div"), {
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+
+    expect(mocks.terminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        theme: expect.objectContaining({
+          background: "#14130f",
+          foreground: "#f2f1ed",
+          cursor: "#f2f1ed",
+          selectionBackground: "#353430",
+          red: "#d95778",
+          green: "#93cb58",
+          yellow: "#d9a441",
+          blue: "#74b0f3",
+          magenta: "#ab98f2",
+          cyan: "#45c8bc",
+          // Dark mode: black is the ground family, white the ink.
+          black: "#0e0d0a",
+          white: "#f2f1ed",
+          // No bright set is published, so bright variants reuse the hues.
+          brightRed: "#d95778",
+          brightBlack: "#787773",
+        }),
+      }),
+    );
+    session.dispose();
+  });
+
+  it("keeps ANSI black dark and white light when the resolved mode is light", () => {
+    publishThemeRoles();
+    // In light mode the ink role resolves dark and the ground light, so the
+    // ANSI black/white pair must swap sources to keep black dark.
+    document.documentElement.style.setProperty("--octant-text-primary", "#26251e");
+    document.documentElement.style.setProperty("--octant-app-background", "#edece7");
+    document.documentElement.dataset.octantThemeMode = "light";
+    const session = mount(document.createElement("div"), {
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+
+    expect(mocks.terminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        theme: expect.objectContaining({ black: "#26251e", white: "#edece7" }),
+      }),
+    );
+    session.dispose();
+  });
+
+  it("leaves xterm's own palette in place when the document resolves no theme roles", () => {
+    const session = mount(document.createElement("div"), {
+      interactive: false,
+      onData: vi.fn(),
+      onResize: vi.fn(),
+      output: "",
+    });
+
+    const options: unknown = mocks.terminal.mock.calls[0]?.[0];
+    expect(options).toBeDefined();
+    expect(options).not.toHaveProperty("theme");
     session.dispose();
   });
 });

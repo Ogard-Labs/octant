@@ -192,7 +192,7 @@ describe("ChatTranscript", () => {
       "https://example.test/guide",
     );
 
-    const content = screen.getByRole("log", { name: "Chat transcript" });
+    const content = screen.getByRole("list", { name: "Chat transcript" });
     expect(content.textContent).toMatch(
       /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Provider handoff · model-b[\s\S]*Here is the summary\.[\s\S]*Completed/,
     );

@@ -30,7 +30,7 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
   return (
     <div
       aria-label="Focus spaces"
-      className="zen-spaces window-no-drag"
+      className="zen-pill zen-spaces window-no-drag"
       role="tablist"
       onKeyDown={(event) => {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
@@ -78,6 +78,7 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
               onClick={() => props.onShowSpace?.(space.spaceId)}
               onDoubleClick={() => setRenaming(String(space.spaceId))}
               role="tab"
+              size="sm"
               tabIndex={showing ? 0 : -1}
               type="button"
               variant="ghost"
@@ -90,6 +91,7 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
                 className="zen-spaces__remove"
                 disabled={props.busy === true}
                 onClick={() => props.onRemoveSpace?.(space.spaceId)}
+                size="sm"
                 type="button"
                 variant="ghost"
               >
@@ -104,6 +106,7 @@ export function ZenSpaceSwitcher(props: ZenSpaceSwitcherProps) {
         className="zen-spaces__add"
         disabled={props.busy === true || full || props.onAddSpace === undefined}
         onClick={() => props.onAddSpace?.(`Space ${String(ordered.length + 1)}`)}
+        size="sm"
         title={
           full
             ? `A window holds at most ${String(MAX_ZEN_SPACES_PER_WINDOW)} spaces.`
