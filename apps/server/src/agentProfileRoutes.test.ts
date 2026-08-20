@@ -49,6 +49,9 @@ describe("AgentProfileRoutes", () => {
     await expect(
       route(new Request("http://127.0.0.1/api/agent-profiles/not-real", { method: "OPTIONS" })),
     ).resolves.toBeUndefined();
+    await expect(
+      route(new Request("http://127.0.0.1/api/agent-profiles/scope", { method: "GET" })),
+    ).resolves.toBeUndefined();
   });
 
   it("returns 401 when capability is missing", async () => {
