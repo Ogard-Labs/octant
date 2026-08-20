@@ -13,10 +13,12 @@ import type {
 import type { OctantMode } from "@octant/contracts/modes";
 import {
   AgentProfileRejected,
+  applyProfileToThread,
   buildExecutionContextPickerEntries,
   filterExecutionContextPickerEntries,
   isModelAllowedByProfile,
   isProfileModeCompatible,
+  profileScopeApplies,
   resolveEffectiveProfile,
   validateCapabilityConstraints,
   validateProfileAuthoritySafety,
@@ -467,5 +469,190 @@ describe("agentProfilePolicy", () => {
         "user-default",
       ]);
     });
+  });
+});
+
+describe("profileScopeApplies", () => {
+  it("lets a user-wide profile start any thread", () => {
+    expect(
+      profileScopeApplies({
+        scope: scope({ scopeKind: "user", scopeRef: "local-user" }),
+        mode: "code",
+        projectId: "project-a",
+        threadId: "thread-a",
+      }),
+    ).toBe(true);
+  });
+
+  it("refuses a profile another Project owns", () => {
+    expect(
+      profileScopeApplies({
+        scope: scope({ scopeKind: "project", scopeRef: "project-b" }),
+        mode: "code",
+        projectId: "project-a",
+        threadId: "thread-a",
+      }),
+    ).toBe(false);
+  });
+
+  it("refuses a profile written for a different mode", () => {
+    expect(
+      profileScopeApplies({
+        scope: scope({ scopeKind: "mode", scopeRef: "chat" }),
+        mode: "code",
+        projectId: "project-a",
+        threadId: "thread-a",
+      }),
+    ).toBe(false);
+  });
+
+  it("refuses a one-off profile that belongs to another thread", () => {
+    expect(
+      profileScopeApplies({
+        scope: scope({ scopeKind: "one-off", scopeRef: "thread-b" }),
+        mode: "code",
+        projectId: "project-a",
+        threadId: "thread-a",
+      }),
+    ).toBe(false);
+  });
+
+  it("lets a one-off profile start the thread it was made for", () => {
+    expect(
+      profileScopeApplies({
+        scope: scope({ scopeKind: "one-off", scopeRef: "thread-a" }),
+        mode: "code",
+        projectId: "project-a",
+        threadId: "thread-a",
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("applyProfileToThread", () => {
+  it("keeps the stricter of the thread's posture and the profile's", () => {
+    const applied = applyProfileToThread({
+      profile: profile({ defaultExecutionPolicy: "approval-gated" }),
+      mode: "code",
+      modelId: "gpt-5.6-luna" as ProviderModel["id"],
+      requestedExecutionPolicy: "full-access",
+      requestedPermissionPersistence: "current-session",
+      projectExecutionPolicy: "full-access",
+    });
+
+    expect(applied).toEqual({
+      status: "applied",
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    });
+  });
+
+  it("leaves a thread that already asks for less than the profile allows alone", () => {
+    const applied = applyProfileToThread({
+      profile: profile({ defaultExecutionPolicy: "full-access" }),
+      mode: "code",
+      modelId: "gpt-5.6-luna" as ProviderModel["id"],
+      requestedExecutionPolicy: "plan",
+      requestedPermissionPersistence: "current-session",
+      projectExecutionPolicy: "full-access",
+    });
+
+    expect(applied).toEqual({
+      status: "applied",
+      executionPolicy: "plan",
+      permissionPersistence: "current-session",
+    });
+  });
+
+  it("refuses a profile whose posture reaches past the Project's", () => {
+    const applied = applyProfileToThread({
+      profile: profile({ defaultExecutionPolicy: "full-access" }),
+      mode: "code",
+      modelId: "gpt-5.6-luna" as ProviderModel["id"],
+      requestedExecutionPolicy: "full-access",
+      requestedPermissionPersistence: "current-session",
+      projectExecutionPolicy: "approval-gated",
+    });
+
+    expect(applied.status).toBe("refused");
+    expect(applied.status === "refused" ? applied.code : undefined).toBe("authority-escalation");
+  });
+
+  it("starts a thread that asked for less than the Project allows under a broader profile", () => {
+    const applied = applyProfileToThread({
+      profile: profile({ defaultExecutionPolicy: "full-access" }),
+      mode: "code",
+      modelId: "gpt-5.6-luna" as ProviderModel["id"],
+      requestedExecutionPolicy: "plan",
+      requestedPermissionPersistence: "current-session",
+      projectExecutionPolicy: "approval-gated",
+    });
+
+    expect(applied).toEqual({
+      status: "applied",
+      executionPolicy: "plan",
+      permissionPersistence: "current-session",
+    });
+  });
+
+  it("keeps the shorter of the thread's permission duration and the profile's", () => {
+    const applied = applyProfileToThread({
+      profile: profile({
+        defaultExecutionPolicy: "full-access",
+        defaultPermissionPersistence: "current-session",
+      }),
+      mode: "code",
+      modelId: "gpt-5.6-luna" as ProviderModel["id"],
+      requestedExecutionPolicy: "full-access",
+      requestedPermissionPersistence: "project-default",
+      projectExecutionPolicy: "full-access",
+    });
+
+    expect(applied).toEqual({
+      status: "applied",
+      executionPolicy: "full-access",
+      permissionPersistence: "current-session",
+    });
+  });
+
+  it("leaves a thread that already asks for the shorter duration alone", () => {
+    const applied = applyProfileToThread({
+      profile: profile({ defaultPermissionPersistence: "project-default" }),
+      mode: "code",
+      modelId: "gpt-5.6-luna" as ProviderModel["id"],
+      requestedExecutionPolicy: "approval-gated",
+      requestedPermissionPersistence: "current-session",
+      projectExecutionPolicy: "approval-gated",
+    });
+
+    expect(applied).toMatchObject({ permissionPersistence: "current-session" });
+  });
+
+  it("refuses a profile that was not written for this mode", () => {
+    const applied = applyProfileToThread({
+      profile: profile({ compatibleModes: ["chat"] }),
+      mode: "code",
+      modelId: "gpt-5.6-luna" as ProviderModel["id"],
+      requestedExecutionPolicy: "approval-gated",
+      requestedPermissionPersistence: "current-session",
+      projectExecutionPolicy: "approval-gated",
+    });
+
+    expect(applied.status).toBe("refused");
+    expect(applied.status === "refused" ? applied.code : undefined).toBe("mode-incompatible");
+  });
+
+  it("refuses a model the profile does not list", () => {
+    const applied = applyProfileToThread({
+      profile: profile({ modelConstraints: ["gpt-5.6-sol" as ProviderModel["id"]] }),
+      mode: "code",
+      modelId: "gpt-5.6-luna" as ProviderModel["id"],
+      requestedExecutionPolicy: "approval-gated",
+      requestedPermissionPersistence: "current-session",
+      projectExecutionPolicy: "approval-gated",
+    });
+
+    expect(applied.status).toBe("refused");
+    expect(applied.status === "refused" ? applied.code : undefined).toBe("model-not-allowed");
   });
 });
