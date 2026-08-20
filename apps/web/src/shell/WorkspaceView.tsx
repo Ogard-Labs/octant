@@ -154,7 +154,11 @@ export interface WorkspaceViewProps {
   readonly onViewAllChatProjectThreads?: (projectId: ProjectId) => void;
   /** Opens the Side Chat tab for a sidecar the host has already resolved. */
   readonly onOpenSideChat?: (sidecar: SideChatSidecar) => void;
-  readonly onCreateWorkThread?: (projectId: ProjectId, draft: string) => boolean | Promise<boolean>;
+  readonly onCreateWorkThread?: (
+    projectId: ProjectId,
+    draft: string,
+    images?: ReadonlyArray<File>,
+  ) => boolean | Promise<boolean>;
   readonly workOverviewClient?: WorkOverviewClient;
   readonly workResearchClient?: WorkResearchClient;
   readonly goalClient?: GoalClient;
@@ -290,6 +294,7 @@ export interface WorkspaceViewProps {
     prompt: string,
     draftProjectId?: ProjectId,
     deliveryOutcome?: import("@octant/contracts/code").CodeDeliveryOutcomeKind,
+    images?: ReadonlyArray<File>,
   ) => void | Promise<void>;
   readonly draftCodeExecute?: (
     command: import("@octant/contracts/code").CodeCommand,
@@ -780,9 +785,15 @@ function renderNonCodeTab(
           {...(props.onDraftCreateCodeThread === undefined
             ? {}
             : { onCreateCodeThread: props.onDraftCreateCodeThread })}
-          onCreateThread={(prompt, folderSelection, deliveryOutcome) => {
+          onCreateThread={(prompt, folderSelection, deliveryOutcome, images) => {
             if (props.onDraftCreateThread !== undefined) {
-              void props.onDraftCreateThread(tab.mode, prompt, folderSelection, deliveryOutcome);
+              void props.onDraftCreateThread(
+                tab.mode,
+                prompt,
+                folderSelection,
+                deliveryOutcome,
+                ...(images === undefined ? [] : [images]),
+              );
             }
           }}
           {...(props.onCreateProject === undefined
@@ -1183,7 +1194,11 @@ function renderNonCodeTab(
                     project.lifecycle === "active"
                   }
                   onReloadPromotion={props.workPromotionController.reload}
-                  onCreateThread={(draft) => props.onCreateWorkThread?.(project.id, draft) ?? false}
+                  onCreateThread={(draft, images) =>
+                    images === undefined
+                      ? (props.onCreateWorkThread?.(project.id, draft) ?? false)
+                      : (props.onCreateWorkThread?.(project.id, draft, images) ?? false)
+                  }
                   {...(openProviderSettings === undefined
                     ? {}
                     : { onOpenSettings: openProviderSettings })}
@@ -1591,7 +1606,10 @@ function WorkProjectOverviewSlot(props: {
   readonly onSelectHost?: (hostId: import("@octant/contracts/host").HostId) => void;
   readonly mutationClient?: WorkMutationClient;
   readonly onReloadPromotion: () => Promise<void>;
-  readonly onCreateThread: (draft: string) => boolean | Promise<boolean>;
+  readonly onCreateThread: (
+    draft: string,
+    images?: ReadonlyArray<File>,
+  ) => boolean | Promise<boolean>;
   readonly onOpenSettings?: () => void;
   readonly onOpenThread?: (threadId: string) => void;
   readonly onSelectProvider?: (selection: {

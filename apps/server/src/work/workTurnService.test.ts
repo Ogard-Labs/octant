@@ -1,4 +1,8 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
+  decodeWorkAttachmentId,
   decodeWorkThread,
   decodeWorkThreadId,
   decodeWorkTurnId,
@@ -10,11 +14,20 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { Effect, Stream } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import { WorkAttachmentStore } from "./workAttachmentStore";
 import { WorkTurnProjection } from "./workTurnProjection";
 import { WorkTurnService, WorkTurnServiceError } from "./workTurnService";
 import type { WorkTurnRuntimePort } from "./workTurnRuntime";
+
+const attachmentRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    attachmentRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  );
+});
 
 const now = "2026-08-11T12:00:00.000Z" as UtcTimestamp;
 const ids = {
@@ -110,6 +123,98 @@ describe("WorkTurnService", () => {
     expect(transcript.turns[0]?.status).toBe("cancelled");
   });
 
+  it("sends a staged image to the provider and refuses a text-only model", async () => {
+    const store = await attachmentStore();
+    const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000001");
+    const bytes = new Uint8Array([137, 80, 78]);
+    const sent: Array<ReadonlyArray<{ readonly attachmentId: string }>> = [];
+    const fixture = serviceFixture({
+      attachments: store,
+      supportsAttachments: () => true,
+      turnRuntime: {
+        run: async (input) => {
+          sent.push(input.attachments ?? []);
+          return { kind: "completed", response: "Saw the mockup" };
+        },
+      },
+    });
+    await fixture.service.stageAttachment(ids.window, {
+      threadId: ids.thread,
+      attachmentId,
+      displayName: "mockup.png",
+      mediaType: "image/png",
+      bytes,
+    });
+
+    const result = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      prompt: "Match this mockup",
+      attachmentIds: [attachmentId],
+    });
+    expect(result.kind).toBe("accepted");
+    await fixture.waitForIdle();
+    expect(sent[0]?.[0]?.attachmentId).toBe(String(attachmentId));
+    expect(sent[0]?.[0]).toMatchObject({ displayName: "mockup.png", mediaType: "image/png" });
+
+    const refusedStore = await attachmentStore();
+    const refusedId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000002");
+    const refused = serviceFixture({
+      attachments: refusedStore,
+      supportsAttachments: () => false,
+    });
+    await refused.service.stageAttachment(ids.window, {
+      threadId: ids.thread,
+      attachmentId: refusedId,
+      displayName: "mockup.png",
+      mediaType: "image/png",
+      bytes,
+    });
+    await expect(
+      refused.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab"),
+        prompt: "Match this mockup",
+        attachmentIds: [refusedId],
+      }),
+    ).rejects.toEqual(
+      new WorkTurnServiceError({
+        category: "unsupported",
+        message:
+          "The selected model does not support images. Choose a vision model, or remove the attachments.",
+      }),
+    );
+    expect(refused.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("does not send a discarded image on a later turn", async () => {
+    const store = await attachmentStore();
+    const attachmentId = decodeWorkAttachmentId("30000000-0000-4000-8000-000000000003");
+    const fixture = serviceFixture({
+      attachments: store,
+      supportsAttachments: () => true,
+    });
+    await fixture.service.stageAttachment(ids.window, {
+      threadId: ids.thread,
+      attachmentId,
+      displayName: "mockup.png",
+      mediaType: "image/png",
+      bytes: new Uint8Array([1, 2, 3]),
+    });
+    await fixture.service.discardAttachment(ids.window, ids.thread, attachmentId);
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        prompt: "Never mind the picture",
+        attachmentIds: [attachmentId],
+      }),
+    ).rejects.toEqual(
+      new WorkTurnServiceError({
+        category: "invalid",
+        message: "An image attached to this turn is no longer staged.",
+      }),
+    );
+  });
+
   it("resumes durable transcript after reconnect through lookup and thread bootstrap", async () => {
     const fixture = serviceFixture();
     await fixture.service.startFirstTurn(ids.window, startCommand());
@@ -144,10 +249,18 @@ function startCommand() {
   };
 }
 
+async function attachmentStore(): Promise<WorkAttachmentStore> {
+  const root = await mkdtemp(join(tmpdir(), "octant-work-turn-attachment-"));
+  attachmentRoots.push(root);
+  return new WorkAttachmentStore(root);
+}
+
 function serviceFixture(
   options: {
     readonly project?: Project;
     readonly turnRuntime?: WorkTurnRuntimePort;
+    readonly attachments?: WorkAttachmentStore;
+    readonly supportsAttachments?: () => boolean;
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -258,6 +371,10 @@ function serviceFixture(
       resolve: vi.fn(async (root: string) => root),
     },
     resolveDriver: () => defaultDriver,
+    ...(options.attachments === undefined ? {} : { attachments: options.attachments }),
+    ...(options.supportsAttachments === undefined
+      ? {}
+      : { supportsAttachments: options.supportsAttachments }),
     turnRuntime: options.turnRuntime ?? defaultRuntime,
     uuid: (() => {
       let n = 0;
