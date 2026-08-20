@@ -116,11 +116,11 @@ describe("buildSidebarActivityView", () => {
     });
   });
 
-  it("uses the mode's rootless label for threads without a Project", () => {
+  it("uses the mode's unfiled label for threads without a Project", () => {
     const view = buildSidebarActivityView({
       now: new Date("2026-08-14T15:00:00.000Z"),
       projects: [],
-      rootlessLabel: "Recents",
+      unfiledLabel: "Recents",
       threads: [
         thread({ threadId: "rootless", title: "hei", updatedAt: "2026-08-13T18:00:00.000Z" }),
       ],
@@ -230,7 +230,7 @@ describe("filterSidebarActivityView", () => {
         buildSidebarActivityView({
           now,
           projects: [],
-          rootlessLabel: "Recents",
+          unfiledLabel: "Recents",
           threads: [
             thread({
               threadId: "rootless",

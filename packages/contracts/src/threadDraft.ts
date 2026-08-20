@@ -57,7 +57,7 @@ export function draftThreadModePresentation(mode: OctantMode): DraftThreadModePr
         eyebrow: "Octant Chat",
         heading: "What are you working on?",
         description:
-          "Start a calm, focused conversation. Keep it unfiled or place it in a virtual Project when it becomes a shared workspace.",
+          "Start a calm, focused conversation. Place it in a virtual Project when it becomes a shared workspace.",
         composerPlaceholder: "Ask anything…",
         intentCards: [
           {

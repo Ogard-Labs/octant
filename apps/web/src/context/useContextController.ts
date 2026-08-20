@@ -3,7 +3,14 @@ import type { ContextEntryId, ContextSubjectRef } from "@octant/contracts/contex
 import type { ContextCommand, ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-export type ContextControllerStatus = "idle" | "loading" | "ready" | "updating" | "disconnected";
+export type ContextControllerStatus =
+  | "idle"
+  | "loading"
+  | "ready"
+  | "updating"
+  | "disconnected"
+  /** The host answered, and nothing has planned this subject's context yet. */
+  | "not-planned";
 
 export interface ContextController {
   readonly errorMessage?: string;
@@ -60,19 +67,42 @@ export function useContextController(options: UseContextControllerOptions): Cont
       requestRef.current = controller;
       setStatus(snapshotRef.current === undefined ? "loading" : "updating");
       setErrorMessage(undefined);
-      try {
-        const next = await client.inspect(
-          {
-            subject,
-            ...(afterSequence === undefined ? {} : { afterSequence }),
-          },
-          controller.signal,
-        );
-        if (!controller.signal.aborted) accept(next);
-      } catch (error) {
-        if (controller.signal.aborted) return;
-        setStatus("disconnected");
-        setErrorMessage(publicError(error));
+      let backoffMs = MIN_CONTEXT_RETRY_MS;
+      for (;;) {
+        try {
+          const next = await client.inspect(
+            {
+              subject,
+              ...(afterSequence === undefined ? {} : { afterSequence }),
+            },
+            controller.signal,
+          );
+          if (!controller.signal.aborted) accept(next);
+          return;
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          // A subject nothing has planned yet is an empty answer from a host that
+          // replied, so it must not raise an alert or offer a retry that cannot
+          // change anything.
+          if (error instanceof ContextClientFailure && error.category === "not-planned") {
+            setStatus("not-planned");
+            setErrorMessage(undefined);
+            return;
+          }
+          setStatus("disconnected");
+          setErrorMessage(publicError(error));
+          /*
+           * A host that did not answer is a host to wait for: this pane asks
+           * while the local service may still be starting, and giving up left
+           * it reading "Context is unavailable" for the session on a machine
+           * that was healthy a second later. Every other category is an answer
+           * the host meant, and asking again would only collect it twice.
+           */
+          if (!worthAskingAgain(error)) return;
+          await waitForRetry(controller.signal, backoffMs);
+          if (controller.signal.aborted) return;
+          backoffMs = Math.min(backoffMs * 2, MAX_CONTEXT_RETRY_MS);
+        }
       }
     },
     [accept, client, subject],
@@ -155,6 +185,31 @@ export function useContextController(options: UseContextControllerOptions): Cont
     setPinned: (entryId, pinned) => updateOverrides(entryId, "pin", pinned),
     setExcluded: (entryId, excluded) => updateOverrides(entryId, "exclude", excluded),
   };
+}
+
+const MIN_CONTEXT_RETRY_MS = 100;
+const MAX_CONTEXT_RETRY_MS = 10_000;
+
+/**
+ * Whether a refusal describes a host that may simply not be up yet. The client
+ * reports every unreachable transport as `unavailable`; every other category
+ * names something waiting cannot change.
+ */
+function worthAskingAgain(error: unknown): boolean {
+  return error instanceof ContextClientFailure && error.category === "unavailable";
+}
+
+async function waitForRetry(signal: AbortSignal, delayMs: number): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(done, delayMs);
+    signal.addEventListener("abort", done, { once: true });
+    function done() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    }
+  });
 }
 
 function publicError(error: unknown): string {

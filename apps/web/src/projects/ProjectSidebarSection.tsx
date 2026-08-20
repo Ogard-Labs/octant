@@ -178,7 +178,7 @@ export interface ProjectSidebarSectionProps {
   /** Absent when the host cannot accept a thread rename, which hides the affordance. */
   readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly projects: ReadonlyArray<ProjectSummary>;
-  readonly rootlessLabel?: "Unfiled" | "Recents";
+  readonly unfiledLabel?: "Unfiled" | "Recents";
   readonly threads?: ReadonlyArray<ChatThreadNavigationItem>;
   readonly threadGroups?: Readonly<Record<ThreadGroupId, ReadonlyArray<ChatThreadNavigationItem>>>;
   readonly threadStatus?: "loading" | "ready" | "unavailable";
@@ -211,15 +211,15 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const searchQuery = props.searchQuery ?? "";
   const searching = searchQuery.trim() !== "";
   const listedThreads = props.threadGroups?.all ?? props.threads;
-  const rootlessLabel = props.rootlessLabel ?? "Unfiled";
+  const unfiledLabel = props.unfiledLabel ?? "Unfiled";
   const projectNames = useMemo(
     () => new Map(props.projects.map((project) => [String(project.id), project.name])),
     [props.projects],
   );
   const folderLabelFor = (thread: ChatThreadNavigationItem): string =>
     thread.projectId === undefined
-      ? rootlessLabel
-      : (projectNames.get(thread.projectId) ?? rootlessLabel);
+      ? unfiledLabel
+      : (projectNames.get(thread.projectId) ?? unfiledLabel);
   const threads =
     listedThreads === undefined || !searching
       ? listedThreads
@@ -263,11 +263,11 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         id: String(project.id),
         name: project.name,
       })),
-      rootlessLabel,
+      unfiledLabel,
       threads: listedThreads ?? [],
     });
     return searching ? filterSidebarActivityView(view, searchQuery) : view;
-  }, [listedThreads, props.now, props.projects, rootlessLabel, searchQuery, searching]);
+  }, [listedThreads, props.now, props.projects, unfiledLabel, searchQuery, searching]);
   const hasVisibleThreads =
     (threadsByProject !== undefined &&
       (unfiled.length > 0 ||
@@ -465,11 +465,8 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               : { threadsByProjectId: threadsByProject.byProjectId })}
           />
           {unfiled.length > 0 && props.onSelectThread !== undefined ? (
-            <section
-              aria-label={rootlessLabel}
-              className="project-section project-section--unfiled"
-            >
-              <h2>{rootlessLabel}</h2>
+            <section aria-label={unfiledLabel} className="project-section project-section--unfiled">
+              <h2>{unfiledLabel}</h2>
               <div className="project-threads">
                 <ProjectThreadRows
                   {...(props.threadActions === undefined ? {} : { actions: props.threadActions })}

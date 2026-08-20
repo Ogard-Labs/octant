@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { REMOTE_ACCESS_EVENT_NAMES } from "@octant/contracts/remote-access";
 import { EventPayloadInvalid, UnknownEventName } from "./journalErrors";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
 
@@ -211,7 +212,6 @@ describe("createPhase1RuntimeRegistries", () => {
       "canvas",
       "automations",
       "github-clones",
-      "rootless",
       "zen",
       "agent-profiles",
       "validation-evidence",
@@ -235,7 +235,6 @@ describe("createPhase1RuntimeRegistries", () => {
       "canvas",
       "automations",
       "github-clones",
-      "rootless",
       "zen",
       "agent-profiles",
       "validation-evidence",
@@ -281,7 +280,7 @@ describe("createPhase1RuntimeRegistries", () => {
 
     expect(
       registry.hostIdentityMigrations.transform(
-        "rootless.thread-created@1",
+        REMOTE_ACCESS_EVENT_NAMES.hostIdentityInitialized,
         1,
         { kind: "thread-created", hostId: "local", unrelated: "local" },
         "local",
