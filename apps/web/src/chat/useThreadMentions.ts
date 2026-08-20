@@ -205,6 +205,7 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
     return threadIds;
   }, [chips, client, newRequestId]);
 
+  const canOpenSideChat = options.onSideChatOpened !== undefined;
   const composer = useMemo((): ChatComposerThreadMentions | undefined => {
     if (client === undefined) return undefined;
     return {
@@ -213,12 +214,17 @@ export function useThreadMentions(options: ThreadMentionsOptions): ThreadMention
       onQueryChange: setQuery,
       onSelectCandidate,
       onRemoveChip,
-      onOpenSideChat,
+      // The chip's Side Chat control mints or reopens a sidecar. Offer it
+      // only when a shell callback can actually open that tab; otherwise a
+      // Side Chat or Code composer would create a hidden conversation the
+      // user never sees.
+      ...(canOpenSideChat ? { onOpenSideChat } : {}),
       busy,
       ...(statusMessage === undefined ? {} : { statusMessage }),
     };
   }, [
     busy,
+    canOpenSideChat,
     candidates,
     chips,
     client,
