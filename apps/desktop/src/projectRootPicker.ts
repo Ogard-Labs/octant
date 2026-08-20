@@ -102,11 +102,7 @@ export function createProjectRootPicker<TWindow extends OwnedWindowPort>(
       body: JSON.stringify({ windowId: options.windowId, projectType, path }),
     });
     if (await isRejectedProjectRoot(response)) {
-      throw new ProjectRootPickerError(
-        projectType === "code"
-          ? "Choose the top-level Git repository or linked-worktree folder."
-          : "Choose an accessible directory.",
-      );
+      throw new ProjectRootPickerError("Choose an accessible directory.");
     }
     if (response.status !== 201) {
       throw new ProjectRootPickerError("Octant could not validate the selected Project root.");
@@ -201,8 +197,7 @@ async function decodeReceiptResponse(
 }
 
 async function isRejectedProjectRoot(response: Response): Promise<boolean> {
-  if (response.status === 400) return true;
-  if (response.status !== 503) return false;
+  if (response.status !== 400 && response.status !== 503) return false;
   try {
     const value: unknown = await response.clone().json();
     return (
