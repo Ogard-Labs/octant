@@ -1789,6 +1789,13 @@ describe("App", () => {
         return () => undefined;
       },
     );
+    let reportVibrancy: ((vibrancy: "sidebar" | null) => void) | undefined;
+    const subscribeResolvedSidebarVibrancy = vi.fn(
+      (listener: (vibrancy: "sidebar" | null) => void) => {
+        reportVibrancy = listener;
+        return () => undefined;
+      },
+    );
     const hostBridge: OctantHostBridge = {
       ...credentialHostOperations(),
       close: vi.fn(),
@@ -1799,6 +1806,7 @@ describe("App", () => {
       selectProjectRoot: vi.fn(),
       setSidebarMaterialPreference,
       subscribeResolvedMaterial,
+      subscribeResolvedSidebarVibrancy,
     };
     render(
       <App
@@ -1827,6 +1835,16 @@ describe("App", () => {
     resolveMaterial?.("translucent");
     await waitFor(() =>
       expect(document.querySelector(".shell")).toHaveClass("shell--material-translucent"),
+    );
+
+    // The near-opaque native wash relaxes only on the host's report that
+    // window vibrancy is applied, and returns as soon as the host withdraws it.
+    expect(document.documentElement.dataset.octantHostVibrancy).toBeUndefined();
+    reportVibrancy?.("sidebar");
+    await waitFor(() => expect(document.documentElement.dataset.octantHostVibrancy).toBe("active"));
+    reportVibrancy?.(null);
+    await waitFor(() =>
+      expect(document.documentElement.dataset.octantHostVibrancy).toBeUndefined(),
     );
 
     await openSettingsFromSidebar(user);

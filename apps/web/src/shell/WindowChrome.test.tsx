@@ -383,6 +383,19 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
   });
 
+  it("keeps the near-opaque native sidebar wash until the host reports applied window vibrancy", () => {
+    // The wash matches only while data-octant-host-vibrancy is absent, and the
+    // gate lives in :where() so the prefers-reduced-transparency override
+    // below it keeps winning on equal specificity.
+    const flattened = styles.replace(/\s+/g, " ");
+    expect(flattened).toContain(
+      'html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"])) .shell-frame:not(.shell--material-opaque) > .sidebar { background: color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent); }',
+    );
+    expect(atRuleBlock("@media (prefers-reduced-transparency: reduce)")).toContain(
+      'html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar',
+    );
+  });
+
   it("exposes exactly one wide utility dock toggle only when a real surface is available", async () => {
     const user = userEvent.setup();
     const { props, rerender } = renderChrome({
