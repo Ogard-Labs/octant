@@ -138,7 +138,6 @@ describe("ProjectMemoryInspector", () => {
     render(
       <RightUtilityDock
         availableSurfaces={[RIGHT_UTILITY_DOCK_SURFACES[1]]}
-        codeEnvironment={null}
         context={null}
         isNarrow={false}
         navigator={null}
@@ -146,7 +145,6 @@ describe("ProjectMemoryInspector", () => {
         onCommitWidth={vi.fn()}
         onPreviewWidth={vi.fn()}
         onSelectSurface={vi.fn()}
-        plan={null}
         projectMemory={<ProjectMemoryInspector {...inspector.props} embedded />}
         resolution={{
           kind: "surface",
