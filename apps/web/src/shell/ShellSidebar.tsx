@@ -11,27 +11,12 @@ import { PanelLeftClose, Search } from "lucide-react";
 import type { ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
-import {
-  resolveSidebarContributions,
-  type FirstPartyPluginComponentId,
-} from "./contributionRegistry";
+import { FIRST_PARTY_PLUGINS_EFFECTIVE, resolveSidebarContributions } from "./contributionRegistry";
 import { IconButton } from "./IconButton";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarProfile } from "./SidebarProfile";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
-
-/**
- * Stand-in for the server's first-party plugin activation state. Both
- * components are seeded and enabled by default with no toggle UI yet, so
- * this is a constant, not a live query; ADR 0001 step 4 replaces it with a
- * value sourced from the server's plugin gate once the board and GitHub
- * plugins are seeded (see docs/decisions/0001-plugin-architecture.md).
- */
-const FIRST_PARTY_PLUGINS_EFFECTIVE: ReadonlyMap<FirstPartyPluginComponentId, boolean> = new Map([
-  ["board", true],
-  ["github-integration", true],
-]);
 
 export interface ShellSidebarProps {
   /**

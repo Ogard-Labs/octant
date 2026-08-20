@@ -7,10 +7,21 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantSlider } from "../ui/base/OctantSlider";
+import {
+  FIRST_PARTY_PLUGINS_EFFECTIVE,
+  isAppearancePresetAvailable,
+  type FirstPartyPluginComponentId,
+} from "../shell/contributionRegistry";
 
-export function ThemeAppearanceEditor(props: { readonly controller: ThemeController }) {
+export function ThemeAppearanceEditor(props: {
+  readonly controller: ThemeController;
+  readonly effectivePlugins?: ReadonlyMap<FirstPartyPluginComponentId, boolean>;
+}) {
   const theme = props.controller;
   const draft = theme.draft;
+  const availablePresets = THEME_PRESETS.filter((preset) =>
+    isAppearancePresetAvailable(preset.id, props.effectivePlugins ?? FIRST_PARTY_PLUGINS_EFFECTIVE),
+  );
   if (draft === undefined) {
     return (
       <p className="settings-view__empty" role="status">
@@ -114,13 +125,13 @@ export function ThemeAppearanceEditor(props: { readonly controller: ThemeControl
             }
             value={draft.lightPresetId ?? "system"}
           >
-            {THEME_PRESETS.filter((preset) => preset.supportedModes.includes("light")).map(
-              (preset) => (
+            {availablePresets
+              .filter((preset) => preset.supportedModes.includes("light"))
+              .map((preset) => (
                 <option key={preset.id} value={preset.id}>
                   {preset.displayName}
                 </option>
-              ),
-            )}
+              ))}
           </OctantNativeSelect>
         </label>
         <label className="settings-view__field">
@@ -133,13 +144,13 @@ export function ThemeAppearanceEditor(props: { readonly controller: ThemeControl
             }
             value={draft.darkPresetId ?? "system"}
           >
-            {THEME_PRESETS.filter((preset) => preset.supportedModes.includes("dark")).map(
-              (preset) => (
+            {availablePresets
+              .filter((preset) => preset.supportedModes.includes("dark"))
+              .map((preset) => (
                 <option key={preset.id} value={preset.id}>
                   {preset.displayName}
                 </option>
-              ),
-            )}
+              ))}
           </OctantNativeSelect>
         </label>
         <label className="settings-view__field">

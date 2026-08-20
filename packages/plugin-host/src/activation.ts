@@ -5,8 +5,17 @@ import type {
 } from "@octant/contracts/extensions";
 import type { OctantMode } from "@octant/contracts/modes";
 
+const rendererKinds = ["ui-surface", "appearance-pack", "preview-viewer"] as const;
+
 const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kind"]>>> = {
-  chat: new Set(["skill-instructions", "mcp-server", "mcp-tool", "mcp-prompt", "mcp-resource"]),
+  chat: new Set([
+    "skill-instructions",
+    "mcp-server",
+    "mcp-tool",
+    "mcp-prompt",
+    "mcp-resource",
+    ...rendererKinds,
+  ]),
   work: new Set([
     "skill-instructions",
     "mcp-server",
@@ -14,6 +23,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "mcp-prompt",
     "mcp-resource",
     "app",
+    ...rendererKinds,
   ]),
   code: new Set([
     "skill-instructions",
@@ -27,6 +37,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "apple-development-adapter",
     "board",
     "integration",
+    ...rendererKinds,
   ]),
 };
 
