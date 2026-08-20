@@ -377,6 +377,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       <div className="automation-editor__field">
         <label htmlFor={ids.name}>Name</label>
         <input
+          className="input"
           id={ids.name}
           onChange={(event) => setDisplayName(event.target.value)}
           ref={nameRef}
@@ -388,6 +389,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       <div className="automation-editor__field">
         <label htmlFor={ids.task}>Task for each run</label>
         <textarea
+          className="textarea"
           id={ids.task}
           onChange={(event) => setTaskPrompt(event.target.value)}
           rows={3}
@@ -405,7 +407,12 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           the filter and on a row.
         */}
         <label htmlFor={ids.host}>Environment</label>
-        <select id={ids.host} onChange={(event) => setHostId(event.target.value)} value={hostId}>
+        <select
+          className="select"
+          id={ids.host}
+          onChange={(event) => setHostId(event.target.value)}
+          value={hostId}
+        >
           {catalog.hosts.length === 0 ? <option value="">No environments available</option> : null}
           {catalog.hosts.map((host) => (
             <option key={String(host.hostId)} value={String(host.hostId)}>
@@ -422,7 +429,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       <fieldset className="automation-editor__field automation-editor__mode">
         <legend>Mode</legend>
         {(["work", "code"] as const).map((option) => (
-          <label className="automation-editor__mode-option" key={option}>
+          <label className="automation-editor__mode-option check" key={option}>
             <input
               checked={mode === option}
               name="automation-editor-mode"
@@ -438,6 +445,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       <div className="automation-editor__field">
         <label htmlFor={ids.project}>Project</label>
         <select
+          className="select"
           id={ids.project}
           onChange={(event) => {
             setProjectId(event.target.value);
@@ -462,6 +470,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       <div className="automation-editor__field">
         <label htmlFor={ids.execution}>Execution profile</label>
         <select
+          className="select"
           id={ids.execution}
           onChange={(event) => setExecutionProfileId(event.target.value)}
           value={executionProfileId}
@@ -483,6 +492,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       <div className="automation-editor__field">
         <label htmlFor={ids.authority}>Authority profile</label>
         <select
+          className="select"
           id={ids.authority}
           onChange={(event) => setAuthorityProfileId(event.target.value)}
           value={authorityProfileId}
@@ -512,6 +522,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       <div className="automation-editor__field">
         <label htmlFor={ids.schedule}>Schedule</label>
         <select
+          className="select"
           id={ids.schedule}
           onChange={(event) =>
             setTrigger((previous) => ({
@@ -531,6 +542,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         <div className="automation-editor__field">
           <label htmlFor={ids.onceAt}>Run at</label>
           <input
+            className="input"
             id={ids.onceAt}
             onChange={(event) =>
               setTrigger((previous) => ({ ...previous, onceLocal: event.target.value }))
@@ -546,6 +558,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           <div className="automation-editor__field">
             <label htmlFor={ids.anchorAt}>Starts at</label>
             <input
+              className="input"
               id={ids.anchorAt}
               onChange={(event) =>
                 setTrigger((previous) => ({ ...previous, anchorLocal: event.target.value }))
@@ -557,6 +570,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           <div className="automation-editor__field">
             <label htmlFor={ids.interval}>Repeat every (minutes)</label>
             <input
+              className="input"
               id={ids.interval}
               min={15}
               max={43_200}
@@ -575,7 +589,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           <fieldset className="automation-editor__field automation-editor__weekdays">
             <legend>Weekdays</legend>
             {weekdayOptions.map((weekday) => (
-              <label className="automation-editor__weekday" key={weekday.value}>
+              <label className="automation-editor__weekday check" key={weekday.value}>
                 <input
                   checked={trigger.weekdays.has(weekday.value)}
                   onChange={(event) =>
@@ -595,6 +609,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           <div className="automation-editor__field">
             <label htmlFor={ids.time}>Time of day</label>
             <input
+              className="input"
               id={ids.time}
               onChange={(event) =>
                 setTrigger((previous) => ({ ...previous, localTime: event.target.value }))
@@ -606,6 +621,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           <div className="automation-editor__field">
             <label htmlFor={ids.timeZone}>Timezone</label>
             <input
+              className="input"
               id={ids.timeZone}
               list={ids.timeZoneList}
               onChange={(event) =>
@@ -627,6 +643,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       <div className="automation-editor__field">
         <label htmlFor={ids.missed}>Missed runs</label>
         <select
+          className="select"
           id={ids.missed}
           onChange={(event) => setMissedRunPolicy(event.target.value as AutomationMissedRunPolicy)}
           value={missedRunPolicy}
@@ -639,6 +656,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       <div className="automation-editor__field">
         <label htmlFor={ids.target}>Delivery target</label>
         <textarea
+          className="textarea"
           id={ids.target}
           onChange={(event) => setTargetSummary(event.target.value)}
           rows={2}

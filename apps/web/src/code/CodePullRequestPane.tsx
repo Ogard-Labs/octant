@@ -75,7 +75,7 @@ function ReviewHeader(props: { readonly onRefresh?: () => void }) {
         <h1>Review</h1>
       </div>
       {props.onRefresh === undefined ? null : (
-        <OctantButton onClick={() => props.onRefresh?.()} type="button" variant="ghost">
+        <OctantButton onClick={() => props.onRefresh?.()} size="sm" type="button" variant="ghost">
           Refresh observation
         </OctantButton>
       )}
@@ -128,13 +128,19 @@ function ReviewWindow(
             Open on GitHub
           </a>
           {props.onNavigateThread === undefined ? null : (
-            <OctantButton onClick={() => props.onNavigateThread?.()} type="button" variant="ghost">
+            <OctantButton
+              onClick={() => props.onNavigateThread?.()}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
               Go to thread
             </OctantButton>
           )}
           {props.onNavigateWorktree === undefined ? null : (
             <OctantButton
               onClick={() => props.onNavigateWorktree?.()}
+              size="sm"
               type="button"
               variant="ghost"
             >
@@ -142,7 +148,12 @@ function ReviewWindow(
             </OctantButton>
           )}
           {props.onRefresh === undefined ? null : (
-            <OctantButton onClick={() => props.onRefresh?.()} type="button" variant="ghost">
+            <OctantButton
+              onClick={() => props.onRefresh?.()}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
               Refresh observation
             </OctantButton>
           )}
@@ -449,6 +460,7 @@ function CreatePullRequest(
           <OctantButton
             disabled={suggesting}
             onClick={() => void suggest()}
+            size="sm"
             type="button"
             variant="ghost"
           >
@@ -457,6 +469,7 @@ function CreatePullRequest(
           <OctantButton
             disabled={title.trim().length === 0}
             onClick={() => void create()}
+            size="sm"
             type="button"
             variant="secondary"
           >

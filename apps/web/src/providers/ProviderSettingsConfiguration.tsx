@@ -82,7 +82,7 @@ export function ProviderCreateForm(props: ProviderCreateFormProps) {
     <section className="provider-settings__manual" data-expanded={manualOpen ? "true" : "false"}>
       <button
         aria-expanded={manualOpen}
-        className="provider-settings__manual-trigger window-no-drag"
+        className="btn btn-secondary btn-sm window-no-drag"
         onClick={() => setManualOpen((current) => !current)}
         type="button"
       >

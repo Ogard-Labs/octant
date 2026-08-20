@@ -5,6 +5,11 @@
  * reinforcement only, so the surface stays readable under Increased Contrast
  * and for colour-blind users. Sizes use relative units so the dialog survives
  * larger text and 200% zoom.
+ *
+ * The look comes from the design system: groups and rows are `.setgroup`/
+ * `.setrow`, notices are `.callout`, and buttons are the `.btn` recipes the
+ * OctantButton adapter emits. The rules here are the residue those recipes do
+ * not express — the wizard grid, the step rail, and the readiness rows.
  */
 
 /*
@@ -43,10 +48,10 @@
     "notice notice"
     "actions actions";
   grid-template-rows: minmax(0, 1fr) auto auto;
-  gap: 1.5rem 2rem;
+  gap: var(--oct-space-6) var(--oct-space-8);
   min-width: 0;
   block-size: 100%;
-  padding: 1.5rem;
+  padding: var(--oct-space-6);
 }
 
 @container first-run (max-width: 40rem) {
@@ -60,8 +65,8 @@
      * the notice and the footer beneath it.
      */
     grid-template-rows: auto auto auto auto;
-    gap: 1.25rem;
-    padding: 1.25rem;
+    gap: var(--oct-space-5);
+    padding: var(--oct-space-5);
 
     /*
      * Stacked, the rail and the footer are both full-height rows that cannot
@@ -84,7 +89,7 @@
   grid-area: rail;
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: var(--oct-space-3);
   min-width: 0;
 
   /*
@@ -100,38 +105,42 @@
 .first-run__rail-list {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 2px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+/* The rail speaks the settings nav's language: quiet until hovered or
+   current, when it takes the same soft fill as `.setnav-item`. */
 .first-run__rail-step {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  column-gap: 0.5rem;
+  column-gap: var(--oct-space-2);
   inline-size: 100%;
-  padding: 0.45rem 0.55rem;
-  border: 1px solid transparent;
-  border-radius: var(--octant-radius-panel, 0.625rem);
+  padding: var(--oct-space-2);
+  border: 0;
+  border-radius: 6px;
   background: none;
-  color: inherit;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
   text-align: start;
   cursor: pointer;
 }
 
 .first-run__rail-step:hover {
-  background: var(--octant-surface-raised, color-mix(in srgb, Canvas 94%, CanvasText 6%));
+  background: var(--oct-fg-soft);
+  color: var(--oct-fg);
 }
 
 /*
  * The current step is marked by `aria-current` in the markup as well as by the
- * border here, so it is not announced by appearance alone.
+ * fill here, so it is not announced by appearance alone.
  */
 .first-run__rail-step[aria-current="step"] {
-  border-color: var(--octant-border, color-mix(in srgb, CanvasText 30%, transparent));
-  background: var(--octant-surface-raised, color-mix(in srgb, Canvas 94%, CanvasText 6%));
+  background: var(--oct-fg-soft);
+  color: var(--oct-fg);
 }
 
 .first-run__rail-marker {
@@ -140,23 +149,26 @@
   justify-content: center;
   inline-size: 1.15rem;
   block-size: 1.15rem;
-  border: 1px solid var(--octant-border, color-mix(in srgb, CanvasText 30%, transparent));
-  border-radius: 999px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
 }
 
+/* Configured is also written into the marker (the check) and announced by the
+   sr-only text; the accent is reinforcement. */
 .first-run__rail-step[data-configured="true"] .first-run__rail-marker {
-  border-color: CanvasText;
+  border-color: var(--oct-accent-fg);
+  color: var(--oct-accent-fg);
 }
 
 .first-run__rail-title {
-  font-size: 0.875rem;
-  font-weight: 600;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
 }
 
 .first-run__rail-summary {
   grid-column: 2;
-  font-size: 0.75rem;
-  opacity: 0.75;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
 }
 
 /* The step's own scroller. The footer stays put beside it; the rail scrolls
@@ -171,135 +183,101 @@
 .first-run__step {
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: var(--oct-space-4);
   min-width: 0;
 }
 
-/* Grouping only — the browser's own fieldset frame is not part of the design. */
-.first-run__group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  min-width: 0;
+/* Non-row content inside a `.setgroup` card supplies the padding `.setrow`
+   would otherwise bring. */
+.setgroup > .first-run__choices {
+  padding: var(--oct-space-4);
 }
 
-.first-run__group > legend {
-  padding: 0;
-  margin-block-end: 0.5rem;
+.setgroup > .first-run__caveat {
+  padding: var(--oct-space-3) var(--oct-space-4);
 }
 
-.first-run__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  min-width: 0;
+/* A caveat under rows gets the same hairline the rows separate with; one
+   directly under the group head does not, or the head's own rule doubles. */
+.setgroup > .setrow + .first-run__caveat {
+  border-top: 1px solid var(--oct-border-soft);
 }
 
 .first-run__choices {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: var(--oct-space-2);
 }
 
 .first-run__choice {
-  padding: 0.4rem 0.75rem;
-  border: 1px solid var(--octant-border, color-mix(in srgb, CanvasText 20%, transparent));
-  border-radius: var(--octant-radius-panel, 0.625rem);
-  background: none;
-  color: inherit;
-  font-size: 0.875rem;
+  min-height: var(--oct-control-height-sm);
+  padding-inline: var(--oct-space-4);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
   cursor: pointer;
+}
+
+.first-run__choice:hover {
+  background: var(--oct-surface-warm);
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
 }
 
 /*
  * The chosen option is carried by `aria-checked` in the markup as well as by
- * the border here, so the choice is never communicated by appearance alone.
+ * the accent here, so the choice is never communicated by appearance alone.
  */
 .first-run__choice[aria-checked="true"] {
-  border-color: CanvasText;
-  background: var(--octant-surface-raised, color-mix(in srgb, Canvas 94%, CanvasText 6%));
-  font-weight: 600;
-}
-
-.first-run__choice:focus-visible {
-  outline: 2px solid Highlight;
-  outline-offset: 2px;
-}
-
-.first-run__switch {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  min-width: 0;
-}
-
-.first-run__switch-label {
-  font-size: 0.875rem;
-  font-weight: 600;
+  border-color: var(--oct-accent-fg);
+  background: var(--oct-accent-soft);
+  font-weight: var(--oct-weight-strong);
 }
 
 .first-run__title {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: var(--oct-text-lg);
 }
 
-.first-run__intro,
-.first-run__summary-detail,
-.first-run__provider-detail,
-.first-run__notice,
+.first-run__intro {
+  margin: 0;
+  font-size: var(--oct-text-sm);
+  color: var(--oct-fg-2);
+}
+
 .first-run__caveat {
   margin: 0;
-  font-size: 0.875rem;
-  opacity: 0.9;
+  max-width: 64ch;
+  font-size: var(--oct-text-sm);
+  color: var(--oct-muted);
 }
 
-.first-run__section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.first-run__section-title {
-  margin: 0;
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  opacity: 0.7;
-}
-
+/* The readiness summary is a row inside the readiness `.setgroup`. */
 .first-run__summary {
   display: grid;
   grid-template-columns: auto 1fr;
   align-items: center;
-  column-gap: 0.5rem;
-  row-gap: 0.15rem;
+  column-gap: var(--oct-space-2);
+  row-gap: 2px;
   margin: 0;
-  padding: 0.6rem 0.75rem;
-  border: 1px solid var(--octant-border, color-mix(in srgb, CanvasText 15%, transparent));
-  border-radius: var(--octant-radius-panel, 0.625rem);
-  background: var(--octant-surface-raised, color-mix(in srgb, Canvas 94%, CanvasText 6%));
+  padding: var(--oct-space-3) var(--oct-space-4);
+  font-size: var(--oct-text-sm);
 }
 
 .first-run__summary-headline {
-  font-weight: 600;
+  font-weight: var(--oct-weight-strong);
 }
 
 .first-run__summary-detail {
   grid-column: 2;
-}
-
-.first-run__summary[data-overall="ready"] {
-  border-color: color-mix(in srgb, CanvasText 30%, transparent);
+  margin: 0;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
 }
 
 .first-run__providers {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -309,60 +287,63 @@
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
-  column-gap: 0.5rem;
-  row-gap: 0.1rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--octant-border, color-mix(in srgb, CanvasText 12%, transparent));
-  border-radius: var(--octant-radius-panel, 0.625rem);
+  column-gap: var(--oct-space-2);
+  row-gap: 2px;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-top: 1px solid var(--oct-border-soft);
+  font-size: var(--oct-text-sm);
 }
 
 .first-run__provider-name {
-  font-weight: 600;
+  font-weight: var(--oct-weight-strong);
   overflow-wrap: anywhere;
 }
 
+/* The state word beside the icon: the settings vocabulary's mono label. */
 .first-run__provider-label {
-  font-size: 0.75rem;
-  letter-spacing: 0.02em;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
   white-space: nowrap;
+  color: var(--oct-muted);
 }
 
 .first-run__provider-detail {
   grid-column: 2 / -1;
+  margin: 0;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
 }
 
+/* `.callout` carries the card; these place it in the wizard grid, stack its
+   children (one holds a paragraph and a button), and map the markup's
+   data-tone onto the callout's semantic edge. */
 .first-run__notice {
   grid-area: notice;
-  display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--octant-border, color-mix(in srgb, CanvasText 15%, transparent));
-  border-radius: var(--octant-radius-panel, 0.625rem);
+  gap: var(--oct-space-2);
+  /* Two of these notices are paragraphs; the callout recipe styles a box,
+     not a p, so the default block margin is dropped here. */
+  margin: 0;
 }
 
 .first-run__notice[data-tone="attention"] {
-  border-style: dashed;
-}
-
-.first-run__setup,
-.first-run__buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  border-left-color: var(--oct-warn-fg);
 }
 
 .first-run__actions {
   grid-area: actions;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  padding-top: 0.25rem;
-  border-top: 1px solid var(--octant-border, color-mix(in srgb, CanvasText 12%, transparent));
+  gap: var(--oct-space-2);
+  padding-top: var(--oct-space-1);
+  border-top: 1px solid var(--oct-border-soft);
 }
 
+/* `.btn-group` spaces and wraps the buttons; the footer right-aligns them. */
 .first-run__buttons {
+  display: flex;
   justify-content: flex-end;
 }

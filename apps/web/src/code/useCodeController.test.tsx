@@ -1417,6 +1417,36 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("re-hydrates a failed transcript when the user retries from the thread view", async () => {
+    const conversation = vi
+      .fn(async () => ({
+        version: 2 as const,
+        threadId: ids.thread,
+        turns: [],
+        nextCursor: 0,
+        hasMore: false,
+      }))
+      .mockRejectedValueOnce(new Error("offline"));
+    const client = fakeClient({ conversation });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be loaded."),
+    );
+
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    // Reloading only the bootstrap left the transcript in its error state
+    // forever, because nothing re-activates a thread that is already open.
+    await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+    expect(result.current.turnError).toBeUndefined();
+    unmount();
+  });
+
   it("surfaces a durable open follow-up on navigation, independent of unread and runtime", async () => {
     const client = fakeClient({ readFollowUp: vi.fn(async () => followUpView(true) as never) });
     const { result } = renderHook(() => useCodeController({ client }));
@@ -1575,6 +1605,57 @@ describe("useCodeController", () => {
 
     await waitFor(() => expect(result.current.navigation).toHaveLength(1));
     expect(result.current.navigation[0]?.unread).toBe(false);
+  });
+
+  it("marks a thread read when it opens even though its history could not be loaded", async () => {
+    // The error state is still the thread's current state in front of the
+    // user. Leaving the mark standing sent them back to a view with nothing
+    // more to show.
+    const readCursorStore = createCodeReadCursorStore();
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => bootstrap(1, 9)),
+      conversation: vi.fn(async () => Promise.reject(new Error("offline"))),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        readCursorStore,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be loaded."),
+    );
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
+    unmount();
+  });
+
+  it("holds a thread the user marked unread even when this sitting journaled no activity for it", async () => {
+    // With nothing journaled this sitting, dropping the cursor alone leaves
+    // the comparison at zero-over-zero and the click does visibly nothing.
+    const readCursorStore = createCodeReadCursorStore();
+    const client = fakeClient();
+    const { result } = renderHook(() => useCodeController({ client, readCursorStore }));
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
+
+    act(() => readCursorStore.unmark(ids.thread));
+
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(true));
+  });
+
+  it("spends an explicit unread mark when the user asks for the thread to be read", async () => {
+    const readCursorStore = createCodeReadCursorStore();
+    const client = fakeClient();
+    const { result } = renderHook(() => useCodeController({ client, readCursorStore }));
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
+    act(() => readCursorStore.unmark(ids.thread));
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(true));
+
+    act(() => result.current.markThreadRead(ids.thread));
+
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
   });
 
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {

@@ -40,8 +40,8 @@ export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
         later in Settings.
       </p>
 
-      <fieldset className="first-run__group">
-        <legend className="first-run__section-title">Colour scheme</legend>
+      <div aria-label="Colour scheme" className="setgroup" role="group">
+        <div className="setgroup-head">Colour scheme</div>
         {schemeUnknown ? (
           <p className="first-run__caveat" role="status">
             Octant is still loading its appearance settings, so it cannot say which scheme is in use
@@ -63,47 +63,55 @@ export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
             ))}
           </div>
         )}
-      </fieldset>
+      </div>
 
-      <fieldset className="first-run__group">
-        <legend className="first-run__section-title">Modes</legend>
-        <div className="first-run__switch">
-          <span className="first-run__switch-label">Chat</span>
-          <OctantSwitch
-            checked={choices.chatEnabled}
-            label="Enable Chat"
-            onCheckedChange={props.onToggleChat}
-          />
+      <div aria-label="Modes" className="setgroup" role="group">
+        <div className="setgroup-head">Modes</div>
+        <div className="setrow">
+          <span className="setrow-label">Chat</span>
+          <div className="setrow-control">
+            <OctantSwitch
+              checked={choices.chatEnabled}
+              label="Enable Chat"
+              onCheckedChange={props.onToggleChat}
+            />
+          </div>
         </div>
-        <div className="first-run__switch">
-          <span className="first-run__switch-label">Work</span>
-          <OctantSwitch
-            checked={choices.workEnabled}
-            label="Enable Work"
-            onCheckedChange={props.onToggleWork}
-          />
+        <div className="setrow">
+          <span className="setrow-label">Work</span>
+          <div className="setrow-control">
+            <OctantSwitch
+              checked={choices.workEnabled}
+              label="Enable Work"
+              onCheckedChange={props.onToggleWork}
+            />
+          </div>
         </div>
         <p className="first-run__caveat" role="note">
           Code is always available. Turning Chat or Work off only hides the mode — its threads and
           data stay exactly where they are, and come back if you turn it on again.
         </p>
-      </fieldset>
+      </div>
 
-      <div className="first-run__field">
-        <label className="first-run__switch-label" htmlFor="first-run-mode-switcher">
-          Mode switcher
-        </label>
-        <OctantNativeSelect
-          aria-label="Mode switcher"
-          id="first-run-mode-switcher"
-          onChange={(event) =>
-            props.onSelectModeSwitcher(event.currentTarget.value as "buttons" | "dropdown")
-          }
-          value={choices.modeSwitcher}
-        >
-          <option value="buttons">Compact buttons</option>
-          <option value="dropdown">Dropdown</option>
-        </OctantNativeSelect>
+      <div className="setgroup">
+        <div className="setrow">
+          <label className="setrow-label" htmlFor="first-run-mode-switcher">
+            Mode switcher
+          </label>
+          <div className="setrow-control">
+            <OctantNativeSelect
+              aria-label="Mode switcher"
+              id="first-run-mode-switcher"
+              onChange={(event) =>
+                props.onSelectModeSwitcher(event.currentTarget.value as "buttons" | "dropdown")
+              }
+              value={choices.modeSwitcher}
+            >
+              <option value="buttons">Compact buttons</option>
+              <option value="dropdown">Dropdown</option>
+            </OctantNativeSelect>
+          </div>
+        </div>
       </div>
     </div>
   );

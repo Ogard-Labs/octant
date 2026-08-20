@@ -32,7 +32,15 @@ export const CODE_OPERATION_EVENT_RECORDED = "code.operation-event-recorded@1";
 export const MAX_CODE_OPERATION_REPLAY_LIMIT = 256;
 
 const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
-const MAX_JOURNAL_SCAN_EVENTS = 10_000;
+/*
+ * Parity with every sibling store's bound. This scan walks the whole global
+ * journal and counts every envelope — including other aggregates' — so the
+ * old 10k bound was exhausted by an ordinary dogfooding host (observed:
+ * ~22k events, 94% of them code-checkout reconnect noise), which made every
+ * thread's history refuse to load. The bound exists to keep a hostile or
+ * corrupt journal from pinning the CPU, not to fail a healthy host.
+ */
+const MAX_JOURNAL_SCAN_EVENTS = 100_000;
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
