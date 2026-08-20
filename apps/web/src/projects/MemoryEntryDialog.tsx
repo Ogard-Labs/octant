@@ -122,12 +122,7 @@ export function MemoryEntryDialog(props: MemoryEntryDialogProps) {
           >
             Cancel
           </OctantButton>
-          <OctantButton
-            disabled={props.busy || value.trim() === ""}
-            type="submit"
-            className="project-button project-button--primary"
-            variant="ghost"
-          >
+          <OctantButton disabled={props.busy || value.trim() === ""} type="submit">
             {props.mode.kind === "create"
               ? "Add memory"
               : props.mode.kind === "supersede"

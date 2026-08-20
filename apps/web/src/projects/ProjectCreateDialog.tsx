@@ -123,12 +123,7 @@ function ChatProjectCreateDialog(props: ProjectCreateDialogProps) {
           >
             Cancel
           </OctantButton>
-          <OctantButton
-            disabled={submitting || name.trim() === ""}
-            type="submit"
-            className="project-button project-button--primary"
-            variant="ghost"
-          >
+          <OctantButton disabled={submitting || name.trim() === ""} type="submit">
             Create Project
           </OctantButton>
         </div>
@@ -243,12 +238,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           >
             Cancel
           </OctantButton>
-          <OctantButton
-            onClick={() => void beginNativeSelection()}
-            type="button"
-            className="project-button project-button--primary"
-            variant="ghost"
-          >
+          <OctantButton onClick={() => void beginNativeSelection()} type="button">
             {submitting ? "Retry" : "Choose folder"}
           </OctantButton>
         </div>
@@ -300,12 +290,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         needs the native picker bridge.
       </p>
       <div className="project-dialog__actions">
-        <OctantButton
-          onClick={props.onClose}
-          type="button"
-          className="project-button project-button--primary"
-          variant="ghost"
-        >
+        <OctantButton onClick={props.onClose} type="button">
           Close
         </OctantButton>
       </div>

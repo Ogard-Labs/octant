@@ -1212,12 +1212,7 @@ function CodeProjectViewEditorDialog(props: {
           >
             Cancel
           </OctantButton>
-          <OctantButton
-            disabled={name.trim() === ""}
-            type="submit"
-            className="project-button project-button--primary"
-            variant="ghost"
-          >
+          <OctantButton disabled={name.trim() === ""} type="submit">
             {props.mode === "create" ? "Create project view" : "Save project view"}
           </OctantButton>
         </div>

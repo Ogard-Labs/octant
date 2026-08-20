@@ -90,12 +90,7 @@ export function MemoryTransferDialog(props: MemoryTransferDialogProps) {
           >
             Cancel
           </OctantButton>
-          <OctantButton
-            disabled={props.busy || destination === ""}
-            type="submit"
-            className="project-button project-button--primary"
-            variant="ghost"
-          >
+          <OctantButton disabled={props.busy || destination === ""} type="submit">
             Transfer memory
           </OctantButton>
         </div>
