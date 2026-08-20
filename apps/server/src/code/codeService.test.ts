@@ -696,6 +696,17 @@ describe("CodeService commands", () => {
     ).resolves.toMatchObject({
       thread: { executionPolicy: "full-access", permissionPersistence: "current-session" },
     });
+    // The confirmation was granted for the duration the person was shown. The
+    // profile shortens it afterwards, so the effect put to the approval store
+    // has to stay the requested one or the granted receipt stops matching.
+    expect(fixture.approvals.validate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        effect: {
+          kind: "create-thread-full-access",
+          thread: expect.objectContaining({ permissionPersistence: "project-default" }),
+        },
+      }),
+    );
     expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
       expect.objectContaining({
         events: [

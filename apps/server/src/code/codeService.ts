@@ -811,11 +811,27 @@ export class CodeService {
         });
         // Native Full-access approval is validated before mutation, bound to the
         // resolved checkout context.
+        //
+        // The confirmation was asked for the thread as requested, and the store
+        // matches the effect exactly. A profile only narrows, so validating the
+        // requested thread checks the very effect the person saw and consented
+        // to; hashing the narrowed one would refuse a confirmation that was
+        // granted for strictly more than the thread ends up with.
+        const approvedThread =
+          managedAuthority.permissionPersistence === command.permissionPersistence
+            ? thread
+            : decodeCodeThread({
+                ...thread,
+                permissionPersistence: command.permissionPersistence,
+              });
         if (
           thread.executionPolicy === "full-access" &&
           !(await this.#approvals?.validate({
             windowId: authenticatedWindowId,
-            effect: { kind: "create-thread-full-access", thread } as CodeApprovalEffect,
+            effect: {
+              kind: "create-thread-full-access",
+              thread: approvedThread,
+            } as CodeApprovalEffect,
             contextDigest: approvalContextDigest({
               projectId: command.projectId,
               threadId: thread.id,
@@ -1108,9 +1124,11 @@ export class CodeService {
           checkout !== undefined &&
           !(await this.#approvals?.validate({
             windowId: authenticatedWindowId,
+            // As in managed creation: the confirmation was granted for the
+            // thread as requested, and a profile only narrows what it does.
             effect: {
               kind: "create-thread-full-access",
-              thread,
+              thread: command.thread,
             } as CodeApprovalEffect,
             contextDigest: approvalContextDigest({
               projectId: command.thread.projectId,
