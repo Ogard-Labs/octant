@@ -2580,7 +2580,7 @@ describe("App", () => {
     providersListbox.focus();
     fireEvent.keyDown(providersListbox, { key: "ArrowDown" });
     fireEvent.keyDown(providersListbox, { key: "Enter" });
-    expect(screen.getByRole("heading", { name: "Providers" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Providers & Models" })).toBeVisible();
     expect(screen.getByLabelText("Permission persistence")).toHaveValue("current-session");
 
     // Keyword search still routes to the Providers section.
@@ -2589,7 +2589,7 @@ describe("App", () => {
     openCodeListbox.focus();
     fireEvent.keyDown(openCodeListbox, { key: "ArrowDown" });
     fireEvent.keyDown(openCodeListbox, { key: "Enter" });
-    expect(screen.getByRole("heading", { name: "Providers" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Providers & Models" })).toBeVisible();
   }, 15_000);
 
   it("renders recovery-required separately from a disconnected shell", async () => {

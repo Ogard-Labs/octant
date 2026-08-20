@@ -48,6 +48,30 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it("adds no pane heading of its own and orders discovery, then providers, then defaults", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture()}
+        discovery={<section aria-label="Detected on this Mac" />}
+      />,
+    );
+
+    // The settings shell owns the pane's single visible title; the pane body
+    // must not repeat a "Providers" heading of its own.
+    expect(screen.queryByRole("heading", { name: "Providers" })).not.toBeInTheDocument();
+
+    const discovery = screen.getByRole("region", { name: "Detected on this Mac" });
+    const providers = screen.getByRole("region", { name: "Providers" });
+    const defaults = screen.getByRole("region", { name: "Defaults" });
+    expect(within(defaults).getByLabelText("Permission persistence")).toBeVisible();
+    expect(
+      discovery.compareDocumentPosition(providers) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      providers.compareDocumentPosition(defaults) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("keeps manual provider setup behind an advanced disclosure", async () => {
     const user = userEvent.setup();
     renderProviderSettings(<ProviderSettingsView {...fixture()} />);
