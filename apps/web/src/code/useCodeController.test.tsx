@@ -649,6 +649,28 @@ describe("useCodeController", () => {
     expect(store.read("code", String(ids.thread))).toBeUndefined();
   });
 
+  it("purges a Code draft when bootstrap no longer lists the thread", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    store.write("code", String(ids.thread), {
+      text: "do not keep",
+      caretIndex: 0,
+      stagedDropped: false,
+    });
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => ({ ...bootstrap(), threads: [] })),
+    });
+    const { result } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(store.read("code", String(ids.thread))).toBeUndefined();
+  });
+
   it("stages prompt evidence and starts a provider turn for follow-ups", async () => {
     const operationId = "70000000-0000-4000-8000-000000000001";
     const contentId = "60000000-0000-4000-8000-000000000001";
@@ -1059,6 +1081,49 @@ describe("useCodeController", () => {
     expect(result.current.turnStatus).toBe("failed");
     expect(result.current.turnError).toMatch(/waiting for approval, input, or recovery/i);
     expect(result.current.pendingDraft).toBe("approve this turn");
+  });
+
+  it("keeps the dropped-context warning when a running Code turn fails", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const operationId = "70000000-0000-4000-8000-000000000032";
+    async function* waitingFrames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "waiting" },
+      };
+    }
+    const client = fakeClient({
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId,
+        state: "running",
+      })) as never,
+      subscribeOperation: vi.fn(() => waitingFrames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => {
+      result.current.setPendingDraft("approve this turn");
+      result.current.markDraftStagedDropped();
+    });
+    expect(result.current.draftStagedDropped).toBe(true);
+
+    await act(async () => {
+      await result.current.sendFollowUp("approve this turn");
+    });
+
+    expect(result.current.pendingDraft).toBe("approve this turn");
+    expect(result.current.draftStagedDropped).toBe(true);
   });
 
   it("keeps a prompt editable when the provider turn cannot start", async () => {

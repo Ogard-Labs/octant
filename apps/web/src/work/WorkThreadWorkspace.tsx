@@ -469,6 +469,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               </OctantButton>
             </div>
           </div>
+          {composerDraft.persistError === undefined ? null : (
+            <p className="work-thread-workspace__hint" role="status">
+              {composerDraft.persistError}
+            </p>
+          )}
           {errorMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">
               {errorMessage}

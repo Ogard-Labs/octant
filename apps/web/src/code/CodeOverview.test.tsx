@@ -482,6 +482,7 @@ function controller(): CodeController {
     pendingDraft: "",
     pendingDraftCaret: 0,
     draftStagedDropped: false,
+    draftPersistError: undefined,
     markDraftStagedDropped: vi.fn(),
     purgeThreadDraft: vi.fn(),
     refreshFollowUp: vi.fn(async () => undefined),

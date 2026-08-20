@@ -99,4 +99,115 @@ describe("composer thread draft store", () => {
     const element = { setSelectionRange: (start: number, end: number) => ({ start, end }) };
     applyComposerCaret(element, 99, 4);
   });
+
+  it("starts up where reading the storage property itself throws", () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get: () => {
+        throw new Error("SecurityError");
+      },
+    });
+
+    try {
+      const store = createComposerThreadDraftStore();
+      store.write("chat", chatThread, {
+        text: "held in memory",
+        caretIndex: 0,
+        stagedDropped: false,
+      });
+      expect(store.read("chat", chatThread)?.text).toBe("held in memory");
+    } finally {
+      if (original === undefined) delete (globalThis as { localStorage?: unknown }).localStorage;
+      else Object.defineProperty(globalThis, "localStorage", original);
+    }
+  });
+
+  it("merges another window's draft instead of replacing the whole snapshot", () => {
+    const storage = memoryStorage();
+    const first = createComposerThreadDraftStore(storage);
+    const second = createComposerThreadDraftStore(storage);
+    first.write("chat", chatThread, { text: "thread A", caretIndex: 0, stagedDropped: false });
+    second.write("code", codeThread, { text: "thread B", caretIndex: 0, stagedDropped: false });
+    // Both stores started empty. The second write must keep the first thread
+    // rather than replacing storage with only thread B.
+
+    expect(second.read("chat", chatThread)?.text).toBe("thread A");
+    expect(JSON.parse(storage.getItem(COMPOSER_THREAD_DRAFTS_STORAGE_KEY) ?? "{}")).toEqual({
+      [`chat:${chatThread}`]: { text: "thread A", caretIndex: 0 },
+      [`code:${codeThread}`]: { text: "thread B", caretIndex: 0 },
+    });
+  });
+
+  it("adopts another window's snapshot written behind this store's back", () => {
+    const storage = memoryStorage();
+    const store = createComposerThreadDraftStore(storage);
+    storage.setItem(
+      COMPOSER_THREAD_DRAFTS_STORAGE_KEY,
+      JSON.stringify({
+        [`chat:${chatThread}`]: { text: "from another window", caretIndex: 3 },
+      }),
+    );
+    store.reloadFromStorage();
+
+    expect(store.read("chat", chatThread)).toEqual({
+      text: "from another window",
+      caretIndex: 3,
+      stagedDropped: false,
+    });
+  });
+
+  it("reports when a draft cannot be saved or removed", () => {
+    const refusingWrite = createComposerThreadDraftStore({
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("quota");
+      },
+      removeItem: () => undefined,
+    });
+    const write = refusingWrite.write("chat", chatThread, {
+      text: "unsaved",
+      caretIndex: 0,
+      stagedDropped: false,
+    });
+    expect(write.status).toBe("unpersisted");
+    expect(refusingWrite.read("chat", chatThread)?.text).toBe("unsaved");
+    expect(refusingWrite.persistError()).toMatch(/could not be saved/);
+
+    const refusingRemove = createComposerThreadDraftStore({
+      getItem: () =>
+        JSON.stringify({
+          [`chat:${chatThread}`]: { text: "keep", caretIndex: 0 },
+        }),
+      setItem: () => undefined,
+      removeItem: () => {
+        throw new Error("blocked");
+      },
+    });
+    const remove = refusingRemove.clear("chat", chatThread);
+    expect(remove.status).toBe("unpersisted");
+    expect(refusingRemove.read("chat", chatThread)).toBeUndefined();
+    expect(refusingRemove.persistError()).toMatch(/could not be removed/);
+  });
+
+  it("drops drafts whose threads are no longer in authoritative state", () => {
+    const store = createComposerThreadDraftStore(memoryStorage());
+    store.write("code", codeThread, { text: "gone", caretIndex: 0, stagedDropped: false });
+    store.write("code", chatThread, { text: "keep", caretIndex: 0, stagedDropped: false });
+    store.dropUnknownThreads("code", [chatThread]);
+
+    expect(store.read("code", codeThread)).toBeUndefined();
+    expect(store.read("code", chatThread)?.text).toBe("keep");
+  });
+
+  it("treats a clear as a mutation so an explicit empty draft is not restored", () => {
+    const store = createComposerThreadDraftStore(memoryStorage());
+    store.write("chat", chatThread, { text: "prompt", caretIndex: 0, stagedDropped: false });
+    const before = store.revision("chat", chatThread);
+    store.clear("chat", chatThread);
+    expect(store.revision("chat", chatThread)).toBe(before + 1);
+    store.write("chat", chatThread, { text: "replacement", caretIndex: 0, stagedDropped: false });
+    store.clear("chat", chatThread);
+    expect(store.revision("chat", chatThread)).toBe(before + 3);
+  });
 });

@@ -187,6 +187,18 @@ export function useChatController(options: ChatControllerOptions) {
   const bootstrapped = useRef(false);
   const composerDraftRef = useRef(composerDraft);
   composerDraftRef.current = composerDraft;
+  const knownDraftThreads = useRef<ReadonlySet<string> | undefined>(undefined);
+
+  const reconcileDrafts = useCallback((threadIds: ReadonlyArray<string>) => {
+    if (knownDraftThreads.current === undefined) {
+      composerDraftRef.current.dropUnknown(threadIds);
+    } else {
+      for (const threadId of knownDraftThreads.current) {
+        if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+      }
+    }
+    knownDraftThreads.current = new Set(threadIds);
+  }, []);
 
   const updatePendingDraft = useCallback((value: string, caretIndex?: number) => {
     if (caretIndex === undefined) composerDraftRef.current.setDraft(value);
@@ -267,6 +279,7 @@ export function useChatController(options: ChatControllerOptions) {
       bootstrapped.current = true;
       settingsVersion.current = next.settings.version;
       setBootstrap(next);
+      reconcileDrafts(next.threads.map((thread) => String(thread.id)));
       setStatus("ready");
       return true;
     } catch (error) {
@@ -275,7 +288,7 @@ export function useChatController(options: ChatControllerOptions) {
       setErrorMessage(failureMessage(error));
       return false;
     }
-  }, [client]);
+  }, [client, reconcileDrafts]);
 
   const activateThread = useCallback(
     async (threadId: ChatThreadId) => {
@@ -587,8 +600,9 @@ export function useChatController(options: ChatControllerOptions) {
       return false;
     }
     const sendingThreadId = String(activeView.thread.id);
-    const sendingCaret = composerDraftRef.current.readFor(sendingThreadId)?.caretIndex;
+    const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
     composerDraftRef.current.clearFor(sendingThreadId);
+    const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
     const result = await execute({
       kind: "send-chat-turn",
       threadId: activeView.thread.id,
@@ -604,10 +618,13 @@ export function useChatController(options: ChatControllerOptions) {
     });
     if (
       result === undefined &&
-      (composerDraftRef.current.readFor(sendingThreadId)?.text ?? "") === ""
+      composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
     ) {
-      if (sendingCaret === undefined) composerDraftRef.current.writeFor(sendingThreadId, prompt);
-      else composerDraftRef.current.writeFor(sendingThreadId, prompt, sendingCaret);
+      composerDraftRef.current.restoreFor(sendingThreadId, {
+        text: prompt,
+        caretIndex: previousDraft?.caretIndex ?? prompt.length,
+        stagedDropped: previousDraft?.stagedDropped === true,
+      });
     }
     return result !== undefined;
   }
@@ -694,6 +711,7 @@ export function useChatController(options: ChatControllerOptions) {
     pendingDraft,
     pendingDraftCaret: composerDraft.caretIndex,
     draftStagedDropped: composerDraft.stagedDropped,
+    draftPersistError: composerDraft.persistError,
     markDraftStagedDropped: composerDraft.markStagedDropped,
     purgeThreadDraft: composerDraft.purge,
     /**

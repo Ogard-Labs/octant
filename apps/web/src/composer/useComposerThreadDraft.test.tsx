@@ -148,6 +148,19 @@ describe("useComposerThreadDraft", () => {
     expect(store.read("code", codeThread)).toBeUndefined();
   });
 
+  it("marks the abandoned thread when told its id after the current thread has changed", () => {
+    const store = createComposerThreadDraftStore(memoryStorage());
+    const { result, rerender } = renderHook(
+      ({ threadId }) => useComposerThreadDraft({ mode: "chat", store, threadId }),
+      { initialProps: { threadId: chatThread } },
+    );
+    act(() => result.current.setDraft("keep this text"));
+    rerender({ threadId: otherChat });
+    act(() => result.current.markStagedDropped(chatThread));
+    expect(store.read("chat", chatThread)?.stagedDropped).toBe(true);
+    expect(store.read("chat", otherChat)).toBeUndefined();
+  });
+
   it("keeps a failed send's text on the thread that sent it", () => {
     const store = createComposerThreadDraftStore(memoryStorage());
     const { result, rerender } = renderHook(

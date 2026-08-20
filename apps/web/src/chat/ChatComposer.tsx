@@ -98,7 +98,7 @@ export interface ChatComposerProps {
   readonly onCaretIndexChange?: (caretIndex: number) => void;
   readonly isSending: boolean;
   readonly model: ChatComposerSelection;
-  readonly onDraftChange: (draft: string) => void;
+  readonly onDraftChange: (draft: string, caretIndex?: number) => void;
   /** Receives the browser-selected File only; file paths are not accepted or exposed. */
   readonly onFileSelected: (file: File) => void;
   readonly onModelChange: (modelId: string) => void;
@@ -335,7 +335,8 @@ export function ChatComposer(props: ChatComposerProps) {
   function chooseCommand(command: OctantCommand) {
     if (commandToken === undefined) return;
     const applied = applySlashCommandToken(props.draft, commandToken);
-    props.onDraftChange(applied.draft);
+    props.onDraftChange(applied.draft, applied.caretIndex);
+    rememberCaret(applied.caretIndex);
     setCommandToken(undefined);
     setActiveCommandIndex(0);
     queueMicrotask(() => {
@@ -343,6 +344,7 @@ export function ChatComposer(props: ChatComposerProps) {
       if (message === null) return;
       message.focus();
       message.setSelectionRange(applied.caretIndex, applied.caretIndex);
+      rememberCaret(applied.caretIndex);
     });
     if (command.action.kind === "run") {
       command.action.run();
