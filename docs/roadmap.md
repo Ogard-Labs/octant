@@ -62,13 +62,16 @@ Hardening in progress for the preview:
   [decisions/0001-plugin-architecture.md](decisions/0001-plugin-architecture.md).
   - `@octant/plugin-api` extracted as a narrow, curated re-export of
     `@octant/contracts/extensions` (manifest, component kinds, capabilities),
-    plus new `board`/`integration` component kinds and `sidebar.destination`/
-    `settings.section` contribution schemas. A minimal renderer contribution
-    registry now resolves sidebar destination availability; settings-section
-    contributions, panes, preview viewers, and appearance contribution points
-    remain open.
-  - First bundled plugins: appearance packs and preview viewers, then the
-    thread board and GitHub integration behind typed server ports.
+    plus `board`/`integration`/`ui-surface`/`appearance-pack`/`preview-viewer`
+    kinds and renderer contribution schemas (`sidebar.destination`,
+    `settings.section`, `workspace.tab`, `thread.pane`, `preview.viewer`,
+    `appearance.preset`, `board.view`). The renderer registry resolves every
+    point from a static first-party catalog; disabled components contribute
+    no sidebar entry, settings section, appearance preset, or preview viewer.
+  - First bundled plugins: an appearance pack (Octant theme preset) and
+    structured preview viewers, as proof those points work. Extracting the
+    thread board, GitHub, and Linear behind typed server ports remains later
+    sequenced work.
 - **Linear integration** — the first bundled-off integration plugin: issue
   intake and delivery-target sync from a Work or Code thread, with the same
   read/write authority model as GitHub.
@@ -81,8 +84,6 @@ Hardening in progress for the preview:
   agent controls with journaled lifecycle; sharing only after secure local use.
 - **Automation Center** — host-owned, Project-bound agent schedules that create
   ordinary Work or Code threads with durable occurrence recovery.
-- **Thread mentions and Side Chat** — ask about a thread from the shell without
-  interrupting it; complete the persisted sidecar panel.
 - **Native agent harness** — Octant-owned agent loop for direct and local
   endpoints with app-managed tools, Goals, roles, session trees, and CLI
   parity with the GUI.

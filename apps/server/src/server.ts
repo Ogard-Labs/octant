@@ -83,6 +83,7 @@ import {
   WorkTurnProjection,
   hydrateWorkTurnProjectionFromJournal,
 } from "./work/workTurnProjection";
+import { WorkAttachmentStore } from "./work/workAttachmentStore";
 import { WorkTurnService } from "./work/workTurnService";
 import { withWorkflowLifecycle } from "./work/workThreadWorkflowHook";
 import { WorkflowEventStore } from "./work/workflowEventStore";
@@ -504,6 +505,8 @@ import {
   createHostControlRouteHandler,
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
+import { ThreadRetentionService } from "./threadRetentionService";
+import { ChatAttachmentStore } from "./chat/chatAttachmentStore";
 import { createPrivateListenerLifecycleController } from "./remote/privateListenerLifecycleController";
 import { resolvePrivateListenerHostIdentity } from "./remote/privateListenerHostIdentity";
 import { createPrivateListenerAdministrationRouteHandler } from "./remote/privateListenerAdministrationRoutes";
@@ -1882,6 +1885,7 @@ export function startOctantServer(
     const codeContent = new CodeContentStore();
     const codeEvidence = new CodeEvidenceStore({ connection: persistence.connection });
     const codeAttachments = new CodeAttachmentStore(persistence.dataDirectory);
+    const workAttachments = new WorkAttachmentStore(persistence.dataDirectory);
     // Listing reads directory entries under the bound checkout and needs no
     // file helper, so it is available even when the helper transport is not.
     const codeFileListing = new CodeFileListingService();
@@ -3238,6 +3242,7 @@ export function startOctantServer(
     });
     yield* Effect.promise(() => chatService.recoverManagedAttachments());
     yield* Effect.promise(() => codeAttachments.recover());
+    yield* Effect.promise(() => workAttachments.recover());
     yield* Effect.promise(() => chatService.recoverPendingDeletions());
     const linkedThreadService = createLinkedThreadRuntime({
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
@@ -3413,6 +3418,15 @@ export function startOctantServer(
         return attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, configuredDriverOptions),
           () => workRequestRuntime,
+        );
+      },
+      attachments: workAttachments,
+      supportsAttachments: (thread) => {
+        const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
+        if (observed?.capabilities.nativeAttachments !== "supported") return false;
+        return observed.models.some(
+          (model) =>
+            String(model.id) === String(thread.modelId) && model.inputModalities.includes("image"),
         );
       },
       uuid: randomUUID,
@@ -5114,9 +5128,29 @@ export function startOctantServer(
     // Registered on the loopback chain only — never inside
     // dispatchProductRoutes — so the remote gateway's product dispatch can
     // never reach host lifecycle authority even if route policy regressed.
+    const chatAttachmentStore = new ChatAttachmentStore(persistence.dataDirectory);
+    const threadRetention = new ThreadRetentionService({
+      connection: persistence.connection,
+      journal: persistence.journal,
+      clock: () => new Date().toISOString(),
+      uuid: randomUUID,
+      listWorkThreads: () =>
+        workThreadProjection.list().map((thread) => ({
+          id: String(thread.id),
+          projectId: thread.projectId,
+          updatedAt: thread.updatedAt,
+        })),
+      forgetWorkThread: (threadId) => {
+        workThreadProjection.forget(threadId as never);
+      },
+      purgeThreadArtifacts: async ({ mode, threadId }) => {
+        if (mode === "chat") await chatAttachmentStore.purgeThread(threadId as never);
+      },
+    });
     const hostControlRoutes = createHostControlRouteHandler({
       windowAuthorityStore,
       diagnostics: composeHostDiagnostics,
+      threadRetention,
       ...(options.hostControl?.servicePolicy === undefined
         ? {}
         : { servicePolicy: options.hostControl.servicePolicy }),

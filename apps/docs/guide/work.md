@@ -25,6 +25,7 @@ Capability-aware workspace surfaces available in Work include:
 - Confined Files/Explorer
 - Artifact Review and preview surfaces
 - Browser tabs (host-owned, policy-gated)
+- Side Chat, a Chat-mode lane that can ask about the focused thread without interrupting it or inheriting this Project's filesystem
 - Research with citations and provenance
 - Scoped memory and child agents
 
@@ -44,6 +45,12 @@ Work supports a research workflow with citations and provenance. Research thread
 ## Artifacts and previews
 
 Work threads can create, edit, and preview artifacts within the bound root. Preview surfaces are authenticated and cancelable. Split-view previews render through the shared renderer with server-authoritative policy.
+
+## Attaching images
+
+Paste or attach a PNG, JPEG, WebP, or GIF in the Work composer to send it with the first provider turn. The image uploads to the host after the thread is created, and the turn names only the identifier the host answered with, so the provider receives bytes the host itself accepted.
+
+A turn carries at most eight images, each up to 10 MB, alongside a written message. If the selected model does not read images, the composer says so at the paste instead of taking the file. The host checks the thread's own model again at send, so a turn never reaches a model with its pictures quietly dropped. Removing a chip before sending keeps that image off the turn.
 
 ## Next steps
 

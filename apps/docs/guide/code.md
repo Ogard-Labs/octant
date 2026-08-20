@@ -16,6 +16,8 @@ Create a Code Project from the sidebar:
 
 The server validates that the folder exists and the renderer receives an opaque receipt. If the folder is not a Git repository, Git-dependent features report _unavailable_ until you initialise one.
 
+A Code Project can remember how new threads should start: in **this Project's current checkout**, or in **a managed worktree Octant creates**. The default is the current checkout, which creates no worktree the owner did not ask for. Set the habit from the Project overview; the composer still lets one thread override it without rewriting the Project. Desktop and phone both inherit that default, and the new thread shows which root it bound. A missing or unauthorized root fails closed instead of inventing a worktree.
+
 ## Authority modes
 
 Code threads run in one of four server-enforced authority modes:
@@ -94,7 +96,7 @@ Code exposes repository-valid engineering surfaces:
 - Files/Explorer, which follows the checkout live: when the agent or anything else changes a file, the tree relists and an open editor reloads. A file you have edited but not saved is never overwritten — Octant reports the external change as a conflict instead.
 - Diff viewer, including discarding a tracked file's uncommitted changes (asked about every time outside Full access, because nothing can restore them)
 - Git/Review surfaces
-- Side Chat
+- Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn or inheriting the repository. Type `#` in the composer to mention another thread as read-only context; `@` still names a file in this checkout.
 - Browser tabs
 - Extension-contributed surfaces approved by effective activation policy
 

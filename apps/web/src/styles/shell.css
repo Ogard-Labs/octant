@@ -337,6 +337,23 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   gap: 2px;
 }
 
+.sidebar__search {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0 4px;
+}
+
+.sidebar__search input {
+  min-width: 0;
+  height: 28px;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--octant-control-hover) 86%, transparent);
+  font-size: 12px;
+}
+
 /* Space separates the navigation actions from the Project tree. A rule here
    reads as a third section boundary in a rail that already has section
    headings, and it is the only horizontal line in the sidebar. */
@@ -952,6 +969,66 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 .work-composer-adapter__composer-bar .work-composer-adapter__send {
   margin-inline-start: auto;
+}
+
+.work-composer-adapter__visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.work-composer-adapter__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.work-composer-adapter__attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 3px 6px 3px 3px;
+  border: 1px solid var(--octant-border, rgb(0 0 0 / 12%));
+  border-radius: 8px;
+}
+
+.work-composer-adapter__attachment-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 5px;
+  object-fit: cover;
+  background: var(--octant-surface-muted, rgb(0 0 0 / 6%));
+}
+
+.work-composer-adapter__attachment-name {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-composer-adapter__attachment-remove {
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.work-composer-adapter__file-input,
+.work-composer-adapter__composer-bar input[type="file"] {
+  display: none;
 }
 
 .work-composer-adapter__context-strip {

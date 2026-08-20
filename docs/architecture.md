@@ -122,6 +122,15 @@ Done); Chat has no board. A Work or Code thread is Done only when its
 user-confirmed delivery target is objectively satisfied; ambiguous state
 resolves to Waiting.
 
+A `#thread` mention points at another thread the sender can already Open. The
+host resolves a bounded, read-only title, status, and transcript window at send
+time; the mentioned thread is not interrupted, steered, or mutated. Unknown `@`
+text stays ordinary text; `@plugin` / `$skill` addressing is unchanged. Side
+Chat is a Chat-mode sidecar about exactly one source thread: ordinary Chat with
+that thread's bounded context, no inherited Work or Code authority, and no path
+that approves, steers, or appends to the source. Unavailable, unauthorized, or
+deleted targets fail closed.
+
 ## Persistence
 
 ```mermaid
@@ -163,12 +172,17 @@ flowchart LR
   append, explicit terminal reasons for turns, tools, terminals, and subagents,
   preservation of partial provider output, and recovery of outstanding
   approvals and user-input requests after restart.
-- **Data lifecycle.** Reset, remove-all, and delete-remote-host operations are
-  explicit, reported per scope, and never run implicitly. Removing a paired
-  host or Project deletes what it owns and reports what it retained. A thread
-  the caller may already Open can be exported as an `octant.thread-bundle/1`
-  JSON cut of the journal — transcript, evidence, and provenance, named with
-  the instant it was taken. Secrets, raw provider payloads, and filesystem
+- **Data lifecycle.** Reset, remove-all, delete-remote-host, and thread
+  retention/purge operations are explicit, reported per scope, and never run
+  implicitly. Removing a paired host or Project deletes what it owns and
+  reports what it retained. A retention window (host default, Project
+  override, or thread override) never deletes on its own; only a confirmed
+  purge erases a thread's bulk content, derived projections, and that
+  thread's own journal events, then records a tombstone so a rebuild cannot
+  resurrect the transcript. See `docs/decisions/0035`. A thread the caller
+  may already Open can be exported as an `octant.thread-bundle/1` JSON cut
+  of the journal — transcript, evidence, and provenance, named with the
+  instant it was taken. Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
   journal are listed as omissions. See `docs/decisions/0036`.
 
@@ -212,13 +226,17 @@ modelId }`, and the model picker is provider-first. Discovery can find
 
 `@octant/plugin-host` is the pure model: normalized component kinds
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
-`hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`),
-composer addressing (`@plugin`, `@plugin/component`, `$skill`), and the
-activation ladder. The manifest and component schemas themselves
-(`ExtensionPackageManifest`, component kinds, declared capabilities,
-`sidebar.destination`/`settings.section` contributions) live in
-`@octant/contracts/extensions`; `@octant/plugin-api` re-exports the subset a
-plugin author needs as a narrower, named surface. `apps/server/src/extensions`
+`hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
+`ui-surface`, `appearance-pack`, `preview-viewer`), composer addressing
+(`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
+manifest and component schemas themselves (`ExtensionPackageManifest`,
+component kinds, declared capabilities, and renderer contribution points)
+live in `@octant/contracts/extensions`; `@octant/plugin-api` re-exports the
+subset a plugin author needs as a narrower, named surface. Unknown
+contribution points are rejected. The renderer contribution registry resolves
+`sidebar.destination`, `settings.section`, `workspace.tab`, `thread.pane`,
+`preview.viewer`, `appearance.preset`, and `board.view` from the effective
+first-party catalog; it never decides availability. `apps/server/src/extensions`
 owns the runtime: package store, inspector, marketplaces (skills.sh, npm,
 curated catalog), Agent Plugins ingestion, supervisor, MCP session manager,
 and skill discovery.

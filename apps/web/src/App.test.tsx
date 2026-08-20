@@ -1416,7 +1416,11 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
+    // Child-run polling on the Code overview can unmount the Suspense fallback
+    // heading after findByRole resolves, so wait for a heading that stays up.
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Controller foundation" })).toBeVisible();
+    });
     await user.click(screen.getByRole("button", { name: "Automations" }));
 
     expect(await screen.findByRole("heading", { name: "Automation Center" })).toBeVisible();
@@ -3525,17 +3529,16 @@ describe("App", () => {
     });
     expect(document.body).not.toHaveTextContent("/private/unvalidated-selection");
 
-    // Search is now the mode-scoped thread overlay, not Project search:
-    // it names the active mode so a user can never mistake which set is listed.
+    // Sidebar Search is in-place: it names the active mode so a user can
+    // never mistake which set is listed. The overlay is a separate palette
+    // finder, not this control.
     await user.click(screen.getByRole("button", { name: "Search" }));
-    const search = screen.getByRole("dialog", { name: "Search Code threads" });
+    const search = screen.getByRole("searchbox", { name: "Search Code threads" });
     expect(search).toBeVisible();
-    expect(within(search).getByRole("combobox", { name: "Search Code threads" })).toBeVisible();
-    expect(
-      within(search).getByRole("listbox", { name: "Code thread results" }),
-    ).toBeInTheDocument();
-    await user.keyboard("{Escape}");
+    expect(search).toHaveFocus();
     expect(screen.queryByRole("dialog", { name: "Search Code threads" })).toBeNull();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("searchbox", { name: "Search Code threads" })).toBeNull();
   }, 15_000);
 
   it("lists an archived Chat thread the host search reports in the Archived group", async () => {
@@ -3554,7 +3557,8 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Search" }));
+    await user.keyboard("{Control>}k{/Control}");
+    await user.click(await screen.findByRole("option", { name: /Search Chat threads/ }));
     await user.type(screen.getByRole("combobox", { name: "Search Chat threads" }), "Retired");
 
     // The Chat bootstrap is deliberately active-only, so the Archived group can
@@ -3581,7 +3585,8 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Search" }));
+    await user.keyboard("{Control>}k{/Control}");
+    await user.click(await screen.findByRole("option", { name: /Search Chat threads/ }));
     await user.type(screen.getByRole("combobox", { name: "Search Chat threads" }), "Retired");
 
     expect(
@@ -3629,7 +3634,8 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "Search" }));
+    await user.keyboard("{Control>}k{/Control}");
+    await user.click(await screen.findByRole("option", { name: /Search Code threads/ }));
     await user.type(screen.getByRole("combobox", { name: "Search Code threads" }), "Controller");
     await user.click(await screen.findByRole("option", { name: /Controller foundation/ }));
 

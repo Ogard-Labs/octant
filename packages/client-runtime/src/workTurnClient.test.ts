@@ -86,6 +86,18 @@ describe("createWorkTurnClient", () => {
       if (url.endsWith(`/api/work/turns/transcript/${ids.thread}`)) {
         return Response.json({ threadId: ids.thread, turns: [] });
       }
+      if (url.endsWith("/api/work/attachments") && init?.method === "PUT") {
+        return Response.json({
+          attachmentId: "22222222-2222-4222-8222-222222222222",
+          displayName: "mockup.png",
+          mediaType: "image/png",
+          byteLength: 3,
+          digest: "a".repeat(64),
+        });
+      }
+      if (url.includes("/api/work/attachments?") && init?.method === "DELETE") {
+        return Response.json({ status: "discarded" });
+      }
       return new Response("missing", { status: 404 });
     });
     const client = createWorkTurnClient({
@@ -120,6 +132,18 @@ describe("createWorkTurnClient", () => {
       threadId: ids.thread,
       turns: [],
     });
+    await expect(
+      client.putAttachment({
+        threadId: ids.thread,
+        attachmentId: "22222222-2222-4222-8222-222222222222" as never,
+        displayName: "mockup.png",
+        mediaType: "image/png",
+        bytes: new Uint8Array([137, 80, 78]),
+      }),
+    ).resolves.toMatchObject({ displayName: "mockup.png", mediaType: "image/png" });
+    await expect(
+      client.discardAttachment(ids.thread, "22222222-2222-4222-8222-222222222222" as never),
+    ).resolves.toBeUndefined();
   });
 
   it("rejects non-loopback base URLs", () => {

@@ -86,6 +86,35 @@ export function writeActivityViewEnabled(
   }
 }
 
+/**
+ * Sidebar Search is an in-place filter of the rows already on screen.
+ * Project, Recents, and Unfiled are folder words on a thread, so a query
+ * that names the folder keeps those rows instead of hiding the attribution
+ * that tells you where the match lives.
+ */
+export function matchesSidebarSearch(query: string, ...values: ReadonlyArray<string>): boolean {
+  const needle = normalizeSearchText(query);
+  if (needle === "") return true;
+  return values.some((value) => normalizeSearchText(value).includes(needle));
+}
+
+export function filterSidebarActivityView(
+  view: SidebarActivityView,
+  query: string,
+): SidebarActivityView {
+  if (normalizeSearchText(query) === "") return view;
+  return {
+    groups: view.groups
+      .map((group) => ({
+        ...group,
+        threads: group.threads.filter((thread) =>
+          matchesSidebarSearch(query, thread.title, thread.projectName),
+        ),
+      }))
+      .filter((group) => group.threads.length > 0),
+  };
+}
+
 export function buildSidebarActivityView(input: {
   readonly now?: Date;
   readonly projects: ReadonlyArray<SidebarActivityProject>;
@@ -213,4 +242,8 @@ function weekdayId(date: Date): string {
 
 function weekdayLabel(date: Date): string {
   return new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date);
+}
+
+function normalizeSearchText(value: string): string {
+  return value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }

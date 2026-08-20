@@ -28,6 +28,42 @@ export type WorkTurnRequestId = typeof WorkTurnRequestId.Type;
 
 export const WorkTurnId = brandedUuid("WorkTurnId");
 export type WorkTurnId = typeof WorkTurnId.Type;
+export const WorkAttachmentId = brandedUuid("WorkAttachmentId");
+export type WorkAttachmentId = typeof WorkAttachmentId.Type;
+
+/**
+ * Work attachments are images only. Everything the confined folder already
+ * holds reaches a Work turn through the Project root, so the one thing a
+ * path cannot carry is a picture the user is looking at — a screenshot, a
+ * mockup, a photographed whiteboard.
+ */
+export const WORK_ATTACHMENT_MEDIA_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+] as const;
+export const WorkAttachmentMediaType = Schema.Literal(...WORK_ATTACHMENT_MEDIA_TYPES);
+export type WorkAttachmentMediaType = typeof WorkAttachmentMediaType.Type;
+export const MAX_WORK_ATTACHMENT_BYTES = 10_485_760;
+export const MAX_WORK_TURN_ATTACHMENTS = 8;
+export const MAX_WORK_ATTACHMENT_DISPLAY_NAME_LENGTH = 255;
+const WorkAttachmentDigest = Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/));
+
+/**
+ * What the host kept for one image: the id the renderer chose, and the name,
+ * media type, size, and digest this process measured from the bytes it wrote.
+ */
+export const WorkAttachmentReference = Schema.Struct({
+  attachmentId: WorkAttachmentId,
+  displayName: Schema.NonEmptyTrimmedString.pipe(
+    Schema.maxLength(MAX_WORK_ATTACHMENT_DISPLAY_NAME_LENGTH),
+  ),
+  mediaType: WorkAttachmentMediaType,
+  byteLength: Schema.Int.pipe(Schema.between(1, MAX_WORK_ATTACHMENT_BYTES)),
+  digest: WorkAttachmentDigest,
+}).annotations(strict);
+export type WorkAttachmentReference = typeof WorkAttachmentReference.Type;
 
 /**
  * Exact server-validated authority for a Project-backed Work turn. The
@@ -110,6 +146,9 @@ export const WorkTurnState = Schema.Struct({
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   response: Schema.optional(boundedText(MAX_WORK_TURN_RESPONSE_BYTES)),
   transcript: Schema.Array(WorkTranscriptEntry).pipe(Schema.maxItems(8)),
+  attachments: Schema.optional(
+    Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
+  ),
   failure: Schema.optional(WorkTurnFailure),
   capabilities: WorkTurnCapabilityFacts,
   version: AggregateVersion,
@@ -125,6 +164,15 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
   turnId: WorkTurnId,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   authority: WorkTurnAuthority,
+  /**
+   * Images already staged for this thread. Ids only: the host reads the bytes
+   * it staged itself, so a renderer cannot send the provider an image the host
+   * never accepted, and the journal records the attachment by name and digest
+   * rather than by content.
+   */
+  attachmentIds: Schema.optional(
+    Schema.Array(WorkAttachmentId).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
+  ),
 }).annotations(strict);
 export type StartWorkThreadTurnCommand = typeof StartWorkThreadTurnCommand.Type;
 
@@ -188,6 +236,9 @@ export const WorkTurnAccepted = Schema.Struct({
   authority: WorkTurnAuthority,
   providerSessionId: ProviderSessionId,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
+  attachments: Schema.optional(
+    Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
+  ),
   capabilities: WorkTurnCapabilityFacts,
   acceptedAt: UtcTimestamp,
 }).annotations(strict);
@@ -221,6 +272,9 @@ export const WORK_TURN_CAPABILITIES: WorkTurnCapabilityFacts = {
 
 export const decodeWorkTurnRequestId = Schema.decodeUnknownSync(WorkTurnRequestId);
 export const decodeWorkTurnId = Schema.decodeUnknownSync(WorkTurnId);
+export const decodeWorkAttachmentId = Schema.decodeUnknownSync(WorkAttachmentId);
+export const decodeWorkAttachmentMediaType = Schema.decodeUnknownSync(WorkAttachmentMediaType);
+export const decodeWorkAttachmentReference = Schema.decodeUnknownSync(WorkAttachmentReference);
 export const decodeWorkTurnAuthority = Schema.decodeUnknownSync(WorkTurnAuthority);
 export const decodeWorkTurnCapabilityFacts = Schema.decodeUnknownSync(WorkTurnCapabilityFacts);
 export const decodeWorkTurnFailure = Schema.decodeUnknownSync(WorkTurnFailure);

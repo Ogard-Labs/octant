@@ -792,3 +792,166 @@ describe("ProjectSidebarSection Code and Work recents", () => {
     expect(onAddProject).toHaveBeenCalledOnce();
   });
 });
+
+describe("ProjectSidebarSection search", () => {
+  const now = new Date("2026-08-14T15:00:00.000Z");
+  const sharedProps = {
+    archivedProjects: [],
+    availabilityByProject: new Map(),
+    now,
+    onArchive: vi.fn(),
+    onMove: vi.fn(),
+    onProjectOpen: vi.fn(),
+    onReorder: vi.fn(),
+    onRestore: vi.fn(),
+    onSelectThread: vi.fn(),
+    projects: [chatProjectA, chatProjectB],
+    threads: [
+      {
+        projectId: String(chatProjectA.id),
+        threadId: "thread-planning",
+        title: "Planning",
+        updatedAt: "2026-08-14T12:00:00.000Z",
+      },
+      {
+        projectId: String(chatProjectB.id),
+        threadId: "thread-notes",
+        title: "Notes",
+        updatedAt: "2026-08-13T18:00:00.000Z",
+      },
+      {
+        threadId: "thread-unfiled",
+        title: "Loose chat",
+        updatedAt: "2026-08-12T09:00:00.000Z",
+      },
+    ],
+  } as const;
+
+  it("narrows nested Project threads and hides Projects that then have no matches", () => {
+    render(<ProjectSidebarSection {...sharedProps} searchQuery="notes" />);
+
+    expect(screen.getByRole("button", { name: /Notes/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Collapse Research" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Loose chat/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse Test" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a Project's threads when the query matches the Project name", () => {
+    render(<ProjectSidebarSection {...sharedProps} searchQuery="research" />);
+
+    expect(screen.getByRole("button", { name: /Notes/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Collapse Research" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
+  });
+
+  it("keeps Unfiled attribution when the query matches that folder word", () => {
+    render(<ProjectSidebarSection {...sharedProps} searchQuery="unfiled" />);
+
+    expect(screen.getByRole("heading", { name: "Unfiled" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Loose chat/i })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Notes/i })).not.toBeInTheDocument();
+  });
+
+  it("keeps Recents attribution when the query matches that folder word", () => {
+    render(
+      <ProjectSidebarSection
+        {...sharedProps}
+        unfiledLabel="Recents"
+        searchQuery="recents"
+        threads={[
+          {
+            threadId: "thread-rootless",
+            title: "hei",
+            updatedAt: "2026-08-13T18:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Recents" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /hei/i })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
+  });
+
+  it("shows matches inside a collapsed Project and restores the collapse when search clears", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<ProjectSidebarSection {...sharedProps} />);
+
+    await user.click(screen.getByRole("button", { name: "Collapse Test" }));
+    expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
+
+    rerender(<ProjectSidebarSection {...sharedProps} searchQuery="Planning" />);
+    expect(screen.getByRole("button", { name: /Planning/i })).toBeVisible();
+
+    rerender(<ProjectSidebarSection {...sharedProps} />);
+    expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand Test" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Notes/i })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Unfiled" })).toBeVisible();
+  });
+
+  it("says so when nothing matches", () => {
+    render(<ProjectSidebarSection {...sharedProps} searchQuery="no such thread" />);
+
+    expect(screen.getByText("No matching threads.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Unfiled" })).not.toBeInTheDocument();
+  });
+
+  it("hides activity-view groups with no matches and restores them when search clears", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+
+    try {
+      const { rerender } = render(<ProjectSidebarSection {...sharedProps} />);
+      await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+
+      expect(screen.getByRole("heading", { name: "Today" })).toBeVisible();
+      expect(screen.getByRole("heading", { name: "Yesterday" })).toBeVisible();
+      expect(screen.getByRole("heading", { name: "Wednesday" })).toBeVisible();
+
+      rerender(<ProjectSidebarSection {...sharedProps} searchQuery="aurora" />);
+      expect(screen.getByText("No matching threads.")).toBeVisible();
+      expect(screen.queryByRole("heading", { name: "Today" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Yesterday" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Wednesday" })).not.toBeInTheDocument();
+
+      rerender(<ProjectSidebarSection {...sharedProps} searchQuery="notes" />);
+      expect(screen.getByRole("heading", { name: "Yesterday" })).toBeVisible();
+      expect(screen.getByRole("button", { name: /Notes/i })).toHaveTextContent("Research");
+      expect(screen.queryByRole("heading", { name: "Today" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Wednesday" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Loose chat/i })).not.toBeInTheDocument();
+
+      rerender(<ProjectSidebarSection {...sharedProps} />);
+      expect(screen.getByRole("heading", { name: "Today" })).toBeVisible();
+      expect(screen.getByRole("heading", { name: "Yesterday" })).toBeVisible();
+      expect(screen.getByRole("heading", { name: "Wednesday" })).toBeVisible();
+      expect(screen.getByRole("button", { name: /Planning/i })).toBeVisible();
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+
+  it("keeps activity-view Project attribution when the query matches the folder word", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+
+    try {
+      render(<ProjectSidebarSection {...sharedProps} searchQuery="test" />);
+      await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+
+      const today = screen.getByRole("region", { name: "Today" });
+      expect(within(today).getByRole("button", { name: /Planning/i })).toHaveTextContent("Test");
+      expect(screen.queryByRole("button", { name: /Notes/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Loose chat/i })).not.toBeInTheDocument();
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+});

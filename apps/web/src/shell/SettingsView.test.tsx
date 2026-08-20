@@ -720,4 +720,11 @@ describe("SettingsView", () => {
     expect(screen.getByText(/managed on the owning host/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh status" })).not.toBeInTheDocument();
   });
+
+  it("omits the GitHub section when the github-integration plugin is not effective", () => {
+    renderSettings({
+      effectivePlugins: new Map([["github-integration", false]]),
+    });
+    expect(screen.queryByRole("button", { name: "GitHub" })).not.toBeInTheDocument();
+  });
 });
