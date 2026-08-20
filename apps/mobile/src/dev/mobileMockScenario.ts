@@ -591,6 +591,13 @@ function createMockTransport(input: {
           readonly providerInstanceId?: string;
           readonly modelId?: string;
           readonly deliveryTarget?: CodeThread["deliveryTarget"];
+          readonly thread?: {
+            readonly id?: string;
+            readonly title?: string;
+            readonly providerInstanceId?: string;
+            readonly modelId?: string;
+            readonly deliveryTarget?: CodeThread["deliveryTarget"];
+          };
         };
         if (command.kind === "prepare-code-project-checkout") {
           return Response.json({
@@ -606,37 +613,61 @@ function createMockTransport(input: {
             facts: { remotes: ["origin"], defaultRemote: "origin" },
           });
         }
+        const createdThreadFields =
+          command.kind === "create-code-thread"
+            ? command.thread === undefined
+              ? undefined
+              : {
+                  id: command.thread.id,
+                  title: command.thread.title,
+                  providerInstanceId: command.thread.providerInstanceId,
+                  modelId: command.thread.modelId,
+                  deliveryTarget: command.thread.deliveryTarget,
+                }
+            : command.kind === "create-managed-code-thread"
+              ? {
+                  id: command.threadId,
+                  title: command.title,
+                  providerInstanceId: command.providerInstanceId,
+                  modelId: command.modelId,
+                  deliveryTarget: command.deliveryTarget,
+                }
+              : undefined;
         if (
-          command.kind === "create-managed-code-thread" &&
-          command.threadId !== undefined &&
-          command.title !== undefined &&
-          command.providerInstanceId !== undefined &&
-          command.modelId !== undefined &&
-          command.deliveryTarget !== undefined
+          createdThreadFields !== undefined &&
+          createdThreadFields.id !== undefined &&
+          createdThreadFields.title !== undefined &&
+          createdThreadFields.providerInstanceId !== undefined &&
+          createdThreadFields.modelId !== undefined &&
+          createdThreadFields.deliveryTarget !== undefined
         ) {
           const thread = {
             ...createCodeThread("active"),
-            id: command.threadId,
-            title: command.title,
-            providerInstanceId: command.providerInstanceId,
-            modelId: command.modelId,
-            deliveryTarget: command.deliveryTarget,
+            id: createdThreadFields.id,
+            title: createdThreadFields.title,
+            providerInstanceId: createdThreadFields.providerInstanceId,
+            modelId: createdThreadFields.modelId,
+            deliveryTarget: createdThreadFields.deliveryTarget,
             version: 1,
             createdAt: NOW,
             updatedAt: NOW,
           } as CodeThread;
           codeThreads.unshift(thread);
-          return Response.json({
-            kind: "managed-thread-created",
-            thread,
-            checkout: codeCheckout,
-            provenance: {
-              receiptId: "90000000-0000-4000-8000-000000000001",
-              mode: "local",
-              branch: "feature/issue-812-mobile-polish-mock",
-              resolvedHead: "a".repeat(40),
-            },
-          });
+          return Response.json(
+            command.kind === "create-code-thread"
+              ? { kind: "thread-created", thread }
+              : {
+                  kind: "managed-thread-created",
+                  thread,
+                  checkout: codeCheckout,
+                  provenance: {
+                    receiptId: "90000000-0000-4000-8000-000000000001",
+                    mode: "local",
+                    branch: "feature/issue-812-mobile-polish-mock",
+                    resolvedHead: "a".repeat(40),
+                  },
+                },
+          );
         }
         if (command.kind === "start-provider-turn" && command.operationId !== undefined) {
           return Response.json({

@@ -20,6 +20,18 @@ moved checkout is unavailable until relinked. Submodules and bare
 repositories are reported honestly but are not eligible Code Project roots in
 V1.
 
+## New-thread checkout
+
+A Code Project remembers whether new threads bind the current checkout or
+start in a managed worktree. That habit is a Project setting, not a second
+workspace product: the create composer can override it for one thread
+without rewriting the Project, and desktop and phone both inherit it. The
+thread then shows which root it bound. Missing, locked, or unauthorized
+roots fail closed.
+
+The conservative default is the current checkout, which creates no worktree
+and no host state the owner did not ask for.
+
 ## Managed worktrees
 
 Code can create managed Git worktrees under
