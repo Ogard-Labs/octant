@@ -13,6 +13,7 @@ import {
   decodeProjectId,
   decodeWindowId,
   type AgentProfile,
+  type AgentProfileScope,
   type Project,
   type CodeCheckoutIdentity,
   type CodeEventFrame,
@@ -648,6 +649,72 @@ describe("CodeService commands", () => {
     const fixture = serviceFixture({
       threads: [],
       profiles: [agentProfile({ defaultExecutionPolicy: "full-access" })],
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("shortens a thread's permission duration to its profile's", async () => {
+    const created = thread({
+      executionPolicy: "full-access",
+      permissionPersistence: "project-default",
+      profileId: ids.profile as never,
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      approve: true,
+      project: {
+        id: ids.project,
+        type: "code",
+        codeAccessPersistence: "project-default",
+      } as never,
+      profiles: [
+        agentProfile({
+          defaultExecutionPolicy: "full-access",
+          defaultPermissionPersistence: "current-session",
+        }),
+      ],
+    });
+
+    // Full access for one session is journaled approval-gated and granted for
+    // the session only, so the Project never remembers it.
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: created,
+        approvalId: "00000000-0000-4000-8000-000000000088" as never,
+      }),
+    ).resolves.toMatchObject({
+      thread: { executionPolicy: "full-access", permissionPersistence: "current-session" },
+    });
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            payload: expect.objectContaining({
+              thread: expect.objectContaining({ executionPolicy: "approval-gated" }),
+            }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("refuses a profile another Project owns", async () => {
+    const created = thread({
+      executionPolicy: "approval-gated",
+      profileId: ids.profile as never,
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      profiles: [agentProfile()],
+      profileScope: {
+        scopeKind: "project",
+        scopeRef: "00000000-0000-4000-8000-000000009999",
+      } as never,
     });
 
     await expect(
@@ -2670,6 +2737,7 @@ function serviceFixture(
     readonly approve?: boolean;
     readonly project?: Project;
     readonly profiles?: ReadonlyArray<AgentProfile>;
+    readonly profileScope?: AgentProfileScope;
     readonly sessionAuthority?: CodeSessionAuthorityStore;
     readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
     readonly worktreeRefs?: CodeWorktreeRefsPort;
@@ -2684,9 +2752,14 @@ function serviceFixture(
   const persistence = {
     readCodeSettings: vi.fn(() => undefined),
     readProject: vi.fn(() => options.project),
-    readAgentProfile: vi.fn((profileId: string) =>
-      (options.profiles ?? []).find((candidate) => String(candidate.id) === String(profileId)),
-    ),
+    readAgentProfileBinding: vi.fn((profileId: string) => {
+      const found = (options.profiles ?? []).find(
+        (candidate) => String(candidate.id) === String(profileId),
+      );
+      return found === undefined
+        ? undefined
+        : { profile: found, scope: options.profileScope ?? { scopeKind: "user", scopeRef: "me" } };
+    }),
     readCodeThread: vi.fn((threadId) => threads.find((candidate) => candidate.id === threadId)),
     readCodeThreads: vi.fn(() => threads),
     readCodeThreadActivity: vi.fn(

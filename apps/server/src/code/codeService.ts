@@ -56,6 +56,7 @@ import {
   type CodeThreadView,
   type Project,
   type EventEnvelope,
+  type PermissionPersistence,
   type ProjectId,
   type ProviderExecutionPolicy,
   type ProviderModelId,
@@ -63,8 +64,12 @@ import {
   type WindowId,
   type ThreadWorkingDirectory,
 } from "@octant/contracts";
-import type { AgentProfile, AgentProfileId } from "@octant/contracts/agent-profile";
-import { applyProfileToThread } from "@octant/domain/agent-profile-policy";
+import type {
+  AgentProfile,
+  AgentProfileId,
+  AgentProfileScope,
+} from "@octant/contracts/agent-profile";
+import { applyProfileToThread, profileScopeApplies } from "@octant/domain/agent-profile-policy";
 import { authorizeCodeOperation } from "@octant/domain/code-policy";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import { Schema } from "effect";
@@ -196,7 +201,9 @@ export interface CodePersistencePort {
   readonly readCodeFileReferences: (threadId: CodeThreadId) => ReadonlyArray<CodeFileReference>;
   readonly readCodeThreadView: (threadId: CodeThreadId) => CodeThreadView | undefined;
   readonly readProject?: (projectId: ProjectId) => Project | undefined;
-  readonly readAgentProfile?: (profileId: AgentProfileId) => AgentProfile | undefined;
+  readonly readAgentProfileBinding?: (
+    profileId: AgentProfileId,
+  ) => { readonly profile: AgentProfile; readonly scope: AgentProfileScope } | undefined;
 }
 
 export interface CodeWindowAccessPort {
@@ -728,17 +735,19 @@ export class CodeService {
         // The profile narrows the posture before any gate reads it, so a
         // profile that pulls the thread below Full access also removes the
         // confirmation Full access would have demanded.
-        const managedExecutionPolicy = this.#profiledExecutionPolicy({
+        const managedAuthority = this.#profiledAuthority({
           profileId: command.profileId,
           projectId: command.projectId,
+          threadId: command.threadId,
           modelId: command.modelId,
           requestedExecutionPolicy: command.executionPolicy,
+          requestedPermissionPersistence: command.permissionPersistence,
         });
         // Authorization that is decidable before any mutation runs first.
         const project = this.#persistence.readProject?.(command.projectId);
         if (
-          managedExecutionPolicy === "full-access" &&
-          command.permissionPersistence === "project-default" &&
+          managedAuthority.executionPolicy === "full-access" &&
+          managedAuthority.permissionPersistence === "project-default" &&
           (project?.type !== "code" || project.codeAccessPersistence !== "project-default")
         ) {
           throw this.#failure(
@@ -782,8 +791,8 @@ export class CodeService {
           lifecycle: "active",
           providerInstanceId: command.providerInstanceId,
           modelId: command.modelId,
-          executionPolicy: managedExecutionPolicy,
-          permissionPersistence: command.permissionPersistence,
+          executionPolicy: managedAuthority.executionPolicy,
+          permissionPersistence: managedAuthority.permissionPersistence,
           deliveryTarget: command.deliveryTarget,
           ...(command.forkedFrom === undefined ? {} : { forkedFrom: command.forkedFrom }),
           ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
@@ -1057,16 +1066,23 @@ export class CodeService {
         }
         // The profile narrows the posture before any gate reads it; every check
         // below, and the thread that is journaled, sees the narrowed value.
-        const profiledPolicy = this.#profiledExecutionPolicy({
+        const profiled = this.#profiledAuthority({
           profileId: command.thread.profileId,
           projectId: command.thread.projectId,
+          threadId: command.thread.id,
           modelId: command.thread.modelId,
           requestedExecutionPolicy: command.thread.executionPolicy,
+          requestedPermissionPersistence: command.thread.permissionPersistence,
         });
         const thread =
-          profiledPolicy === command.thread.executionPolicy
+          profiled.executionPolicy === command.thread.executionPolicy &&
+          profiled.permissionPersistence === command.thread.permissionPersistence
             ? command.thread
-            : decodeCodeThread({ ...command.thread, executionPolicy: profiledPolicy });
+            : decodeCodeThread({
+                ...command.thread,
+                executionPolicy: profiled.executionPolicy,
+                permissionPersistence: profiled.permissionPersistence,
+              });
         const project = this.#persistence.readProject?.(thread.projectId);
         if (
           thread.executionPolicy === "full-access" &&
@@ -2148,26 +2164,55 @@ export class CodeService {
   }
 
   /**
-   * Narrow a starting thread's posture to the profile it was started under.
-   * Runs before every authority gate so a profile that pulls the thread below
-   * Full access also removes the native confirmation it would otherwise demand.
+   * Narrow a starting thread to the profile it was started under. Runs before
+   * every authority gate so a profile that pulls the thread below Full access
+   * also removes the native confirmation it would otherwise demand, and returns
+   * the permission duration too — a profile written to hold Full access for one
+   * session must not produce a thread the Project remembers.
    */
-  #profiledExecutionPolicy(input: {
+  #profiledAuthority(input: {
     readonly profileId: AgentProfileId | undefined;
     readonly projectId: ProjectId;
+    readonly threadId: CodeThreadId;
     readonly modelId: ProviderModelId;
     readonly requestedExecutionPolicy: ProviderExecutionPolicy;
-  }): ProviderExecutionPolicy {
-    if (input.profileId === undefined) return input.requestedExecutionPolicy;
-    const profile = this.#persistence.readAgentProfile?.(input.profileId);
-    if (profile === undefined) {
+    readonly requestedPermissionPersistence: PermissionPersistence;
+  }): {
+    readonly executionPolicy: ProviderExecutionPolicy;
+    readonly permissionPersistence: PermissionPersistence;
+  } {
+    if (input.profileId === undefined) {
+      return {
+        executionPolicy: input.requestedExecutionPolicy,
+        permissionPersistence: input.requestedPermissionPersistence,
+      };
+    }
+    const binding = this.#persistence.readAgentProfileBinding?.(input.profileId);
+    if (binding === undefined) {
       throw this.#failure("invalid", "The selected agent profile was not found.");
     }
+    // An identifier alone says nothing about who owns the profile. A stale
+    // multi-Project selection, or a crafted command, could otherwise attach
+    // another Project's profile — or another thread's one-off — to this thread.
+    if (
+      !profileScopeApplies({
+        scope: binding.scope,
+        mode: "code",
+        projectId: String(input.projectId),
+        threadId: String(input.threadId),
+      })
+    ) {
+      throw this.#failure(
+        "unauthorized",
+        `Profile "${binding.profile.displayName}" belongs to another Project, mode, or thread.`,
+      );
+    }
     const applied = applyProfileToThread({
-      profile,
+      profile: binding.profile,
       mode: "code",
       modelId: input.modelId,
       requestedExecutionPolicy: input.requestedExecutionPolicy,
+      requestedPermissionPersistence: input.requestedPermissionPersistence,
       projectExecutionPolicy: this.#projectProfileCeiling(input.projectId),
     });
     if (applied.status === "refused") {
@@ -2176,7 +2221,10 @@ export class CodeService {
         applied.reason,
       );
     }
-    return applied.executionPolicy;
+    return {
+      executionPolicy: applied.executionPolicy,
+      permissionPersistence: applied.permissionPersistence,
+    };
   }
 
   #failure(category: CodeFailure["category"], message: string): CodeServiceError {

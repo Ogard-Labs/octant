@@ -57,8 +57,12 @@ Octant supports persisted execution profiles that capture settings, provider def
 Selecting a profile in the Code composer binds it to the thread you start. The
 profile can only narrow that thread: if it defaults to Approval-gated and you
 asked for Full access, the thread starts Approval-gated; if you asked for Plan,
-Plan stands. A profile written for another mode, or one that does not list the
-model you selected, refuses the thread rather than starting it. A profile can
+Plan stands. It shortens the permission duration the same
+way: a profile that keeps permissions to the current session starts the thread
+that way even if you asked for the Project default. A profile written for
+another mode, one that does not list the model you selected, and one that
+belongs to a different Project or thread all refuse the thread rather than
+starting it. A profile can
 never grant authority the Project does not already give, and editing a profile
 afterwards does not change a thread that is already running under it — the
 thread shows which profile it started under beside its model and access

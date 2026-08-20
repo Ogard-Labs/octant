@@ -9,6 +9,7 @@ import type {
   ExecutionResolutionSource,
 } from "@octant/contracts/agent-profile";
 import type {
+  PermissionPersistence,
   ProviderCatalogSnapshot,
   ProviderExecutionPolicy,
   ProviderInstanceId,
@@ -78,9 +79,40 @@ const POLICY_RANK = {
   "full-access": 3,
 } as const;
 
+/**
+ * How long a granted permission outlives the thread that asked for it. A
+ * profile may shorten this, never lengthen it: a profile written to hold Full
+ * access to one session must not produce a thread that remembers Full access
+ * for the whole Project.
+ */
+const PERSISTENCE_RANK = { "current-session": 0, "project-default": 1 } as const;
+
+/**
+ * Whether a profile's scope reaches the thread being started. Scopes exist to
+ * partition profiles by owner, so a Project's profile, another thread's one-off,
+ * or a profile written for a different mode must not start this thread just
+ * because its identifier was supplied.
+ */
+export function profileScopeApplies(input: {
+  readonly scope: AgentProfileScope;
+  readonly mode: OctantMode;
+  readonly projectId: string;
+  readonly threadId: string;
+}): boolean {
+  const ref = input.scope.scopeRef;
+  if (input.scope.scopeKind === "user") return true;
+  if (input.scope.scopeKind === "mode") return ref === String(input.mode);
+  if (input.scope.scopeKind === "project") return ref === String(input.projectId);
+  return ref === String(input.threadId);
+}
+
 /** What binding a profile to a thread did, or why it could not be done. */
 export type ProfileApplication =
-  | { readonly status: "applied"; readonly executionPolicy: ProviderExecutionPolicy }
+  | {
+      readonly status: "applied";
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly permissionPersistence: PermissionPersistence;
+    }
   | {
       readonly status: "refused";
       readonly code: AgentProfileRejectionCode;
@@ -106,6 +138,7 @@ export function applyProfileToThread(input: {
   readonly mode: OctantMode;
   readonly modelId: ProviderModelId;
   readonly requestedExecutionPolicy: ProviderExecutionPolicy;
+  readonly requestedPermissionPersistence: PermissionPersistence;
   readonly projectExecutionPolicy: ProviderExecutionPolicy;
 }): ProfileApplication {
   if (!isProfileModeCompatible(input.profile, input.mode)) {
@@ -138,7 +171,12 @@ export function applyProfileToThread(input: {
     POLICY_RANK[input.profile.defaultExecutionPolicy] < POLICY_RANK[input.requestedExecutionPolicy]
       ? input.profile.defaultExecutionPolicy
       : input.requestedExecutionPolicy;
-  return { status: "applied", executionPolicy };
+  const permissionPersistence =
+    PERSISTENCE_RANK[input.profile.defaultPermissionPersistence] <
+    PERSISTENCE_RANK[input.requestedPermissionPersistence]
+      ? input.profile.defaultPermissionPersistence
+      : input.requestedPermissionPersistence;
+  return { status: "applied", executionPolicy, permissionPersistence };
 }
 
 /**

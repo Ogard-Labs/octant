@@ -1,5 +1,6 @@
 import {
   decodeAgentProfile,
+  decodeAgentProfileScope,
   decodeAgentProfileCreated,
   decodeAgentProfileRemoved,
   decodeAgentProfileUpdated,
@@ -149,6 +150,30 @@ export function readAgentProfile(
     `)
     .get(profileId) as AgentProfileProjectionRow | undefined;
   return row === undefined ? undefined : decodeProfileRow(row);
+}
+
+/**
+ * The profile together with the scope that owns it. A caller deciding whether a
+ * profile may start a given thread needs both: the identifier alone says
+ * nothing about which Project, mode, or thread the profile was written for.
+ */
+export function readAgentProfileBinding(
+  connection: SqliteConnection,
+  profileId: AgentProfileId,
+): { readonly profile: AgentProfile; readonly scope: AgentProfileScope } | undefined {
+  const row = connection
+    .prepare(`
+      SELECT profile_id, schema_version, scope_kind, scope_ref,
+             profile_json, aggregate_version
+      FROM agent_profile_projection
+      WHERE profile_id = ?
+    `)
+    .get(profileId) as AgentProfileProjectionRow | undefined;
+  if (row === undefined) return undefined;
+  return {
+    profile: decodeProfileRow(row),
+    scope: decodeAgentProfileScope({ scopeKind: row.scope_kind, scopeRef: row.scope_ref }),
+  };
 }
 
 export function readAgentProfiles(connection: SqliteConnection): ReadonlyArray<AgentProfile> {
