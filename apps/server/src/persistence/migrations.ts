@@ -1226,6 +1226,39 @@ ALTER TABLE diagnostics_failure_incident_projection
   CHECK(length(trim(failure_code)) > 0);
 `;
 
+const REPAIR_AGENT_PROFILE_SCOPES_SQL = `
+-- Editing a profile used to journal it as user-scoped no matter what scope it
+-- was created with, so an upgraded database can hold a Project, mode, or
+-- one-off profile that the projection reports as reaching every thread. Thread
+-- binding now reads that scope as authority, so the widened rows have to be
+-- put back before it does. The creation event is the record of what the scope
+-- actually was.
+UPDATE agent_profile_projection
+SET
+  scope_kind = (
+    SELECT json_extract(event_journal.payload_json, '$.scope.scopeKind')
+    FROM event_journal
+    WHERE event_journal.aggregate_type = 'agent-profile'
+      AND event_journal.aggregate_id = agent_profile_projection.profile_id
+      AND event_journal.event_name = 'agent.profile-created@1'
+  ),
+  scope_ref = (
+    SELECT json_extract(event_journal.payload_json, '$.scope.scopeRef')
+    FROM event_journal
+    WHERE event_journal.aggregate_type = 'agent-profile'
+      AND event_journal.aggregate_id = agent_profile_projection.profile_id
+      AND event_journal.event_name = 'agent.profile-created@1'
+  )
+WHERE EXISTS (
+  SELECT 1
+  FROM event_journal
+  WHERE event_journal.aggregate_type = 'agent-profile'
+    AND event_journal.aggregate_id = agent_profile_projection.profile_id
+    AND event_journal.event_name = 'agent.profile-created@1'
+    AND json_extract(event_journal.payload_json, '$.scope.scopeKind') IS NOT NULL
+);
+`;
+
 export const MIGRATIONS: ReadonlyArray<Migration> = [
   {
     version: 1,
@@ -1501,6 +1534,11 @@ ALTER TABLE code_runtime_projection
     version: 51,
     name: "create_thread_retention_projection",
     sql: THREAD_RETENTION_PROJECTION_SQL,
+  },
+  {
+    version: 52,
+    name: "repair_agent_profile_scopes",
+    sql: REPAIR_AGENT_PROFILE_SCOPES_SQL,
   },
 ];
 

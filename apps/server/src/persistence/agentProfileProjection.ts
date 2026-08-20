@@ -51,7 +51,12 @@ export class AgentProfileProjection implements Projection {
           profile.version === event.aggregateVersion,
       );
       if (this.#isStale(connection, event)) return;
-      this.#upsertProfile(connection, profile, scope, event.aggregateVersion);
+      // An edit never restates the scope a profile belongs to. Updates journaled
+      // before the service carried the scope forward say "user" regardless of
+      // what the profile was created with, and thread binding reads this scope
+      // as authority, so a stored scope is kept over anything an update claims.
+      const stored = this.#storedScope(connection, profile.id);
+      this.#upsertProfile(connection, profile, stored ?? scope, event.aggregateVersion);
       return;
     }
 
@@ -65,6 +70,17 @@ export class AgentProfileProjection implements Projection {
       if (this.#isStale(connection, event)) return;
       this.#removeProfile(connection, removed.profileId, removed.version);
     }
+  }
+
+  #storedScope(
+    connection: SqliteConnection,
+    profileId: AgentProfile["id"],
+  ): AgentProfileScope | undefined {
+    const row = connection
+      .prepare(`SELECT scope_kind, scope_ref FROM agent_profile_projection WHERE profile_id = ?`)
+      .get(profileId) as { readonly scope_kind: string; readonly scope_ref: string } | undefined;
+    if (row === undefined) return undefined;
+    return decodeAgentProfileScope({ scopeKind: row.scope_kind, scopeRef: row.scope_ref });
   }
 
   #isStale(connection: SqliteConnection, event: EventEnvelope): boolean {
