@@ -81,6 +81,7 @@
     "./apple-toolchain-rpc": "./src/appleToolchainRpc.ts",
     "./thread-checkpoints": "./src/threadCheckpoints.ts",
     "./thread-creation": "./src/threadCreation.ts",
+    "./thread-retention": "./src/threadRetention.ts",
     "./thread-export": "./src/threadExport.ts",
     "./zen": "./src/zen.ts",
     "./zen-background-media": "./src/zenBackgroundMedia.ts",

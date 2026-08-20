@@ -322,6 +322,30 @@ describe("host control routes", () => {
     expect(response?.status).toBe(503);
   });
 
+  it("fails closed for thread purge without a window capability or confirmation", async () => {
+    const { handler } = setup();
+    const unauthenticated = await handler(
+      makeRequest("/api/host-control/thread-purge", {
+        body: {
+          scope: { kind: "thread", mode: "chat", threadId: "c1000000-0000-4000-8000-000000000010" },
+          confirm: true,
+        },
+      }),
+    );
+    expect(unauthenticated?.status).toBe(401);
+
+    const unconfirmed = await handler(
+      makeRequest("/api/host-control/thread-purge", {
+        capability,
+        body: {
+          scope: { kind: "thread", mode: "chat", threadId: "c1000000-0000-4000-8000-000000000010" },
+          confirm: false,
+        },
+      }),
+    );
+    expect(unconfirmed?.status).toBe(400);
+  });
+
   it("answers OPTIONS preflight for the renderer", async () => {
     const { handler } = setup();
     const response = await handler(

@@ -505,6 +505,8 @@ import {
   createHostControlRouteHandler,
   type HostControlServicePolicyPort,
 } from "./hostControlRoutes";
+import { ThreadRetentionService } from "./threadRetentionService";
+import { ChatAttachmentStore } from "./chat/chatAttachmentStore";
 import { createPrivateListenerLifecycleController } from "./remote/privateListenerLifecycleController";
 import { resolvePrivateListenerHostIdentity } from "./remote/privateListenerHostIdentity";
 import { createPrivateListenerAdministrationRouteHandler } from "./remote/privateListenerAdministrationRoutes";
@@ -5126,9 +5128,29 @@ export function startOctantServer(
     // Registered on the loopback chain only — never inside
     // dispatchProductRoutes — so the remote gateway's product dispatch can
     // never reach host lifecycle authority even if route policy regressed.
+    const chatAttachmentStore = new ChatAttachmentStore(persistence.dataDirectory);
+    const threadRetention = new ThreadRetentionService({
+      connection: persistence.connection,
+      journal: persistence.journal,
+      clock: () => new Date().toISOString(),
+      uuid: randomUUID,
+      listWorkThreads: () =>
+        workThreadProjection.list().map((thread) => ({
+          id: String(thread.id),
+          projectId: thread.projectId,
+          updatedAt: thread.updatedAt,
+        })),
+      forgetWorkThread: (threadId) => {
+        workThreadProjection.forget(threadId as never);
+      },
+      purgeThreadArtifacts: async ({ mode, threadId }) => {
+        if (mode === "chat") await chatAttachmentStore.purgeThread(threadId as never);
+      },
+    });
     const hostControlRoutes = createHostControlRouteHandler({
       windowAuthorityStore,
       diagnostics: composeHostDiagnostics,
+      threadRetention,
       ...(options.hostControl?.servicePolicy === undefined
         ? {}
         : { servicePolicy: options.hostControl.servicePolicy }),
