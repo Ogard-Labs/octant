@@ -497,34 +497,11 @@ export function findUnregisteredRouteModules(
 }
 
 /**
- * Endpoints that are served but which nothing calls. Each entry states why.
- * These are a distinct failure from an unreachable module: the route module is
- * registered and the server answers, but no client, desktop, CLI, or mobile
- * caller ever constructs the path, so the capability is unusable in practice.
+ * Endpoints that are served but which nothing calls. Each remaining entry
+ * states a dated reason and the caller it is waiting on. Empty means every
+ * served endpoint has a caller (or is a routing prefix).
  */
-export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
-  [
-    "/api/agent-profiles/scope",
-    "Clients call the /api/agent-profiles base only; the scope sub-route has no caller.",
-  ],
-  [
-    "/api/chat/evidence/mutation",
-    "Chat evidence surface with no client path construction; appears to serve a QA/evidence flow that was never given a caller.",
-  ],
-  ["/api/chat/evidence/stream", "As above; the evidence stream has no caller."],
-  [
-    "/api/desktop/code-managed-root-grants",
-    "Desktop-bridge managed-root grant flow with no caller. Managed worktree creation itself is reachable through the Code service path, so this bridge surface is unused rather than the feature being broken.",
-  ],
-  [
-    "/api/desktop/code-managed-worktrees",
-    "As above: the desktop-bridge create surface has no caller.",
-  ],
-  [
-    "/api/desktop/code-managed-worktrees/cleanup",
-    "As above: the desktop-bridge cleanup surface has no caller.",
-  ],
-]);
+export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map();
 
 const API_PATH_PATTERN = /"(\/api\/[a-z0-9/_-]+)"/g;
 const PREFIX_GUARD_PATTERN = /startsWith\(\s*"(\/api\/[a-z0-9/_-]+)"/g;
@@ -559,6 +536,11 @@ export function findUncalledEndpoints(
   for (const file of files) {
     if (isTest(file.path)) continue;
     if (file.path.startsWith("apps/server/src/")) {
+      // An island is unreachable from the running server, so path strings in it
+      // cannot be endpoints the host answers. The remote-exit evidence driver is
+      // a browser bundle that constructs client paths; counting those as served
+      // invented two uncalled "product" routes the Chat handler never registered.
+      if (KNOWN_ISLANDS.has(file.path)) continue;
       for (const p of apiPathsIn(file.content, API_PATH_PATTERN)) served.add(p);
       for (const p of apiPathsIn(file.content, PREFIX_GUARD_PATTERN)) prefixes.add(p);
       continue;
