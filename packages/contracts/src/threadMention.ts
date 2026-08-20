@@ -29,7 +29,6 @@ export const ThreadMentionPlacement = Schema.Union(
     label: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200)),
   }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("recents") }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unfiled") }).annotations(strict),
 );
 export type ThreadMentionPlacement = typeof ThreadMentionPlacement.Type;
 
@@ -121,7 +120,7 @@ export type UnavailableThreadMention = typeof UnavailableThreadMention.Type;
  * Persisted Side Chat sidecar linkage. One Chat-mode sidecar per source
  * thread. The sidecar is ordinary Chat: it never inherits the source thread's
  * Work or Code filesystem, shell, Git, or worktree authority, and it is
- * hidden from Chat Recents, Unfiled, and Project nesting so it cannot become a
+ * hidden from Chat Recents and Project nesting so it cannot become a
  * second orchestration surface.
  */
 export const SideChatSidecar = Schema.Struct({

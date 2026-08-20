@@ -194,7 +194,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const suggestedOutcome = useMemo(() => suggestCodeDeliveryOutcome(prompt), [prompt]);
   const outcomeKind = outcomeOverride ?? suggestedOutcome;
   const trimmed = prompt.trim();
-  const canSubmit = trimmed.length > 0 && !props.creating;
+  // A Code thread belongs to a Project (decision 0037), so the first turn
+  // cannot start until one is chosen.
+  const canSubmit = trimmed.length > 0 && !props.creating && props.projectId !== undefined;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -304,7 +306,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           <h1 className="code-composer-adapter__heading">What should we build?</h1>
           <p className="code-composer-adapter__description">
             {props.projectId === undefined
-              ? "Start without a repository, or choose a saved Project before creating the thread."
+              ? "Choose a Project to build in. Its repository is the checkout this thread works against."
               : "Start a Code thread in this repository. The thread inherits the current checkout and approval policy."}
           </p>
         </div>
