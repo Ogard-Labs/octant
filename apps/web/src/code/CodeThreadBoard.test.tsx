@@ -21,6 +21,7 @@ function card(overrides: {
   readonly followUp?: boolean;
   readonly checks?: CodeBoardCard["checks"];
   readonly activeAgents?: number;
+  readonly unread?: boolean;
 }): CodeBoardCard {
   return {
     threadId: `00000000-0000-4000-8000-0000000051${overrides.id}`,
@@ -48,7 +49,7 @@ function card(overrides: {
       ? { kind: "recovering", reasons: ["project-projection-missing"] }
       : { kind: "ok" },
     githubFreshness: "fresh",
-    unread: false,
+    unread: overrides.unread ?? false,
     followUp: overrides.followUp ?? false,
     lastMeaningfulActivityAt: null,
   } as CodeBoardCard;
@@ -91,6 +92,27 @@ function memoryStorage() {
 describe("CodeThreadBoard", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("announces an unread card's marker to assistive technology", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([
+        card({ id: "01", status: "ready", title: "Unread thread", unread: true }),
+        card({ id: "02", status: "ready", title: "Read thread" }),
+      ]),
+    );
+    render(
+      <CodeThreadBoard
+        loadBoard={loadBoard}
+        onOpenThread={() => undefined}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Unread thread" });
+    expect(within(cardFor("Unread thread")).getByRole("img", { name: "Unread" })).toBeTruthy();
+    expect(within(cardFor("Read thread")).queryByRole("img", { name: "Unread" })).toBeNull();
   });
 
   it("renders every Status column by default, including empty ones, and opens a thread", async () => {

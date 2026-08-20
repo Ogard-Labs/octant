@@ -558,8 +558,10 @@ function CodeBoardCardView(props: {
       data-status={card.status}
     >
       <span className="board-card-top">
-        {/* unread is a presence before the title, named for assistive tech */}
-        {card.unread ? <span aria-label="Unread" className="unread" /> : null}
+        {/* unread is a presence before the title; the img role is what makes
+            the label real — a generic empty span's aria-label is dropped from
+            the accessibility tree */}
+        {card.unread ? <span aria-label="Unread" className="unread" role="img" /> : null}
         <button
           className="code-board__card-open"
           onClick={() => props.onOpen?.(card.threadId as CodeThreadId)}

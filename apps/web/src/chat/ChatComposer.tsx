@@ -272,11 +272,17 @@ export function ChatComposer(props: ChatComposerProps) {
   // are visually hidden; only actionable state (errors, streaming) is loud.
   const quietStatus = !status.loud;
 
+  // `.composer-input` sizes itself through `field-sizing: content` with the
+  // system's 60–240px bounds; an inline height would override the stylesheet
+  // and reintroduce the legacy clamp. The measurement runs only for engines
+  // without field-sizing (remote clients in Safari/Firefox), mirroring the
+  // same bounds so both paths render the same composer.
   useLayoutEffect(() => {
     const message = messageRef.current;
     if (message === null) return;
+    if (typeof CSS?.supports === "function" && CSS.supports("field-sizing", "content")) return;
     message.style.height = "0px";
-    message.style.height = `${Math.min(Math.max(message.scrollHeight, 28), 180)}px`;
+    message.style.height = `${Math.min(Math.max(message.scrollHeight, 60), 240)}px`;
   }, [props.draft]);
 
   function send() {
