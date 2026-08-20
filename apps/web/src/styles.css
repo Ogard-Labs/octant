@@ -1838,37 +1838,43 @@ button:focus-visible {
   background: var(--octant-workspace);
 }
 
+/* Drawn to the system's .btn btn-secondary btn-sm recipe until these
+   surfaces adopt the classes themselves. */
 .workspace-group__action,
 .settings-view__action,
 .shell-boundary__action {
-  min-height: 28px;
-  padding: 0 10px;
-  color: var(--octant-text-secondary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 7px;
+  min-height: var(--oct-control-height-sm);
+  padding: 0 var(--oct-space-4);
+  color: var(--oct-fg);
+  background: transparent;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--oct-text-xs);
   font-weight: 500;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+    background-color var(--oct-motion-fast) var(--oct-ease-standard),
+    border-color var(--oct-motion-fast) var(--oct-ease-standard),
+    color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .workspace-group__action:hover,
 .settings-view__action:hover,
 .shell-boundary__action:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-  border-color: var(--octant-border-strong);
+  color: var(--oct-fg);
+  background: var(--oct-surface-warm);
+  border-color: var(--oct-fg);
 }
 
+/* Reads as a .setgroup-head so in-pane subheadings match group heads. */
 .settings-view__section-heading {
-  margin: 18px 0 4px;
-  color: var(--octant-text-primary);
-  font-size: 13px;
-  font-weight: 600;
+  margin: var(--oct-space-6) 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
 }
 
 .settings-view__field,
@@ -1878,11 +1884,11 @@ button:focus-visible {
   align-items: center;
   gap: 16px;
   padding: 6px 0;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
   background: transparent;
   border: 0;
   border-radius: 0;
-  font-size: 12.5px;
+  font-size: var(--oct-text-sm);
 }
 
 .settings-view__field {
@@ -1912,18 +1918,19 @@ button:focus-visible {
   cursor: pointer;
 }
 
+/* Drawn to the system's .input/.select recipe at the small control height. */
 .settings-view__text-input,
 .settings-view__select {
   width: auto;
   min-width: 150px;
-  min-height: 30px;
-  padding: 0 9px;
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 7px;
+  min-height: var(--oct-control-height-sm);
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--oct-text-sm);
 }
 
 .settings-view__field--search .settings-view__text-input {
@@ -1938,7 +1945,7 @@ button:focus-visible {
 
 .settings-view__text-input:hover,
 .settings-view__select:hover {
-  border-color: var(--octant-border-strong);
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
 }
 
 .settings-view__text-input:focus-visible,
@@ -1949,8 +1956,9 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+/* No forced color-scheme: the root's declared scheme keeps the native
+   popup matched to the active theme, which "dark" broke in light mode. */
 .settings-view__select {
-  color-scheme: dark;
   cursor: pointer;
 }
 
