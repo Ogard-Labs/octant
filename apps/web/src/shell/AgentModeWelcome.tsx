@@ -22,9 +22,9 @@ const copy: Record<
   },
   code: {
     eyebrow: "Code",
-    heading: "Add a repository to start",
+    heading: "Add a folder to start",
     description:
-      "Bind a repository root for approval-gated coding work. Then start a Code thread with provider, branch, and delivery context.",
+      "Bind a confined folder for approval-gated coding work. Then start a Code thread with provider, branch, and delivery context.",
   },
 };
 
@@ -55,9 +55,7 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
               Add folder
             </span>
             <span className="draft-thread__intent-description">
-              {props.mode === "code"
-                ? "Select a repository root on this Mac."
-                : "Select a confined folder on this Mac."}
+              Select a confined folder on this Mac.
             </span>
           </OctantButton>
           {props.onOpenDraft === undefined ? null : (
