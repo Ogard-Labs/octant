@@ -22,7 +22,7 @@ export interface ThreadSearchProject {
 }
 
 /** The folder word shown beside a thread. A label, never a filter. */
-export type ThreadSearchRootlessLabel = "Unfiled" | "Recents";
+export type ThreadSearchUnfiledLabel = "Unfiled" | "Recents";
 
 export interface ThreadSearchHit {
   readonly threadId: string;
@@ -61,7 +61,7 @@ export interface BuildThreadSearchResultsInput {
   readonly query: string;
   readonly threads: ReadonlyArray<ThreadSearchThread>;
   readonly projects: ReadonlyArray<ThreadSearchProject>;
-  readonly rootlessLabel?: ThreadSearchRootlessLabel;
+  readonly unfiledLabel?: ThreadSearchUnfiledLabel;
   readonly limit?: number;
 }
 
@@ -84,7 +84,7 @@ export function buildThreadSearchResults(
 
   const limit = input.limit ?? THREAD_SEARCH_GROUP_LIMIT;
   const projectNames = new Map(input.projects.map((project) => [project.id, project.name]));
-  const rootlessLabel = input.rootlessLabel ?? "Unfiled";
+  const unfiledLabel = input.unfiledLabel ?? "Unfiled";
 
   const matches = input.threads
     .filter((thread) => thread.mode === input.mode)
@@ -99,14 +99,14 @@ export function buildThreadSearchResults(
     groups.push({
       id: "threads",
       label: "Threads",
-      hits: live.slice(0, limit).map((thread) => toHit(thread, projectNames, rootlessLabel)),
+      hits: live.slice(0, limit).map((thread) => toHit(thread, projectNames, unfiledLabel)),
     });
   }
   if (archived.length > 0) {
     groups.push({
       id: "archived",
       label: "Archived",
-      hits: archived.slice(0, limit).map((thread) => toHit(thread, projectNames, rootlessLabel)),
+      hits: archived.slice(0, limit).map((thread) => toHit(thread, projectNames, unfiledLabel)),
     });
   }
   const hitCount = groups.reduce((total, group) => total + group.hits.length, 0);
@@ -123,12 +123,12 @@ export function flattenThreadSearchHits(
 function toHit(
   thread: ThreadSearchThread,
   projectNames: ReadonlyMap<string, string>,
-  rootlessLabel: ThreadSearchRootlessLabel,
+  unfiledLabel: ThreadSearchUnfiledLabel,
 ): ThreadSearchHit {
   const folderLabel =
     thread.projectId === undefined
-      ? rootlessLabel
-      : (projectNames.get(thread.projectId) ?? rootlessLabel);
+      ? unfiledLabel
+      : (projectNames.get(thread.projectId) ?? unfiledLabel);
   return {
     threadId: thread.threadId,
     mode: thread.mode,

@@ -34,8 +34,20 @@ export interface CodeThreadEnvironmentProps {
   readonly files?: ReactNode;
   /** Publishing controls, mounted inside the collapsible Publish group. */
   readonly publish?: ReactNode;
+  /**
+   * The thread's plan, mounted inside its own collapsible group. The plan
+   * belongs to this thread, so it lives beside the thread's other facts rather
+   * than in the Project-scoped dock.
+   */
+  readonly plan?: ReactNode;
   /** Opens the thread's Changes (diff) surface. Absent hides the control. */
   readonly onOpenChanges?: () => void;
+  /**
+   * Starts a fresh thread in this Project. Offered only when the checkout is
+   * unusable: a thread created against an older binding revision can never
+   * observe its own checkout again, so a new thread is the way forward.
+   */
+  readonly onNewThreadInProject?: (projectId: ProjectSummary["id"]) => void;
   readonly onExecute?: (
     command: CodeCommand,
     signal?: AbortSignal,
@@ -77,6 +89,16 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   });
   const resolved = resolveTabPresentation(props.presentation, "code", props.tab.id);
   const localServersSection = projection.sections.find((section) => section.id === "local-servers");
+  const project = props.project;
+  const onNewThreadInProject = props.onNewThreadInProject;
+  const checkoutUnusable =
+    controller.status === "error" ||
+    controller.observation?.status === "unavailable" ||
+    controller.observation?.status === "failed";
+  const freshThreadAction =
+    !checkoutUnusable || project === undefined || onNewThreadInProject === undefined
+      ? undefined
+      : { label: "New thread in this Project", onClick: () => onNewThreadInProject(project.id) };
   const [localServersOpen, setLocalServersOpen] = useState(false);
   // Scan only while the section can actually be seen: a hidden panel or a
   // collapsed group must not ask the host to enumerate listeners on a timer.
@@ -114,6 +136,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           title="Changes"
         >
           <EnvironmentGitGroup
+            {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
             {...(controller.errorMessage === undefined
               ? {}
               : { errorMessage: controller.errorMessage })}
@@ -135,6 +158,9 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         </EnvironmentGroup>
         {props.files === undefined ? null : (
           <EnvironmentGroup title="Files">{props.files}</EnvironmentGroup>
+        )}
+        {props.plan === undefined ? null : (
+          <EnvironmentGroup title="Plan">{props.plan}</EnvironmentGroup>
         )}
         {props.publish === undefined ? null : (
           <EnvironmentGroup title="Publish">{props.publish}</EnvironmentGroup>

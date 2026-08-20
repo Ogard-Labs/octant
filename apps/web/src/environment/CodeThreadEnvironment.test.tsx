@@ -150,6 +150,28 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.getAllByText("Branch").length).toBeGreaterThan(0);
   });
 
+  it("keeps the thread's plan beside the thread rather than in the window dock", async () => {
+    render(
+      <CodeThreadEnvironment
+        onChangePresentation={vi.fn()}
+        plan={<p>Three steps, one done</p>}
+        presentation={defaultEnvironmentPresentationState()}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const plan = screen.getByRole("button", { name: "Plan" });
+    expect(plan).toBeVisible();
+    await userEvent.click(plan);
+    expect(screen.getByText("Three steps, one done")).toBeVisible();
+  });
+
   it("reports an unavailable identity when no project is bound to the tab", () => {
     render(
       <CodeThreadEnvironment

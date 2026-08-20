@@ -25,7 +25,7 @@ function candidate(
     title,
     placement:
       overrides.project === undefined
-        ? { kind: "unfiled" }
+        ? { kind: "recents" }
         : { kind: "project", label: overrides.project },
     updatedAt: overrides.updatedAt ?? "2026-08-14T10:00:00.000Z",
   });
@@ -193,14 +193,14 @@ describe("formatThreadMentionContext", () => {
       {
         title: "Roadmap",
         mode: "chat",
-        placement: { kind: "unfiled" },
+        placement: { kind: "recents" },
         transcript: [{ role: "assistant", text: "later" }],
         truncated: true,
       },
     ]);
 
     expect(block).toContain("older history was not read");
-    expect(block).toContain("(chat, Unfiled)");
+    expect(block).toContain("(chat, Recents)");
   });
 
   it("renders nothing when no mention resolved", () => {
