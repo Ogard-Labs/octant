@@ -32,6 +32,57 @@ describe("transcript activity", () => {
     ]);
   });
 
+  it("keeps a journaled summary as a summary, not as tool arguments or output", () => {
+    const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+      kind: "tool-activity",
+      toolCallId: "call-1" as never,
+      toolName: "Read",
+      state: "running",
+      summary: "Reading file…",
+    } as CodeOperationEvent);
+    expect(started.rows[0]).toEqual({
+      kind: "tool",
+      id: "call-1",
+      toolName: "Read",
+      state: "running",
+      summary: "Reading file…",
+    });
+    expect(started.rows[0]).not.toHaveProperty("arguments");
+    expect(started.rows[0]).not.toHaveProperty("output");
+  });
+
+  it("replaces the summary when a later event records a different one", () => {
+    const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("running"));
+    const finished = applyActivityEvent(started, {
+      kind: "tool-activity",
+      toolCallId: "call-1" as never,
+      toolName: "Bash",
+      state: "completed",
+      summary: "exit 0",
+    } as CodeOperationEvent);
+    expect(finished.rows[0]).toMatchObject({
+      summary: "exit 0",
+      state: "completed",
+    });
+    expect(finished.rows[0]).not.toHaveProperty("arguments");
+    expect(finished.rows[0]).not.toHaveProperty("output");
+  });
+
+  it("keeps a failed call's message as the row summary so the fold still names the refusal", () => {
+    const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("running"));
+    const failed = applyActivityEvent(started, {
+      kind: "tool-activity",
+      toolCallId: "call-1" as never,
+      toolName: "Bash",
+      state: "failed",
+      summary: "Write refused: path is outside the checkout.",
+    } as CodeOperationEvent);
+    expect(failed.rows[0]).toMatchObject({
+      state: "failed",
+      summary: "Write refused: path is outside the checkout.",
+    });
+  });
+
   it("keeps tool and task rows apart even when their ids collide", () => {
     const withTool = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("running"));
     const withTask = applyActivityEvent(withTool, {

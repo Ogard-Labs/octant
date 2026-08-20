@@ -13,31 +13,57 @@ even when the Build iOS Apps extension is absent or disabled.
 
 ## Scope
 
-The workbench covers **local iOS and iPadOS Simulator development** and
-**local macOS development** (Xcode and Swift Package Manager):
+The intended first-release boundary is **local iOS and iPadOS Simulator
+development** and **local macOS development** (Xcode and Swift Package
+Manager). What you can do today is a slice of that shape:
 
 - Toolchain, project, and destination discovery (Xcode, `xcode-select`, SDKs,
-  Simulator runtimes, workspaces, projects, `Package.swift`, schemes, test
-  plans, destinations) — non-mutating, with setup guidance
-- Build, install, launch, terminate, and relaunch on an explicitly allocated
-  Simulator
-- Simulator boot, wait, shut down, and erase as explicit ownership-protected
-  actions — never implicit
-- macOS app build and staging, stopping only owned processes, launch and
-  focus, unified logs and crashes, and handoff to Xcode or an external editor
-- Tests via Swift Testing and XCTest — unit, integration, and UI — with
-  focused target, suite, test, tag, and test-plan selection, accessibility
-  audits, flake investigation, and `.xcresult` evidence parsed into navigable
-  build errors, warnings, test hierarchies, attachments, and coverage
+  Simulator runtimes, workspaces, projects, schemes, configurations, targets,
+  destinations) — non-mutating, with setup guidance when Xcode is missing.
+  The command palette lists only `.xcodeproj` and `.xcworkspace` at the
+  checkout root. The `octant_apple` tool can name a `Package.swift` path, but
+  Swift-package discovery is not available yet: the host passes that file to
+  `xcodebuild -packagePath`, which expects the package directory, so
+  discovery fails as incomplete. Test plans are not discovered yet.
+- **Build** against the workspace's first reported scheme.
+- **Test** against that same scheme. The workbench Test action names no
+  Simulator. A non-macOS test without a matching destination is refused as an
+  invalid destination, so Simulator tests are not available from the
+  workbench yet. An `octant_apple` test can include a matching `platform` and
+  `simulatorId`; a macOS test needs no Simulator.
+- **Run** on a selected Simulator — build, install, and launch (a launch
+  also terminates any already-running copy of that app). The workbench sends
+  the first discovered Simulator's platform with the selected destination's
+  ID, so Run succeeds only when that destination is on the same platform; a
+  different-platform selection is refused as an invalid destination.
+  Separate install, terminate, and relaunch controls are not yet built.
+- Simulator **Boot** and **Shut down** as explicit actions from the workbench
+  destination list — never as a side effect of Build or Test. Boot waits until
+  the destination is ready. Erase is not yet a workbench action.
+- **Capture screen** of a booted Simulator, stored as a screenshot artifact.
+
+macOS app staging, stopping only owned processes, launch and focus, unified
+logs and crashes, and handoff to Xcode or an external editor are not yet
+workbench actions. Tests that reach `xcodebuild test` run the scheme (Swift
+Testing and XCTest as the scheme defines them). `xcodebuild` is given a
+result-bundle path; that `.xcresult` is not retained as a host artifact, and
+the evidence reference does not currently resolve to stored bytes. Logs, and
+screenshots from captures, are retained. Focused target, suite, test, tag,
+and test-plan selection, accessibility audits, flake investigation, and a
+navigable parse of `.xcresult` into build errors, warnings, test
+hierarchies, attachments, and coverage are not yet built.
 
 ## Workbench surface
 
-The workbench appears as a Code workspace tab and shows the project path, the
-"Apple development" eyebrow, Xcode version, scheme, revision, SDK count,
-**Simulator destinations**, **Current progress**, and **Validation
-evidence**. The Simulator is a first-class persistent split-tree pane with a
-live frame, orientation, accessibility hierarchy, and screenshot, recording,
-and log surfaces.
+The workbench appears as a Code workspace tab titled **Apple workbench** and
+shows the project path, the "Apple development" eyebrow, Xcode version,
+scheme, revision, SDK count, Simulator count, **Actions**, **Simulator
+destinations**, **Current progress**, and **Validation evidence**.
+
+An inline Simulator pane with a live frame, orientation, accessibility
+hierarchy, screenshot, recording, and log surfaces is not yet built. Today
+the Simulator is a destination list with the actions that destination can
+perform.
 
 States include loading the toolchain, waiting for Apple evidence, toolchain
 unavailable, action interrupted, and action failed, with **Retry**. Outcome
@@ -47,11 +73,12 @@ and **Process died**.
 
 ## Running actions
 
-**Build** and **Test** run against the workspace scheme. Each Simulator
-destination offers only what its reported state can do: a shut-down Simulator
-offers **Boot**; a booted one offers **Run**, **Capture screen**, and **Shut
-down**. Anything already running can be **Cancel**led from **Current
-progress**.
+**Build** and **Test** run against the workspace scheme and name no
+Simulator. Each Simulator destination offers only what its reported state
+can do: a shut-down Simulator offers **Boot**; a booted one offers **Run**,
+**Capture screen**, and **Shut down**. **Run** is limited to destinations
+whose platform matches the first discovered Simulator. Anything already
+running can be **Cancel**led from **Current progress**.
 
 An approval-gated Code thread asks for confirmation before each of these, the
 same confirmation the rest of Code uses. **Capture screen** does not: reading
@@ -63,13 +90,17 @@ conversation.
 Open the workbench from the command palette: **Open Apple workbench for
 &lt;project&gt;** appears for each `.xcodeproj` or `.xcworkspace` the host
 finds at the root of the Code thread's checkout. A checkout with none offers
-no such command.
+no such command. `Package.swift` is not listed.
 
-A Code thread on **Full access** also reaches the same actions through the
+A Code thread on **Full access** also reaches these actions through the
 app-managed `octant_apple` tool, so an agent can discover the toolchain, read
 Simulator state, build, test, run, boot, shut down, and capture the screen.
-It sends the same requests the workbench sends and is refused by the same
-policy; it is unavailable under Plan and approval-gated postures.
+The host binds both to the same thread and checkout and refuses them with
+the same policy; the tool is unavailable under Plan and approval-gated
+postures. The workbench never treats Boot as a side effect of Run: a
+shut-down Simulator only offers **Boot**. The tool's `run` operation
+currently boots a named Simulator that is shut down, then installs and
+launches; that is today's toolchain behavior, not a workbench control.
 
 ## Honest verification
 
@@ -82,10 +113,10 @@ exercised:
 - A passing unit suite is not a passing UI or accessibility workflow.
 
 Evidence is stored as local artifact files with durable references, not
-copied wholesale into model context. Code mode includes a **Review changes**
-action that inspects the diff and evidence, produces durable inline findings
-with severity, and supports accept, dismiss, and fix — it never auto-merges
-or mutates a remote PR in V1.
+copied wholesale into model context. An automated **Review changes** pass
+that inspects the diff and Apple evidence and produces durable inline
+findings is not yet built; Code's local findings pane is a separate surface
+and does not consume Simulator captures.
 
 ## Boundaries
 
