@@ -1390,10 +1390,15 @@ export function useCodeController(options: CodeControllerOptions) {
         return undefined;
       }
       const timestamp = new Date().toISOString();
+      // A fork is its own thread and does not inherit the source's profile. A
+      // one-off profile belongs to the source by definition, and one deleted
+      // since the source started would refuse the fork outright; either way the
+      // fork begins with no profile until someone picks one for it.
+      const { profileId: _inheritedProfileId, ...carried } = source;
       let thread: CodeThread;
       try {
         thread = decodeCodeThread({
-          ...source,
+          ...carried,
           id: globalThis.crypto.randomUUID(),
           bindingRevisionId: prepared.bindingRevisionId,
           repositoryId: prepared.checkout.repositoryId,

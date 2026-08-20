@@ -116,6 +116,28 @@ describe("planCodeThreadCreate", () => {
     });
   });
 
+  it("carries the selected profile into either creation command", () => {
+    const profileId = "60000000-0000-4000-8000-000000000001";
+    for (const workspace of ["managed-worktree", "current-checkout"] as const) {
+      const result = planCodeThreadCreate({
+        composer: composer(workspace),
+        modelId: "qwen-3.6" as never,
+        prepared: prepared() as never,
+        projectId: ids.project as never,
+        providerInstanceId: ids.provider as never,
+        threadId: ids.thread,
+        timestamp: now,
+        title: "Fix search",
+        profileId: profileId as never,
+      });
+      expect(result).toMatchObject(
+        workspace === "managed-worktree"
+          ? { kind: "command", command: { profileId } }
+          : { kind: "command", command: { thread: { profileId } } },
+      );
+    }
+  });
+
   it("refuses the current checkout when the prepared head is detached", () => {
     const result = planCodeThreadCreate({
       composer: composer("current-checkout"),
