@@ -1874,6 +1874,9 @@ describe("ChatWorkspace", () => {
     const composer = screen.getByRole("textbox", { name: "Message" });
     await user.type(composer, "#Release");
     await user.click(await screen.findByRole("option", { name: /Release notes/ }));
+    expect(
+      screen.queryByRole("button", { name: "Open Side Chat about Release notes" }),
+    ).not.toBeInTheDocument();
     await user.type(composer, "Compare these{Enter}");
 
     await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());

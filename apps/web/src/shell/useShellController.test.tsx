@@ -303,6 +303,46 @@ describe("useShellController", () => {
     expect(result.current.errorMessage).toBe("This surface is not available here.");
   });
 
+  it("records the sidecar identity on a Side Chat tab opened from the launcher", async () => {
+    const server = statefulClient();
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000895");
+    const sidecar = decodeSideChatSidecar({
+      sourceThreadId: String(threadId),
+      sourceMode: "code",
+      sidecarThreadId: "00000000-0000-4000-8000-000000000201",
+      title: "Side Chat about Release notes",
+      createdAt: "2026-08-14T10:00:00.000Z",
+    });
+
+    await act(async () => result.current.openCodeThread(threadId, "Release notes"));
+    await act(async () => result.current.openSurface("side-chat"));
+    expect(
+      groups(result.current.workspace!.layouts.code).flatMap((group) =>
+        group.tabs.filter((tab) => tab.kind === "side-chat"),
+      )[0],
+    ).toMatchObject({ sourceThreadId: String(threadId) });
+    expect(
+      groups(result.current.workspace!.layouts.code).flatMap((group) =>
+        group.tabs.filter((tab) => tab.kind === "side-chat"),
+      )[0],
+    ).not.toHaveProperty("sidecarThreadId");
+
+    await act(async () => result.current.openSideChat(sidecar));
+
+    const sideChatTabs = groups(result.current.workspace!.layouts.code).flatMap((group) =>
+      group.tabs.filter((tab) => tab.kind === "side-chat"),
+    );
+    expect(sideChatTabs).toHaveLength(1);
+    expect(sideChatTabs[0]).toMatchObject({
+      sourceThreadId: String(threadId),
+      sidecarThreadId: "00000000-0000-4000-8000-000000000201",
+    });
+  });
+
   it("opens the Side Chat tab a host-resolved sidecar names", async () => {
     const server = statefulClient(workBootstrap());
     const { result } = renderHook(() =>

@@ -17,7 +17,7 @@ const otherSidecarThreadId = "00000000-0000-4000-8000-000000000202";
 const tabId = "00000000-0000-4000-8000-000000000301";
 
 function sideChatTab(overrides: Record<string, unknown> = {}) {
-  const tab = decodeWorkspaceTab({
+  const payload: Record<string, unknown> = {
     kind: "side-chat",
     id: tabId,
     mode: "work",
@@ -25,7 +25,9 @@ function sideChatTab(overrides: Record<string, unknown> = {}) {
     sourceThreadId,
     sidecarThreadId,
     ...overrides,
-  });
+  };
+  if (payload.sidecarThreadId === undefined) delete payload.sidecarThreadId;
+  const tab = decodeWorkspaceTab(payload);
   if (tab.kind !== "side-chat") throw new Error("expected a Side Chat tab");
   return tab;
 }
@@ -194,6 +196,41 @@ describe("SideChatWorkspaceTab", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("Chat thread was not found."),
     );
     expect(screen.queryByRole("region", { name: "Chat workspace" })).toBeNull();
+  });
+
+  it("tells the shell the sidecar identity when a launcher tab has not recorded one", async () => {
+    const onSidecarOpened = vi.fn();
+    render(
+      <SideChatWorkspaceTab
+        chatClient={chatClientStub()}
+        chatReadCursorStore={readCursorStore}
+        onSidecarOpened={onSidecarOpened}
+        tab={sideChatTab({ sidecarThreadId: undefined })}
+        threadMentionClient={mentionClientStub()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(onSidecarOpened).toHaveBeenCalledWith(expect.objectContaining({ sidecarThreadId })),
+    );
+  });
+
+  it("does not ask the shell to replace a sidecar the restored tab already names", async () => {
+    const onSidecarOpened = vi.fn();
+    render(
+      <SideChatWorkspaceTab
+        chatClient={chatClientStub()}
+        chatReadCursorStore={readCursorStore}
+        onSidecarOpened={onSidecarOpened}
+        tab={sideChatTab()}
+        threadMentionClient={mentionClientStub()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("region", { name: "Chat workspace" })).toBeVisible(),
+    );
+    expect(onSidecarOpened).not.toHaveBeenCalled();
   });
 
   it("says Side Chat is unavailable when the host has no mention surface", () => {

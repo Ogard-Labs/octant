@@ -81,8 +81,6 @@ Hardening in progress for the preview:
   agent controls with journaled lifecycle; sharing only after secure local use.
 - **Automation Center** — host-owned, Project-bound agent schedules that create
   ordinary Work or Code threads with durable occurrence recovery.
-- **Thread mentions and Side Chat** — ask about a thread from the shell without
-  interrupting it; complete the persisted sidecar panel.
 - **Native agent harness** — Octant-owned agent loop for direct and local
   endpoints with app-managed tools, Goals, roles, session trees, and CLI
   parity with the GUI.
