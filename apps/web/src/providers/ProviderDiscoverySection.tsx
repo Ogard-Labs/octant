@@ -30,17 +30,12 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
   );
 
   return (
-    <section aria-label="Detected on this Mac" className="provider-discovery">
-      <div className="provider-discovery__header">
-        <div>
-          <h3>Detected on this Mac</h3>
-          <p>
-            Octant scans installed runtimes automatically. Enable only the providers you want
-            available.
-          </p>
-        </div>
+    <section aria-label="Detected on this Mac" className="setgroup provider-discovery">
+      <div className="setgroup-head">
+        <span>Detected on this Mac</span>
+        <span className="setgroup-gap" />
         <OctantButton
-          className="settings-view__action"
+          className="btn btn-secondary btn-sm"
           disabled={scanning}
           onClick={() => void props.onScan()}
           type="button"
@@ -49,15 +44,22 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
         </OctantButton>
       </div>
 
+      <p className="setgroup-note">
+        Octant scans installed runtimes automatically. Enable only the providers you want available.
+      </p>
+
       {scanning && snapshot === undefined ? (
-        <p role="status">Scanning for installed runtimes…</p>
+        <p className="setgroup-note" role="status">
+          Scanning for installed runtimes…
+        </p>
       ) : null}
 
       {props.message === undefined ? null : (
-        <p className="provider-discovery__notice" role="alert">
+        <p className="setgroup-note" role="alert">
           {props.message}{" "}
           <OctantButton
             aria-label="Retry provider discovery"
+            className="btn btn-ghost btn-sm"
             onClick={() => void props.onScan()}
             type="button"
           >
@@ -67,80 +69,89 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       )}
 
       {snapshot !== undefined && snapshot.status === "cancelled" ? (
-        <p className="provider-discovery__notice" role="status">
+        <p className="setgroup-note" role="status">
           Scan was cancelled.{" "}
-          <OctantButton onClick={() => void props.onScan()} type="button">
+          <OctantButton
+            className="btn btn-ghost btn-sm"
+            onClick={() => void props.onScan()}
+            type="button"
+          >
             Retry
           </OctantButton>
         </p>
       ) : null}
 
       {snapshot !== undefined && snapshot.status === "partial" ? (
-        <p className="provider-discovery__notice" role="status">
+        <p className="setgroup-note" role="status">
           {snapshot.message ?? "Scan completed partially."} Some results may be missing.
         </p>
       ) : null}
 
       {snapshot !== undefined && snapshot.status === "failed" ? (
-        <p className="provider-discovery__notice" role="alert">
+        <p className="setgroup-note" role="alert">
           {snapshot.message ?? "Discovery scan failed."}{" "}
-          <OctantButton onClick={() => void props.onScan()} type="button">
+          <OctantButton
+            className="btn btn-ghost btn-sm"
+            onClick={() => void props.onScan()}
+            type="button"
+          >
             Retry
           </OctantButton>
         </p>
       ) : null}
 
       {!scanning && detected.length === 0 && snapshot !== undefined ? (
-        <p className="provider-discovery__empty">
+        <p className="setgroup-note">
           Installed providers are already listed below. Use <strong>Add provider manually</strong>
           only for a custom endpoint or unusual binary path.
         </p>
       ) : null}
 
-      {detected.length > 0 ? (
-        <ul className="provider-discovery__list" role="list">
-          {detected.map((candidate) => (
-            <DiscoveryCard
-              key={`${candidate.driverKind}-${candidate.binaryPath}`}
-              candidate={candidate}
-              connecting={props.connectingPaths.has(candidate.binaryPath)}
-              onConnect={props.onConnect}
-            />
-          ))}
-        </ul>
-      ) : null}
+      {detected.map((candidate) => (
+        <DiscoveryRow
+          key={`${candidate.driverKind}-${candidate.binaryPath}`}
+          candidate={candidate}
+          connecting={props.connectingPaths.has(candidate.binaryPath)}
+          onConnect={props.onConnect}
+        />
+      ))}
     </section>
   );
 }
 
-interface DiscoveryCardProps {
+interface DiscoveryRowProps {
   readonly candidate: DiscoveryCandidate;
   readonly connecting: boolean;
   readonly onConnect: (candidate: DiscoveryCandidate) => Promise<boolean>;
 }
 
-function DiscoveryCard(props: DiscoveryCardProps) {
+function DiscoveryRow(props: DiscoveryRowProps) {
   const { candidate, connecting } = props;
   const [connected, setConnected] = useState(false);
 
   return (
-    <li className="provider-discovery__card">
-      <div className="provider-discovery__card-info">
-        <span className="provider-discovery__card-name">{candidate.displayName}</span>
+    <div className="setrow">
+      <span className="setrow-label">
+        {candidate.displayName}
         {candidate.version !== undefined ? (
-          <span className="provider-discovery__card-version">{candidate.version}</span>
+          <span className="provider-discovery__version">{candidate.version}</span>
         ) : null}
-        <span className="provider-discovery__card-path">{candidate.pathSummary}</span>
+      </span>
+      <p className="setrow-hint">
+        <span>{candidate.pathSummary}</span>
+        {candidate.readiness === "unauthenticated" && candidate.onboardingGuidance !== undefined ? (
+          <span className="provider-discovery__guidance">{candidate.onboardingGuidance}</span>
+        ) : null}
+      </p>
+      <div className="setrow-control row">
         <ReadinessBadge readiness={candidate.readiness} />
-      </div>
-      <div className="provider-discovery__card-actions">
         {connected ? (
           <span className="provider-discovery__connected" role="status">
             Connected
           </span>
         ) : (
           <OctantButton
-            className="settings-view__action"
+            className="btn btn-secondary btn-sm"
             disabled={connecting}
             onClick={() => {
               void props.onConnect(candidate).then((ok) => {
@@ -153,10 +164,7 @@ function DiscoveryCard(props: DiscoveryCardProps) {
           </OctantButton>
         )}
       </div>
-      {candidate.readiness === "unauthenticated" && candidate.onboardingGuidance !== undefined ? (
-        <p className="provider-discovery__guidance">{candidate.onboardingGuidance}</p>
-      ) : null}
-    </li>
+    </div>
   );
 }
 
@@ -171,11 +179,13 @@ function ReadinessBadge(props: { readonly readiness: DiscoveryCandidate["readine
           : props.readiness === "unavailable"
             ? "Unavailable"
             : "Unknown";
-  return (
-    <span
-      className={`provider-discovery__readiness provider-discovery__readiness--${props.readiness}`}
-    >
-      {label}
-    </span>
-  );
+  const variant =
+    props.readiness === "ready"
+      ? "badge badge-ok"
+      : props.readiness === "unauthenticated"
+        ? "badge badge-warn"
+        : props.readiness === "incompatible" || props.readiness === "unavailable"
+          ? "badge badge-danger"
+          : "badge";
+  return <span className={variant}>{label}</span>;
 }

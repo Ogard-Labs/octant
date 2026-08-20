@@ -685,10 +685,12 @@ describe("App", () => {
 
     await openSettingsFromSidebar(user);
     fireEvent.click(await screen.findByRole("button", { name: "Providers & Models" }));
-    await user.click(await screen.findByRole("button", { name: "Details for Primary Gateway" }));
-    await user.click(await screen.findByRole("button", { name: "Disable Primary Gateway" }));
+    await user.click(await screen.findByRole("switch", { name: "Enable Primary Gateway" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Enable Primary Gateway" })).toBeVisible(),
+      expect(screen.getByRole("switch", { name: "Enable Primary Gateway" })).toHaveAttribute(
+        "aria-checked",
+        "false",
+      ),
     );
     await user.click(screen.getByRole("button", { name: "Back to app" }));
 

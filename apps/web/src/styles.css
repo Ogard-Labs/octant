@@ -1988,86 +1988,27 @@ button:focus-visible {
   gap: 16px;
 }
 
-.provider-discovery {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+/* Discovery is a .setgroup of .setrow candidates (octant.css); only the
+   pieces the system has no vocabulary for remain here. */
+.provider-discovery .setgroup-note:last-child {
+  padding-bottom: var(--oct-space-4);
 }
 
-.provider-discovery__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+.provider-discovery__version {
+  margin-left: var(--oct-space-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-meta);
 }
 
-.provider-discovery__header h3,
-.provider-discovery__header p,
-.provider-discovery__empty,
-.provider-discovery__notice,
 .provider-discovery__guidance {
-  margin: 0;
+  display: block;
+  margin-top: 2px;
 }
 
-.provider-discovery__header h3 {
-  font-size: 13px;
-}
-
-.provider-discovery__header p,
-.provider-discovery__empty,
-.provider-discovery__notice,
-.provider-discovery__guidance {
-  margin-top: 3px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.provider-discovery__list {
-  display: grid;
-  gap: 8px;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.provider-discovery__card {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 5px 12px;
-  align-items: center;
-  padding: 10px 12px;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-}
-
-.provider-discovery__card-info,
-.provider-discovery__card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-}
-
-.provider-discovery__card-name {
-  color: var(--octant-text-primary);
-  font-weight: 600;
-}
-
-.provider-discovery__card-version,
-.provider-discovery__card-path,
-.provider-discovery__readiness,
 .provider-discovery__connected {
-  color: var(--octant-text-muted);
-  font-size: 10.5px;
-}
-
-.provider-discovery__guidance {
-  grid-column: 1 / -1;
+  font-size: var(--oct-text-xs);
+  color: var(--oct-meta);
 }
 
 .provider-settings h2,
@@ -2157,32 +2098,6 @@ button:focus-visible {
   border-radius: 9px;
 }
 
-.provider-settings__manual {
-  display: grid;
-  overflow: hidden;
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
-}
-
-.provider-settings__manual-trigger {
-  display: flex;
-  min-height: 38px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 12px;
-  color: var(--octant-text-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.provider-settings__manual-trigger:hover,
-.provider-settings__manual-trigger:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
 .provider-settings__disclosure-icon,
 .provider-card__disclosure-icon {
   flex: 0 0 auto;
@@ -2194,14 +2109,12 @@ button:focus-visible {
   transform: rotate(180deg);
 }
 
+/* Sits inside the provider card's .setgroup-foot, which already carries
+   the horizontal padding. */
 .provider-settings__manual-body {
   display: grid;
   gap: 12px;
-  padding: 0 12px 12px;
-}
-
-.provider-settings__manual[data-expanded="false"] .provider-settings__manual-body {
-  display: none;
+  padding: 12px 0 0;
 }
 
 .provider-settings__create--openai-compatible,
@@ -2226,22 +2139,72 @@ button:focus-visible {
   margin: 0;
 }
 
-.provider-settings__list {
+/* The provider list is a .setgroup of .provrow items (octant.css). The
+   rules below are the app-side residue that vocabulary does not cover. */
+
+/* Inside a .setgroup card the empty state needs the card's own padding. */
+.setgroup > .provider-settings__empty {
+  margin: 0;
+  padding: var(--oct-space-4);
+}
+
+.setgroup > .setgroup-note + .provlist {
+  margin-top: var(--oct-space-2);
+}
+
+/* Reordering keeps the pre-port up/down mechanism; the grip column just
+   presents it as two stacked 24px targets (the WCAG 2.5.8 floor the
+   system's .prov-grip comment cites). */
+.prov-grip-slot {
+  display: grid;
+}
+
+.prov-grip-slot .prov-grip {
+  cursor: pointer;
+}
+
+.prov-grip-slot .prov-grip:disabled {
+  cursor: default;
+  color: var(--oct-meta);
+  background: none;
+  opacity: var(--oct-disabled-opacity);
+}
+
+/* The system's narrow-viewport rule targets input.switch; the app's switch
+   is the owned OctantSwitch button recipe and the details chevron rides
+   beside it, so the pair travels as one grid item. */
+.prov-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.prov-details-icon {
+  transition: transform 140ms ease;
+}
+
+.prov-details-trigger[aria-expanded="true"] .prov-details-icon {
+  transform: rotate(180deg);
+}
+
+/* Expanded details bleed to the card edges so the divider reads as part of
+   the card, not a box floating inside the row. */
+.prov-details {
   display: grid;
   gap: 12px;
+  grid-column: 1 / -1;
+  margin: var(--oct-space-3) calc(-1 * var(--oct-space-4)) calc(-1 * var(--oct-space-3));
+  border-top: 1px solid var(--oct-border-soft);
+  padding: var(--oct-space-4);
 }
 
-.provider-card {
-  display: grid;
-  gap: 0;
-  padding: 0;
-  overflow: hidden;
-  background: color-mix(in srgb, var(--octant-control) 64%, transparent);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
+@media (max-width: 560px) {
+  .provrow > .prov-actions {
+    grid-area: 1 / 3;
+    justify-self: end;
+  }
 }
 
-.provider-card__header,
 .provider-card__actions,
 .provider-card__facts {
   display: flex;
@@ -2250,75 +2213,16 @@ button:focus-visible {
   gap: 8px;
 }
 
-.provider-card__header {
-  justify-content: space-between;
-  min-height: 54px;
-  padding: 10px 12px;
-}
-
-.provider-card__header h3 {
-  font-size: 15px;
-}
-
-.provider-card__header p,
 .provider-card__facts {
   margin-top: 3px;
   color: var(--octant-text-muted);
   font-size: 11px;
 }
 
-.provider-card__header-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.provider-card__details-trigger {
-  min-height: 26px;
-  padding: 0 7px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-}
-
-.provider-card__details-icon {
-  transition: transform 140ms ease;
-}
-
-.provider-card__details-trigger[aria-expanded="true"] .provider-card__details-icon {
-  transform: rotate(180deg);
-}
-
-.provider-card__details {
-  display: grid;
-  gap: 12px;
-  padding: 12px;
-  border-top: 1px solid var(--octant-border);
-}
-
 .provider-card__facts span:not(:last-child)::after {
   margin-left: 8px;
   color: var(--octant-divider-strong);
   content: "·";
-}
-
-.provider-card__status {
-  padding: 4px 8px;
-  color: var(--octant-text-secondary);
-  background: var(--octant-control);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.provider-card__status--ready {
-  color: var(--octant-success-text);
-  background: var(--octant-success-surface);
-}
-
-.provider-card__status--checking,
-.provider-card__status--starting {
-  color: var(--octant-text-secondary);
-  background: var(--octant-control-hover);
 }
 
 .provider-card__actions button,
@@ -4940,8 +4844,7 @@ dialog.project-dialog {
     grid-template-columns: 1fr;
   }
 
-  .provider-settings__intro,
-  .provider-card__header {
+  .provider-settings__intro {
     align-items: stretch;
     flex-direction: column;
   }
@@ -5005,8 +4908,7 @@ dialog.project-dialog {
     grid-template-columns: 1fr;
   }
 
-  .provider-settings__intro,
-  .provider-card__header {
+  .provider-settings__intro {
     align-items: stretch;
     flex-direction: column;
   }
@@ -6613,93 +6515,6 @@ dialog.project-dialog {
 
 .model-picker--narrow .model-picker__readiness {
   margin-left: 0;
-}
-
-.provider-order {
-  display: grid;
-  overflow: hidden;
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-}
-
-.provider-order__trigger {
-  display: flex;
-  min-height: 38px;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  text-align: left;
-}
-
-.provider-order__trigger:hover,
-.provider-order__trigger:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.provider-order__count {
-  margin-left: auto;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.provider-order__disclosure-icon {
-  transition: transform 140ms ease;
-}
-
-.provider-order[data-expanded="true"] .provider-order__disclosure-icon {
-  transform: rotate(180deg);
-}
-
-.provider-order__body {
-  display: grid;
-  gap: 8px;
-  padding: 0 10px 10px;
-  border-top: 1px solid var(--octant-border);
-}
-
-.provider-order__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 0.25rem;
-}
-
-.provider-order__item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.5rem;
-  border-radius: 0.4rem;
-  border: 1px solid var(--octant-border, rgba(255, 255, 255, 0.12));
-  background: var(--octant-surface-raised, rgba(255, 255, 255, 0.03));
-}
-
-.provider-order__name {
-  flex: 1;
-}
-
-.provider-order__move {
-  padding: 0.2rem 0.5rem;
-  border-radius: 0.3rem;
-  border: 1px solid var(--octant-border, rgba(255, 255, 255, 0.12));
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-
-.provider-order__move:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .agent-eligible-models {

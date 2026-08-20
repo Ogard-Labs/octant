@@ -6,10 +6,12 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
-import { ArrowDown, ArrowUp, ChevronDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { ProviderGlyph } from "./ProviderGlyph";
 import {
   AnthropicConfigurationForm,
   ClaudeConfigurationForm,
@@ -68,150 +70,104 @@ export type ProviderSettingsListProps = Pick<
   | "onAgentEligibleModelsChange"
 > & {
   readonly discoverySnapshot: DiscoverySnapshot | undefined;
+  readonly createForm?: ReactNode;
 };
 
 export function ProviderSettingsList(props: ProviderSettingsListProps) {
-  return props.status !== "ready" ? null : props.instances.length === 0 ? (
-    <p className="provider-settings__empty">No providers configured.</p>
-  ) : (
-    <>
-      <ProviderOrderControls
-        busy={props.busy}
-        instances={props.instances}
-        providerOrder={props.defaults.providerOrder}
-        onProviderOrderChange={props.onProviderOrderChange}
-      />
-      <AgentEligibleModelsControls
-        agentEligibleModels={props.defaults.agentEligibleModels}
-        busy={props.busy}
-        instances={props.instances}
-        observedByInstance={props.observedByInstance}
-        onAgentEligibleModelsChange={props.onAgentEligibleModelsChange}
-      />
-      <div className="provider-settings__list">
-        {props.instances.map((instance) => (
-          <ProviderCard
-            busy={props.busy}
-            credentialManagementAvailable={props.credentialManagementAvailable}
-            instance={instance}
-            key={instance.id}
-            {...(props.discoverySnapshot === undefined
-              ? {}
-              : { discoverySnapshot: props.discoverySnapshot })}
-            {...(props.observedByInstance.get(instance.id) === undefined
-              ? {}
-              : { observed: props.observedByInstance.get(instance.id)! })}
-            onChangeBinary={props.onChangeBinary}
-            onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
-            onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
-            onChangeGrokConfiguration={props.onChangeGrokConfiguration}
-            onChangeDevinConfiguration={props.onChangeDevinConfiguration}
-            onChangeKiloConfiguration={props.onChangeKiloConfiguration}
-            onChangePiConfiguration={props.onChangePiConfiguration}
-            onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}
-            onChangeOllamaConfiguration={props.onChangeOllamaConfiguration}
-            onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
-            onChangeAnthropicCompatibleConfiguration={
-              props.onChangeAnthropicCompatibleConfiguration
-            }
-            onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
-            onClearProviderCredential={props.onClearProviderCredential}
-            onBeginProviderAuthentication={props.onBeginProviderAuthentication}
-            onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
-            onProbe={props.onProbe}
-            onVerifyFoundryTools={props.onVerifyFoundryTools}
-            onProviderCredentialStatus={props.onProviderCredentialStatus}
-            onRemove={props.onRemove}
-            onRename={props.onRename}
-            onSetEnabled={props.onSetEnabled}
-            probing={props.probingIds.has(instance.id)}
-          />
-        ))}
-      </div>
-    </>
-  );
-}
-
-function ProviderOrderControls(props: {
-  readonly busy: boolean;
-  readonly instances: ReadonlyArray<ProviderInstance>;
-  readonly providerOrder: ReadonlyArray<ProviderInstanceId> | undefined;
-  readonly onProviderOrderChange: (
-    providerOrder: ReadonlyArray<ProviderInstanceId>,
-  ) => Promise<boolean>;
-}) {
-  const [open, setOpen] = useState(false);
-  const order = useMemo(() => {
-    const explicit = props.providerOrder ?? [];
+  // Row order is the order the model picker offers providers in, so the list
+  // renders in that order and the row grips edit it directly.
+  const ordered = useMemo(() => {
+    const explicit = props.defaults.providerOrder ?? [];
     const explicitSet = new Set(explicit);
-    const ordered = explicit
+    const orderedInstances = explicit
       .map((id) => props.instances.find((instance) => instance.id === id))
       .filter((instance): instance is ProviderInstance => instance !== undefined);
     const remaining = props.instances.filter((instance) => !explicitSet.has(instance.id));
-    return [...ordered, ...remaining];
-  }, [props.instances, props.providerOrder]);
+    return [...orderedInstances, ...remaining];
+  }, [props.instances, props.defaults.providerOrder]);
 
   function move(index: number, direction: -1 | 1) {
     const next = index + direction;
-    if (next < 0 || next >= order.length) return;
-    const reordered = [...order];
+    if (next < 0 || next >= ordered.length) return;
+    const reordered = [...ordered];
     const [moved] = reordered.splice(index, 1);
     if (moved !== undefined) reordered.splice(next, 0, moved);
     void props.onProviderOrderChange(reordered.map((instance) => instance.id));
   }
 
-  if (order.length < 2) return null;
-  return (
-    <section aria-label="Provider order" className="provider-order" data-expanded={open}>
-      <button
-        aria-controls="provider-order-list"
-        aria-expanded={open}
-        aria-label="Provider order"
-        className="provider-order__trigger window-no-drag"
-        onClick={() => setOpen((current) => !current)}
-        type="button"
-      >
-        <span>Provider order</span>
-        <span className="provider-order__count">{order.length}</span>
-        <ChevronDown aria-hidden="true" className="provider-order__disclosure-icon" size={15} />
-      </button>
-      {open ? (
-        <div className="provider-order__body" id="provider-order-list">
-          <p className="provider-settings__hint">
-            Controls model-picker order. The first ready provider is the default for new threads.
-          </p>
-          <ol className="provider-order__list">
-            {order.map((instance, index) => (
-              <li className="provider-order__item" key={instance.id}>
-                <span className="provider-order__name">{instance.displayName}</span>
-                <OctantButton
-                  aria-label={`Move ${instance.displayName} up`}
-                  className="provider-order__move window-no-drag"
-                  disabled={props.busy || index === 0}
-                  onClick={() => move(index, -1)}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <ArrowUp aria-hidden="true" size={14} />
-                </OctantButton>
-                <OctantButton
-                  aria-label={`Move ${instance.displayName} down`}
-                  className="provider-order__move window-no-drag"
-                  disabled={props.busy || index === order.length - 1}
-                  onClick={() => move(index, 1)}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <ArrowDown aria-hidden="true" size={14} />
-                </OctantButton>
-              </li>
-            ))}
-          </ol>
+  return props.status !== "ready" ? null : (
+    <>
+      <section aria-label="Providers" className="setgroup">
+        <div className="setgroup-head">
+          <span>Providers</span>
+          <span className="setgroup-gap" />
+          <span>Model-picker order</span>
         </div>
-      ) : null}
-    </section>
+        <p className="setgroup-note">
+          Rows follow the model-picker order. The first ready provider is the default for new
+          threads.
+        </p>
+        {ordered.length === 0 ? (
+          <p className="provider-settings__empty">No providers configured.</p>
+        ) : (
+          <div className="provlist">
+            {ordered.map((instance, index) => (
+              <ProviderRow
+                busy={props.busy}
+                count={ordered.length}
+                credentialManagementAvailable={props.credentialManagementAvailable}
+                index={index}
+                instance={instance}
+                key={instance.id}
+                {...(props.discoverySnapshot === undefined
+                  ? {}
+                  : { discoverySnapshot: props.discoverySnapshot })}
+                {...(props.observedByInstance.get(instance.id) === undefined
+                  ? {}
+                  : { observed: props.observedByInstance.get(instance.id)! })}
+                onChangeBinary={props.onChangeBinary}
+                onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
+                onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
+                onChangeGrokConfiguration={props.onChangeGrokConfiguration}
+                onChangeDevinConfiguration={props.onChangeDevinConfiguration}
+                onChangeKiloConfiguration={props.onChangeKiloConfiguration}
+                onChangePiConfiguration={props.onChangePiConfiguration}
+                onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}
+                onChangeOllamaConfiguration={props.onChangeOllamaConfiguration}
+                onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}
+                onChangeAnthropicCompatibleConfiguration={
+                  props.onChangeAnthropicCompatibleConfiguration
+                }
+                onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
+                onClearProviderCredential={props.onClearProviderCredential}
+                onBeginProviderAuthentication={props.onBeginProviderAuthentication}
+                onCompleteProviderAuthentication={props.onCompleteProviderAuthentication}
+                onMove={move}
+                onProbe={props.onProbe}
+                onVerifyFoundryTools={props.onVerifyFoundryTools}
+                onProviderCredentialStatus={props.onProviderCredentialStatus}
+                onRemove={props.onRemove}
+                onRename={props.onRename}
+                onSetEnabled={props.onSetEnabled}
+                probing={props.probingIds.has(instance.id)}
+              />
+            ))}
+          </div>
+        )}
+        {props.createForm === undefined ? null : (
+          <div className="setgroup-foot">{props.createForm}</div>
+        )}
+      </section>
+      {ordered.length === 0 ? null : (
+        <AgentEligibleModelsControls
+          agentEligibleModels={props.defaults.agentEligibleModels}
+          busy={props.busy}
+          instances={props.instances}
+          observedByInstance={props.observedByInstance}
+          onAgentEligibleModelsChange={props.onAgentEligibleModelsChange}
+        />
+      )}
+    </>
   );
 }
 
@@ -368,13 +324,16 @@ function AgentEligibleModelsControls(props: {
   );
 }
 
-interface ProviderCardProps {
+interface ProviderRowProps {
   readonly instance: ProviderInstance;
   readonly observed?: ProviderObservedState;
   readonly discoverySnapshot?: DiscoverySnapshot;
   readonly busy: boolean;
   readonly probing: boolean;
   readonly credentialManagementAvailable: boolean;
+  readonly index: number;
+  readonly count: number;
+  readonly onMove: (index: number, direction: -1 | 1) => void;
   readonly onRename: ProviderSettingsViewProps["onRename"];
   readonly onChangeBinary: ProviderSettingsViewProps["onChangeBinary"];
   readonly onChangeClaudeConfiguration: ProviderSettingsViewProps["onChangeClaudeConfiguration"];
@@ -398,7 +357,7 @@ interface ProviderCardProps {
   readonly onVerifyFoundryTools: ProviderSettingsViewProps["onVerifyFoundryTools"];
 }
 
-function ProviderCard(props: ProviderCardProps) {
+function ProviderRow(props: ProviderRowProps) {
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const disabled = props.busy || props.probing;
@@ -445,42 +404,72 @@ function ProviderCard(props: ProviderCardProps) {
       await props.onProbe(props.instance.id);
     }
   };
+  const name = props.instance.displayName;
   return (
-    <article aria-label={props.instance.displayName} className="provider-card">
-      <header className="provider-card__header">
-        <div>
-          <h3>{props.instance.displayName}</h3>
-          <p>
-            {label} {runtimeLabel} · {props.instance.enabled ? "Enabled" : "Disabled"}
-          </p>
-        </div>
-        <div className="provider-card__header-actions">
-          {autoRegisteredDisabled ? (
-            <OctantButton disabled={disabled} onClick={() => void toggleEnabled()} type="button">
-              Enable {props.instance.displayName}
-            </OctantButton>
-          ) : null}
-          <span
-            className={`provider-card__status provider-card__status--${readiness ?? "unknown"}`}
-          >
-            {readiness === undefined ? "Not checked" : readinessLabel(readiness)}
-          </span>
-          <OctantButton
-            aria-controls={`provider-details-${props.instance.id}`}
-            aria-expanded={detailsOpen}
-            aria-label={`Details for ${props.instance.displayName}`}
-            className="provider-card__details-trigger window-no-drag"
-            onClick={() => setDetailsOpen((current) => !current)}
-            type="button"
-            variant="ghost"
-          >
-            <span>Details</span>
-            <ChevronDown aria-hidden="true" className="provider-card__details-icon" size={14} />
-          </OctantButton>
-        </div>
-      </header>
+    <article
+      aria-label={name}
+      className="provrow"
+      data-enabled={props.instance.enabled ? "true" : "false"}
+    >
+      <span className="prov-grip-slot">
+        <button
+          aria-label={`Move ${name} up`}
+          className="prov-grip window-no-drag"
+          disabled={props.busy || props.index === 0}
+          onClick={() => props.onMove(props.index, -1)}
+          type="button"
+        >
+          <ChevronUp aria-hidden="true" size={13} />
+        </button>
+        <button
+          aria-label={`Move ${name} down`}
+          className="prov-grip window-no-drag"
+          disabled={props.busy || props.index === props.count - 1}
+          onClick={() => props.onMove(props.index, 1)}
+          type="button"
+        >
+          <ChevronDown aria-hidden="true" size={13} />
+        </button>
+      </span>
+      <span className="icon-mark">
+        <ProviderGlyph displayName={name} driverKind={props.instance.driverKind} size={16} />
+      </span>
+      <span className="prov-main">
+        <span className="prov-name">{name}</span>
+        <span className="prov-meta">
+          {label} {runtimeLabel}
+        </span>
+      </span>
+      <span className="prov-models">
+        {props.observed === undefined
+          ? null
+          : `${props.observed.models.length} ${props.observed.models.length === 1 ? "model" : "models"}`}
+      </span>
+      <span className="prov-status">
+        <span className={readinessBadgeClass(readiness)}>
+          {readiness === undefined ? "Not checked" : readinessLabel(readiness)}
+        </span>
+      </span>
+      <span className="prov-actions">
+        <button
+          aria-controls={`provider-details-${props.instance.id}`}
+          aria-expanded={detailsOpen}
+          aria-label={`Details for ${name}`}
+          className="btn-icon prov-details-trigger window-no-drag"
+          onClick={() => setDetailsOpen((current) => !current)}
+          type="button"
+        >
+          <ChevronDown aria-hidden="true" className="prov-details-icon" size={14} />
+        </button>
+        <OctantSwitch
+          checked={props.instance.enabled}
+          disabled={disabled}
+          label={`Enable ${name}`}
+          onCheckedChange={() => void toggleEnabled()}
+        />
+      </span>
       {detailsOpen ? (
-        <div className="provider-card__details" id={`provider-details-${props.instance.id}`}>
+        <div className="prov-details" id={`provider-details-${props.instance.id}`}>
           {props.observed === undefined ? null : (
             <div className="provider-card__facts">
               <span>Process: {titleCase(props.observed.processState)}</span>
@@ -683,11 +672,6 @@ function ProviderCard(props: ProviderCardProps) {
                 ? "Checking connection…"
                 : `Check connection for ${props.instance.displayName}`}
             </OctantButton>
-            {autoRegisteredDisabled ? null : (
-              <OctantButton disabled={disabled} onClick={() => void toggleEnabled()} type="button">
-                {props.instance.enabled ? "Disable" : "Enable"} {props.instance.displayName}
-              </OctantButton>
-            )}
             <OctantButton
               aria-controls={`provider-configuration-${props.instance.id}`}
               aria-expanded={configurationOpen}
@@ -902,6 +886,18 @@ function ProviderCard(props: ProviderCardProps) {
       ) : null}
     </article>
   );
+}
+
+/**
+ * The badge reports fact (reachable right now), never intent (the switch).
+ * "checking" and "not checked" stay neutral because no reachability claim
+ * has been established either way.
+ */
+function readinessBadgeClass(readiness: ProviderObservedState["readiness"] | undefined): string {
+  if (readiness === "ready") return "badge badge-ok";
+  if (readiness === "degraded" || readiness === "unauthenticated") return "badge badge-warn";
+  if (readiness === "unavailable" || readiness === "incompatible") return "badge badge-danger";
+  return "badge";
 }
 
 function isDisabledDiscoveryInstance(

@@ -204,22 +204,22 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         </p>
       )}
       {props.discovery}
-      {props.status === "ready" ? (
-        <ProviderCreateForm
-          busy={props.busy}
-          credentialManagementAvailable={props.credentialManagementAvailable}
-          onCreate={props.onCreate}
-          onCreateAnthropicCompatible={props.onCreateAnthropicCompatible}
-          onCreateAzureFoundry={props.onCreateAzureFoundry}
-          onCreateClaude={props.onCreateClaude}
-          onCreateGrok={props.onCreateGrok}
-          onCreateMistralVibe={props.onCreateMistralVibe}
-          onCreateOllama={props.onCreateOllama}
-          onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
-        />
-      ) : null}
       <ProviderSettingsList
         busy={props.busy}
+        createForm={
+          <ProviderCreateForm
+            busy={props.busy}
+            credentialManagementAvailable={props.credentialManagementAvailable}
+            onCreate={props.onCreate}
+            onCreateAnthropicCompatible={props.onCreateAnthropicCompatible}
+            onCreateAzureFoundry={props.onCreateAzureFoundry}
+            onCreateClaude={props.onCreateClaude}
+            onCreateGrok={props.onCreateGrok}
+            onCreateMistralVibe={props.onCreateMistralVibe}
+            onCreateOllama={props.onCreateOllama}
+            onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
+          />
+        }
         credentialManagementAvailable={props.credentialManagementAvailable}
         defaults={props.defaults}
         discoverySnapshot={props.discoverySnapshot}
