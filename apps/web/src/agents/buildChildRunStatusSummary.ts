@@ -36,7 +36,7 @@ export interface ChildRunStatusSummary {
 const NON_TERMINAL = new Set(["queued", "starting", "running", "waiting"]);
 const WORKING = new Set(["queued", "starting", "running"]);
 const WAITING = new Set(["waiting"]);
-const BLOCKED = new Set(["blocked", "failed", "cancelled", "interrupted", "timed-out"]);
+const BLOCKED = new Set(["failed", "cancelled", "interrupted"]);
 
 /**
  * Compact child-run summary for one parent thread.
@@ -69,7 +69,13 @@ export function buildChildRunStatusSummary(
     }
     if (WORKING.has(status)) working += 1;
     else if (WAITING.has(status)) waiting += 1;
-    else if (BLOCKED.has(status) && !entry.resultAcknowledgement.acknowledged) blocked += 1;
+    else if (
+      BLOCKED.has(status) &&
+      entry.resultAcknowledgement.required &&
+      !entry.resultAcknowledgement.acknowledged
+    ) {
+      blocked += 1;
+    }
   }
 
   const outstanding = active + unacknowledgedResults;
@@ -115,7 +121,7 @@ function detailLabel(counts: {
   if (counts.waiting > 0) parts.push(`${counts.waiting} waiting`);
   if (counts.blocked > 0) parts.push(`${counts.blocked} blocked`);
   if (parts.length === 0) {
-    return `${counts.outstanding} finished child ${counts.outstanding === 1 ? "run" : "runs"} need acknowledgement.`;
+    return `${counts.outstanding} finished child ${counts.outstanding === 1 ? "run needs" : "runs need"} acknowledgement.`;
   }
   return `${parts.join(", ")} on this thread.`;
 }

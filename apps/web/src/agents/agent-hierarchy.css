@@ -260,3 +260,13 @@
   display: flex;
   gap: 6px;
 }
+
+.chat-workspace__header .child-run-status,
+.work-thread-workspace__header .child-run-status,
+.code-thread-workspace__header .child-run-status {
+  flex: 1 1 16rem;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+}

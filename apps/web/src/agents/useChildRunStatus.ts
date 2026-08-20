@@ -1,6 +1,7 @@
 import {
   createAgentRunClient,
   type AgentRunClient,
+  type AgentRunClientCommandResult,
   type AgentRunParentSummaryClientEntry,
 } from "@octant/client-runtime";
 import type { AgentRunParentThreadId } from "@octant/contracts";
@@ -183,10 +184,24 @@ export function useChildRunStatus(options: ChildRunStatusOptions): ChildRunStatu
       setBusy(true);
       setFailure(undefined);
       try {
+        const receipts: AgentRunClientCommandResult[] = [];
         for (const runId of runIds) {
           // `subtree` is the existing cancel scope: nested descendants are in
           // scope only because the server's own cancel already includes them.
-          await client.cancel({ runId: runId as never, scope: "subtree" });
+          const { results } = await client.cancel({ runId: runId as never, scope: "subtree" });
+          receipts.push(...results);
+        }
+        // The host answers with ordinary command receipts. A failed receipt is
+        // still a recorded outcome, not a successful stop.
+        if (receipts.some((receipt) => receipt.kind === "run-command-failed")) {
+          if (mounted.current) {
+            setFailure({
+              parentThreadId,
+              message: "Child runs could not be stopped. They are still running.",
+            });
+            refresh();
+          }
+          return false;
         }
         if (mounted.current) refresh();
         return true;
