@@ -8,8 +8,14 @@ export interface CodeTranscriptRowProps {
   readonly running: boolean;
 }
 
-/** Expanded tool output is clipped to this many characters until the user asks for all of it. */
-export const TOOL_OUTPUT_PREVIEW_LIMIT = 1_200;
+/** Expanded summaries are clipped to this many characters until the user asks for all of it. */
+export const TOOL_SUMMARY_PREVIEW_LIMIT = 1_200;
+
+/**
+ * Collapsed accessible names clip a task summary here so a 2 KiB journaled
+ * message does not become the disclosure's spoken name.
+ */
+export const ACCESSIBLE_SUMMARY_LIMIT = 120;
 
 function outcomeLabel(row: CodeActivityRow): string {
   switch (row.state) {
@@ -31,19 +37,28 @@ function rowKey(row: CodeActivityRow): string {
   return `${row.kind}:${row.id}`;
 }
 
+function boundAccessibleSummary(text: string): string {
+  if (text.length <= ACCESSIBLE_SUMMARY_LIMIT) return text;
+  return `${text.slice(0, ACCESSIBLE_SUMMARY_LIMIT - 1)}…`;
+}
+
+function collapsedName(row: CodeActivityRow): string {
+  return row.kind === "tool" ? row.toolName : row.summary;
+}
+
 function disclosureName(row: CodeActivityRow): string {
-  const name = row.kind === "tool" ? row.toolName : "Task";
+  const name = row.kind === "tool" ? row.toolName : boundAccessibleSummary(row.summary);
   return `${name}, ${outcomeLabel(row)}`;
 }
 
-function clipOutput(
+function clipSummary(
   text: string,
   revealed: boolean,
 ): { readonly text: string; readonly clipped: boolean } {
-  if (revealed || text.length <= TOOL_OUTPUT_PREVIEW_LIMIT) {
+  if (revealed || text.length <= TOOL_SUMMARY_PREVIEW_LIMIT) {
     return { text, clipped: false };
   }
-  return { text: text.slice(0, TOOL_OUTPUT_PREVIEW_LIMIT), clipped: true };
+  return { text: text.slice(0, TOOL_SUMMARY_PREVIEW_LIMIT), clipped: true };
 }
 
 function setHas(values: ReadonlySet<string>, id: string, present: boolean): ReadonlySet<string> {
@@ -65,7 +80,9 @@ function setHas(values: ReadonlySet<string>, id: string, present: boolean): Read
  */
 export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
   const [openIds, setOpenIds] = useState<ReadonlySet<string>>(() => new Set());
-  const [revealedOutputIds, setRevealedOutputIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [revealedSummaryIds, setRevealedSummaryIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const { activity, running } = props;
   const hasRows = activity.rows.length > 0;
   const hasReasoning = activity.reasoning.trim().length > 0;
@@ -119,9 +136,9 @@ export function CodeTranscriptRow(props: CodeTranscriptRowProps) {
                 onKeyDown={onSummaryKeyDown(id)}
                 onToggle={onToggle(id)}
                 open={openIds.has(id)}
-                revealed={revealedOutputIds.has(id)}
+                revealed={revealedSummaryIds.has(id)}
                 row={row}
-                onReveal={() => setRevealedOutputIds((current) => setHas(current, id, true))}
+                onReveal={() => setRevealedSummaryIds((current) => setHas(current, id, true))}
               />
             );
           })
@@ -160,9 +177,7 @@ function ActivityDisclosure(props: {
           size={13}
           strokeWidth={2}
         />
-        <span className="code-transcript-row__name">
-          {row.kind === "tool" ? row.toolName : "Task"}
-        </span>
+        <span className="code-transcript-row__name">{collapsedName(row)}</span>
         <span className="code-transcript-row__outcome">{outcomeLabel(row)}</span>
         {failed ? (
           <CircleAlert
@@ -182,49 +197,19 @@ function activityDetail(
   row: CodeActivityRow,
   props: { readonly revealed: boolean; readonly onReveal: () => void },
 ): ReactNode {
-  if (row.kind === "task") {
-    return <p className="code-transcript-row__pre">{row.summary}</p>;
+  const summary = row.summary;
+  if (summary === undefined) {
+    return <p className="code-transcript-row__empty-detail">No summary was recorded.</p>;
   }
-  const open = row.state === "started" || row.state === "running";
-  const argumentsText = row.arguments ?? (open ? row.summary : undefined);
-  const outputText = row.output ?? (open ? undefined : row.summary);
-  const same =
-    argumentsText !== undefined && outputText !== undefined && argumentsText === outputText;
-  if (argumentsText === undefined && outputText === undefined) {
-    return (
-      <p className="code-transcript-row__empty-detail">No arguments or output were recorded.</p>
-    );
-  }
+  const clipped = clipSummary(summary, props.revealed);
   return (
     <>
-      {argumentsText === undefined || same ? null : (
-        <section>
-          <p className="code-transcript-row__section-label">Arguments</p>
-          <pre className="code-transcript-row__pre">{argumentsText}</pre>
-        </section>
-      )}
-      {outputText === undefined ? null : (
-        <OutputSection onReveal={props.onReveal} revealed={props.revealed} text={outputText} />
-      )}
-    </>
-  );
-}
-
-function OutputSection(props: {
-  readonly text: string;
-  readonly revealed: boolean;
-  readonly onReveal: () => void;
-}) {
-  const clipped = clipOutput(props.text, props.revealed);
-  return (
-    <section>
-      <p className="code-transcript-row__section-label">Output</p>
-      <pre className="code-transcript-row__pre">{clipped.text}</pre>
+      <p className="code-transcript-row__pre">{clipped.text}</p>
       {clipped.clipped ? (
         <OctantButton onClick={props.onReveal} size="sm" type="button" variant="ghost">
           Show all
         </OctantButton>
       ) : null}
-    </section>
+    </>
   );
 }

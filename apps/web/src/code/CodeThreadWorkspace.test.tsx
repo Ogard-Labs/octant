@@ -1087,9 +1087,9 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    // Closed by default: each tool is a named row, not the printed arguments.
+    // Closed by default: each tool is a named row, not the printed summary.
     expect(screen.getByRole("button", { name: "Bash, done" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Task, running" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Rewrite the pane, running" })).toBeVisible();
     expect(screen.queryByText("bun run verify")).not.toBeVisible();
     expect(screen.queryByText("Check the failing suite first.")).not.toBeVisible();
 

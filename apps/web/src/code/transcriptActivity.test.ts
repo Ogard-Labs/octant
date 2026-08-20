@@ -28,13 +28,30 @@ describe("transcript activity", () => {
         toolName: "Bash",
         state: "completed",
         summary: "bun run verify",
-        arguments: "bun run verify",
-        output: "bun run verify",
       },
     ]);
   });
 
-  it("keeps the invocation when a completed call records a different result", () => {
+  it("keeps a journaled summary as a summary, not as tool arguments or output", () => {
+    const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+      kind: "tool-activity",
+      toolCallId: "call-1" as never,
+      toolName: "Read",
+      state: "running",
+      summary: "Reading file…",
+    } as CodeOperationEvent);
+    expect(started.rows[0]).toEqual({
+      kind: "tool",
+      id: "call-1",
+      toolName: "Read",
+      state: "running",
+      summary: "Reading file…",
+    });
+    expect(started.rows[0]).not.toHaveProperty("arguments");
+    expect(started.rows[0]).not.toHaveProperty("output");
+  });
+
+  it("replaces the summary when a later event records a different one", () => {
     const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("running"));
     const finished = applyActivityEvent(started, {
       kind: "tool-activity",
@@ -44,13 +61,14 @@ describe("transcript activity", () => {
       summary: "exit 0",
     } as CodeOperationEvent);
     expect(finished.rows[0]).toMatchObject({
-      arguments: "bun run verify",
-      output: "exit 0",
+      summary: "exit 0",
       state: "completed",
     });
+    expect(finished.rows[0]).not.toHaveProperty("arguments");
+    expect(finished.rows[0]).not.toHaveProperty("output");
   });
 
-  it("records a failed call's message as output so the fold still names the refusal", () => {
+  it("keeps a failed call's message as the row summary so the fold still names the refusal", () => {
     const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("running"));
     const failed = applyActivityEvent(started, {
       kind: "tool-activity",
@@ -61,8 +79,7 @@ describe("transcript activity", () => {
     } as CodeOperationEvent);
     expect(failed.rows[0]).toMatchObject({
       state: "failed",
-      arguments: "bun run verify",
-      output: "Write refused: path is outside the checkout.",
+      summary: "Write refused: path is outside the checkout.",
     });
   });
 

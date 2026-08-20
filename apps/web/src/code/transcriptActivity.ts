@@ -14,19 +14,11 @@ export type CodeActivityRow =
       readonly id: string;
       readonly toolName: string;
       readonly state: "started" | "running" | "completed" | "failed";
-      /** Latest journaled summary, kept so replay and live folding share one row. */
+      /**
+       * Latest journaled summary. The contract does not distinguish arguments
+       * from output; this is a progress or result message, not captured tool I/O.
+       */
       readonly summary?: string;
-      /**
-       * Text captured while the call was still open — typically the invocation.
-       * The journal does not split arguments from output; the transcript infers
-       * this from the open-state summary.
-       */
-      readonly arguments?: string;
-      /**
-       * Text from a completed or failed event — the result, or the reason the
-       * call failed or was refused. Absent when the host recorded none.
-       */
-      readonly output?: string;
     }
   | {
       readonly kind: "task";
@@ -70,27 +62,21 @@ function previousTool(
 }
 
 /**
- * Folds one journaled tool-activity event into a row. Open-state summaries
- * become arguments; terminal summaries become output. A later event that omits
+ * Folds one journaled tool-activity event into a row. A later event that omits
  * summary keeps what the row already held, so a completed call still names the
- * invocation that started it.
+ * last progress the host recorded.
  */
 function foldToolEvent(
   previous: ToolActivityRow | undefined,
   event: Extract<CodeOperationEvent, { kind: "tool-activity" }>,
 ): ToolActivityRow {
-  const open = event.state === "started" || event.state === "running";
   const summary = event.summary ?? previous?.summary;
-  const argumentsText = open ? (event.summary ?? previous?.arguments) : previous?.arguments;
-  const outputText = open ? previous?.output : (event.summary ?? previous?.output);
   return {
     kind: "tool",
     id: String(event.toolCallId),
     toolName: event.toolName,
     state: event.state,
     ...(summary === undefined ? {} : { summary }),
-    ...(argumentsText === undefined ? {} : { arguments: argumentsText }),
-    ...(outputText === undefined ? {} : { output: outputText }),
   };
 }
 
