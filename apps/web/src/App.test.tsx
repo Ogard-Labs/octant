@@ -1542,6 +1542,8 @@ describe("App", () => {
     expect(
       screen.queryByRole("region", { name: /Threads and recent activity/ }),
     ).not.toBeInTheDocument();
+    // The region exists while the list still says Loading, so wait for the
+    // thread row rather than clicking a button that has not been rendered yet.
     await user.click(await within(threads).findByRole("button", { name: /Older chat/ }));
 
     expect(await screen.findByRole("tab", { name: "Older chat" })).toHaveAttribute(
