@@ -49,6 +49,11 @@
   --oct-border: var(--octant-border);
   --oct-border-soft: color-mix(in oklab, var(--octant-border) 55%, var(--octant-workspace));
 
+  /* The chosen row's ground. `selection` is a real theme role (focus
+     category, non-text bar against the workspace), so custom themes
+     restyle every active palette and picker row from one place. */
+  --oct-selection: var(--octant-selection);
+
   /* A translucent tint for chips and hover fills that sit over
      whichever layer they land on. Kept translucent for that reason
      rather than mapped to the app's solid --octant-control. */

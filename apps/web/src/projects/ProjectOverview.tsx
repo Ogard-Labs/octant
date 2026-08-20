@@ -223,13 +223,15 @@ export function ProjectOverview(props: ProjectOverviewProps) {
         />
       ) : null}
       {/*
-        Chat Projects already get a threads list from `chatOverview`, which can
-        also create a thread and expand the full list in the sidebar. Rendering
-        the shared section too would show the same threads twice from two
-        different fetches. Chat keeps the richer surface; merging them into one
-        list is a Chat change, tracked as a follow-up.
+        Chat and Code Projects already get a threads list from their own
+        overview: Chat's can also create a thread and expand the full list in
+        the sidebar; Code's sessions list carries the host-reported board facts
+        plus open, rename, and pin. Rendering the shared section too showed the
+        same threads twice from two different fetches, so the mode's richer
+        list owns the page and the generic section stands down.
       */}
-      {props.project.type === "chat" && props.chatOverview !== undefined ? null : (
+      {(props.project.type === "chat" && props.chatOverview !== undefined) ||
+      (props.project.type === "code" && props.codeOverview !== undefined) ? null : (
         <ProjectThreadsSection project={props.project} />
       )}
       {props.canvasInventory !== undefined ? props.canvasInventory : null}
