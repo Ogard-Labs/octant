@@ -19,6 +19,7 @@ export interface WindowPresentation {
         readonly titleBarStyle: "hiddenInset";
         readonly trafficLightPosition: { readonly x: 16; readonly y: 18 };
         readonly transparent: true;
+        readonly vibrancy?: "sidebar";
       }
     | {
         readonly backgroundColor: "#101013";
@@ -38,6 +39,13 @@ export interface NativeThemePort {
 export interface PresentationWindowPort {
   readonly setVibrancy: (vibrancy: "sidebar" | null) => void;
   readonly publishResolvedMaterial: (material: ResolvedSidebarMaterial) => void;
+  /**
+   * Tells the renderer whether native window vibrancy is actually applied.
+   * The renderer keeps a near-opaque sidebar wash until the host says so,
+   * because a translucent CSS material over a transparent window shows the
+   * desktop behind it sharp when nothing is frosting it natively.
+   */
+  readonly publishSidebarVibrancy: (vibrancy: "sidebar" | null) => void;
 }
 
 interface CreateWindowPresentationControllerOptions {
@@ -92,6 +100,10 @@ export function resolveWindowPresentation(input: WindowPresentationInput): Windo
             titleBarStyle: "hiddenInset",
             trafficLightPosition: { x: 16, y: 18 },
             transparent: true,
+            // A window constructed while the translucent conditions already
+            // hold gets its NSVisualEffectView from the first frame instead of
+            // waiting for the controller's runtime setVibrancy refresh.
+            ...(translucent ? { vibrancy: "sidebar" as const } : {}),
           }
         : {
             backgroundColor: "#101013",
@@ -120,6 +132,7 @@ export function createWindowPresentationController(
     });
     options.window.setVibrancy(presentation.vibrancy);
     options.window.publishResolvedMaterial(presentation.material);
+    options.window.publishSidebarVibrancy(presentation.vibrancy);
     return presentation;
   };
   options.nativeTheme.on("updated", refresh);

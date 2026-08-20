@@ -27,7 +27,7 @@ export function CodeBlocks({ block }: { readonly block: Block }) {
               </span>
             ) : null}
           </div>
-          <pre>
+          <pre className="codeblock">
             <code>{block.code}</code>
           </pre>
         </section>
@@ -35,7 +35,7 @@ export function CodeBlocks({ block }: { readonly block: Block }) {
     case "pseudocode":
       return (
         <div className="canvas-block__pseudocode">
-          <pre>
+          <pre className="codeblock">
             <code>{block.code}</code>
           </pre>
         </div>
@@ -46,7 +46,7 @@ export function CodeBlocks({ block }: { readonly block: Block }) {
           {block.hunks.map((hunk, hunkIndex) => (
             <div key={hunkIndex} className="canvas-block__diff-hunk">
               <div className="canvas-block__diff-header">{hunk.header}</div>
-              <pre>
+              <pre className="codeblock">
                 <code>
                   {hunk.lines.map((line, lineIndex) => (
                     <span

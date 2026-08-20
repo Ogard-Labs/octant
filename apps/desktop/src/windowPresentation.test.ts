@@ -31,10 +31,17 @@ describe("resolveWindowPresentation", () => {
         titleBarStyle: "hiddenInset",
         trafficLightPosition: { x: 16, y: 18 },
         transparent: true,
+        vibrancy: "sidebar",
       },
       material: "translucent",
       vibrancy: "sidebar",
     });
+  });
+
+  it("constructs a window that resolves opaque without any vibrancy material", () => {
+    expect(
+      resolveWindowPresentation(system({ sidebarVibrancyMode: "off" })).browserWindow,
+    ).not.toHaveProperty("vibrancy");
   });
 
   it("keeps an explicit native frame without macOS-only controls on non-macOS", () => {
@@ -81,6 +88,7 @@ describe("window presentation controller", () => {
     const window: PresentationWindowPort = {
       setVibrancy: vi.fn(),
       publishResolvedMaterial: vi.fn(),
+      publishSidebarVibrancy: vi.fn(),
     };
     const controller = createWindowPresentationController({
       window,
@@ -100,13 +108,16 @@ describe("window presentation controller", () => {
 
     expect(window.setVibrancy).toHaveBeenLastCalledWith(null);
     expect(window.publishResolvedMaterial).toHaveBeenLastCalledWith("opaque");
+    expect(window.publishSidebarVibrancy).toHaveBeenLastCalledWith(null);
 
     controller.update({ sidebarMaterial: "system" });
     expect(window.setVibrancy).toHaveBeenLastCalledWith("sidebar");
+    expect(window.publishSidebarVibrancy).toHaveBeenLastCalledWith("sidebar");
 
     controller.update({ sidebarMaterial: "opaque" });
     thermalListener?.({ state: "fair" });
     expect(window.setVibrancy).toHaveBeenLastCalledWith(null);
+    expect(window.publishSidebarVibrancy).toHaveBeenLastCalledWith(null);
 
     stopThermal();
     controller.dispose();
@@ -125,6 +136,7 @@ describe("window presentation controller", () => {
     const window: PresentationWindowPort = {
       setVibrancy: vi.fn(),
       publishResolvedMaterial: vi.fn(),
+      publishSidebarVibrancy: vi.fn(),
     };
 
     const controller = createWindowPresentationController({
@@ -138,6 +150,7 @@ describe("window presentation controller", () => {
     });
     expect(window.setVibrancy).toHaveBeenLastCalledWith("sidebar");
     expect(window.publishResolvedMaterial).toHaveBeenLastCalledWith("translucent");
+    expect(window.publishSidebarVibrancy).toHaveBeenLastCalledWith("sidebar");
 
     controller.update({ sidebarMaterial: "opaque" });
     expect(window.setVibrancy).toHaveBeenLastCalledWith(null);
@@ -154,6 +167,7 @@ describe("window presentation controller", () => {
     listener?.();
     expect(window.setVibrancy).toHaveBeenLastCalledWith(null);
     expect(window.publishResolvedMaterial).toHaveBeenLastCalledWith("opaque");
+    expect(window.publishSidebarVibrancy).toHaveBeenLastCalledWith(null);
 
     controller.update({ sidebarMaterial: "system", performanceSafe: true });
     expect(window.setVibrancy).toHaveBeenLastCalledWith(null);

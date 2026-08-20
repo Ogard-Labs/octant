@@ -225,6 +225,7 @@ function AvailableEditor(
                 .then(() => setMessage("Opened in the configured external editor."))
                 .catch(() => setMessage("Octant could not open the configured external editor."))
             }
+            size="sm"
             type="button"
             variant="secondary"
           >
@@ -236,6 +237,7 @@ function AvailableEditor(
             aria-label={`Save ${props.file.path}`}
             disabled={!dirty || saving || loadState.kind !== "ready"}
             onClick={() => void save()}
+            size="sm"
             type="button"
             variant="secondary"
           >
@@ -252,7 +254,7 @@ function AvailableEditor(
               : "A new external revision is available."}
           </strong>
           <p>Your draft is preserved. Reload only after deciding how to reconcile it.</p>
-          <OctantButton onClick={discardDraftAndReload} type="button" variant="secondary">
+          <OctantButton onClick={discardDraftAndReload} size="sm" type="button" variant="secondary">
             Discard draft and reload
           </OctantButton>
         </div>

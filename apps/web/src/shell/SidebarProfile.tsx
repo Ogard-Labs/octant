@@ -1,9 +1,8 @@
 import type { SettingsDeepLink } from "@octant/contracts";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import { Compass, Gauge, Plug, Settings, Sparkles } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ComponentType, type Ref } from "react";
+import { useEffect, useId, useRef, useState, type ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
-import { OctantButton } from "../ui/base/OctantButton";
 
 export interface SidebarProfileProps {
   readonly onOpenSettings: (deepLink?: SettingsDeepLink) => void;
@@ -42,19 +41,18 @@ export function SidebarProfile(props: SidebarProfileProps) {
   }
 
   return (
-    <div className="sidebar-profile">
-      <OctantButton
+    <div className="sidebar-foot sidebar-profile">
+      <button
         aria-controls={disclosureId}
         aria-expanded={open}
-        className="sidebar-profile__trigger justify-start"
+        className="sidebar-item window-no-drag"
         onClick={() => setOpen((current) => !current)}
         ref={trigger}
         type="button"
-        variant="ghost"
       >
         <UserAvatar profile={props.profile} size={22} />
-        <span className="sidebar-profile__name">{name === "" ? "Set your name" : name}</span>
-      </OctantButton>
+        <span className="sidebar-label">{name === "" ? "Set your name" : name}</span>
+      </button>
       {open ? (
         <div
           className="sidebar-profile__disclosure"
@@ -97,22 +95,26 @@ export function SidebarProfile(props: SidebarProfileProps) {
 }
 
 function ProfileAction(props: {
-  readonly buttonRef?: Ref<HTMLButtonElement>;
-  readonly icon: ComponentType<{ readonly "aria-hidden": true; readonly size: number }>;
+  readonly icon: ComponentType<{
+    readonly "aria-hidden": true;
+    readonly className: string;
+    readonly size: number;
+    readonly strokeWidth: number;
+  }>;
   readonly label: string;
   readonly onClick: () => void;
 }) {
   const Icon = props.icon;
   return (
-    <OctantButton
-      className="sidebar-profile__action justify-start"
+    // A plain button whose visible text is its accessible name — nothing but
+    // the aria-hidden icon sits beside it, so no wrapper can swallow the label.
+    <button
+      className="sidebar-profile__action window-no-drag"
       onClick={props.onClick}
-      ref={props.buttonRef}
       type="button"
-      variant="ghost"
     >
-      <Icon aria-hidden={true} size={14} />
+      <Icon aria-hidden={true} className="icon" size={16} strokeWidth={1.5} />
       <span>{props.label}</span>
-    </OctantButton>
+    </button>
   );
 }

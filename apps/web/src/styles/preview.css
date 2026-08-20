@@ -1,3 +1,8 @@
+/* File preview viewers: table, workbook, document, slides, PDF. Paint
+   comes from the design system (octant.css `--oct-*` tokens and the
+   datatable/sheet-tab/viewer-notice/btn recipes); this sheet keeps the
+   full-pane frame, per-format layout, and the fidelity affordances. */
+
 .preview-viewer {
   display: flex;
   width: 100%;
@@ -5,27 +10,29 @@
   height: 100%;
   flex: 1 1 auto;
   flex-direction: column;
-  color: var(--octant-text-primary);
-  background: var(--octant-workspace);
-  font-size: 13px;
-  line-height: 1.5;
+  color: var(--oct-fg);
+  background: var(--oct-bg);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-body);
 }
 
 .preview-viewer__chrome {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--octant-border);
-  background: var(--octant-chrome);
+  gap: var(--oct-space-3);
+  min-height: var(--oct-control-height-sm);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
+  background: var(--oct-surface-warm);
   flex-wrap: wrap;
 }
 
 .preview-viewer__title {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--octant-text-primary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+  color: var(--oct-fg);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -35,36 +42,32 @@
 .preview-viewer__meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--octant-text-muted);
-  font-size: 12px;
+  gap: var(--oct-space-2);
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }
 
 .preview-viewer__body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 16px;
+  padding: var(--oct-space-4);
 }
 
 .preview-viewer__body--flush {
   padding: 0;
 }
 
+/* .viewer-notice paints the strip; the fidelity note can run to two
+   lines, so the glyph pins to the first line instead of the middle. */
 .preview-fidelity-notice {
-  display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 8px 12px;
-  background: var(--octant-warning-surface);
-  border-bottom: 1px solid var(--octant-warning-border);
-  color: var(--octant-warning-text);
-  font-size: 12px;
 }
 
 .preview-fidelity-notice__icon {
   flex: 0 0 auto;
-  font-weight: 700;
+  font-weight: var(--oct-weight-strong);
 }
 
 .preview-fidelity-notice__text {
@@ -78,171 +81,118 @@
   margin-left: auto;
 }
 
-.preview-nav__button {
-  min-width: 28px;
-  height: 28px;
-  padding: 0 6px;
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 6px;
-  background: var(--octant-control);
-  color: var(--octant-text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.preview-nav__button:hover:not(:disabled) {
-  background: var(--octant-control-hover);
-  color: var(--octant-text-primary);
-}
-
-.preview-nav__button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
 .preview-nav__position {
   min-width: 8ch;
   text-align: center;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }
 
-/* PDF viewer */
+/* PDF viewer: the page is a sheet of paper raised off the pane ground. */
 .preview-pdf__page {
-  margin: 0 auto 24px;
+  margin: 0 auto var(--oct-space-6);
   max-width: 720px;
-  padding: 24px 28px;
-  background: #fafafa;
-  color: #1a1a1a;
-  border: 1px solid var(--octant-border);
-  border-radius: 6px;
+  padding: var(--oct-space-6) var(--oct-space-8);
+  background: var(--oct-surface);
+  color: var(--oct-fg);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  box-shadow: var(--oct-elev-raised);
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  font-family: var(--oct-font-transcript);
   min-height: 200px;
 }
 
 .preview-pdf__page--empty {
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-style: italic;
 }
 
 .preview-pdf__page-number {
   display: block;
-  margin-bottom: 12px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  margin-bottom: var(--oct-space-3);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
   font-style: normal;
 }
 
-/* Table viewer */
+/* Table viewer: .datatable paints the grid; these rules keep the caption
+   and clamp runaway cells so a wide table stays scannable. */
 .preview-table {
-  width: 100%;
-  border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
 
 .preview-table caption {
-  padding: 6px 0;
+  padding: 6px var(--oct-space-3);
   caption-side: top;
   text-align: left;
-  color: var(--octant-text-muted);
-  font-size: 12px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .preview-table th,
 .preview-table td {
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--octant-border);
-  text-align: left;
-  white-space: nowrap;
   max-width: 40ch;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.preview-table th {
-  position: sticky;
-  top: 0;
-  background: var(--octant-chrome);
-  color: var(--octant-text-secondary);
-  font-weight: 600;
-  z-index: 1;
-}
-
-.preview-table tbody tr:nth-child(even) {
-  background: rgb(255 255 255 / 2%);
-}
-
-.preview-table tbody tr:hover {
-  background: var(--octant-selection);
+.preview-table tbody tr:nth-child(even) td {
+  background: color-mix(in oklab, var(--oct-fg) 3%, transparent);
 }
 
 .preview-table td:focus,
 .preview-table th:focus {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-accent-fg);
   outline-offset: -2px;
 }
 
-/* Workbook viewer */
+/* Workbook viewer: the tab strip sits above the grid, so it carries its
+   own bottom rule; .sheet-tab paints each tab. */
 .preview-workbook__tabs {
   display: flex;
   gap: 2px;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--octant-border);
-  background: var(--octant-chrome);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
+  background: var(--oct-surface-warm);
   overflow-x: auto;
-}
-
-.preview-workbook__tab {
-  padding: 4px 10px;
-  border: 1px solid transparent;
-  border-radius: 6px 6px 0 0;
-  background: transparent;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.preview-workbook__tab--active {
-  background: var(--octant-workspace);
-  border-color: var(--octant-border);
-  border-bottom-color: transparent;
-  color: var(--octant-text-primary);
+  scrollbar-width: thin;
 }
 
 /* Document viewer */
 .preview-document {
   max-width: 720px;
   margin: 0 auto;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .preview-document__block {
-  margin: 0 0 12px;
+  margin: 0 0 var(--oct-space-3);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .preview-document__block--empty {
   min-height: 12px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 /* Slides viewer */
 .preview-slides {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--oct-space-4);
 }
 
 .preview-slides__slide {
-  padding: 20px 24px;
-  background: var(--octant-chrome);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  padding: var(--oct-space-5) var(--oct-space-6);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
   aspect-ratio: 4 / 3;
   display: flex;
   flex-direction: column;
@@ -250,33 +200,34 @@
 }
 
 .preview-slides__slide-title {
-  margin: 0 0 12px;
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--octant-text-primary);
+  margin: 0 0 var(--oct-space-3);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-strong);
+  color: var(--oct-fg);
 }
 
 .preview-slides__slide-body {
   margin: 0;
   white-space: pre-wrap;
-  color: var(--octant-text-secondary);
-  font-size: 14px;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
 }
 
 .preview-empty {
   display: grid;
   place-items: center;
   height: 100%;
-  color: var(--octant-text-muted);
-  font-size: 13px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .preview-table tbody tr:nth-child(even) {
+  .preview-table tbody tr:nth-child(even) td {
     background: transparent;
   }
   .preview-slides__slide {
-    background: var(--octant-control);
+    background: var(--oct-surface-warm);
   }
 }
 
@@ -287,12 +238,7 @@
   .preview-table td,
   .preview-pdf__page,
   .preview-slides__slide {
-    border-color: var(--octant-text-primary);
-  }
-
-  .preview-nav__button,
-  .preview-workbook__tab {
-    border-color: var(--octant-text-primary);
+    border-color: var(--oct-fg);
   }
 }
 
@@ -308,8 +254,8 @@
 
 @media (max-width: 600px) {
   .preview-viewer__chrome {
-    gap: 8px;
-    padding: 6px 8px;
+    gap: var(--oct-space-2);
+    padding: 6px var(--oct-space-2);
   }
   .preview-viewer__title {
     max-width: 20ch;
@@ -317,7 +263,7 @@
   .preview-pdf__page,
   .preview-document {
     max-width: 100%;
-    padding: 16px;
+    padding: var(--oct-space-4);
   }
   .preview-table th,
   .preview-table td {
