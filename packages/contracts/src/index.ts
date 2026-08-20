@@ -89,7 +89,6 @@ export * from "./automationNotifications";
 export * from "./linkedThread";
 export * from "./linkedThreadPrompt";
 export * from "./linkedThreadAggregation";
-export * from "./rootlessThread";
 export * from "./validationRpc";
 export * from "./zen";
 export * from "./cursorAcp";

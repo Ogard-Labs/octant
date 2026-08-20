@@ -203,7 +203,6 @@ describe("database CLI runtime composition", () => {
         { name: "canvas", lastSequence: 1, lag: 0 },
         { name: "automations", lastSequence: 1, lag: 0 },
         { name: "github-clones", lastSequence: 1, lag: 0 },
-        { name: "rootless", lastSequence: 1, lag: 0 },
         { name: "zen", lastSequence: 1, lag: 0 },
         { name: "agent-profiles", lastSequence: 1, lag: 0 },
         { name: "validation-evidence", lastSequence: 1, lag: 0 },
@@ -212,6 +211,7 @@ describe("database CLI runtime composition", () => {
         { name: "remote-access", lastSequence: 1, lag: 0 },
         { name: "thread-checkpoint", lastSequence: 1, lag: 0 },
         { name: "product-feedback", lastSequence: 1, lag: 0 },
+        { name: "thread-retention", lastSequence: 1, lag: 0 },
       ],
     });
 

@@ -87,7 +87,6 @@ export * from "./automationPolicy";
 export * from "./linkedThreadPolicy";
 export * from "./linkedThreadPromptPolicy";
 export * from "./linkedThreadAggregationPolicy";
-export * from "./rootlessThreadPolicy";
 export * from "./zenPolicy";
 export * from "./zenFocusZonePolicy";
 export * from "./cursorAcpPolicy";

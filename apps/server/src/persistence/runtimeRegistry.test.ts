@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { REMOTE_ACCESS_EVENT_NAMES } from "@octant/contracts/remote-access";
 import { EventPayloadInvalid, UnknownEventName } from "./journalErrors";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
 
@@ -211,7 +212,6 @@ describe("createPhase1RuntimeRegistries", () => {
       "canvas",
       "automations",
       "github-clones",
-      "rootless",
       "zen",
       "agent-profiles",
       "validation-evidence",
@@ -220,6 +220,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "remote-access",
       "thread-checkpoint",
       "product-feedback",
+      "thread-retention",
     ]);
     expect(second.projections.all().map((projection) => projection.name)).toEqual([
       "aggregate-heads",
@@ -235,7 +236,6 @@ describe("createPhase1RuntimeRegistries", () => {
       "canvas",
       "automations",
       "github-clones",
-      "rootless",
       "zen",
       "agent-profiles",
       "validation-evidence",
@@ -244,6 +244,7 @@ describe("createPhase1RuntimeRegistries", () => {
       "remote-access",
       "thread-checkpoint",
       "product-feedback",
+      "thread-retention",
     ]);
     expect(first.projections.all()[0]).not.toBe(second.projections.all()[0]);
     expect(first.events.decode("shell.settings-replaced", 1, validSettingsPayload())).toEqual(
@@ -281,7 +282,7 @@ describe("createPhase1RuntimeRegistries", () => {
 
     expect(
       registry.hostIdentityMigrations.transform(
-        "rootless.thread-created@1",
+        REMOTE_ACCESS_EVENT_NAMES.hostIdentityInitialized,
         1,
         { kind: "thread-created", hostId: "local", unrelated: "local" },
         "local",

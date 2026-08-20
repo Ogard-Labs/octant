@@ -127,7 +127,6 @@ describe("PersistenceLive", () => {
         { name: "canvas", lastSequence: 1, lag: 0 },
         { name: "automations", lastSequence: 1, lag: 0 },
         { name: "github-clones", lastSequence: 1, lag: 0 },
-        { name: "rootless", lastSequence: 1, lag: 0 },
         { name: "zen", lastSequence: 1, lag: 0 },
         { name: "agent-profiles", lastSequence: 1, lag: 0 },
         { name: "validation-evidence", lastSequence: 1, lag: 0 },
@@ -136,6 +135,7 @@ describe("PersistenceLive", () => {
         { name: "remote-access", lastSequence: 1, lag: 0 },
         { name: "thread-checkpoint", lastSequence: 1, lag: 0 },
         { name: "product-feedback", lastSequence: 1, lag: 0 },
+        { name: "thread-retention", lastSequence: 1, lag: 0 },
       ],
     });
   });
@@ -404,7 +404,6 @@ describe("PersistenceLive", () => {
         { projection_name: "canvas", global_sequence: 1, reason },
         { projection_name: "automations", global_sequence: 1, reason },
         { projection_name: "github-clones", global_sequence: 1, reason },
-        { projection_name: "rootless", global_sequence: 1, reason },
         { projection_name: "zen", global_sequence: 1, reason },
         { projection_name: "agent-profiles", global_sequence: 1, reason },
         { projection_name: "validation-evidence", global_sequence: 1, reason },
@@ -413,6 +412,7 @@ describe("PersistenceLive", () => {
         { projection_name: "remote-access", global_sequence: 1, reason },
         { projection_name: "thread-checkpoint", global_sequence: 1, reason },
         { projection_name: "product-feedback", global_sequence: 1, reason },
+        { projection_name: "thread-retention", global_sequence: 1, reason },
       ]);
       inspected.close();
     },

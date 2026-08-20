@@ -77,10 +77,10 @@ describe("applyMigrations", () => {
       const before = connection.prepare("SELECT * FROM event_journal").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 50,
+        currentVersion: 51,
         appliedVersions: [
           24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
-          46, 47, 48, 49, 50,
+          46, 47, 48, 49, 50, 51,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -138,11 +138,11 @@ describe("applyMigrations", () => {
 
     try {
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 50,
+        currentVersion: 51,
         appliedVersions: [
           1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
           26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
-          48, 49, 50,
+          48, 49, 50, 51,
         ],
       });
 
@@ -206,8 +206,6 @@ describe("applyMigrations", () => {
         "remote_security_audit_projection",
         "remote_session_invalidation_projection",
         "remote_session_store",
-        "rootless_thread_projection",
-        "rootless_turn_request_projection",
         "schema_migrations",
         "shell_settings_projection",
         "theme_settings_projection",
@@ -225,7 +223,7 @@ describe("applyMigrations", () => {
 
       const projectionTables = connection
         .prepare(
-          "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ORDER BY name",
+          "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name IN (?, ?, ?, ?, ?, ?, ?, ?, ?) ORDER BY name",
         )
         .all(
           "project_memory_projection",
@@ -235,15 +233,13 @@ describe("applyMigrations", () => {
           "provider_instance_projection",
           "shell_settings_projection",
           "window_workspace_projection",
-          "rootless_thread_projection",
-          "rootless_turn_request_projection",
           "agent_profile_projection",
           "validation_evidence_projection",
         ) as ReadonlyArray<{
         readonly name: string;
         readonly sql: string;
       }>;
-      expect(projectionTables).toHaveLength(11);
+      expect(projectionTables).toHaveLength(9);
       expect(projectionTables.every(({ sql }) => sql.endsWith(") STRICT"))).toBe(true);
 
       const projectIndexes = connection
@@ -394,10 +390,11 @@ describe("applyMigrations", () => {
         .run("existing-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 50,
+        currentVersion: 51,
         appliedVersions: [
           5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
           29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+          51,
         ],
       });
       expect(
@@ -435,10 +432,10 @@ describe("applyMigrations", () => {
         .run("kimi-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 50,
+        currentVersion: 51,
         appliedVersions: [
           11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32,
-          33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+          33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
         ],
       });
       expect(
@@ -485,10 +482,10 @@ describe("applyMigrations", () => {
         .run("anthropic-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 50,
+        currentVersion: 51,
         appliedVersions: [
           13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34,
-          35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+          35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
         ],
       });
       expect(
@@ -526,8 +523,8 @@ describe("applyMigrations", () => {
         .run("foundry-provider");
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 50,
-        appliedVersions: [45, 46, 47, 48, 49, 50],
+        currentVersion: 51,
+        appliedVersions: [45, 46, 47, 48, 49, 50, 51],
       });
       expect(
         connection
@@ -588,10 +585,11 @@ describe("applyMigrations", () => {
       const providerBefore = connection.prepare("SELECT * FROM provider_instance_projection").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 50,
+        currentVersion: 51,
         appliedVersions: [
           6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
           29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+          51,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(
@@ -613,7 +611,7 @@ describe("applyMigrations", () => {
       const before = connection.prepare("SELECT * FROM schema_migrations").all();
 
       expect(applyMigrations(connection, MIGRATIONS, () => "2099-01-01T00:00:00.000Z")).toEqual({
-        currentVersion: 50,
+        currentVersion: 51,
         appliedVersions: [],
       });
       expect(connection.prepare("SELECT * FROM schema_migrations").all()).toEqual(before);
@@ -666,10 +664,10 @@ describe("applyMigrations", () => {
       const projectBefore = connection.prepare("SELECT * FROM project_projection").all();
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
-        currentVersion: 50,
+        currentVersion: 51,
         appliedVersions: [
           8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30,
-          31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+          31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
         ],
       });
       expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(

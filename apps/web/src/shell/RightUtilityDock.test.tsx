@@ -12,7 +12,6 @@ const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
 function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDockProps {
   return {
     availableSurfaces: RIGHT_UTILITY_DOCK_SURFACES,
-    codeEnvironment: <p>Repository environment</p>,
     context: <p>Live context inspector</p>,
     isNarrow: false,
     navigator: <p>Host Navigator</p>,
@@ -20,7 +19,6 @@ function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDock
     onCommitWidth: vi.fn(),
     onPreviewWidth: vi.fn(),
     onSelectSurface: vi.fn(),
-    plan: <p>Thread plan</p>,
     projectMemory: <p>Private Project memory</p>,
     resolution: {
       kind: "surface",

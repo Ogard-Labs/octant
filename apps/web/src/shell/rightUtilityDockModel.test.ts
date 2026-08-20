@@ -25,7 +25,7 @@ const validInput = {
   activeProject: projects.code,
   connectionState: "connected",
   presentationAvailability: "available",
-  savedSurface: "code-environment",
+  savedSurface: "context",
   surfaceProjectId: projectIds.current,
 } as const satisfies RightUtilityDockResolutionInput;
 
@@ -45,22 +45,10 @@ describe("Right Utility Dock surface model", () => {
         projectRequired: true,
       },
       {
-        id: "code-environment",
-        label: "Code environment",
-        modes: ["code"],
-        projectRequired: true,
-      },
-      {
         id: "navigator",
         label: "Navigator",
         modes: ["chat", "work", "code"],
         projectRequired: false,
-      },
-      {
-        id: "plan",
-        label: "Plan",
-        modes: ["code"],
-        projectRequired: true,
       },
     ]);
   });
@@ -75,14 +63,14 @@ describe("Right Utility Dock surface model", () => {
           presentationAvailability: "available",
           savedSurface: "navigator",
         }),
-      ).toEqual({ kind: "surface", surface: RIGHT_UTILITY_DOCK_SURFACES[3] });
+      ).toEqual({ kind: "surface", surface: RIGHT_UTILITY_DOCK_SURFACES[2] });
     },
   );
 
   it("carries no Project identity on a host-owned surface even when one is active", () => {
     expect(resolveRightUtilityDockSurface({ ...validInput, savedSurface: "navigator" })).toEqual({
       kind: "surface",
-      surface: RIGHT_UTILITY_DOCK_SURFACES[3],
+      surface: RIGHT_UTILITY_DOCK_SURFACES[2],
     });
   });
 
@@ -97,7 +85,7 @@ describe("Right Utility Dock surface model", () => {
     ).toEqual({ kind: "closed", reason: "disconnected" });
   });
 
-  it.each(["context", "project-memory", "code-environment", "plan"] as const)(
+  it.each(["context", "project-memory"] as const)(
     "keeps Project-required surface %s closed with no active Project",
     (savedSurface) => {
       expect(
@@ -146,20 +134,6 @@ describe("Right Utility Dock surface model", () => {
         savedSurface: "context",
       }),
     ).toMatchObject({ kind: "surface", surface: { id: "context" } });
-  });
-
-  it.each([
-    ["chat", "mode-invalid"],
-    ["work", "mode-invalid"],
-    ["code", "surface"],
-  ] as const)("gates Code environment in %s", (activeMode, expectedKind) => {
-    const resolution = resolveRightUtilityDockSurface({ ...validInput, activeMode });
-
-    if (expectedKind === "surface") {
-      expect(resolution.kind).toBe("surface");
-    } else {
-      expect(resolution).toEqual({ kind: "closed", reason: expectedKind });
-    }
   });
 
   it.each([
@@ -219,7 +193,7 @@ describe("Right Utility Dock surface model", () => {
     },
   );
 
-  it("requires Code environment to have a truthful bound Code Project", () => {
+  it("requires Context to have a truthful bound Code Project", () => {
     const { binding: _binding, ...unboundCodeProject } = projects.code;
 
     expect(

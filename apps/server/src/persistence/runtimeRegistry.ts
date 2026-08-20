@@ -60,11 +60,6 @@ import {
   ProviderInstanceEnabledChanged,
   ProviderInstanceRemoved,
   ProviderInstanceRenamed,
-  RootlessFolderAttached,
-  RootlessFolderAttachmentDenied,
-  RootlessThreadCreated,
-  RootlessTurnAccepted,
-  RootlessTurnUpdated,
   ShellSettingsReplaced,
   THREAD_GOAL_EVENT_NAMES,
   THREAD_PLAN_EVENT_NAMES,
@@ -137,7 +132,7 @@ import {
   PersistedWorkspaceLayoutReplaced,
 } from "./shellPersistenceSchema";
 import { ShellProjection } from "./shellProjection";
-import { RootlessProjection } from "./rootlessProjection";
+import { RETIRED_EVENT_NAMES, RetiredEventPayload } from "./retiredEvents";
 import { ZenProjection } from "./zenProjection";
 import { UsageProjection } from "./usageProjection";
 import { ValidationEvidenceProjection } from "../validation/validationEvidenceProjection";
@@ -300,11 +295,6 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register("work.research-recorded@1", 1, WorkResearchFrame)
     .register("work.workflow-recorded@1", 1, WorkflowFrame)
     .register("work.request-recorded@1", 1, WorkRequestFrame)
-    .register("rootless.thread-created@1", 1, RootlessThreadCreated)
-    .register("rootless.turn-accepted@1", 1, RootlessTurnAccepted)
-    .register("rootless.turn-updated@1", 1, RootlessTurnUpdated)
-    .register("rootless.folder-attached@1", 1, RootlessFolderAttached)
-    .register("rootless.folder-attachment-denied@1", 1, RootlessFolderAttachmentDenied)
     .register("zen.space-snapshot-recorded@1", 1, Schema.Unknown)
     .register("zen.space-snapshot-recorded@2", 1, ZenSpaceSnapshotRecorded)
     .register("zen.widget-mutation-recorded@1", 1, ZenWidgetMutationRecorded)
@@ -335,6 +325,9 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(GITHUB_CLONE_TRANSITIONED, 1, GithubCloneTransitioned)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
     .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged);
+  for (const eventName of RETIRED_EVENT_NAMES) {
+    events.register(eventName, 1, RetiredEventPayload);
+  }
   registerAutomationEvents(events);
   registerCanvasShareEvents(events);
   registerArtifactMirrorEvents(events);
@@ -368,7 +361,6 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(canvasProjection)
       .register(automationProjection)
       .register(githubCloneProjection)
-      .register(new RootlessProjection())
       .register(new ZenProjection())
       .register(new AgentProfileProjection())
       .register(new ValidationEvidenceProjection())

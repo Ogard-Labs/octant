@@ -69,6 +69,10 @@ export class DiagnosticsExportProjection implements Projection {
       event.eventName === DIAGNOSTICS_FAILURE_INCIDENT_RECORDED_V1 ||
       event.eventName === DIAGNOSTICS_FAILURE_INCIDENT_RECORDED
     ) {
+      // `rootless-thread` is a retired aggregate type. Journals written before
+      // threads required a Project still carry incidents stamped with it, and
+      // replay decodes every row, so dropping it here would fail those rows and
+      // quarantine the projection.
       if (
         event.eventVersion !== 1 ||
         !["diagnostics-incident", "chat-thread", "rootless-thread"].includes(event.aggregateType)
