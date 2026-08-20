@@ -34,8 +34,8 @@ export interface CodeThreadLocalServerScopeOptions {
  * Returning `undefined` is the fail-closed answer for every reason a request
  * cannot be served: the thread is not in this Project, the Project is not an
  * active Code Project reachable from this window, or the checkout root cannot
- * be resolved. Local servers requires a bound Code Project, so a rootless or
- * unbound thread simply has no scope rather than a degraded one.
+ * be resolved. Local servers requires a bound Code Project, so a thread the
+ * window cannot resolve one for simply has no scope rather than a degraded one.
  *
  * The thread's own execution policy becomes the posture, which is what makes a
  * Plan thread able to list and open but never stop.

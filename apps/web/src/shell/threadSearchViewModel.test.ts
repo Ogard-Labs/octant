@@ -35,7 +35,7 @@ describe("buildThreadSearchResults", () => {
     const results = buildThreadSearchResults({
       mode: "work",
       query: "release",
-      rootlessLabel: "Recents",
+      unfiledLabel: "Recents",
       threads: [
         thread({ threadId: "t1", mode: "work", title: "Release checklist", projectId: "p1" }),
         thread({ threadId: "t2", mode: "work", title: "Release notes" }),
@@ -67,7 +67,7 @@ describe("buildThreadSearchResults", () => {
     expect(flattenThreadSearchHits(results).map((hit) => hit.projectId)).toEqual(["p2", undefined]);
   });
 
-  it("labels a rootless Chat thread Unfiled by default", () => {
+  it("labels a Chat thread with no Project Unfiled by default", () => {
     const results = buildThreadSearchResults({
       mode: "chat",
       query: "notes",
@@ -115,7 +115,7 @@ describe("buildThreadSearchResults", () => {
     const results = buildThreadSearchResults({
       mode: "code",
       query: "release",
-      rootlessLabel: "Recents",
+      unfiledLabel: "Recents",
       threads: [
         thread({ threadId: "t1", mode: "code", title: "Release branch", projectId: "p1" }),
         thread({ threadId: "t2", mode: "code", title: "Release hotfix", projectId: "p9" }),

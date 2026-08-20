@@ -26,12 +26,12 @@ users start quickly without a setup modal.
     directory need not be a repository root at bind time); each Code thread
     additionally selects one checkout (existing checkout, existing worktree,
     or Octant-managed worktree), an execution posture, and a delivery target.
-- Threads may start unfiled. Until a saved Project is explicitly attached, a
-  thread has no filesystem, shell, Git, worktree, test, preview, mutation, or
-  delivery authority. Attaching is an explicit, recorded authority transition.
-  Octant never infers a root from the prompt, process directory, or another
-  thread. The only folder Octant may create is the verified result of an
-  explicitly approved managed repository clone into the host's inventory.
+- Every Work and Code thread belongs to one Project (amended by 0037: threads
+  no longer start unfiled). Binding a Project is an explicit, recorded
+  authority transition. Octant never infers a root from the prompt, process
+  directory, or another thread. The only folder Octant may create is the
+  verified result of an explicitly approved managed repository clone into the
+  host's inventory.
 - Work never silently becomes Code. Coding discoveries offer a linked
   promotion into a new Code thread; promotion carries a handoff brief, chosen
   messages, memory, and provenance, and never carries approvals, secrets,
@@ -71,8 +71,8 @@ users start quickly without a setup modal.
 - Every new capability must state its Chat, Work, and Code availability and be
   checked server-side before side effects; React never grants capability by
   showing a pane.
-- Unfiled-first creation keeps onboarding light but requires every tool path
-  to tolerate a rootless thread honestly.
+- Requiring a Project up front costs one explicit choice before the first
+  turn and gives every tool path a container it can rely on (0037).
 - Worktree isolation and opaque repository identity survive renames and moves
   but demand an audited relink after copies or cross-volume replacement.
 - Provider changes inside a thread are cheap for the user and honest about
