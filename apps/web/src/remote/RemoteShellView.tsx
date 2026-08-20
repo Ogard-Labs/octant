@@ -329,7 +329,9 @@ export function RemoteShellView(props: RemoteShellViewProps) {
               <h3 className="remote-shell__surface-title">{entry.surface.label}</h3>
               <p className="remote-shell__surface-description">{entry.surface.description}</p>
               {exercise === undefined ? (
-                <span className="remote-shell__surface-badge">Available in Project context</span>
+                <span className="remote-shell__surface-badge badge">
+                  Available in Project context
+                </span>
               ) : (
                 <OctantButton
                   disabled={!ready}
@@ -361,7 +363,7 @@ export function RemoteShellView(props: RemoteShellViewProps) {
             className="remote-shell__surface-card remote-shell__surface-card--local-only"
             key={surface.id}
           >
-            <span className="remote-shell__surface-badge">Unavailable remotely</span>
+            <span className="remote-shell__surface-badge badge">Unavailable remotely</span>
             <h3 className="remote-shell__surface-title">{surface.label}</h3>
             <p className="remote-shell__surface-description">{surface.description}</p>
           </article>

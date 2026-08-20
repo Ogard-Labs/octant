@@ -44,7 +44,7 @@ export function RoutineComposer(props: RoutineComposerProps) {
         What do you want automated?
       </label>
       <textarea
-        className="routine-composer__input"
+        className="routine-composer__input textarea"
         id="routine-composer-request"
         onChange={(event) => read(event.target.value)}
         placeholder="Every weekday at 9:00, summarise what changed overnight"

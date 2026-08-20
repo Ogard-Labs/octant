@@ -13,7 +13,6 @@ import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCe
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { FIRST_PARTY_PLUGINS_EFFECTIVE, resolveSidebarContributions } from "./contributionRegistry";
-import { IconButton } from "./IconButton";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarProfile } from "./SidebarProfile";
@@ -131,21 +130,28 @@ export function ShellSidebar(props: ShellSidebarProps) {
           actions={
             <>
               {searchVisible ? null : (
-                <IconButton
+                <button
+                  aria-label="Search"
+                  className="btn-icon window-no-drag"
                   data-navigation-id="search"
-                  icon={Search}
-                  label="Search"
                   onClick={() => setSearchOpen(true)}
                   title="Search"
-                />
+                  type="button"
+                >
+                  <Search aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+                </button>
               )}
               {props.onCollapseSidebar === undefined ? null : (
-                <IconButton
+                <button
+                  aria-label="Hide sidebar"
+                  className="btn-icon window-no-drag"
                   data-navigation-id="hide-sidebar"
-                  icon={PanelLeftClose}
-                  label="Hide sidebar"
                   onClick={props.onCollapseSidebar}
-                />
+                  title="Hide sidebar"
+                  type="button"
+                >
+                  <PanelLeftClose aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+                </button>
               )}
               <span className="sidebar__chrome-activity" data-octant-sidebar-chrome-actions />
             </>

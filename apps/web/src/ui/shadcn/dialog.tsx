@@ -2,6 +2,13 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import type { ComponentProps, ReactNode, RefObject } from "react";
 import { cn } from "./utils";
 
+/*
+ * The dialog's paint belongs to the token-driven chrome, not to Tailwind: the
+ * `.octant-dialog__*` rules own position, scrim, surface, border, radius, and
+ * shadow, and being unlayered they beat every layered utility anyway. Only
+ * behavior that chrome does not express stays here as utilities: the
+ * backdrop's enter/exit fade and the popup's default content padding.
+ */
 export function Dialog(props: ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root {...props} />;
 }
@@ -16,10 +23,7 @@ export function DialogBackdrop({
 }: ComponentProps<typeof DialogPrimitive.Backdrop>) {
   return (
     <DialogPrimitive.Backdrop
-      className={cn(
-        "fixed inset-0 z-50 bg-black/70 data-ending-style:opacity-0 data-starting-style:opacity-0",
-        className,
-      )}
+      className={cn("data-ending-style:opacity-0 data-starting-style:opacity-0", className)}
       {...props}
     />
   );
@@ -29,23 +33,12 @@ export function DialogViewport({
   className,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Viewport>) {
-  return (
-    <DialogPrimitive.Viewport
-      className={cn("fixed inset-0 z-50 flex items-center justify-center p-4", className)}
-      {...props}
-    />
-  );
+  return <DialogPrimitive.Viewport className={cn(className)} {...props} />;
 }
 
 export function DialogPopup({ className, ...props }: ComponentProps<typeof DialogPrimitive.Popup>) {
   return (
-    <DialogPrimitive.Popup
-      className={cn(
-        "relative z-50 w-full max-w-lg rounded-lg border border-border bg-popover p-4 text-popover-foreground shadow-lg outline-none",
-        className,
-      )}
-      {...props}
-    />
+    <DialogPrimitive.Popup className={cn("relative p-4 outline-none", className)} {...props} />
   );
 }
 

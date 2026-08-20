@@ -6,7 +6,13 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceTabs } from "./WorkspaceTabs";
 
-const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+// Comments are stripped before matching: `cssRule` reads a rule's prelude as
+// "everything since the last brace", so a comment above a rule would become
+// part of the selector it documents and the rule would stop being found.
+const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
 
 function cssRule(selector: string): string {
   const match = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gs)].find((candidate) =>
@@ -52,10 +58,10 @@ describe("WorkspaceTabs", () => {
 
     expect(header).not.toMatch(/background:|border-bottom:/);
     expect(tabs).toContain("gap: 4px;");
-    expect(item).toContain("border-radius: 8px;");
+    expect(item).toContain("border-radius: 6px;");
     expect(item).not.toMatch(/border-right:/);
     expect(paneActions).not.toMatch(/border-left:/);
-    expect(selected).toContain("background: var(--octant-selection);");
+    expect(selected).toContain("background: var(--oct-fg-soft);");
     expect(selected).not.toMatch(/accent|border-bottom|border-color|box-shadow/i);
     expect(cssRule('.workspace-group[data-focused="true"]')).toContain("box-shadow: none;");
   });

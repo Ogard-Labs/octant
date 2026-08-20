@@ -47,7 +47,7 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
       <p className="first-run__intro">{props.intro}</p>
 
       {empty ? (
-        <div className="first-run__notice" data-tone="attention" role="status">
+        <div className="first-run__notice callout" data-tone="attention" role="status">
           <p className="first-run__intro">
             {listed
               ? "No provider on this Mac offered a model, so there is nothing to choose from yet."
@@ -78,7 +78,7 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
       )}
 
       {chosen && props.onClear !== undefined ? (
-        <div className="first-run__setup">
+        <div className="btn-group">
           <OctantButton onClick={props.onClear} type="button" variant="ghost">
             {props.clearLabel ?? "Clear selection"}
           </OctantButton>
