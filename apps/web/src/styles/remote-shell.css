@@ -1,33 +1,38 @@
+/* Remote shell: what a paired browser device may see and do. Paint comes
+   from the design system (octant.css `--oct-*` tokens and the btn/badge
+   recipes); this sheet keeps the pane layout and the panel structure. */
+
 .remote-shell {
   display: grid;
   width: min(100%, 720px);
-  gap: 18px;
-  padding: 28px;
-  color: var(--octant-text-primary);
+  gap: var(--oct-space-5);
+  padding: var(--oct-space-8);
+  color: var(--oct-fg);
 }
 
 .remote-shell__header {
   display: grid;
-  gap: 12px;
+  gap: var(--oct-space-3);
 }
 
 .remote-shell__title {
   margin: 0;
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-snug);
 }
 
 .remote-shell__composer {
   display: grid;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .remote-shell__label {
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }
 
@@ -37,31 +42,31 @@
 
 .remote-shell__hint {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
 }
 
 .remote-shell__mode-panel {
   display: grid;
-  gap: 12px;
-  padding: 14px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-4);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .remote-shell__mode-description {
   margin: 0;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
-  line-height: 1.5;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
 }
 
 .remote-shell__mode-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .remote-shell__surface-grid {
@@ -71,11 +76,11 @@
 
 .remote-shell__surface-card {
   display: grid;
-  gap: 8px;
-  padding: 12px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .remote-shell__surface-card--local-only {
@@ -84,44 +89,38 @@
 
 .remote-shell__surface-title {
   margin: 0;
-  font-size: 13px;
-  font-weight: 600;
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
 }
 
 .remote-shell__surface-description {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-  line-height: 1.45;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
 }
 
+/* .badge paints the pill; it only needs its slot in the card grid. */
 .remote-shell__surface-badge {
   justify-self: start;
-  padding: 2px 8px;
-  color: var(--octant-text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  background: rgb(255 255 255 / 4%);
-  border: 1px solid var(--octant-border);
-  border-radius: 999px;
 }
 
 .remote-shell__section-title {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }
 
 .remote-shell__local-only {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
 }
 
 .remote-shell__status {
@@ -129,8 +128,8 @@
   gap: 6px;
   align-items: baseline;
   margin: 0;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
 }
 
 .remote-shell__status svg {
@@ -140,41 +139,41 @@
 
 .remote-shell__overview {
   display: grid;
-  gap: 12px;
+  gap: var(--oct-space-3);
 }
 
 .remote-shell__stale-banner {
   display: grid;
   gap: 4px;
-  padding: 12px;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
-  line-height: 1.5;
-  background: rgb(251 191 36 / 8%);
-  border: 1px solid rgb(251 191 36 / 28%);
-  border-radius: 8px;
+  padding: var(--oct-space-3);
+  color: var(--oct-warn-fg);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+  background: var(--oct-warn-soft);
+  border: 1px solid color-mix(in oklab, var(--oct-warn) 45%, transparent);
+  border-radius: var(--oct-radius-md);
 }
 
 .remote-shell__device-panel {
   display: grid;
   gap: 10px;
-  padding: 14px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  padding: var(--oct-space-4);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .remote-shell__device-copy,
 .remote-shell__device-muted {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
 }
 
 .remote-shell__device-facts {
   display: grid;
-  gap: 8px;
+  gap: var(--oct-space-2);
   margin: 0;
 }
 
@@ -184,35 +183,35 @@
 }
 
 .remote-shell__device-fact dt {
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }
 
 .remote-shell__device-fact dd {
   margin: 0;
-  color: var(--octant-text-primary);
-  font-size: 13px;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
 }
 
 .remote-shell__device-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .remote-shell__device-confirm {
   display: grid;
-  gap: 8px;
-  padding: 12px;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
-  line-height: 1.5;
-  background: var(--octant-surface-inset);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
+  background: var(--oct-bg);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .remote-shell__device-confirm p {
@@ -222,7 +221,7 @@
 @media (max-width: 680px) {
   .remote-shell {
     width: 100%;
-    padding: 16px;
+    padding: var(--oct-space-4);
   }
 
   .remote-shell__device-actions {
@@ -245,12 +244,12 @@
 
 @media (prefers-contrast: more) {
   .remote-shell__stale-banner {
-    border-color: var(--octant-text-primary);
+    border-color: var(--oct-fg);
   }
 
   .remote-shell__surface-card,
   .remote-shell__mode-panel,
   .remote-shell__device-panel {
-    border-color: var(--octant-text-secondary);
+    border-color: var(--oct-fg-2);
   }
 }

@@ -1,6 +1,7 @@
 import type { ZenChecklistElementPayload, ZenChecklistItemId } from "@octant/contracts/zen";
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
+import { OctantInput } from "../../ui/base/OctantInput";
 
 export interface ZenChecklistProps {
   readonly element: ZenChecklistElementPayload;
@@ -99,14 +100,14 @@ export function ZenChecklist(props: ZenChecklistProps) {
   const title = element.title ?? "Checklist";
   return (
     <div className="zen-checklist">
-      <ul aria-label={`${title} items`} className="zen-checklist__items">
+      <ul aria-label={`${title} items`} className="zen-check">
         {element.items.map((item, index) => (
           <li
-            className="zen-checklist__item"
+            className={item.done ? "is-done" : undefined}
             key={item.itemId}
             onKeyDown={(event) => handleItemKeyDown(event, item.itemId, index)}
           >
-            <label className="zen-checklist__label">
+            <label className="check zen-checklist__label">
               <input
                 checked={item.done}
                 disabled={element.locked || props.onSetCompleted === undefined}
@@ -126,15 +127,14 @@ export function ZenChecklist(props: ZenChecklistProps) {
                 }}
                 type="checkbox"
               />
-              <span className={item.done ? "zen-checklist__text--done" : undefined}>
-                {item.text}
-              </span>
+              <span>{item.text}</span>
             </label>
             <span className="zen-checklist__actions">
               <OctantButton
                 aria-label={`Move ${item.text} up`}
                 disabled={element.locked || index === 0 || props.onReorder === undefined}
                 onClick={() => move(item.itemId, index, -1)}
+                size="sm"
                 type="button"
                 variant="ghost"
               >
@@ -148,6 +148,7 @@ export function ZenChecklist(props: ZenChecklistProps) {
                   props.onReorder === undefined
                 }
                 onClick={() => move(item.itemId, index, 1)}
+                size="sm"
                 type="button"
                 variant="ghost"
               >
@@ -161,6 +162,7 @@ export function ZenChecklist(props: ZenChecklistProps) {
                     props.onRemoveItem!(element.elementId, item.itemId, element.widgetVersion),
                   )
                 }
+                size="sm"
                 type="button"
                 variant="ghost"
               >
@@ -173,7 +175,7 @@ export function ZenChecklist(props: ZenChecklistProps) {
       <form className="zen-checklist__add" onSubmit={submit}>
         <label>
           <span className="visually-hidden">New checklist item</span>
-          <input
+          <OctantInput
             aria-label="New checklist item"
             disabled={element.locked || props.onAddItem === undefined}
             maxLength={500}
@@ -184,6 +186,7 @@ export function ZenChecklist(props: ZenChecklistProps) {
         </label>
         <OctantButton
           disabled={newItem.trim().length === 0 || element.locked || props.onAddItem === undefined}
+          size="sm"
           type="submit"
           variant="secondary"
         >

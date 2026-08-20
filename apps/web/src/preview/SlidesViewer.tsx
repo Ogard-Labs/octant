@@ -66,7 +66,6 @@ export function SlidesViewer(props: {
         </div>
         <nav className="preview-nav" aria-label="Slide navigation">
           <OctantButton
-            className="preview-nav__button"
             type="button"
             disabled={current <= 1}
             onClick={() => moveSlide(-1)}
@@ -80,7 +79,6 @@ export function SlidesViewer(props: {
             slide {current}
           </span>
           <OctantButton
-            className="preview-nav__button"
             type="button"
             disabled={current >= slideCount}
             onClick={() => moveSlide(1)}

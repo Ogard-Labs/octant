@@ -19,20 +19,10 @@ export function ZenBar(props: ZenBarProps) {
   if (props.collapsed) {
     return (
       <div className="zen-pill window-no-drag" role="group" aria-label="Zen pill">
-        <OctantButton
-          className="zen-pill__show"
-          onClick={props.onExpand}
-          type="button"
-          variant="ghost"
-        >
+        <OctantButton onClick={props.onExpand} size="sm" type="button" variant="ghost">
           Show Navigator Bar
         </OctantButton>
-        <OctantButton
-          className="zen-pill__exit"
-          onClick={props.onExit}
-          type="button"
-          variant="ghost"
-        >
+        <OctantButton onClick={props.onExit} size="sm" type="button" variant="secondary">
           Exit Zen
         </OctantButton>
       </div>
@@ -41,21 +31,17 @@ export function ZenBar(props: ZenBarProps) {
 
   return (
     <div className="zen-bar window-no-drag" role="toolbar" aria-label="Navigator Bar">
-      <OctantButton
-        className="zen-bar__button"
-        onClick={props.onHide}
-        type="button"
-        variant="ghost"
-      >
+      <OctantButton onClick={props.onHide} size="sm" type="button" variant="ghost">
         Hide Navigator Bar
       </OctantButton>
-      <span className="zen-bar__provider" aria-label="Navigator model">
+      <span className="zen-bar-model" aria-label="Navigator model">
         {props.providerLabel ?? "Navigator"}
       </span>
       <label className="zen-bar__ask">
         <span className="visually-hidden">Ask Navigator</span>
         <OctantInput
           aria-label="Ask Navigator"
+          className="zen-bar-ask"
           onKeyDown={(event) => {
             if (event.key !== "Enter") return;
             const value = event.currentTarget.value.trim();
@@ -87,12 +73,8 @@ export function ZenBar(props: ZenBarProps) {
         label="Appearance"
         {...(props.onOpenAppearance === undefined ? {} : { onClick: props.onOpenAppearance })}
       />
-      <OctantButton
-        className="zen-bar__button zen-bar__exit"
-        onClick={props.onExit}
-        type="button"
-        variant="ghost"
-      >
+      <span className="zen-bar-sep" aria-hidden="true" />
+      <OctantButton onClick={props.onExit} size="sm" type="button" variant="secondary">
         Exit Zen
       </OctantButton>
     </div>
@@ -103,11 +85,12 @@ function DeferredControl(props: { readonly label: string; readonly onClick?: () 
   return (
     <OctantButton
       {...(props.onClick === undefined ? { "aria-disabled": true } : {})}
-      className={`zen-bar__button${props.onClick === undefined ? " zen-bar__button--deferred" : ""}`}
+      className={props.onClick === undefined ? "zen-bar__button--deferred" : undefined}
       onClick={(event) => {
         event.preventDefault();
         props.onClick?.();
       }}
+      size="sm"
       title={props.onClick === undefined ? `${props.label} is unavailable` : props.label}
       type="button"
       variant="ghost"

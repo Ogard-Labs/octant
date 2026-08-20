@@ -11,7 +11,7 @@
   grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
   position: relative;
-  background: var(--octant-workspace);
+  background: var(--oct-bg);
   border: 0;
   border-radius: 0;
   box-shadow: none;
@@ -49,7 +49,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   grid-column: 2;
   grid-row: 1;
   align-items: center;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   background: transparent;
   border-bottom: 0;
   pointer-events: none;
@@ -88,29 +88,24 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   min-width: 12px;
 }
 
+/* The badge recipe carries the warning palette and type; the chrome only
+   keeps the marker from flexing away in the 34px rail. */
 .window-chrome__development-auth {
   flex: 0 0 auto;
-  padding: 2px 7px;
-  color: var(--octant-warning-text);
-  background: var(--octant-warning-surface);
-  border: 1px solid var(--octant-warning-border);
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
 }
 
 .window-chrome__zen-recovery {
   display: flex;
   flex: 0 1 auto;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-2);
   min-width: 0;
-  padding: 2px 8px;
-  color: var(--octant-warning-text);
-  background: var(--octant-warning-surface);
-  border: 1px solid var(--octant-warning-border);
-  border-radius: 999px;
-  font-size: 11px;
+  padding: 2px var(--oct-space-2);
+  color: var(--oct-warn-fg);
+  background: var(--oct-warn-soft);
+  border: 0;
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
 }
 
 .window-chrome__text-button {
@@ -140,6 +135,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   pointer-events: auto;
 }
 
+/* The btn-icon recipe owns the shape and states; this override keeps the
+   compact 26px square the 34px native titlebar row can actually hold. */
 .window-chrome__button {
   display: grid;
   flex: 0 0 auto;
@@ -147,7 +144,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   height: 26px;
   padding: 0;
   place-items: center;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -156,8 +153,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 .window-chrome__button:hover,
 .window-chrome__button[aria-expanded="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
   border-color: transparent;
 }
 
@@ -177,15 +174,15 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   display: grid;
   width: 180px;
   padding: 5px;
-  background: var(--octant-floating);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-  box-shadow: var(--octant-shadow-overlay);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  box-shadow: var(--oct-elev-raised);
 }
 
 .window-chrome__disclosure-action {
-  padding: 8px 10px;
-  color: var(--octant-text-secondary);
+  padding: var(--oct-space-2) 10px;
+  color: var(--oct-muted);
   background: transparent;
   border: 0;
   border-radius: 6px;
@@ -195,21 +192,22 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 .window-chrome__disclosure-action:hover,
 .window-chrome__disclosure-action:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
+/* The container recipe (flex column, min-width, border, base surface) comes
+   from octant.css's .sidebar. Residual here is app plumbing only: shell grid
+   placement, the material backgrounds the vibrancy modes swap, and zeroed
+   padding/scrolling — the traffic-light drag row must reach the edges, so
+   .sidebar__content carries the padding and the scroll instead. */
 .shell-frame > .sidebar {
-  display: flex;
-  min-width: 0;
   min-height: 0;
   grid-column: 1;
   grid-row: 1 / -1;
-  flex-direction: column;
   padding: 0;
   overflow: hidden;
   background: var(--octant-sidebar-translucent);
-  border-right: 1px solid var(--octant-border);
 }
 
 .sidebar__native-leading {
@@ -263,13 +261,15 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   bottom: 0;
   left: 3px;
   width: 1px;
-  background: var(--octant-border);
+  background: var(--oct-border);
   content: "";
 }
 
+/* The same feedback the system's .split-handle gives: the hairline takes the
+   accent ink while grabbed or focused. */
 .shell-frame__sidebar-resize:hover::before,
 .shell-frame__sidebar-resize:focus-visible::before {
-  background: var(--octant-focus-ring);
+  background: var(--oct-accent-fg);
 }
 
 .shell--material-opaque.shell-frame > .sidebar {
@@ -299,6 +299,18 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   background: var(--octant-sidebar-translucent-strong);
 }
 
+/* Under the native host the window itself is transparent, and CSS
+   backdrop-filter blurs only this page's own pixels — it can never frost
+   another app's window. Every point of alpha in the washes above therefore
+   shows the desktop behind Octant SHARP: at the 34–62% vibrancy tiers a code
+   editor behind the window stays readable through the sidebar. Until the
+   host delivers real vibrancy (Electron setVibrancy), the native sidebar
+   keeps a near-opaque wash — enough tint to stay a material, not enough
+   transparency to read through. The opaque material keeps its own rule. */
+html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar {
+  background: color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent);
+}
+
 /* Frost sidebar background art behind a mode-aware glass wash so preset and
    custom backgrounds read as material behind the glass, not paint on top. */
 .shell--material-translucent.shell-frame > .sidebar [data-octant-sidebar-background]::after {
@@ -324,9 +336,21 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   min-width: 0;
 }
 
-.sidebar__chrome .mode-switcher {
+/* Both presentations fill the row so the action icons keep to its far edge. */
+.sidebar__chrome .modeswitch,
+.sidebar__chrome .mode-trigger {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* The activity toggle is contributed by the Project section pass and still
+   wears the 28px shell-icon-button metric; its neighbors in this row are
+   var(--oct-control-height-sm) .btn-icon squares. One row, one size. */
+.sidebar__chrome-activity .shell-icon-button {
+  width: var(--oct-control-height-sm);
+  min-width: var(--oct-control-height-sm);
+  height: var(--oct-control-height-sm);
+  min-height: var(--oct-control-height-sm);
 }
 
 .sidebar__chrome-actions,
@@ -350,7 +374,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   min-width: 0;
   height: 28px;
   border-color: transparent;
-  background: color-mix(in srgb, var(--octant-control-hover) 86%, transparent);
+  background: var(--oct-fg-soft);
   font-size: 12px;
 }
 
@@ -366,7 +390,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   margin-top: 16px;
 }
 
-.sidebar-navigation__item {
+/* Navigation rows must not shrink when the Project tree below them grows. */
+.sidebar-navigation > .sidebar-item {
   flex: 0 0 auto;
 }
 
@@ -379,30 +404,37 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 .sidebar-navigation__thread {
   /* Flex, not a two-column grid: a row can carry a title, a state, an unread
      dot, and a follow-up marker at once, and the grid wrapped the extras onto
-     a second line as a full-width bar under the thread. */
+     a second line as a full-width bar under the thread.
+     Metrics mirror the system's .sidebar-item (min-height, padding, gap,
+     radius, type size) so tree rows and shell nav rows read as one list; the
+     class itself stays off because these rows carry row-only affordances
+     (status dot, provider mark, context menu) the shell items do not. */
   display: flex;
   width: 100%;
   min-width: 0;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  color: var(--octant-text-secondary);
+  justify-content: flex-start;
+  gap: var(--oct-space-3);
+  min-height: var(--oct-control-height-sm);
+  padding-block: 0;
+  padding-inline: var(--oct-space-2);
+  color: var(--oct-muted);
   background: transparent;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
+  font-size: var(--oct-text-sm);
   cursor: pointer;
   text-align: left;
 }
 
 .sidebar-navigation__thread:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .sidebar-navigation__thread[aria-current="page"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-selection);
-  box-shadow: var(--octant-shadow-hairline);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .sidebar-navigation__thread-copy {
@@ -428,18 +460,18 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 .sidebar-navigation__thread-status[data-activity="unread"] {
-  background: var(--octant-accent);
-  border-color: var(--octant-accent);
+  background: var(--oct-accent);
+  border-color: var(--oct-accent);
 }
 
 .sidebar-navigation__thread-status[data-activity="attention"] {
-  background: var(--octant-warning-text);
-  border-color: var(--octant-warning-text);
+  background: var(--oct-warn);
+  border-color: var(--oct-warn);
 }
 
 .sidebar-navigation__thread-status[data-activity="working"] {
-  background: var(--octant-accent);
-  border-color: var(--octant-accent);
+  background: var(--oct-accent);
+  border-color: var(--oct-accent);
   animation: octant-thread-pulse 1.4s ease-in-out infinite;
 }
 
@@ -487,11 +519,11 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 .sidebar-navigation__thread-unread,
 .sidebar-navigation__thread-follow-up {
   padding: 1px 5px;
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
   font-size: 10px;
   line-height: 1.4;
-  border: 1px solid var(--octant-border);
-  border-radius: 999px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
 }
 
 /*
@@ -500,8 +532,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
  * "Follow-up" label so the obligation is legible without relying on hue.
  */
 .sidebar-navigation__thread-follow-up[data-indicator="follow-up"] {
-  color: var(--octant-warning-text);
-  background: var(--octant-warning-surface);
+  color: var(--oct-warn-fg);
+  background: var(--oct-warn-soft);
   border-color: var(--octant-warning-border);
 }
 
@@ -515,8 +547,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
  * stays legible without relying on hue.
  */
 .sidebar-navigation__thread-unread[data-indicator="unread"] {
-  color: var(--octant-text-primary);
-  border-color: var(--octant-border-strong, var(--octant-border));
+  color: var(--oct-fg);
+  border-color: var(--octant-border-strong, var(--oct-border));
 }
 
 .sidebar-navigation__thread-unread[data-indicator="unread"]::before {
@@ -537,11 +569,11 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 .sidebar-navigation__thread-pin {
   flex: 0 0 auto;
   padding: 2px 4px;
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
 }
 
 .sidebar-navigation__thread-pin[aria-pressed="true"] {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .sidebar-navigation__thread-rename {
@@ -553,15 +585,21 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   align-items: center;
   gap: 6px;
   padding: 2px 8px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
   cursor: pointer;
 }
 
+/* Painted opaque at the layer itself, not only by the surfaces inside it:
+   under the native host the window and the shell frame are transparent, so
+   any pixel this column leaves unpainted — a rounding gutter at the right
+   edge, a surface that forgets its ground — shows whatever window sits
+   behind Octant, sharp. */
 .shell-frame > .workspace-layer {
   grid-column: 2;
   grid-row: 1 / -1;
   border-left: 0;
+  background: var(--oct-bg);
 }
 
 @media (min-width: 681px) and (max-width: 960px) {
@@ -587,6 +625,10 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   .shell-frame > .window-chrome {
     grid-column: 1;
     grid-row: 1;
+    /* In the stacked layout no workspace layer sits behind this row, and
+       under the native host an unpainted row shows the desktop through the
+       transparent frame. */
+    background: var(--oct-bg);
   }
 
   .shell-frame > .sidebar {
@@ -628,7 +670,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 @media (prefers-reduced-transparency: reduce) {
   .shell--material-translucent.shell-frame > .sidebar,
   .shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame > .sidebar,
-  .shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame > .sidebar {
+  .shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame > .sidebar,
+  html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar {
     background: var(--octant-sidebar-opaque);
     backdrop-filter: none;
   }
@@ -644,7 +687,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
     border-color: var(--octant-border-strong);
   }
 
-  .sidebar-navigation__item:focus-visible {
+  .sidebar-navigation > .sidebar-item:focus-visible {
     box-shadow: inset 0 0 0 1px var(--octant-border-strong);
   }
 }
@@ -904,60 +947,30 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   margin-inline-start: auto;
 }
 
-.draft-thread__input-row,
-.work-composer-adapter__card {
-  display: flex;
-  flex-direction: column;
-  background: var(--octant-surface-raised, var(--octant-surface));
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-composer, 14px);
-  box-shadow: var(--octant-shadow-lg);
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.work-composer-adapter__input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 10px 12px;
-}
-
-.work-composer-adapter__input-row {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-  padding: 12px 12px 8px 14px;
-}
-
 .work-composer-adapter__context-strip {
   padding: 8px 12px 8px 14px;
-  border-top: 1px solid var(--octant-border-subtle, var(--octant-border));
-}
-
-.work-composer-adapter__composer-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  border-top: 1px solid var(--oct-border-soft);
 }
 
 .work-composer-adapter__composer-bar .work-composer-adapter__context-picker {
   margin-inline-start: 0;
 }
 
+/* The shared provider/model picker keeps the quiet trigger the bar's other
+   controls wear; the menu opens downward because the draft composer sits
+   mid-screen rather than at the window's bottom edge. */
 .work-composer-adapter__composer-bar .composer-model-picker__trigger {
-  min-height: 26px;
+  min-height: 27px;
   padding: 0 7px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   background: transparent;
   border-color: transparent;
-  font-size: 11.5px;
+  font-size: var(--oct-text-xs);
 }
 
 .work-composer-adapter__composer-bar .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .work-composer-adapter__composer-bar .composer-model-picker__menu {
@@ -965,10 +978,6 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   right: auto;
   bottom: auto;
   left: 0;
-}
-
-.work-composer-adapter__composer-bar .work-composer-adapter__send {
-  margin-inline-start: auto;
 }
 
 .work-composer-adapter__visually-hidden {
@@ -983,47 +992,30 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   border: 0;
 }
 
-.work-composer-adapter__attachments {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 6px;
+/* Attached images: the chip and its remove control are the system's; only
+   the thumbnail and the name's ellipsis are this surface's own. */
+.work-composer-adapter__attachment {
+  max-width: 240px;
 }
 
-.work-composer-adapter__attachment {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 240px;
-  padding: 3px 6px 3px 3px;
-  border: 1px solid var(--octant-border, rgb(0 0 0 / 12%));
-  border-radius: 8px;
+/* Outside a composer frame (the Work overview quick-start form) the chips row
+   aligns with the field instead of taking a frame gutter it does not have. */
+form > .work-composer-adapter__attachments {
+  padding: 0 0 6px;
 }
 
 .work-composer-adapter__attachment-thumb {
-  width: 32px;
-  height: 32px;
-  border-radius: 5px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
   object-fit: cover;
-  background: var(--octant-surface-muted, rgb(0 0 0 / 6%));
+  background: var(--oct-fg-soft);
 }
 
 .work-composer-adapter__attachment-name {
   overflow: hidden;
-  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.work-composer-adapter__attachment-remove {
-  padding: 0 4px;
-  border: 0;
-  background: none;
-  color: inherit;
-  cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
 }
 
 .work-composer-adapter__file-input,
@@ -1033,83 +1025,6 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 .work-composer-adapter__context-strip {
   justify-content: flex-start;
-}
-
-.draft-thread__input-row:focus-within {
-  border-color: var(--octant-border-strong);
-  box-shadow: var(--octant-shadow-lg);
-}
-
-.draft-thread__textarea,
-.work-composer-adapter__textarea {
-  flex: 1;
-  min-height: 24px;
-  max-height: 160px;
-  height: auto;
-  width: auto;
-  padding: 4px 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  color: var(--octant-text-primary);
-  font-family: inherit;
-  font-size: 13.5px;
-  line-height: 1.55;
-  outline: none;
-  resize: none;
-}
-
-.draft-thread__textarea:focus-visible,
-.work-composer-adapter__textarea:focus-visible {
-  box-shadow: none;
-  outline: none;
-}
-
-.draft-thread__textarea::placeholder {
-  color: var(--octant-text-muted);
-}
-
-.draft-thread__send,
-.work-composer-adapter__send {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  min-height: 30px;
-  flex-shrink: 0;
-  place-items: center;
-  padding: 0;
-  background: var(--octant-accent);
-  border: none;
-  border-radius: var(--octant-radius-pill, 999px);
-  color: var(--octant-accent-foreground);
-  cursor: pointer;
-  transition:
-    opacity 120ms ease,
-    transform 100ms ease;
-}
-
-.draft-thread__send:active:not(:disabled),
-.work-composer-adapter__send:active:not(:disabled) {
-  transform: scale(0.96);
-}
-
-.draft-thread__send:hover:not(:disabled),
-.work-composer-adapter__send:hover:not(:disabled) {
-  opacity: 0.85;
-}
-
-.draft-thread__send:disabled,
-.work-composer-adapter__send:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.draft-thread__send:focus-visible,
-.work-composer-adapter__send:focus-visible {
-  outline: 2px solid var(--octant-focus);
-  outline-offset: 1px;
 }
 
 .draft-thread__error,
@@ -1129,9 +1044,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .draft-thread__intent-card,
-  .draft-thread__input-row,
-  .draft-thread__send {
+  .draft-thread__intent-card {
     transition: none;
   }
 }
@@ -1361,7 +1274,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   align-items: center;
   gap: 6px 12px;
   padding: 8px 12px 8px 14px;
-  border-top: 1px solid var(--octant-border-subtle, var(--octant-border));
+  border-top: 1px solid var(--oct-border-soft);
 }
 
 /* Panels a strip control expands into are further rows of the same card, so
@@ -1372,7 +1285,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   padding: 10px 12px 10px 14px;
   background: transparent;
   border: 0;
-  border-top: 1px solid var(--octant-border-subtle, var(--octant-border));
+  border-top: 1px solid var(--oct-border-soft);
   border-radius: 0;
 }
 
@@ -1412,24 +1325,26 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   margin-inline-start: auto;
 }
 
+/* Native select in the composer rows: the same quiet combobox the chat bar
+   gives its selects — transparent, muted, xs, a border only on hover. */
 .code-composer-adapter__policy-select {
   width: auto;
   min-width: 7rem;
-  height: 24px;
+  height: 27px;
   padding: 0 6px;
-  font-size: 11.5px;
+  font-size: var(--oct-text-xs);
 }
 
 .code-composer-adapter__composer-bar .code-composer-adapter__policy-select {
   min-width: 0;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   background: transparent;
   border-color: transparent;
 }
 
 .code-composer-adapter__composer-bar .code-composer-adapter__policy-select:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 /* ── Branch / worktree source selector ─────────────────────────────── */
@@ -1572,51 +1487,22 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   font-weight: 500;
 }
 
-/* The card is the composer. What the thread will be bound to — host, Project,
-   checkout, base, delivery — belongs inside the thing being started, divided
-   from the prompt by a hairline rather than floating below the card as loose
-   chrome. Only the error, the pending status, and the keyboard hint stay
-   outside it: they talk about the card, they are not part of it. */
-.code-composer-adapter__card {
-  display: flex;
-  flex-direction: column;
-  background: var(--octant-surface-raised, var(--octant-surface));
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-composer, 14px);
-  box-shadow: var(--octant-shadow-lg);
-}
-
-.code-composer-adapter__input-row {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-  padding: 12px 12px 8px 14px;
-}
-
-/* Bottom toolbar inside the composer card: model + policy left, send right. */
-.code-composer-adapter__composer-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
 .code-composer-adapter__composer-bar .code-composer-adapter__context-picker {
   margin-inline-start: 0;
 }
 
 .code-composer-adapter__composer-bar .composer-model-picker__trigger {
-  min-height: 26px;
+  min-height: 27px;
   padding: 0 7px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   background: transparent;
   border-color: transparent;
-  font-size: 11.5px;
+  font-size: var(--oct-text-xs);
 }
 
 .code-composer-adapter__composer-bar .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .code-composer-adapter__composer-bar .composer-model-picker__menu {
@@ -1629,21 +1515,17 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 /* The profile trigger is a peer of the model picker in this row, so it wears
    the same quiet chrome rather than the outlined button it is elsewhere. */
 .code-composer-adapter__composer-bar .execution-profile-workflow__trigger {
-  min-height: 26px;
+  min-height: 27px;
   padding: 0 7px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   background: transparent;
   border-color: transparent;
-  font-size: 11.5px;
+  font-size: var(--oct-text-xs);
 }
 
 .code-composer-adapter__composer-bar .execution-profile-workflow__trigger:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.code-composer-adapter__composer-bar .code-composer-adapter__send {
-  margin-inline-start: auto;
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 /* Inside the card the strip is a row of it, so it starts on the same edge as
@@ -1652,95 +1534,40 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   justify-content: flex-start;
 }
 
-/* The frame that reacts to focus is the one that draws the border. */
-.code-composer-adapter__card:focus-within {
-  border-color: var(--octant-border-strong);
-  box-shadow: var(--octant-shadow-lg);
-}
-
-.code-composer-adapter__textarea {
-  flex: 1;
-  min-height: 24px;
-  max-height: 160px;
-  height: auto;
-  width: auto;
-  padding: 4px 0;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  box-shadow: none;
-  color: var(--octant-text-primary);
-  font-family: inherit;
-  font-size: 13.5px;
-  line-height: 1.55;
-  outline: none;
-  resize: none;
-}
-
-.code-composer-adapter__textarea:focus-visible {
-  box-shadow: none;
-  outline: none;
-}
-
-.code-composer-adapter__send {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  min-width: 30px;
-  min-height: 30px;
-  flex-shrink: 0;
-  place-items: center;
-  padding: 0;
-  background: var(--octant-accent);
-  border: none;
-  border-radius: var(--octant-radius-pill, 999px);
-  color: var(--octant-accent-foreground);
-  cursor: pointer;
-}
-
-.code-composer-adapter__send:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
 .code-composer-adapter__disclosure-toggle {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: auto;
   padding: 4px 2px;
-  color: var(--octant-text-muted);
-  font-size: 12px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .code-composer-adapter__delivery {
   display: grid;
   gap: 10px;
   padding: 10px 12px;
-  background: var(--octant-surface);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
 }
 
 .code-composer-adapter__field {
   display: grid;
   gap: 4px;
-  font-size: 12px;
-  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+  color: var(--oct-muted);
 }
 
 .code-composer-adapter__error {
   margin: 0;
-  color: var(--octant-destructive);
-  font-size: 12px;
+  color: var(--oct-danger-fg);
+  font-size: var(--oct-text-sm);
 }
 
 .code-composer-adapter__hint {
   margin: 0;
   padding: 0 2px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  opacity: 0.7;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 /* Quiet worktree-source status line below the context strip. */
@@ -1817,7 +1644,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   background: var(--octant-surface-canvas);
 }
 
@@ -1837,8 +1664,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   gap: 8px;
   min-width: 0;
   padding: 0 10px;
-  border-bottom: 1px solid var(--octant-border-subtle);
-  background: color-mix(in srgb, var(--octant-surface-raised) 68%, var(--octant-surface-canvas));
+  border-bottom: 1px solid var(--oct-border-soft);
+  background: var(--oct-surface-warm);
 }
 
 .browser-workspace h2,
@@ -1860,7 +1687,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   height: 28px;
   padding: 0;
   place-items: center;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -1868,8 +1695,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 .browser-workspace__history button:hover:not(:disabled),
 .browser-workspace__close:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .browser-workspace__history button:disabled {
@@ -1884,19 +1711,19 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   min-width: 0;
   height: 28px;
   padding: 0 9px;
-  border: 1px solid var(--octant-border-subtle);
+  border: 1px solid var(--oct-border-soft);
   border-radius: 6px;
-  color: var(--octant-text-primary);
-  background: color-mix(in srgb, var(--octant-surface-canvas) 82%, transparent);
+  color: var(--oct-fg);
+  background: var(--oct-bg);
 }
 
 .browser-workspace__omnibox:focus-within {
   border-color: var(--octant-border-strong);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--octant-accent) 28%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--oct-accent) 28%, transparent);
 }
 
 .browser-workspace__omnibox svg {
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
 }
 
 .browser-workspace__security {
@@ -1910,11 +1737,11 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   min-width: 0;
   height: 100%;
   padding: 0;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   border: 0;
   outline: 0;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--oct-text-sm);
 }
 
 .browser-workspace__control-state {
@@ -1922,8 +1749,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   flex: 0 0 auto;
   align-items: center;
   gap: 5px;
-  color: var(--octant-text-secondary);
-  font-size: 10px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   white-space: nowrap;
 }
 
@@ -1933,10 +1760,10 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 .browser-workspace__message {
   padding: 7px 12px;
-  color: var(--octant-warning-text);
+  color: var(--oct-warn-fg);
   border-bottom: 1px solid var(--octant-warning-border);
-  background: var(--octant-warning-surface);
-  font-size: 11px;
+  background: var(--oct-warn-soft);
+  font-size: var(--oct-text-xs);
 }
 
 .browser-workspace__empty,
@@ -1947,21 +1774,21 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   gap: 8px;
   min-height: 0;
   padding: 32px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   text-align: center;
 }
 
 .browser-workspace__empty h2 {
-  color: var(--octant-text-primary);
-  font-size: 14px;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
   font-weight: 600;
 }
 
 .browser-workspace__empty p,
 .browser-workspace__remote-empty p {
   max-width: 360px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   line-height: 1.5;
 }
 
@@ -1979,7 +1806,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   justify-items: center;
   gap: 8px;
   padding: 24px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   text-align: center;
 }
 
@@ -1992,7 +1819,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 .browser-workspace__remote--focused {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--octant-accent) 42%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--oct-accent) 42%, transparent);
 }
 
 .browser-workspace__preview {

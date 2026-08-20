@@ -1,30 +1,36 @@
+/* Remote pairing: claim a device code, then compare fingerprints. Paint
+   comes from the design system (octant.css `--oct-*` tokens); the
+   fingerprint stays mono at full length because a truncated fingerprint
+   cannot be compared, which is the only reason to show one. */
+
 .remote-pairing {
   display: grid;
   width: min(100%, 420px);
-  gap: 14px;
-  padding: 28px;
-  color: var(--octant-text-primary);
+  gap: var(--oct-space-4);
+  padding: var(--oct-space-8);
+  color: var(--oct-fg);
 }
 
 .remote-pairing__centered {
   display: grid;
   place-items: center;
   min-height: 100vh;
-  padding: 28px;
+  padding: var(--oct-space-8);
 }
 
 .remote-pairing__title {
   margin: 0;
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-base);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-snug);
 }
 
 .remote-pairing__description {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-body);
 }
 
 .remote-pairing__form {
@@ -33,10 +39,10 @@
 }
 
 .remote-pairing__label {
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }
 
@@ -49,17 +55,17 @@
 }
 
 .remote-pairing__error {
-  color: var(--octant-danger-text);
-  font-size: 12px;
+  color: var(--oct-danger-fg);
+  font-size: var(--oct-text-xs);
 }
 
 .remote-pairing__identity {
   display: grid;
-  gap: 8px;
-  padding: 12px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .remote-pairing__fact {
@@ -71,45 +77,45 @@
 }
 
 .remote-pairing__fact-label {
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .remote-pairing__fact-value {
   overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .remote-pairing__fact-value--monospace {
-  font-family: var(--octant-editor-font-family);
-  font-size: 11px;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }
 
 .remote-pairing__comparison {
   display: grid;
   gap: 6px;
-  padding: 18px;
+  padding: var(--oct-space-5);
   text-align: center;
-  background: var(--octant-success-surface);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  background: var(--oct-success-soft);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .remote-pairing__comparison-label {
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }
 
 .remote-pairing__comparison-code {
-  color: var(--octant-text-primary-high-contrast);
-  font-family: var(--octant-editor-font-family);
-  font-size: 28px;
-  font-weight: 600;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-2xl);
+  font-weight: var(--oct-weight-strong);
   letter-spacing: 0.12em;
 }

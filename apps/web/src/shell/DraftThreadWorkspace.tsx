@@ -417,11 +417,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               ? {}
               : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
           />
-          <div className="draft-thread__input-row">
+          <div className="composer">
             <OctantTextarea
               aria-label="First message"
               autoFocus
-              className="draft-thread__textarea"
+              className="composer-input"
               disabled={props.creating}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={handleKeyDown}
@@ -430,17 +430,19 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               rows={3}
               value={prompt}
             />
-            <OctantButton
-              aria-label="Create thread"
-              className="draft-thread__send"
-              disabled={!canSubmit}
-              onClick={submit}
-              size="icon"
-              type="button"
-              variant="default"
-            >
-              <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-            </OctantButton>
+            <div className="composer-row">
+              <span className="composer-gap" />
+              <OctantButton
+                aria-label="Create thread"
+                disabled={!canSubmit}
+                onClick={submit}
+                size="icon"
+                type="button"
+                variant="default"
+              >
+                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+              </OctantButton>
+            </div>
           </div>
           {props.errorMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">

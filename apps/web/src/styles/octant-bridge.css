@@ -1,0 +1,129 @@
+/* ══════════════════════════════════════════════════════════════════════
+   HOST THEME ADAPTER — octant.css inside the Octant app
+
+   Repoints the design system's --oct-* colour and font tokens at the
+   runtime theme the app's users actually picked. The authority order is
+   the one docs/decisions/0016 states: `--octant-*` (packages/theme via
+   ThemeSettingsProvider / TypographyProvider) is the single source of
+   visual truth; `--oct-*` is a consumer, exactly like shadcn-theme.css.
+
+   Two rules, both measured rather than assumed (see the design system's
+   octant-oo-bridge.css, which this file adapts):
+
+     1. Map only what the host varies at RUNTIME. Colours and fonts
+        change per theme; space, radii, motion and the type scale do not.
+
+     2. Accent as TEXT needs 4.5:1, not the 3:1 a fill needs. That is
+        what the `accent-text` theme role exists for — the theme engine
+        polices it like every other text role.
+
+   Load AFTER octant.css. Every rule here overrides a token octant.css
+   declared; a token absent from this file keeps its light-dark() value
+   on purpose and follows the root's color-scheme, which
+   ThemeSettingsProvider sets inline from the resolved mode.
+   ══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ─── ground ────────────────────────────────────────────────────────
+     Octant's three steps line up with the app's three: the page ground,
+     the card raised off it, and the warmer strip inside a card. */
+  --oct-bg: var(--octant-workspace);
+  --oct-surface: var(--octant-floating);
+  --oct-surface-warm: var(--octant-control);
+
+  /* ─── text ──────────────────────────────────────────────────────────
+     Four steps to the app's three. fg-2 is Octant's 90% weight, which
+     has no role of its own in the app, so it is derived rather than
+     collapsed into fg — losing it would flatten every secondary line in
+     a card to the same weight as its heading. */
+  --oct-fg: var(--octant-text-primary);
+  --oct-fg-2: color-mix(in oklab, var(--octant-text-primary) 90%, transparent);
+  --oct-muted: var(--octant-text-secondary);
+  --oct-meta: var(--octant-text-muted);
+
+  /* ─── lines ─────────────────────────────────────────────────────────
+     The app's border is a solid colour, not a translucent ink, so the
+     soft variant is mixed toward the workspace rather than toward
+     transparent — mixing to transparent would let the ground show
+     through and make the hairline read darker than the surface. */
+  --oct-border: var(--octant-border);
+  --oct-border-soft: color-mix(in oklab, var(--octant-border) 55%, var(--octant-workspace));
+
+  /* A translucent tint for chips and hover fills that sit over
+     whichever layer they land on. Kept translucent for that reason
+     rather than mapped to the app's solid --octant-control. */
+  --oct-fg-soft: color-mix(in oklab, var(--octant-text-primary) 7%, transparent);
+
+  /* ─── accent ────────────────────────────────────────────────────────
+     accent-text is a real theme role (contrast target: workspace, bar:
+     normal text), so accent-as-text follows a custom theme and stays
+     policed at 4.5:1 instead of borrowing the fill's 3:1 guarantee. */
+  --oct-accent: var(--octant-accent);
+  --oct-accent-on: var(--octant-accent-foreground);
+  --oct-accent-fg: var(--octant-accent-text);
+
+  /* ─── status ────────────────────────────────────────────────────────
+     The app enforces these text roles at 4.5:1 against `floating` — the
+     stricter of the two surfaces status text actually sits on — so the
+     mappings are direct. The soft fills are the tinted grounds behind
+     status text; the app supplies success and warning surfaces but no
+     danger surface, so danger-soft is derived at the strength the
+     design system uses. */
+  --oct-success-fg: var(--octant-success-text);
+  --oct-warn-fg: var(--octant-warning-text);
+  --oct-danger-fg: var(--octant-danger-text);
+
+  --oct-success-soft: var(--octant-success-surface);
+  --oct-warn-soft: var(--octant-warning-surface);
+  --oct-danger-soft: color-mix(in oklab, var(--octant-danger-text) 20%, transparent);
+
+  /* The saturated bases, used for fills and status dots rather than
+     text. The app has no separate base, so they follow the text roles —
+     which is what the design system does in dark mode anyway. */
+  --oct-success: var(--octant-success-text);
+  --oct-warn: var(--octant-warning-text);
+  --oct-danger: var(--octant-danger-text);
+
+  /* ─── depth ─────────────────────────────────────────────────────────
+     Octant draws elevation as a ring and no shadow; the app has real
+     shadows. Inside the app the app wins, because a flat card in a
+     shadowed shell reads as a rendering bug rather than as restraint. */
+  --oct-elev-ring: var(--octant-shadow-hairline);
+  --oct-elev-raised: var(--octant-shadow-overlay);
+
+  /* ─── focus and scrim ───────────────────────────────────────────────
+     The two-ring shape is the design system's: an inner ring in the
+     ground colour separating the outer ring from the control. Only the
+     colours come from the app. */
+  --oct-focus-ring: 0 0 0 2px var(--octant-workspace), 0 0 0 4px var(--octant-focus-ring);
+  --oct-scrim: var(--octant-scrim);
+
+  /* Chart chrome, derived so it tracks the theme. The grid stays
+     fainter than border-soft: a gridline is a reading aid and must
+     never compete with the data. */
+  --oct-chart-grid: color-mix(in oklab, var(--octant-border) 70%, var(--octant-workspace));
+  --oct-chart-axis: var(--octant-border-strong);
+
+  /* ─── type ──────────────────────────────────────────────────────────
+     These follow the user's typography settings (TypographyProvider).
+     Display and transcript are deliberately NOT mapped: the display
+     face is the brand mark and the transcript face is a reading
+     decision; neither has an equivalent role in the app. */
+  --oct-font-body: var(--octant-ui-font-family);
+  --oct-font-mono: var(--octant-editor-font-family);
+}
+
+/* ── Deliberately not mapped ───────────────────────────────────────────
+
+   --oct-series-1..6    The chart palette, measured against the design
+                        system's own grounds and paired with dash
+                        patterns. The app has no series roles yet;
+                        adding six is the upstream fix if custom themes
+                        ever push a chart below 3:1.
+
+   --oct-grid-line      A structural hairline, not a themed surface.
+
+   space, radius, motion, type scale, tracking, control heights, layout
+   sizes, z-index, breakpoints — static in both systems. Mapping a
+   constant onto another constant buys indirection and nothing else.
+   ────────────────────────────────────────────────────────────────────── */

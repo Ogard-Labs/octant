@@ -303,10 +303,10 @@ export function AutomationCenter(props: AutomationCenterProps) {
                 />
               </label>
               <ListArrangementMenu arrangement={arrangement} onChange={setArrangement} />
-              <fieldset className="automation-center__views">
+              <fieldset className="automation-center__views segmented">
                 <legend className="sr-only">Choose a view</legend>
                 {(["list", "calendar"] as const).map((candidate) => (
-                  <label className="automation-center__view" key={candidate}>
+                  <label className="automation-center__view segment" key={candidate}>
                     <input
                       checked={view === candidate}
                       name="automation-center-view"
@@ -318,7 +318,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
                   </label>
                 ))}
               </fieldset>
-              <label className="automation-center__completed">
+              <label className="automation-center__completed check">
                 <input
                   checked={includeCompleted}
                   onChange={(event) => setIncludeCompleted(event.target.checked)}
@@ -326,10 +326,10 @@ export function AutomationCenter(props: AutomationCenterProps) {
                 />
                 <span>Show completed</span>
               </label>
-              <fieldset className="automation-center__filters">
+              <fieldset className="automation-center__filters segmented">
                 <legend className="sr-only">Filter by mode</legend>
                 {FILTERS.map((filter) => (
-                  <label className="automation-center__filter" key={filter.value}>
+                  <label className="automation-center__filter segment" key={filter.value}>
                     <input
                       checked={controller.filter === filter.value}
                       name="automation-center-filter"
@@ -491,7 +491,7 @@ function AutomationListBody(props: {
   });
   if (groups.length === 0) {
     return (
-      <div className="automation-center__empty" role="status">
+      <div className="automation-center__empty empty" role="status">
         <p>No automations match the current filters.</p>
         <p>Nothing was deleted; adjust the filters or create a new automation.</p>
       </div>
@@ -536,7 +536,7 @@ function AutomationListBody(props: {
                     )}
                   </span>
                   <span
-                    className="automation-row__cadence"
+                    className="automation-row__cadence badge"
                     data-cadence={routineCadence(summary.trigger)}
                   >
                     {routineCadenceLabel(routineCadence(summary.trigger))}
@@ -545,7 +545,7 @@ function AutomationListBody(props: {
                     // Only a routine that belongs somewhere else is badged. Badging
                     // every row would make the machine you are sitting at look like
                     // one more remote environment.
-                    <span className="automation-row__environment">
+                    <span className="automation-row__environment badge">
                       {props.environmentLabel(String(summary.hostId))}
                     </span>
                   )}
@@ -579,7 +579,7 @@ function AutomationListBody(props: {
                     <ChevronDown aria-hidden="true" size={13} strokeWidth={1.8} />
                   </OctantButton>
                   {props.openMenuId !== String(summary.id) ? null : (
-                    <div className="automation-row__menu">
+                    <div className="automation-row__menu menu">
                       {summary.lifecycle === "enabled" ? (
                         <OctantButton
                           onClick={() =>

@@ -25,13 +25,18 @@ import type {
   ZenThreadCatalogRef,
   ZenViewport,
 } from "@octant/contracts/zen";
-import { DEFAULT_ZEN_TIMER_DURATION_MS, getZenBuiltinBackground } from "@octant/contracts/zen";
+import {
+  DEFAULT_ZEN_BACKGROUND,
+  DEFAULT_ZEN_TIMER_DURATION_MS,
+  getZenBuiltinBackground,
+} from "@octant/contracts/zen";
 import type { SettingsDeepLink } from "@octant/contracts";
 import {
   UNSUPPORTED_NAVIGATOR_ASSISTANT,
   type NavigatorAssistantController,
 } from "../navigator/useNavigatorAssistant";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import { ZenAppearancePanel } from "./ZenAppearancePanel";
 import { ZenBar } from "./ZenBar";
 import { ZenAssistant } from "./ZenAssistant";
@@ -338,7 +343,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
     return props.renderTerminal({ element, activity });
   }
 
-  const backgroundStyle = resolveZenBackgroundStyle(background, props.backgroundImageUrl);
+  const resolvedBackground = resolveZenBackgroundStyle(background, props.backgroundImageUrl);
   const overlay = Math.max(
     appearance.dimming,
     background.kind === "image" || background.kind === "builtin" ? background.overlay : 0,
@@ -482,9 +487,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
       onPointerCancel={finishPointerInteraction}
       ref={surfaceRef}
       role="application"
-      style={backgroundStyle}
+      style={resolvedBackground.style}
       tabIndex={0}
     >
+      {resolvedBackground.systemGround ? <div aria-hidden="true" className="zen-ground" /> : null}
       <div className="zen-surface__traffic-light-safe window-drag-region" aria-hidden="true" />
       {props.focusZone === null || props.focusZone === undefined ? null : (
         <div className="zen-surface__spaces-anchor window-no-drag">
@@ -552,7 +558,9 @@ export function ZenSurface(props: ZenSurfaceProps) {
           return (
             <div
               aria-label={title}
-              className={`zen-element${focusedId === element.elementId ? " zen-element--focused" : ""}${element.minimized ? " zen-element--minimized" : ""}`}
+              className={`zen-el${focusedId === element.elementId ? " zen-element--focused" : ""}`}
+              data-locked={element.locked ? "true" : undefined}
+              data-minimized={element.minimized ? "true" : undefined}
               key={element.elementId}
               onFocus={(event) => {
                 if (event.target !== event.currentTarget) return;
@@ -564,19 +572,23 @@ export function ZenSurface(props: ZenSurfaceProps) {
                 left: geometry.x,
                 top: geometry.y,
                 width: geometry.width,
-                height: element.minimized ? 44 : geometry.height,
+                // A minimised card keeps only its title bar, so the bar's own
+                // height is the honest one; the stored geometry height waits
+                // for the restore.
+                ...(element.minimized ? {} : { height: geometry.height }),
                 zIndex: element.zIndex,
                 opacity: forceOpaque ? 1 : appearance.elementOpacity,
               }}
               tabIndex={0}
             >
               <header
-                className="zen-element__header"
+                className="zen-el-head"
                 onPointerDown={(event) => beginElementInteraction(event, element, "move")}
               >
                 <span>{title}</span>
+                <span className="zen-el-gap" />
                 <span
-                  className="zen-element__actions window-no-drag"
+                  className="zen-el-actions window-no-drag"
                   onPointerDown={(event) => event.stopPropagation()}
                   onMouseDown={(event) => event.stopPropagation()}
                 >
@@ -587,6 +599,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                       event.stopPropagation();
                       props.onUpdateElement({ ...element, minimized: !element.minimized });
                     }}
+                    size="sm"
                     type="button"
                     variant="ghost"
                   >
@@ -599,6 +612,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                       event.stopPropagation();
                       props.onRemoveElement?.(element.elementId);
                     }}
+                    size="sm"
                     type="button"
                     variant="ghost"
                   >
@@ -608,7 +622,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
               </header>
               {element.minimized ? null : (
                 <>
-                  <div className="zen-element__body">
+                  <div className="zen-el-body">
                     {element.kind === "thread" ? (
                       <ZenThreadElement
                         {...(threadCard ?? {})}
@@ -666,7 +680,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                   </div>
                   <button
                     aria-label={`Resize ${title}`}
-                    className="zen-element__resize-handle window-no-drag"
+                    className="zen-el-grip window-no-drag"
                     disabled={element.locked}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => beginElementInteraction(event, element, "resize")}
@@ -683,7 +697,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
         ? null
         : props.renderResearchDock?.({ dock: props.space.research })}
 
-      <div className="zen-surface__controls window-no-drag">
+      <div className="zen-bar zen-surface__controls window-no-drag">
         <OctantButton
           aria-label="Zoom out"
           onClick={() =>
@@ -692,8 +706,9 @@ export function ZenSurface(props: ZenSurfaceProps) {
               scale: Math.max(0.1, props.space.viewport.scale / 1.2),
             })
           }
+          size="sm"
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
           −
         </OctantButton>
@@ -705,8 +720,9 @@ export function ZenSurface(props: ZenSurfaceProps) {
               scale: Math.min(5, props.space.viewport.scale * 1.2),
             })
           }
+          size="sm"
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
           +
         </OctantButton>
@@ -716,15 +732,17 @@ export function ZenSurface(props: ZenSurfaceProps) {
               computeZoomToFit(props.space.elements, { width: 1200, height: 800 }, 48),
             )
           }
+          size="sm"
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
           Zoom to Fit
         </OctantButton>
         <OctantButton
           onClick={() => props.onUpdateViewport({ panX: 0, panY: 0, scale: 1 })}
+          size="sm"
           type="button"
-          variant="secondary"
+          variant="ghost"
         >
           Reset view
         </OctantButton>
@@ -768,10 +786,10 @@ export function ZenSurface(props: ZenSurfaceProps) {
       {manualPanel === null ? null : (
         <section
           aria-label={manualPanel === "appearance" ? "Zen appearance" : "Zen additions"}
-          className="zen-panel zen-surface__manual-panel window-no-drag"
+          className="zen-panel card card-tight card-raised zen-surface__manual-panel window-no-drag"
           role="dialog"
         >
-          <header className="zen-panel__header">
+          <header className="card-head">
             <h2>
               {manualPanel === "appearance"
                 ? "Appearance"
@@ -833,7 +851,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     </OctantButton>
                     <label>
                       Reference URL
-                      <input
+                      <OctantInput
                         aria-label="Reference URL"
                         onChange={(event) => setReferenceUrl(event.currentTarget.value)}
                         type="url"
@@ -842,7 +860,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     </label>
                     <label>
                       Reference label
-                      <input
+                      <OctantInput
                         aria-label="Reference label"
                         onChange={(event) => setReferenceLabel(event.currentTarget.value)}
                         type="text"
@@ -872,7 +890,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                   <div className="zen-panel__timer-create">
                     <label>
                       Timer duration in minutes
-                      <input
+                      <OctantInput
                         aria-label="Timer duration in minutes"
                         max="480"
                         min="1"
@@ -961,46 +979,86 @@ function ZenRecipeElement(props: {
   );
 }
 
+type ResolvedZenBackground = {
+  readonly style: CSSProperties;
+  /**
+   * True when the surface shows the system's own ground, which also renders
+   * the design system's dot grid. The grid appears only here: over a user's
+   * colour or imagery it would read as the app's texture on their choice.
+   */
+  readonly systemGround: boolean;
+};
+
+/* The theme's workspace ground. Used whenever no user choice paints the
+   surface, so the safe fallback is the same ground every other surface
+   stands on rather than a colour of Zen's own. */
+const SYSTEM_GROUND = "var(--oct-bg)";
+
+/* The contract's default is a stored solid colour, not a "no choice"
+   marker, so that colour is what identifies an unconfigured ground. */
+const DEFAULT_GROUND_COLOR =
+  DEFAULT_ZEN_BACKGROUND.kind === "solid" ? DEFAULT_ZEN_BACKGROUND.color : null;
+
 function resolveZenBackgroundStyle(
   background: ZenAppearance["background"],
   uploadedImageUrl?: string,
-): CSSProperties {
+): ResolvedZenBackground {
   if (background.kind === "solid") {
-    return { backgroundColor: background.color };
+    if (background.color === DEFAULT_GROUND_COLOR) {
+      return { style: { backgroundColor: SYSTEM_GROUND }, systemGround: true };
+    }
+    return { style: { backgroundColor: background.color }, systemGround: false };
   }
   if (background.kind === "gradient") {
     const style = background.style ?? "linear";
     if (style === "radial") {
       return {
-        backgroundColor: background.to,
-        backgroundImage: `radial-gradient(circle at 50% 40%, ${background.from}, ${background.to})`,
+        style: {
+          backgroundColor: background.to,
+          backgroundImage: `radial-gradient(circle at 50% 40%, ${background.from}, ${background.to})`,
+        },
+        systemGround: false,
       };
     }
     if (style === "conic") {
       return {
-        backgroundColor: background.to,
-        backgroundImage: `conic-gradient(from ${background.angle}deg, ${background.from}, ${background.to}, ${background.from})`,
+        style: {
+          backgroundColor: background.to,
+          backgroundImage: `conic-gradient(from ${background.angle}deg, ${background.from}, ${background.to}, ${background.from})`,
+        },
+        systemGround: false,
       };
     }
     return {
-      backgroundColor: background.to,
-      backgroundImage: `linear-gradient(${background.angle}deg, ${background.from}, ${background.to})`,
+      style: {
+        backgroundColor: background.to,
+        backgroundImage: `linear-gradient(${background.angle}deg, ${background.from}, ${background.to})`,
+      },
+      systemGround: false,
     };
   }
   if (background.kind === "builtin") {
     const preset = getZenBuiltinBackground(background.presetId);
-    return mediaBackgroundStyle(preset.src, background.fill ?? "cover");
+    return {
+      style: mediaBackgroundStyle(preset.src, background.fill ?? "cover"),
+      systemGround: false,
+    };
   }
   if (uploadedImageUrl === undefined) {
-    return { backgroundColor: "#1a1a2e" };
+    // The chosen image is not readable here, so the surface stands on the
+    // system ground until it is — the status line says which case this is.
+    return { style: { backgroundColor: SYSTEM_GROUND }, systemGround: true };
   }
-  return mediaBackgroundStyle(uploadedImageUrl, background.fill ?? "cover");
+  return {
+    style: mediaBackgroundStyle(uploadedImageUrl, background.fill ?? "cover"),
+    systemGround: false,
+  };
 }
 
 function mediaBackgroundStyle(src: string, fill: "cover" | "contain" | "tile"): CSSProperties {
   if (fill === "tile") {
     return {
-      backgroundColor: "#1a1a2e",
+      backgroundColor: SYSTEM_GROUND,
       backgroundImage: `url("${src}")`,
       backgroundPosition: "center",
       backgroundRepeat: "repeat",
@@ -1008,7 +1066,7 @@ function mediaBackgroundStyle(src: string, fill: "cover" | "contain" | "tile"): 
     };
   }
   return {
-    backgroundColor: "#1a1a2e",
+    backgroundColor: SYSTEM_GROUND,
     backgroundImage: `url("${src}")`,
     backgroundPosition: "center",
     backgroundRepeat: "no-repeat",
