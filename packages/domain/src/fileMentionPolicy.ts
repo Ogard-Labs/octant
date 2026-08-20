@@ -122,10 +122,35 @@ export function applyFileMention(
 }
 
 /**
+ * A complete `@path` token: word-boundary `@`, then the exact path, then
+ * whitespace or the end of the draft. Substring presence is not enough —
+ * `@foo` must not keep `foo` selected after the user edits the draft to
+ * `@foobar`.
+ */
+export function draftContainsFileMentionToken(draft: string, path: string): boolean {
+  const token = `@${path}`;
+  let from = 0;
+  while (from <= draft.length - token.length) {
+    const at = draft.indexOf(token, from);
+    if (at === -1) return false;
+    const preceding = at === 0 ? "" : draft.charAt(at - 1);
+    if (preceding !== "" && !/\s/.test(preceding)) {
+      from = at + 1;
+      continue;
+    }
+    const afterIndex = at + token.length;
+    const after = afterIndex >= draft.length ? "" : draft.charAt(afterIndex);
+    if (after === "" || /\s/.test(after)) return true;
+    from = at + 1;
+  }
+  return false;
+}
+
+/**
  * Drop selected paths whose `@path` token the user has since edited out of the
  * draft, and cap the survivors at the per-turn bound. A path that no longer
- * appears must not keep contributing file contents the user believes they
- * deleted.
+ * appears as a complete mention token must not keep contributing file contents
+ * the user believes they deleted.
  */
 export function reconcileFileMentionPaths(
   draft: string,
@@ -136,11 +161,21 @@ export function reconcileFileMentionPaths(
   for (const path of paths) {
     if (kept.length >= MAX_FILE_MENTIONS_PER_TURN) break;
     if (seen.has(path)) continue;
-    if (!draft.includes(`@${path}`)) continue;
+    if (!draftContainsFileMentionToken(draft, path)) continue;
     seen.add(path);
     kept.push(path);
   }
   return kept;
+}
+
+/**
+ * Whether a typeahead query already names a parent-traversal or absolute path.
+ * Only a path component equal to `..` is traversal — `notes..md` is a valid
+ * name and must still complete.
+ */
+export function fileMentionQueryEscapesRoot(query: string): boolean {
+  if (query.startsWith("/") || query.includes("\\")) return true;
+  return query.split("/").some((component) => component === "..");
 }
 
 /**

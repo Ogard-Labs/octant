@@ -3425,14 +3425,57 @@ export function startOctantServer(
           try {
             const view = await codeService.read(windowId, decodeCodeThreadId(threadId));
             if (String(view.checkout.id) !== checkoutId) return { kind: "unauthorized" };
-            const root = await roots.resolve(
+            const rooted = await roots.resolve(
               windowId,
               view.thread,
               view.checkout,
               codeWorkingDirectoryProbePath,
             );
-            if (root === undefined) return { kind: "unavailable" };
-            return { kind: "ok", rootPath: root.rootPath };
+            if (rooted !== undefined) {
+              return {
+                kind: "ok",
+                rootPath: rooted.rootPath,
+                rootIdentity: rooted.rootIdentity,
+              };
+            }
+            // ADR 0017: a Code Project may bind a non-Git folder. Mention
+            // confinement follows the authorized checkout directory rather
+            // than requiring a Git observation.
+            const project = persistence.readProject(view.thread.projectId);
+            const revision = project?.type === "code" ? project.bindingHistory.at(-1) : undefined;
+            if (
+              project?.type !== "code" ||
+              project.lifecycle !== "active" ||
+              revision?.revisionId !== view.thread.bindingRevisionId
+            ) {
+              return { kind: "unauthorized" };
+            }
+            let rootPath: string;
+            if (view.checkout.kind === "existing-worktree") {
+              rootPath = project.binding.canonicalRoot;
+            } else {
+              const receipt = await managedWorktreeReceipts.load(view.checkout.ownershipReceiptId);
+              if (
+                receipt === undefined ||
+                receipt.state !== "ready" ||
+                receipt.canonicalWorktreePath === undefined
+              ) {
+                return { kind: "unavailable" };
+              }
+              rootPath = receipt.canonicalWorktreePath;
+            }
+            const metadata = await lstat(rootPath, { bigint: true });
+            if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+              return { kind: "unavailable" };
+            }
+            return {
+              kind: "ok",
+              rootPath,
+              rootIdentity: {
+                device: metadata.dev.toString(10),
+                inode: metadata.ino.toString(10),
+              },
+            };
           } catch {
             return { kind: "unauthorized" };
           }
@@ -3450,12 +3493,15 @@ export function startOctantServer(
             ) {
               return { kind: "unauthorized" };
             }
-            const workingDirectory = thread.workingDirectory ?? decodeThreadWorkingDirectory(".");
-            const rootPath = await resolveThreadWorkingDirectory(
-              project.binding.canonicalRoot,
-              workingDirectory,
-            );
-            return { kind: "ok", rootPath };
+            const latest = project.bindingHistory.at(-1);
+            if (
+              thread.bindingRevisionId === undefined ||
+              latest === undefined ||
+              String(thread.bindingRevisionId) !== String(latest.revisionId)
+            ) {
+              return { kind: "unauthorized" };
+            }
+            return { kind: "ok", rootPath: project.binding.canonicalRoot };
           } catch {
             return { kind: "unavailable" };
           }

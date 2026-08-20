@@ -88,11 +88,26 @@ export const ResolvedFileMention = Schema.Struct({
 export type ResolvedFileMention = typeof ResolvedFileMention.Type;
 
 /**
+ * A mentioned path as the user named it. Leading and trailing spaces are
+ * significant POSIX name bytes, so this must not trim. Parent traversal is
+ * still accepted here so policy can refuse it as `out-of-root` rather than
+ * failing the command as invalid.
+ */
+export const FileMentionPathInput = Schema.String.pipe(
+  Schema.filter(
+    (value) =>
+      value.length > 0 &&
+      textEncoder.encode(value).byteLength <= MAX_FILE_MENTION_RELATIVE_PATH_BYTES,
+  ),
+);
+export type FileMentionPathInput = typeof FileMentionPathInput.Type;
+
+/**
  * A mention the server refused. `out-of-root` is the confinement failure: the
  * host classified the path as outside the bound root and did not read it.
  */
 export const UnavailableFileMention = Schema.Struct({
-  path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FILE_MENTION_RELATIVE_PATH_BYTES)),
+  path: FileMentionPathInput,
   reason: Schema.Literal("out-of-root", "not-found", "unauthorized", "unsupported-mode"),
 }).annotations(strict);
 export type UnavailableFileMention = typeof UnavailableFileMention.Type;
@@ -114,9 +129,10 @@ export const FileMentionCommand = Schema.Union(
     kind: Schema.Literal("resolve-file-mentions"),
     requestId: FileMentionRequestId,
     scope: FileMentionScope,
-    paths: Schema.Array(
-      Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FILE_MENTION_RELATIVE_PATH_BYTES)),
-    ).pipe(Schema.minItems(1), Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
+    paths: Schema.Array(FileMentionPathInput).pipe(
+      Schema.minItems(1),
+      Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN),
+    ),
   }).annotations(strict),
 );
 export type FileMentionCommand = typeof FileMentionCommand.Type;

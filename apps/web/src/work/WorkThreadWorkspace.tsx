@@ -15,7 +15,7 @@ import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-cl
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
-import { ArrowUp, Check, Globe2 } from "lucide-react";
+import { ArrowUp, Check, Globe2, Paperclip } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -232,13 +232,15 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     setErrorMessage(undefined);
     setStatus(undefined);
     try {
-      if (
-        props.turnClient !== undefined &&
-        thread !== undefined &&
-        thread.bindingRevisionId !== undefined
-      ) {
+      if (props.turnClient !== undefined) {
+        if (thread === undefined || thread.bindingRevisionId === undefined) {
+          setErrorMessage(
+            "This Work thread must be rebound before sending a follow-up. The Project folder is no longer authorized for this thread.",
+          );
+          return;
+        }
         const threadMentionIds = await threadMentions.resolveForSend();
-        const staged = images.takeForSend();
+        const staged = images.filesForSend();
         const attachmentIds = [];
         for (const file of staged) {
           const attachmentId = decodeWorkAttachmentId(globalThis.crypto.randomUUID());
@@ -276,6 +278,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           setErrorMessage("The Work turn could not be started.");
           return;
         }
+        images.clearAfterAccepted();
         setPrompt("");
         threadMentions.clear();
         fileMentions.clear();
@@ -612,6 +615,47 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               value={prompt}
             />
             <div className="composer-row">
+              {props.turnClient === undefined ? null : (
+                <>
+                  <label>
+                    <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                    <input
+                      aria-label="Choose attachment file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="work-composer-adapter__file-input"
+                      disabled={creating || completionLocked || imageSupport === false}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.item(0);
+                        if (file !== null && file !== undefined) {
+                          if (imageSupport === false) {
+                            images.refuse(
+                              "The selected model does not accept images. Choose an image-capable model.",
+                            );
+                          } else {
+                            images.attach([file]);
+                          }
+                        }
+                        event.currentTarget.value = "";
+                      }}
+                      type="file"
+                    />
+                  </label>
+                  <OctantButton
+                    aria-label="Add attachment"
+                    disabled={creating || completionLocked || imageSupport === false}
+                    onClick={(event) => {
+                      event.currentTarget.parentElement
+                        ?.querySelector<HTMLInputElement>('input[type="file"]')
+                        ?.click();
+                    }}
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+                  </OctantButton>
+                </>
+              )}
               <span className="composer-gap" />
               <OctantButton
                 aria-label={props.turnClient === undefined ? "Create artifact" : "Send follow-up"}

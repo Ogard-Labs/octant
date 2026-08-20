@@ -16,16 +16,29 @@ import {
   classifyFileMentionRelativePath,
   FILE_MENTION_OUT_OF_ROOT_CONTEXT,
   FILE_MENTION_UNREADABLE_CONTEXT,
+  fileMentionQueryEscapesRoot,
   formatFileMentionContext,
   rankFileMentionCandidates,
 } from "@octant/domain";
-import { createFileMentionIo, type FileMentionIo } from "./fileMentionIo";
+import {
+  createFileMentionIo,
+  type FileMentionIo,
+  type FileMentionRootIdentity,
+} from "./fileMentionIo";
 
 export type FileMentionRootResolution =
-  | { readonly kind: "ok"; readonly rootPath: string }
+  | {
+      readonly kind: "ok";
+      readonly rootPath: string;
+      readonly rootIdentity?: FileMentionRootIdentity;
+    }
   | { readonly kind: "unauthorized" }
   | { readonly kind: "unavailable" }
   | { readonly kind: "not-found" };
+
+const LISTING_CACHE_MS = 2_000;
+const fatalDecoder = new TextDecoder("utf-8", { fatal: true });
+const prefixDecoder = new TextDecoder("utf-8", { fatal: false });
 
 export interface FileMentionAuthority {
   resolveCodeRoot(
@@ -35,8 +48,6 @@ export interface FileMentionAuthority {
   ): Promise<FileMentionRootResolution>;
   resolveWorkRoot(windowId: WindowId, threadId: string): Promise<FileMentionRootResolution>;
 }
-
-const decoder = new TextDecoder("utf-8", { fatal: true });
 
 /**
  * Resolve one mentioned path against a bound root.
@@ -50,6 +61,7 @@ export async function resolveMentionedFile(input: {
   readonly relativePath: string;
   readonly rootPath: string;
   readonly io: FileMentionIo;
+  readonly rootIdentity?: FileMentionRootIdentity;
 }): Promise<
   | {
       readonly kind: "resolved";
@@ -67,24 +79,29 @@ export async function resolveMentionedFile(input: {
   if (classified.kind === "out-of-root") {
     return { kind: "unavailable", path: input.relativePath, reason: "out-of-root" };
   }
-  const located = await input.io.locate(input.rootPath, classified.path);
+  const located =
+    input.rootIdentity === undefined
+      ? await input.io.locate(input.rootPath, classified.path)
+      : await input.io.locate(input.rootPath, classified.path, input.rootIdentity);
   if (located.kind === "escapes-root") {
     return { kind: "unavailable", path: classified.path, reason: "out-of-root" };
   }
   if (located.kind !== "file") {
     return { kind: "unavailable", path: classified.path, reason: "not-found" };
   }
+  const maximumBytes = MAX_FILE_MENTION_CHARACTERS * 4;
   const bytes = await input.io.readBytes(
     located.canonicalPath,
     { device: located.device, inode: located.inode },
-    MAX_FILE_MENTION_CHARACTERS * 4,
+    maximumBytes,
   );
   if (bytes === undefined) {
     return { kind: "unavailable", path: classified.path, reason: "not-found" };
   }
   let text: string;
   try {
-    text = decoder.decode(bytes);
+    text =
+      located.size > bytes.byteLength ? prefixDecoder.decode(bytes) : fatalDecoder.decode(bytes);
   } catch {
     return { kind: "unavailable", path: classified.path, reason: "not-found" };
   }
@@ -93,7 +110,7 @@ export async function resolveMentionedFile(input: {
     kind: "resolved",
     path: classified.path,
     text: bounded.text,
-    truncated: bounded.truncated,
+    truncated: bounded.truncated || located.size > bytes.byteLength,
   };
 }
 
@@ -145,6 +162,10 @@ function randomFileMentionRequestId(): string {
 export class FileMentionService {
   readonly #authority: FileMentionAuthority;
   readonly #io: FileMentionIo;
+  readonly #listings = new Map<
+    string,
+    { readonly expiresAt: number; readonly promise: ReturnType<FileMentionIo["list"]> }
+  >();
 
   constructor(options: { readonly authority: FileMentionAuthority; readonly io?: FileMentionIo }) {
     this.#authority = options.authority;
@@ -165,24 +186,24 @@ export class FileMentionService {
     if (root.kind !== "ok") return failed(command.requestId, root.kind);
 
     if (command.kind === "complete-file-mentions") {
-      return this.#complete(command.requestId, root.rootPath, command.query);
+      return this.#complete(command.requestId, root, command.query);
     }
-    return this.#resolve(command.requestId, root.rootPath, command.paths);
+    return this.#resolve(command.requestId, root, command.paths);
   }
 
   async #complete(
     requestId: FileMentionRequestId,
-    rootPath: string,
+    root: Extract<FileMentionRootResolution, { readonly kind: "ok" }>,
     query: string,
   ): Promise<FileMentionCommandResult> {
-    if (query.includes("..") || query.startsWith("/") || query.includes("\\")) {
+    if (fileMentionQueryEscapesRoot(query)) {
       return decodeFileMentionCommandResult({
         kind: "file-mentions-completed",
         requestId,
         candidates: [],
       });
     }
-    const listed = await this.#io.list(rootPath);
+    const listed = await this.#listCached(root);
     return decodeFileMentionCommandResult({
       kind: "file-mentions-completed",
       requestId,
@@ -190,9 +211,29 @@ export class FileMentionService {
     });
   }
 
+  async #listCached(
+    root: Extract<FileMentionRootResolution, { readonly kind: "ok" }>,
+  ): ReturnType<FileMentionIo["list"]> {
+    const key = `${root.rootPath}\0${root.rootIdentity?.device ?? ""}\0${root.rootIdentity?.inode ?? ""}`;
+    const now = Date.now();
+    const cached = this.#listings.get(key);
+    if (cached !== undefined && cached.expiresAt > now) return cached.promise;
+    const promise =
+      root.rootIdentity === undefined
+        ? this.#io.list(root.rootPath)
+        : this.#io.list(root.rootPath, root.rootIdentity);
+    this.#listings.set(key, { expiresAt: now + LISTING_CACHE_MS, promise });
+    try {
+      return await promise;
+    } catch (error) {
+      this.#listings.delete(key);
+      throw error;
+    }
+  }
+
   async #resolve(
     requestId: FileMentionRequestId,
-    rootPath: string,
+    root: Extract<FileMentionRootResolution, { readonly kind: "ok" }>,
     paths: ReadonlyArray<string>,
   ): Promise<FileMentionCommandResult> {
     const mentions: Array<{
@@ -204,8 +245,9 @@ export class FileMentionService {
     for (const relativePath of paths) {
       const resolved = await resolveMentionedFile({
         relativePath,
-        rootPath,
+        rootPath: root.rootPath,
         io: this.#io,
+        ...(root.rootIdentity === undefined ? {} : { rootIdentity: root.rootIdentity }),
       });
       if (resolved.kind === "unavailable") {
         unavailable.push({ path: resolved.path, reason: resolved.reason });

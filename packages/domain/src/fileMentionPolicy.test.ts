@@ -6,6 +6,7 @@ import {
   FILE_MENTION_OUT_OF_ROOT_CONTEXT,
   formatFileMentionContext,
   parseFileMentionToken,
+  fileMentionQueryEscapesRoot,
   rankFileMentionCandidates,
   reconcileFileMentionPaths,
 } from "./fileMentionPolicy";
@@ -74,6 +75,21 @@ describe("reconcileFileMentionPaths", () => {
     expect(
       reconcileFileMentionPaths("look at @src/index.ts please", ["src/index.ts", "gone.ts"]),
     ).toEqual(["src/index.ts"]);
+  });
+
+  it("does not keep a shorter path that is only a prefix of a later mention", () => {
+    expect(reconcileFileMentionPaths("look at @foobar please", ["foo"])).toEqual([]);
+    expect(reconcileFileMentionPaths("look at @foo please", ["foo"])).toEqual(["foo"]);
+  });
+});
+
+describe("fileMentionQueryEscapesRoot", () => {
+  it("refuses a parent-traversal component and accepts double dots inside a name", () => {
+    expect(fileMentionQueryEscapesRoot("../secret")).toBe(true);
+    expect(fileMentionQueryEscapesRoot("archive/../secret")).toBe(true);
+    expect(fileMentionQueryEscapesRoot("/etc/passwd")).toBe(true);
+    expect(fileMentionQueryEscapesRoot("notes..md")).toBe(false);
+    expect(fileMentionQueryEscapesRoot("archive..old/report.md")).toBe(false);
   });
 });
 

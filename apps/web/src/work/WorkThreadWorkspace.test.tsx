@@ -278,6 +278,78 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
+  it("refuses a follow-up when the thread has no binding authority instead of writing an artifact", async () => {
+    const user = userEvent.setup();
+    const { bindingRevisionId: _omitted, ...unbound } = workThread();
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({
+        threads: [unbound],
+      })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const mutate = vi.fn();
+    const startFirstTurn = vi.fn();
+    render(
+      <WorkThreadWorkspace
+        mutationClient={{ mutate } as never}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={
+          { startFirstTurn, transcript: vi.fn(async () => ({ threadId, turns: [] })) } as never
+        }
+      />,
+    );
+
+    await screen.findByLabelText("Bound provider and model");
+    await user.type(screen.getByRole("textbox", { name: "Work prompt" }), "Revise that");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    expect(mutate).not.toHaveBeenCalled();
+    expect(startFirstTurn).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(/must be rebound before sending a follow-up/),
+    ).toBeInTheDocument();
+  });
+
+  it("offers a file picker on an existing Work thread that can send images", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[
+          {
+            ...providerGroup(),
+            sections: [
+              {
+                label: "Models",
+                models: [
+                  {
+                    model: {
+                      id: modelId,
+                      displayName: "Model One",
+                      inputModalities: ["text", "image"],
+                    },
+                  },
+                ],
+              },
+            ],
+          } as never,
+        ]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript: vi.fn(async () => ({ threadId, turns: [] })) } as never}
+      />,
+    );
+
+    await screen.findByLabelText("Bound provider and model");
+    expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
+  });
+
   it("says a text-only model cannot take a pasted image instead of attaching it", async () => {
     const threadClient = {
       bootstrap: vi.fn(async () => ({ threads: [workThread()] })),

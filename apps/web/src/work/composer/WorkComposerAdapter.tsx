@@ -46,7 +46,7 @@ export interface WorkComposerAdapterProps {
     prompt: string,
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly onAttachFolder?: () => void;
@@ -88,14 +88,23 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   // A Work thread belongs to a Project (decision 0037), so the first turn
   // cannot start until one is chosen. Blocking here is what makes the
   // Project control a requirement rather than a suggestion.
-  const canSubmit = trimmed.length > 0 && !props.creating && hasFolder;
+  const [submitting, setSubmitting] = useState(false);
+  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && hasFolder;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    const staged = images.takeForSend();
-    void threadMentions.resolveForSend().then((threadMentionIds) => {
-      void props.onCreateThread(trimmed, staged, threadMentionIds);
-    });
+    setSubmitting(true);
+    const staged = images.filesForSend();
+    void threadMentions
+      .resolveForSend()
+      .then(async (threadMentionIds) => {
+        const created = await props.onCreateThread(trimmed, staged, threadMentionIds);
+        if (created !== false) images.clearAfterAccepted();
+        return created;
+      })
+      .finally(() => {
+        setSubmitting(false);
+      });
   }, [canSubmit, images, props, threadMentions, trimmed]);
 
   function attachFromTransfer(items: DataTransfer | null): boolean {

@@ -150,6 +150,28 @@ describe("FileMentionService", () => {
     });
   });
 
+  it("completes a file whose name contains double dots", async () => {
+    const io = trackingIo();
+    io.list = vi.fn(async () => [{ path: "notes..md" as never, kind: "file" as const }]);
+    const service = new FileMentionService({ authority: authority(), io });
+
+    const result = await service.execute(
+      {
+        kind: "complete-file-mentions",
+        requestId,
+        scope: { mode: "work", threadId },
+        query: "notes..",
+      },
+      { windowId },
+    );
+
+    expect(result).toMatchObject({
+      kind: "file-mentions-completed",
+      candidates: [{ path: "notes..md", kind: "file" }],
+    });
+    expect(io.list).toHaveBeenCalledOnce();
+  });
+
   it("does not walk the tree when the complete query already names a parent traversal", async () => {
     const io = trackingIo();
     const service = new FileMentionService({ authority: authority(), io });
@@ -196,5 +218,38 @@ describe("FileMentionService", () => {
       unavailable: [],
     });
     expect(io.readBytes).toHaveBeenCalledOnce();
+  });
+
+  it("returns a bounded prefix when the mentioned file is larger than the read window", async () => {
+    const io = trackingIo();
+    const contents = "a".repeat(40_000);
+    io.locate = vi.fn(async () => ({
+      kind: "file" as const,
+      canonicalPath: `${rootPath}/large.md`,
+      device: "1",
+      inode: "2",
+      size: contents.length,
+    }));
+    io.readBytes = vi.fn(async (_path, _expected, maximumBytes) =>
+      new TextEncoder().encode(contents.slice(0, maximumBytes)),
+    );
+    const service = new FileMentionService({ authority: authority(), io });
+
+    const result = await service.execute(
+      {
+        kind: "resolve-file-mentions",
+        requestId,
+        scope: { mode: "work", threadId },
+        paths: ["large.md"],
+      },
+      { windowId },
+    );
+
+    expect(result.kind).toBe("file-mentions-resolved");
+    if (result.kind !== "file-mentions-resolved") return;
+    expect(result.mentions).toHaveLength(1);
+    expect(result.mentions[0]?.truncated).toBe(true);
+    expect(result.mentions[0]?.text.length).toBeLessThan(contents.length);
+    expect(result.unavailable).toEqual([]);
   });
 });

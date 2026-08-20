@@ -38,6 +38,11 @@ import {
   FILE_MENTION_UNREADABLE_CONTEXT,
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
+import {
+  planWorkTurnContext,
+  WORK_TURN_SAFE_INPUT_TOKENS,
+  type WorkTurnContextContribution,
+} from "./workTurnContext";
 import { Schema } from "effect";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
@@ -161,6 +166,12 @@ export interface WorkTurnServiceDependencies {
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly expectedHostId?: string;
+  /**
+   * Token budget the Work turn planner uses. Tests inject a tight budget to
+   * prove oversized file mentions refuse; production uses the conservative
+   * default until this thread's model reports a window.
+   */
+  readonly safeInputBudgetTokens?: number;
 }
 
 export class WorkTurnService {
@@ -178,6 +189,7 @@ export class WorkTurnService {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #expectedHostId: string;
+  readonly #safeInputBudgetTokens: number;
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
   readonly #liveResponses = new Map<string, string>();
@@ -197,6 +209,7 @@ export class WorkTurnService {
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
     this.#expectedHostId = dependencies.expectedHostId ?? "local";
+    this.#safeInputBudgetTokens = dependencies.safeInputBudgetTokens ?? WORK_TURN_SAFE_INPUT_TOKENS;
   }
 
   async startFirstTurn(
@@ -299,6 +312,38 @@ export class WorkTurnService {
 
     const acceptedAt = decodeTimestamp(this.#clock());
     const providerSessionId = decodeProviderSessionId(this.#uuid());
+    const planned = planWorkTurnContext({
+      threadId: command.threadId,
+      providerInstanceId: command.authority.providerInstanceId,
+      modelId: command.authority.modelId,
+      uuid: this.#uuid,
+      createdAt: this.#clock(),
+      safeInputBudget: this.#safeInputBudgetTokens,
+      contributions: [
+        ...this.#priorTranscriptContributions(command.threadId),
+        ...(await this.#threadMentionContributions(
+          command.threadMentionIds,
+          authenticatedWindowId,
+        )),
+        ...(await this.#fileMentionContributions(
+          command.fileMentionPaths,
+          authenticatedWindowId,
+          command.threadId,
+        )),
+        {
+          text: command.prompt,
+          sourceKind: "message",
+          referenceId: `prompt:${command.turnId}`,
+          category: "current-request",
+          posture: "required",
+          block: { kind: "user-message", text: command.prompt },
+        },
+      ],
+    });
+    if (planned.kind === "blocked") {
+      throw this.#failure("invalid", planned.message);
+    }
+
     try {
       this.#append(command.requestId, 0, "work.turn-accepted@1", {
         kind: "turn-accepted",
@@ -341,7 +386,7 @@ export class WorkTurnService {
       projectRoot,
       driver,
       attachments: attachmentInputs,
-      windowId: authenticatedWindowId,
+      context: planned.context,
       signal: controller.signal,
     }).finally(() => {
       this.#controllers.delete(String(command.requestId));
@@ -448,21 +493,13 @@ export class WorkTurnService {
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
-    readonly windowId: WindowId;
+    readonly context: ReadonlyArray<ProviderContextBlock>;
     readonly signal: AbortSignal;
   }): Promise<void> {
     const current = this.#projection.lookup(input.command.requestId);
     if (current === undefined) return;
     this.#persistUpdate(current, { status: "running" });
 
-    const context = [
-      ...(await this.#resolveThreadMentions(input.command.threadMentionIds, input.windowId)),
-      ...(await this.#resolveFileMentions(
-        input.command.fileMentionPaths,
-        input.windowId,
-        input.command.threadId,
-      )),
-    ];
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
@@ -470,7 +507,7 @@ export class WorkTurnService {
       driver: input.driver,
       signal: input.signal,
       ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
-      ...(context.length === 0 ? {} : { context }),
+      ...(input.context.length === 0 ? {} : { context: input.context }),
       onDelta: (response) => {
         this.#liveResponses.set(String(input.command.requestId), response);
       },
@@ -484,40 +521,87 @@ export class WorkTurnService {
     );
   }
 
-  async #resolveThreadMentions(
+  #priorTranscriptContributions(
+    threadId: WorkThreadId,
+  ): ReadonlyArray<WorkTurnContextContribution> {
+    const contributions: WorkTurnContextContribution[] = [];
+    for (const turn of this.#projection.listForThread(threadId)) {
+      for (const [index, entry] of turn.transcript.entries()) {
+        if (entry.text.trim() === "") continue;
+        contributions.push({
+          text: entry.text,
+          sourceKind: "message",
+          referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
+          category: "conversation",
+          posture: "compressible",
+          block: {
+            kind: entry.role === "assistant" ? "assistant-message" : "user-message",
+            text: entry.text,
+          },
+        });
+      }
+    }
+    return contributions;
+  }
+
+  async #threadMentionContributions(
     threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
     windowId: WindowId,
-  ): Promise<ReadonlyArray<ProviderContextBlock>> {
+  ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
     if (threadMentionIds === undefined || threadMentionIds.length === 0) return [];
-    const unreadable = () =>
-      threadMentionIds.map(() => ({
-        kind: "user-message" as const,
+    const unreadable = (): ReadonlyArray<WorkTurnContextContribution> =>
+      threadMentionIds.map((threadId, index) => ({
         text: THREAD_MENTION_UNREADABLE_CONTEXT,
+        sourceKind: "message",
+        referenceId: `thread-mention-unread:${String(threadId)}:${String(index)}`,
+        category: "workspace-context",
+        posture: "compressible",
+        block: { kind: "user-message", text: THREAD_MENTION_UNREADABLE_CONTEXT },
       }));
     const resolve = this.#resolveThreadMentionContext;
     if (resolve === undefined) return unreadable();
     try {
-      return await resolve({ threadMentionIds, windowId });
+      const blocks = await resolve({ threadMentionIds, windowId });
+      return blocks.map((block, index) => ({
+        text: block.text,
+        sourceKind: "message",
+        referenceId: `thread-mention:${String(threadMentionIds[index] ?? index)}`,
+        category: "workspace-context",
+        posture: "compressible",
+        block,
+      }));
     } catch {
       return unreadable();
     }
   }
 
-  async #resolveFileMentions(
+  async #fileMentionContributions(
     fileMentionPaths: ReadonlyArray<string> | undefined,
     windowId: WindowId,
     threadId: WorkThreadId,
-  ): Promise<ReadonlyArray<ProviderContextBlock>> {
+  ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
     if (fileMentionPaths === undefined || fileMentionPaths.length === 0) return [];
-    const unreadable = () =>
-      fileMentionPaths.map(() => ({
-        kind: "user-message" as const,
+    const unreadable = (): ReadonlyArray<WorkTurnContextContribution> =>
+      fileMentionPaths.map((path, index) => ({
         text: FILE_MENTION_UNREADABLE_CONTEXT,
+        sourceKind: "file",
+        referenceId: `file-mention-unread:${path}:${String(index)}`,
+        category: "workspace-context",
+        posture: "required",
+        block: { kind: "user-message", text: FILE_MENTION_UNREADABLE_CONTEXT },
       }));
     const resolve = this.#resolveFileMentionContext;
     if (resolve === undefined) return unreadable();
     try {
-      return await resolve({ fileMentionPaths, windowId, threadId });
+      const blocks = await resolve({ fileMentionPaths, windowId, threadId });
+      return blocks.map((block, index) => ({
+        text: block.text,
+        sourceKind: "file",
+        referenceId: `file-mention:${fileMentionPaths[index] ?? String(index)}`,
+        category: "workspace-context",
+        posture: "required",
+        block,
+      }));
     } catch {
       return unreadable();
     }

@@ -93,11 +93,11 @@ export interface DraftThreadWorkspaceProps {
     deliveryOutcome?: CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<MentionableThreadId>,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
     projectId?: ProjectId,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   readonly codeExecute?: (
     command: CodeCommand,
     signal?: AbortSignal,
@@ -165,14 +165,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           displayName: selectedProject?.name ?? selectedProjectLabel ?? "Selected Project",
         };
   const projectEntries: ReadonlyArray<ComposerProjectEntry> = [
-    ...compatibleProjects.map(
-      (project): ComposerProjectEntry => ({
-        kind: "saved-project",
-        projectId: project.id,
-        displayName: project.name,
-        rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
-      }),
-    ),
+    ...compatibleProjects.map((project): ComposerProjectEntry => ({
+      kind: "saved-project",
+      projectId: project.id,
+      displayName: project.name,
+      rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
+    })),
     { kind: "add-folder" },
   ];
   const folderControl =
@@ -297,12 +295,11 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             : { profileControl: props.executionProfile })}
           onCreateThread={(input) => {
             if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
-              void props.onCreateCodeThread(input, selectedProjectId);
-              return;
+              return props.onCreateCodeThread(input, selectedProjectId);
             }
             // Carry the outcome the user confirmed in the composer so the
             // fallback path never re-derives or auto-confirms a suggestion.
-            void props.onCreateThread(
+            return props.onCreateThread(
               input.prompt,
               selectedProjectId,
               input.deliveryTarget.outcomeKind,

@@ -34,7 +34,7 @@ import {
   ProviderModelId,
   ProviderSessionId,
 } from "./providers";
-import { MAX_FILE_MENTION_RELATIVE_PATH_BYTES, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
+import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -617,9 +617,7 @@ const StartProviderTurn = Schema.Struct({
    * A path that escapes is refused before any read.
    */
   fileMentionPaths: Schema.optional(
-    Schema.Array(
-      Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FILE_MENTION_RELATIVE_PATH_BYTES)),
-    ).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
+    Schema.Array(FileMentionPathInput).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
   ),
 }).annotations(strict);
 const AnswerProviderInput = Schema.Struct({

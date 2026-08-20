@@ -47,6 +47,20 @@ describe("file mention contracts", () => {
     ).toThrow();
   });
 
+  it("preserves leading and trailing spaces in a named path", () => {
+    expect(
+      decodeFileMentionCommand({
+        kind: "resolve-file-mentions",
+        requestId,
+        scope: { mode: "work", threadId },
+        paths: [" notes.md", "notes.md "],
+      }),
+    ).toMatchObject({
+      kind: "resolve-file-mentions",
+      paths: [" notes.md", "notes.md "],
+    });
+  });
+
   it("rejects more paths than a turn may carry", () => {
     expect(() =>
       decodeFileMentionCommand({

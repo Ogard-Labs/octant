@@ -35,14 +35,26 @@ export type FileMentionLocation =
  * already been classified in-root. `locate` must not read file bytes;
  * `readBytes` is the only method that may.
  */
+export interface FileMentionRootIdentity {
+  readonly device: string;
+  readonly inode: string;
+}
+
 export interface FileMentionIo {
-  locate(rootPath: string, relativePath: string): Promise<FileMentionLocation>;
+  locate(
+    rootPath: string,
+    relativePath: string,
+    rootIdentity?: FileMentionRootIdentity,
+  ): Promise<FileMentionLocation>;
   readBytes(
     canonicalPath: string,
     expected: { readonly device: string; readonly inode: string },
     maximumBytes: number,
   ): Promise<Uint8Array | undefined>;
-  list(rootPath: string): Promise<ReadonlyArray<FileMentionCandidate>>;
+  list(
+    rootPath: string,
+    rootIdentity?: FileMentionRootIdentity,
+  ): Promise<ReadonlyArray<FileMentionCandidate>>;
 }
 
 export function createFileMentionIo(
@@ -50,13 +62,9 @@ export function createFileMentionIo(
   files: CodeTestSourcePort = liveCodeTestSourcePort,
 ): FileMentionIo {
   return {
-    async locate(rootPath, relativePath) {
-      let canonicalRoot: string;
-      try {
-        canonicalRoot = await directory.realpath(rootPath);
-      } catch {
-        return { kind: "missing" };
-      }
+    async locate(rootPath, relativePath, rootIdentity) {
+      const canonicalRoot = await canonicalizeMentionRoot(directory, rootPath, rootIdentity);
+      if (canonicalRoot === undefined) return { kind: "missing" };
       if (classifyPathContainment(canonicalRoot, canonicalRoot) === "escapes-root") {
         return { kind: "escapes-root" };
       }
@@ -100,9 +108,9 @@ export function createFileMentionIo(
         const opened = await file.stat();
         if (!opened.isFile) return undefined;
         if (opened.device !== expected.device || opened.inode !== expected.inode) return undefined;
-        if (opened.size > maximumBytes) return undefined;
-        const bytes = await file.read(opened.size + 1);
-        if (bytes.byteLength !== opened.size) return undefined;
+        const toRead = Math.min(opened.size, maximumBytes);
+        const bytes = await file.read(toRead);
+        if (bytes.byteLength !== toRead) return undefined;
         return bytes;
       } catch {
         return undefined;
@@ -110,13 +118,9 @@ export function createFileMentionIo(
         await file.close().catch(() => undefined);
       }
     },
-    async list(rootPath) {
-      let canonicalRoot: string;
-      try {
-        canonicalRoot = await directory.realpath(rootPath);
-      } catch {
-        return [];
-      }
+    async list(rootPath, rootIdentity) {
+      const canonicalRoot = await canonicalizeMentionRoot(directory, rootPath, rootIdentity);
+      if (canonicalRoot === undefined) return [];
       if (classifyPathContainment(canonicalRoot, canonicalRoot) === "escapes-root") return [];
       const root = await resolveContainedPath(directory, canonicalRoot, canonicalRoot);
       if (root === undefined || !root.stat.isDirectory) return [];
@@ -136,6 +140,30 @@ export function createFileMentionIo(
   };
 }
 
+async function canonicalizeMentionRoot(
+  directory: CodeDirectoryPort,
+  rootPath: string,
+  rootIdentity: FileMentionRootIdentity | undefined,
+): Promise<string | undefined> {
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = await directory.realpath(rootPath);
+  } catch {
+    return undefined;
+  }
+  if (rootIdentity === undefined) return canonicalRoot;
+  let stat: CodeDirectoryStat;
+  try {
+    stat = await directory.stat(canonicalRoot);
+  } catch {
+    return undefined;
+  }
+  if (stat.device !== rootIdentity.device || stat.inode !== rootIdentity.inode) {
+    return undefined;
+  }
+  return canonicalRoot;
+}
+
 async function walk(input: {
   readonly directory: CodeDirectoryPort;
   readonly canonicalRoot: string;
@@ -146,43 +174,60 @@ async function walk(input: {
   readonly entries: FileMentionCandidate[];
   readonly visited: Set<string>;
 }): Promise<void> {
-  if (input.depth > MAX_LISTING_DEPTH) return;
-  if (input.entries.length >= MAX_LISTING_ENTRIES) return;
-  const names = await readContainedDirectoryNames(
-    input.directory,
-    input.absolute,
-    input.identity,
-    MAX_LISTING_ENTRIES - input.entries.length + 1,
-  );
-  if (names === undefined) return;
-  for (const name of names) {
-    if (input.entries.length >= MAX_LISTING_ENTRIES) return;
-    if (name === "." || name === ".." || SKIPPED_DIRECTORIES.has(name)) continue;
-    const relative = input.relative === "" ? name : `${input.relative}/${name}`;
-    const absolute = joinCodePath(input.absolute, name);
-    const contained = await resolveContainedPath(input.directory, input.canonicalRoot, absolute);
-    if (contained === undefined) continue;
-    let path: FileMentionCandidate["path"];
-    try {
-      path = decodeFileMentionPath(relative);
-    } catch {
-      continue;
-    }
-    if (contained.stat.isDirectory) {
-      if (input.visited.has(contained.canonical)) continue;
-      input.visited.add(contained.canonical);
-      input.entries.push({ path, kind: "directory" });
-      await walk({
-        ...input,
-        absolute: contained.canonical,
-        identity: contained.stat,
-        relative,
-        depth: input.depth + 1,
-      });
-      continue;
-    }
-    if (contained.stat.isFile) {
-      input.entries.push({ path, kind: "file" });
+  // Breadth-first so an early dense directory cannot exhaust the global
+  // listing budget before sibling files at the same depth are recorded.
+  const queue: Array<{
+    readonly absolute: string;
+    readonly identity: CodeDirectoryStat;
+    readonly relative: string;
+    readonly depth: number;
+  }> = [
+    {
+      absolute: input.absolute,
+      identity: input.identity,
+      relative: input.relative,
+      depth: input.depth,
+    },
+  ];
+  while (queue.length > 0 && input.entries.length < MAX_LISTING_ENTRIES) {
+    const current = queue.shift();
+    if (current === undefined) break;
+    if (current.depth > MAX_LISTING_DEPTH) continue;
+    const names = await readContainedDirectoryNames(
+      input.directory,
+      current.absolute,
+      current.identity,
+      MAX_LISTING_ENTRIES - input.entries.length + 1,
+    );
+    if (names === undefined) continue;
+    for (const name of names) {
+      if (input.entries.length >= MAX_LISTING_ENTRIES) return;
+      if (name === "." || name === ".." || SKIPPED_DIRECTORIES.has(name)) continue;
+      const relative = current.relative === "" ? name : `${current.relative}/${name}`;
+      const absolute = joinCodePath(current.absolute, name);
+      const contained = await resolveContainedPath(input.directory, input.canonicalRoot, absolute);
+      if (contained === undefined) continue;
+      let path: FileMentionCandidate["path"];
+      try {
+        path = decodeFileMentionPath(relative);
+      } catch {
+        continue;
+      }
+      if (contained.stat.isDirectory) {
+        if (input.visited.has(contained.canonical)) continue;
+        input.visited.add(contained.canonical);
+        input.entries.push({ path, kind: "directory" });
+        queue.push({
+          absolute: contained.canonical,
+          identity: contained.stat,
+          relative,
+          depth: current.depth + 1,
+        });
+        continue;
+      }
+      if (contained.stat.isFile) {
+        input.entries.push({ path, kind: "file" });
+      }
     }
   }
 }

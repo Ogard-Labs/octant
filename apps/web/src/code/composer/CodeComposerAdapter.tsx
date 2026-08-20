@@ -90,7 +90,9 @@ export interface CodeComposerAdapterProps {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => void;
-  readonly onCreateThread: (input: CodeComposerSubmitInput) => void | Promise<void>;
+  readonly onCreateThread: (
+    input: CodeComposerSubmitInput,
+  ) => boolean | void | Promise<boolean | void>;
   readonly onCancel: () => void;
   readonly creating?: boolean;
   readonly errorMessage?: string;
@@ -241,7 +243,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const trimmed = prompt.trim();
   // A Code thread belongs to a Project (decision 0037), so the first turn
   // cannot start until one is chosen.
-  const canSubmit = trimmed.length > 0 && !props.creating && props.projectId !== undefined;
+  const [submitting, setSubmitting] = useState(false);
+  const canSubmit =
+    trimmed.length > 0 && !props.creating && !submitting && props.projectId !== undefined;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -289,32 +293,40 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    const staged = images.takeForSend();
-    void threadMentions.resolveForSend().then((threadMentionIds) => {
-      void props.onCreateThread({
-        prompt: trimmed,
-        executionPolicy,
-        permissionPersistence,
-        deliveryTarget: {
-          branchIntent: branchIntent.trim() || defaultDeliveryBranchIntent(baseBranch, shortId),
-          remoteName: remoteName.trim() || "origin",
-          proposedBaseRepository:
-            baseRepository.trim() ||
-            (props.projectName === undefined || props.projectName.trim() === ""
-              ? "local/repository"
-              : `local/${props.projectName}`),
-          proposedBaseBranch: baseBranch.trim() || "development",
-          outcomeKind,
-        },
-        workspace,
-        worktreeSource: {
-          startFromOrigin,
-          remoteName: resolvedWorktreeRemote,
-        },
-        ...(staged.length === 0 ? {} : { images: staged }),
-        ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
+    setSubmitting(true);
+    const staged = images.filesForSend();
+    void threadMentions
+      .resolveForSend()
+      .then(async (threadMentionIds) => {
+        const created = await props.onCreateThread({
+          prompt: trimmed,
+          executionPolicy,
+          permissionPersistence,
+          deliveryTarget: {
+            branchIntent: branchIntent.trim() || defaultDeliveryBranchIntent(baseBranch, shortId),
+            remoteName: remoteName.trim() || "origin",
+            proposedBaseRepository:
+              baseRepository.trim() ||
+              (props.projectName === undefined || props.projectName.trim() === ""
+                ? "local/repository"
+                : `local/${props.projectName}`),
+            proposedBaseBranch: baseBranch.trim() || "development",
+            outcomeKind,
+          },
+          workspace,
+          worktreeSource: {
+            startFromOrigin,
+            remoteName: resolvedWorktreeRemote,
+          },
+          ...(staged.length === 0 ? {} : { images: staged }),
+          ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
+        });
+        if (created !== false) images.clearAfterAccepted();
+        return created;
+      })
+      .finally(() => {
+        setSubmitting(false);
       });
-    });
   }, [
     canSubmit,
     trimmed,

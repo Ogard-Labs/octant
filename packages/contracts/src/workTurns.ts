@@ -4,7 +4,7 @@ import { HostId } from "./host";
 import { BindingRevisionId, ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId, ProviderSessionId } from "./providers";
 import { ThreadWorkingDirectory } from "./workingDirectory";
-import { MAX_FILE_MENTION_RELATIVE_PATH_BYTES, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
+import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { WorkThreadId } from "./workThreads";
 
@@ -191,9 +191,7 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    * the file itself. A path that escapes is refused before any read.
    */
   fileMentionPaths: Schema.optional(
-    Schema.Array(
-      Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FILE_MENTION_RELATIVE_PATH_BYTES)),
-    ).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
+    Schema.Array(FileMentionPathInput).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
   ),
 }).annotations(strict);
 export type StartWorkThreadTurnCommand = typeof StartWorkThreadTurnCommand.Type;

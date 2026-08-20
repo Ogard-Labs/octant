@@ -86,24 +86,29 @@ export function useWorkFileMentions(options: WorkFileMentionsOptions): WorkFileM
     }
     const controller = new AbortController();
     setBusy(true);
-    void (async () => {
-      try {
-        const hits = await client.complete(
-          decodeFileMentionRequestId(globalThis.crypto.randomUUID()),
-          scope,
-          mention.query,
-          controller.signal,
-        );
-        if (!controller.signal.aborted) {
-          setCandidates(rankPathMentionCandidates(hits, mention.query));
+    const debounce = globalThis.setTimeout(() => {
+      void (async () => {
+        try {
+          const hits = await client.complete(
+            decodeFileMentionRequestId(globalThis.crypto.randomUUID()),
+            scope,
+            mention.query,
+            controller.signal,
+          );
+          if (!controller.signal.aborted) {
+            setCandidates(rankPathMentionCandidates(hits, mention.query));
+          }
+        } catch {
+          if (!controller.signal.aborted) setCandidates([]);
+        } finally {
+          if (!controller.signal.aborted) setBusy(false);
         }
-      } catch {
-        if (!controller.signal.aborted) setCandidates([]);
-      } finally {
-        if (!controller.signal.aborted) setBusy(false);
-      }
-    })();
-    return () => controller.abort();
+      })();
+    }, 120);
+    return () => {
+      globalThis.clearTimeout(debounce);
+      controller.abort();
+    };
   }, [client, mention, scope]);
 
   const open = mention !== undefined && client !== undefined && scope !== undefined;
