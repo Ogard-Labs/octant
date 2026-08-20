@@ -232,11 +232,15 @@
   line-height: 1.35;
 }
 
-.chat-workspace__header button {
-  min-height: 28px;
-  gap: 5px;
-  padding-inline: 8px;
-  color: var(--octant-text-secondary);
+/* The overflow trigger and its outcome receipt stack at the header's end.
+   The receipt exists only after an action ran, so the column must not
+   reserve height for it and push the title row apart when it is absent. */
+.chat-workspace__thread-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-inline-start: auto;
 }
 
 .chat-workspace__canvas {
@@ -937,6 +941,51 @@
   min-width: 132px;
   flex: 0 0 auto;
   max-width: 100%;
+}
+
+/* Declared model options and the pool control live behind one trigger, so the
+   composer row shows a single control instead of one select per option. */
+.chat-composer__model-options {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+/* The active dot is positioned against the trigger's own corner. */
+.chat-composer__model-options > button {
+  position: relative;
+}
+
+/* A non-default option choice must be visible while the panel is closed;
+   the trigger icon alone cannot say the model is running off its defaults. */
+.chat-composer__model-options-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--oct-accent-fg);
+}
+
+/* Opens upward: the composer sits at the window's bottom edge, so a panel
+   growing downward would clip. Mirrors the model picker's anchoring. */
+.chat-composer__model-options-panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--oct-space-2);
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-overlay);
 }
 
 .chat-composer .composer-pool-control__trigger {

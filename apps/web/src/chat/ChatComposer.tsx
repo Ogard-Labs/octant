@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -7,7 +8,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { ArrowUp, Globe2, Paperclip, Slash, Square, X } from "lucide-react";
+import { ArrowUp, Globe2, Paperclip, Slash, SlidersHorizontal, Square, X } from "lucide-react";
 import type { ChatAttachmentId } from "@octant/contracts/chat";
 import { clipboardHasImage, collectPastedImages } from "./composerImagePaste";
 import {
@@ -213,6 +214,48 @@ export function ChatComposer(props: ChatComposerProps) {
       ? "Stopping is unavailable for this response."
       : undefined);
   const controlDisabled = props.isSending;
+  const modelOptionsPanelId = useId();
+  const [modelOptionsOpen, setModelOptionsOpen] = useState(false);
+  const modelOptionsRef = useRef<HTMLDivElement>(null);
+  const declaredModelOptions = props.modelOptions ?? [];
+  const hasModelOptionControls = declaredModelOptions.length > 0 || props.poolControl !== undefined;
+  // "Set" mirrors the select's own fallback: a stored value the model no
+  // longer declares renders as the provider default, so it must not light the
+  // trigger either.
+  const anyModelOptionSet = declaredModelOptions.some(
+    (option) => option.value !== undefined && option.values.includes(option.value),
+  );
+
+  useEffect(() => {
+    if (!modelOptionsOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      if (modelOptionsRef.current === null) return;
+      if (event.target instanceof Node && modelOptionsRef.current.contains(event.target)) return;
+      // The option selects portal their popups to the body, so a click on an
+      // option is "outside" this panel's subtree; closing on it would dismiss
+      // the panel mid-choice. A listbox is only ever an open select's popup.
+      if (
+        event.target instanceof Node &&
+        Array.from(document.querySelectorAll('[role="listbox"]')).some((popup) =>
+          popup.contains(event.target as Node),
+        )
+      ) {
+        return;
+      }
+      setModelOptionsOpen(false);
+    }
+    // `globalThis.` because this file imports React's KeyboardEvent type,
+    // and a document listener receives the DOM event.
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setModelOptionsOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [modelOptionsOpen]);
   const status = composeStatus({
     attachment,
     imageAttachment,
@@ -623,33 +666,63 @@ export function ChatComposer(props: ChatComposerProps) {
               </label>
             </>
           )}
-          {(props.modelOptions ?? []).map((option) => (
-            <label key={option.id}>
-              <span className="chat-composer__visually-hidden">{option.displayName}</span>
-              <OctantSelectField
+          {hasModelOptionControls ? (
+            <div className="chat-composer__model-options" ref={modelOptionsRef}>
+              <OctantButton
+                aria-controls={modelOptionsPanelId}
+                aria-expanded={modelOptionsOpen}
+                aria-haspopup="dialog"
+                aria-label="Model options"
+                data-customized={anyModelOptionSet || undefined}
                 disabled={controlDisabled}
-                onValueChange={(value) =>
-                  props.onModelOptionChange?.(
-                    option.id,
-                    value === MODEL_OPTION_DEFAULT_ID ? undefined : value,
-                  )
-                }
-                options={[
-                  { id: MODEL_OPTION_DEFAULT_ID, label: `${option.displayName}: Default` },
-                  ...option.values.map((value) => ({
-                    id: value,
-                    label: `${option.displayName}: ${value}`,
-                  })),
-                ]}
-                value={
-                  option.value !== undefined && option.values.includes(option.value)
-                    ? option.value
-                    : MODEL_OPTION_DEFAULT_ID
-                }
-              />
-            </label>
-          ))}
-          {props.poolControl}
+                onClick={() => setModelOptionsOpen((current) => !current)}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <SlidersHorizontal aria-hidden="true" size={15} strokeWidth={1.8} />
+                {anyModelOptionSet ? (
+                  <span aria-hidden="true" className="chat-composer__model-options-dot" />
+                ) : null}
+              </OctantButton>
+              {modelOptionsOpen ? (
+                <div
+                  aria-label="Model options"
+                  className="chat-composer__model-options-panel"
+                  id={modelOptionsPanelId}
+                  role="dialog"
+                >
+                  {declaredModelOptions.map((option) => (
+                    <label key={option.id}>
+                      <span className="chat-composer__visually-hidden">{option.displayName}</span>
+                      <OctantSelectField
+                        disabled={controlDisabled}
+                        onValueChange={(value) =>
+                          props.onModelOptionChange?.(
+                            option.id,
+                            value === MODEL_OPTION_DEFAULT_ID ? undefined : value,
+                          )
+                        }
+                        options={[
+                          { id: MODEL_OPTION_DEFAULT_ID, label: `${option.displayName}: Default` },
+                          ...option.values.map((value) => ({
+                            id: value,
+                            label: `${option.displayName}: ${value}`,
+                          })),
+                        ]}
+                        value={
+                          option.value !== undefined && option.values.includes(option.value)
+                            ? option.value
+                            : MODEL_OPTION_DEFAULT_ID
+                        }
+                      />
+                    </label>
+                  ))}
+                  {props.poolControl}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className="chat-composer__research">
           <OctantButton
