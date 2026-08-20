@@ -175,6 +175,19 @@ describe("useThreadMentions", () => {
     );
   });
 
+  it("does not mint a Side Chat sidecar when the shell cannot open it", async () => {
+    const user = userEvent.setup();
+    const client = stubClient({
+      openSideChat: vi.fn().mockResolvedValue({ sidecar: {}, created: true }),
+    });
+    render(<Harness client={client} initialDraft="#[Release notes]" />);
+
+    await user.click(screen.getByRole("button", { name: "pick" }));
+    await user.click(screen.getByRole("button", { name: "side chat" }));
+
+    expect(client.openSideChat).not.toHaveBeenCalled();
+  });
+
   it("hands the host's sidecar linkage to the shell", async () => {
     const user = userEvent.setup();
     const sidecar = {
