@@ -75,23 +75,31 @@ describe("theme semantic token catalog", () => {
     expect(getDefaultToken("accent", "dark")).toBe(getRoleDefinition("accent").defaultDark);
   });
 
-  it("uses the approved cool-neutral Octant palette in both modes", () => {
+  it("uses the design system's warm charcoal-and-brass palette in both modes", () => {
     expect(DEFAULT_LIGHT_TOKENS).toMatchObject({
-      "app-background": "#f1f2f3",
-      workspace: "#fafafb",
-      selection: "#e7e9eb",
-      "text-primary": "#1f2124",
-      accent: "#0170dd",
-      "accent-foreground": "#ffffff",
+      "app-background": "#edece7",
+      workspace: "#f2f1ed",
+      floating: "#e6e5e0",
+      "text-primary": "#26251e",
+      accent: "#d9a441",
+      "accent-foreground": "#14130f",
+      "accent-text": "#8a6218",
     });
     expect(DEFAULT_DARK_TOKENS).toMatchObject({
-      "app-background": "#161616",
-      workspace: "#1e1e1e",
-      selection: "#323232",
-      "text-primary": "#ededed",
-      accent: "#3d9aff",
-      "accent-foreground": "#06111c",
+      "app-background": "#0e0d0a",
+      workspace: "#14130f",
+      floating: "#1c1b16",
+      "text-primary": "#f2f1ed",
+      accent: "#d9a441",
+      "accent-foreground": "#14130f",
+      "accent-text": "#d9a441",
     });
+  });
+
+  it("keeps the brass accent fill constant across modes while accent-as-text darkens for light", () => {
+    expect(DEFAULT_LIGHT_TOKENS["accent"]).toBe(DEFAULT_DARK_TOKENS["accent"]);
+    expect(DEFAULT_LIGHT_TOKENS["accent-text"]).not.toBe(DEFAULT_LIGHT_TOKENS["accent"]);
+    expect(DEFAULT_DARK_TOKENS["accent-text"]).toBe(DEFAULT_DARK_TOKENS["accent"]);
   });
 
   it("contrast targets reference known roles", () => {

@@ -61,7 +61,7 @@ describe("theme fallback policy", () => {
       false,
     );
     expect(resolved.mode).toBe("light");
-    expect(resolved.tokens["accent"]).toBe("#0170dd");
+    expect(resolved.tokens["accent"]).toBe("#d9a441");
 
     const darkResolved = resolveEffectiveTokens(
       makeSettings({

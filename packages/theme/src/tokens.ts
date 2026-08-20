@@ -23,12 +23,18 @@ export interface ThemeTokenRoleDefinition {
 }
 
 export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
+  // The default palette is the Octant design system's own: warm charcoal
+  // grounds and cream ink in dark, warm paper in light, brass accent in
+  // both. The hex values flatten the system sheet's light-dark() pairs and
+  // translucent inks (apps/web/src/styles/octant.css) onto the surface
+  // each role actually renders over, because preset tokens are opaque
+  // six-digit hex by contract.
   {
     id: "app-background",
     displayName: "Application background",
     category: "foundation",
-    defaultLight: "#f1f2f3",
-    defaultDark: "#161616",
+    defaultLight: "#edece7",
+    defaultDark: "#0e0d0a",
   },
   {
     id: "chrome",
@@ -36,8 +42,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "foundation",
     contrastTarget: "app-background",
     contrastLevel: "ui",
-    defaultLight: "#e9eaec",
-    defaultDark: "#1a1a1a",
+    defaultLight: "#e9e8e3",
+    defaultDark: "#12110d",
   },
   {
     id: "sidebar",
@@ -45,24 +51,26 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "foundation",
     contrastTarget: "app-background",
     contrastLevel: "ui",
-    defaultLight: "#eef0f1",
-    defaultDark: "#191919",
+    defaultLight: "#eeede8",
+    defaultDark: "#11100c",
   },
   {
     id: "workspace",
     displayName: "Workspace surface",
     category: "surface",
-    defaultLight: "#fafafb",
-    defaultDark: "#1e1e1e",
+    defaultLight: "#f2f1ed",
+    defaultDark: "#14130f",
   },
   {
+    // In light mode the card is DARKER than the ground: the design system
+    // raises surfaces off cream by deepening them, not by going whiter.
     id: "floating",
     displayName: "Floating surface",
     category: "surface",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#ffffff",
-    defaultDark: "#282828",
+    defaultLight: "#e6e5e0",
+    defaultDark: "#1c1b16",
   },
   {
     id: "scrim",
@@ -77,8 +85,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#eff0f2",
-    defaultDark: "#2a2a2a",
+    defaultLight: "#ebeae5",
+    defaultDark: "#232219",
   },
   {
     id: "control-hover",
@@ -86,8 +94,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e7e9eb",
-    defaultDark: "#313131",
+    defaultLight: "#e3e2dc",
+    defaultDark: "#2a2920",
   },
   {
     id: "control-pressed",
@@ -95,17 +103,20 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#dfe1e4",
-    defaultDark: "#393939",
+    defaultLight: "#dbdad3",
+    defaultDark: "#322f25",
   },
   {
+    // The design system's border is translucent ink (13-14% of the text
+    // colour); flattened over the workspace so a hairline never shifts
+    // when a surface behind it changes.
     id: "border",
     displayName: "Border",
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e4e6e9",
-    defaultDark: "#323232",
+    defaultLight: "#d5d4d0",
+    defaultDark: "#312f2c",
   },
   {
     id: "border-strong",
@@ -113,8 +124,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#d4d7db",
-    defaultDark: "#414141",
+    defaultLight: "#bdbcb7",
+    defaultDark: "#494844",
   },
   {
     id: "divider-strong",
@@ -122,8 +133,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#85888e",
-    defaultDark: "#6f6f6f",
+    defaultLight: "#8c8b86",
+    defaultDark: "#787773",
   },
   {
     id: "text-primary",
@@ -131,17 +142,20 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#1f2124",
-    defaultDark: "#ededed",
+    defaultLight: "#26251e",
+    defaultDark: "#f2f1ed",
   },
   {
+    // A step darker than the flattened 68% ink the system sheet uses:
+    // that value measured 4.5:1 on the workspace but only 4.2:1 on the
+    // darker light-mode card this text also sits on.
     id: "text-secondary",
     displayName: "Secondary text",
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#5c5f66",
-    defaultDark: "#a8a8a8",
+    defaultLight: "#61605a",
+    defaultDark: "#959490",
   },
   {
     id: "text-muted",
@@ -149,17 +163,19 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "large-text",
-    defaultLight: "#7c7f86",
-    defaultDark: "#8b8b8b",
+    defaultLight: "#74726d",
+    defaultDark: "#787773",
   },
   {
+    // Ink on the brass fill in BOTH modes: the fill stays brand-brass in
+    // light and dark, so the ink on it does not flip either.
     id: "primary-foreground",
     displayName: "Primary foreground",
     category: "text",
     contrastTarget: "accent",
     contrastLevel: "normal-text",
-    defaultLight: "#ffffff",
-    defaultDark: "#06111c",
+    defaultLight: "#14130f",
+    defaultDark: "#14130f",
   },
   {
     id: "focus-ring",
@@ -167,8 +183,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "focus",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#0285ff",
-    defaultDark: "#7ec0ff",
+    defaultLight: "#8a6218",
+    defaultDark: "#d9a441",
   },
   {
     id: "selection",
@@ -176,17 +192,19 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "focus",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e7e9eb",
-    defaultDark: "#323232",
+    defaultLight: "#d9d8d4",
+    defaultDark: "#353430",
   },
   {
+    // The brand fill. Brass in both modes on purpose — the design system
+    // keeps the fill constant and moves only accent-as-text per mode.
     id: "accent",
     displayName: "Accent",
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#0170dd",
-    defaultDark: "#3d9aff",
+    defaultLight: "#d9a441",
+    defaultDark: "#d9a441",
   },
   {
     id: "accent-foreground",
@@ -194,22 +212,22 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "accent",
     contrastTarget: "accent",
     contrastLevel: "normal-text",
-    defaultLight: "#ffffff",
-    defaultDark: "#06111c",
+    defaultLight: "#14130f",
+    defaultDark: "#14130f",
   },
   {
     // Accent as TEXT, not as a fill. `accent` is held to 3:1 because it
-    // renders as a button; pointed at text it measured 3.0:1 on tinted
-    // chips in the shipped light preset. This role carries the hue at
-    // the 4.5:1 bar so links, active tabs, and current rows stay policed
-    // like every other text role.
+    // renders as a button; brass measures 2.0:1 as text on the cream
+    // ground, so light mode darkens the same hue to #8a6218 (4.8:1).
+    // This role carries the hue at the 4.5:1 bar so links, active tabs,
+    // and current rows stay policed like every other text role.
     id: "accent-text",
     displayName: "Accent text",
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#0161c2",
-    defaultDark: "#3d9aff",
+    defaultLight: "#8a6218",
+    defaultDark: "#d9a441",
   },
   {
     id: "success-surface",
@@ -217,8 +235,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e8f5ed",
-    defaultDark: "#233229",
+    defaultLight: "#bfd8cc",
+    defaultDark: "#16281f",
   },
   {
     id: "success-text",
@@ -226,8 +244,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "success-surface",
     contrastLevel: "normal-text",
-    defaultLight: "#157a3d",
-    defaultDark: "#8fd8ab",
+    defaultLight: "#0f6144",
+    defaultDark: "#6bb299",
   },
   {
     id: "warning-surface",
@@ -235,8 +253,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#fdf1e5",
-    defaultDark: "#372d1d",
+    defaultLight: "#f0dea8",
+    defaultDark: "#342b0e",
   },
   {
     id: "warning-border",
@@ -244,8 +262,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "warning-surface",
     contrastLevel: "ui",
-    defaultLight: "#b0791f",
-    defaultDark: "#a98443",
+    defaultLight: "#987405",
+    defaultDark: "#a3801f",
   },
   {
     id: "warning-text",
@@ -253,21 +271,22 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "warning-surface",
     contrastLevel: "normal-text",
-    defaultLight: "#8a5310",
-    defaultDark: "#f0c383",
+    defaultLight: "#6f5300",
+    defaultDark: "#edbc26",
   },
   {
     // Targeted at `floating`, not `workspace`: status text sits inside
-    // cards, and in dark mode the card is lighter than the workspace —
-    // #ee5c61 measured 5.03:1 on the workspace but 4.45:1 on the card
-    // it was actually read on.
+    // cards, and the card is the stricter ground in both modes — lighter
+    // than the workspace in dark, darker than it in light. #a8102f
+    // measures 6.7:1 on the light workspace but 6.0:1 on the card it is
+    // actually read on.
     id: "danger-text",
     displayName: "Danger text",
     category: "status",
     contrastTarget: "floating",
     contrastLevel: "normal-text",
-    defaultLight: "#c62f34",
-    defaultDark: "#f06b70",
+    defaultLight: "#a8102f",
+    defaultDark: "#e17d96",
   },
   {
     id: "addition-text",
@@ -275,8 +294,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "diff",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#157a3d",
-    defaultDark: "#8fd8ab",
+    defaultLight: "#0f6144",
+    defaultDark: "#6bb299",
   },
   {
     id: "deletion-text",
@@ -284,17 +303,22 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "diff",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#c62f34",
-    defaultDark: "#ee5c61",
+    defaultLight: "#a8102f",
+    defaultDark: "#e17d96",
   },
+  // The picker palette follows the design system's chart-series hues
+  // (yellow IS the brass, teal/green/blue/purple/pink are series 2-6) so
+  // project labels and terminal-adjacent colour read as one family with
+  // the rest of the theme. Red and orange, which the series set lacks,
+  // are derived from the danger and warning hues.
   {
     id: "palette-red",
     displayName: "Palette red",
     category: "palette",
     contrastTarget: "sidebar",
     contrastLevel: "ui",
-    defaultLight: "#c62f34",
-    defaultDark: "#ee5c61",
+    defaultLight: "#a8102f",
+    defaultDark: "#d95778",
   },
   {
     id: "palette-orange",
@@ -302,8 +326,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "palette",
     contrastTarget: "sidebar",
     contrastLevel: "ui",
-    defaultLight: "#a75613",
-    defaultDark: "#f0954a",
+    defaultLight: "#9d5a12",
+    defaultDark: "#e09b52",
   },
   {
     id: "palette-yellow",
@@ -311,8 +335,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "palette",
     contrastTarget: "sidebar",
     contrastLevel: "ui",
-    defaultLight: "#7a6a00",
-    defaultDark: "#f0c383",
+    defaultLight: "#8a6218",
+    defaultDark: "#d9a441",
   },
   {
     id: "palette-green",
@@ -320,8 +344,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "palette",
     contrastTarget: "sidebar",
     contrastLevel: "ui",
-    defaultLight: "#157a3d",
-    defaultDark: "#8fd8ab",
+    defaultLight: "#41761c",
+    defaultDark: "#93cb58",
   },
   {
     id: "palette-teal",
@@ -329,8 +353,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "palette",
     contrastTarget: "sidebar",
     contrastLevel: "ui",
-    defaultLight: "#0d7772",
-    defaultDark: "#5ccfc9",
+    defaultLight: "#0f6f68",
+    defaultDark: "#45c8bc",
   },
   {
     id: "palette-blue",
@@ -338,8 +362,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "palette",
     contrastTarget: "sidebar",
     contrastLevel: "ui",
-    defaultLight: "#0170dd",
-    defaultDark: "#3d9aff",
+    defaultLight: "#1e5fae",
+    defaultDark: "#74b0f3",
   },
   {
     id: "palette-purple",
@@ -347,8 +371,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "palette",
     contrastTarget: "sidebar",
     contrastLevel: "ui",
-    defaultLight: "#6f42d0",
-    defaultDark: "#b48cf2",
+    defaultLight: "#5b4bb0",
+    defaultDark: "#ab98f2",
   },
   {
     id: "palette-pink",
@@ -356,8 +380,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "palette",
     contrastTarget: "sidebar",
     contrastLevel: "ui",
-    defaultLight: "#b32e83",
-    defaultDark: "#f08ac0",
+    defaultLight: "#b3356e",
+    defaultDark: "#f4809a",
   },
 ];
 

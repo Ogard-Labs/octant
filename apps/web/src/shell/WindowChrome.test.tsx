@@ -227,8 +227,8 @@ describe("WindowChrome", () => {
   });
 
   it("keeps semantic shell borders and controls restrained", () => {
-    expect(cssRule(":root")).toContain("--octant-border: #323232;");
-    expect(cssRule(":root")).toContain("--octant-border-strong: #414141;");
+    expect(cssRule(":root")).toContain("--octant-border: #312f2c;");
+    expect(cssRule(":root")).toContain("--octant-border-strong: #494844;");
     expect(cssRule(".sidebar__native-leading")).not.toMatch(/background|border|box-shadow/);
 
     expect(cssRule(".new-project", 1)).toContain("color: var(--octant-text-primary);");
