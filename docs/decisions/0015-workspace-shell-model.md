@@ -61,8 +61,9 @@ redesigns.
   Kanban.
 - Every saved Project has a mode-aware Overview composed from authoritative
   projections; it is a normal workspace view, not a dashboard route. Sidebar
-  search is one overlay that finds threads of the current mode; Projects,
-  Recents, and Unfiled are folder labels on threads.
+  Search filters the current mode's visible thread list in place; a separate
+  overlay still finds threads of that mode, including archived ones the list
+  does not show. Projects, Recents, and Unfiled are folder labels on threads.
 - The sidebar uses native translucency when supported and falls back to an
   opaque semantic surface for reduced transparency, increased contrast,
   performance, unsupported hosts, or an explicit preference, without changing

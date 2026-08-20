@@ -603,6 +603,7 @@ function LaunchedShell(
   const [draftModelId, setDraftModelId] =
     useState<import("@octant/contracts/providers").ProviderModelId>();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   // The Thread Search query lives here as well as in the overlay, because the
   // archived half of the Chat listing is fetched from the host per query.
   const [searchQuery, setSearchQuery] = useState("");
@@ -3282,7 +3283,8 @@ function LaunchedShell(
                 }
               : {})}
             onAddFolder={() => setCreateOpen(true)}
-            onOpenSearch={openThreadSearch}
+            onSearchQueryChange={setSidebarSearchQuery}
+            searchQuery={sidebarSearchQuery}
             {...(isNarrow ? {} : { onCollapseSidebar: () => setSidebarCollapsedPersistent(true) })}
             onOpenSettings={(deepLink) => void controller.openSettings(deepLink)}
             onOpenZen={() => void zen.enterZen()}
@@ -3306,6 +3308,7 @@ function LaunchedShell(
                 </div>
               ) : (
                 <ProjectSidebarSection
+                  searchQuery={sidebarSearchQuery}
                   {...(activeMode === "code"
                     ? {
                         projectViewsEnabled: true,
