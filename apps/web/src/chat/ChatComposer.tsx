@@ -30,7 +30,6 @@ import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/prov
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import {
@@ -349,10 +348,112 @@ export function ChatComposer(props: ChatComposerProps) {
   }
 
   return (
-    <section aria-label="Chat composer" className="chat-composer">
+    <section aria-label="Chat composer" className="composer chat-composer">
+      <ThreadMentionChips
+        chips={props.threadMentions?.chips ?? []}
+        disabled={controlDisabled}
+        onRemove={(threadId) => props.threadMentions?.onRemoveChip(threadId)}
+        {...(props.threadMentions?.onOpenSideChat === undefined
+          ? {}
+          : { onOpenSideChat: props.threadMentions.onOpenSideChat })}
+      />
+      {(props.pendingAttachments ?? []).length > 0 ? (
+        <ul aria-label="Attached files" className="composer-chips chat-composer__selections">
+          {(props.pendingAttachments ?? []).map((attachmentSelection) => (
+            <li key={String(attachmentSelection.id)} className="chip chat-composer__selection">
+              <span>{attachmentSelection.displayName}</span>
+              {props.onRemoveAttachment === undefined ? null : (
+                <button
+                  aria-label={`Remove ${attachmentSelection.displayName} attachment`}
+                  className="chip-x window-no-drag"
+                  disabled={controlDisabled}
+                  onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
+                  type="button"
+                >
+                  <X aria-hidden="true" size={10} strokeWidth={1.8} />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {(props.pendingPreviewSelections ?? []).length > 0 ? (
+        <ul
+          aria-label="Attached preview selections"
+          className="composer-chips chat-composer__selections"
+        >
+          {(props.pendingPreviewSelections ?? []).map((selection) => (
+            <li key={String(selection.id)} className="chip chat-composer__selection">
+              <span>{selection.displayName}</span>
+              {props.onRemovePreviewSelection === undefined ? null : (
+                <OctantButton
+                  aria-label={`Remove ${selection.displayName} selection`}
+                  disabled={controlDisabled}
+                  onClick={() => props.onRemovePreviewSelection?.(selection.id)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Remove
+                </OctantButton>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {(props.pendingCanvasSelections ?? []).length > 0 ? (
+        <ul
+          aria-label="Attached canvas selections"
+          className="composer-chips chat-composer__selections"
+        >
+          {(props.pendingCanvasSelections ?? []).map((selection) => (
+            <li key={String(selection.id)} className="chip chat-composer__selection">
+              <span>{selection.displayName}</span>
+              {props.onRemoveCanvasSelection === undefined ? null : (
+                <OctantButton
+                  aria-label={`Remove ${selection.displayName} canvas selection`}
+                  disabled={controlDisabled}
+                  onClick={() => props.onRemoveCanvasSelection?.(selection.id)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Remove
+                </OctantButton>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {(props.pendingExtensionSelections ?? []).length > 0 ? (
+        <ul aria-label="Selected extensions" className="composer-chips chat-composer__selections">
+          {(props.pendingExtensionSelections ?? []).map((item) => (
+            <li key={item.reference} className="chip chat-composer__selection">
+              <span>{item.label}</span>
+              <span className="chat-composer__selection-receipt">
+                {item.status.kind === "selected"
+                  ? "Selection verified"
+                  : `Blocked: ${item.status.reason}`}
+              </span>
+              {props.onRemoveExtensionSelection === undefined ? null : (
+                <OctantButton
+                  aria-label={`Remove ${item.label} extension`}
+                  disabled={controlDisabled}
+                  onClick={() => props.onRemoveExtensionSelection?.(item.reference)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Remove
+                </OctantButton>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <label className="chat-composer__message-field">
         <span className="chat-composer__visually-hidden">Message</span>
-        <OctantTextarea
+        <textarea
           aria-activedescendant={
             activeCommand !== undefined
               ? `${commandListId}-${activeCommand.id}`
@@ -370,6 +471,7 @@ export function ChatComposer(props: ChatComposerProps) {
               ? undefined
               : commandOpen || mentionOpen
           }
+          className="composer-input window-no-drag"
           disabled={controlDisabled}
           onChange={(event) => {
             props.onDraftChange(event.currentTarget.value);
@@ -436,104 +538,11 @@ export function ChatComposer(props: ChatComposerProps) {
           onHover={mention.setActiveIndex}
         />
       ) : null}
-      <ThreadMentionChips
-        chips={props.threadMentions?.chips ?? []}
-        disabled={controlDisabled}
-        onRemove={(threadId) => props.threadMentions?.onRemoveChip(threadId)}
-        {...(props.threadMentions?.onOpenSideChat === undefined
-          ? {}
-          : { onOpenSideChat: props.threadMentions.onOpenSideChat })}
-      />
-      {(props.pendingAttachments ?? []).length > 0 ? (
-        <ul aria-label="Attached files" className="chat-composer__selections">
-          {(props.pendingAttachments ?? []).map((attachmentSelection) => (
-            <li key={String(attachmentSelection.id)} className="chat-composer__selection">
-              <span>{attachmentSelection.displayName}</span>
-              {props.onRemoveAttachment === undefined ? null : (
-                <OctantButton
-                  aria-label={`Remove ${attachmentSelection.displayName} attachment`}
-                  disabled={controlDisabled}
-                  onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <X aria-hidden="true" size={12} strokeWidth={1.8} />
-                </OctantButton>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {(props.pendingPreviewSelections ?? []).length > 0 ? (
-        <ul aria-label="Attached preview selections" className="chat-composer__selections">
-          {(props.pendingPreviewSelections ?? []).map((selection) => (
-            <li key={String(selection.id)} className="chat-composer__selection">
-              <span>{selection.displayName}</span>
-              {props.onRemovePreviewSelection === undefined ? null : (
-                <OctantButton
-                  aria-label={`Remove ${selection.displayName} selection`}
-                  disabled={controlDisabled}
-                  onClick={() => props.onRemovePreviewSelection?.(selection.id)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Remove
-                </OctantButton>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {(props.pendingCanvasSelections ?? []).length > 0 ? (
-        <ul aria-label="Attached canvas selections" className="chat-composer__selections">
-          {(props.pendingCanvasSelections ?? []).map((selection) => (
-            <li key={String(selection.id)} className="chat-composer__selection">
-              <span>{selection.displayName}</span>
-              {props.onRemoveCanvasSelection === undefined ? null : (
-                <OctantButton
-                  aria-label={`Remove ${selection.displayName} canvas selection`}
-                  disabled={controlDisabled}
-                  onClick={() => props.onRemoveCanvasSelection?.(selection.id)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Remove
-                </OctantButton>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {(props.pendingExtensionSelections ?? []).length > 0 ? (
-        <ul aria-label="Selected extensions" className="chat-composer__selections">
-          {(props.pendingExtensionSelections ?? []).map((item) => (
-            <li key={item.reference} className="chat-composer__selection">
-              <span>{item.label}</span>
-              <span className="chat-composer__selection-receipt">
-                {item.status.kind === "selected"
-                  ? "Selection verified"
-                  : `Blocked: ${item.status.reason}`}
-              </span>
-              {props.onRemoveExtensionSelection === undefined ? null : (
-                <OctantButton
-                  aria-label={`Remove ${item.label} extension`}
-                  disabled={controlDisabled}
-                  onClick={() => props.onRemoveExtensionSelection?.(item.reference)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Remove
-                </OctantButton>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <div aria-label="Composer controls" className="chat-composer__bar" role="toolbar">
+      <div
+        aria-label="Composer controls"
+        className="composer-row chat-composer__bar"
+        role="toolbar"
+      >
         <div className="chat-composer__leading">
           <label>
             <span className="chat-composer__visually-hidden">Add attachment</span>
@@ -676,27 +685,25 @@ export function ChatComposer(props: ChatComposerProps) {
         </div>
         <div className="chat-composer__actions">
           {props.isSending ? (
-            <OctantButton
+            <button
               aria-label="Stop response"
+              className="btn-send window-no-drag"
               disabled={stopDisabledReason !== undefined}
               onClick={() => props.onStop?.()}
-              size="icon"
               type="button"
-              variant="secondary"
             >
               <Square aria-hidden="true" fill="currentColor" size={10} strokeWidth={1.5} />
-            </OctantButton>
+            </button>
           ) : (
-            <OctantButton
+            <button
               aria-label="Send message"
+              className="btn-send window-no-drag"
               disabled={sendDisabledReason !== undefined}
               onClick={send}
-              size="icon"
               type="button"
-              variant="default"
             >
               <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-            </OctantButton>
+            </button>
           )}
         </div>
       </div>
