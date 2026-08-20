@@ -195,6 +195,34 @@ describe("CodeService reads", () => {
     );
   });
 
+  it("journals nothing when a reconnect poll observes the checkout it already recorded as unavailable", async () => {
+    // A previous bootstrap already journaled this checkout as unavailable after
+    // the Project was rebound. The renderer re-runs bootstrap on every
+    // navigation refresh and stream reconnect, so journaling each identical
+    // observation grew one dogfooding host's journal by ~21k events in days —
+    // enough to exhaust the bounded conversation replay scan. The journal
+    // records changes of state; a poll that confirms the recorded state must
+    // append nothing.
+    const unavailable = decodeCodeCheckoutIdentity({ ...checkout, availability: "unavailable" });
+    const superseding = decodeCodeCheckoutIdentity({
+      ...checkout,
+      id: "00000000-0000-4000-8000-000000001014",
+      availability: "available",
+    });
+    const fixture = serviceFixture({
+      threads: [thread()],
+      checkout: unavailable,
+      observedCheckout: superseding,
+    });
+
+    const result = await fixture.service.bootstrap(ids.window);
+
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    expect(result.checkouts).toContainEqual(
+      expect.objectContaining({ id: ids.checkout, availability: "unavailable" }),
+    );
+  });
+
   it("re-observes a shared existing checkout only once during restart bootstrap", async () => {
     const waiting = decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" });
     const secondThread = thread({
@@ -333,7 +361,11 @@ describe("CodeService reads", () => {
 
 describe("CodeService commands", () => {
   it("observes and journals the authenticated Project checkout without exposing its root", async () => {
-    const fixture = serviceFixture();
+    // The persisted checkout is still waiting, so this observation is a real
+    // change of state and belongs in the journal.
+    const fixture = serviceFixture({
+      checkout: decodeCodeCheckoutIdentity({ ...checkout, availability: "waiting" }),
+    });
 
     await expect(
       fixture.service.execute(ids.window, {
@@ -359,6 +391,26 @@ describe("CodeService commands", () => {
       }),
     );
     expect(JSON.stringify(await fixture.service.bootstrap(ids.window))).not.toContain("/private");
+  });
+
+  it("journals nothing when preparing a checkout the journal already records unchanged", async () => {
+    // Prepare is issued from user gestures that repeat freely — opening the
+    // composer, retrying after a failure — and each one re-observes the same
+    // checkout. A repeated observation carries no new fact, only a fresher
+    // clock, so it must not append; the projection already says exactly this.
+    const fixture = serviceFixture();
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "prepare-code-project-checkout",
+        projectId: ids.project,
+      }),
+    ).resolves.toEqual({
+      kind: "checkout-prepared",
+      bindingRevisionId: ids.binding,
+      checkout,
+    });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("returns a wire-valid checkout receipt when observation also includes remote facts", async () => {
