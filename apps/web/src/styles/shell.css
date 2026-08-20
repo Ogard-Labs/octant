@@ -1626,6 +1626,22 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   left: 0;
 }
 
+/* The profile trigger is a peer of the model picker in this row, so it wears
+   the same quiet chrome rather than the outlined button it is elsewhere. */
+.code-composer-adapter__composer-bar .execution-profile-workflow__trigger {
+  min-height: 26px;
+  padding: 0 7px;
+  color: var(--octant-text-secondary);
+  background: transparent;
+  border-color: transparent;
+  font-size: 11.5px;
+}
+
+.code-composer-adapter__composer-bar .execution-profile-workflow__trigger:hover:not(:disabled) {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
 .code-composer-adapter__composer-bar .code-composer-adapter__send {
   margin-inline-start: auto;
 }

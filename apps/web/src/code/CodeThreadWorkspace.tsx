@@ -10,7 +10,7 @@ import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { decidesCodeEffectsByApproval, type PickerGroup } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
-import { ArrowUp, Bot, X } from "lucide-react";
+import { ArrowUp, Bot, UserRoundCog, X } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -44,6 +44,7 @@ import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
 import { CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
+import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
 import { ThreadExportControl } from "../thread/ThreadExportControl";
 
 export type CodeAttachmentClient = Pick<
@@ -134,6 +135,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.controller.activeView?.thread.id === props.threadId
       ? props.controller.activeView
       : undefined;
+  const profileName = useAgentProfileName(view?.thread.profileId);
   const [draft, setDraft] = useState(props.controller.pendingDraft);
   const [providerChanging, setProviderChanging] = useState(false);
   const [accessChanging, setAccessChanging] = useState(false);
@@ -1040,6 +1042,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
               nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
               onSelect={(next) => void changeAccess(next)}
             />
+            {/*
+              Provenance, not a control: the profile narrowed this thread once,
+              when it started, and is never consulted again. Editing the profile
+              afterwards cannot change what this thread may do, so the chip says
+              which working mode produced the posture and stops there.
+            */}
+            {profileName === undefined ? null : (
+              <span className="code-thread-workspace__profile" title="Started under this profile">
+                <UserRoundCog aria-hidden="true" size={12} strokeWidth={1.8} />
+                <span>{profileName}</span>
+              </span>
+            )}
             <span className="code-thread-workspace__hint">
               {providerChanging
                 ? "Checking the selected provider…"
