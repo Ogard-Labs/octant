@@ -554,9 +554,6 @@ export function createHostBridge(
         // context prefix; rethrow the allowlisted guidance verbatim so the
         // renderer can surface it.
         const message = error instanceof Error ? error.message : "";
-        if (message.includes("Choose the top-level Git repository or linked-worktree folder.")) {
-          throw new Error("Choose the top-level Git repository or linked-worktree folder.");
-        }
         if (message.includes("Choose an accessible directory.")) {
           throw new Error("Choose an accessible directory.");
         }

@@ -315,10 +315,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
 
 function safeNativePickerMessage(error: unknown): string {
   if (!(error instanceof Error)) return "Project creation could not be completed.";
-  if (
-    error.message === "Choose the top-level Git repository or linked-worktree folder." ||
-    error.message === "Choose an accessible directory."
-  ) {
+  if (error.message === "Choose an accessible directory.") {
     return error.message;
   }
   return "Project creation could not be completed.";

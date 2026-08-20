@@ -139,39 +139,45 @@ describe("createProjectRootPicker", () => {
     return { dialog, fetch, picker };
   }
 
-  it("returns mode-specific safe guidance when server validation rejects a selected root", async () => {
-    const { picker } = setup({
-      fetch: vi
-        .fn()
-        .mockResolvedValue(
-          Response.json(
-            { category: "unavailable", message: "The selected Project root is unavailable." },
-            { status: 400 },
+  it.each(["work", "code"] as const)(
+    "tells %s to choose an accessible directory when the selected root is unavailable",
+    async (projectType) => {
+      const { picker } = setup({
+        fetch: vi
+          .fn()
+          .mockResolvedValue(
+            Response.json(
+              { category: "unavailable", message: "The selected Project root is unavailable." },
+              { status: 400 },
+            ),
           ),
-        ),
-    });
+      });
 
-    await expect(picker({ sender }, "code")).rejects.toMatchObject({
-      message: "Choose the top-level Git repository or linked-worktree folder.",
-    });
-  });
+      await expect(picker({ sender }, projectType)).rejects.toMatchObject({
+        message: "Choose an accessible directory.",
+      });
+    },
+  );
 
-  it("returns mode-specific safe guidance when root validation is unavailable", async () => {
-    const { picker } = setup({
-      fetch: vi
-        .fn()
-        .mockResolvedValue(
-          Response.json(
-            { category: "unavailable", message: "The selected Project root is unavailable." },
-            { status: 503 },
+  it.each(["work", "code"] as const)(
+    "tells %s to choose an accessible directory when root validation is unavailable",
+    async (projectType) => {
+      const { picker } = setup({
+        fetch: vi
+          .fn()
+          .mockResolvedValue(
+            Response.json(
+              { category: "unavailable", message: "The selected Project root is unavailable." },
+              { status: 503 },
+            ),
           ),
-        ),
-    });
+      });
 
-    await expect(picker({ sender }, "code")).rejects.toMatchObject({
-      message: "Choose the top-level Git repository or linked-worktree folder.",
-    });
-  });
+      await expect(picker({ sender }, projectType)).rejects.toMatchObject({
+        message: "Choose an accessible directory.",
+      });
+    },
+  );
 
   it("does not treat host-time recovery as a rejected Project root", async () => {
     const { picker } = setup({
@@ -191,29 +197,37 @@ describe("createProjectRootPicker", () => {
     });
   });
 
-  it("opens an owned directory without recent-item mutation and returns only a frozen receipt", async () => {
-    const { dialog, fetch, picker } = setup();
+  it.each(["work", "code"] as const)(
+    "accepts an owned directory as a %s Project root and returns only a frozen receipt",
+    async (projectType) => {
+      const fetch = vi
+        .fn()
+        .mockResolvedValue(
+          Response.json({ receiptId, projectType, expiresAt: 61_000 }, { status: 201 }),
+        );
+      const { dialog, picker } = setup({ fetch });
 
-    const result = await picker({ sender }, "work");
+      const result = await picker({ sender }, projectType);
 
-    expect(dialog.showOpenDialog).toHaveBeenCalledWith(ownedWindow, {
-      properties: ["openDirectory", "dontAddToRecent"],
-    });
-    expect(fetch).toHaveBeenCalledWith(
-      "http://127.0.0.1:13773/api/desktop/project-binding-receipts",
-      expect.objectContaining({
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-octant-desktop-secret": desktopBridgeSecret,
-        },
-        body: JSON.stringify({ windowId, projectType: "work", path: "/private/raw" }),
-      }),
-    );
-    expect(result).toEqual({ kind: "selected", receiptId, displayName: "raw" });
-    expect(Object.isFrozen(result)).toBe(true);
-    expect(JSON.stringify(result)).not.toContain("/private/raw");
-  });
+      expect(dialog.showOpenDialog).toHaveBeenCalledWith(ownedWindow, {
+        properties: ["openDirectory", "dontAddToRecent"],
+      });
+      expect(fetch).toHaveBeenCalledWith(
+        "http://127.0.0.1:13773/api/desktop/project-binding-receipts",
+        expect.objectContaining({
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-desktop-secret": desktopBridgeSecret,
+          },
+          body: JSON.stringify({ windowId, projectType, path: "/private/raw" }),
+        }),
+      );
+      expect(result).toEqual({ kind: "selected", receiptId, displayName: "raw" });
+      expect(Object.isFrozen(result)).toBe(true);
+      expect(JSON.stringify(result)).not.toContain("/private/raw");
+    },
+  );
 
   it("returns a frozen cancellation without contacting the server", async () => {
     const { fetch, picker } = setup({
@@ -291,7 +305,9 @@ describe("createProjectRootPicker", () => {
     ]) {
       const { picker } = setup({ fetch: vi.fn().mockResolvedValue(response) });
       const rejection = picker({ sender }, "work");
-      await expect(rejection).rejects.toBeInstanceOf(ProjectRootPickerError);
+      await expect(rejection).rejects.toMatchObject({
+        message: "Octant could not validate the selected Project root.",
+      });
       await expect(rejection).rejects.not.toThrow("/private/raw");
       await expect(rejection).rejects.not.toThrow(desktopBridgeSecret);
     }

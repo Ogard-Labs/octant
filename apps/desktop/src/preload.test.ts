@@ -349,7 +349,7 @@ describe("desktop preload bridge", () => {
       .fn()
       .mockRejectedValue(
         new Error(
-          "Error invoking remote method 'octant:project:select-root': Error: Choose the top-level Git repository or linked-worktree folder.",
+          "Error invoking remote method 'octant:project:select-root': Error: Choose an accessible directory.",
         ),
       );
     const bridge = createHostBridge(
@@ -358,7 +358,7 @@ describe("desktop preload bridge", () => {
     );
 
     await expect(bridge.selectProjectRoot("code")).rejects.toThrow(
-      /^Choose the top-level Git repository or linked-worktree folder\.$/,
+      /^Choose an accessible directory\.$/,
     );
 
     invoke.mockRejectedValueOnce(
