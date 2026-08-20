@@ -261,6 +261,9 @@ export const ExtensionComponentKind = Schema.Literal(
   "apple-development-adapter",
   "board",
   "integration",
+  "ui-surface",
+  "appearance-pack",
+  "preview-viewer",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
@@ -294,8 +297,31 @@ const executableKinds = new Set<ExtensionComponentKind>([
 ]);
 const mcpChildKinds = new Set<ExtensionComponentKind>(["mcp-tool", "mcp-prompt", "mcp-resource"]);
 
-export const ExtensionContributionPoint = Schema.Literal("sidebar.destination", "settings.section");
+export const ExtensionContributionPoint = Schema.Literal(
+  "sidebar.destination",
+  "settings.section",
+  "workspace.tab",
+  "thread.pane",
+  "preview.viewer",
+  "appearance.preset",
+  "board.view",
+);
 export type ExtensionContributionPoint = typeof ExtensionContributionPoint.Type;
+
+export const ExtensionPreviewViewerKind = Schema.Literal(
+  "text",
+  "markdown",
+  "image",
+  "pdf",
+  "table",
+  "workbook",
+  "document",
+  "slides",
+);
+export type ExtensionPreviewViewerKind = typeof ExtensionPreviewViewerKind.Type;
+
+export const ExtensionBoardMode = Schema.Literal("work", "code");
+export type ExtensionBoardMode = typeof ExtensionBoardMode.Type;
 
 export const ExtensionSidebarDestinationContribution = Schema.Struct({
   point: Schema.Literal("sidebar.destination"),
@@ -317,9 +343,59 @@ export const ExtensionSettingsSectionContribution = Schema.Struct({
 }).annotations(strict);
 export type ExtensionSettingsSectionContribution = typeof ExtensionSettingsSectionContribution.Type;
 
+export const ExtensionWorkspaceTabContribution = Schema.Struct({
+  point: Schema.Literal("workspace.tab"),
+  componentId: ExtensionComponentId,
+  tabId: boundedToken(64),
+  label: boundedText(64),
+  modes: Schema.Array(OctantMode).pipe(Schema.minItems(1), Schema.maxItems(3)),
+}).annotations(strict);
+export type ExtensionWorkspaceTabContribution = typeof ExtensionWorkspaceTabContribution.Type;
+
+export const ExtensionThreadPaneContribution = Schema.Struct({
+  point: Schema.Literal("thread.pane"),
+  componentId: ExtensionComponentId,
+  paneId: boundedToken(64),
+  label: boundedText(64),
+  modes: Schema.Array(OctantMode).pipe(Schema.minItems(1), Schema.maxItems(3)),
+}).annotations(strict);
+export type ExtensionThreadPaneContribution = typeof ExtensionThreadPaneContribution.Type;
+
+export const ExtensionPreviewViewerContribution = Schema.Struct({
+  point: Schema.Literal("preview.viewer"),
+  componentId: ExtensionComponentId,
+  viewerId: boundedToken(64),
+  label: boundedText(64),
+  kinds: Schema.Array(ExtensionPreviewViewerKind).pipe(Schema.minItems(1), Schema.maxItems(16)),
+}).annotations(strict);
+export type ExtensionPreviewViewerContribution = typeof ExtensionPreviewViewerContribution.Type;
+
+export const ExtensionAppearancePresetContribution = Schema.Struct({
+  point: Schema.Literal("appearance.preset"),
+  componentId: ExtensionComponentId,
+  presetId: boundedToken(64),
+  label: boundedText(64),
+}).annotations(strict);
+export type ExtensionAppearancePresetContribution =
+  typeof ExtensionAppearancePresetContribution.Type;
+
+export const ExtensionBoardViewContribution = Schema.Struct({
+  point: Schema.Literal("board.view"),
+  componentId: ExtensionComponentId,
+  viewId: boundedToken(64),
+  label: boundedText(64),
+  modes: Schema.Array(ExtensionBoardMode).pipe(Schema.minItems(1), Schema.maxItems(2)),
+}).annotations(strict);
+export type ExtensionBoardViewContribution = typeof ExtensionBoardViewContribution.Type;
+
 export const ExtensionContribution = Schema.Union(
   ExtensionSidebarDestinationContribution,
   ExtensionSettingsSectionContribution,
+  ExtensionWorkspaceTabContribution,
+  ExtensionThreadPaneContribution,
+  ExtensionPreviewViewerContribution,
+  ExtensionAppearancePresetContribution,
+  ExtensionBoardViewContribution,
 );
 export type ExtensionContribution = typeof ExtensionContribution.Type;
 

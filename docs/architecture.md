@@ -226,13 +226,17 @@ modelId }`, and the model picker is provider-first. Discovery can find
 
 `@octant/plugin-host` is the pure model: normalized component kinds
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
-`hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`),
-composer addressing (`@plugin`, `@plugin/component`, `$skill`), and the
-activation ladder. The manifest and component schemas themselves
-(`ExtensionPackageManifest`, component kinds, declared capabilities,
-`sidebar.destination`/`settings.section` contributions) live in
-`@octant/contracts/extensions`; `@octant/plugin-api` re-exports the subset a
-plugin author needs as a narrower, named surface. `apps/server/src/extensions`
+`hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
+`ui-surface`, `appearance-pack`, `preview-viewer`), composer addressing
+(`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
+manifest and component schemas themselves (`ExtensionPackageManifest`,
+component kinds, declared capabilities, and renderer contribution points)
+live in `@octant/contracts/extensions`; `@octant/plugin-api` re-exports the
+subset a plugin author needs as a narrower, named surface. Unknown
+contribution points are rejected. The renderer contribution registry resolves
+`sidebar.destination`, `settings.section`, `workspace.tab`, `thread.pane`,
+`preview.viewer`, `appearance.preset`, and `board.view` from the effective
+first-party catalog; it never decides availability. `apps/server/src/extensions`
 owns the runtime: package store, inspector, marketplaces (skills.sh, npm,
 curated catalog), Agent Plugins ingestion, supervisor, MCP session manager,
 and skill discovery.

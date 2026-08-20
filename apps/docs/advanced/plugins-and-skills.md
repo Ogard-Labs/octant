@@ -65,8 +65,11 @@ disabled — trust and enable them from **Installed**.
 
 ## Plugins
 
-A plugin is an extension package that can contribute prompt-only skills and MCP
-servers. Octant is a conformant
+A plugin is an extension package that can contribute prompt-only skills, MCP
+servers, and declared renderer surfaces (sidebar destinations, settings
+sections, workspace tabs, thread panes, preview viewers, appearance presets,
+and board views). The host rejects unknown contribution points, and a
+disabled component contributes no surface. Octant is a conformant
 [Agent Plugins](https://agent-plugins.org/) 1.0.0 client: portable packages use
 root `plugin.json`, `skills/`, and `mcp.json`. Codex-compatible
 `.codex-plugin/plugin.json` packages remain supported through a compatibility
