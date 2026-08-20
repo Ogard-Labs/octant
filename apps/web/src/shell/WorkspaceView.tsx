@@ -733,91 +733,90 @@ function renderNonCodeTab(
 ): React.ReactNode {
   if (tab.kind === "draft-thread") {
     return (
-      <div className="draft-thread-execution-profile" key={tab.id}>
-        {props.draftExecutionProfile}
-        <DraftThreadWorkspace
-          mode={tab.mode}
-          {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-          {...(props.selectedCreateHostId === undefined
-            ? {}
-            : { selectedHostId: props.selectedCreateHostId })}
-          {...(props.fixedCreateHostId === undefined
-            ? tab.projectId !== undefined && props.selectedCreateHostId !== undefined
-              ? { fixedHostId: props.selectedCreateHostId }
-              : {}
-            : { fixedHostId: props.fixedCreateHostId })}
-          {...(props.lastSelectedHealthyHostId === undefined
-            ? {}
-            : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-          {...(props.createHostViewScope === undefined
-            ? {}
-            : { viewScope: props.createHostViewScope })}
-          {...(props.onSelectCreateHost === undefined
-            ? {}
-            : { onSelectHost: props.onSelectCreateHost })}
-          projects={props.projects}
-          availabilityByProject={props.availabilityByProject}
-          {...(props.folderBrowseClient === undefined
-            ? {}
-            : { folderBrowseClient: props.folderBrowseClient })}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
-          {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
-          {...(props.githubCloneClient === undefined
-            ? {}
-            : { githubCloneClient: props.githubCloneClient })}
-          {...(tab.projectId === undefined ? {} : { projectId: tab.projectId })}
-          {...(props.draftProjectName === undefined ? {} : { projectName: props.draftProjectName })}
-          {...(props.draftProjectRoot === undefined ? {} : { projectRoot: props.draftProjectRoot })}
-          {...(props.draftBranchName === undefined ? {} : { branchName: props.draftBranchName })}
-          {...(props.draftApprovalLabel === undefined
-            ? {}
-            : { approvalLabel: props.draftApprovalLabel })}
-          providerGroups={props.draftProviderGroups ?? []}
-          {...(props.draftSelectedProviderInstanceId === undefined
-            ? {}
-            : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
-          {...(props.draftSelectedModelId === undefined
-            ? {}
-            : { selectedModelId: props.draftSelectedModelId })}
-          onSelectProvider={props.onDraftSelectProvider ?? (() => {})}
-          {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
-          {...(props.onDraftCreateCodeThread === undefined
-            ? {}
-            : { onCreateCodeThread: props.onDraftCreateCodeThread })}
-          onCreateThread={(prompt, folderSelection, deliveryOutcome, images) => {
-            if (props.onDraftCreateThread !== undefined) {
-              void props.onDraftCreateThread(
-                tab.mode,
-                prompt,
-                folderSelection,
-                deliveryOutcome,
-                ...(images === undefined ? [] : [images]),
-              );
-            }
-          }}
-          {...(props.onCreateProject === undefined
-            ? {}
-            : { onCreateProject: props.onCreateProject })}
-          onCancel={() => {
-            // Find the group containing this tab and close it
-            const layout = props.workspace.layouts[tab.mode];
-            const location = findTabLocation(layout, tab.id);
-            if (location !== undefined) {
-              props.onClose(location.groupId, tab.id);
-            }
-          }}
-          {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
-          {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
-          {...(props.onDraftPendingMessage === undefined
-            ? {}
-            : { pendingMessage: props.onDraftPendingMessage })}
-          {...(props.onDraftCancelFirstTurn === undefined
-            ? {}
-            : { onCancelFirstTurn: props.onDraftCancelFirstTurn })}
-          {...(props.onAttachFolder === undefined ? {} : { onAttachFolder: props.onAttachFolder })}
-        />
-      </div>
+      <DraftThreadWorkspace
+        key={tab.id}
+        mode={tab.mode}
+        {...(tab.mode === "code" && props.draftExecutionProfile !== undefined
+          ? { executionProfile: props.draftExecutionProfile }
+          : {})}
+        {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+        {...(props.selectedCreateHostId === undefined
+          ? {}
+          : { selectedHostId: props.selectedCreateHostId })}
+        {...(props.fixedCreateHostId === undefined
+          ? tab.projectId !== undefined && props.selectedCreateHostId !== undefined
+            ? { fixedHostId: props.selectedCreateHostId }
+            : {}
+          : { fixedHostId: props.fixedCreateHostId })}
+        {...(props.lastSelectedHealthyHostId === undefined
+          ? {}
+          : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+        {...(props.createHostViewScope === undefined
+          ? {}
+          : { viewScope: props.createHostViewScope })}
+        {...(props.onSelectCreateHost === undefined
+          ? {}
+          : { onSelectHost: props.onSelectCreateHost })}
+        projects={props.projects}
+        availabilityByProject={props.availabilityByProject}
+        {...(props.folderBrowseClient === undefined
+          ? {}
+          : { folderBrowseClient: props.folderBrowseClient })}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
+        {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
+        {...(props.githubCloneClient === undefined
+          ? {}
+          : { githubCloneClient: props.githubCloneClient })}
+        {...(tab.projectId === undefined ? {} : { projectId: tab.projectId })}
+        {...(props.draftProjectName === undefined ? {} : { projectName: props.draftProjectName })}
+        {...(props.draftProjectRoot === undefined ? {} : { projectRoot: props.draftProjectRoot })}
+        {...(props.draftBranchName === undefined ? {} : { branchName: props.draftBranchName })}
+        {...(props.draftApprovalLabel === undefined
+          ? {}
+          : { approvalLabel: props.draftApprovalLabel })}
+        providerGroups={props.draftProviderGroups ?? []}
+        {...(props.draftSelectedProviderInstanceId === undefined
+          ? {}
+          : { selectedProviderInstanceId: props.draftSelectedProviderInstanceId })}
+        {...(props.draftSelectedModelId === undefined
+          ? {}
+          : { selectedModelId: props.draftSelectedModelId })}
+        onSelectProvider={props.onDraftSelectProvider ?? (() => {})}
+        {...(props.draftCodeExecute === undefined ? {} : { codeExecute: props.draftCodeExecute })}
+        {...(props.onDraftCreateCodeThread === undefined
+          ? {}
+          : { onCreateCodeThread: props.onDraftCreateCodeThread })}
+        onCreateThread={(prompt, folderSelection, deliveryOutcome, images) => {
+          if (props.onDraftCreateThread !== undefined) {
+            void props.onDraftCreateThread(
+              tab.mode,
+              prompt,
+              folderSelection,
+              deliveryOutcome,
+              ...(images === undefined ? [] : [images]),
+            );
+          }
+        }}
+        {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
+        onCancel={() => {
+          // Find the group containing this tab and close it
+          const layout = props.workspace.layouts[tab.mode];
+          const location = findTabLocation(layout, tab.id);
+          if (location !== undefined) {
+            props.onClose(location.groupId, tab.id);
+          }
+        }}
+        {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
+        {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
+        {...(props.onDraftPendingMessage === undefined
+          ? {}
+          : { pendingMessage: props.onDraftPendingMessage })}
+        {...(props.onDraftCancelFirstTurn === undefined
+          ? {}
+          : { onCancelFirstTurn: props.onDraftCancelFirstTurn })}
+        {...(props.onAttachFolder === undefined ? {} : { onAttachFolder: props.onAttachFolder })}
+      />
     );
   }
   if (tab.kind === "chat-thread") {

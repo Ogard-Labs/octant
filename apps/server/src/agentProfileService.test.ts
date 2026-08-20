@@ -78,6 +78,25 @@ describe("AgentProfileService", () => {
     }
   });
 
+  it("keeps a scoped profile with its owner when it is edited", async () => {
+    const scope = { scopeKind: "project", scopeRef: "project-a" };
+    const fixture = fixtureService({ profiles: [sampleProfile()], scope });
+    await fixture.service.execute({
+      kind: "update-agent-profile",
+      profileId,
+      expectedVersion: 1,
+      displayName: "Reviewer v2",
+    });
+
+    // A profile relabelled user-wide on every edit is a profile any Project
+    // could then bind, which is the partition scopes exist to hold.
+    expect(fixture.append).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        events: [expect.objectContaining({ payload: expect.objectContaining({ scope }) })],
+      }),
+    );
+  });
+
   it("removes a profile", async () => {
     const fixture = fixtureService({ profiles: [sampleProfile()] });
     const result = await fixture.service.execute({
@@ -205,6 +224,7 @@ function fixtureService(
   options: {
     profiles?: AgentProfile[];
     appendError?: Error;
+    scope?: { scopeKind: string; scopeRef: string };
   } = {},
 ) {
   const profiles = [...(options.profiles ?? [])];
@@ -231,6 +251,12 @@ function fixtureService(
   const persistence = {
     journal: { append },
     readAgentProfile: (id: typeof profileId) => profiles.find((p) => String(p.id) === String(id)),
+    readAgentProfileBinding: (id: typeof profileId) => {
+      const profile = profiles.find((p) => String(p.id) === String(id));
+      return profile === undefined
+        ? undefined
+        : { profile, scope: options.scope ?? { scopeKind: "user", scopeRef: "local-user" } };
+    },
     readAgentProfiles: () => [...profiles],
     readProfilesForScope: (_scopeKind: string, _scopeRef: string) => [...profiles],
     readProviderInstances: () => [{ id: "00000000-0000-0000-0000-000000000030", enabled: true }],

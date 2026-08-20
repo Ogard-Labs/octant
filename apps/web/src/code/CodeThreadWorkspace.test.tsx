@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { StrictMode, useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { AgentProfileNamesProvider } from "../agentProfile/AgentProfileNames";
 import { CodeThreadWorkspace } from "./CodeThreadWorkspace";
 import type { CodeController } from "./useCodeController";
 import type { PickerGroup } from "@octant/domain";
@@ -17,6 +18,40 @@ const alternateProviderId = "80000000-0000-4000-8000-0000000000a2" as never;
 const alternateModelId = "model-two" as never;
 
 describe("CodeThreadWorkspace", () => {
+  it("names the profile a thread was started under, and stays quiet when it has none", () => {
+    const profileId = "60000000-0000-4000-8000-000000000001";
+    const withProfile = controller();
+    const { rerender } = render(
+      <AgentProfileNamesProvider profiles={[{ id: profileId, displayName: "Reviewer" } as never]}>
+        <CodeThreadWorkspace
+          controller={
+            {
+              ...withProfile,
+              activeView: {
+                ...withProfile.activeView,
+                thread: { ...withProfile.activeView!.thread, profileId },
+              },
+            } as never
+          }
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+        />
+      </AgentProfileNamesProvider>,
+    );
+    expect(screen.getByText("Reviewer")).toBeVisible();
+
+    rerender(
+      <AgentProfileNamesProvider profiles={[{ id: profileId, displayName: "Reviewer" } as never]}>
+        <CodeThreadWorkspace
+          controller={controller()}
+          providerGroups={[providerGroup()]}
+          threadId={threadId}
+        />
+      </AgentProfileNamesProvider>,
+    );
+    expect(screen.queryByText("Reviewer")).toBeNull();
+  });
+
   it("renders the conversation center and sends follow-ups through the controller", async () => {
     const user = userEvent.setup();
     const sendFollowUp = vi.fn(async () => true);

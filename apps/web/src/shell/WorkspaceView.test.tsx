@@ -913,6 +913,22 @@ describe("WorkspaceView execution profiles", () => {
     expect(screen.getByRole("region", { name: "New Code thread" })).toBeVisible();
   });
 
+  it("leaves the execution-profile control off a draft whose mode it cannot bind", () => {
+    const tab = {
+      id: ids.tab,
+      kind: "draft-thread",
+      mode: "chat",
+      title: "New Chat thread",
+    } as WorkspaceTab;
+    render(
+      <WorkspaceView
+        {...propsFor(tab)}
+        draftExecutionProfile={<div data-testid="execution-profile-mount">Profile control</div>}
+      />,
+    );
+    expect(screen.queryByTestId("execution-profile-mount")).toBeNull();
+  });
+
   it("threads the GitHub onboarding clients into the Code draft composer", () => {
     const tab = {
       id: ids.tab,

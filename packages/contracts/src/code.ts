@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { AgentProfileId } from "./agentProfile";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { BindingRevisionId, ProjectId } from "./projects";
 import { ThreadWorkingDirectory } from "./workingDirectory";
@@ -241,6 +242,15 @@ export const CodeThread = Schema.Struct({
   providerHandoff: Schema.optional(ThreadProviderHandoff),
   executionPolicy: ProviderExecutionPolicy,
   permissionPersistence: PermissionPersistence,
+  /**
+   * The profile this thread runs under, recorded so the thread can say which
+   * working mode produced its posture. Optional so a journal written before
+   * profiles bound threads replays as "no profile" rather than being rejected.
+   * The posture itself is already in `executionPolicy`: a profile narrows it at
+   * creation and is never consulted again for authority, so a profile edited
+   * afterwards cannot change what a running thread may do.
+   */
+  profileId: Schema.optional(AgentProfileId),
   workingDirectory: Schema.optional(ThreadWorkingDirectory),
   deliveryTarget: CodeDeliveryTarget,
   version: AggregateVersion,
@@ -399,6 +409,12 @@ export const CodeCommand = Schema.Union(
      * touched.
      */
     forkedFrom: Schema.optional(CodeThreadForkOrigin),
+    /**
+     * The profile the thread starts under. Optional because a thread may run
+     * with no profile at all; when present it narrows the requested posture
+     * before any authority gate runs.
+     */
+    profileId: Schema.optional(AgentProfileId),
     approvalId: Schema.optional(CodeApprovalId),
   })
     .annotations(strict)
