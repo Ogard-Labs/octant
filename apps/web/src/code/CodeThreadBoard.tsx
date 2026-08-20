@@ -256,11 +256,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
                           type="checkbox"
                         />
                         <span>
-                          <span
-                            aria-hidden="true"
-                            className="code-board__status-dot"
-                            data-status={status}
-                          />
+                          <span aria-hidden="true" className={`st st-${status}`} />
                           {codeBoardStatusLabel(status)}
                         </span>
                       </label>
@@ -395,7 +391,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
         {activeFilters.length === 0 ? null : (
           <div aria-label="Active filters" className="code-board__active-filters" role="status">
             {activeFilters.map((filter) => (
-              <span className="code-board__active-filter" key={`${filter.kind}:${filter.label}`}>
+              <span className="tag" key={`${filter.kind}:${filter.label}`}>
                 {filter.label}
               </span>
             ))}
@@ -473,7 +469,7 @@ function CodeBoardBody(props: {
   return (
     <div className="code-board__body" data-grouping={props.grouping}>
       {emptyNote}
-      <div className="code-board__columns" data-grouping={props.grouping}>
+      <div className="board" data-grouping={props.grouping}>
         {visibleColumns.map((column) => (
           <CodeBoardColumnView
             column={column}
@@ -501,22 +497,24 @@ function CodeBoardColumnView(props: {
   return (
     <section
       aria-label={`${column.label} (${column.cards.length})`}
-      className="code-board__column"
+      className="board-col"
       data-column-kind={column.kind}
     >
-      <header className="code-board__column-header">
+      <header className="board-col-head">
         {column.status === undefined ? null : (
-          <span aria-hidden="true" className="code-board__status-dot" data-status={column.status} />
+          <span aria-hidden="true" className={`st st-${column.status}`} />
         )}
         <h2>{column.label}</h2>
-        <span aria-hidden="true" className="code-board__column-count">
+        <span aria-hidden="true" className="count">
           {column.cards.length}
         </span>
       </header>
       {column.cards.length === 0 ? (
-        <p className="code-board__column-empty">No threads</p>
+        <div className="board-col-body">
+          <p className="board-col-empty">No threads</p>
+        </div>
       ) : (
-        <ul className="code-board__cards">
+        <ul className="board-col-body">
           {column.cards.map((card) => (
             <li key={String(card.threadId)}>
               <CodeBoardCardView
@@ -552,81 +550,68 @@ function CodeBoardCardView(props: {
     card.changedFiles.kind === "observed" ? card.changedFiles.changedPathCount : 0;
   return (
     <article
-      className="code-board__card"
+      className="board-card"
       data-follow-up={card.followUp ? "true" : "false"}
       data-status={card.status}
     >
-      <div className="code-board__card-head">
-        <span aria-hidden="true" className="code-board__status-dot" data-status={card.status} />
+      <span className="board-card-top">
+        {/* unread is a presence before the title, named for assistive tech */}
+        {card.unread ? <span aria-label="Unread" className="unread" /> : null}
         <button
           className="code-board__card-open"
           onClick={() => props.onOpen?.(card.threadId as CodeThreadId)}
           type="button"
         >
-          <span className="code-board__card-title">{card.title}</span>
+          <span className="board-card-title">{card.title}</span>
         </button>
         {/*
-         * The dot is decorative. The status itself is always text: a compact
-         * chip where the column does not state it, and screen-reader-only where
-         * the Status column header already does.
+         * The status is always text: a compact chip where the column does not
+         * state it, and screen-reader-only where the Status column header
+         * already does. The column head's dot is the only decorative dot.
          */}
-        <span
-          className={
-            props.statusPresentation === "visible"
-              ? "code-board__flag code-board__card-status"
-              : "sr-only"
-          }
-        >
+        <span className={props.statusPresentation === "visible" ? "badge" : "sr-only"}>
           {statusLabel}
         </span>
-      </div>
-      <p className="code-board__card-meta-line">
-        {props.projectName === undefined ? null : <span>{props.projectName}</span>}
-        <span>{card.modelId}</span>
-      </p>
-      <p className="code-board__card-flags">
-        {card.recovery.kind === "recovering" ? (
-          <span className="code-board__flag code-board__flag--recovery">
-            Recovery: {card.recovery.reasons.map(recoveryReasonLabel).join(", ")}
-          </span>
-        ) : null}
-        {card.blockingReason === undefined ? null : (
-          <span className="code-board__flag code-board__flag--blocked">{card.blockingReason}</span>
-        )}
-        {card.checks.state === "failing" ? (
-          <span className="code-board__flag code-board__flag--blocked">Checks failing</span>
-        ) : null}
+      </span>
+      <span className="board-card-facts">
+        {props.projectName === undefined ? null : <span className="fact">{props.projectName}</span>}
+        <span className="fact">{card.modelId}</span>
+        {card.checks.state === "failing" ? <span className="fact bad">Checks failing</span> : null}
         {card.followUp ? (
-          <span className="code-board__flag code-board__flag--follow-up" data-indicator="follow-up">
+          <span className="fact warn" data-indicator="follow-up">
             <span aria-hidden="true">◆</span> Follow-up
           </span>
         ) : null}
-        {card.unread ? <span className="code-board__flag">Unread</span> : null}
         {card.childAgents.active === 0 ? null : (
-          <span className="code-board__flag">
+          <span className="fact">
             {card.childAgents.active} active {card.childAgents.active === 1 ? "agent" : "agents"}
           </span>
         )}
         {changedFileCount === 0 ? null : (
-          <span className="code-board__flag">
+          <span className="fact">
             {changedFileCount} {changedFileCount === 1 ? "file" : "files"}
           </span>
         )}
         {card.linkedPullRequest.kind === "linked" ? (
-          <span className="code-board__flag">
-            <GitPullRequest aria-hidden="true" size={11} strokeWidth={1.8} /> #
+          <span className="fact">
+            <GitPullRequest aria-hidden="true" className="icon" size={12} strokeWidth={1.8} /> #
             {card.linkedPullRequest.number}
           </span>
         ) : null}
         {stale ? (
-          <span
-            className="code-board__flag code-board__flag--stale"
-            title="Some metadata could not be refreshed"
-          >
+          <span className="fact" title="Some metadata could not be refreshed">
             Stale metadata
           </span>
         ) : null}
-      </p>
+      </span>
+      {card.recovery.kind === "recovering" ? (
+        <span className="board-card-blocked">
+          Recovery: {card.recovery.reasons.map(recoveryReasonLabel).join(", ")}
+        </span>
+      ) : null}
+      {card.blockingReason === undefined ? null : (
+        <span className="board-card-blocked">{card.blockingReason}</span>
+      )}
       <details className="code-board__card-details">
         <summary aria-label={`Details for ${card.title}`}>
           <span>Details</span>

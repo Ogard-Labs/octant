@@ -7148,49 +7148,54 @@ dialog.project-dialog {
   }
 }
 
-/* Code Thread Board */
+/* Code Thread Board.
+   Columns and cards come from the design system (.board, .board-col,
+   .board-card, .st, .fact in octant.css). Everything here is the app-specific
+   frame around them — header, toolbar, filter popovers — plus the two grouping
+   layouts and semantic markup (h2 headings, card lists, button titles) the
+   system board vocabulary does not carry. */
 .code-board-layer {
   position: absolute;
   inset: 0;
   z-index: 5;
   overflow: hidden;
-  background: var(--octant-surface-inset);
+  background: var(--oct-bg);
 }
 
 .code-board {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--oct-space-3);
   height: 100%;
   min-height: 0;
-  padding: 18px 20px 0;
+  padding: 18px var(--oct-space-5) 0;
 }
 
 .code-board__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: var(--oct-space-4);
 }
 
 .code-board__identity {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: var(--oct-space-1) 10px;
   min-width: 0;
 }
 
 .code-board__title {
   margin: 0;
   font-size: 1rem;
-  font-weight: 600;
-  color: var(--octant-text-primary);
+  font-weight: var(--oct-weight-strong);
+  color: var(--oct-fg);
 }
 
 .code-board__subtitle {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 12px;
 }
 
@@ -7201,16 +7206,16 @@ dialog.project-dialog {
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--octant-border);
+  gap: var(--oct-space-2);
+  padding-bottom: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
 }
 
 .code-board__primary-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .code-board__toolbar fieldset {
@@ -7223,9 +7228,9 @@ dialog.project-dialog {
   display: flex;
   gap: 2px;
   padding: 2px;
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-  background: var(--octant-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
 }
 
 .code-board__grouping-option {
@@ -7246,19 +7251,19 @@ dialog.project-dialog {
 .code-board__grouping-option span {
   padding: 4px 10px;
   border-radius: 6px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
   font-size: 0.78rem;
   line-height: 1.2;
 }
 
 .code-board__grouping-option input:checked + span {
-  color: var(--octant-text-primary);
-  background: var(--octant-surface-raised);
-  box-shadow: var(--octant-shadow-hairline);
+  color: var(--oct-fg);
+  background: var(--oct-bg);
+  box-shadow: var(--oct-elev-ring);
 }
 
 .code-board__grouping-option input:focus-visible + span {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-accent-fg);
   outline-offset: 1px;
 }
 
@@ -7270,15 +7275,15 @@ dialog.project-dialog {
   min-width: 160px;
   height: 30px;
   padding: 0 9px;
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-  color: var(--octant-text-muted);
-  background: var(--octant-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-muted);
+  background: var(--oct-surface);
 }
 
 .code-board__search:focus-within {
-  border-color: var(--octant-focus-ring);
-  box-shadow: 0 0 0 1px var(--octant-focus-ring);
+  border-color: var(--oct-accent-fg);
+  box-shadow: 0 0 0 1px var(--oct-accent-fg);
 }
 
 .code-board__toolbar .code-board__search input[type="search"] {
@@ -7289,7 +7294,7 @@ dialog.project-dialog {
   outline: 0;
   font-size: 0.8rem;
   background: transparent;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .code-board__filters {
@@ -7298,32 +7303,25 @@ dialog.project-dialog {
 
 .code-board__filters-toggle {
   gap: 6px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
 }
 
 .code-board__filters-toggle[aria-expanded="true"],
 .code-board__filters-toggle[data-active="true"],
 .code-board__filters-toggle:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-surface-raised);
-}
-
-.code-board__filter-count,
-.code-board__active-filter,
-.code-board__column-count {
-  border-radius: 999px;
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .code-board__filter-count {
   min-width: 18px;
   padding: 0 6px;
+  border-radius: var(--oct-radius-pill);
   font-size: 0.68rem;
   line-height: 18px;
   text-align: center;
-  color: var(--octant-accent-foreground);
-  background: var(--octant-accent);
+  color: var(--oct-accent-on);
+  background: var(--oct-accent);
 }
 
 .code-board__filters-panel,
@@ -7334,19 +7332,19 @@ dialog.project-dialog {
   left: auto;
   max-width: 100%;
   z-index: 6;
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 10px;
-  background: var(--octant-surface-raised);
-  box-shadow: var(--octant-shadow-overlay);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  box-shadow: var(--oct-elev-raised);
 }
 
 .code-board__filters-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--oct-space-3);
   width: 440px;
   max-height: calc(100vh - 220px);
-  padding: 12px;
+  padding: var(--oct-space-3);
   overflow-y: auto;
 }
 
@@ -7355,9 +7353,9 @@ dialog.project-dialog {
   margin-bottom: 5px;
   font-size: 0.7rem;
   font-weight: 500;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .code-board__filters-panel legend {
@@ -7390,37 +7388,37 @@ dialog.project-dialog {
   align-items: center;
   gap: 6px;
   padding: 3px 10px 3px 8px;
-  border: 1px solid var(--octant-border);
-  border-radius: 999px;
-  color: var(--octant-text-muted);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  color: var(--oct-muted);
   background: transparent;
   font-size: 0.76rem;
   line-height: 1.3;
 }
 
-.code-board__status-option > span .code-board__status-dot {
+.code-board__status-option > span .st {
   opacity: 0.45;
 }
 
 .code-board__status-option input:checked + span {
-  color: var(--octant-text-primary);
-  border-color: var(--octant-border-strong);
-  background: var(--octant-surface-selected);
+  color: var(--oct-fg);
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  background: var(--oct-fg-soft);
 }
 
-.code-board__status-option input:checked + span .code-board__status-dot {
+.code-board__status-option input:checked + span .st {
   opacity: 1;
 }
 
 .code-board__status-option input:focus-visible + span {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-accent-fg);
   outline-offset: 1px;
 }
 
 .code-board__filter-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px 12px;
+  gap: 10px var(--oct-space-3);
 }
 
 .code-board__filter-fields label {
@@ -7434,21 +7432,21 @@ dialog.project-dialog {
   min-width: 0;
   padding: 6px 8px;
   font-size: 0.8rem;
-  color: var(--octant-text-primary);
-  background: var(--octant-surface);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 7px;
+  color: var(--oct-fg);
+  background: var(--oct-bg);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
 }
 
 .code-board__filters-footer {
   display: flex;
   justify-content: flex-end;
-  padding-top: 8px;
-  border-top: 1px solid var(--octant-border);
+  padding-top: var(--oct-space-2);
+  border-top: 1px solid var(--oct-border);
 }
 
 .code-board__reset-filters {
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
 }
 
 .code-board__view-options {
@@ -7463,7 +7461,7 @@ dialog.project-dialog {
   gap: 5px;
   cursor: pointer;
   list-style: none;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
   font-size: 0.78rem;
 }
 
@@ -7481,8 +7479,8 @@ dialog.project-dialog {
 .code-board__view-options summary:hover,
 .code-board__view-options[open] summary,
 .code-board__card-details summary:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-surface-raised);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .code-board__view-options[open] summary svg,
@@ -7494,7 +7492,7 @@ dialog.project-dialog {
   left: auto;
   right: 0;
   min-width: 190px;
-  padding: 8px;
+  padding: var(--oct-space-2);
 }
 
 .code-board__view-popover label {
@@ -7502,7 +7500,7 @@ dialog.project-dialog {
   flex-direction: row;
   align-items: center;
   gap: 7px;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-size: 0.78rem;
 }
 
@@ -7513,221 +7511,124 @@ dialog.project-dialog {
   gap: 6px;
 }
 
-.code-board__active-filter {
-  padding: 2px 8px;
-  font-size: 0.72rem;
-}
-
 /*
- * The board body owns all scrolling. Status grouping is a horizontal row of
- * equal-width columns that scroll vertically inside themselves; the page never
- * scrolls horizontally. Project grouping stacks its sections and scrolls
- * vertically as one list.
+ * The board body owns all scrolling. Status grouping hands the horizontal
+ * scroll to the system .board row, whose columns scroll vertically inside
+ * themselves; the page never scrolls horizontally. Project grouping stacks
+ * its sections and scrolls vertically as one list.
  */
 .code-board__body {
   flex: 1 1 auto;
   min-height: 0;
-  padding-bottom: 16px;
+  padding-bottom: var(--oct-space-4);
   overflow: auto;
 }
 
 .code-board__body[data-grouping="status"] {
   display: flex;
   flex-direction: column;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: hidden;
 }
 
-.code-board__columns {
-  display: flex;
+/* the system .board sizes to its content; here it must fill the body's
+   height so each column can pin its head and scroll on its own */
+.code-board__body[data-grouping="status"] .board {
   flex: 1 1 auto;
-  gap: 12px;
-  align-items: stretch;
   min-height: 0;
 }
 
-.code-board__columns[data-grouping="project"] {
-  flex: 0 0 auto;
-  flex-direction: column;
-  gap: 20px;
+/* cards render in a semantic list; the system class carries the layout,
+   this strips the list chrome the styleguide's plain divs never had */
+ul.board-col-body {
+  margin: 0;
+  list-style: none;
 }
 
-.code-board__column {
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  min-width: 260px;
-  max-width: 420px;
-  min-height: 0;
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
-  background: var(--octant-surface);
-  overflow-y: auto;
+/* the placeholder is a paragraph here and nothing resets paragraph margins
+   globally; the system padding is the whole intended spacing */
+p.board-col-empty {
+  margin: 0;
 }
 
-.code-board__columns[data-grouping="project"] .code-board__column {
-  flex: 0 0 auto;
-  max-width: none;
-  overflow: visible;
-}
-
-.code-board__column-header {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--octant-border);
-  background: var(--octant-surface);
-}
-
-.code-board__column-header h2 {
+/* the column heading is an h2 for the document outline; it takes the
+   head's mono styling rather than heading styling */
+.board-col-head h2 {
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font: inherit;
+  letter-spacing: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--octant-text-primary);
 }
 
-.code-board__column-count {
-  min-width: 22px;
-  padding: 1px 7px;
-  text-align: center;
-  font-size: 0.72rem;
-}
-
-.code-board__column-empty {
-  margin: 0;
-  padding: 24px 12px;
-  color: var(--octant-text-muted);
-  font-size: 0.78rem;
-  text-align: center;
-}
-
-.code-board__cards {
-  display: flex;
+/* Project grouping stacks full-width sections that flow their cards in a
+   grid; the recovery column follows the same shape in either grouping */
+.board[data-grouping="project"] {
   flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 10px;
-  list-style: none;
+  gap: var(--oct-space-5);
+  overflow-x: visible;
 }
 
-.code-board__columns[data-grouping="project"] .code-board__cards {
+.board[data-grouping="project"] .board-col {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.board[data-grouping="project"] .board-col-body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  overflow: visible;
 }
 
-.code-board__card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-  background: var(--octant-surface-raised);
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease;
-}
-
-.code-board__card:hover {
-  border-color: var(--octant-border-strong);
-  box-shadow: var(--octant-shadow-sm);
-}
-
-.code-board__card-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.code-board__card-head .code-board__status-dot {
-  flex: 0 0 auto;
-  margin-top: 5px;
-}
-
-.code-board__card-status {
-  flex: 0 0 auto;
-  margin-top: 1px;
-  white-space: nowrap;
-}
-
+/* the whole card title is the click target; the system card supplies all
+   chrome, so the button contributes none of its own */
 .code-board__card-open {
   flex: 1 1 auto;
   min-width: 0;
   padding: 0;
-  color: var(--octant-text-primary);
-  font: inherit;
-  font-size: 0.84rem;
-  font-weight: 500;
-  line-height: 1.35;
-  text-align: left;
-  background: none;
   border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   cursor: pointer;
 }
 
-.code-board__card-open:hover .code-board__card-title {
+.code-board__card-open:hover .board-card-title {
   text-decoration: underline;
 }
 
-.code-board__card-title {
-  display: -webkit-box;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+/* the visible status chip must not compress against a long title */
+.board-card-top .badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
-.code-board__card-meta-line {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 6px;
-  margin: 0;
-  padding-left: 16px;
+.code-board__card-details {
+  margin-top: var(--oct-space-1);
+}
+
+.code-board__card-details summary {
+  width: fit-content;
+  padding: 2px 6px;
+  border-radius: 5px;
   font-size: 0.72rem;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
-.code-board__card-meta-line span:not(:first-child)::before {
-  content: "·";
-  margin-right: 6px;
-}
-
-.code-board__status-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--octant-text-secondary);
-}
-
-.code-board__status-dot[data-status="in-progress"] {
-  background: #4c9ffe;
-}
-
-.code-board__status-dot[data-status="waiting"] {
-  background: #e0a516;
-}
-
-.code-board__status-dot[data-status="done"] {
-  background: #3ea672;
+.code-board__card-details[open] summary {
+  color: var(--oct-fg);
 }
 
 .code-board__card-meta {
   display: grid;
-  gap: 4px;
-  margin: 8px 0 0;
+  gap: var(--oct-space-1);
+  margin: var(--oct-space-2) 0 0;
+  padding: 0 6px 4px;
   font-size: 0.74rem;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
 }
 
 .code-board__card-meta div {
@@ -7737,94 +7638,27 @@ dialog.project-dialog {
 
 .code-board__card-meta dt {
   min-width: 84px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .code-board__card-meta dd {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--oct-space-1);
   margin: 0;
-  color: var(--octant-text-primary);
-}
-
-.code-board__card-flags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 0;
-  padding-left: 16px;
-}
-
-.code-board__card-flags:empty {
-  display: none;
-}
-
-.code-board__card-details {
-  margin-top: 2px;
-}
-
-.code-board__card-details summary {
-  width: fit-content;
-  padding: 2px 6px;
-  margin-left: 10px;
-  border-radius: 5px;
-  font-size: 0.72rem;
-  color: var(--octant-text-muted);
-}
-
-.code-board__card-details[open] summary {
-  color: var(--octant-text-primary);
-}
-
-.code-board__card-details .code-board__card-meta {
-  padding: 0 6px 4px 16px;
-}
-
-.code-board__flag {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 1px 7px;
-  font-size: 0.68rem;
-  line-height: 1.5;
-  color: var(--octant-text-secondary);
-  background: var(--octant-surface);
-  border: 1px solid var(--octant-border);
-  border-radius: 999px;
-}
-
-.code-board__flag--recovery,
-.code-board__flag--blocked {
-  color: #e0a516;
-  border-color: color-mix(in srgb, #e0a516 40%, transparent);
-}
-
-.code-board__flag--stale {
-  color: var(--octant-text-muted);
-  border-style: dashed;
-}
-
-/*
- * Durable follow-up marker on a board card. Distinguished by more than color:
- * an amber palette plus a leading diamond glyph and the "Follow-up" label.
- */
-.code-board__flag--follow-up {
-  color: var(--octant-warning-text);
-  background: var(--octant-warning-surface);
-  border-color: var(--octant-warning-border);
+  color: var(--oct-fg);
 }
 
 .code-board__empty {
   display: grid;
   gap: 6px;
   max-width: 460px;
-  margin: 24px auto;
-  padding: 20px;
-  color: var(--octant-text-secondary);
+  margin: var(--oct-space-6) auto;
+  padding: var(--oct-space-5);
+  color: var(--oct-fg-2);
   text-align: center;
-  border: 1px dashed var(--octant-border-strong);
-  border-radius: 12px;
+  border: 1px dashed var(--oct-border);
+  border-radius: var(--oct-radius-lg);
 }
 
 @media (max-width: 560px) {
