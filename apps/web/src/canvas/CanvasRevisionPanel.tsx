@@ -58,12 +58,18 @@ export function ReviseCanvasDraft(props: ReviseCanvasDraftProps) {
       <textarea
         id="canvas-revise-prompt"
         aria-label="Revision prompt"
+        className="textarea"
         data-testid="canvas-revise-prompt"
         value={prompt}
         onChange={(event) => setPrompt(event.target.value)}
         rows={3}
       />
-      <button type="submit" data-testid="canvas-revise-submit" disabled={submitting}>
+      <button
+        className="btn btn-secondary btn-sm"
+        type="submit"
+        data-testid="canvas-revise-submit"
+        disabled={submitting}
+      >
         Revise
       </button>
       {message ? <div data-testid="canvas-revise-message">{message}</div> : null}

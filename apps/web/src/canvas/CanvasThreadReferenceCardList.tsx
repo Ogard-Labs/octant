@@ -45,12 +45,16 @@ export function CanvasThreadReferenceCardList(props: CanvasThreadReferenceCardLi
   }
   if (cards.length === 0) return null;
   return (
-    <section aria-label="Canvas references" data-testid="canvas-card-list">
+    <section aria-label="Canvas references" className="stack" data-testid="canvas-card-list">
       {cards.map((card) => (
         <div key={String(card.cardId)}>
           <CardView card={card} />
           {props.onOpen ? (
-            <button type="button" onClick={() => props.onOpen?.(card)}>
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              onClick={() => props.onOpen?.(card)}
+            >
               Open Canvas
             </button>
           ) : null}

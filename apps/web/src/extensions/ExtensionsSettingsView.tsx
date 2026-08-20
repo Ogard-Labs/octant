@@ -1,3 +1,4 @@
+import { BookOpen, Puzzle } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type {
@@ -18,9 +19,7 @@ import type {
 } from "@octant/contracts/extensions";
 import type { ExtensionPackagePreview } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
-import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
-import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { OctantTabs, OctantTabsList, OctantTabsPanel, OctantTabsTab } from "../ui/base/OctantTabs";
 
 /**
@@ -519,6 +518,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       <section
         aria-label={props.showHeading === false ? "Skills & Extensions" : undefined}
         aria-labelledby={props.showHeading === false ? undefined : "extensions-settings-heading"}
+        className="extensions-settings"
         id="settings-skills"
       >
         {props.showHeading === false ? null : (
@@ -536,6 +536,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
       <section
         aria-label={props.showHeading === false ? "Skills & Extensions" : undefined}
         aria-labelledby={props.showHeading === false ? undefined : "extensions-settings-heading"}
+        className="extensions-settings"
         id="settings-skills"
       >
         {props.showHeading === false ? null : (
@@ -558,6 +559,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     <section
       aria-label={props.showHeading === false ? "Skills & Extensions" : undefined}
       aria-labelledby={props.showHeading === false ? undefined : "extensions-settings-heading"}
+      className="extensions-settings"
       id="settings-skills"
     >
       {props.showHeading === false ? null : (
@@ -574,336 +576,425 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
         </OctantTabsList>
 
         <OctantTabsPanel value="installed">
-          <section aria-labelledby="installed-extension-packages-heading">
-            <h3
-              className="extensions-settings__subheading"
-              id="installed-extension-packages-heading"
-            >
+          <section aria-labelledby="installed-extension-packages-heading" className="setgroup">
+            <h3 className="setgroup-head" id="installed-extension-packages-heading">
               Extension packages
             </h3>
-            {installedPackages.length === 0 ? (
-              <p className="extensions-settings__state" role="status">
-                No extension packages are installed.
-              </p>
-            ) : (
-              <ul className="extensions-settings__list">
-                {installedPackages.map((pkg) => (
-                  <InstalledPackageCard
-                    key={`${pkg.extensionId}:${pkg.packageId}`}
-                    packageState={pkg}
-                    busy={busyPackageId === `${pkg.extensionId}:${pkg.packageId}`}
-                    onTrust={(trusted) =>
-                      runLifecycle(
-                        {
-                          kind: "set-source-trust",
-                          commandVersion: COMMAND_VERSION,
-                          extensionId: pkg.extensionId,
-                          expectedStateVersion: pkg.stateVersion,
-                          trusted,
-                        },
-                        `${pkg.extensionId}:${pkg.packageId}`,
-                      )
-                    }
-                    onPluginDesired={(desired) =>
-                      runLifecycle(
-                        {
-                          kind: "set-plugin-desired",
-                          commandVersion: COMMAND_VERSION,
-                          extensionId: pkg.extensionId,
-                          expectedStateVersion: pkg.stateVersion,
-                          desired,
-                        },
-                        `${pkg.extensionId}:${pkg.packageId}`,
-                      )
-                    }
-                    onComponentDesired={(componentId, desired) =>
-                      runLifecycle(
-                        {
-                          kind: "set-component-desired",
-                          commandVersion: COMMAND_VERSION,
-                          extensionId: pkg.extensionId,
-                          expectedStateVersion: pkg.stateVersion,
-                          componentId,
-                          desired,
-                        },
-                        `${pkg.extensionId}:${pkg.packageId}`,
-                      )
-                    }
-                    onUninstall={() =>
-                      runLifecycle(
-                        {
-                          kind: "uninstall-package",
-                          extensionId: pkg.extensionId,
-                          packageId: pkg.packageId,
-                        },
-                        `${pkg.extensionId}:${pkg.packageId}`,
-                      )
-                    }
-                  />
-                ))}
-              </ul>
-            )}
+            <div className="extensions-settings__body">
+              {installedPackages.length === 0 ? (
+                <p className="extensions-settings__state" role="status">
+                  No extension packages are installed.
+                </p>
+              ) : (
+                <ul className="extensions-settings__cards">
+                  {installedPackages.map((pkg) => (
+                    <InstalledPackageCard
+                      key={`${pkg.extensionId}:${pkg.packageId}`}
+                      packageState={pkg}
+                      busy={busyPackageId === `${pkg.extensionId}:${pkg.packageId}`}
+                      onTrust={(trusted) =>
+                        runLifecycle(
+                          {
+                            kind: "set-source-trust",
+                            commandVersion: COMMAND_VERSION,
+                            extensionId: pkg.extensionId,
+                            expectedStateVersion: pkg.stateVersion,
+                            trusted,
+                          },
+                          `${pkg.extensionId}:${pkg.packageId}`,
+                        )
+                      }
+                      onPluginDesired={(desired) =>
+                        runLifecycle(
+                          {
+                            kind: "set-plugin-desired",
+                            commandVersion: COMMAND_VERSION,
+                            extensionId: pkg.extensionId,
+                            expectedStateVersion: pkg.stateVersion,
+                            desired,
+                          },
+                          `${pkg.extensionId}:${pkg.packageId}`,
+                        )
+                      }
+                      onComponentDesired={(componentId, desired) =>
+                        runLifecycle(
+                          {
+                            kind: "set-component-desired",
+                            commandVersion: COMMAND_VERSION,
+                            extensionId: pkg.extensionId,
+                            expectedStateVersion: pkg.stateVersion,
+                            componentId,
+                            desired,
+                          },
+                          `${pkg.extensionId}:${pkg.packageId}`,
+                        )
+                      }
+                      onUninstall={() =>
+                        runLifecycle(
+                          {
+                            kind: "uninstall-package",
+                            extensionId: pkg.extensionId,
+                            packageId: pkg.packageId,
+                          },
+                          `${pkg.extensionId}:${pkg.packageId}`,
+                        )
+                      }
+                    />
+                  ))}
+                </ul>
+              )}
+            </div>
           </section>
 
-          <section
-            aria-labelledby="standalone-skill-registry-heading"
-            className="extensions-settings__subsection"
-          >
-            <h3 className="extensions-settings__subheading" id="standalone-skill-registry-heading">
+          <section aria-labelledby="standalone-skill-registry-heading" className="setgroup">
+            <h3 className="setgroup-head" id="standalone-skill-registry-heading">
               Standalone skills
             </h3>
-            {standaloneSkills.length === 0 ? (
-              <p className="extensions-settings__state" role="status">
-                No standalone skills were discovered.
-              </p>
-            ) : (
-              <ul className="extensions-settings__list">
-                {standaloneSkills.map((skill) => (
-                  <StandaloneSkillCard key={String(skill.skill.qualifiedId)} skill={skill} />
-                ))}
-              </ul>
-            )}
+            <div className="extensions-settings__body">
+              {standaloneSkills.length === 0 ? (
+                <p className="extensions-settings__state" role="status">
+                  No standalone skills were discovered.
+                </p>
+              ) : (
+                <ul className="extensions-settings__cards">
+                  {standaloneSkills.map((skill) => (
+                    <StandaloneSkillCard key={String(skill.skill.qualifiedId)} skill={skill} />
+                  ))}
+                </ul>
+              )}
+            </div>
           </section>
 
           {snapshot.collisions.length > 0 ? (
-            <section
-              aria-labelledby="standalone-skill-collisions-heading"
-              className="extensions-settings__subsection"
-            >
-              <h3
-                className="extensions-settings__subheading"
-                id="standalone-skill-collisions-heading"
-              >
+            <section aria-labelledby="standalone-skill-collisions-heading" className="setgroup">
+              <h3 className="setgroup-head" id="standalone-skill-collisions-heading">
                 Name collisions
               </h3>
-              <ul className="extensions-settings__diagnostics">
-                {snapshot.collisions.map((collision) => (
-                  <li
-                    aria-label={`Skill name collision: ${collision.name}`}
-                    key={`${collision.name}:${collision.candidates.join(":")}`}
-                    role="status"
-                  >
-                    <strong>{collision.name}</strong> has {collision.candidates.length}{" "}
-                    source-qualified candidates. Choose the exact source before use.
-                  </li>
-                ))}
-              </ul>
+              <div className="extensions-settings__body">
+                <ul className="extensions-settings__diagnostics">
+                  {snapshot.collisions.map((collision) => (
+                    <li
+                      aria-label={`Skill name collision: ${collision.name}`}
+                      key={`${collision.name}:${collision.candidates.join(":")}`}
+                      role="status"
+                    >
+                      <strong>{collision.name}</strong> has {collision.candidates.length}{" "}
+                      source-qualified candidates. Choose the exact source before use.
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </section>
           ) : null}
         </OctantTabsPanel>
 
         <OctantTabsPanel value="marketplace">
-          <div className="extensions-settings__marketplace">
-            <div className="extensions-settings__search">
-              <OctantInput
-                aria-label="Search marketplace"
-                className="extensions-settings__search-input"
-                onChange={(event) => setMarketplaceQuery(event.currentTarget.value)}
-                placeholder="Search the extension catalog"
-                type="search"
-                value={marketplaceQuery}
-              />
-              <OctantButton
-                disabled={catalogOffline || marketplaceQuery.trim() === ""}
-                onClick={() => void runSearch()}
-                type="button"
-                variant="secondary"
-              >
-                Run search
-              </OctantButton>
-            </div>
-            {props.pickLocalPluginFolder !== undefined ? (
-              <div className="extensions-settings__local-import">
-                <OctantButton
-                  disabled={importingLocal || installing}
-                  onClick={() => {
-                    void (async () => {
-                      setFailure(undefined);
-                      try {
-                        const selection = await props.pickLocalPluginFolder?.();
-                        if (selection === undefined) return;
-                        await importLocalPlugin(selection);
-                      } catch (error) {
-                        setFailure({
-                          category: "unavailable",
-                          message:
-                            error instanceof Error
-                              ? error.message
-                              : "Local plugin folder picker failed.",
-                        });
-                      }
-                    })();
-                  }}
+          <section aria-labelledby="extension-catalog-heading" className="setgroup">
+            <h3 className="setgroup-head" id="extension-catalog-heading">
+              Extension catalog
+            </h3>
+            <div className="extensions-settings__body">
+              <div className="extensions-settings__search">
+                <OctantInput
+                  aria-label="Search marketplace"
+                  className="extensions-settings__search-input"
+                  onChange={(event) => setMarketplaceQuery(event.currentTarget.value)}
+                  placeholder="Search the extension catalog"
+                  type="search"
+                  value={marketplaceQuery}
+                />
+                <button
+                  className="btn btn-secondary"
+                  disabled={catalogOffline || marketplaceQuery.trim() === ""}
+                  onClick={() => void runSearch()}
                   type="button"
-                  variant="secondary"
                 >
-                  Import local Agent Plugin…
-                </OctantButton>
+                  Run search
+                </button>
               </div>
-            ) : null}
-            {catalogOffline ? (
-              <p
-                className="extensions-settings__state"
-                role="status"
-                aria-label="Catalog unavailable"
-              >
-                The extension catalog is unavailable. Connect a catalog source to search.
-              </p>
-            ) : null}
-            {marketplaceStatus === "empty" ? (
-              <p className="extensions-settings__state" role="status">
-                No catalog entries matched the search.
-              </p>
-            ) : null}
-            {marketplaceStatus === "failed" ? (
-              <p className="extensions-settings__state" role="status">
-                The catalog search failed. Retry or inspect the source directly.
-              </p>
-            ) : null}
-            {marketplaceEntries.length > 0 ? (
-              <ul className="extensions-settings__list">
-                {marketplaceEntries.map((entry) => {
-                  const entryKey = `${entry.extensionId}:${entry.packageId}`;
-                  const isPreviewing =
-                    preview !== undefined && sameEntryIdentity(preview.entry, entry);
-                  return (
-                    <li className="extensions-settings__card" key={entryKey}>
-                      <div className="extensions-settings__card-head">
-                        <span className="extensions-settings__title">{entry.displayName}</span>
-                        <span className="extensions-settings__version">{entry.version}</span>
-                      </div>
-                      <span className="extensions-settings__source">
-                        {sourceLabel(entry.source)}
-                      </span>
-                      <OctantButton
-                        aria-label={`Inspect ${entry.displayName}`}
-                        disabled={inspectingEntryId === entryKey || installing}
-                        onClick={() => void inspectEntry(entry)}
-                        type="button"
-                        variant="secondary"
-                      >
-                        Inspect
-                      </OctantButton>
-                      {isPreviewing && preview !== undefined ? (
-                        <div
-                          className="extensions-settings__preview"
-                          aria-label="Package inspection preview"
-                        >
-                          <p className="extensions-settings__preview-heading">
-                            Review before installing
-                          </p>
-                          {preview.review.description !== undefined ? (
-                            <p className="extensions-settings__description">
-                              {preview.review.description}
+              {props.pickLocalPluginFolder !== undefined ? (
+                <div className="extensions-settings__local-import">
+                  <button
+                    className="btn btn-secondary"
+                    disabled={importingLocal || installing}
+                    onClick={() => {
+                      void (async () => {
+                        setFailure(undefined);
+                        try {
+                          const selection = await props.pickLocalPluginFolder?.();
+                          if (selection === undefined) return;
+                          await importLocalPlugin(selection);
+                        } catch (error) {
+                          setFailure({
+                            category: "unavailable",
+                            message:
+                              error instanceof Error
+                                ? error.message
+                                : "Local plugin folder picker failed.",
+                          });
+                        }
+                      })();
+                    }}
+                    type="button"
+                  >
+                    Import local Agent Plugin…
+                  </button>
+                </div>
+              ) : null}
+              {catalogOffline ? (
+                <p
+                  className="extensions-settings__state"
+                  role="status"
+                  aria-label="Catalog unavailable"
+                >
+                  The extension catalog is unavailable. Connect a catalog source to search.
+                </p>
+              ) : null}
+              {marketplaceStatus === "empty" ? (
+                <p className="extensions-settings__state" role="status">
+                  No catalog entries matched the search.
+                </p>
+              ) : null}
+              {marketplaceStatus === "failed" ? (
+                <p className="extensions-settings__state" role="status">
+                  The catalog search failed. Retry or inspect the source directly.
+                </p>
+              ) : null}
+              {marketplaceEntries.length > 0 ? (
+                <ul className="extensions-settings__cards">
+                  {marketplaceEntries.map((entry) => {
+                    const entryKey = `${entry.extensionId}:${entry.packageId}`;
+                    const isPreviewing =
+                      preview !== undefined && sameEntryIdentity(preview.entry, entry);
+                    return (
+                      <li className="extcard" key={entryKey}>
+                        <span aria-hidden="true" className="icon-mark">
+                          <Puzzle aria-hidden="true" className="icon" size={18} strokeWidth={1.5} />
+                        </span>
+                        <span className="extcard-name">{entry.displayName}</span>
+                        <span className="extcard-right">
+                          <button
+                            aria-label={`Inspect ${entry.displayName}`}
+                            className="btn btn-secondary btn-sm"
+                            disabled={inspectingEntryId === entryKey || installing}
+                            onClick={() => void inspectEntry(entry)}
+                            type="button"
+                          >
+                            Inspect
+                          </button>
+                        </span>
+                        <span className="extcard-src">
+                          {sourceLabel(entry.source)} · v<span>{entry.version}</span>
+                        </span>
+                        {isPreviewing && preview !== undefined ? (
+                          <div
+                            className="extensions-settings__preview"
+                            aria-label="Package inspection preview"
+                          >
+                            <p className="extensions-settings__preview-heading">
+                              Review before installing
                             </p>
-                          ) : null}
-                          <dl className="extensions-settings__compatibility">
-                            {preview.review.provenance.publisher !== undefined ? (
-                              <div>
-                                <dt>Publisher</dt>
-                                <dd>{preview.review.provenance.publisher}</dd>
-                              </div>
+                            {preview.review.description !== undefined ? (
+                              <p className="extensions-settings__description">
+                                {preview.review.description}
+                              </p>
                             ) : null}
-                            {preview.review.provenance.canonicalUrl !== undefined ? (
+                            <dl className="extensions-settings__compatibility">
+                              {preview.review.provenance.publisher !== undefined ? (
+                                <div>
+                                  <dt>Publisher</dt>
+                                  <dd>{preview.review.provenance.publisher}</dd>
+                                </div>
+                              ) : null}
+                              {preview.review.provenance.canonicalUrl !== undefined ? (
+                                <div>
+                                  <dt>Source</dt>
+                                  <dd>{preview.review.provenance.canonicalUrl}</dd>
+                                </div>
+                              ) : null}
+                              {preview.review.provenance.sourceCommit !== undefined ? (
+                                <div>
+                                  <dt>Upstream commit</dt>
+                                  <dd>{preview.review.provenance.sourceCommit}</dd>
+                                </div>
+                              ) : null}
                               <div>
-                                <dt>Source</dt>
-                                <dd>{preview.review.provenance.canonicalUrl}</dd>
+                                <dt>Source review</dt>
+                                <dd>
+                                  {preview.review.provenance.reviewed ? "Reviewed" : "Not reviewed"}
+                                </dd>
                               </div>
-                            ) : null}
-                            {preview.review.provenance.sourceCommit !== undefined ? (
                               <div>
-                                <dt>Upstream commit</dt>
-                                <dd>{preview.review.provenance.sourceCommit}</dd>
+                                <dt>License</dt>
+                                <dd>{licenseLabel(preview.review.license)}</dd>
                               </div>
-                            ) : null}
-                            <div>
-                              <dt>Source review</dt>
-                              <dd>
-                                {preview.review.provenance.reviewed ? "Reviewed" : "Not reviewed"}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>License</dt>
-                              <dd>{licenseLabel(preview.review.license)}</dd>
-                            </div>
-                            <div>
-                              <dt>Digest</dt>
-                              <dd>{preview.entry.digest}</dd>
-                            </div>
-                            <div>
-                              <dt>Platforms</dt>
-                              <dd>{preview.review.compatibility.platforms.join(", ")}</dd>
-                            </div>
-                            <div>
-                              <dt>Modes</dt>
-                              <dd>{preview.review.compatibility.modes.join(", ")}</dd>
-                            </div>
-                            <div>
-                              <dt>Providers</dt>
-                              <dd>
-                                {preview.review.compatibility.providerFamilies.length === 0
-                                  ? "All providers"
-                                  : preview.review.compatibility.providerFamilies.join(", ")}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Capabilities</dt>
-                              <dd>{preview.review.declaredCapabilities.join(", ")}</dd>
-                            </div>
-                          </dl>
-                          <ul className="extensions-settings__list">
-                            {preview.review.components.map((component) => (
-                              <li className="extensions-settings__component" key={component.id}>
-                                <p className="extensions-settings__component-name">
-                                  {component.displayName}
-                                </p>
-                                <p className="extensions-settings__effective">
-                                  {component.kind}
-                                  {component.declaredCapabilities.length === 0
-                                    ? ""
-                                    : ` — ${component.declaredCapabilities.join(", ")}`}
-                                </p>
-                                {component.instructions === undefined ? null : (
-                                  <div className="extensions-settings__instruction-review">
-                                    <p className="extensions-settings__preview-heading">
-                                      Bundled skill instructions
-                                    </p>
-                                    <pre>{component.instructions}</pre>
-                                  </div>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                          {preview.diagnostics.length > 0 ? (
-                            <ul className="extensions-settings__diagnostics">
-                              {preview.diagnostics.map((diagnostic) => (
-                                <li key={diagnostic.code}>{diagnostic.message}</li>
+                              <div>
+                                <dt>Digest</dt>
+                                <dd>{preview.entry.digest}</dd>
+                              </div>
+                              <div>
+                                <dt>Platforms</dt>
+                                <dd>{preview.review.compatibility.platforms.join(", ")}</dd>
+                              </div>
+                              <div>
+                                <dt>Modes</dt>
+                                <dd>{preview.review.compatibility.modes.join(", ")}</dd>
+                              </div>
+                              <div>
+                                <dt>Providers</dt>
+                                <dd>
+                                  {preview.review.compatibility.providerFamilies.length === 0
+                                    ? "All providers"
+                                    : preview.review.compatibility.providerFamilies.join(", ")}
+                                </dd>
+                              </div>
+                              <div>
+                                <dt>Capabilities</dt>
+                                <dd>{preview.review.declaredCapabilities.join(", ")}</dd>
+                              </div>
+                            </dl>
+                            <ul className="extensions-settings__components">
+                              {preview.review.components.map((component) => (
+                                <li className="extensions-settings__component" key={component.id}>
+                                  <p className="extensions-settings__component-name">
+                                    {component.displayName}
+                                  </p>
+                                  <p className="extensions-settings__effective">
+                                    {component.kind}
+                                    {component.declaredCapabilities.length === 0
+                                      ? ""
+                                      : ` — ${component.declaredCapabilities.join(", ")}`}
+                                  </p>
+                                  {component.instructions === undefined ? null : (
+                                    <div className="extensions-settings__instruction-review">
+                                      <p className="extensions-settings__preview-heading">
+                                        Bundled skill instructions
+                                      </p>
+                                      <pre>{component.instructions}</pre>
+                                    </div>
+                                  )}
+                                </li>
                               ))}
                             </ul>
-                          ) : null}
-                          <OctantButton
-                            aria-label="Confirm install"
-                            disabled={installing}
-                            onClick={() => void confirmInstall(preview.entry)}
-                            type="button"
-                            variant="default"
-                          >
-                            Confirm install
-                          </OctantButton>
+                            {preview.diagnostics.length > 0 ? (
+                              <ul className="extensions-settings__diagnostics">
+                                {preview.diagnostics.map((diagnostic) => (
+                                  <li key={diagnostic.code}>{diagnostic.message}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                            <button
+                              aria-label="Confirm install"
+                              className="btn btn-primary"
+                              disabled={installing}
+                              onClick={() => void confirmInstall(preview.entry)}
+                              type="button"
+                            >
+                              Confirm install
+                            </button>
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+              {localPreview !== undefined ? (
+                <div className="extcard">
+                  <span aria-hidden="true" className="icon-mark">
+                    <Puzzle aria-hidden="true" className="icon" size={18} strokeWidth={1.5} />
+                  </span>
+                  <span className="extcard-name">{localPreview.entry.displayName}</span>
+                  <span className="extcard-src">
+                    {sourceLabel(localPreview.entry.source)} · v
+                    <span>{localPreview.entry.version}</span>
+                  </span>
+                  <div
+                    className="extensions-settings__preview"
+                    aria-label="Package inspection preview"
+                  >
+                    <p className="extensions-settings__preview-heading">Review before installing</p>
+                    {localPreview.review.description !== undefined ? (
+                      <p className="extensions-settings__description">
+                        {localPreview.review.description}
+                      </p>
+                    ) : null}
+                    <dl className="extensions-settings__compatibility">
+                      {localPreview.review.provenance.publisher !== undefined ? (
+                        <div>
+                          <dt>Publisher</dt>
+                          <dd>{localPreview.review.provenance.publisher}</dd>
                         </div>
                       ) : null}
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-            <section
-              aria-labelledby="skill-marketplace-heading"
-              className="extensions-settings__subsection"
-            >
-              <h3 className="extensions-settings__subheading" id="skill-marketplace-heading">
-                Standalone skills
-              </h3>
+                      <div>
+                        <dt>Source</dt>
+                        <dd>{sourceLabel(localPreview.entry.source)}</dd>
+                      </div>
+                      <div>
+                        <dt>License</dt>
+                        <dd>{licenseLabel(localPreview.review.license)}</dd>
+                      </div>
+                      <div>
+                        <dt>Digest</dt>
+                        <dd>{localPreview.entry.digest}</dd>
+                      </div>
+                      <div>
+                        <dt>Capabilities</dt>
+                        <dd>{localPreview.review.declaredCapabilities.join(", ")}</dd>
+                      </div>
+                    </dl>
+                    <ul className="extensions-settings__components">
+                      {localPreview.review.components.map((component) => (
+                        <li className="extensions-settings__component" key={component.id}>
+                          <p className="extensions-settings__component-name">
+                            {component.displayName}
+                          </p>
+                          <p className="extensions-settings__effective">
+                            {component.kind}
+                            {component.declaredCapabilities.length === 0
+                              ? ""
+                              : ` — ${component.declaredCapabilities.join(", ")}`}
+                          </p>
+                          {component.instructions === undefined ? null : (
+                            <div className="extensions-settings__instruction-review">
+                              <p className="extensions-settings__preview-heading">
+                                Bundled skill instructions
+                              </p>
+                              <pre>{component.instructions}</pre>
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                    {localPreview.diagnostics.length > 0 ? (
+                      <ul className="extensions-settings__diagnostics">
+                        {localPreview.diagnostics.map((diagnostic) => (
+                          <li key={`${diagnostic.code}:${diagnostic.message}`}>
+                            {diagnostic.message}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    <button
+                      aria-label="Confirm install"
+                      className="btn btn-primary"
+                      disabled={installing}
+                      onClick={() => void confirmInstall(localPreview.entry)}
+                      type="button"
+                    >
+                      Confirm install
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section aria-labelledby="skill-marketplace-heading" className="setgroup">
+            <h3 className="setgroup-head" id="skill-marketplace-heading">
+              Standalone skills
+            </h3>
+            <div className="extensions-settings__body">
               <p className="extensions-settings__description">
                 Search skills.sh and npm packages that ship SKILL.md, preview, then install.
                 Installs start disabled — trust and enable them from Installed.
@@ -917,14 +1008,14 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   type="search"
                   value={skillQuery}
                 />
-                <OctantButton
+                <button
+                  className="btn btn-secondary"
                   disabled={skillQuery.trim() === "" || skillStatus === "searching"}
                   onClick={() => void runSkillSearch()}
                   type="button"
-                  variant="secondary"
                 >
                   Search skills
-                </OctantButton>
+                </button>
               </div>
               {skillStatus === "empty" ? (
                 <p className="extensions-settings__state" role="status">
@@ -937,33 +1028,40 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                 </p>
               ) : null}
               {skillEntries.length > 0 ? (
-                <ul className="extensions-settings__list">
+                <ul className="extensions-settings__cards">
                   {skillEntries.map((entry) => {
                     const entryKey = String(entry.skill.qualifiedId);
                     const isPreviewing =
                       skillPreview !== undefined &&
                       sameEntrySource(skillPreview.entry.source, entry.source);
                     return (
-                      <li className="extensions-settings__card" key={entryKey}>
-                        <div className="extensions-settings__card-head">
-                          <span className="extensions-settings__title">{entry.displayName}</span>
-                          <span className="extensions-settings__version">{entry.version}</span>
-                        </div>
-                        <span className="extensions-settings__source">
-                          {sourceLabel(entry.source)}
+                      <li className="extcard" key={entryKey}>
+                        <span aria-hidden="true" className="icon-mark">
+                          <BookOpen
+                            aria-hidden="true"
+                            className="icon"
+                            size={18}
+                            strokeWidth={1.5}
+                          />
+                        </span>
+                        <span className="extcard-name">{entry.displayName}</span>
+                        <span className="extcard-right">
+                          <button
+                            aria-label={`Preview ${entry.displayName}`}
+                            className="btn btn-secondary btn-sm"
+                            disabled={inspectingSkillId === entryKey || installingSkill}
+                            onClick={() => void previewSkillEntry(entry)}
+                            type="button"
+                          >
+                            Preview
+                          </button>
+                        </span>
+                        <span className="extcard-src">
+                          {sourceLabel(entry.source)} · v<span>{entry.version}</span>
                         </span>
                         {entry.description !== undefined ? (
-                          <p className="extensions-settings__description">{entry.description}</p>
+                          <p className="extcard-desc">{entry.description}</p>
                         ) : null}
-                        <OctantButton
-                          aria-label={`Preview ${entry.displayName}`}
-                          disabled={inspectingSkillId === entryKey || installingSkill}
-                          onClick={() => void previewSkillEntry(entry)}
-                          type="button"
-                          variant="secondary"
-                        >
-                          Preview
-                        </OctantButton>
                         {isPreviewing && skillPreview !== undefined ? (
                           <div
                             className="extensions-settings__preview"
@@ -1010,7 +1108,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                 <dd>{licenseLabel(skillPreview.license)}</dd>
                               </div>
                             </dl>
-                            <OctantButton
+                            <button
                               aria-label={
                                 skillPreviewAction === "current"
                                   ? "Skill already installed"
@@ -1018,17 +1116,17 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                                     ? "Confirm skill update"
                                     : "Confirm skill install"
                               }
+                              className="btn btn-primary"
                               disabled={installingSkill || skillPreviewAction === "current"}
                               onClick={() => void confirmSkillInstall(skillPreview)}
                               type="button"
-                              variant="default"
                             >
                               {skillPreviewAction === "current"
                                 ? "Already installed"
                                 : skillPreviewAction === "update"
                                   ? "Confirm update"
                                   : "Confirm install"}
-                            </OctantButton>
+                            </button>
                           </div>
                         ) : null}
                       </li>
@@ -1036,98 +1134,8 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   })}
                 </ul>
               ) : null}
-            </section>
-
-            {localPreview !== undefined ? (
-              <div className="extensions-settings__card">
-                <div className="extensions-settings__card-head">
-                  <span className="extensions-settings__title">
-                    {localPreview.entry.displayName}
-                  </span>
-                  <span className="extensions-settings__version">{localPreview.entry.version}</span>
-                </div>
-                <span className="extensions-settings__source">
-                  {sourceLabel(localPreview.entry.source)}
-                </span>
-                <div
-                  className="extensions-settings__preview"
-                  aria-label="Package inspection preview"
-                >
-                  <p className="extensions-settings__preview-heading">Review before installing</p>
-                  {localPreview.review.description !== undefined ? (
-                    <p className="extensions-settings__description">
-                      {localPreview.review.description}
-                    </p>
-                  ) : null}
-                  <dl className="extensions-settings__compatibility">
-                    {localPreview.review.provenance.publisher !== undefined ? (
-                      <div>
-                        <dt>Publisher</dt>
-                        <dd>{localPreview.review.provenance.publisher}</dd>
-                      </div>
-                    ) : null}
-                    <div>
-                      <dt>Source</dt>
-                      <dd>{sourceLabel(localPreview.entry.source)}</dd>
-                    </div>
-                    <div>
-                      <dt>License</dt>
-                      <dd>{licenseLabel(localPreview.review.license)}</dd>
-                    </div>
-                    <div>
-                      <dt>Digest</dt>
-                      <dd>{localPreview.entry.digest}</dd>
-                    </div>
-                    <div>
-                      <dt>Capabilities</dt>
-                      <dd>{localPreview.review.declaredCapabilities.join(", ")}</dd>
-                    </div>
-                  </dl>
-                  <ul className="extensions-settings__list">
-                    {localPreview.review.components.map((component) => (
-                      <li className="extensions-settings__component" key={component.id}>
-                        <p className="extensions-settings__component-name">
-                          {component.displayName}
-                        </p>
-                        <p className="extensions-settings__effective">
-                          {component.kind}
-                          {component.declaredCapabilities.length === 0
-                            ? ""
-                            : ` — ${component.declaredCapabilities.join(", ")}`}
-                        </p>
-                        {component.instructions === undefined ? null : (
-                          <div className="extensions-settings__instruction-review">
-                            <p className="extensions-settings__preview-heading">
-                              Bundled skill instructions
-                            </p>
-                            <pre>{component.instructions}</pre>
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                  {localPreview.diagnostics.length > 0 ? (
-                    <ul className="extensions-settings__diagnostics">
-                      {localPreview.diagnostics.map((diagnostic) => (
-                        <li key={`${diagnostic.code}:${diagnostic.message}`}>
-                          {diagnostic.message}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                  <OctantButton
-                    aria-label="Confirm install"
-                    disabled={installing}
-                    onClick={() => void confirmInstall(localPreview.entry)}
-                    type="button"
-                    variant="default"
-                  >
-                    Confirm install
-                  </OctantButton>
-                </div>
-              </div>
-            ) : null}
-          </div>
+            </div>
+          </section>
         </OctantTabsPanel>
       </OctantTabs>
 
@@ -1144,15 +1152,19 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
 function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
   const skill = props.skill;
   return (
-    <li className="extensions-settings__card">
-      <div className="extensions-settings__card-head">
-        <span className="extensions-settings__title">{skill.displayName}</span>
-        <span className="extensions-settings__version">
+    <li className="extcard">
+      <span aria-hidden="true" className="icon-mark">
+        <BookOpen aria-hidden="true" className="icon" size={18} strokeWidth={1.5} />
+      </span>
+      <span className="extcard-name">{skill.displayName}</span>
+      <span className="extcard-right">
+        <span className={skill.skill.available ? "badge" : "badge badge-warn"}>
           {skill.skill.available ? "Available" : "Unavailable"}
         </span>
-      </div>
-      <span className="extensions-settings__source">{standaloneSkillSourceLabel(skill)}</span>
+      </span>
+      <span className="extcard-src">{standaloneSkillSourceLabel(skill)}</span>
       <code className="extensions-settings__skill-id">{skill.skill.qualifiedId}</code>
+      {skill.description === undefined ? null : <p className="extcard-desc">{skill.description}</p>}
       <dl className="extensions-settings__compatibility">
         <div>
           <dt>Review</dt>
@@ -1164,16 +1176,15 @@ function StandaloneSkillCard(props: { readonly skill: StandaloneSkillRecord }) {
         </div>
         <div>
           <dt>State</dt>
-          <dd>{effectiveLabel(skill.effectiveState)}</dd>
+          <dd data-blocked={skill.effectiveState.kind === "blocked" ? "true" : "false"}>
+            {effectiveLabel(skill.effectiveState)}
+          </dd>
         </div>
         <div>
           <dt>Content</dt>
           <dd>{skill.contentBytes.toLocaleString()} bytes</dd>
         </div>
       </dl>
-      {skill.description === undefined ? null : (
-        <p className="extensions-settings__description">{skill.description}</p>
-      )}
       {skill.skill.diagnostic === undefined ? null : (
         <p className="extensions-settings__failure" role="status">
           <span>{skill.skill.diagnostic.code}</span>
@@ -1210,93 +1221,111 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
     (pluginRuntimeBlocked && !pkg.activation.pluginDesired) || props.busy;
 
   return (
-    <li className="extensions-settings__card">
-      <div className="extensions-settings__card-head">
-        <span className="extensions-settings__title">
-          {pkg.displayName ?? pkg.slug ?? pkg.extensionId}
-        </span>
-        <span className="extensions-settings__version">{pkg.version}</span>
-      </div>
-      <span className="extensions-settings__source">{sourceLabel(pkg.source)}</span>
-      <dl className="extensions-settings__compatibility">
-        <div>
-          <dt>Platforms</dt>
-          <dd>{pkg.compatibility.platforms.join(", ")}</dd>
-        </div>
-        <div>
-          <dt>Modes</dt>
-          <dd>{pkg.compatibility.modes.join(", ")}</dd>
-        </div>
-        {pkg.compatibility.providerFamilies.length > 0 ? (
-          <div>
-            <dt>Providers</dt>
-            <dd>{pkg.compatibility.providerFamilies.join(", ")}</dd>
-          </div>
-        ) : null}
-      </dl>
-      <div className="extensions-settings__controls">
-        <OctantButton
+    <li className="extcard">
+      <span aria-hidden="true" className="icon-mark">
+        <Puzzle aria-hidden="true" className="icon" size={18} strokeWidth={1.5} />
+      </span>
+      <span className="extcard-name">{pkg.displayName ?? pkg.slug ?? pkg.extensionId}</span>
+      <span className="extcard-right">
+        <button
           aria-label={pkg.activation.trusted ? "Revoke trust" : "Trust source"}
+          className="btn btn-secondary btn-sm"
           disabled={props.busy}
           onClick={() => void props.onTrust(!pkg.activation.trusted)}
           type="button"
-          variant="secondary"
         >
           {pkg.activation.trusted ? "Revoke trust" : "Trust source"}
-        </OctantButton>
-        <label className="extensions-settings__toggle">
-          <span>Enable plugin</span>
-          <OctantSwitch
-            checked={pkg.activation.pluginDesired}
-            disabled={pluginEnableDisabled}
-            label="Enable plugin"
-            onCheckedChange={(checked) => void props.onPluginDesired(checked)}
-          />
-        </label>
-        {pkg.components.map((componentState) => {
-          const componentRuntimeBlocked =
-            componentState.effectiveState.kind === "blocked" &&
-            ENABLE_BLOCKING_STATES.has(componentState.effectiveState.reason);
-          // Same direction rule as the plugin switch: only block enabling,
-          // never block disabling a desired-on component.
-          const componentEnableDisabled =
-            (componentRuntimeBlocked && !componentState.activation.componentDesired) || props.busy;
-          return (
-            <div className="extensions-settings__component" key={componentState.component.id}>
-              <p className="extensions-settings__component-name">
-                {componentState.component.displayName}
-              </p>
-              <p
-                className="extensions-settings__effective"
-                role="status"
-                aria-label={effectiveLabel(componentState.effectiveState)}
-              >
-                {effectiveLabel(componentState.effectiveState)}
-              </p>
-              <label className="extensions-settings__toggle">
-                <span>Enable component</span>
-                <OctantSwitch
-                  checked={componentState.activation.componentDesired}
-                  disabled={componentEnableDisabled}
-                  label="Enable component"
-                  onCheckedChange={(checked) =>
-                    void props.onComponentDesired(componentState.component.id, checked)
-                  }
-                />
-              </label>
-            </div>
-          );
-        })}
-        <OctantButton
+        </button>
+        {/* Disabling revokes what the plugin was granted, so the control is a
+            button that names the action, not a preference switch. */}
+        <button
+          aria-label={pkg.activation.pluginDesired ? "Disable plugin" : "Enable plugin"}
+          className="btn btn-secondary btn-sm"
+          disabled={pluginEnableDisabled}
+          onClick={() => void props.onPluginDesired(!pkg.activation.pluginDesired)}
+          type="button"
+        >
+          {pkg.activation.pluginDesired ? "Disable plugin" : "Enable plugin"}
+        </button>
+        <button
           aria-label="Uninstall"
+          className="btn btn-secondary btn-sm"
           disabled={props.busy}
           onClick={() => void props.onUninstall()}
           type="button"
-          variant="secondary"
         >
           Uninstall
-        </OctantButton>
+        </button>
+      </span>
+      <span className="extcard-src">
+        {sourceLabel(pkg.source)} · v<span>{pkg.version}</span>
+      </span>
+      <div className="extcard-scopes">
+        {pkg.compatibility.platforms.map((platform) => (
+          <span className="tag" key={`platform:${platform}`}>
+            {platform}
+          </span>
+        ))}
+        {pkg.compatibility.modes.map((mode) => (
+          <span className="tag" key={`mode:${mode}`}>
+            {mode}
+          </span>
+        ))}
+        {pkg.compatibility.providerFamilies.map((family) => (
+          <span className="tag" key={`provider:${family}`}>
+            {family}
+          </span>
+        ))}
       </div>
+      {pkg.components.length > 0 ? (
+        <div className="extensions-settings__components">
+          {pkg.components.map((componentState) => {
+            const componentRuntimeBlocked =
+              componentState.effectiveState.kind === "blocked" &&
+              ENABLE_BLOCKING_STATES.has(componentState.effectiveState.reason);
+            // Same direction rule as the plugin control: only block enabling,
+            // never block disabling a desired-on component.
+            const componentEnableDisabled =
+              (componentRuntimeBlocked && !componentState.activation.componentDesired) ||
+              props.busy;
+            return (
+              <div className="extensions-settings__component" key={componentState.component.id}>
+                <p className="extensions-settings__component-name">
+                  {componentState.component.displayName}
+                </p>
+                <p
+                  className="extensions-settings__effective"
+                  data-blocked={componentState.effectiveState.kind === "blocked" ? "true" : "false"}
+                  role="status"
+                  aria-label={effectiveLabel(componentState.effectiveState)}
+                >
+                  {effectiveLabel(componentState.effectiveState)}
+                </p>
+                <button
+                  aria-label={
+                    componentState.activation.componentDesired
+                      ? "Disable component"
+                      : "Enable component"
+                  }
+                  className="btn btn-secondary btn-sm"
+                  disabled={componentEnableDisabled}
+                  onClick={() =>
+                    void props.onComponentDesired(
+                      componentState.component.id,
+                      !componentState.activation.componentDesired,
+                    )
+                  }
+                  type="button"
+                >
+                  {componentState.activation.componentDesired
+                    ? "Disable component"
+                    : "Enable component"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       {pkg.diagnostics.length > 0 ? (
         <ul className="extensions-settings__diagnostics">
           {pkg.diagnostics.map((diagnostic) => (

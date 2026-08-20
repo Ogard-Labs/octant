@@ -10,9 +10,15 @@ describe("SidebarProfile", () => {
   it("says a name is not set yet and still opens the place it is set", async () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();
-    render(<SidebarProfile onOpenSettings={onOpenSettings} profile={profile} />);
+    const { container } = render(
+      <SidebarProfile onOpenSettings={onOpenSettings} profile={profile} />,
+    );
 
-    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    const row = screen.getByRole("button", { name: "Set your name" });
+    expect(row).toHaveClass("sidebar-item");
+    expect(container.querySelector(".sidebar-foot")).toContainElement(row);
+
+    await user.click(row);
     await user.click(screen.getByRole("button", { name: "Settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(onOpenSettings.mock.calls[0]?.[0]).toBeUndefined();

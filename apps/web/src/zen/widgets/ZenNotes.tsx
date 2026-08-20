@@ -50,7 +50,7 @@ export function ZenNotes({ element, onSave }: ZenNotesProps) {
     <div className="zen-notes">
       <textarea
         aria-label={`${title} content`}
-        className="zen-notes__editor window-no-drag"
+        className="window-no-drag"
         disabled={element.locked}
         onChange={(event) => {
           setDraft(event.currentTarget.value);
