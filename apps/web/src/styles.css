@@ -1952,7 +1952,6 @@ button:focus-visible {
   line-height: 1.5;
 }
 
-.provider-settings__permission,
 .provider-settings__create label,
 .provider-card__edit label {
   display: grid;
@@ -1966,10 +1965,6 @@ button:focus-visible {
   min-height: 58px;
   padding: 8px 10px;
   resize: vertical;
-}
-
-.provider-settings__permission {
-  min-width: 220px;
 }
 
 .provider-settings__alert,
@@ -4754,10 +4749,6 @@ dialog.project-dialog {
     flex-direction: column;
   }
 
-  .provider-settings__permission {
-    min-width: 0;
-  }
-
   .provider-card__edit,
   .provider-card__discovery {
     grid-template-columns: 1fr;
@@ -4810,10 +4801,6 @@ dialog.project-dialog {
   .provider-settings__intro {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .provider-settings__permission {
-    min-width: 0;
   }
 
   .provider-settings__create,
