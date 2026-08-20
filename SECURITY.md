@@ -47,7 +47,7 @@ branches.
 - **Server-side authority.** Chat, Work, and Code are enforced by the server
   before any side effect; the renderer never grants itself capability. Chat
   Projects have no filesystem or shell authority. Work binds one confined
-  folder. Code binds one repository root and starts approval-gated; Plan mode
+  folder. Code binds one confined folder and starts approval-gated; Plan mode
   is read-only.
 - **Approvals.** Tool calls, promotions from Work to Code, pairing, and
   extension installs require explicit user approval on the host, not only in

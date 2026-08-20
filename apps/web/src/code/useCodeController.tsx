@@ -33,7 +33,6 @@ import {
   EMPTY_TURN_ACTIVITY,
   appendReasoning,
   applyActivityEvent,
-  type CodeActivityRow,
   type CodeTurnActivity,
 } from "./transcriptActivity";
 import {
@@ -696,13 +695,14 @@ export function useCodeController(options: CodeControllerOptions) {
         // transcript builds, so a reopened thread reads like the turn did.
         const steps = turn.steps ?? [];
         if (steps.length > 0 || turn.stepsTruncated === true) {
-          const rows: CodeActivityRow[] = [];
-          let reasoning = "";
+          // Fold replayed steps through the same classifier the live stream
+          // uses, so a reopened thread and a watched turn agree on rows.
+          let replayed = EMPTY_TURN_ACTIVITY;
           for (const step of steps) {
             if (step.kind === "tool") {
-              rows.push({
-                kind: "tool",
-                id: String(step.toolCallId),
+              replayed = applyActivityEvent(replayed, {
+                kind: "tool-activity",
+                toolCallId: step.toolCallId,
                 toolName: step.toolName,
                 state: step.state,
                 ...(step.summary === undefined ? {} : { summary: step.summary }),
@@ -715,12 +715,11 @@ export function useCodeController(options: CodeControllerOptions) {
               turn.operationId,
               step.content.contentId,
             );
-            if (text !== undefined) reasoning += text;
+            if (text !== undefined) replayed = appendReasoning(replayed, text);
           }
           if (!isActive(request, threadGeneration, mounted)) return undefined;
           replayedActivity.set(String(turn.operationId), {
-            rows,
-            reasoning,
+            ...replayed,
             ...(turn.stepsTruncated === true ? { truncated: true } : {}),
           });
         }
