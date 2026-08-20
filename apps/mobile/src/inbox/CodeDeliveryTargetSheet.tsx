@@ -111,6 +111,9 @@ export function CodeDeliveryTargetSheet(props: CodeDeliveryTargetSheetProps) {
     >
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <Text style={styles.intro}>
+          {props.proposal.workspace === "managed-worktree"
+            ? `This thread will start in a managed worktree Octant creates from ${props.proposal.boundRoot}.`
+            : `This thread will bind the current checkout at ${props.proposal.boundRoot}.`}{" "}
           Confirm the repository, branch, remote, and outcome Octant will work toward. Nothing is
           created until you confirm this target.
         </Text>
