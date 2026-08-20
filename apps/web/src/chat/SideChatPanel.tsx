@@ -20,6 +20,8 @@ export interface SideChatPanelProps {
    * the sidecar is a real Chat thread rather than a second chat implementation.
    */
   readonly renderSidecar: (sidecarThreadId: ChatThreadId, sidecar: SideChatSidecar) => ReactNode;
+  /** Called with the host's sidecar so the shell can persist the tab identity. */
+  readonly onSidecarOpened?: (sidecar: SideChatSidecar) => void;
   readonly requestId?: () => ThreadMentionRequestId;
 }
 
@@ -45,6 +47,8 @@ export function SideChatPanel(props: SideChatPanelProps) {
   const [retryToken, setRetryToken] = useState(0);
   const requestIdRef = useRef(props.requestId ?? defaultRequestId);
   requestIdRef.current = props.requestId ?? defaultRequestId;
+  const onSidecarOpenedRef = useRef(props.onSidecarOpened);
+  onSidecarOpenedRef.current = props.onSidecarOpened;
   const client = props.client;
   const sourceThreadId = props.sourceThreadId;
 
@@ -58,7 +62,9 @@ export function SideChatPanel(props: SideChatPanelProps) {
     void (async () => {
       try {
         const opened = await client.openSideChat(requestIdRef.current(), sourceThreadId);
-        if (!cancelled) setState({ kind: "open", sidecar: opened.sidecar });
+        if (cancelled) return;
+        setState({ kind: "open", sidecar: opened.sidecar });
+        onSidecarOpenedRef.current?.(opened.sidecar);
       } catch {
         if (!cancelled) {
           setState({
