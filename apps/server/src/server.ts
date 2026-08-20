@@ -195,7 +195,6 @@ import { createMacOsComputerUseAdapter } from "./computerUse/macOsComputerUseAda
 import { createNodeComputerUseProcessPort } from "./computerUse/nodeComputerUseProcessPort";
 import { createComputerUseValidationEvidenceRecorder } from "./computerUse/computerUseValidationEvidence";
 import { createComputerUseRouteHandler } from "./computerUseRoutes";
-import { createCodeManagedRootRouteHandler } from "./codeManagedRootRoutes";
 import { CodeEnvironmentService } from "./codeEnvironmentService";
 import { ContextHarnessService } from "./context/contextHarnessService";
 import {
@@ -2346,43 +2345,6 @@ export function startOctantServer(
       service: managedWorktreeService,
       repository: managedWorktreePorts.repository,
       clock: () => new Date().toISOString(),
-    });
-    const managedWorktreeRoutes = createCodeManagedRootRouteHandler({
-      desktopBridgeSecret: options.desktopBridgeSecret,
-      service: {
-        planCreation: async (input, signal) => {
-          const result = await managedWorktreeService.planCreation(input as never, signal);
-          if (result.status === "planned" || result.status === "refused") return result;
-          if (result.status === "unavailable") return { status: "unavailable" as const };
-          return { status: "refused" as const, reason: "Managed worktree planning is waiting." };
-        },
-        create: async (input, signal) => {
-          const result = await managedWorktreeService.create(input as never, signal);
-          return result.status === "ready"
-            ? result
-            : result.status === "refused"
-              ? result
-              : { status: "interrupted" as const, reason: "Managed worktree creation is waiting." };
-        },
-        cleanup: async (input, signal) => {
-          const result = await managedWorktreeService.cleanup(input, signal);
-          return result.status === "removed"
-            ? result
-            : result.status === "refused"
-              ? result
-              : { status: "interrupted" as const, reason: "Managed worktree cleanup is waiting." };
-        },
-      },
-      resolveRepositoryRoot: async (projectId, bindingRevisionId) => {
-        const project = persistence.readProject(projectId);
-        if (project?.type !== "code") throw new Error("Code Project is unavailable.");
-        const revision = project.bindingHistory.at(-1);
-        if (revision === undefined || revision.revisionId !== bindingRevisionId) {
-          throw new Error("Code Project binding is stale.");
-        }
-        return project.binding.canonicalRoot;
-      },
-      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     const acpHome =
       options.acpHome ??
@@ -4960,7 +4922,6 @@ export function startOctantServer(
     // gives this chain a loopback-shaped internal request; individual handlers
     // resolve the bound context through principalRouteContext before effects.
     const dispatchProductRoutes = async (request: Request): Promise<Response | undefined> =>
-      (await managedWorktreeRoutes(request)) ??
       (await projectBindingRoutes(request)) ??
       (await launchSessionRoutes(request)) ??
       (await contextRoutes(request)) ??
