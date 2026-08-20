@@ -58,6 +58,20 @@
     grid-template-rows: auto minmax(0, 1fr) auto auto;
     gap: 1.25rem;
     padding: 1.25rem;
+
+    /*
+     * Stacked, the rail and the footer are both full-height rows that cannot
+     * shrink, so at a short viewport — a normal window at 200% zoom — they can
+     * together outgrow the dialog. The dialog clips, so without a scroller here
+     * Continue would sit below the fold with no way to reach it. The whole
+     * stacked wizard scrolls instead.
+     */
+    overflow-y: auto;
+  }
+
+  /* One scroller, not two: the body took it over. */
+  .first-run__panel {
+    overflow-y: visible;
   }
 }
 

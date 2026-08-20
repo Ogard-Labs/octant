@@ -6451,8 +6451,16 @@ dialog.project-dialog {
  * deepseek-v4-flash` and its kin — pushed its row wider than the list and the
  * overflow painted over the row beneath it.
  */
+/*
+ * The option is an OctantButton, and that recipe sets `whitespace-nowrap` for
+ * the short labels a button usually carries. A model name or id is neither
+ * short nor under our control, so wrapping is turned back on here — without it
+ * `overflow-wrap` has nothing to break, and a long name overflows its track
+ * instead of wrapping inside it.
+ */
 .model-picker__option {
   display: grid;
+  white-space: normal;
   grid-template-columns: minmax(0, 1fr) minmax(0, auto);
   grid-template-areas:
     "name id"

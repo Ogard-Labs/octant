@@ -315,6 +315,12 @@ describe("WindowChrome", () => {
     expect(cssRule(".octant-dialog__popup")).toContain(
       "width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
     );
+    // The shared dialog recipe caps every popup at max-w-lg, so a width alone
+    // is a request the recipe overrules. Both properties, or a dialog that asks
+    // to be wide silently is not.
+    expect(cssRule(".octant-dialog__popup")).toContain(
+      "max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
+    );
     expect(cssRule(".octant-dialog__popup")).toContain("border-radius: 12px");
     expect(cssRule(".octant-dialog__popup")).not.toContain("height: 100%");
     expect(cssRule(".octant-dialog__popup")).not.toContain("border-left: 1px solid");
