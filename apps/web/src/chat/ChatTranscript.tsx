@@ -24,6 +24,7 @@ import {
 import { useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
+import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ChatRichText } from "./ChatRichText";
 import { ChatTurnEditor } from "./ChatTurnEditor";
 
@@ -47,6 +48,8 @@ export interface ChatTranscriptProps {
    * record.
    */
   readonly checkpoints?: ChatTranscriptCheckpoints;
+  /** Scrolls this turn into the window. Used by jump-to-message. */
+  readonly revealTurnId?: ChatTurnId;
 }
 
 export interface ChatTranscriptCheckpoints {
@@ -104,8 +107,8 @@ export function ChatTranscript(props: ChatTranscriptProps) {
     (decision) => !turnIds.has(String(decision.turnId)),
   );
 
-  return (
-    <section aria-label="Conversation" className="chat-transcript">
+  const lead = (
+    <>
       {props.connectionStatus === "disconnected" ? (
         <p aria-live="polite" className="chat-transcript__connection" role="status">
           Disconnected — reconnecting to the authoritative transcript.
@@ -138,97 +141,125 @@ export function ChatTranscript(props: ChatTranscriptProps) {
             : `${revisedTurnCount} earlier messages were revised. This is the conversation as it now stands; the earlier versions stay in this thread's history.`}
         </p>
       )}
-      {turns.length === 0 ? (
+    </>
+  );
+
+  if (turns.length === 0) {
+    return (
+      <section aria-label="Conversation" className="chat-transcript">
+        {lead}
         <div className="chat-transcript__empty" role="status">
           <h2>Start the conversation</h2>
           <p>Ask a question, draft something, or explore an idea.</p>
         </div>
-      ) : null}
-      <ol aria-label="Chat transcript" className="chat-transcript__turns" role="log">
-        {turns.map((turn) => {
-          const userContent = resolvedContent(contentById, turn.userMessageRef, "user");
-          const attachments = turn.attachmentIds.map((id) => attachmentById.get(String(id)));
-          const editing = editingTurnId === String(turn.id);
-          const checkpoints = props.checkpoints;
-          const marked = checkpoints?.byTurnId.get(String(turn.id));
+        {orphanedRouteDecisions.map((decision) => (
+          <RouteReceipt decision={decision} key={String(decision.turnId)} />
+        ))}
+      </section>
+    );
+  }
 
-          return (
-            <li className="chat-transcript__turn" key={turn.id}>
-              <article
-                aria-label="Your message"
-                className="chat-transcript__message chat-transcript__message--user"
-              >
-                {editing && userContent !== undefined && props.onEditTurn !== undefined ? (
-                  <ChatTurnEditor
-                    busy={props.busy === true}
-                    initialPrompt={userContent.body}
-                    onCancel={() => setEditingTurnId(undefined)}
-                    onSubmit={(turnId, prompt) => {
-                      setEditingTurnId(undefined);
-                      props.onEditTurn?.(turnId, prompt);
-                    }}
-                    turnId={turn.id}
-                  />
-                ) : (
-                  <MessageBody content={userContent} missing="Message content is unavailable." />
-                )}
-                {attachments.length > 0 ? (
-                  <ul aria-label="Attachments" className="chat-transcript__attachments">
-                    {attachments.map((attachment, index) => (
-                      <li key={attachment?.id ?? `${turn.id}-${index}`}>
-                        {attachment === undefined
-                          ? "Attachment is unavailable."
-                          : attachment.displayName}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {editing || checkpoints === undefined ? null : (
-                  <ThreadCheckpointControls
-                    busy={props.busy === true || checkpoints.busy}
-                    {...(marked === undefined ? {} : { checkpoint: marked })}
-                    defaultLabel={`Message ${String(turn.sequence)}`}
-                    onForget={() => {
-                      if (marked !== undefined) checkpoints.onForget(marked);
-                    }}
-                    onMark={(label) => checkpoints.onMark(turn.id, label)}
-                    onRestore={(title) => {
-                      if (marked !== undefined) checkpoints.onRestore(marked, title);
-                    }}
-                  />
-                )}
-                {editing ? null : (
-                  <TurnActions
-                    busy={props.busy === true}
-                    canEdit={userContent !== undefined && props.onEditTurn !== undefined}
-                    {...(props.onBranchTurn === undefined
-                      ? {}
-                      : { onBranch: () => props.onBranchTurn?.(turn.id) })}
-                    onEdit={() => setEditingTurnId(String(turn.id))}
-                  />
-                )}
-              </article>
-              {routeDecisionByTurn.get(String(turn.id)) === undefined ? null : (
-                <RouteReceipt decision={routeDecisionByTurn.get(String(turn.id))!} />
-              )}
-              {turn.attempts.map((attempt, index) => (
-                <AttemptBlock
-                  attempt={attempt}
-                  contentById={contentById}
-                  key={attempt.id}
-                  onRetryAttempt={props.onRetryAttempt}
-                  previousAttempt={turn.attempts[index - 1]}
-                  citations={citationsByAttempt.get(String(attempt.id)) ?? []}
+  return (
+    <TranscriptWindow
+      ariaLabel="Conversation"
+      className="chat-transcript"
+      estimateSize={160}
+      gap={36}
+      itemKey={(turn) => String(turn.id)}
+      items={turns}
+      itemTag="li"
+      key={String(props.view.thread.id)}
+      lead={lead}
+      listClassName="chat-transcript__turns"
+      listLabel="Chat transcript"
+      listRole="log"
+      listTag="ol"
+      renderItem={(turn) => {
+        const userContent = resolvedContent(contentById, turn.userMessageRef, "user");
+        const attachments = turn.attachmentIds.map((id) => attachmentById.get(String(id)));
+        const editing = editingTurnId === String(turn.id);
+        const checkpoints = props.checkpoints;
+        const marked = checkpoints?.byTurnId.get(String(turn.id));
+
+        return (
+          <div className="chat-transcript__turn">
+            <article
+              aria-label="Your message"
+              className="chat-transcript__message chat-transcript__message--user"
+            >
+              {editing && userContent !== undefined && props.onEditTurn !== undefined ? (
+                <ChatTurnEditor
+                  busy={props.busy === true}
+                  initialPrompt={userContent.body}
+                  onCancel={() => setEditingTurnId(undefined)}
+                  onSubmit={(turnId, prompt) => {
+                    setEditingTurnId(undefined);
+                    props.onEditTurn?.(turnId, prompt);
+                  }}
+                  turnId={turn.id}
                 />
-              ))}
-            </li>
-          );
-        })}
-      </ol>
-      {orphanedRouteDecisions.map((decision) => (
+              ) : (
+                <MessageBody content={userContent} missing="Message content is unavailable." />
+              )}
+              {attachments.length > 0 ? (
+                <ul aria-label="Attachments" className="chat-transcript__attachments">
+                  {attachments.map((attachment, index) => (
+                    <li key={attachment?.id ?? `${turn.id}-${index}`}>
+                      {attachment === undefined
+                        ? "Attachment is unavailable."
+                        : attachment.displayName}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {editing || checkpoints === undefined ? null : (
+                <ThreadCheckpointControls
+                  busy={props.busy === true || checkpoints.busy}
+                  {...(marked === undefined ? {} : { checkpoint: marked })}
+                  defaultLabel={`Message ${String(turn.sequence)}`}
+                  onForget={() => {
+                    if (marked !== undefined) checkpoints.onForget(marked);
+                  }}
+                  onMark={(label) => checkpoints.onMark(turn.id, label)}
+                  onRestore={(title) => {
+                    if (marked !== undefined) checkpoints.onRestore(marked, title);
+                  }}
+                />
+              )}
+              {editing ? null : (
+                <TurnActions
+                  busy={props.busy === true}
+                  canEdit={userContent !== undefined && props.onEditTurn !== undefined}
+                  {...(props.onBranchTurn === undefined
+                    ? {}
+                    : { onBranch: () => props.onBranchTurn?.(turn.id) })}
+                  onEdit={() => setEditingTurnId(String(turn.id))}
+                />
+              )}
+            </article>
+            {routeDecisionByTurn.get(String(turn.id)) === undefined ? null : (
+              <RouteReceipt decision={routeDecisionByTurn.get(String(turn.id))!} />
+            )}
+            {turn.attempts.map((attempt, index) => (
+              <AttemptBlock
+                attempt={attempt}
+                contentById={contentById}
+                key={attempt.id}
+                onRetryAttempt={props.onRetryAttempt}
+                previousAttempt={turn.attempts[index - 1]}
+                citations={citationsByAttempt.get(String(attempt.id)) ?? []}
+              />
+            ))}
+          </div>
+        );
+      }}
+      restoreKey={String(props.view.thread.id)}
+      {...(props.revealTurnId === undefined ? {} : { revealKey: String(props.revealTurnId) })}
+      role="region"
+      trail={orphanedRouteDecisions.map((decision) => (
         <RouteReceipt decision={decision} key={String(decision.turnId)} />
       ))}
-    </section>
+    />
   );
 }
 

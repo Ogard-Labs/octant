@@ -5696,11 +5696,16 @@ dialog.project-dialog {
 }
 
 .code-thread-workspace__transcript {
-  display: grid;
+  position: relative;
   width: min(100% - 40px, 760px);
-  gap: 18px;
   padding: clamp(20px, 3vh, 36px) 0 28px;
   margin: 0 auto;
+}
+
+.code-thread-workspace__conversation:not([data-transcript-window])
+  .code-thread-workspace__transcript {
+  display: grid;
+  gap: 18px;
 }
 
 .code-thread-workspace__empty {
@@ -5841,14 +5846,8 @@ dialog.project-dialog {
   line-height: 1;
 }
 
-/*
- * Long-thread virtualization without a windowing library: the engine skips
- * layout and paint for rows scrolled out of view, and the reserved intrinsic
- * height keeps scrollbar position stable while they are skipped.
- */
 .code-thread-workspace__row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
+  min-width: 0;
 }
 
 .code-transcript-row {

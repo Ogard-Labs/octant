@@ -291,15 +291,17 @@
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  overflow: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
 }
 
 .chat-transcript {
-  flex: 1 0 auto;
+  flex: 1 1 auto;
   width: min(100% - 40px, 760px);
+  min-height: 0;
   padding: 18px 0 32px;
   margin: 0 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
 }
 
 .chat-transcript:has(.chat-transcript__empty) {
@@ -434,10 +436,6 @@
 .chat-transcript__turn {
   display: grid;
   gap: 14px;
-}
-
-.chat-transcript__turn + .chat-transcript__turn {
-  margin-top: 36px;
 }
 
 .chat-transcript__message {

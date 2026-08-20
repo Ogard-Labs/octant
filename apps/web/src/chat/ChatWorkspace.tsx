@@ -149,9 +149,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
-  const conversationRef = useRef<HTMLDivElement>(null);
-  const followsConversationRef = useRef(true);
-  const followedThreadRef = useRef<string | undefined>(undefined);
   const pendingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
   // Every composer command that carries the thread's expected version shares
   // one queue. Two of them dispatched before the first round trip returns
@@ -190,16 +187,6 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       }
     };
   }, [activeThread?.id]);
-  useEffect(() => {
-    const conversation = conversationRef.current;
-    const threadId = view?.thread.id;
-    if (conversation === null || threadId === undefined) return;
-    if (followedThreadRef.current !== String(threadId)) {
-      followedThreadRef.current = String(threadId);
-      followsConversationRef.current = true;
-    }
-    if (followsConversationRef.current) conversation.scrollTop = conversation.scrollHeight;
-  }, [view?.lastSequence, view?.thread.id]);
   const activeProvider = props.providerSnapshot?.instances.find(
     (instance) => String(instance.id) === String(activeThread?.providerInstanceId),
   );
@@ -465,15 +452,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           {props.controller.errorMessage}
         </p>
       )}
-      <div
-        className="chat-workspace__conversation"
-        onScroll={(event) => {
-          const target = event.currentTarget;
-          followsConversationRef.current =
-            target.scrollHeight - target.scrollTop - target.clientHeight <= 72;
-        }}
-        ref={conversationRef}
-      >
+      <div className="chat-workspace__conversation">
         <header className="chat-workspace__header">
           <div>
             <h1>{view.thread.title}</h1>

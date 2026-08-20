@@ -1048,10 +1048,17 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByText(/steps?$/)).not.toBeInTheDocument();
   });
 
-  it("lets the engine skip layout for transcript rows scrolled out of view", () => {
-    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
-    expect(styles).toMatch(/\.code-thread-workspace__row\s*\{[^}]*content-visibility:\s*auto;/);
-    expect(styles).toMatch(/\.code-thread-workspace__row\s*\{[^}]*contain-intrinsic-size:/);
+  it("windows a long transcript so only a bounded number of rows mount", () => {
+    const conversation = Array.from({ length: 1000 }, (_, index) => ({
+      id: `message-${String(index)}`,
+      role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+      text: `Code turn ${String(index)}`,
+    }));
+    render(<CodeThreadWorkspace controller={controller({ conversation })} threadId={threadId} />);
+
+    expect(document.querySelectorAll("[data-transcript-row]").length).toBeLessThan(80);
+    expect(screen.getByText("Code turn 0")).toBeVisible();
+    expect(screen.queryByText("Code turn 999")).not.toBeInTheDocument();
   });
 
   it("queues a follow-up written while a turn runs instead of blocking the composer", async () => {
