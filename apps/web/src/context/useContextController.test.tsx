@@ -115,6 +115,37 @@ describe("useContextController", () => {
     expect(result.current.errorMessage).not.toContain("secret");
   });
 
+  /**
+   * The renderer asks for context while the local service may still be coming
+   * up. One refusal used to leave the pane reading "Context is unavailable"
+   * for the rest of the session on a host that answered a moment later.
+   */
+  it("keeps asking for context after an unreachable host, without a manual retry", async () => {
+    const inspect = vi
+      .fn<ContextClient["inspect"]>()
+      .mockRejectedValueOnce(new ContextClientFailure("unavailable", "unreachable"))
+      .mockResolvedValue(contextFixture());
+    const client = fakeClient({ inspect });
+    const { result, unmount } = renderHook(() => useContextController({ client, subject }));
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(inspect.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(result.current.errorMessage).toBeUndefined();
+    unmount();
+  });
+
+  it("says a thread has no context plan yet rather than reporting a broken connection", async () => {
+    const client = fakeClient({
+      inspect: vi.fn(async () => {
+        throw new ContextClientFailure("not-planned", "This thread has no context plan yet.");
+      }),
+    });
+    const { result } = renderHook(() => useContextController({ client, subject }));
+    await waitFor(() => expect(result.current.status).toBe("not-planned"));
+    // Nothing to retry and nothing broke, so the panel carries no error at all.
+    expect(result.current.errorMessage).toBeUndefined();
+  });
+
   it("replays from the accepted sequence and recovers a reconnected snapshot", async () => {
     const inspect = vi
       .fn<ContextClient["inspect"]>()
@@ -122,17 +153,19 @@ describe("useContextController", () => {
       .mockRejectedValueOnce(new ContextClientFailure("unavailable", "Disconnected."))
       .mockResolvedValueOnce(contextReconnectFixture());
     const client = fakeClient({ inspect });
-    const { result } = renderHook(() => useContextController({ client, subject }));
+    const { result, unmount } = renderHook(() => useContextController({ client, subject }));
     await waitFor(() => expect(result.current.snapshot?.sequence).toBe(8));
+
+    // Every attempt after the first resumes from the sequence already accepted,
+    // so a recovered pane continues its history rather than restarting it.
     await act(() => result.current.retry());
-    await waitFor(() => expect(result.current.status).toBe("disconnected"));
+    await waitFor(() => expect(result.current.snapshot?.sequence).toBe(12));
+    expect(result.current.status).toBe("ready");
     expect(inspect).toHaveBeenLastCalledWith(
       { subject, afterSequence: 8 },
       expect.any(AbortSignal),
     );
-    await act(() => result.current.retry());
-    await waitFor(() => expect(result.current.snapshot?.sequence).toBe(12));
-    expect(result.current.status).toBe("ready");
+    unmount();
   });
 
   it("does not restart loading when an equivalent subject object is rerendered", async () => {

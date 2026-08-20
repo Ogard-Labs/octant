@@ -25,8 +25,6 @@ const ids = {
   otherProject: "67000000-0000-4000-8000-000000000005",
   otherChatThread: "67000000-0000-4000-8000-000000000006",
   workThread: "67000000-0000-4000-8000-000000000007",
-  rootlessWorkThread: "67000000-0000-4000-8000-000000000008",
-  rootlessCodeThread: "67000000-0000-4000-8000-000000000009",
 } as const;
 
 afterEach(() => {
@@ -113,26 +111,6 @@ function seedCodeThread(connection: SqliteConnection, projectId: string): void {
     .run(ids.codeThread, projectId, now);
 }
 
-/**
- * A Work or Code thread created without a Project: recorded under the
- * `rootless-thread` subject type, with its mode kept in the durable projection.
- */
-function seedRootlessThread(
-  connection: SqliteConnection,
-  threadId: string,
-  mode: "work" | "code",
-  projectId: string | null = null,
-): void {
-  connection
-    .prepare(`
-      INSERT INTO rootless_thread_projection (
-        thread_id, mode, host_id, workspace_kind, project_id, schema_version,
-        thread_json, aggregate_version, created_at, updated_at, last_sequence
-      ) VALUES (?, ?, 'local', ?, ?, 1, '{}', 1, ?, ?, 1)
-    `)
-    .run(threadId, mode, projectId === null ? "rootless" : "project-backed", projectId, now, now);
-}
-
 /** The authoritative `work.thread-created@1` record of a Work thread's Project. */
 function seedWorkThread(connection: SqliteConnection, threadId: string, projectId: string): void {
   connection
@@ -150,29 +128,6 @@ function seedWorkThread(connection: SqliteConnection, threadId: string, projectI
       now,
       JSON.stringify({ kind: "thread-created", thread: { id: threadId, projectId } }),
     );
-}
-
-/** One usage row for each of the two rootless threads. */
-function seedRootlessUsageRows(connection: SqliteConnection): void {
-  seedUsageRow(connection, {
-    reconciliationId: "67000000-0000-4000-8000-000000000020",
-    subjectType: "rootless-thread",
-    subjectId: ids.rootlessWorkThread,
-    sequence: 1,
-  });
-  seedUsageRow(connection, {
-    reconciliationId: "67000000-0000-4000-8000-000000000021",
-    subjectType: "rootless-thread",
-    subjectId: ids.rootlessCodeThread,
-    sequence: 2,
-  });
-}
-
-/** A Project-less Work thread and a Project-less Code thread, each with usage. */
-function seedRootlessUsage(connection: SqliteConnection): void {
-  seedRootlessThread(connection, ids.rootlessWorkThread, "work");
-  seedRootlessThread(connection, ids.rootlessCodeThread, "code");
-  seedRootlessUsageRows(connection);
 }
 
 /**
@@ -388,93 +343,6 @@ describe("readUsageDashboard", () => {
       ),
     );
     expect(dashboard.summary.totals.totalRequests).toBe(0);
-  });
-
-  it("reads a Project-less Work thread's usage under the Work mode filter", () => {
-    const connection = connect();
-    seedRootlessUsage(connection);
-
-    const dashboard = read(connection, { filter: { mode: "work" } as never });
-    expect(dashboard.summary.totals.totalRequests).toBe(1);
-    expect(dashboard.detail[0]?.subjectId).toBe(ids.rootlessWorkThread);
-    expect(dashboard.detail[0]?.mode).toBe("work");
-    expect(dashboard.breakdown.find((group) => group.dimension === "mode")?.rows).toEqual([
-      expect.objectContaining({ key: "work", availability: "recorded", requestCount: 1 }),
-    ]);
-  });
-
-  it("reads a Project-less Code thread's usage under the Code mode filter", () => {
-    const connection = connect();
-    seedRootlessUsage(connection);
-
-    const dashboard = read(connection, { filter: { mode: "code" } as never });
-    expect(dashboard.summary.totals.totalRequests).toBe(1);
-    expect(dashboard.detail[0]?.subjectId).toBe(ids.rootlessCodeThread);
-    expect(dashboard.detail[0]?.mode).toBe("code");
-    expect(dashboard.breakdown.find((group) => group.dimension === "mode")?.rows).toEqual([
-      expect.objectContaining({ key: "code", availability: "recorded", requestCount: 1 }),
-    ]);
-  });
-
-  it("keeps a rootless thread out of the Chat mode filter", () => {
-    const connection = connect();
-    seedChatThread(connection, null);
-    seedUsageRow(connection);
-    seedRootlessUsage(connection);
-
-    const dashboard = read(connection, { filter: { mode: "chat" } as never });
-    expect(dashboard.summary.totals.totalRequests).toBe(1);
-    expect(dashboard.detail.every((row) => row.subjectType === "chat-thread")).toBe(true);
-  });
-
-  it("reports a rootless thread's own mode rather than none", () => {
-    const connection = connect();
-    seedRootlessUsage(connection);
-
-    const dashboard = read(connection);
-    expect(dashboard.detail.map((row) => row.mode).sort()).toEqual(["code", "work"]);
-    expect(
-      dashboard.breakdown
-        .find((group) => group.dimension === "mode")
-        ?.rows.map((row) => [row.key, row.requestCount]),
-    ).toEqual([
-      ["code", 1],
-      ["work", 1],
-    ]);
-  });
-
-  it("counts rootless usage in an unfiltered dashboard exactly as before", () => {
-    const connection = connect();
-    seedRootlessUsage(connection);
-
-    const dashboard = read(connection);
-    expect(dashboard.summary.totals.totalRequests).toBe(2);
-    expect(dashboard.summary.totals.totalInputTokens).toBe(200);
-  });
-
-  it("keeps a Project-backed rootless thread's usage inside its own Project scope", () => {
-    const connection = connect();
-    seedRootlessThread(connection, ids.rootlessWorkThread, "work", ids.project);
-    seedRootlessThread(connection, ids.rootlessCodeThread, "code", ids.otherProject);
-    seedRootlessUsageRows(connection);
-
-    const scoped = read(connection, {}, { kind: "projects", projectIds: [ids.project] });
-    expect(scoped.summary.totals.totalRequests).toBe(1);
-    expect(scoped.detail[0]?.subjectId).toBe(ids.rootlessWorkThread);
-    expect(scoped.detail[0]?.projectId).toBe(ids.project);
-
-    // The mode filter narrows the scope and can never widen it: the other
-    // Project's Code thread stays unreadable even when its mode is requested.
-    expect(
-      read(
-        connection,
-        { filter: { mode: "code" } as never },
-        { kind: "projects", projectIds: [ids.project] },
-      ).summary.totals.totalRequests,
-    ).toBe(0);
-
-    // Both rootless threads name a Project, so an unfiled window sees neither.
-    expect(read(connection).summary.totals.totalRequests).toBe(0);
   });
 
   it("applies host, model, quality, and range filters", () => {

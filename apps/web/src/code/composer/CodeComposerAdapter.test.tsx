@@ -212,6 +212,45 @@ describe("CodeComposerAdapter interactions", () => {
     container.remove();
   });
 
+  /**
+   * A Code thread belongs to a Project (decision 0035). Enter must not start a
+   * first turn while no Project is chosen, or the thread would run against a
+   * root nobody picked.
+   */
+  it("refuses to start the first turn until a Project is chosen", async () => {
+    const onCreateThread = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <CodeComposerAdapter
+          defaultExecutionPolicy="approval-gated"
+          defaultPermissionPersistence="current-session"
+          providerGroups={[]}
+          onSelectProvider={() => {}}
+          onCreateThread={onCreateThread}
+          onCancel={() => {}}
+        />,
+      );
+    });
+    const textarea = container.querySelector("textarea");
+    await act(async () => {
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      nativeInputValueSetter?.call(textarea, "Ship the fix");
+      textarea!.dispatchEvent(new Event("input", { bubbles: true }));
+      textarea!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+
+    expect(onCreateThread).not.toHaveBeenCalled();
+    expect(container.querySelector('[aria-label="Create thread"]')).toBeDisabled();
+    root.unmount();
+    container.remove();
+  });
+
   it("F4: carries startFromOrigin=false on the submit input when no server-authoritative remote facts are provided", async () => {
     const onCreateThread = vi.fn();
     const container = document.createElement("div");

@@ -17,9 +17,9 @@ before reading any bytes.
 - **Code** sees files inside the exact repository checkout or worktree
   selected by the Code Project or thread, plus artifacts and evidence.
 
-An **unfiled** Work or Code thread has no filesystem, shell, Git, worktree,
-test, preview, or delivery authority until an existing folder is explicitly
-attached. Octant never infers a root from a prompt or working directory.
+Every Work and Code thread belongs to one Project, so its first turn cannot
+start until a Project is chosen. Octant never infers a root from a prompt or
+working directory.
 
 ## Path safety
 

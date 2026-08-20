@@ -40,7 +40,7 @@
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   background: var(--octant-workspace);
 }
@@ -51,24 +51,14 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 5px 8px 5px 12px;
+  padding: 5px 8px;
   background: var(--octant-chrome);
   border-bottom: 1px solid var(--octant-border);
 }
 
 .right-utility-dock__identity {
   min-width: 0;
-}
-
-.right-utility-dock__identity > span {
-  display: block;
-  color: var(--octant-text-muted);
-  font-size: 9px;
-  font-weight: 500;
-}
-
-.right-utility-dock__identity h2 {
-  margin: 1px 0 0;
+  margin: 0;
   overflow: hidden;
   color: var(--octant-text-primary);
   font-size: 12px;
@@ -98,11 +88,10 @@
 
 .right-utility-dock__tabs {
   display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
   gap: 2px;
-  padding: 5px 8px;
   overflow-x: auto;
-  background: var(--octant-chrome);
-  border-bottom: 1px solid var(--octant-border);
   scrollbar-width: thin;
 }
 

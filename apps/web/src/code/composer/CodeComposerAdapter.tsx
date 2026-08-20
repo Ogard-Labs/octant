@@ -194,7 +194,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const suggestedOutcome = useMemo(() => suggestCodeDeliveryOutcome(prompt), [prompt]);
   const outcomeKind = outcomeOverride ?? suggestedOutcome;
   const trimmed = prompt.trim();
-  const canSubmit = trimmed.length > 0 && !props.creating;
+  // A Code thread belongs to a Project (decision 0037), so the first turn
+  // cannot start until one is chosen.
+  const canSubmit = trimmed.length > 0 && !props.creating && props.projectId !== undefined;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -304,226 +306,231 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           <h1 className="code-composer-adapter__heading">What should we build?</h1>
           <p className="code-composer-adapter__description">
             {props.projectId === undefined
-              ? "Start without a repository, or choose a saved Project before creating the thread."
+              ? "Choose a Project to build in. Its repository is the checkout this thread works against."
               : "Start a Code thread in this repository. The thread inherits the current checkout and approval policy."}
           </p>
         </div>
 
         <div className="code-composer-adapter__composer">
-          <div className="code-composer-adapter__input-row">
-            <OctantTextarea
-              aria-label="First message"
-              autoFocus
-              className="code-composer-adapter__textarea"
-              disabled={props.creating}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Describe the change…"
-              rows={3}
-              value={prompt}
-            />
-            <div className="code-composer-adapter__composer-bar">
-              <span className="code-composer-adapter__context-picker">
-                <ComposerModelPicker
-                  ariaLabel="Provider and model"
-                  groups={props.providerGroups}
-                  onSelect={props.onSelectProvider}
-                  {...(props.selectedModelId === undefined
-                    ? {}
-                    : { selectedModelId: props.selectedModelId })}
-                  {...(props.selectedProviderInstanceId === undefined
-                    ? {}
-                    : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                />
-              </span>
-              {props.poolControl}
-              <span className="code-composer-adapter__context-item">
-                <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
-                <OctantNativeSelect
-                  aria-label="Access policy"
-                  className="code-composer-adapter__policy-select"
-                  onChange={(e) => setExecutionPolicy(e.target.value as ProviderExecutionPolicy)}
-                  value={executionPolicy}
+          {/* One card holds the prompt and everything the thread will be bound
+              to. The strip used to sit outside it, which read as loose chrome
+              under the composer rather than as part of what is being started. */}
+          <div className="code-composer-adapter__card">
+            <div className="code-composer-adapter__input-row">
+              <OctantTextarea
+                aria-label="First message"
+                autoFocus
+                className="code-composer-adapter__textarea"
+                disabled={props.creating}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Describe the change…"
+                rows={3}
+                value={prompt}
+              />
+              <div className="code-composer-adapter__composer-bar">
+                <span className="code-composer-adapter__context-picker">
+                  <ComposerModelPicker
+                    ariaLabel="Provider and model"
+                    groups={props.providerGroups}
+                    onSelect={props.onSelectProvider}
+                    {...(props.selectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.selectedModelId })}
+                    {...(props.selectedProviderInstanceId === undefined
+                      ? {}
+                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                  />
+                </span>
+                {props.poolControl}
+                <span className="code-composer-adapter__context-item">
+                  <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <OctantNativeSelect
+                    aria-label="Access policy"
+                    className="code-composer-adapter__policy-select"
+                    onChange={(e) => setExecutionPolicy(e.target.value as ProviderExecutionPolicy)}
+                    value={executionPolicy}
+                  >
+                    <option value="plan">Plan</option>
+                    <option value="approval-gated">Approval</option>
+                    <option value="auto-accept-edits">Auto-accept edits</option>
+                    <option value="full-access">Full access</option>
+                  </OctantNativeSelect>
+                </span>
+                <OctantButton
+                  aria-label={
+                    props.errorMessage === undefined ? "Create thread" : "Retry creating thread"
+                  }
+                  className="code-composer-adapter__send"
+                  disabled={!canSubmit}
+                  onClick={submit}
+                  size="icon"
+                  type="button"
+                  variant="default"
                 >
-                  <option value="plan">Plan</option>
-                  <option value="approval-gated">Approval</option>
-                  <option value="auto-accept-edits">Auto-accept edits</option>
-                  <option value="full-access">Full access</option>
-                </OctantNativeSelect>
-              </span>
+                  <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+                </OctantButton>
+              </div>
+            </div>
+
+            <div className="code-composer-adapter__context-strip" aria-label="Thread context">
+              <HostSelector
+                {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                {...(props.selectedHostId === undefined
+                  ? {}
+                  : { selectedHostId: props.selectedHostId })}
+                {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+                {...(props.lastSelectedHealthyHostId === undefined
+                  ? {}
+                  : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+                {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
+                requiredCapability="code"
+              />
+              {props.folderControl}
+              {props.folderControl === undefined && props.projectName !== undefined ? (
+                <span className="code-composer-adapter__context-item" title={props.projectRoot}>
+                  <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <span>{props.projectName}</span>
+                </span>
+              ) : null}
+              {props.githubControl}
+              {props.projectId === undefined ? null : (
+                <span className="code-composer-adapter__context-item">
+                  <OctantNativeSelect
+                    aria-label="Workspace"
+                    className="code-composer-adapter__policy-select"
+                    onChange={(e) => setWorkspaceOverride(e.target.value as CodeNewThreadWorkspace)}
+                    {...(props.creating === true ? { disabled: true } : {})}
+                    value={workspace}
+                  >
+                    <option value="current-checkout">Current checkout</option>
+                    <option value="managed-worktree">Managed worktree</option>
+                  </OctantNativeSelect>
+                </span>
+              )}
+              {props.projectId !== undefined ? (
+                <CodeBranchSelector
+                  key={String(props.projectId)}
+                  branch={baseBranch.trim() || "development"}
+                  loading={refsLoading}
+                  onOpen={loadWorktreeRefs}
+                  onSelectRef={handleSelectRef}
+                  onStartFromOriginChange={setStartFromOriginOverride}
+                  remoteName={resolvedWorktreeRemote}
+                  startFromOrigin={startFromOrigin}
+                  startFromOriginAvailable={
+                    preferredRemote.status === "selected" || worktreeRemote !== undefined
+                  }
+                  {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
+                  {...(props.creating === true ? { disabled: true } : {})}
+                />
+              ) : props.branchName !== undefined ? (
+                <span className="code-composer-adapter__context-item">
+                  <span>{props.branchName}</span>
+                </span>
+              ) : null}
               <OctantButton
-                aria-label={
-                  props.errorMessage === undefined ? "Create thread" : "Retry creating thread"
-                }
-                className="code-composer-adapter__send"
-                disabled={!canSubmit}
-                onClick={submit}
-                size="icon"
+                aria-expanded={showDelivery}
+                className="code-composer-adapter__disclosure-toggle"
+                onClick={() => setShowDelivery(!showDelivery)}
                 type="button"
-                variant="default"
+                variant="ghost"
               >
-                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+                {showDelivery ? (
+                  <ChevronUp aria-hidden="true" size={12} />
+                ) : (
+                  <ChevronDown aria-hidden="true" size={12} />
+                )}
+                <span>Delivery target</span>
               </OctantButton>
             </div>
-          </div>
 
-          <div className="code-composer-adapter__context-strip" aria-label="Thread context">
-            <HostSelector
-              {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-              {...(props.selectedHostId === undefined
-                ? {}
-                : { selectedHostId: props.selectedHostId })}
-              {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-              {...(props.lastSelectedHealthyHostId === undefined
-                ? {}
-                : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-              {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-              {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
-              requiredCapability="code"
-            />
-            {props.folderControl}
-            {props.folderControl === undefined && props.projectName !== undefined ? (
-              <span className="code-composer-adapter__context-item" title={props.projectRoot}>
-                <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
-                <span>{props.projectName}</span>
-              </span>
-            ) : null}
-            {props.githubControl}
-            {props.projectId === undefined ? null : (
-              <span className="code-composer-adapter__context-item">
-                <OctantNativeSelect
-                  aria-label="Workspace"
-                  className="code-composer-adapter__policy-select"
-                  onChange={(e) => setWorkspaceOverride(e.target.value as CodeNewThreadWorkspace)}
-                  {...(props.creating === true ? { disabled: true } : {})}
-                  value={workspace}
-                >
-                  <option value="current-checkout">Current checkout</option>
-                  <option value="managed-worktree">Managed worktree</option>
-                </OctantNativeSelect>
-              </span>
-            )}
-            {props.projectId !== undefined ? (
-              <CodeBranchSelector
-                key={String(props.projectId)}
-                branch={baseBranch.trim() || "development"}
-                loading={refsLoading}
-                onOpen={loadWorktreeRefs}
-                onSelectRef={handleSelectRef}
-                onStartFromOriginChange={setStartFromOriginOverride}
-                remoteName={resolvedWorktreeRemote}
-                startFromOrigin={startFromOrigin}
-                startFromOriginAvailable={
-                  preferredRemote.status === "selected" || worktreeRemote !== undefined
-                }
-                {...(worktreeRefs === undefined ? {} : { refs: worktreeRefs })}
-                {...(props.creating === true ? { disabled: true } : {})}
-              />
-            ) : props.branchName !== undefined ? (
-              <span className="code-composer-adapter__context-item">
-                <span>{props.branchName}</span>
-              </span>
-            ) : null}
-            <OctantButton
-              aria-expanded={showDelivery}
-              className="code-composer-adapter__disclosure-toggle"
-              onClick={() => setShowDelivery(!showDelivery)}
-              type="button"
-              variant="ghost"
-            >
-              {showDelivery ? (
-                <ChevronUp aria-hidden="true" size={12} />
-              ) : (
-                <ChevronDown aria-hidden="true" size={12} />
-              )}
-              <span>Delivery target</span>
-            </OctantButton>
-          </div>
-
-          {/* Start from origin decides where a *new* worktree branches from.
+            {/* Start from origin decides where a *new* worktree branches from.
               Binding the current checkout resolves no source, so the control
               would be a lie rather than a choice. */}
-          {props.projectId === undefined || workspace !== "managed-worktree" ? null : (
-            <CodeWorktreeSourceControl
-              branch={baseBranch.trim() || "development"}
-              {...(props.execute !== undefined ? { onRefresh: sourcePreview.refresh } : {})}
-              onSelectRemote={setWorktreeRemote}
-              onStartFromOriginChange={setStartFromOriginOverride}
-              remoteFacts={worktreeRemoteFacts}
-              resolution={
-                props.execute !== undefined
-                  ? sourcePreview.resolution
-                  : (props.worktreeResolution ?? { kind: "idle" })
-              }
-              selectedRemote={resolvedWorktreeRemote}
-              startFromOrigin={startFromOrigin}
-            />
-          )}
+            {props.projectId === undefined || workspace !== "managed-worktree" ? null : (
+              <CodeWorktreeSourceControl
+                branch={baseBranch.trim() || "development"}
+                {...(props.execute !== undefined ? { onRefresh: sourcePreview.refresh } : {})}
+                onSelectRemote={setWorktreeRemote}
+                onStartFromOriginChange={setStartFromOriginOverride}
+                remoteFacts={worktreeRemoteFacts}
+                resolution={
+                  props.execute !== undefined
+                    ? sourcePreview.resolution
+                    : (props.worktreeResolution ?? { kind: "idle" })
+                }
+                selectedRemote={resolvedWorktreeRemote}
+                startFromOrigin={startFromOrigin}
+              />
+            )}
 
-          {showDelivery ? (
-            <div className="code-composer-adapter__delivery" aria-label="Delivery target">
-              <label className="code-composer-adapter__field">
-                <span>Outcome</span>
-                <OctantNativeSelect
-                  aria-label="Delivery outcome"
-                  onChange={(e) => setOutcomeOverride(e.target.value as CodeDeliveryOutcomeKind)}
-                  value={outcomeKind}
-                >
-                  {CODE_DELIVERY_OUTCOME_ORDER.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {CODE_DELIVERY_OUTCOME_LABELS[kind]}
-                    </option>
-                  ))}
-                </OctantNativeSelect>
-              </label>
-              <label className="code-composer-adapter__field">
-                <span>Branch</span>
-                <OctantInput
-                  aria-label="Branch intent"
-                  onChange={(e) => setBranchIntent(e.target.value)}
-                  value={branchIntent}
-                />
-              </label>
-              <label className="code-composer-adapter__field">
-                <span>Remote</span>
-                <OctantInput
-                  aria-label="Remote name"
-                  onChange={(e) => setRemoteName(e.target.value)}
-                  value={remoteName}
-                />
-              </label>
-              <label className="code-composer-adapter__field">
-                <span>Base repository</span>
-                <OctantInput
-                  aria-label="Base repository"
-                  onChange={(e) => setBaseRepository(e.target.value)}
-                  placeholder="owner/repository"
-                  value={baseRepository}
-                />
-              </label>
-              <label className="code-composer-adapter__field">
-                <span>Base branch</span>
-                <OctantInput
-                  aria-label="Base branch"
-                  onChange={(e) => setBaseBranch(e.target.value)}
-                  value={baseBranch}
-                />
-              </label>
-              <label className="code-composer-adapter__field">
-                <span>Permission duration</span>
-                <OctantNativeSelect
-                  aria-label="Permission persistence"
-                  onChange={(e) =>
-                    setPermissionPersistence(e.target.value as PermissionPersistence)
-                  }
-                  value={permissionPersistence}
-                >
-                  <option value="current-session">Current session</option>
-                  <option value="project-default">Project default</option>
-                </OctantNativeSelect>
-              </label>
-            </div>
-          ) : null}
+            {showDelivery ? (
+              <div className="code-composer-adapter__delivery" aria-label="Delivery target">
+                <label className="code-composer-adapter__field">
+                  <span>Outcome</span>
+                  <OctantNativeSelect
+                    aria-label="Delivery outcome"
+                    onChange={(e) => setOutcomeOverride(e.target.value as CodeDeliveryOutcomeKind)}
+                    value={outcomeKind}
+                  >
+                    {CODE_DELIVERY_OUTCOME_ORDER.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {CODE_DELIVERY_OUTCOME_LABELS[kind]}
+                      </option>
+                    ))}
+                  </OctantNativeSelect>
+                </label>
+                <label className="code-composer-adapter__field">
+                  <span>Branch</span>
+                  <OctantInput
+                    aria-label="Branch intent"
+                    onChange={(e) => setBranchIntent(e.target.value)}
+                    value={branchIntent}
+                  />
+                </label>
+                <label className="code-composer-adapter__field">
+                  <span>Remote</span>
+                  <OctantInput
+                    aria-label="Remote name"
+                    onChange={(e) => setRemoteName(e.target.value)}
+                    value={remoteName}
+                  />
+                </label>
+                <label className="code-composer-adapter__field">
+                  <span>Base repository</span>
+                  <OctantInput
+                    aria-label="Base repository"
+                    onChange={(e) => setBaseRepository(e.target.value)}
+                    placeholder="owner/repository"
+                    value={baseRepository}
+                  />
+                </label>
+                <label className="code-composer-adapter__field">
+                  <span>Base branch</span>
+                  <OctantInput
+                    aria-label="Base branch"
+                    onChange={(e) => setBaseBranch(e.target.value)}
+                    value={baseBranch}
+                  />
+                </label>
+                <label className="code-composer-adapter__field">
+                  <span>Permission duration</span>
+                  <OctantNativeSelect
+                    aria-label="Permission persistence"
+                    onChange={(e) =>
+                      setPermissionPersistence(e.target.value as PermissionPersistence)
+                    }
+                    value={permissionPersistence}
+                  >
+                    <option value="current-session">Current session</option>
+                    <option value="project-default">Project default</option>
+                  </OctantNativeSelect>
+                </label>
+              </div>
+            ) : null}
+          </div>
 
           {props.errorMessage !== undefined ? (
             <p className="code-composer-adapter__error" role="alert">

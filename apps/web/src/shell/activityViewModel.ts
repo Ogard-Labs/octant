@@ -89,13 +89,13 @@ export function writeActivityViewEnabled(
 export function buildSidebarActivityView(input: {
   readonly now?: Date;
   readonly projects: ReadonlyArray<SidebarActivityProject>;
-  readonly rootlessLabel?: "Unfiled" | "Recents";
+  readonly unfiledLabel?: "Unfiled" | "Recents";
   readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
 }): SidebarActivityView {
   const now = input.now ?? new Date();
   const projectNames = new Map(input.projects.map((project) => [project.id, project.name]));
   const rows = input.threads
-    .map((thread) => toActivityThread(thread, projectNames, input.rootlessLabel ?? "Unfiled"))
+    .map((thread) => toActivityThread(thread, projectNames, input.unfiledLabel ?? "Unfiled"))
     .sort(compareActivityThreads);
   // A pin is the user saying "keep this where I can see it", so it outranks
   // both attention and recency; a pinned thread that also needs attention still
@@ -133,12 +133,12 @@ export function buildSidebarActivityView(input: {
 function toActivityThread(
   thread: ChatThreadNavigationItem,
   projectNames: ReadonlyMap<string, string>,
-  rootlessLabel: "Unfiled" | "Recents",
+  unfiledLabel: "Unfiled" | "Recents",
 ): SidebarActivityThread {
   const projectName =
     thread.projectId === undefined
-      ? rootlessLabel
-      : (projectNames.get(thread.projectId) ?? rootlessLabel);
+      ? unfiledLabel
+      : (projectNames.get(thread.projectId) ?? unfiledLabel);
   return {
     attention: activityAttention(thread),
     ...(thread.pinned === true ? { pinned: true } : {}),
