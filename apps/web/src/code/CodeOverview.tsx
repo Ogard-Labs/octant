@@ -8,25 +8,23 @@ import { resolveCodeNewThreadWorkspace, type PickerGroup } from "@octant/domain"
 import type { WorktreeRemoteFacts } from "@octant/domain/code-worktree-source-policy";
 import {
   ArrowUpRight,
-  Bot,
   CircleAlert,
-  CircleCheck,
-  Clock3,
   GitBranch,
   GitCompare,
   GitPullRequest,
   ListChecks,
-  MessageCircleQuestion,
+  Pin,
+  PinOff,
   RefreshCw,
   ShieldAlert,
   Terminal,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ShellState } from "../shell/ShellState";
-import type { CodeController } from "./useCodeController";
+import type { CodeController, CodeThreadNavigationItem } from "./useCodeController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
-import { CodeSidebarSection } from "./CodeSidebarSection";
+import { ThreadRenameField } from "../projects/ThreadRenameField";
 import { CodeComposerAdapter, type CodeComposerSubmitInput } from "./composer/CodeComposerAdapter";
 import { useWorktreeRemoteFacts } from "./composer/useWorktreeRemoteFacts";
 
@@ -330,8 +328,13 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
 
   return (
     <section aria-label="Code Project Overview" className="code-project-overview">
+      <CodeProjectFacts
+        cards={cards}
+        {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
+      />
       <CodeProjectSessions
         boardState={boardState}
+        cards={cards}
         navigationThreads={navigationThreads}
         onRenameThread={(threadId, title) =>
           void props.controller.renameThread(threadId as CodeThreadId, title)
@@ -342,7 +345,6 @@ function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projec
         onOpenThread={props.onOpenThread}
         onRetry={() => setReload((current) => current + 1)}
       />
-      <CodeProjectionSections boardState={boardState} cards={cards} />
       <CodeProjectQuickStart
         controller={props.controller}
         projectId={props.projectId}
@@ -380,14 +382,80 @@ type ProjectBoardState =
   | { readonly kind: "ready"; readonly view: CodeBoardView }
   | { readonly kind: "unavailable"; readonly message: string };
 
+/**
+ * Project-level truth rendered exactly once: the bound repository and the
+ * authority rule for this surface. Per-thread facts live on the thread rows
+ * below, so nothing here repeats per thread.
+ */
+function CodeProjectFacts(props: {
+  readonly cards: ReadonlyArray<CodeBoardCard>;
+  readonly projectRoot?: string;
+}) {
+  const waiting = props.cards.filter((card) => card.status === "waiting").length;
+  return (
+    <section aria-label="Project scope and authority" className="code-project-overview__facts">
+      {props.projectRoot === undefined ? null : (
+        <dl className="kv">
+          <dt>Repository</dt>
+          <dd>{props.projectRoot}</dd>
+        </dl>
+      )}
+      {waiting > 0 ? (
+        <div className="callout callout-warn" role="status">
+          <ShieldAlert aria-hidden="true" size={16} />
+          <div>
+            <p className="callout-title">
+              {waiting === 1 ? "1 thread is waiting" : `${waiting} threads are waiting`}
+            </p>
+            <p>
+              Waiting for server-reported approval, input, or recovery. The overview does not grant
+              authority.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <p className="code-project-overview__authority">
+          Read-only host projection. The overview does not grant authority.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * One row per thread. The navigation projection orders the rows and carries
+ * rename and pin; a board card whose thread the navigation does not carry
+ * still gets a row, so no reported fact is lost.
+ */
+interface ThreadRowModel {
+  readonly threadId: string;
+  readonly title: string;
+  readonly thread?: CodeThreadNavigationItem | undefined;
+  readonly card?: CodeBoardCard | undefined;
+}
+
 function CodeProjectSessions(props: {
   readonly boardState: ProjectBoardState;
+  readonly cards: ReadonlyArray<CodeBoardCard>;
   readonly navigationThreads: CodeController["navigation"];
   readonly onRenameThread?: (threadId: string, title: string) => void;
   readonly onPinThread?: (threadId: string, pinned: boolean) => void;
   readonly onOpenThread: (threadId: CodeThreadId) => void;
   readonly onRetry: () => void;
 }) {
+  const cardsByThread = new Map(props.cards.map((card) => [String(card.threadId), card]));
+  const navigationIds = new Set(props.navigationThreads.map((thread) => String(thread.threadId)));
+  const rows: ReadonlyArray<ThreadRowModel> = [
+    ...props.navigationThreads.map((thread) => ({
+      threadId: String(thread.threadId),
+      title: thread.title,
+      thread,
+      card: cardsByThread.get(String(thread.threadId)),
+    })),
+    ...props.cards
+      .filter((card) => !navigationIds.has(String(card.threadId)))
+      .map((card) => ({ threadId: String(card.threadId), title: card.title, card })),
+  ].slice(0, MAX_PROJECT_OVERVIEW_CARDS);
   return (
     <section aria-label="Code sessions" className="code-project-overview__sessions">
       <header className="code-project-overview__section-header">
@@ -400,294 +468,292 @@ function CodeProjectSessions(props: {
       {props.boardState.kind === "loading" ? (
         <p role="status">Loading authoritative Code projections…</p>
       ) : props.boardState.kind === "unavailable" ? (
-        <div className="code-project-overview__state" role="alert">
+        <div className="callout callout-warn code-project-overview__state" role="alert">
           <CircleAlert aria-hidden="true" size={16} />
           <div>
-            <strong>Code projections unavailable</strong>
+            <p className="callout-title">Code projections unavailable</p>
             <p>{props.boardState.message}</p>
           </div>
           <OctantButton onClick={props.onRetry} type="button" variant="secondary">
             <RefreshCw aria-hidden="true" size={14} /> Retry projections
           </OctantButton>
         </div>
+      ) : rows.length === 0 ? (
+        <p role="status">No Code threads in this Project.</p>
       ) : (
-        // One list, whether or not the board has projected cards for this
-        // Project: it is the only surface that carries rename and pin, and
-        // showing cards instead whenever any exist left those controls
-        // unreachable for every Project that has been worked in. The board's
-        // own projections stay below, where their status belongs.
-        <CodeSidebarSection
-          onSelectThread={(threadId) => props.onOpenThread(threadId as CodeThreadId)}
-          {...(props.onRenameThread === undefined ? {} : { onRenameThread: props.onRenameThread })}
-          {...(props.onPinThread === undefined ? {} : { onPinThread: props.onPinThread })}
-          threads={props.navigationThreads.slice(0, MAX_PROJECT_OVERVIEW_CARDS)}
-        />
-      )}
-    </section>
-  );
-}
-
-function CodeProjectionSections(props: {
-  readonly boardState: ProjectBoardState;
-  readonly cards: ReadonlyArray<CodeBoardCard>;
-}) {
-  const cards = props.cards;
-  const active = cards.filter((card) => card.status === "in-progress" || card.executing);
-  const waiting = cards.filter((card) => card.status === "waiting");
-  const followUps = cards.filter((card) => card.followUp);
-  const recent = [...cards]
-    .filter((card) => card.lastMeaningfulActivityAt !== null)
-    .sort((left, right) =>
-      String(right.lastMeaningfulActivityAt).localeCompare(String(left.lastMeaningfulActivityAt)),
-    )
-    .slice(0, 8);
-
-  return (
-    <div className="code-project-overview__sections">
-      <OverviewProjectionSection
-        icon={<GitBranch aria-hidden="true" size={16} />}
-        label="Repository, checkout, and worktree"
-        state={props.boardState}
-      >
-        {cards.length === 0 ? (
-          <ProjectionEmpty />
-        ) : (
-          <div className="code-project-overview__items">
-            {cards.map((card) => (
-              <article className="code-project-overview__item" key={String(card.threadId)}>
-                <strong>{card.title}</strong>
-                {card.worktree.kind === "available" ? (
-                  <p>
-                    Checkout available · {headLabel(card.worktree.head)} · {card.worktree.path}
-                  </p>
-                ) : (
-                  <p>Checkout/worktree unavailable · no mutation is authorized here.</p>
-                )}
-              </article>
-            ))}
-          </div>
-        )}
-      </OverviewProjectionSection>
-
-      <OverviewProjectionSection
-        icon={<GitCompare aria-hidden="true" size={16} />}
-        label="Branch and changes"
-        state={props.boardState}
-      >
-        {cards.length === 0 ? (
-          <ProjectionEmpty />
-        ) : (
-          <div className="code-project-overview__items">
-            {cards.map((card) => (
-              <article className="code-project-overview__item" key={String(card.threadId)}>
-                <strong>{card.title}</strong>
-                <p>{changedFilesLabel(card.changedFiles)}</p>
-                {card.changedFiles.kind === "observed" &&
-                card.changedFiles.freshness === "stale" ? (
-                  <ProjectionStatus icon={<Clock3 aria-hidden="true" size={13} />}>
-                    Stale observation
-                  </ProjectionStatus>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        )}
-      </OverviewProjectionSection>
-
-      <OverviewProjectionSection
-        icon={<Clock3 aria-hidden="true" size={16} />}
-        label="Thread activity"
-        state={props.boardState}
-      >
-        <ThreadActivityGroup label="Active threads" cards={active} />
-        <ThreadActivityGroup label="Waiting threads" cards={waiting} />
-        <ThreadActivityGroup label="Follow-up threads" cards={followUps} />
-        <ThreadActivityGroup label="Recent threads" cards={recent} />
-      </OverviewProjectionSection>
-
-      <OverviewProjectionSection
-        icon={<MessageCircleQuestion aria-hidden="true" size={16} />}
-        label="Approvals and input"
-        state={props.boardState}
-      >
-        {cards.some((card) => card.status === "waiting") ? (
-          <ProjectionStatus icon={<ShieldAlert aria-hidden="true" size={13} />}>
-            Waiting for server-reported approval, input, or recovery. The overview does not grant
-            authority.
-          </ProjectionStatus>
-        ) : (
-          <ProjectionStatus icon={<CircleCheck aria-hidden="true" size={13} />}>
-            No pending approval or input is reported.
-          </ProjectionStatus>
-        )}
-      </OverviewProjectionSection>
-
-      <OverviewProjectionSection
-        icon={<ListChecks aria-hidden="true" size={16} />}
-        label="Tests and validation"
-        state={props.boardState}
-      >
-        {cards.length === 0 ? (
-          <ProjectionEmpty />
-        ) : (
-          <div className="code-project-overview__items">
-            {cards.map((card) => (
-              <article className="code-project-overview__item" key={String(card.threadId)}>
-                <strong>{card.title}</strong>
-                <p>
-                  Checks: {capitalize(card.checks.state)} · Review:{" "}
-                  {capitalize(card.reviewState.state)}
-                </p>
-                {card.checks.freshness === "stale" || card.reviewState.freshness === "stale" ? (
-                  <ProjectionStatus icon={<Clock3 aria-hidden="true" size={13} />}>
-                    Stale validation observation
-                  </ProjectionStatus>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        )}
-      </OverviewProjectionSection>
-
-      <OverviewProjectionSection
-        icon={<GitPullRequest aria-hidden="true" size={16} />}
-        label="Delivery and pull request"
-        state={props.boardState}
-      >
-        {cards.length === 0 ? (
-          <ProjectionEmpty />
-        ) : (
-          <div className="code-project-overview__items">
-            {cards.map((card) => (
-              <article className="code-project-overview__item" key={String(card.threadId)}>
-                <strong>{card.title}</strong>
-                <p>
-                  {deliveryOutcomeLabel(card.outcomeKind)} · {capitalize(card.deliverySatisfaction)}
-                </p>
-                {card.linkedPullRequest.kind === "linked" ? (
-                  <p>
-                    #{card.linkedPullRequest.number} · {card.linkedPullRequest.state}
-                    {card.linkedPullRequest.freshness === "stale" ? " · Stale" : ""}
-                  </p>
-                ) : (
-                  <p>No linked pull request reported.</p>
-                )}
-              </article>
-            ))}
-          </div>
-        )}
-      </OverviewProjectionSection>
-
-      <OverviewProjectionSection
-        icon={<Bot aria-hidden="true" size={16} />}
-        label="Active child agents"
-        state={props.boardState}
-      >
-        {cards.length === 0 ? (
-          <ProjectionEmpty />
-        ) : (
-          <div className="code-project-overview__items">
-            {cards.map((card) => (
-              <article className="code-project-overview__item" key={String(card.threadId)}>
-                <strong>{card.title}</strong>
-                <p>
-                  {card.childAgents.active} active · {card.childAgents.completed} completed ·{" "}
-                  {card.childAgents.failed} failed
-                </p>
-                {card.childAgents.latestSummary === undefined ? null : (
-                  <p>{card.childAgents.latestSummary}</p>
-                )}
-              </article>
-            ))}
-          </div>
-        )}
-      </OverviewProjectionSection>
-
-      <details className="code-project-overview__details">
-        <summary>
-          <Terminal aria-hidden="true" size={15} />
-          <span>Environment and metadata details</span>
-        </summary>
-        <div className="code-project-overview__items">
-          {cards.length === 0 ? (
-            <ProjectionEmpty />
-          ) : (
-            cards.map((card) => (
-              <article className="code-project-overview__item" key={String(card.threadId)}>
-                <strong>{card.title}</strong>
-                <p>
-                  <EnvironmentState card={card} /> · Host-scoped read-only projection
-                </p>
-                {card.recovery.kind === "recovering" ? (
-                  <p>Recovery: {card.recovery.reasons.join(", ")}</p>
-                ) : null}
-              </article>
-            ))
-          )}
-        </div>
-      </details>
-    </div>
-  );
-}
-
-function OverviewProjectionSection(props: {
-  readonly icon: ReactNode;
-  readonly label: string;
-  readonly state: ProjectBoardState;
-  readonly children: ReactNode;
-}) {
-  return (
-    <section aria-label={props.label} className="code-project-overview__projection">
-      <header className="code-project-overview__section-header">
-        <div>
-          {props.icon}
-          <h2>{props.label}</h2>
-        </div>
-        {props.state.kind === "unavailable" ? (
-          <ProjectionStatus icon={<CircleAlert aria-hidden="true" size={13} />}>
-            Unavailable
-          </ProjectionStatus>
-        ) : null}
-      </header>
-      {props.children}
-    </section>
-  );
-}
-
-function ThreadActivityGroup(props: {
-  readonly label: string;
-  readonly cards: ReadonlyArray<CodeBoardCard>;
-}) {
-  return (
-    <div className="code-project-overview__activity-group">
-      <h3>{props.label}</h3>
-      {props.cards.length === 0 ? (
-        <p>None reported.</p>
-      ) : (
-        <ul>
-          {props.cards.map((card) => (
-            <li key={`${props.label}-${String(card.threadId)}`}>
-              <strong>{card.title}</strong>
-              <span>{boardStatusLabel(card.status)}</span>
+        <ul className="code-project-overview__threads">
+          {rows.map((row) => (
+            <li key={row.threadId}>
+              <CodeProjectThreadRow
+                onOpen={() => props.onOpenThread(row.threadId as CodeThreadId)}
+                {...(props.onRenameThread === undefined
+                  ? {}
+                  : { onRename: (title: string) => props.onRenameThread?.(row.threadId, title) })}
+                {...(row.thread === undefined || props.onPinThread === undefined
+                  ? {}
+                  : {
+                      onPin: () => props.onPinThread?.(row.threadId, row.thread?.pinned !== true),
+                    })}
+                row={row}
+              />
             </li>
           ))}
         </ul>
       )}
-    </div>
+    </section>
   );
 }
 
-function ProjectionStatus(props: { readonly icon: ReactNode; readonly children: ReactNode }) {
+function CodeProjectThreadRow(props: {
+  readonly row: ThreadRowModel;
+  readonly onOpen: () => void;
+  readonly onRename?: (title: string) => void;
+  readonly onPin?: () => void;
+}) {
+  const [renaming, setRenaming] = useState(false);
+  const { row } = props;
+  const pinned = row.thread?.pinned === true;
+  const facts = collapsedThreadFacts(row.card);
+  const detail = detailThreadFacts(row.card);
   return (
-    <span className="code-project-overview__status" role="status">
-      {props.icon}
-      <span>{props.children}</span>
-    </span>
+    <article className="setgroup code-project-thread">
+      {renaming && props.onRename !== undefined ? (
+        <ThreadRenameField
+          label="Rename Code thread"
+          onCancel={() => setRenaming(false)}
+          onRename={(title) => {
+            setRenaming(false);
+            props.onRename?.(title);
+          }}
+          title={row.title}
+        />
+      ) : (
+        <div className="code-project-thread__row">
+          <OctantButton
+            className="code-project-thread__title"
+            onClick={props.onOpen}
+            // Renaming from the keyboard needs no pointer; F2 is the platform
+            // convention and the double-click is the pointer equivalent.
+            onDoubleClick={props.onRename === undefined ? undefined : () => setRenaming(true)}
+            onKeyDown={(event) => {
+              if (event.key !== "F2" || props.onRename === undefined) return;
+              event.preventDefault();
+              setRenaming(true);
+            }}
+            type="button"
+            variant="ghost"
+          >
+            <span>{row.title}</span>
+          </OctantButton>
+          <span className="code-project-thread__chips">
+            <ThreadStateBadge row={row} />
+            {row.thread === undefined ? null : (
+              <span className="tag">{policyLabel(row.thread.executionPolicy)}</span>
+            )}
+            {row.thread?.unread === true ? (
+              <span className="badge badge-accent">New activity</span>
+            ) : null}
+            {(row.thread?.followUp ?? row.card?.followUp) === true ? (
+              <span className="tag">Follow-up</span>
+            ) : null}
+            {pinned ? <span className="tag">Pinned</span> : null}
+          </span>
+          {props.onPin === undefined ? null : (
+            <OctantButton
+              aria-label={pinned ? `Unpin ${row.title}` : `Pin ${row.title}`}
+              aria-pressed={pinned}
+              className="code-project-thread__pin"
+              onClick={props.onPin}
+              type="button"
+              variant="ghost"
+            >
+              {pinned ? (
+                <PinOff aria-hidden="true" size={13} strokeWidth={1.8} />
+              ) : (
+                <Pin aria-hidden="true" size={13} strokeWidth={1.8} />
+              )}
+            </OctantButton>
+          )}
+        </div>
+      )}
+      {facts.length === 0 ? null : (
+        <dl className="kv code-project-thread__facts">
+          {facts.map((fact) => (
+            <Fragment key={fact.label}>
+              <dt>{fact.label}</dt>
+              <dd>{fact.value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
+      {detail.length === 0 ? null : (
+        <details className="code-project-thread__more">
+          <summary>Full detail</summary>
+          <dl className="kv">
+            {detail.map((fact) => (
+              <Fragment key={fact.label}>
+                <dt>{fact.label}</dt>
+                <dd>{fact.value}</dd>
+              </Fragment>
+            ))}
+          </dl>
+        </details>
+      )}
+    </article>
   );
 }
 
-function ProjectionEmpty() {
-  return <p className="code-project-overview__empty">No projection is currently reported.</p>;
+/**
+ * The board's derived status outranks the navigation lifecycle because it is
+ * projected from more evidence; the lifecycle stands in only when the board
+ * has no card for the thread. Both are server-reported, never invented here.
+ */
+function ThreadStateBadge({ row }: { readonly row: ThreadRowModel }) {
+  if (row.card !== undefined) {
+    return (
+      <span className={boardStatusBadgeClass(row.card.status)}>
+        {boardStatusLabel(row.card.status)}
+      </span>
+    );
+  }
+  if (row.thread !== undefined) {
+    return (
+      <span className={lifecycleBadgeClass(row.thread.lifecycle)}>
+        {lifecycleSummary(row.thread.lifecycle)}
+      </span>
+    );
+  }
+  return null;
+}
+
+interface ThreadFact {
+  readonly label: string;
+  readonly value: string;
+}
+
+/**
+ * Only facts the host actually reported become rows. An unknown, unavailable,
+ * or zero-valued facet is absence, not a fact, so it renders nothing rather
+ * than a placeholder sentence.
+ */
+function collapsedThreadFacts(card: CodeBoardCard | undefined): ReadonlyArray<ThreadFact> {
+  if (card === undefined) return [];
+  const facts: ThreadFact[] = [];
+  if (card.worktree.kind === "available") {
+    facts.push({ label: "Branch", value: headLabel(card.worktree.head) });
+  }
+  if (card.changedFiles.kind === "observed") {
+    facts.push({
+      label: "Changes",
+      value: withStaleness(observedChangesLabel(card.changedFiles), card.changedFiles.freshness),
+    });
+  }
+  if (card.checks.state !== "unknown") {
+    facts.push({
+      label: "Checks",
+      value: withStaleness(capitalize(card.checks.state), card.checks.freshness),
+    });
+  }
+  if (card.reviewState.state !== "unknown") {
+    facts.push({
+      label: "Review",
+      value: withStaleness(capitalize(card.reviewState.state), card.reviewState.freshness),
+    });
+  }
+  if (card.linkedPullRequest.kind === "linked") {
+    facts.push({
+      label: "Pull request",
+      value: withStaleness(
+        `#${card.linkedPullRequest.number} · ${card.linkedPullRequest.state}`,
+        card.linkedPullRequest.freshness,
+      ),
+    });
+  }
+  const agents = childAgentsLabel(card.childAgents);
+  if (agents !== undefined) facts.push({ label: "Agents", value: agents });
+  if (card.recovery.kind === "recovering") {
+    facts.push({ label: "Recovery", value: card.recovery.reasons.join(", ") });
+  }
+  if (card.blockingReason !== undefined) {
+    facts.push({ label: "Blocked", value: card.blockingReason });
+  }
+  return facts;
+}
+
+/**
+ * The disclosure carries the facts that are true but rarely the reason to
+ * glance at the board: paths, the confirmed delivery target, and trailing
+ * activity. Everything here is still host-reported, only tucked away.
+ */
+function detailThreadFacts(card: CodeBoardCard | undefined): ReadonlyArray<ThreadFact> {
+  if (card === undefined) return [];
+  const facts: ThreadFact[] = [];
+  if (card.worktree.kind === "available") {
+    facts.push({ label: "Worktree", value: String(card.worktree.path) });
+  }
+  facts.push({
+    label: "Delivery",
+    value: `${deliveryOutcomeLabel(card.outcomeKind)} · ${capitalize(card.deliverySatisfaction)}`,
+  });
+  if (card.childAgents.latestSummary !== undefined) {
+    facts.push({ label: "Latest agent", value: card.childAgents.latestSummary });
+  }
+  if (card.lastMeaningfulActivityAt !== null) {
+    facts.push({
+      label: "Last activity",
+      value: new Date(String(card.lastMeaningfulActivityAt)).toLocaleString(),
+    });
+  }
+  return facts;
+}
+
+function withStaleness(value: string, freshness: CodeBoardCard["githubFreshness"]): string {
+  return freshness === "stale" ? `${value} · stale` : value;
+}
+
+function observedChangesLabel(
+  changes: Extract<CodeBoardCard["changedFiles"], { readonly kind: "observed" }>,
+): string {
+  if (changes.workingTreeClean && changes.changedPathCount === 0 && changes.stagedCount === 0) {
+    return changes.committedAhead > 0
+      ? `Working tree clean · ${changes.committedAhead} committed ahead`
+      : "Working tree clean";
+  }
+  const files = `${changes.changedPathCount} changed ${changes.changedPathCount === 1 ? "file" : "files"}`;
+  return `${files} · ${changes.stagedCount} staged · ${changes.committedAhead} committed ahead`;
+}
+
+function childAgentsLabel(agents: CodeBoardCard["childAgents"]): string | undefined {
+  const parts: string[] = [];
+  if (agents.active > 0) parts.push(`${agents.active} active`);
+  if (agents.completed > 0) parts.push(`${agents.completed} completed`);
+  if (agents.failed > 0) parts.push(`${agents.failed} failed`);
+  return parts.length === 0 ? undefined : parts.join(" · ");
+}
+
+function boardStatusBadgeClass(status: CodeBoardCard["status"]): string {
+  switch (status) {
+    case "ready":
+      return "badge";
+    case "in-progress":
+      return "badge badge-accent";
+    case "waiting":
+      return "badge badge-warn";
+    case "done":
+      return "badge badge-ok";
+  }
+}
+
+function lifecycleBadgeClass(lifecycle: CodeThreadNavigationItem["lifecycle"]): string {
+  switch (lifecycle) {
+    case "waiting":
+      return "badge badge-warn";
+    case "interrupted":
+      return "badge badge-danger";
+    case "active":
+    case "archived":
+      return "badge";
+  }
 }
 
 function CodeProjectQuickStart(props: {
@@ -805,11 +871,6 @@ function CodeProjectQuickStart(props: {
   );
 }
 
-function changedFilesLabel(changes: CodeBoardCard["changedFiles"]): string {
-  if (changes.kind === "unavailable") return "Changed files unavailable";
-  return `${changes.changedPathCount} changed ${changes.changedPathCount === 1 ? "file" : "files"} · ${changes.stagedCount} staged · ${changes.committedAhead} committed ahead${changes.workingTreeClean ? " · Working tree clean" : ""}`;
-}
-
 function boardStatusLabel(status: CodeBoardCard["status"]): string {
   switch (status) {
     case "ready":
@@ -834,16 +895,6 @@ function deliveryOutcomeLabel(kind: CodeBoardCard["outcomeKind"]): string {
     case "merged-pr":
       return "Merged pull request";
   }
-}
-
-function EnvironmentState({ card }: { readonly card: CodeBoardCard }): string {
-  if (card.worktree.kind === "unavailable") return "Unavailable";
-  if (card.recovery.kind === "recovering") return "Waiting for recovery";
-  if (card.childAgents.failed > 0 || card.checks.state === "failing") return "Failed";
-  if (card.status === "waiting") return "Waiting";
-  if (card.executing) return "Active";
-  if (card.githubFreshness === "stale") return "Stale";
-  return "Idle";
 }
 
 function capitalize(value: string): string {

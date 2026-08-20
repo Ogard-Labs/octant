@@ -1469,6 +1469,7 @@ button:focus-visible {
 .workspace-tabs {
   display: flex;
   flex: 1 1 auto;
+  align-items: center;
   min-width: 0;
   min-height: 30px;
   gap: 4px;
@@ -1483,6 +1484,11 @@ button:focus-visible {
   overflow: visible;
 }
 
+/* The dock-tab precedent (.right-utility-dock__tabs button): compact ghost
+   items in a 34px chrome rail. At rest a tab is meta ink on nothing; pointing
+   at one, or the one that is active, takes the system's fg ink over the soft
+   fill. The single filled pill at rest is the active affordance — selection
+   stays neutral, with no accent and no border. */
 .workspace-tab-item {
   position: relative;
   display: inline-flex;
@@ -1490,10 +1496,15 @@ button:focus-visible {
   align-items: center;
   min-width: 0;
   max-width: min(184px, 24vw);
+  min-height: 26px;
   overflow: visible;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: 6px;
+}
+
+.workspace-tab-item:hover {
+  background: var(--oct-fg-soft);
 }
 
 .workspace-tab-slot {
@@ -1508,9 +1519,9 @@ button:focus-visible {
   width: 2px;
   min-height: 28px;
   align-self: center;
-  background: var(--octant-focus-ring);
+  background: var(--oct-accent);
   border-radius: 999px;
-  box-shadow: 0 0 0 1px var(--octant-workspace);
+  box-shadow: 0 0 0 1px var(--oct-bg);
   pointer-events: none;
 }
 
@@ -1571,20 +1582,20 @@ button:focus-visible {
 }
 
 .workspace-tab-item:has(.workspace-tab[aria-selected="true"]) {
-  background: var(--octant-selection);
+  background: var(--oct-fg-soft);
 }
 
 .workspace-tab {
   width: auto;
   max-width: 100%;
   min-width: 96px;
-  min-height: 28px;
+  min-height: 26px;
   padding: 0 56px 0 9px;
   overflow: hidden;
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
   border-radius: inherit;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--oct-text-xs);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1592,29 +1603,32 @@ button:focus-visible {
 
 .workspace-tab:hover,
 .workspace-tab[aria-selected="true"] {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
+/* The btn-icon recipe's states at the 26px square this rail's pills can hold
+   — the same compromise .window-chrome__button makes in the 34px titlebar
+   row, pressed feedback included. */
 .workspace-tab__action {
   display: grid;
   width: 26px;
   height: 26px;
   place-items: center;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   background: transparent;
   border-radius: 5px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--oct-text-xs);
 }
 
 .workspace-tab__action:hover,
 .workspace-tab__action[aria-expanded="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .workspace-tab__action:active {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   background: var(--octant-control-pressed);
 }
 
@@ -4024,20 +4038,34 @@ button:focus-visible {
   color: var(--octant-text-muted);
 }
 
-/* Code Project Overview: bounded, host-authoritative projections. */
+/* Code Project Overview: one thread-major list over host-authoritative
+   projections. Cards, chips, facts, and callouts are the system recipes
+   (.setgroup, .badge, .tag, .kv, .callout); this surface only places them. */
 .code-project-overview {
   display: flex;
   min-width: 0;
   flex-direction: column;
 }
 
+.code-project-overview__facts,
 .code-project-overview__sessions,
-.code-project-overview__projection,
-.code-project-overview__details,
 .code-project-overview__quick-start {
   min-width: 0;
   padding: 20px 28px;
   border-bottom: 1px solid var(--octant-border);
+}
+
+.code-project-overview__facts {
+  display: grid;
+  gap: 12px;
+}
+
+.code-project-overview__authority {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
 }
 
 .code-project-overview__quick-start {
@@ -4081,175 +4109,94 @@ button:focus-visible {
   color: var(--octant-success-text);
 }
 
-.code-project-overview__thread-list,
-.code-project-overview__items,
-.code-project-overview__activity-group ul {
+.code-project-overview__threads {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.code-project-overview__thread-list .project-button {
-  display: flex;
-  width: 100%;
-  min-height: 42px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 11px;
-  text-align: left;
-}
-
-.code-project-overview__thread-list .project-button span:first-child {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--octant-text-primary);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-project-overview__thread-list .project-button span:last-child {
-  flex: none;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-}
-
-.code-project-overview__sections {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.code-project-overview__projection {
-  border-right: 1px solid var(--octant-border);
-}
-
-.code-project-overview__projection:nth-child(even) {
-  border-right: 0;
-}
-
-.code-project-overview__item {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
-  padding: 10px 12px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-}
-
-.code-project-overview__item strong {
-  overflow: hidden;
-  color: var(--octant-text-primary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-project-overview__item p,
 .code-project-overview__sessions > p,
 .code-project-overview__quick-start > p,
-.code-project-overview__state p,
-.code-project-overview__activity-group > p {
+.code-project-overview__state p {
   margin: 0;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  line-height: 1.45;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
-.code-project-overview__empty {
-  color: var(--octant-text-muted) !important;
-}
-
-.code-project-overview__status {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 5px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  line-height: 1.4;
-}
-
-.code-project-overview__status svg {
-  flex: none;
-  margin-top: 1px;
-}
-
+/* The unavailable alert is the system callout; the surface only keeps the
+   retry control beside the copy instead of under it. */
 .code-project-overview__state {
-  display: flex;
   align-items: flex-start;
-  gap: 8px;
-  color: var(--octant-warning-text);
 }
 
 .code-project-overview__state > div {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
   flex: 1;
-}
-
-.code-project-overview__state strong {
-  font-size: 12px;
-}
-
-.code-project-overview__state .octant-button {
-  flex: none;
-}
-
-.code-project-overview__activity-group + .code-project-overview__activity-group {
-  margin-top: 12px;
-}
-
-.code-project-overview__activity-group h3 {
-  margin: 0 0 5px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.code-project-overview__activity-group li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--octant-border);
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-}
-
-.code-project-overview__activity-group li strong {
   min-width: 0;
+}
+
+.code-project-overview__state svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* Each thread card is the system setgroup recipe; the surface owns only the
+   interior placement of the title row, inline facts, and disclosure. */
+.code-project-thread {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 14px 12px;
+}
+
+.code-project-thread__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.code-project-thread__title {
+  flex: 1 1 220px;
+  min-width: 0;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.code-project-thread__title span {
   overflow: hidden;
-  color: var(--octant-text-primary);
-  font-weight: 500;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.code-project-overview__activity-group li span {
-  flex: none;
-  color: var(--octant-text-muted);
-}
-
-.code-project-overview__details summary {
+.code-project-thread__chips {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
-  cursor: pointer;
-  color: var(--octant-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
+  gap: 6px;
 }
 
-.code-project-overview__details[open] summary {
-  margin-bottom: 12px;
-  color: var(--octant-text-primary);
+.code-project-thread__pin {
+  flex: none;
+}
+
+.code-project-thread__more summary {
+  cursor: pointer;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
+}
+
+.code-project-thread__more[open] summary {
+  margin-bottom: 8px;
+  color: var(--oct-fg-2);
 }
 
 .code-project-overview__quick-start-copy {
@@ -4276,20 +4223,10 @@ button:focus-visible {
 }
 
 @media (max-width: 760px) {
+  .code-project-overview__facts,
   .code-project-overview__sessions,
-  .code-project-overview__projection,
-  .code-project-overview__details,
   .code-project-overview__quick-start {
     padding-inline: 18px;
-  }
-
-  .code-project-overview__sections {
-    grid-template-columns: 1fr;
-  }
-
-  .code-project-overview__projection,
-  .code-project-overview__projection:nth-child(even) {
-    border-right: 0;
   }
 }
 
@@ -5183,15 +5120,21 @@ button:focus-visible {
   background: var(--oct-bg);
 }
 
+/* The bar spans the surface for its rule; its content sits in the shared
+   thread column so the title starts where the transcript below it does. */
 .code-thread-workspace__header {
+  flex: 0 0 auto;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.code-thread-workspace__header-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px 16px;
   min-height: 44px;
-  padding: 6px clamp(16px, 3vw, 28px);
-  border-bottom: 1px solid var(--oct-border);
 }
 
 .code-thread-workspace__identity h1 {
@@ -5277,7 +5220,6 @@ button:focus-visible {
 
 .code-thread-workspace__auxiliary {
   display: grid;
-  width: min(100% - 40px, 760px);
   max-height: min(42vh, 360px);
   gap: 10px;
   padding: var(--oct-space-3);
@@ -5288,14 +5230,29 @@ button:focus-visible {
   border-radius: var(--oct-radius-md);
 }
 
-.code-thread-workspace__error,
-.code-thread-workspace__banner {
+/* Kept for AgentRunHierarchy, which still reports its errors under this
+   class inside the auxiliary panel. The workspace's own notices moved to
+   the system `.callout` recipe in the thread column below. */
+.code-thread-workspace__error {
   margin: 0;
   padding: 10px clamp(20px, 4vw, 48px);
   color: var(--oct-warn-fg);
   background: var(--oct-warn-soft);
   border-bottom: 1px solid var(--oct-border);
   font-size: var(--oct-text-sm);
+}
+
+/* Placement only: the recipe is the system's `.callout`, the measure the
+   shared `.thread-column`. A notice about this thread spans the thread's
+   own column — running it edge to edge made it read as window chrome. */
+.code-thread-workspace__callout {
+  flex: 0 0 auto;
+  align-items: center;
+  margin: 12px auto 0;
+}
+
+.code-thread-workspace__callout > p {
+  flex: 1 1 auto;
 }
 
 .code-thread-workspace__provider-request {
@@ -5329,7 +5286,6 @@ button:focus-visible {
 
 .code-thread-workspace__transcript {
   display: grid;
-  width: min(100% - 40px, 760px);
   gap: 18px;
   padding: clamp(20px, 3vh, 36px) 0 28px;
   margin: 0 auto;
@@ -5412,7 +5368,6 @@ button:focus-visible {
 .code-thread-workspace__composer {
   position: relative;
   z-index: 2;
-  width: min(100% - 40px, 760px);
   flex: 0 0 auto;
   margin: 0 auto 16px;
 }
