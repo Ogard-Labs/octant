@@ -1,5 +1,7 @@
 import {
   decodeWorkMutationRequestId,
+  decodeWorkTurnId,
+  decodeWorkTurnRequestId,
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
@@ -11,7 +13,9 @@ import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-cl
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
-import { ArrowUp, Check, Globe2 } from "lucide-react";
+import { ArrowUp, Check, Globe2, X } from "lucide-react";
+import { useQueuedSend } from "../composer/useQueuedSend";
+import type { TurnSettlement } from "../composer/queuedSend";
 import {
   useCallback,
   useEffect,
@@ -75,14 +79,31 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [completionFormOpen, setCompletionFormOpen] = useState(false);
   const [completionEvidence, setCompletionEvidence] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sendQueuedRef = useRef<() => Promise<boolean>>(async () => false);
   const trimmed = prompt.trim();
   const completionLocked = thread?.completionConfirmed === true;
-  const canSubmit =
+  const queued = useQueuedSend({
+    threadKey: String(props.threadId),
+    settlement: workTurnSettlement(turns),
+    send: () => sendQueuedRef.current(),
+  });
+  const turnRunning = workTurnSettlement(turns) === "running";
+  const canSendTurn =
+    trimmed.length > 0 &&
+    !creating &&
+    !completionLocked &&
+    props.turnClient !== undefined &&
+    props.hostId !== undefined &&
+    thread !== undefined &&
+    thread.bindingRevisionId !== undefined &&
+    projectId !== undefined;
+  const canCreateArtifact =
     trimmed.length > 0 &&
     !creating &&
     !completionLocked &&
     props.mutationClient !== undefined &&
     projectId !== undefined;
+  const canSubmit = turnRunning || queued.state.status !== "idle" ? canSendTurn : canCreateArtifact;
 
   useEffect(() => {
     let cancelled = false;
@@ -180,8 +201,65 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     [props.threadClient, providerChanging, thread],
   );
 
+  const sendWorkTurn = useCallback(async (): Promise<boolean> => {
+    if (
+      thread === undefined ||
+      props.turnClient === undefined ||
+      props.hostId === undefined ||
+      thread.bindingRevisionId === undefined ||
+      projectId === undefined
+    ) {
+      return false;
+    }
+    const promptText = prompt.trim();
+    if (promptText.length === 0) return false;
+    setCreating(true);
+    setErrorMessage(undefined);
+    setStatus(undefined);
+    try {
+      const started = await props.turnClient.startFirstTurn({
+        kind: "start-work-thread-turn",
+        requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
+        threadId: thread.id,
+        turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
+        prompt: promptText,
+        authority: {
+          hostId: props.hostId,
+          projectId,
+          bindingRevisionId: thread.bindingRevisionId,
+          workingDirectory: thread.workingDirectory ?? ("." as never),
+          confinementPosture: "project-root-confined",
+          providerInstanceId: thread.providerInstanceId,
+          modelId: thread.modelId,
+        },
+      });
+      if (started.kind !== "accepted") {
+        setErrorMessage("The Work turn could not be started.");
+        return false;
+      }
+      setTurns((current) => [...current, started.turn]);
+      setPrompt("");
+      return true;
+    } catch {
+      setErrorMessage("The Work turn could not be started.");
+      return false;
+    } finally {
+      setCreating(false);
+    }
+  }, [projectId, prompt, props.hostId, props.turnClient, thread]);
+  sendQueuedRef.current = sendWorkTurn;
+
   const submit = useCallback(async () => {
-    if (!canSubmit || props.mutationClient === undefined || projectId === undefined) {
+    if (turnRunning) {
+      queued.enqueue();
+      return;
+    }
+    if (queued.state.status === "held") {
+      const sent = await sendWorkTurn();
+      if (sent) queued.discard();
+      return;
+    }
+    if (!canCreateArtifact || props.mutationClient === undefined || projectId === undefined) {
       return;
     }
     setCreating(true);
@@ -208,7 +286,15 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     } finally {
       setCreating(false);
     }
-  }, [canSubmit, projectId, props.mutationClient, thread?.completionConfirmed, trimmed]);
+  }, [
+    canCreateArtifact,
+    projectId,
+    props.mutationClient,
+    queued,
+    sendWorkTurn,
+    trimmed,
+    turnRunning,
+  ]);
 
   const confirmCompletion = useCallback(async () => {
     const evidence = completionEvidence.trim();
@@ -401,39 +487,89 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               aria-label="Work prompt"
               autoFocus
               className="draft-thread__textarea"
-              disabled={creating || completionLocked || props.mutationClient === undefined}
+              disabled={creating || completionLocked}
               onChange={(event) => setPrompt(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Describe the deliverable or paste a draft…"
+              placeholder={
+                turnRunning
+                  ? "Queue the next message…"
+                  : "Describe the deliverable or paste a draft…"
+              }
               ref={textareaRef}
               rows={4}
               value={prompt}
             />
-            <OctantButton
-              aria-label="Create artifact"
-              className="draft-thread__send"
-              disabled={!canSubmit}
-              onClick={() => void submit()}
-              type="button"
-              variant="default"
-            >
-              <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-            </OctantButton>
+            {queued.state.status === "idle" ? null : (
+              <OctantButton
+                aria-label="Discard queued message"
+                className="draft-thread__send"
+                onClick={() => {
+                  queued.discard();
+                  setPrompt("");
+                }}
+                type="button"
+                variant="ghost"
+              >
+                <X aria-hidden="true" size={16} strokeWidth={2} />
+              </OctantButton>
+            )}
+            {queued.state.status === "queued" ? null : (
+              <OctantButton
+                aria-label={
+                  turnRunning
+                    ? "Queue message"
+                    : queued.state.status === "held"
+                      ? "Send message"
+                      : "Create artifact"
+                }
+                className="draft-thread__send"
+                disabled={!canSubmit}
+                onClick={() => void submit()}
+                type="button"
+                variant="default"
+              >
+                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+              </OctantButton>
+            )}
           </div>
           {errorMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">
               {errorMessage}
             </p>
           )}
+          {queued.statusMessage === undefined ? null : (
+            <p className="draft-thread__hint" role="status">
+              {queued.statusMessage}
+            </p>
+          )}
           <p className="draft-thread__hint">
             {completionLocked
               ? "Reactivate this Work thread before creating another artifact or changing its provider."
-              : "Press Enter to save a markdown artifact · Shift+Enter for a new line"}
+              : turnRunning
+                ? "Press Enter to queue the next message · Shift+Enter for a new line"
+                : "Press Enter to save a markdown artifact · Shift+Enter for a new line"}
           </p>
         </div>
       </div>
     </section>
   );
+}
+
+function workTurnSettlement(turns: ReadonlyArray<WorkTurnState>): TurnSettlement | "idle" {
+  const latest = turns.at(-1);
+  if (latest === undefined) return "idle";
+  switch (latest.status) {
+    case "accepted":
+    case "running":
+    case "waiting":
+      return "running";
+    case "completed":
+      return "completed";
+    case "cancelled":
+      return "cancelled";
+    case "failed":
+      return "failed";
+  }
 }
 
 function boundProviderModelLabel(

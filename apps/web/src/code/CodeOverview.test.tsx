@@ -322,9 +322,7 @@ function controller(): CodeController {
     forkThread: vi.fn(async () => undefined),
     renameThread: vi.fn(async () => true),
     pinThread: vi.fn(async () => true),
-    cancelQueuedFollowUp: vi.fn(),
-    queueFollowUp: vi.fn(),
-    queuedFollowUps: [],
+
     turnActivity: new Map(),
     providerRequests: [],
     bootstrap: { checkouts: [checkout], settings: {} as never, threads: [thread] } as never,

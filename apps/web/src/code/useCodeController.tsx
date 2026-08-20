@@ -35,14 +35,6 @@ import {
   type CodeActivityRow,
   type CodeTurnActivity,
 } from "./transcriptActivity";
-import {
-  EMPTY_CODE_TURN_QUEUES,
-  enqueueCodeTurn,
-  queuedTurnsFor,
-  removeQueuedCodeTurn,
-  type CodeTurnQueues,
-  type QueuedCodeTurn,
-} from "./turnQueue";
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type CodeTurnStatus = "idle" | "sending" | "running" | "failed";
@@ -299,8 +291,7 @@ export function useCodeController(options: CodeControllerOptions) {
   const [turnStatus, setTurnStatus] = useState<CodeTurnStatus>("idle");
   const [turnError, setTurnError] = useState<string>();
   const [providerRequests, setProviderRequests] = useState<ReadonlyArray<CodeProviderRequest>>([]);
-  const [turnQueues, setTurnQueues] = useState<CodeTurnQueues>(EMPTY_CODE_TURN_QUEUES);
-  const draining = useRef(false);
+
   const noteProviderRequest = useCallback((event: CodeOperationEvent) => {
     const request = providerRequestFromEvent(event);
     if (request !== undefined) setProviderRequests((current) => [...current, request]);
@@ -1730,67 +1721,6 @@ export function useCodeController(options: CodeControllerOptions) {
     [activeView, beginProviderTurn, clearFailure, client, fail, turnStatus],
   );
 
-  /**
-   * Park a follow-up written while a turn is running and send it once that turn
-   * settles. Sending immediately is impossible — the host admits one provider
-   * turn per thread — so the alternative is making the user wait at the
-   * keyboard and remember to press send.
-   */
-  const queueFollowUp = useCallback(
-    (
-      prompt: string,
-      threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
-      attachments: ReadonlyArray<CodeAttachmentReference> = [],
-    ): QueuedCodeTurn | undefined => {
-      const trimmed = prompt.trim();
-      const threadId = activeThreadId.current;
-      if (trimmed.length === 0 || threadId === undefined) return undefined;
-      const turn: QueuedCodeTurn = {
-        id: globalThis.crypto.randomUUID(),
-        prompt: trimmed,
-        threadMentionIds,
-        attachments,
-      };
-      setTurnQueues((current) => enqueueCodeTurn(current, String(threadId), turn));
-      return turn;
-    },
-    [],
-  );
-
-  const cancelQueuedFollowUp = useCallback((turnId: string): void => {
-    const threadId = activeThreadId.current;
-    if (threadId === undefined) return;
-    setTurnQueues((current) => removeQueuedCodeTurn(current, String(threadId), turnId));
-  }, []);
-
-  const queuedFollowUps = useMemo(
-    () =>
-      options.activeThreadId === undefined
-        ? []
-        : queuedTurnsFor(turnQueues, String(options.activeThreadId)),
-    [options.activeThreadId, turnQueues],
-  );
-
-  // A settled turn releases the next queued follow-up. A failed turn keeps the
-  // queue parked: the user decides whether the rest still applies.
-  useEffect(() => {
-    if (turnStatus !== "idle") return;
-    const threadId = options.activeThreadId;
-    if (threadId === undefined) return;
-    const next = queuedTurnsFor(turnQueues, String(threadId))[0];
-    if (next === undefined || draining.current) return;
-    draining.current = true;
-    void (async () => {
-      try {
-        const sent = await sendFollowUp(next.prompt, next.threadMentionIds, next.attachments);
-        if (!mounted.current || !sent) return;
-        setTurnQueues((current) => removeQueuedCodeTurn(current, String(threadId), next.id));
-      } finally {
-        draining.current = false;
-      }
-    })();
-  }, [options.activeThreadId, sendFollowUp, turnQueues, turnStatus]);
-
   const answerProviderRequest = useCallback(
     async (answer: CodeProviderAnswer): Promise<boolean> => {
       const view = activeView;
@@ -1841,9 +1771,6 @@ export function useCodeController(options: CodeControllerOptions) {
     activeView: activeView?.thread.id === options.activeThreadId ? activeView : undefined,
     answerProviderRequest,
     archiveThread,
-    cancelQueuedFollowUp,
-    queueFollowUp,
-    queuedFollowUps,
     bootstrap,
     client,
     conversation,

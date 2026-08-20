@@ -1,7 +1,7 @@
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { decodeWorkThread, decodeWorkThreadId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WorkThreadWorkspace } from "./WorkThreadWorkspace";
@@ -277,7 +277,135 @@ describe("WorkThreadWorkspace", () => {
       threadId,
     );
   });
+
+  it("queues a follow-up while a turn is running and sends it once the turn completes", async () => {
+    const user = userEvent.setup();
+    const startFirstTurn = vi.fn(async () => ({
+      kind: "accepted" as const,
+      turn: workTurn({
+        requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        turnId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        status: "accepted",
+        prompt: "Next instruction",
+        transcript: [{ role: "user", text: "Next instruction" }],
+      }),
+    }));
+    let turns = [workTurn({ status: "running" })];
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns })),
+      startFirstTurn,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const composer = await screen.findByLabelText("Work prompt");
+    expect(composer).toBeEnabled();
+    await user.type(composer, "Next instruction");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    expect(startFirstTurn).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "This message is queued and will send when the response finishes.",
+    );
+    expect(composer).toHaveValue("Next instruction");
+
+    turns = [workTurn({ status: "completed" })];
+    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
+    expect(startFirstTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-work-thread-turn",
+        threadId,
+        prompt: "Next instruction",
+      }),
+    );
+  });
+
+  it("leaves a queued follow-up unsent when the turn is cancelled, and lets the user discard it", async () => {
+    const user = userEvent.setup();
+    const startFirstTurn = vi.fn();
+    let turns = [workTurn({ status: "running" })];
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns })),
+      startFirstTurn,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await user.type(await screen.findByLabelText("Work prompt"), "Hold this");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    turns = [workTurn({ status: "cancelled" })];
+    await waitFor(
+      () =>
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "The response was cancelled. The queued message was not sent.",
+        ),
+      { timeout: 2500 },
+    );
+    expect(startFirstTurn).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
+    expect(screen.getByLabelText("Work prompt")).toHaveValue("");
+  });
 });
+
+function workTurn(overrides: Record<string, unknown> = {}) {
+  return {
+    requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    threadId,
+    turnId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    projectId: "20000000-0000-4000-8000-000000000101",
+    authority: {
+      hostId: "local",
+      projectId: "20000000-0000-4000-8000-000000000101",
+      bindingRevisionId: "30000000-0000-4000-8000-000000000101",
+      workingDirectory: "research/brief",
+      confinementPosture: "project-root-confined",
+      providerInstanceId: providerId,
+      modelId,
+    },
+    status: "completed",
+    prompt: "Summarize the brief",
+    transcript: [
+      { role: "user", text: "Summarize the brief" },
+      { role: "assistant", text: "Here is the confined summary." },
+    ],
+    capabilities: {
+      workspace: "project-backed",
+      confinement: "project-root-confined",
+      shell: "denied",
+      git: "denied",
+      worktree: "denied",
+      pullRequest: "denied",
+      code: "denied",
+    },
+    version: 2,
+    acceptedAt: "2026-08-01T20:00:00.000Z",
+    updatedAt: "2026-08-01T20:01:00.000Z",
+    ...overrides,
+  };
+}
 
 function workThread(overrides: Record<string, unknown> = {}) {
   return decodeWorkThread({

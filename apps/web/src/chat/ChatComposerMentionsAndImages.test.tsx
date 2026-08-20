@@ -373,12 +373,12 @@ describe("ChatComposer image paste", () => {
     );
   });
 
-  it("does not paste while a response is streaming", () => {
+  it("pastes an image onto a message queued while a response is streaming", () => {
     const onFileSelected = vi.fn();
     renderComposer({ onFileSelected, imageAttachment: { kind: "supported" }, isSending: true });
 
     pasteImage(screen.getByLabelText("Message"), [imageFile()]);
 
-    expect(onFileSelected).not.toHaveBeenCalled();
+    expect(onFileSelected).toHaveBeenCalledOnce();
   });
 });

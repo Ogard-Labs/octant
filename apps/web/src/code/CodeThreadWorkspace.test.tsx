@@ -1054,18 +1054,12 @@ describe("CodeThreadWorkspace", () => {
     expect(styles).toMatch(/\.code-thread-workspace__row\s*\{[^}]*contain-intrinsic-size:/);
   });
 
-  it("queues a follow-up written while a turn runs instead of blocking the composer", async () => {
+  it("queues a follow-up written while a turn runs instead of sending it", async () => {
     const user = userEvent.setup();
-    const queueFollowUp = vi.fn(() => ({
-      id: "queued-1",
-      prompt: "and then push",
-      threadMentionIds: [],
-      attachments: [],
-    }));
     const sendFollowUp = vi.fn(async () => true);
-    render(
+    const { rerender } = render(
       <CodeThreadWorkspace
-        controller={controller({ queueFollowUp, sendFollowUp, turnStatus: "running" })}
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
         threadId={threadId}
       />,
     );
@@ -1075,37 +1069,55 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "and then push");
     await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
 
-    expect(queueFollowUp).toHaveBeenCalledWith("and then push", [], []);
     expect(sendFollowUp).not.toHaveBeenCalled();
-    await waitFor(() => expect(composer).toHaveValue(""));
+    expect(composer).toHaveValue("and then push");
+    expect(
+      screen.getByText("This message is queued and will send when the response finishes."),
+    ).toBeVisible();
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ pendingDraft: "and then push", sendFollowUp, turnStatus: "idle" })}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
+    expect(sendFollowUp).toHaveBeenCalledWith("and then push", [], []);
   });
 
-  it("lists queued follow-ups in order and cancels one through the controller", async () => {
+  it("leaves a queued follow-up unsent when the turn fails, and lets the user discard it", async () => {
     const user = userEvent.setup();
-    const cancelQueuedFollowUp = vi.fn();
-    render(
+    const sendFollowUp = vi.fn(async () => true);
+    const { rerender } = render(
       <CodeThreadWorkspace
-        controller={controller({
-          cancelQueuedFollowUp,
-          queuedFollowUps: [
-            { id: "queued-1", prompt: "run the tests", threadMentionIds: [], attachments: [] },
-            { id: "queued-2", prompt: "then open a PR", threadMentionIds: [], attachments: [] },
-          ],
-          turnStatus: "running",
-        })}
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
         threadId={threadId}
       />,
     );
 
-    const queue = screen.getByRole("list", { name: "Queued follow-ups" });
-    const entries = within(queue).getAllByRole("listitem");
-    expect(entries.map((entry) => entry.textContent)).toEqual([
-      "1run the tests",
-      "2then open a PR",
-    ]);
+    await user.type(screen.getByLabelText("Follow-up message"), "retry later");
+    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({
+          pendingDraft: "retry later",
+          sendFollowUp,
+          turnStatus: "failed",
+          turnError: "The provider turn failed.",
+        })}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText("The response failed. The queued message was not sent."),
+      ).toBeVisible(),
+    );
+    expect(sendFollowUp).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("button", { name: "Cancel queued follow-up 2" }));
-    expect(cancelQueuedFollowUp).toHaveBeenCalledWith("queued-2");
+    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
+    expect(screen.getByLabelText("Follow-up message")).toHaveValue("");
+    expect(sendFollowUp).not.toHaveBeenCalled();
   });
 
   it("keeps loading and disconnected states honest", () => {
@@ -1340,9 +1352,7 @@ function controller(
     pendingDraft: "",
     providerRequests: [],
     answerProviderRequest: vi.fn(async () => true),
-    cancelQueuedFollowUp: vi.fn(),
-    queueFollowUp: vi.fn(),
-    queuedFollowUps: [],
+
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     noteRestoreUndo: vi.fn(),
     turnActivity: new Map(),
