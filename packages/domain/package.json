@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./agent-profile-policy": "./src/agentProfilePolicy.ts",
     "./agent-run-policy": "./src/agentRunPolicy.ts",
     "./automation-policy": "./src/automationPolicy.ts",
     "./linked-thread-policy": "./src/linkedThreadPolicy.ts",
