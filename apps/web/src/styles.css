@@ -5656,6 +5656,12 @@ button:focus-visible {
   font-size: var(--oct-text-xs);
 }
 
+.code-thread-workspace__turn-access {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+
 .code-thread-workspace__limit {
   font-size: var(--oct-text-xs);
   color: var(--oct-fg-2);

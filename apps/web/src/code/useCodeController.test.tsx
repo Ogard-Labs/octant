@@ -677,6 +677,46 @@ describe("useCodeController", () => {
     expect(result.current.turnStatus).toBe("idle");
   });
 
+  it("sends the requested turn posture as an intent the host clamps", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000009";
+    const executeOperation = vi.fn(async () => ({
+      kind: "provider-turn-state",
+      operationId,
+      state: "running",
+    }));
+    async function* completedFrames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      };
+    }
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => completedFrames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    await act(async () => {
+      await result.current.sendFollowUp("check tests", [], [], "plan");
+    });
+
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-provider-turn",
+        executionPolicy: "plan",
+      }),
+    );
+    expect(result.current.conversation[0]).toEqual(
+      expect.objectContaining({ role: "user", executionPolicy: "plan" }),
+    );
+  });
+
   it("names a follow-up's mentioned threads on the turn without staging them as the message", async () => {
     const operationId = "70000000-0000-4000-8000-000000000002";
     const putEvidence = vi.fn(async () => ({
@@ -1126,7 +1166,7 @@ describe("useCodeController", () => {
     const replyId = "60000000-0000-4000-8000-000000000011";
     const operationId = "70000000-0000-4000-8000-000000000010";
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1175,7 +1215,7 @@ describe("useCodeController", () => {
     const reasoningId = "60000000-0000-4000-8000-000000000014";
     const operationId = "70000000-0000-4000-8000-000000000012";
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1242,7 +1282,7 @@ describe("useCodeController", () => {
     const conversation = vi
       .fn()
       .mockResolvedValueOnce({
-        version: 2,
+        version: 3,
         threadId: ids.thread,
         turns: [
           {
@@ -1261,7 +1301,7 @@ describe("useCodeController", () => {
         hasMore: false,
       })
       .mockResolvedValueOnce({
-        version: 2,
+        version: 3,
         threadId: ids.thread,
         turns: [
           {
@@ -1280,7 +1320,7 @@ describe("useCodeController", () => {
         hasMore: false,
       })
       .mockResolvedValue({
-        version: 2,
+        version: 3,
         threadId: ids.thread,
         turns: [
           {
@@ -1341,7 +1381,7 @@ describe("useCodeController", () => {
     const liveId = "60000000-0000-4000-8000-000000000031";
     const operationId = "70000000-0000-4000-8000-000000000030";
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1420,7 +1460,7 @@ describe("useCodeController", () => {
   it("re-hydrates a failed transcript when the user retries from the thread view", async () => {
     const conversation = vi
       .fn(async () => ({
-        version: 2 as const,
+        version: 3 as const,
         threadId: ids.thread,
         turns: [],
         nextCursor: 0,
@@ -1521,7 +1561,7 @@ describe("useCodeController", () => {
     let status: "incomplete" | "completed" = "incomplete";
     const bootstrapRead = vi.fn(async () => bootstrap(1, activitySequence));
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1725,7 +1765,7 @@ function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
     bootstrap: vi.fn(async () => bootstrap()),
     queryBoard: vi.fn(),
     conversation: vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [],
       nextCursor: 0,
