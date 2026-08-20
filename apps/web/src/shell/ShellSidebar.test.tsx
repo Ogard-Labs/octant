@@ -156,7 +156,7 @@ describe("ShellSidebar", () => {
       expect(search.compareDocumentPosition(projects)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(projects.compareDocumentPosition(profile)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
       expect(container.querySelector(".sidebar__utility--filled")).toBeNull();
-      expect(search).toHaveClass("shell-icon-button");
+      expect(search).toHaveClass("btn-icon");
       expect(search).not.toHaveTextContent("Search");
       expect(search).toHaveAttribute("data-navigation-id", "search");
       expect(screen.queryByRole("button", { name: "Add folder" })).not.toBeInTheDocument();
@@ -273,11 +273,13 @@ describe("ShellSidebar", () => {
     expect(chrome).not.toBeNull();
     expect(chrome).toContainElement(search);
     expect(chrome).toContainElement(activity);
-    expect(search).toHaveClass("shell-icon-button");
+    expect(search).toHaveClass("btn-icon");
     expect(search).not.toHaveTextContent("Search");
+    // The activity toggle is contributed by the Project section, which the
+    // sidebar port does not own; it keeps its own icon-button recipe.
     expect(activity).toHaveClass("shell-icon-button");
     expect(activity).not.toHaveTextContent("Turn on activity view");
-    expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar__utility");
+    expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar-item");
   });
 
   it("keeps keyboard focus on sidebar Search while it filters the current-mode list", async () => {

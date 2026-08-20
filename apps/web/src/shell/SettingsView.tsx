@@ -205,18 +205,17 @@ export function SettingsView(props: SettingsViewProps) {
         </div>
         <div className="settings-view__sidebar-content">
           {props.onBack === undefined ? null : (
-            <OctantButton
-              className="settings-view__back"
+            <button
+              className="setnav-item window-no-drag settings-view__back"
               onClick={props.onBack}
               type="button"
-              variant="ghost"
             >
-              <ArrowLeft aria-hidden="true" size={13} strokeWidth={1.8} />
+              <ArrowLeft aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
               <span>Back to app</span>
-            </OctantButton>
+            </button>
           )}
           <div className="settings-view__all-settings">
-            <Settings2 aria-hidden="true" size={13} strokeWidth={1.8} />
+            <Settings2 aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
             <span>All settings</span>
           </div>
           <label className="settings-view__field settings-view__field--search">
@@ -243,13 +242,11 @@ export function SettingsView(props: SettingsViewProps) {
         <main className="settings-view__content">
           <div className="settings-view__content-inner">
             <header className="settings-view__header">
-              <h1 id="settings-heading">
+              <h1 className="setpane-title" id="settings-heading">
                 {hasQuery ? "Search settings" : (SECTION_LABELS[route.activeSection] ?? "Settings")}
               </h1>
               {!hasQuery && SECTION_DESCRIPTIONS[route.activeSection] !== undefined ? (
-                <p className="settings-view__header-description">
-                  {SECTION_DESCRIPTIONS[route.activeSection]}
-                </p>
+                <p className="setpane-note">{SECTION_DESCRIPTIONS[route.activeSection]}</p>
               ) : null}
             </header>
             {hasQuery ? (
@@ -523,66 +520,68 @@ interface SectionProps {
 function GeneralSection({ focusedSetting, props }: SectionProps) {
   return (
     <section aria-label="General" id="settings-general">
-      <SettingRow
-        description="How you are shown inside Octant. There is no account behind this, and none of it is required."
-        focused={focusedSetting === settingId("user-profile")}
-        label="Your profile"
-        scope="app"
-        settingId="user-profile"
-      >
-        <UserProfileSettingsView
-          onSettingsChange={props.onSettingsChange}
-          profile={props.settings.userProfile}
-        />
-      </SettingRow>
-      <SettingRow
-        focused={focusedSetting === settingId("enable-chat")}
-        label="Enable Chat"
-        scope="app"
-        settingId="enable-chat"
-      >
-        <OctantSwitch
-          checked={props.settings.chatEnabled}
+      <div className="setgroup">
+        <SettingRow
+          description="How you are shown inside Octant. There is no account behind this, and none of it is required."
+          focused={focusedSetting === settingId("user-profile")}
+          label="Your profile"
+          scope="app"
+          settingId="user-profile"
+        >
+          <UserProfileSettingsView
+            onSettingsChange={props.onSettingsChange}
+            profile={props.settings.userProfile}
+          />
+        </SettingRow>
+        <SettingRow
+          focused={focusedSetting === settingId("enable-chat")}
           label="Enable Chat"
-          onCheckedChange={(checked) => props.onSettingsChange({ chatEnabled: checked })}
-        />
-      </SettingRow>
-      <SettingRow
-        focused={focusedSetting === settingId("enable-work")}
-        label="Enable Work"
-        scope="app"
-        settingId="enable-work"
-      >
-        <OctantSwitch
-          checked={props.settings.workEnabled}
+          scope="app"
+          settingId="enable-chat"
+        >
+          <OctantSwitch
+            checked={props.settings.chatEnabled}
+            label="Enable Chat"
+            onCheckedChange={(checked) => props.onSettingsChange({ chatEnabled: checked })}
+          />
+        </SettingRow>
+        <SettingRow
+          focused={focusedSetting === settingId("enable-work")}
           label="Enable Work"
-          onCheckedChange={(checked) => props.onSettingsChange({ workEnabled: checked })}
-        />
-      </SettingRow>
-      <SettingRow
-        description="The chords that reach Octant's global surfaces on this machine."
-        focused={focusedSetting === settingId("keybindings")}
-        label="Keyboard shortcuts"
-        scope="app"
-        settingId="keybindings"
-      >
-        <KeybindingSettings />
-      </SettingRow>
-      <SettingRow
-        description="Octant updates itself only when you ask it to, and never while work is running."
-        focused={focusedSetting === settingId("app-updates")}
-        label="Updates"
-        scope="app"
-        settingId="app-updates"
-      >
-        <AppUpdateSettings
-          automaticChecks={props.settings.automaticUpdateChecks}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          onAutomaticChecksChange={(enabled) =>
-            props.onSettingsChange({ automaticUpdateChecks: enabled })
-          }
-        />
-      </SettingRow>
+          scope="app"
+          settingId="enable-work"
+        >
+          <OctantSwitch
+            checked={props.settings.workEnabled}
+            label="Enable Work"
+            onCheckedChange={(checked) => props.onSettingsChange({ workEnabled: checked })}
+          />
+        </SettingRow>
+        <SettingRow
+          description="The chords that reach Octant's global surfaces on this machine."
+          focused={focusedSetting === settingId("keybindings")}
+          label="Keyboard shortcuts"
+          scope="app"
+          settingId="keybindings"
+        >
+          <KeybindingSettings />
+        </SettingRow>
+        <SettingRow
+          description="Octant updates itself only when you ask it to, and never while work is running."
+          focused={focusedSetting === settingId("app-updates")}
+          label="Updates"
+          scope="app"
+          settingId="app-updates"
+        >
+          <AppUpdateSettings
+            automaticChecks={props.settings.automaticUpdateChecks}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+            onAutomaticChecksChange={(enabled) =>
+              props.onSettingsChange({ automaticUpdateChecks: enabled })
+            }
+          />
+        </SettingRow>
+      </div>
     </section>
   );
 }
@@ -599,147 +598,158 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
       {props.themeController !== undefined ? (
         <ThemeAppearanceEditor controller={props.themeController} />
       ) : null}
-      {isAvailable("sidebar-width") ? (
-        <SettingRow
-          focused={focusedSetting === settingId("sidebar-width")}
-          label="Sidebar width"
-          scope="app"
-          settingId="sidebar-width"
-        >
-          <OctantSlider
-            aria-label="Sidebar width"
-            className="settings-view__range"
-            max={420}
-            min={220}
-            onChange={(event) =>
-              props.onSettingsChange({ sidebarWidth: Number(event.currentTarget.value) })
-            }
-            value={props.settings.sidebarWidth}
-          />
-        </SettingRow>
-      ) : null}
-      {isAvailable("sidebar-material") ? (
-        <SettingRow
-          description="Use the system sidebar material when available."
-          focused={focusedSetting === settingId("sidebar-material")}
-          label="Translucent sidebar"
-          scope="app"
-          settingId="sidebar-material"
-        >
-          <OctantSwitch
-            checked={
-              props.settings.sidebarMaterial === "system" &&
-              (props.themeController?.draft?.sidebarBackground ?? props.settings.sidebarBackground)
-                .vibrancyMode !== "off"
-            }
-            describedBy="sidebar-material-description"
+      <div className="setgroup">
+        {isAvailable("sidebar-width") ? (
+          <SettingRow
+            focused={focusedSetting === settingId("sidebar-width")}
+            label="Sidebar width"
+            scope="app"
+            settingId="sidebar-width"
+          >
+            <OctantSlider
+              aria-label="Sidebar width"
+              className="settings-view__range"
+              max={420}
+              min={220}
+              onChange={(event) =>
+                props.onSettingsChange({ sidebarWidth: Number(event.currentTarget.value) })
+              }
+              value={props.settings.sidebarWidth}
+            />
+          </SettingRow>
+        ) : null}
+        {isAvailable("sidebar-material") ? (
+          <SettingRow
+            description="Use the system sidebar material when available."
+            focused={focusedSetting === settingId("sidebar-material")}
             label="Translucent sidebar"
-            onCheckedChange={(checked) => {
-              props.onSettingsChange({ sidebarMaterial: checked ? "system" : "opaque" });
-              const background =
-                props.themeController?.draft?.sidebarBackground ?? props.settings.sidebarBackground;
-              if (checked && props.sidebarVibrancySupported && background.vibrancyMode === "off") {
-                props.themeController?.updateDraft({
-                  sidebarBackground: { ...background, vibrancyMode: "subtle" },
-                });
+            scope="app"
+            settingId="sidebar-material"
+          >
+            <OctantSwitch
+              checked={
+                props.settings.sidebarMaterial === "system" &&
+                (
+                  props.themeController?.draft?.sidebarBackground ??
+                  props.settings.sidebarBackground
+                ).vibrancyMode !== "off"
               }
-            }}
-          />
-          {props.settings.sidebarMaterial === "system" ? (
-            <p
-              className="settings-view__effective-note"
-              data-visible-when-material="opaque"
-              id="translucent-sidebar-effective-note"
+              describedBy="sidebar-material-description"
+              label="Translucent sidebar"
+              onCheckedChange={(checked) => {
+                props.onSettingsChange({ sidebarMaterial: checked ? "system" : "opaque" });
+                const background =
+                  props.themeController?.draft?.sidebarBackground ??
+                  props.settings.sidebarBackground;
+                if (
+                  checked &&
+                  props.sidebarVibrancySupported &&
+                  background.vibrancyMode === "off"
+                ) {
+                  props.themeController?.updateDraft({
+                    sidebarBackground: { ...background, vibrancyMode: "subtle" },
+                  });
+                }
+              }}
+            />
+            {props.settings.sidebarMaterial === "system" ? (
+              <p
+                className="settings-view__effective-note"
+                data-visible-when-material="opaque"
+                id="translucent-sidebar-effective-note"
+              >
+                Translucency is unavailable, so Octant is using an opaque sidebar.
+              </p>
+            ) : null}
+          </SettingRow>
+        ) : null}
+        {isAvailable("mode-switcher") ? (
+          <SettingRow
+            focused={focusedSetting === settingId("mode-switcher")}
+            label="Mode switcher"
+            scope="app"
+            settingId="mode-switcher"
+          >
+            <OctantNativeSelect
+              aria-label="Mode switcher"
+              className="settings-view__select"
+              onChange={(event) =>
+                props.onSettingsChange({
+                  modeSwitcherPresentation: event.currentTarget
+                    .value as ShellSettings["modeSwitcherPresentation"],
+                })
+              }
+              value={props.settings.modeSwitcherPresentation}
             >
-              Translucency is unavailable, so Octant is using an opaque sidebar.
-            </p>
-          ) : null}
-        </SettingRow>
-      ) : null}
-      {isAvailable("mode-switcher") ? (
-        <SettingRow
-          focused={focusedSetting === settingId("mode-switcher")}
-          label="Mode switcher"
-          scope="app"
-          settingId="mode-switcher"
-        >
-          <OctantNativeSelect
-            aria-label="Mode switcher"
-            className="settings-view__select"
-            onChange={(event) =>
-              props.onSettingsChange({
-                modeSwitcherPresentation: event.currentTarget
-                  .value as ShellSettings["modeSwitcherPresentation"],
-              })
-            }
-            value={props.settings.modeSwitcherPresentation}
+              <option value="buttons">Compact buttons</option>
+              <option value="dropdown">Dropdown</option>
+            </OctantNativeSelect>
+          </SettingRow>
+        ) : null}
+        {isAvailable("project-view-switcher") ? (
+          <SettingRow
+            description="How the Code sidebar offers saved project views."
+            focused={focusedSetting === settingId("project-view-switcher")}
+            label="Project view switcher"
+            scope="app"
+            settingId="project-view-switcher"
           >
-            <option value="buttons">Compact buttons</option>
-            <option value="dropdown">Dropdown</option>
-          </OctantNativeSelect>
-        </SettingRow>
-      ) : null}
-      {isAvailable("project-view-switcher") ? (
-        <SettingRow
-          description="How the Code sidebar offers saved project views."
-          focused={focusedSetting === settingId("project-view-switcher")}
-          label="Project view switcher"
-          scope="app"
-          settingId="project-view-switcher"
-        >
-          <OctantNativeSelect
-            aria-label="Project view switcher"
-            className="settings-view__select"
-            onChange={(event) =>
-              props.onSettingsChange({
-                projectViewSwitcherPresentation: event.currentTarget
-                  .value as ShellSettings["projectViewSwitcherPresentation"],
-              })
-            }
-            value={props.settings.projectViewSwitcherPresentation}
-          >
-            <option value="dropdown">Dropdown</option>
-            <option value="inline">Icon buttons</option>
-          </OctantNativeSelect>
-        </SettingRow>
-      ) : null}
-      {isAvailable("environment-presentation") ? (
-        <SettingRow
-          description="Default presentation for the Environment panel in each mode."
-          focused={focusedSetting === settingId("environment-presentation")}
-          label="Environment panel"
-          scope="app"
-          settingId="environment-presentation"
-        >
-          <EnvironmentPresentationDefaultsRow
-            value={props.settings.environmentPresentationByMode}
-            onChange={(byMode) => props.onSettingsChange({ environmentPresentationByMode: byMode })}
-          />
-        </SettingRow>
-      ) : null}
-      {isAvailable("sidebar-background") ? (
-        <SettingRow
-          description="Choose a preset gradient, a custom image, or none. Adjust the overlay color and opacity for readability."
-          focused={focusedSetting === settingId("sidebar-background")}
-          label="Sidebar background"
-          scope="app"
-          settingId="sidebar-background"
-        >
-          <SidebarBackgroundSettings
-            background={
-              props.themeController?.draft?.sidebarBackground ?? props.settings.sidebarBackground
-            }
-            onSettingsChange={(patch) => {
-              if (patch.sidebarBackground !== undefined && props.themeController !== undefined) {
-                props.themeController.updateDraft({ sidebarBackground: patch.sidebarBackground });
-              } else {
-                props.onSettingsChange(patch);
+            <OctantNativeSelect
+              aria-label="Project view switcher"
+              className="settings-view__select"
+              onChange={(event) =>
+                props.onSettingsChange({
+                  projectViewSwitcherPresentation: event.currentTarget
+                    .value as ShellSettings["projectViewSwitcherPresentation"],
+                })
               }
-            }}
-            sidebarVibrancySupported={props.sidebarVibrancySupported}
-          />
-        </SettingRow>
-      ) : null}
+              value={props.settings.projectViewSwitcherPresentation}
+            >
+              <option value="dropdown">Dropdown</option>
+              <option value="inline">Icon buttons</option>
+            </OctantNativeSelect>
+          </SettingRow>
+        ) : null}
+        {isAvailable("environment-presentation") ? (
+          <SettingRow
+            description="Default presentation for the Environment panel in each mode."
+            focused={focusedSetting === settingId("environment-presentation")}
+            label="Environment panel"
+            scope="app"
+            settingId="environment-presentation"
+          >
+            <EnvironmentPresentationDefaultsRow
+              value={props.settings.environmentPresentationByMode}
+              onChange={(byMode) =>
+                props.onSettingsChange({ environmentPresentationByMode: byMode })
+              }
+            />
+          </SettingRow>
+        ) : null}
+        {isAvailable("sidebar-background") ? (
+          <SettingRow
+            description="Choose a preset gradient, a custom image, or none. Adjust the overlay color and opacity for readability."
+            focused={focusedSetting === settingId("sidebar-background")}
+            label="Sidebar background"
+            scope="app"
+            settingId="sidebar-background"
+          >
+            <SidebarBackgroundSettings
+              background={
+                props.themeController?.draft?.sidebarBackground ?? props.settings.sidebarBackground
+              }
+              onSettingsChange={(patch) => {
+                if (patch.sidebarBackground !== undefined && props.themeController !== undefined) {
+                  props.themeController.updateDraft({ sidebarBackground: patch.sidebarBackground });
+                } else {
+                  props.onSettingsChange(patch);
+                }
+              }}
+              sidebarVibrancySupported={props.sidebarVibrancySupported}
+            />
+          </SettingRow>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -761,7 +771,7 @@ function AdvancedSection({
   );
   return (
     <section aria-label="Advanced" id="settings-advanced">
-      <div className="settings-view__actions">
+      <div className="setgroup">
         <SettingRow
           focused={focusedSetting === settingId("reset-layout")}
           label="Reset active mode layout"

@@ -45,6 +45,7 @@ distilled successor of the earlier long-form design specifications.
 | [0035](0035-thread-retention-and-purge.md)              | Thread retention and explicit purge                               | Accepted |
 | [0036](0036-thread-export.md)                           | Thread export                                                     | Accepted |
 | [0037](0037-a-thread-starts-in-a-project.md)            | A thread starts in a Project                                      | Accepted |
+| [0038](0038-owned-design-system-stylesheet.md)          | The owned design system stylesheet                                | Accepted |
 
 ## Adding an ADR
 

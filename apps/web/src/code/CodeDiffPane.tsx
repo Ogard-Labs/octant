@@ -178,11 +178,21 @@ function AvailableDiff(
           <h1>Checkout changes</h1>
         </div>
         <p>{props.diff.observation.changedPaths.length.toLocaleString()} changed paths</p>
-        <div className="code-diff-pane__view-toggle" role="group" aria-label="Diff layout">
-          <button aria-pressed={sideBySide} onClick={() => setSideBySide(true)} type="button">
+        <div className="segmented" role="group" aria-label="Diff layout">
+          <button
+            aria-pressed={sideBySide}
+            className="segment"
+            onClick={() => setSideBySide(true)}
+            type="button"
+          >
             Side by side
           </button>
-          <button aria-pressed={!sideBySide} onClick={() => setSideBySide(false)} type="button">
+          <button
+            aria-pressed={!sideBySide}
+            className="segment"
+            onClick={() => setSideBySide(false)}
+            type="button"
+          >
             Inline
           </button>
         </div>
@@ -240,13 +250,17 @@ function AvailableDiff(
                 <p className="code-diff-pane__renamed-from">Renamed from {selected.previousPath}</p>
               )}
               {props.onOpenFile === undefined || selected.change === "deleted" ? null : (
-                <button onClick={() => props.onOpenFile?.(selected.path)} type="button">
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => props.onOpenFile?.(selected.path)}
+                  type="button"
+                >
                   Open in editor
                 </button>
               )}
               {mayDiscard && tracked.get(selected.path) !== undefined ? (
                 <button
-                  className="code-diff-pane__discard"
+                  className="btn btn-danger btn-sm"
                   disabled={discarding}
                   onClick={() => setConfirmingDiscard(selected.path)}
                   type="button"
@@ -267,14 +281,18 @@ function AvailableDiff(
                 </p>
                 <div className="code-diff-pane__confirm-actions">
                   <button
-                    className="code-diff-pane__discard"
+                    className="btn btn-danger btn-sm"
                     disabled={discarding}
                     onClick={() => void discard(tracked.get(selected.path)!)}
                     type="button"
                   >
                     Discard permanently
                   </button>
-                  <button onClick={() => setConfirmingDiscard(undefined)} type="button">
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => setConfirmingDiscard(undefined)}
+                    type="button"
+                  >
                     Keep changes
                   </button>
                 </div>

@@ -4,7 +4,10 @@
  * Both surfaces mark their active row with a token-derived fill *and* a word or
  * shape the user can read — `Enter` in the palette, the selected button variant
  * in the composer — so the active state never rests on colour alone. Values are
- * derived from the semantic `--octant-*` tokens in styles.css.
+ * the design system's `--oct-*` tokens (octant.css, repointed at the runtime
+ * theme by octant-bridge.css); rows carry the system's .menu-item metrics and
+ * group labels the mono meta treatment. The selection fill and its strong
+ * border stay on app tokens because the system has no selection role.
  */
 
 /* ── `/` command typeahead in the chat composer ────────────────────── */
@@ -12,15 +15,15 @@
 .chat-composer__command-typeahead {
   max-height: 220px;
   overflow-y: auto;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-md, 8px);
-  background: var(--octant-surface, var(--octant-control));
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
 }
 
 .chat-composer__command-list {
   display: flex;
   flex-direction: column;
-  padding: 4px;
+  padding: var(--oct-space-1);
   margin: 0;
   list-style: none;
 }
@@ -33,15 +36,15 @@
 
 .chat-composer__command-meta {
   margin-left: auto;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 .chat-composer__command-empty {
-  padding: 8px 10px;
+  padding: var(--oct-space-2) var(--oct-space-3);
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
 }
 
 /* ── Global command palette ────────────────────────────────────────── */
@@ -49,35 +52,51 @@
 .command-palette__field {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .command-palette__scope,
-.command-palette__status,
+.command-palette__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+/* Mono meta, matching the system's .menu-label treatment. */
 .command-palette__group-label {
   display: flex;
   align-items: center;
   gap: 6px;
   margin: 0;
-  color: var(--octant-text-secondary);
-  font-size: 11.5px;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
 }
 
 .command-palette__results {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--oct-space-1);
   max-height: 46vh;
   overflow-y: auto;
 }
 
+/* Rows carry the system's .menu-item metrics. */
 .command-palette__result {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: var(--oct-space-2);
+  min-height: var(--oct-control-height-sm);
+  padding-block: 0;
+  padding-inline: var(--oct-space-3);
   border: 1px solid transparent;
-  border-radius: var(--octant-radius-control, 8px);
+  border-radius: 6px;
+  font-size: var(--oct-text-sm);
   cursor: default;
 }
 
@@ -88,18 +107,19 @@
 
 .command-palette__result-title {
   flex: 1 1 auto;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .command-palette__result-detail {
-  color: var(--octant-text-secondary);
-  font-size: 11.5px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .command-palette__result-hint {
   display: flex;
   align-items: center;
-  gap: 4px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
+  gap: var(--oct-space-1);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }

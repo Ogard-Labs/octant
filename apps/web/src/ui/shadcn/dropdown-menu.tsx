@@ -49,6 +49,12 @@ export interface ShadcnDropdownMenuProps {
   readonly items: ReadonlyArray<ShadcnMenuItem>;
   readonly onValueChange: (value: string) => void;
   readonly trigger: ReactNode;
+  /**
+   * Replaces `octant-menu__trigger` rather than adding to it: the caller's
+   * recipe and the default style the same properties, and stylesheet order
+   * would otherwise decide which one wins.
+   */
+  readonly triggerClassName?: string;
   readonly triggerLabel: string;
   readonly value: string;
 }
@@ -59,7 +65,7 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label={props.triggerLabel}
-        className="octant-menu__trigger window-no-drag"
+        className={cn(props.triggerClassName ?? "octant-menu__trigger", "window-no-drag")}
         ref={triggerRef}
       >
         {props.trigger}

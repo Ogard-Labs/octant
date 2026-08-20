@@ -170,6 +170,44 @@ describe("ChatComposer", () => {
     );
   });
 
+  it("keeps model options hidden until the model-options control is opened", async () => {
+    const user = userEvent.setup();
+    renderComposer({
+      modelOptions: [{ id: "effort", displayName: "Effort", values: ["low", "high"] }],
+      onModelOptionChange: vi.fn(),
+    });
+
+    const trigger = screen.getByRole("button", { name: "Model options" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    // Every value is the provider default, so the trigger shows no active mark.
+    expect(trigger).not.toHaveAttribute("data-customized");
+    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+
+    await user.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("combobox", { name: "Effort" })).toBeVisible();
+
+    await user.click(trigger);
+    expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
+  });
+
+  it("offers no model-options control when the model declares none and no pool exists", () => {
+    renderComposer();
+    expect(screen.queryByRole("button", { name: "Model options" })).toBeNull();
+  });
+
+  it("marks the model-options trigger when any option is off the provider default", () => {
+    renderComposer({
+      modelOptions: [
+        { id: "effort", displayName: "Effort", values: ["low", "high"], value: "high" },
+      ],
+      onModelOptionChange: vi.fn(),
+    });
+    expect(screen.getByRole("button", { name: "Model options" })).toHaveAttribute(
+      "data-customized",
+    );
+  });
+
   it("offers one select per declared model option with Default first and reports changes", async () => {
     const user = userEvent.setup();
     const onModelOptionChange = vi.fn();
@@ -181,6 +219,7 @@ describe("ChatComposer", () => {
       onModelOptionChange,
     });
 
+    await user.click(screen.getByRole("button", { name: "Model options" }));
     expect(screen.getByRole("combobox", { name: "Effort" })).toHaveTextContent("Effort: high");
     expect(screen.getByRole("combobox", { name: "Service tier" })).toHaveTextContent(
       "Service tier: Default",

@@ -50,7 +50,7 @@ describe("SidebarNavigation", () => {
     expect(actions.plugins).toHaveBeenCalledOnce();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(actions["pull-requests"]).toHaveBeenCalledOnce();
-    expect(screen.getByRole("button", { name: "New thread" })).toHaveClass("sidebar__utility");
+    expect(screen.getByRole("button", { name: "New thread" })).toHaveClass("sidebar-item");
     // Search is a mode-switcher icon and thread rows nest under Projects, so
     // neither is a navigation row here.
     expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
@@ -150,7 +150,7 @@ describe("SidebarNavigation", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar__utility");
+    expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar-item");
     // Plugins reach Chat too; boards and a second thread list do not.
     expect(screen.getByRole("button", { name: "Plugins" })).toBeVisible();
     expect(screen.queryByRole("button", { name: /thread board/i })).not.toBeInTheDocument();
