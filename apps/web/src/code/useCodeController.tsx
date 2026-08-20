@@ -26,6 +26,7 @@ import {
   type CodeAttachmentId,
   type CodeAttachmentReference,
   type MentionableThreadId,
+  type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -104,6 +105,11 @@ export interface CodeConversationMessage {
    * restore control acts on.
    */
   readonly checkpoint?: CodeCheckpoint;
+  /**
+   * The posture this turn ran under, as the host recorded it. Absent on a
+   * message whose turn was journaled before the host started recording it.
+   */
+  readonly executionPolicy?: ProviderExecutionPolicy;
 }
 
 export interface CodeThreadNavigationItem {
@@ -663,6 +669,7 @@ export function useCodeController(options: CodeControllerOptions) {
             ? {}
             : { attachments: turn.attachments }),
           ...(turn.checkpoint === undefined ? {} : { checkpoint: turn.checkpoint }),
+          ...(turn.executionPolicy === undefined ? {} : { executionPolicy: turn.executionPolicy }),
         });
         const parts: string[] = [];
         for (const reference of turn.assistant) {
@@ -1304,6 +1311,11 @@ export function useCodeController(options: CodeControllerOptions) {
        * image and never decides what an id stands for.
        */
       readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
+      /**
+       * The posture this turn asks to run under. The host clamps it to the
+       * thread's grant, so this is an intent, not a grant.
+       */
+      readonly executionPolicy?: ProviderExecutionPolicy;
       readonly signal?: AbortSignal;
     }) => {
       const reference = await client.putEvidence(input.threadId, input.prompt);
@@ -1325,6 +1337,7 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
           ? {}
           : { attachmentIds: [...input.attachmentIds] }),
+        ...(input.executionPolicy === undefined ? {} : { executionPolicy: input.executionPolicy }),
       });
       return { operationId, started } as const;
     },
@@ -1593,6 +1606,11 @@ export function useCodeController(options: CodeControllerOptions) {
       threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
       /** Images the host already staged for this thread. */
       attachments: ReadonlyArray<CodeAttachmentReference> = [],
+      /**
+       * The posture this follow-up asks to run under. The host clamps it to
+       * the thread's grant. Absent means the thread's own posture.
+       */
+      executionPolicy?: ProviderExecutionPolicy,
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -1609,6 +1627,7 @@ export function useCodeController(options: CodeControllerOptions) {
         providerInstanceId: view.thread.providerInstanceId,
         modelId: view.thread.modelId,
         ...(attachments.length === 0 ? {} : { attachments }),
+        ...(executionPolicy === undefined ? {} : { executionPolicy }),
       };
 
       turnAbort.current?.abort();
@@ -1623,6 +1642,7 @@ export function useCodeController(options: CodeControllerOptions) {
           prompt: trimmed,
           threadMentionIds,
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+          ...(executionPolicy === undefined ? {} : { executionPolicy }),
           signal: controller.signal,
         });
         if (controller.signal.aborted) return false;
@@ -1689,13 +1709,22 @@ export function useCodeController(options: CodeControllerOptions) {
             // The checkpoint is only known once the host has taken it, so the
             // message the user already sees gains its restore point here
             // rather than waiting for the thread to be reopened.
-            if (event.kind === "conversation-turn-started" && event.checkpoint !== undefined) {
+            if (event.kind === "conversation-turn-started") {
               const checkpoint = event.checkpoint;
-              setConversation((current) =>
-                current.map((entry) =>
-                  entry.id === userMessage.id ? { ...entry, checkpoint } : entry,
-                ),
-              );
+              const ranUnder = event.executionPolicy;
+              if (checkpoint !== undefined || ranUnder !== undefined) {
+                setConversation((current) =>
+                  current.map((entry) =>
+                    entry.id === userMessage.id
+                      ? {
+                          ...entry,
+                          ...(checkpoint === undefined ? {} : { checkpoint }),
+                          ...(ranUnder === undefined ? {} : { executionPolicy: ranUnder }),
+                        }
+                      : entry,
+                  ),
+                );
+              }
             }
             if (event.kind === "provider-content" && event.channel === "reasoning") {
               const chunk = await readOperationText(
@@ -1809,6 +1838,7 @@ export function useCodeController(options: CodeControllerOptions) {
       prompt: string,
       threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
       attachments: ReadonlyArray<CodeAttachmentReference> = [],
+      executionPolicy?: ProviderExecutionPolicy,
     ): QueuedCodeTurn | undefined => {
       const trimmed = prompt.trim();
       const threadId = activeThreadId.current;
@@ -1818,6 +1848,7 @@ export function useCodeController(options: CodeControllerOptions) {
         prompt: trimmed,
         threadMentionIds,
         attachments,
+        ...(executionPolicy === undefined ? {} : { executionPolicy }),
       };
       setTurnQueues((current) => enqueueCodeTurn(current, String(threadId), turn));
       return turn;
@@ -1850,7 +1881,12 @@ export function useCodeController(options: CodeControllerOptions) {
     draining.current = true;
     void (async () => {
       try {
-        const sent = await sendFollowUp(next.prompt, next.threadMentionIds, next.attachments);
+        const sent = await sendFollowUp(
+          next.prompt,
+          next.threadMentionIds,
+          next.attachments,
+          next.executionPolicy,
+        );
         if (!mounted.current || !sent) return;
         setTurnQueues((current) => removeQueuedCodeTurn(current, String(threadId), next.id));
       } finally {
