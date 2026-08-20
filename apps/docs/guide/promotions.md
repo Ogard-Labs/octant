@@ -33,7 +33,7 @@ The promotion proposal can include context from the Work thread, such as:
 - A summary of the Work work that led to the promotion.
 - Referenced files or paths within the Work root.
 
-The Code thread does not inherit the Work root binding. It binds its own repository root selected during Project creation or thread configuration.
+The Code thread does not inherit the Work root binding. It binds its own folder selected during Project creation or thread configuration.
 
 ## Dismissing a promotion
 

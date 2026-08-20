@@ -21,6 +21,7 @@ OS-confined project root.
 
 ## Code
 
-Code is the repository workspace. Each Code Project binds exactly one repository
-root and starts approval-gated unless the user explicitly remembers Full access.
-Plan mode remains read-only even when Full access is remembered.
+Code is the repository workspace. Each Code Project binds exactly one folder
+and starts approval-gated unless the user explicitly remembers Full access. A
+Git repository is recommended but not required at bind time. Plan mode remains
+read-only even when Full access is remembered.

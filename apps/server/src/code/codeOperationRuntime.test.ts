@@ -362,6 +362,72 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("answers an approval requested by a narrowed turn on a broader thread", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+    });
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+    const startOperation = operationId(14);
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+        executionPolicy: "approval-gated",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "approval-request",
+          requestId: "provider-approval-narrowed",
+          action: "write",
+          description: "Modify src/a.ts",
+        }),
+      ),
+    );
+
+    let frames: readonly OperationFrame[] = [];
+    await vi.waitFor(async () => {
+      frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+      expect(frames.some((frame) => frame.event.kind === "approval-requested")).toBe(true);
+    });
+    const approval = frames.find(
+      (
+        frame,
+      ): frame is OperationFrame & { event: { kind: "approval-requested"; approvalId: string } } =>
+        frame.event.kind === "approval-requested",
+    );
+    expect(approval).toBeDefined();
+    if (approval === undefined) return;
+
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "answer-provider-approval",
+        operationId: operationId(15),
+        threadId,
+        checkoutId,
+        approvalId: approval.event.approvalId,
+        decision: "approved",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    expect(connection.answerApproval).toHaveBeenCalledWith({
+      sessionId,
+      requestId: "provider-approval-narrowed",
+      approved: true,
+    });
+    fixture.close();
+  });
+
   it("sanitizes provider claims before durable frames and authorizes subscriptions", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);

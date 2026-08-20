@@ -14,6 +14,10 @@ export type CodeActivityRow =
       readonly id: string;
       readonly toolName: string;
       readonly state: "started" | "running" | "completed" | "failed";
+      /**
+       * Latest journaled summary. The contract does not distinguish arguments
+       * from output; this is a progress or result message, not captured tool I/O.
+       */
       readonly summary?: string;
     }
   | {
@@ -48,6 +52,34 @@ function upsert(
   return rows.map((candidate, candidateIndex) => (candidateIndex === index ? row : candidate));
 }
 
+type ToolActivityRow = Extract<CodeActivityRow, { kind: "tool" }>;
+
+function previousTool(
+  rows: ReadonlyArray<CodeActivityRow>,
+  id: string,
+): ToolActivityRow | undefined {
+  return rows.find((row): row is ToolActivityRow => row.kind === "tool" && row.id === id);
+}
+
+/**
+ * Folds one journaled tool-activity event into a row. A later event that omits
+ * summary keeps what the row already held, so a completed call still names the
+ * last progress the host recorded.
+ */
+function foldToolEvent(
+  previous: ToolActivityRow | undefined,
+  event: Extract<CodeOperationEvent, { kind: "tool-activity" }>,
+): ToolActivityRow {
+  const summary = event.summary ?? previous?.summary;
+  return {
+    kind: "tool",
+    id: String(event.toolCallId),
+    toolName: event.toolName,
+    state: event.state,
+    ...(summary === undefined ? {} : { summary }),
+  };
+}
+
 /**
  * Folds one journaled operation event into a turn's activity. Returns the same
  * activity when the event carries nothing the transcript renders, so callers can
@@ -58,15 +90,10 @@ export function applyActivityEvent(
   event: CodeOperationEvent,
 ): CodeTurnActivity {
   if (event.kind === "tool-activity") {
+    const id = String(event.toolCallId);
     return {
       ...activity,
-      rows: upsert(activity.rows, {
-        kind: "tool",
-        id: String(event.toolCallId),
-        toolName: event.toolName,
-        state: event.state,
-        ...(event.summary === undefined ? {} : { summary: event.summary }),
-      }),
+      rows: upsert(activity.rows, foldToolEvent(previousTool(activity.rows, id), event)),
     };
   }
   if (event.kind === "task-progress") {
@@ -88,7 +115,7 @@ export function appendReasoning(activity: CodeTurnActivity, chunk: string): Code
   return { ...activity, reasoning: `${activity.reasoning}${chunk}` };
 }
 
-/** How many rows are still open, for the collapsed row's summary line. */
+/** How many rows are still open. */
 export function activeRowCount(activity: CodeTurnActivity): number {
   return activity.rows.filter((row) =>
     row.kind === "tool"
