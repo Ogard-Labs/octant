@@ -209,6 +209,7 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
                 <div>
                   <OctantButton
                     onClick={() => void changeState(finding, "resolved")}
+                    size="sm"
                     type="button"
                     variant="secondary"
                   >
@@ -216,6 +217,7 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
                   </OctantButton>
                   <OctantButton
                     onClick={() => void changeState(finding, "dismissed")}
+                    size="sm"
                     type="button"
                     variant="ghost"
                   >
@@ -243,6 +245,7 @@ export function CodeReviewPane(props: CodeReviewPaneProps) {
           <OctantButton
             disabled={summary.trim().length === 0}
             onClick={() => void add()}
+            size="sm"
             type="button"
             variant="secondary"
           >

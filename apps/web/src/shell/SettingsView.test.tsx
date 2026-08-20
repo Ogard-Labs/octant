@@ -144,7 +144,7 @@ describe("SettingsView", () => {
     expect(await screen.findByTestId("execution-profile-settings")).toBeVisible();
     expect(screen.getByRole("button", { name: "Profiles" })).toHaveAttribute(
       "aria-current",
-      "true",
+      "page",
     );
     expect(screen.queryByText("Providers", { selector: "h1" })).not.toBeInTheDocument();
   });
@@ -163,7 +163,7 @@ describe("SettingsView", () => {
       initialDeepLink: { section: "agents" },
     });
     expect(await screen.findByRole("radio", { name: /Ask/ })).toBeChecked();
-    expect(screen.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "page");
   });
 
   it("does not render the Agents panel without an AgentRunSettingsClient", () => {
@@ -197,11 +197,11 @@ describe("SettingsView", () => {
   it("marks the active section in the navigator and switches on click", () => {
     renderSettings();
 
-    expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "page");
     navigateTo("Appearance");
     expect(screen.getByRole("button", { name: "Appearance" })).toHaveAttribute(
       "aria-current",
-      "true",
+      "page",
     );
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "General" })).not.toBeInTheDocument();

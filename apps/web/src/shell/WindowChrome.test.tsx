@@ -128,8 +128,11 @@ describe("WindowChrome", () => {
     expect(root).toContain("--octant-danger-text:");
     expect(root).toContain("--octant-addition-text:");
     expect(root).toContain("--octant-deletion-text:");
+    // accent-text is a policed theme role (accent held to normal-text
+    // contrast), unlike the retired derived-accent palette guarded below.
+    expect(root).toContain("--octant-accent-text:");
     expect(root).not.toMatch(/#9a8cff|#d5ceff|154 140 255/i);
-    expect(root).not.toMatch(/--octant-accent-(focus|border|surface|text)/);
+    expect(root).not.toMatch(/--octant-accent-(focus|border|surface)/);
   });
 
   it("keeps ordinary palette literals behind neutral semantic roles", () => {
@@ -183,11 +186,11 @@ describe("WindowChrome", () => {
     expect(cssRule(".window-chrome__button")).toContain("width: 26px;");
     expect(cssRule(".window-chrome__button")).toContain("height: 26px;");
     expect(cssRule(".window-chrome__button")).toContain("background: transparent;");
-    expect(cssRule(".window-chrome__button:hover")).toContain(
-      "background: var(--octant-control-hover);",
-    );
+    // The hover fill is the design system's neutral soft ink (--oct-fg-soft),
+    // the same feedback .btn-icon gives, still no accent.
+    expect(cssRule(".window-chrome__button:hover")).toContain("background: var(--oct-fg-soft);");
     expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
-      "background: var(--octant-control-hover);",
+      "background: var(--oct-fg-soft);",
     );
   });
 
@@ -204,16 +207,18 @@ describe("WindowChrome", () => {
   });
 
   it("keeps ordinary navigation and tab selection neutral", () => {
-    expect(cssRule('.mode-button[aria-pressed="true"]')).toContain(
-      "background: var(--octant-selection);",
-    );
-    expect(cssRule('.mode-button[aria-pressed="true"]')).not.toMatch(/accent|purple/i);
-    expect(cssRule('.project-row[data-active="true"]')).toContain(
-      "background: var(--octant-selection);",
-    );
-    expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple/i);
+    // The mode switcher's active state moved to the design system sheet,
+    // where .mode[aria-current="page"] uses the neutral soft fill.
+    const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
+    const activeMode = systemStyles.match(/\.mode\[aria-current="page"\]\s*{[^}]*}/)?.[0] ?? "";
+    expect(activeMode).toContain("var(--oct-fg-soft)");
+    expect(activeMode).not.toMatch(/accent|purple/i);
+    // The Project header is a quiet section label, so its active state is
+    // carried by ink alone rather than a filled pill.
+    expect(cssRule('.project-row[data-active="true"]')).toContain("color: var(--oct-fg);");
+    expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple|background/i);
     expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])')).toContain(
-      "background: var(--octant-selection);",
+      "background: var(--oct-fg-soft);",
     );
     expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])')).not.toMatch(
       /accent|border-bottom-color/i,
@@ -222,8 +227,8 @@ describe("WindowChrome", () => {
   });
 
   it("keeps semantic shell borders and controls restrained", () => {
-    expect(cssRule(":root")).toContain("--octant-border: #323232;");
-    expect(cssRule(":root")).toContain("--octant-border-strong: #414141;");
+    expect(cssRule(":root")).toContain("--octant-border: #312f2c;");
+    expect(cssRule(":root")).toContain("--octant-border-strong: #494844;");
     expect(cssRule(".sidebar__native-leading")).not.toMatch(/background|border|box-shadow/);
 
     expect(cssRule(".new-project", 1)).toContain("color: var(--octant-text-primary);");
@@ -238,11 +243,9 @@ describe("WindowChrome", () => {
     expect(cssRule(".workspace-tab__action")).toContain("width: 26px;");
     expect(cssRule(".workspace-tab__action")).toContain("height: 26px;");
     expect(cssRule(".workspace-tab__action")).toContain("background: transparent;");
-    expect(cssRule(".workspace-tab__action:hover")).toContain(
-      "background: var(--octant-control-hover);",
-    );
+    expect(cssRule(".workspace-tab__action:hover")).toContain("background: var(--oct-fg-soft);");
     expect(cssRule('.workspace-tab__action[aria-expanded="true"]')).toContain(
-      "background: var(--octant-control-hover);",
+      "background: var(--oct-fg-soft);",
     );
     expect(cssRule(".workspace-tab__action:active")).toContain(
       "background: var(--octant-control-pressed);",
@@ -321,18 +324,22 @@ describe("WindowChrome", () => {
     expect(cssRule(".octant-dialog__popup")).toContain(
       "max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
     );
-    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: 12px");
+    // 12px now arrives as the system radius token (--oct-radius-lg: 12px).
+    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: var(--oct-radius-lg)");
     expect(cssRule(".octant-dialog__popup")).not.toContain("height: 100%");
     expect(cssRule(".octant-dialog__popup")).not.toContain("border-left: 1px solid");
-    expect(cssRule(".octant-dialog__backdrop")).toContain("rgb(0 0 0 / 28%)");
-    expect(cssRule(".project-dialog", 1)).toContain("width: min(100%, 380px)");
-    expect(cssRule(".project-dialog", 1)).toContain("padding: 16px");
-    expect(cssRule(".project-dialog h1")).toContain("font-size: 16px");
+    // The wash behind a modal is the system scrim token rather than a literal.
+    expect(cssRule(".octant-dialog__backdrop")).toContain("var(--oct-scrim)");
+    expect(cssRule(".project-dialog")).toContain("width: min(100%, 380px)");
+    expect(cssRule(".project-dialog")).toContain("padding: var(--oct-space-4)");
+    expect(cssRule(".project-dialog h1")).toContain("font-size: var(--oct-text-base)");
   });
 
   it("keeps the opaque utility dock and accessibility fallbacks", () => {
-    expect(cssRule(".right-utility-dock")).toContain("background: var(--octant-workspace);");
-    expect(cssRule(".octant-dialog__popup")).toContain("background: var(--octant-workspace);");
+    // --oct-bg is the bridge's alias for the opaque --octant-workspace ground,
+    // so the dock and dialog stay workspace-opaque under every theme.
+    expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
+    expect(cssRule(".octant-dialog__popup")).toContain("background: var(--oct-bg);");
     expect(cssRule(".environment-git-group dl")).toContain("background: var(--octant-control);");
     expect(cssRule(".environment-git-group dl")).toContain(
       "border: 1px solid var(--octant-border);",
@@ -374,6 +381,19 @@ describe("WindowChrome", () => {
     );
     expect(cssRule(".workspace")).toContain("background: var(--octant-workspace);");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
+  });
+
+  it("keeps the near-opaque native sidebar wash until the host reports applied window vibrancy", () => {
+    // The wash matches only while data-octant-host-vibrancy is absent, and the
+    // gate lives in :where() so the prefers-reduced-transparency override
+    // below it keeps winning on equal specificity.
+    const flattened = styles.replace(/\s+/g, " ");
+    expect(flattened).toContain(
+      'html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"])) .shell-frame:not(.shell--material-opaque) > .sidebar { background: color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent); }',
+    );
+    expect(atRuleBlock("@media (prefers-reduced-transparency: reduce)")).toContain(
+      'html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar',
+    );
   });
 
   it("exposes exactly one wide utility dock toggle only when a real surface is available", async () => {

@@ -79,22 +79,21 @@ export function SettingRow({
 
   return (
     <div
-      className="settings-row"
+      className="setrow"
       data-focused={focused ? "true" : "false"}
       data-setting-id={settingId}
       data-testid="setting-row"
       ref={rowRef}
     >
-      <div className="settings-row__copy">
-        <span className="settings-row__label">{label}</span>
-        {description === undefined ? null : (
-          <p className="settings-row__description" id={`${settingId}-description`}>
-            {description}
-          </p>
-        )}
+      <span className="setrow-label">{label}</span>
+      {/* The scope rides inside the hint line because .setrow declares exactly
+          two rows; a third child in column 1 would land in an implicit track
+          the control's `grid-row: 1 / -1` span does not cover. */}
+      <p className="setrow-hint" id={`${settingId}-description`}>
+        {description === undefined ? null : <span>{description} </span>}
         <ScopeIndicator scope={scope} />
-      </div>
-      <div className="settings-row__control">{children}</div>
+      </p>
+      <div className="setrow-control">{children}</div>
     </div>
   );
 }
@@ -110,14 +109,10 @@ export interface SettingGroupProps {
  */
 export function SettingGroup({ label, description, children }: SettingGroupProps) {
   return (
-    <div className="settings-group" role="group" aria-label={label}>
-      <div className="settings-group__heading">
-        <span className="settings-group__label">{label}</span>
-        {description === undefined ? null : (
-          <p className="settings-group__description">{description}</p>
-        )}
-      </div>
-      <div className="settings-group__rows">{children}</div>
+    <div className="setgroup" role="group" aria-label={label}>
+      <div className="setgroup-head">{label}</div>
+      {description === undefined ? null : <p className="setgroup-note">{description}</p>}
+      {children}
     </div>
   );
 }

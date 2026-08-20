@@ -22,7 +22,10 @@ import { SHELL_SETTINGS_AGGREGATE_ID } from "./shellProjection";
 import { openSqlite, type SqliteConnection, type SqliteStatement } from "./sqlitePort";
 
 const directories: Array<string> = [];
-const fixturePayload = Schema.Struct({ value: Schema.String });
+const fixturePayload = Schema.Struct({
+  value: Schema.String,
+  threadId: Schema.optional(Schema.String),
+});
 const replayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
 const ids = {
@@ -569,6 +572,49 @@ describe("Journal", () => {
         .replayAggregateType({ aggregateType: "fixture", afterSequence: 0, limit: 10 })
         .map((event) => event.eventId),
     ).toEqual([ids.event1, ids.event2]);
+    connection.close();
+  });
+
+  it("replays one thread's slice of an aggregate type without other threads' rows", () => {
+    const connection = openMigratedConnection();
+    const journal = createJournal(connection);
+    const threadA = "00000000-0000-4000-8000-0000000000aa";
+    const threadB = "00000000-0000-4000-8000-0000000000bb";
+    journal.append(
+      appendRequest([
+        pendingEvent(ids.event1, { payload: { value: "a1", threadId: threadA } }),
+        pendingEvent(ids.event2, { payload: { value: "b1", threadId: threadB } }),
+        pendingEvent(ids.event3, { payload: { value: "a2", threadId: threadA } }),
+      ]),
+    );
+    // Same thread named in the payload, but a different aggregate type: a
+    // thread-scoped read of one stream must not pick it up.
+    journal.append({
+      aggregate: {
+        aggregateType: "other-fixture",
+        aggregateId: "00000000-0000-4000-8000-000000000099",
+      },
+      expectedVersion: 0,
+      events: [
+        pendingEvent("00000000-0000-4000-8000-000000000007", {
+          payload: { value: "a3", threadId: threadA },
+        }),
+      ],
+    });
+
+    const cursor = (afterSequence: number) => ({
+      aggregateType: "fixture",
+      threadId: threadA,
+      afterSequence,
+      limit: 10,
+    });
+    expect(journal.replayAggregateTypeForThread(cursor(0)).map((event) => event.eventId)).toEqual([
+      ids.event1,
+      ids.event3,
+    ]);
+    expect(journal.replayAggregateTypeForThread(cursor(1)).map((event) => event.eventId)).toEqual([
+      ids.event3,
+    ]);
     connection.close();
   });
 

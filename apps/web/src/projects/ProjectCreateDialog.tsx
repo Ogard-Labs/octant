@@ -114,13 +114,7 @@ function ChatProjectCreateDialog(props: ProjectCreateDialogProps) {
           value={name}
         />
         <div className="project-dialog__actions">
-          <OctantButton
-            disabled={submitting}
-            onClick={requestClose}
-            type="button"
-            className="project-button project-button--quiet"
-            variant="ghost"
-          >
+          <OctantButton disabled={submitting} onClick={requestClose} type="button" variant="ghost">
             Cancel
           </OctantButton>
           <OctantButton disabled={submitting || name.trim() === ""} type="submit">
@@ -230,12 +224,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
         </div>
         <p>Choose one directory. Octant records the binding.</p>
         <div className="project-dialog__actions">
-          <OctantButton
-            onClick={props.onClose}
-            type="button"
-            className="project-button project-button--quiet"
-            variant="ghost"
-          >
+          <OctantButton onClick={props.onClose} type="button" variant="ghost">
             Cancel
           </OctantButton>
           <OctantButton onClick={() => void beginNativeSelection()} type="button">

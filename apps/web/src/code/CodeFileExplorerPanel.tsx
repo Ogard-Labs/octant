@@ -61,6 +61,7 @@ export function CodeFileExplorerPanel(props: CodeFileExplorerPanelProps) {
         <OctantButton
           disabled={controller.status === "loading"}
           onClick={() => void controller.refresh()}
+          size="sm"
           type="button"
           variant="ghost"
         >

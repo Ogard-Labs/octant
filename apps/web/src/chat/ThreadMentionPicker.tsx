@@ -207,7 +207,7 @@ export function ThreadMentionChips(props: {
   return (
     <ul aria-label="Mentioned threads" className="thread-mention__chips">
       {props.chips.map((chip) => (
-        <li className="thread-mention__chip" key={String(chip.threadId)}>
+        <li className="chip thread-mention__chip" key={String(chip.threadId)}>
           <Hash aria-hidden="true" size={12} strokeWidth={1.8} />
           <span>{chip.title}</span>
           <span className="thread-mention__chip-receipt">
@@ -228,16 +228,15 @@ export function ThreadMentionChips(props: {
               <span>{chip.hasSideChat === true ? "Reopen Side Chat" : "Side Chat"}</span>
             </OctantButton>
           )}
-          <OctantButton
+          <button
             aria-label={`Remove ${chip.title} thread mention`}
+            className="chip-x window-no-drag"
             disabled={props.disabled === true}
             onClick={() => props.onRemove(chip.threadId)}
-            size="icon"
             type="button"
-            variant="ghost"
           >
-            <X aria-hidden="true" size={12} strokeWidth={1.8} />
-          </OctantButton>
+            <X aria-hidden="true" size={10} strokeWidth={1.8} />
+          </button>
         </li>
       ))}
     </ul>
