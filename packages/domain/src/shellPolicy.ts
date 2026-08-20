@@ -1345,12 +1345,12 @@ export function sameWorkspaceSurface(a: WorkspaceTab, b: WorkspaceTab): boolean 
       return true;
     case "draft-thread":
       return (
-        b.kind === "draft-thread" &&
-        a.mode === b.mode &&
-        sameOptionalId(a.projectId, b.projectId)
+        b.kind === "draft-thread" && a.mode === b.mode && sameOptionalId(a.projectId, b.projectId)
       );
     case "project":
-      return b.kind === "project" && a.mode === b.mode && String(a.projectId) === String(b.projectId);
+      return (
+        b.kind === "project" && a.mode === b.mode && String(a.projectId) === String(b.projectId)
+      );
     case "chat-thread":
       return b.kind === "chat-thread" && String(a.threadId) === String(b.threadId);
     case "work-thread":
@@ -1561,9 +1561,7 @@ export function applyWorkspaceOperation(
       if (removed.pane === undefined) reject("missing-pane", "operation references a missing pane");
       // Closing the last pane leaves the mode's default welcome pane rather
       // than an empty tree: a mode always shows something.
-      return finishOperation(
-        replaceLayout(workspace, mode, removed.layout ?? defaultLayout(mode)),
-      );
+      return finishOperation(replaceLayout(workspace, mode, removed.layout ?? defaultLayout(mode)));
     }
 
     case "resize-split": {

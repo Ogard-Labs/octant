@@ -6,6 +6,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceView, type WorkspaceViewProps } from "./WorkspaceView";
+import { stubSurfaceDragHandle } from "../App.test-fixtures";
 import { createChatReadCursorStore } from "../chat/useChatController";
 import { createCodeThreadControllers } from "../code/codeThreadControllers";
 import {
@@ -17,7 +18,7 @@ import {
 
 const ids = {
   checkout: "10000000-0000-4000-8000-000000000001",
-  group: "10000000-0000-4000-8000-000000000002",
+  pane: "10000000-0000-4000-8000-000000000002",
   node: "10000000-0000-4000-8000-000000000003",
   tab: "10000000-0000-4000-8000-000000000004",
   thread: "10000000-0000-4000-8000-000000000005",
@@ -115,7 +116,7 @@ describe("WorkspaceView Code tab registration", () => {
     );
     await screen.findByRole("heading", { name: "Composition" });
 
-    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open surface" }));
     fireEvent.click(screen.getByRole("button", { name: "Terminal" }));
 
     expect(base.onOpenCodeSurface).toHaveBeenCalledWith(
@@ -157,9 +158,15 @@ describe("WorkspaceView Code tab registration", () => {
 
     expect(await screen.findByRole("img", { name: "Preview page browser activity" })).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Open Browser tab" }));
-    expect(onOpenSurface).toHaveBeenCalledWith("browser", ids.group);
+    expect(onOpenSurface).toHaveBeenCalledWith("browser", ids.pane);
   });
 });
+
+/** Closes a pane the way a person does: through its own actions disclosure. */
+async function closePaneShowing(title: string): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: `Pane actions for ${title}` }));
+  fireEvent.click(screen.getByRole("button", { name: "Close pane" }));
+}
 
 async function expandLocalServers(): Promise<void> {
   fireEvent.click(
@@ -194,7 +201,7 @@ describe("WorkspaceView Local servers wiring", () => {
     await waitFor(() =>
       expect(onOpenSurface).toHaveBeenCalledWith(
         "browser",
-        ids.group,
+        ids.pane,
         // The tab is named by the context this Open created, not by the thread.
         "60000000-0000-4000-8000-000000000001",
       ),
@@ -604,12 +611,11 @@ describe("WorkspaceView split Code file explorer", () => {
       title: "Thread B",
     } as WorkspaceTab;
     const base = propsFor(tabA);
-    const groupB = {
-      kind: "group",
+    const paneB = {
+      kind: "pane",
       nodeId: "10000000-0000-4000-8000-000000000012",
-      groupId: "10000000-0000-4000-8000-000000000013",
-      activeTabId: tabBId,
-      tabs: [tabB],
+      paneId: "10000000-0000-4000-8000-000000000013",
+      surface: tabB,
     } as const;
     const split = {
       kind: "split",
@@ -617,7 +623,7 @@ describe("WorkspaceView split Code file explorer", () => {
       orientation: "horizontal",
       ratio: 0.5,
       first: base.layout,
-      second: groupB,
+      second: paneB,
     } as never as WorkspaceViewProps["layout"];
     // The focused controller view is thread A. Thread B's checkout is known
     // only through the bootstrap thread record, exactly as at runtime.
@@ -707,11 +713,10 @@ describe("WorkspaceView concurrent Code threads", () => {
       ratio: 0.5,
       first: base.layout,
       second: {
-        kind: "group",
+        kind: "pane",
         nodeId: "10000000-0000-4000-8000-000000000022",
-        groupId: "10000000-0000-4000-8000-000000000023",
-        activeTabId: tabBId,
-        tabs: [tabB],
+        paneId: "10000000-0000-4000-8000-000000000023",
+        surface: tabB,
       },
     } as never as WorkspaceViewProps["layout"];
     const controllers = createCodeThreadControllers();
@@ -1078,9 +1083,8 @@ describe("WorkspaceView tab isolation", () => {
 
     const secondProps = propsFor(secondTab);
     const secondLayout = {
-      ...(secondProps.layout as Extract<WorkspaceViewProps["layout"], { kind: "group" }>),
-      activeTabId: secondTabId,
-      tabs: [secondTab],
+      ...(secondProps.layout as Extract<WorkspaceViewProps["layout"], { kind: "pane" }>),
+      surface: secondTab,
     };
     rerender(
       <WorkspaceView
@@ -1119,12 +1123,12 @@ describe("WorkspaceView tab isolation", () => {
     const browserAutomationClient = { inspectThread, releaseThread } as never;
     render(<WorkspaceView {...base} browserAutomationClient={browserAutomationClient} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Browser A" }));
+    await closePaneShowing("Browser A");
 
     await waitFor(() => expect(releaseThread).toHaveBeenCalledOnce());
     expect(releaseThread).toHaveBeenCalledWith({ threadId: ids.thread });
-    expect(base.onClose).toHaveBeenCalledWith(ids.group, ids.tab);
-    expect(vi.mocked(base.onClose).mock.invocationCallOrder[0]).toBeLessThan(
+    expect(base.onClosePane).toHaveBeenCalledWith(ids.pane);
+    expect(vi.mocked(base.onClosePane).mock.invocationCallOrder[0]).toBeLessThan(
       releaseThread.mock.invocationCallOrder[0]!,
     );
   });
@@ -1138,7 +1142,7 @@ describe("WorkspaceView tab isolation", () => {
     >;
     render(<WorkspaceView {...secondaryProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Terminal 2" }));
+    await closePaneShowing("Terminal 2");
 
     // This tab minted the identity and is the only thing that carries it, so
     // closing it without stopping the shell would strand a running process.
@@ -1156,11 +1160,11 @@ describe("WorkspaceView tab isolation", () => {
     const sharedProps = propsFor(codeTab("code-terminal", "Terminal"));
     const shared = sharedProps.codeController.client!.executeOperation as ReturnType<typeof vi.fn>;
     render(<WorkspaceView {...sharedProps} />);
-    fireEvent.click(screen.getByRole("button", { name: "Close Terminal" }));
+    await closePaneShowing("Terminal");
 
     // A tab with no identity of its own only views the thread's original
     // terminal, which stays reachable from the thread's Terminal surface.
-    await waitFor(() => expect(sharedProps.onClose).toHaveBeenCalled());
+    await waitFor(() => expect(sharedProps.onClosePane).toHaveBeenCalled());
     expect(shared).not.toHaveBeenCalledWith(
       expect.objectContaining({ kind: "stop-terminal" as const }),
     );
@@ -1186,14 +1190,14 @@ describe("WorkspaceView tab isolation", () => {
     );
     render(<WorkspaceView {...secondaryProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Terminal 3" }));
+    await closePaneShowing("Terminal 3");
 
     await waitFor(() =>
       expect(executeOperation).toHaveBeenCalledWith(
         expect.objectContaining({ kind: "stop-terminal" as const }),
       ),
     );
-    expect(secondaryProps.onClose).not.toHaveBeenCalled();
+    expect(secondaryProps.onClosePane).not.toHaveBeenCalled();
   });
 
   // A terminal the host no longer owns has already stopped, so there is nothing
@@ -1217,9 +1221,9 @@ describe("WorkspaceView tab isolation", () => {
     );
     render(<WorkspaceView {...secondaryProps} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Terminal 4" }));
+    await closePaneShowing("Terminal 4");
 
-    await waitFor(() => expect(secondaryProps.onClose).toHaveBeenCalledWith(ids.group, ids.tab));
+    await waitFor(() => expect(secondaryProps.onClosePane).toHaveBeenCalledWith(ids.pane));
   });
 
   it("closes one local server's tab without releasing the thread's other contexts", async () => {
@@ -1251,7 +1255,7 @@ describe("WorkspaceView tab isolation", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Browser A" }));
+    await closePaneShowing("Browser A");
 
     await waitFor(() => expect(stop).toHaveBeenCalledWith({ contextId, threadId: ids.thread }));
     expect(releaseThread).not.toHaveBeenCalled();
@@ -1276,10 +1280,10 @@ describe("WorkspaceView tab isolation", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Close Browser A" }));
+    await closePaneShowing("Browser A");
 
     await waitFor(() => expect(releaseThread).toHaveBeenCalledOnce());
-    expect(base.onClose).toHaveBeenCalledWith(ids.group, ids.tab);
+    expect(base.onClosePane).toHaveBeenCalledWith(ids.pane);
   });
 });
 
@@ -1942,11 +1946,10 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
     return gitObservation;
   });
   const layout = {
-    kind: "group",
+    kind: "pane",
     nodeId: ids.node,
-    groupId: ids.group,
-    activeTabId: ids.tab,
-    tabs: [tab],
+    paneId: ids.pane,
+    surface: tab,
   } as const;
   const codeControllers = createCodeThreadControllers();
   const props = {
@@ -2011,31 +2014,29 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
       dismiss: vi.fn(async () => false),
     },
     codeProviderChoices: [],
+    drag: stubSurfaceDragHandle(),
     layout: layout as never,
     mode: "code",
-    onActivate: vi.fn(),
+    onActivatePane: vi.fn(),
     onArchiveProject: vi.fn(),
     onCreateChat: vi.fn(),
     onClearFocus: vi.fn(),
-    onClose: vi.fn(),
+    onClosePane: vi.fn(),
     onCommitResize: vi.fn(),
-    onDropTab: vi.fn(),
     onFocus: vi.fn(),
-    onMove: vi.fn(),
     onOpenCodeThread: vi.fn(),
     onOpenCodeSurface: vi.fn(),
     onPreviewResize: vi.fn(),
     onRelinkProject: vi.fn(),
     onRenameProject: vi.fn(),
-    onReorder: vi.fn(),
-    onSplit: vi.fn(),
+    onSplitPane: vi.fn(),
     projects: [],
     providerController: {} as never,
     workspace: {
       windowId: ids.window,
       activeMode: "code",
       layouts: { chat: layout, work: layout, code: layout },
-      activeGroupIds: { chat: ids.group, work: ids.group, code: ids.group },
+      activePaneIds: { chat: ids.pane, work: ids.pane, code: ids.pane },
       contextByMode: {
         chat: { host: "local", mode: "chat", projectId: null, boundRoot: null },
         work: { host: "local", mode: "work", projectId: null, boundRoot: null },
@@ -2070,11 +2071,10 @@ function workProjectPropsFor(input: {
     projectId: input.project.id,
   } as WorkspaceTab;
   const layout = {
-    kind: "group",
+    kind: "pane",
     nodeId: ids.node,
-    groupId: ids.group,
-    activeTabId: ids.tab,
-    tabs: [tab],
+    paneId: ids.pane,
+    surface: tab,
   } as const;
   return {
     ...propsFor(tab),
@@ -2102,7 +2102,7 @@ function workProjectPropsFor(input: {
       windowId: ids.window,
       activeMode: "work",
       layouts: { chat: layout, work: layout, code: layout },
-      activeGroupIds: { chat: ids.group, work: ids.group, code: ids.group },
+      activePaneIds: { chat: ids.pane, work: ids.pane, code: ids.pane },
       contextByMode: {
         chat: { host: "local", mode: "chat", projectId: null, boundRoot: null },
         work: { host: "local", mode: "work", projectId: input.project.id, boundRoot: null },

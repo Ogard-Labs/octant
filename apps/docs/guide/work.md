@@ -24,7 +24,7 @@ Capability-aware workspace surfaces available in Work include:
 
 - Confined Files/Explorer
 - Artifact Review and preview surfaces
-- Browser tabs (host-owned, policy-gated)
+- Browser surfaces (host-owned, policy-gated)
 - Side Chat, a Chat-mode lane that can ask about the focused thread without interrupting it or inheriting this Project's filesystem
 - Research with citations and provenance
 - Scoped memory and child agents

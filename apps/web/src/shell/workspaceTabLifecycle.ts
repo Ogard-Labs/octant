@@ -1,61 +1,57 @@
 import type { ChatThreadId } from "@octant/contracts/chat";
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
-import type { TabGroupId, WorkspaceLayoutNode, WorkspaceTab } from "@octant/contracts/shell";
+import type {
+  PaneId,
+  WorkspaceLayoutNode,
+  WorkspacePane,
+  WorkspaceTab,
+} from "@octant/contracts/shell";
 
-export function activeSurfaceTitle(layout: WorkspaceLayoutNode, activeGroupId: TabGroupId): string {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  return group?.tabs.find((tab) => tab.id === group.activeTabId)?.title ?? "Octant";
+export function activeSurfaceTitle(layout: WorkspaceLayoutNode, activePaneId: PaneId): string {
+  return findWorkspacePane(layout, activePaneId)?.surface.title ?? "Octant";
 }
 
 export function activeChatThreadTabId(
   layout: WorkspaceLayoutNode,
-  activeGroupId: TabGroupId,
+  activePaneId: PaneId,
 ): ChatThreadId | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  return tab?.kind === "chat-thread" ? tab.threadId : undefined;
+  const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  return surface?.kind === "chat-thread" ? surface.threadId : undefined;
 }
 
 export function activeDraftProjectId(
   layout: WorkspaceLayoutNode,
-  activeGroupId: TabGroupId,
+  activePaneId: PaneId,
 ): ProjectId | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  return tab?.kind === "draft-thread" ? tab.projectId : undefined;
+  const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  return surface?.kind === "draft-thread" ? surface.projectId : undefined;
 }
 
 export function activeDraftTabKey(
   layout: WorkspaceLayoutNode,
-  activeGroupId: TabGroupId,
+  activePaneId: PaneId,
 ): string | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  return tab?.kind === "draft-thread"
-    ? `${String(tab.id)}:${tab.projectId === undefined ? "unfiled" : String(tab.projectId)}`
+  const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  return surface?.kind === "draft-thread"
+    ? `${String(surface.id)}:${surface.projectId === undefined ? "unfiled" : String(surface.projectId)}`
     : undefined;
 }
 
 /**
- * The local Code thread the focused group is showing. When the focused group
- * shows a utility surface (Browser, Files, Side Chat, Preview) instead, the
- * Code thread visible in a sibling split pane stays active so its transcript
- * is not unloaded just because the user clicked into the other pane.
+ * The local Code thread the active pane is showing. When the active pane shows
+ * a utility surface (Browser, Files, Side Chat, Preview) instead, the Code
+ * thread visible in a sibling pane stays active so its transcript is not
+ * unloaded just because the user clicked into the other pane.
  */
 export function activeCodeThreadTabId(
   layout: WorkspaceLayoutNode,
-  activeGroupId: TabGroupId,
+  activePaneId: PaneId,
 ): CodeThreadId | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  const focused = localCodeThreadTabId(tab);
+  const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  const focused = localCodeThreadTabId(surface);
   if (focused !== undefined) return focused;
-  switch (tab?.kind) {
+  switch (surface?.kind) {
     case "browser":
     case "files":
     case "side-chat":
@@ -67,10 +63,10 @@ export function activeCodeThreadTabId(
 }
 
 /**
- * Every local Code thread this window has open, in any group of the Code tree.
+ * Every local Code thread this window has open, in any pane of the Code tree.
  *
- * Keyed on the thread, not the tab: a thread's overview, diff, terminal, and
- * workbench are several tabs of one conversation, and giving each its own
+ * Keyed on the thread, not the surface: a thread's overview, diff, terminal,
+ * and workbench are several views of one conversation, and giving each its own
  * controller would open the same thread's stream several times over.
  */
 export function openLocalCodeThreadIds(layout: WorkspaceLayoutNode): ReadonlyArray<CodeThreadId> {
@@ -79,34 +75,33 @@ export function openLocalCodeThreadIds(layout: WorkspaceLayoutNode): ReadonlyArr
   return open;
 
   function collect(node: WorkspaceLayoutNode): void {
-    if (node.kind !== "group") {
+    if (node.kind !== "pane") {
       collect(node.first);
       collect(node.second);
       return;
     }
-    for (const tab of node.tabs) {
-      const threadId = openCodeTabThreadId(tab);
-      if (threadId === undefined) continue;
-      if (open.some((candidate) => String(candidate) === String(threadId))) continue;
-      open.push(threadId);
-    }
+    const threadId = openCodeTabThreadId(node.surface);
+    if (threadId === undefined) return;
+    if (open.some((candidate) => String(candidate) === String(threadId))) return;
+    open.push(threadId);
   }
 }
 
-function openCodeTabThreadId(tab: WorkspaceTab): CodeThreadId | undefined {
-  const local = localCodeThreadTabId(tab);
+function openCodeTabThreadId(surface: WorkspaceTab): CodeThreadId | undefined {
+  const local = localCodeThreadTabId(surface);
   if (local !== undefined) return local;
-  // An Apple workbench tab is bound to a Code thread like the other surfaces.
-  // The active-thread lookup leaves it out because focus resting there does not
+  // An Apple workbench surface is bound to a Code thread like the others. The
+  // active-thread lookup leaves it out because focus resting there does not
   // make it the thread in view; it still needs that thread's own controller.
-  if (tab.kind !== "apple-workbench") return undefined;
-  if ("hostId" in tab && tab.hostId !== undefined) return undefined;
-  return tab.threadId;
+  if (surface.kind !== "apple-workbench") return undefined;
+  if ("hostId" in surface && surface.hostId !== undefined) return undefined;
+  return surface.threadId;
 }
 
-function localCodeThreadTabId(tab: WorkspaceTab | undefined): CodeThreadId | undefined {
-  if (tab !== undefined && "hostId" in tab && tab.hostId !== undefined) return undefined;
-  switch (tab?.kind) {
+function localCodeThreadTabId(surface: WorkspaceTab | undefined): CodeThreadId | undefined {
+  if (surface !== undefined && "hostId" in surface && surface.hostId !== undefined)
+    return undefined;
+  switch (surface?.kind) {
     case "code-overview":
     case "code-file":
     case "code-diff":
@@ -115,43 +110,43 @@ function localCodeThreadTabId(tab: WorkspaceTab | undefined): CodeThreadId | und
     case "code-git":
     case "code-pr":
     case "code-local-review":
-      return tab.threadId;
+      return surface.threadId;
     default:
       return undefined;
   }
 }
 
 function visibleLocalCodeThreadTabId(layout: WorkspaceLayoutNode): CodeThreadId | undefined {
-  if (layout.kind === "group") {
-    return localCodeThreadTabId(layout.tabs.find((tab) => tab.id === layout.activeTabId));
+  if (layout.kind === "pane") {
+    return localCodeThreadTabId(layout.surface);
   }
   return visibleLocalCodeThreadTabId(layout.first) ?? visibleLocalCodeThreadTabId(layout.second);
 }
 
 export function activeWorkThreadTabId(
   layout: WorkspaceLayoutNode,
-  activeGroupId: TabGroupId,
+  activePaneId: PaneId,
 ): string | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  return tab?.kind === "work-thread" && tab.hostId === undefined ? String(tab.threadId) : undefined;
+  const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  return surface?.kind === "work-thread" && surface.hostId === undefined
+    ? String(surface.threadId)
+    : undefined;
 }
 
 export function activeProjectTabId(
   layout: WorkspaceLayoutNode,
-  activeGroupId: TabGroupId,
+  activePaneId: PaneId,
 ): ProjectId | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  return tab?.kind === "project" ? tab.projectId : undefined;
+  const surface = findWorkspacePane(layout, activePaneId)?.surface;
+  return surface?.kind === "project" ? surface.projectId : undefined;
 }
 
-export function findWorkspaceGroup(
+export function findWorkspacePane(
   layout: WorkspaceLayoutNode,
-  groupId: TabGroupId,
-): Extract<WorkspaceLayoutNode, { kind: "group" }> | undefined {
-  if (layout.kind === "group") return layout.groupId === groupId ? layout : undefined;
-  return findWorkspaceGroup(layout.first, groupId) ?? findWorkspaceGroup(layout.second, groupId);
+  paneId: PaneId,
+): WorkspacePane | undefined {
+  if (layout.kind === "pane") {
+    return String(layout.paneId) === String(paneId) ? layout : undefined;
+  }
+  return findWorkspacePane(layout.first, paneId) ?? findWorkspacePane(layout.second, paneId);
 }

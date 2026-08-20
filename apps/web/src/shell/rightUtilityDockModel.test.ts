@@ -86,7 +86,7 @@ describe("Right Utility Dock surface model", () => {
   });
 
   it.each(["context", "project-memory"] as const)(
-    "keeps Project-required surface %s closed with no active Project",
+    "reports Project-required surface %s unavailable rather than closed with no active Project",
     (savedSurface) => {
       expect(
         resolveRightUtilityDockSurface({
@@ -95,7 +95,11 @@ describe("Right Utility Dock surface model", () => {
           presentationAvailability: "available",
           savedSurface,
         }),
-      ).toEqual({ kind: "closed", reason: "project-required" });
+      ).toMatchObject({
+        kind: "unavailable",
+        reason: "project-required",
+        surface: { id: savedSurface },
+      });
     },
   );
 
@@ -178,7 +182,7 @@ describe("Right Utility Dock surface model", () => {
     [{ ...projects.code, lifecycle: "archived" }, projectIds.current, "project-incompatible"],
     [projects.chat, projectIds.current, "project-incompatible"],
   ] as const)(
-    "fails closed for absent, archived, incompatible, or replaced Project identity %#",
+    "keeps the panel selected but empty-handed for absent, archived, incompatible, or replaced Project identity %#",
     (activeProject, surfaceProjectId, reason) => {
       expect(
         resolveRightUtilityDockSurface({
@@ -189,7 +193,7 @@ describe("Right Utility Dock surface model", () => {
           ...(activeProject === undefined ? {} : { activeProject }),
           ...(surfaceProjectId === undefined ? {} : { surfaceProjectId }),
         }),
-      ).toEqual({ kind: "closed", reason });
+      ).toMatchObject({ kind: "unavailable", reason, surface: { id: "context" } });
     },
   );
 
@@ -201,7 +205,7 @@ describe("Right Utility Dock surface model", () => {
         ...validInput,
         activeProject: unboundCodeProject,
       }),
-    ).toEqual({ kind: "closed", reason: "project-incompatible" });
+    ).toMatchObject({ kind: "unavailable", reason: "project-incompatible" });
   });
 
   it.each(["work", "code"] as const)(
@@ -216,7 +220,7 @@ describe("Right Utility Dock surface model", () => {
           activeProject: unboundProject,
           savedSurface: "project-memory",
         }),
-      ).toEqual({ kind: "closed", reason: "project-incompatible" });
+      ).toMatchObject({ kind: "unavailable", reason: "project-incompatible" });
     },
   );
 

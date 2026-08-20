@@ -113,7 +113,9 @@ function firstPaneId(layout: WorkspaceLayoutNode): PaneId {
 
 function codeLayoutWithPanes(paneCount: number): WorkspaceLayoutNode {
   const panes: ReadonlyArray<WorkspacePane> = Array.from({ length: paneCount }, (_, index) => {
-    const tabId = decodeWorkspaceTabId(`a3000000-0000-4000-8000-${String(index).padStart(12, "0")}`);
+    const tabId = decodeWorkspaceTabId(
+      `a3000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    );
     return {
       kind: "pane",
       nodeId: decodeLayoutNodeId(`a1000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
@@ -380,7 +382,10 @@ describe("workspace surface identity", () => {
 
   it("recognizes the same thread under a freshly minted surface id", () => {
     expect(
-      sameWorkspaceSurface(overviewSurface(ids.tabA, "One title"), overviewSurface(ids.tabB, "Another")),
+      sameWorkspaceSurface(
+        overviewSurface(ids.tabA, "One title"),
+        overviewSurface(ids.tabB, "Another"),
+      ),
     ).toBe(true);
   });
 

@@ -364,12 +364,14 @@ describe("App", () => {
         prompt: "New chat",
       }),
     );
-    expect(await screen.findByRole("tab", { name: "Exact created chat" })).toBeVisible();
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Exact created chat" }),
+    ).toBeVisible();
     expect(shellApi.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: expect.objectContaining({
-          kind: "open-tab",
-          tab: expect.objectContaining({
+          kind: "open-surface",
+          surface: expect.objectContaining({
             kind: "chat-thread",
             threadId: createdChatThreadId,
           }),
@@ -384,8 +386,8 @@ describe("App", () => {
     const openCallOrder = shellApi.execute.mock.invocationCallOrder.find(
       (_, index) =>
         shellApi.execute.mock.calls[index]?.[0].kind === "apply-workspace-operation" &&
-        shellApi.execute.mock.calls[index]?.[0].operation.kind === "open-tab" &&
-        shellApi.execute.mock.calls[index]?.[0].operation.tab.kind === "chat-thread",
+        shellApi.execute.mock.calls[index]?.[0].operation.kind === "open-surface" &&
+        shellApi.execute.mock.calls[index]?.[0].operation.surface.kind === "chat-thread",
     );
     expect(sendCallOrder).toBeDefined();
     expect(openCallOrder).toBeDefined();
@@ -415,12 +417,12 @@ describe("App", () => {
     projectApi.memory = vi.fn(async () => ({ projectId, active: [], history: [] }) as never);
     const initial = chatShellBootstrap();
     const layout = initial.workspace.layouts.chat;
-    if (layout.kind !== "group") throw new Error("Expected the default Chat group.");
+    if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
     const projectWorkspace = applyWorkspaceOperation(initial.workspace, {
-      kind: "open-tab",
+      kind: "open-surface",
       mode: "chat",
-      groupId: layout.groupId,
-      tab: {
+      paneId: layout.paneId,
+      surface: {
         kind: "project",
         id: "00000000-0000-4000-8000-000000000890" as never,
         projectId,
@@ -477,9 +479,9 @@ describe("App", () => {
         expect.objectContaining({
           kind: "apply-workspace-operation",
           operation: expect.objectContaining({
-            kind: "switch-project-tab",
+            kind: "switch-project-surface",
             mode: "chat",
-            tab: expect.objectContaining({
+            surface: expect.objectContaining({
               kind: "chat-thread",
               threadId: createdChatThreadId,
             }),
@@ -518,14 +520,14 @@ describe("App", () => {
     projectApi.memory = vi.fn(async () => ({ projectId, active: [], history: [] }) as never);
     const initial = chatShellBootstrap();
     const layout = initial.workspace.layouts.chat;
-    if (layout.kind !== "group") throw new Error("Expected the default Chat group.");
+    if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
     const shellApi = client({
       ...initial,
       workspace: applyWorkspaceOperation(initial.workspace, {
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "chat",
-        groupId: layout.groupId,
-        tab: {
+        paneId: layout.paneId,
+        surface: {
           kind: "project",
           id: "00000000-0000-4000-8000-000000000891" as never,
           projectId,
@@ -553,7 +555,9 @@ describe("App", () => {
     );
     await user.click(within(quickStart).getByRole("button", { name: "Start thread" }));
 
-    expect(await screen.findByRole("tab", { name: "Exact created chat" })).toBeVisible();
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Exact created chat" }),
+    ).toBeVisible();
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "The first message could not be sent. Retry from the open thread.",
     );
@@ -738,7 +742,9 @@ describe("App", () => {
     await user.type(within(welcome).getByRole("textbox", { name: "First message" }), "Open now");
     await user.click(within(welcome).getByRole("button", { name: "Start chat" }));
 
-    expect(await screen.findByRole("tab", { name: "Exact created chat" })).toBeVisible();
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Exact created chat" }),
+    ).toBeVisible();
     expect(resolveSend).toBeDefined();
     resolveSend!(
       decodeChatCommandResult({
@@ -894,13 +900,15 @@ describe("App", () => {
         modelId: "gpt-5",
       },
     });
-    expect(await screen.findByRole("tab", { name: "Draft brief" })).toBeVisible();
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Draft brief" }),
+    ).toBeVisible();
     expect(shellApi.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: expect.objectContaining({
-          kind: "open-tab",
+          kind: "open-surface",
           mode: "work",
-          tab: expect.objectContaining({
+          surface: expect.objectContaining({
             kind: "work-thread",
             threadId: workThreadId,
           }),
@@ -972,7 +980,9 @@ describe("App", () => {
     expect(workThreadClient.execute).toHaveBeenCalled();
     expect(workTurnClient.startFirstTurn).not.toHaveBeenCalled();
     expect(prompt).toHaveValue("Keep this overview draft");
-    expect(screen.queryByRole("tab", { name: "Keep this overview draft" })).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Workspace pane: Keep this overview draft" }),
+    ).toBeNull();
   });
 
   it("creates a Work thread from a draft tab and opens the authoritative thread tab", async () => {
@@ -1053,13 +1063,15 @@ describe("App", () => {
         }),
       }),
     );
-    expect(await screen.findByRole("tab", { name: "Release checklist" })).toBeVisible();
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Release checklist" }),
+    ).toBeVisible();
     expect(shellApi.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: expect.objectContaining({
-          kind: "open-tab",
+          kind: "open-surface",
           mode: "work",
-          tab: expect.objectContaining({
+          surface: expect.objectContaining({
             kind: "work-thread",
             threadId: workThreadId,
           }),
@@ -1168,67 +1180,6 @@ describe("App", () => {
     expect(within(dock).getByRole("heading", { name: "Context inspector" })).toBeVisible();
     expect(within(dock).getByText("Safe input budget")).toBeVisible();
     expect(within(dock).getByText("Provider capacity")).toBeVisible();
-  });
-
-  it("keeps a context warning visible after its Project tab loses focus", async () => {
-    const user = userEvent.setup();
-    const contextApi: ContextClient = {
-      inspect: vi.fn(async ({ subject }) => {
-        const snapshot = contextFixture();
-        return {
-          ...snapshot,
-          subject,
-          next: {
-            ...snapshot.next,
-            manifest: { ...snapshot.next.manifest, subject },
-            plan: { ...snapshot.next.plan, health: "watch" },
-          },
-          latestSent: {
-            ...snapshot.latestSent!,
-            manifest: { ...snapshot.latestSent!.manifest, subject },
-          },
-          capacity: { ...snapshot.capacity!, subject },
-        } as never;
-      }),
-      execute: vi.fn(),
-    };
-    const value = projectBootstrap();
-    const secondProject = { ...value.active[0]!, id: otherProjectId, name: "Other Repository" };
-
-    render(
-      <App
-        contextClient={contextApi}
-        isNarrow={false}
-        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
-        projectClient={projects({
-          ...value,
-          active: [...value.active, secondProject],
-          availability: [
-            { ...value.availability[0]!, status: "available" },
-            { ...value.availability[0]!, projectId: otherProjectId, status: "available" },
-          ],
-        })}
-        projectWindowCapability={projectWindowCapability}
-        shellClient={client()}
-      />,
-    );
-
-    await openSidebarProject(user, "Octant");
-    expect(
-      await screen.findByRole("button", {
-        name: "Octant: Watch. Open context inspector.",
-      }),
-    ).toBeVisible();
-    await openSidebarProject(user, "Other Repository");
-
-    const warning = screen.getByRole("button", {
-      name: "Octant: Watch. Open context inspector.",
-    });
-    expect(warning).toBeVisible();
-    expect(screen.getByRole("tab", { name: "Octant" })).toHaveAttribute("aria-selected", "false");
-    await user.click(warning);
-    expect(await screen.findByRole("heading", { name: "Context inspector" })).toBeVisible();
-    expect(screen.getByRole("tab", { name: "Octant" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("previews and authoritatively commits a wide left-sidebar resize", async () => {
@@ -1348,8 +1299,10 @@ describe("App", () => {
 
     await openSidebarProject(user, "Other Repository");
     expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
-    expect(screen.getByText("Keep this Project's memory visible.")).toBeVisible();
-    expect(projectApi.memory).toHaveBeenCalledTimes(1);
+    expect(document.querySelectorAll("#right-utility-dock")).toHaveLength(1);
+    // The dock follows the active pane: opening another Project re-targets the
+    // open panel to that Project instead of keeping the previous one's memory.
+    await waitFor(() => expect(projectApi.memory).toHaveBeenCalledWith(otherProjectId));
   });
 
   it("opens memory for the invoking Chat Project instead of the globally active split", async () => {
@@ -1399,12 +1352,12 @@ describe("App", () => {
     });
     const initial = chatShellBootstrap();
     const layout = initial.workspace.layouts.chat;
-    if (layout.kind !== "group") throw new Error("Expected the default Chat group.");
+    if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
     const withFirstProject = applyWorkspaceOperation(initial.workspace, {
-      kind: "open-tab",
+      kind: "open-surface",
       mode: "chat",
-      groupId: layout.groupId,
-      tab: {
+      paneId: layout.paneId,
+      surface: {
         kind: "project",
         id: "00000000-0000-4000-8000-000000000883" as never,
         projectId,
@@ -1412,26 +1365,22 @@ describe("App", () => {
         title: "Project Alpha",
       },
     });
-    const withBothProjects = applyWorkspaceOperation(withFirstProject, {
-      kind: "open-tab",
+    // A pane holds one surface, so the second Project opens through a split
+    // rather than a second tab in the same group.
+    const splitProjects = applyWorkspaceOperation(withFirstProject, {
+      kind: "split-pane",
       mode: "chat",
-      groupId: layout.groupId,
-      tab: {
+      targetPaneId: layout.paneId,
+      surface: {
         kind: "project",
         id: "00000000-0000-4000-8000-000000000884" as never,
         projectId: otherProjectId,
         mode: "chat",
         title: "Project Beta",
       },
-    });
-    const splitProjects = applyWorkspaceOperation(withBothProjects, {
-      kind: "split-group",
-      mode: "chat",
-      groupId: layout.groupId,
-      tabId: "00000000-0000-4000-8000-000000000884" as never,
       splitNodeId: "00000000-0000-4000-8000-000000000885" as never,
-      newGroupNodeId: "00000000-0000-4000-8000-000000000886" as never,
-      newGroupId: "00000000-0000-4000-8000-000000000887" as never,
+      newPaneNodeId: "00000000-0000-4000-8000-000000000886" as never,
+      newPaneId: "00000000-0000-4000-8000-000000000887" as never,
       orientation: "horizontal",
       placement: "after",
       ratio: 0.5 as never,
@@ -1479,6 +1428,214 @@ describe("App", () => {
     );
   });
 
+  it("re-targets the open dock when clicking into another pane, keeping the selected panel", async () => {
+    const user = userEvent.setup();
+    const firstChatProject = {
+      id: projectId,
+      type: "chat",
+      name: "Project Alpha",
+      lifecycle: "active",
+      pinned: true,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-08-11T09:00:00.000Z",
+      updatedAt: "2026-08-11T09:00:00.000Z",
+    } as ProjectBootstrap["active"][number];
+    const secondChatProject = {
+      ...firstChatProject,
+      id: otherProjectId,
+      name: "Project Beta",
+      rank: "1/1" as ProjectBootstrap["active"][number]["rank"],
+    };
+    const projectApi = projects({
+      active: [firstChatProject, secondChatProject],
+      archived: [],
+      availability: [],
+      memory: [],
+    });
+    projectApi.memory = vi.fn(
+      async (requestedProjectId) =>
+        ({ projectId: requestedProjectId, active: [], history: [] }) as never,
+    );
+    const initial = chatShellBootstrap();
+    const layout = initial.workspace.layouts.chat;
+    if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
+    const withFirstProject = applyWorkspaceOperation(initial.workspace, {
+      kind: "open-surface",
+      mode: "chat",
+      paneId: layout.paneId,
+      surface: {
+        kind: "project",
+        id: "00000000-0000-4000-8000-000000000883" as never,
+        projectId,
+        mode: "chat",
+        title: "Project Alpha",
+      },
+    });
+    const splitProjects = applyWorkspaceOperation(withFirstProject, {
+      kind: "split-pane",
+      mode: "chat",
+      targetPaneId: layout.paneId,
+      surface: {
+        kind: "project",
+        id: "00000000-0000-4000-8000-000000000884" as never,
+        projectId: otherProjectId,
+        mode: "chat",
+        title: "Project Beta",
+      },
+      splitNodeId: "00000000-0000-4000-8000-000000000885" as never,
+      newPaneNodeId: "00000000-0000-4000-8000-000000000886" as never,
+      newPaneId: "00000000-0000-4000-8000-000000000887" as never,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5 as never,
+    });
+
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client({
+          ...initial,
+          workspace: splitProjects,
+          workspaceVersion: splitProjects.version,
+        })}
+      />,
+    );
+
+    const alphaOverview = await screen.findByDisplayValue("Project Alpha");
+    const alphaProject = alphaOverview.closest(".project-overview");
+    if (!(alphaProject instanceof HTMLElement)) throw new Error("Expected Project Alpha overview.");
+    await user.click(await within(alphaProject).findByRole("button", { name: "Review memory" }));
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(await within(dock).findByText("Project Alpha")).toBeVisible();
+
+    // Clicking anywhere inside the other pane is the activation gesture. The
+    // dock follows the newly active pane's Project while the memory panel and
+    // its open state survive the move — no second "Review memory" is needed,
+    // and none of the previous pane's content leaks into the re-targeted dock.
+    await user.click(screen.getByDisplayValue("Project Beta"));
+
+    expect(await within(dock).findByText("Project Beta")).toBeVisible();
+    expect(within(dock).queryByText("Project Alpha")).not.toBeInTheDocument();
+    expect(within(dock).getByRole("button", { name: "Add memory" })).toBeVisible();
+    await waitFor(() => expect(projectApi.memory).toHaveBeenCalledWith(otherProjectId));
+  });
+
+  it("empties the memory panel instead of leaking it when the active pane has no Project", async () => {
+    const user = userEvent.setup();
+    const chatProject = {
+      id: projectId,
+      type: "chat",
+      name: "Project Alpha",
+      lifecycle: "active",
+      pinned: true,
+      rank: "0/1",
+      version: 1,
+      createdAt: "2026-08-11T09:00:00.000Z",
+      updatedAt: "2026-08-11T09:00:00.000Z",
+    } as ProjectBootstrap["active"][number];
+    const projectApi = projects({
+      active: [chatProject],
+      archived: [],
+      availability: [],
+      memory: [],
+    });
+    projectApi.memory = vi.fn(
+      async () =>
+        ({
+          projectId,
+          active: [
+            {
+              id: "00000000-0000-4000-8000-000000000892",
+              projectId,
+              kind: "fact",
+              content: "Alpha remembers the roadmap.",
+              provenance: { kind: "user-authored" },
+              author: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000891" },
+              status: "active",
+              version: 1,
+              createdAt: "2026-08-11T09:00:00.000Z",
+              updatedAt: "2026-08-11T09:00:00.000Z",
+            },
+          ],
+          history: [],
+        }) as never,
+    );
+    const initial = chatShellBootstrap();
+    const layout = initial.workspace.layouts.chat;
+    if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
+    const withProject = applyWorkspaceOperation(initial.workspace, {
+      kind: "open-surface",
+      mode: "chat",
+      paneId: layout.paneId,
+      surface: {
+        kind: "project",
+        id: "00000000-0000-4000-8000-000000000893" as never,
+        projectId,
+        mode: "chat",
+        title: "Project Alpha",
+      },
+    });
+    const withThreadPane = applyWorkspaceOperation(withProject, {
+      kind: "split-pane",
+      mode: "chat",
+      targetPaneId: layout.paneId,
+      surface: {
+        kind: "chat-thread",
+        id: "00000000-0000-4000-8000-000000000894" as never,
+        threadId: oldChatThreadId as never,
+        mode: "chat",
+        title: "Older chat",
+      },
+      splitNodeId: "00000000-0000-4000-8000-000000000895" as never,
+      newPaneNodeId: "00000000-0000-4000-8000-000000000896" as never,
+      newPaneId: "00000000-0000-4000-8000-000000000897" as never,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5 as never,
+    });
+
+    render(
+      <App
+        chatClient={chats()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client({
+          ...initial,
+          workspace: withThreadPane,
+          workspaceVersion: withThreadPane.version,
+        })}
+      />,
+    );
+
+    const alphaOverview = await screen.findByDisplayValue("Project Alpha");
+    const alphaProject = alphaOverview.closest(".project-overview");
+    if (!(alphaProject instanceof HTMLElement)) throw new Error("Expected Project Alpha overview.");
+    await user.click(await within(alphaProject).findByRole("button", { name: "Review memory" }));
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(await within(dock).findByText("Alpha remembers the roadmap.")).toBeVisible();
+
+    // The thread pane belongs to no Project, so following the activation the
+    // panel has nothing to describe. It must present that as its own state —
+    // never Alpha's memory, which would attribute one Project's memory to a
+    // pane about something else.
+    await user.click(screen.getByRole("region", { name: "Workspace pane: Older chat" }));
+
+    expect(
+      await within(dock).findByRole("heading", {
+        name: "Project memory has nothing to describe here",
+      }),
+    ).toBeVisible();
+    expect(within(dock).queryByText("Alpha remembers the roadmap.")).not.toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+  });
+
   it("shows a Chat Project one threads list in its Overview and opens a thread from it", async () => {
     const user = userEvent.setup();
     const chatProject = {
@@ -1505,12 +1662,12 @@ describe("App", () => {
     }));
     const initial = chatShellBootstrap();
     const layout = initial.workspace.layouts.chat;
-    if (layout.kind !== "group") throw new Error("Expected the default Chat group.");
+    if (layout.kind !== "pane") throw new Error("Expected the default Chat pane.");
     const withProject = applyWorkspaceOperation(initial.workspace, {
-      kind: "open-tab",
+      kind: "open-surface",
       mode: "chat",
-      groupId: layout.groupId,
-      tab: {
+      paneId: layout.paneId,
+      surface: {
         kind: "project",
         id: "00000000-0000-4000-8000-000000000888" as never,
         projectId,
@@ -1547,10 +1704,7 @@ describe("App", () => {
     // thread row rather than clicking a button that has not been rendered yet.
     await user.click(await within(threads).findByRole("button", { name: /Older chat/ }));
 
-    expect(await screen.findByRole("tab", { name: "Older chat" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(await screen.findByRole("region", { name: "Workspace pane: Older chat" })).toBeVisible();
   });
 
   it("keeps the owning Code Project active while a Code thread tab is selected", async () => {
@@ -1589,12 +1743,12 @@ describe("App", () => {
     const user = userEvent.setup();
     const initial = codeShellBootstrap().workspace;
     const code = initial.layouts.code;
-    if (code.kind !== "group") throw new Error("Default Code layout must be a group.");
+    if (code.kind !== "pane") throw new Error("Default Code layout must be a pane.");
     const restoredWorkspace = applyWorkspaceOperation(initial, {
-      kind: "open-tab",
+      kind: "open-surface",
       mode: "code",
-      groupId: code.groupId,
-      tab: {
+      paneId: code.paneId,
+      surface: {
         kind: "project",
         id: "00000000-0000-4000-8000-000000000630" as never,
         projectId,
@@ -1644,13 +1798,13 @@ describe("App", () => {
   it("keeps Project context and the Right Utility Dock on the active split group", async () => {
     const initial = codeShellBootstrap().workspace;
     const code = initial.layouts.code;
-    if (code.kind !== "group") throw new Error("Default Code layout must be a group.");
+    if (code.kind !== "pane") throw new Error("Default Code layout must be a pane.");
     const projectTabId = "00000000-0000-4000-8000-000000000631" as never;
     const withProject = applyWorkspaceOperation(initial, {
-      kind: "open-tab",
+      kind: "open-surface",
       mode: "code",
-      groupId: code.groupId,
-      tab: {
+      paneId: code.paneId,
+      surface: {
         kind: "project",
         id: projectTabId,
         projectId,
@@ -1658,17 +1812,35 @@ describe("App", () => {
         title: "Octant",
       },
     });
-    const withSplitProject = applyWorkspaceOperation(withProject, {
-      kind: "split-group",
+    const withSplit = applyWorkspaceOperation(withProject, {
+      kind: "split-pane",
       mode: "code",
-      groupId: code.groupId,
-      tabId: projectTabId,
-      splitNodeId: "00000000-0000-4000-8000-000000000632" as never,
-      newGroupNodeId: "00000000-0000-4000-8000-000000000633" as never,
-      newGroupId: "00000000-0000-4000-8000-000000000634" as never,
+      targetPaneId: code.paneId,
+      surface: {
+        kind: "welcome",
+        id: "00000000-0000-4000-8000-000000000632" as never,
+        mode: "code",
+        title: "Welcome to Code",
+      },
+      splitNodeId: "00000000-0000-4000-8000-000000000633" as never,
+      newPaneNodeId: "00000000-0000-4000-8000-000000000634" as never,
+      newPaneId: "00000000-0000-4000-8000-000000000635" as never,
       orientation: "horizontal",
       placement: "after",
       ratio: 0.5 as never,
+    });
+    // Re-activate the Project pane: the dock should follow the active pane.
+    const withSplitProject = applyWorkspaceOperation(withSplit, {
+      kind: "open-surface",
+      mode: "code",
+      paneId: code.paneId,
+      surface: {
+        kind: "project",
+        id: "00000000-0000-4000-8000-000000000636" as never,
+        projectId,
+        mode: "code",
+        title: "Octant",
+      },
     });
     const projectApi = projects();
     vi.mocked(projectApi.memory).mockResolvedValue({ projectId, active: [], history: [] });
@@ -1824,7 +1996,7 @@ describe("App", () => {
       screen.getByRole("status", { name: /^Host: This Mac · (Connected|Connecting)$/ }),
     ).toBeVisible();
     expect(document.querySelector(".window-chrome__identity")).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Welcome to Chat" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Workspace pane: Welcome to Chat" })).toBeVisible();
     expect(screen.getByRole("banner")).toHaveAccessibleName(
       "Workspace actions for Welcome to Chat",
     );
@@ -1997,7 +2169,7 @@ describe("App", () => {
       />,
     );
 
-    await screen.findByRole("tab", { name: "Welcome to Chat" });
+    await screen.findByRole("region", { name: "Workspace pane: Welcome to Chat" });
     await waitFor(() => expect(subscribeStartNewAgent).toHaveBeenCalled());
     await act(async () => startNewAgent?.());
     await waitFor(() =>
@@ -2005,9 +2177,9 @@ describe("App", () => {
         shellApi.execute.mock.calls.some(
           ([command]) =>
             command.kind === "apply-workspace-operation" &&
-            command.operation.kind === "open-tab" &&
+            command.operation.kind === "open-surface" &&
             command.operation.mode === "chat" &&
-            command.operation.tab.kind === "draft-thread",
+            command.operation.surface.kind === "draft-thread",
         ),
       ).toBe(true),
     );
@@ -2043,9 +2215,9 @@ describe("App", () => {
         shellApi.execute.mock.calls.some(
           ([command]) =>
             command.kind === "apply-workspace-operation" &&
-            command.operation.kind === "open-tab" &&
-            command.operation.tab.kind === "project" &&
-            String(command.operation.tab.projectId) === String(projectId),
+            command.operation.kind === "open-surface" &&
+            command.operation.surface.kind === "project" &&
+            String(command.operation.surface.projectId) === String(projectId),
         ),
       ).toBe(true),
     );
@@ -2054,8 +2226,8 @@ describe("App", () => {
       shellApi.execute.mock.calls.filter(
         ([command]) =>
           command.kind === "apply-workspace-operation" &&
-          command.operation.kind === "open-tab" &&
-          command.operation.tab.kind === "project",
+          command.operation.kind === "open-surface" &&
+          command.operation.surface.kind === "project",
       ),
     ).toHaveLength(1);
   });
@@ -2096,9 +2268,9 @@ describe("App", () => {
         shellApi.execute.mock.calls.some(
           ([command]) =>
             command.kind === "apply-workspace-operation" &&
-            command.operation.kind === "open-tab" &&
-            command.operation.tab.kind === "code-overview" &&
-            String(command.operation.tab.threadId) === String(codeThreadId),
+            command.operation.kind === "open-surface" &&
+            command.operation.surface.kind === "code-overview" &&
+            String(command.operation.surface.threadId) === String(codeThreadId),
         ),
       ).toBe(true),
     );
@@ -2149,9 +2321,9 @@ describe("App", () => {
       shellApi.execute.mock.calls.some(
         ([command]) =>
           command.kind === "apply-workspace-operation" &&
-          command.operation.kind === "open-tab" &&
-          command.operation.tab.kind === "code-overview" &&
-          String(command.operation.tab.threadId) === String(codeThreadId),
+          command.operation.kind === "open-surface" &&
+          command.operation.surface.kind === "code-overview" &&
+          String(command.operation.surface.threadId) === String(codeThreadId),
       ),
     ).toBe(false);
   });
@@ -2263,10 +2435,7 @@ describe("App", () => {
     ).toBeVisible();
 
     await openSidebarProject(user, "Octant");
-    expect(await screen.findByRole("tab", { name: "Octant" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(await screen.findByRole("region", { name: "Workspace pane: Octant" })).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent("Relink required");
     await user.click(screen.getByRole("button", { name: "Choose new root" }));
     expect(hostBridge.selectProjectRoot).toHaveBeenCalledWith("code");
@@ -2396,9 +2565,9 @@ describe("App", () => {
       expect(shellApi.execute).toHaveBeenCalledWith(
         expect.objectContaining({
           operation: expect.objectContaining({
-            kind: "switch-project-tab",
+            kind: "switch-project-surface",
             mode: "code",
-            tab: expect.objectContaining({ threadId: codeThreadId }),
+            surface: expect.objectContaining({ threadId: codeThreadId }),
           }),
         }),
       ),
@@ -2442,9 +2611,9 @@ describe("App", () => {
       expect(shellApi.execute).toHaveBeenCalledWith(
         expect.objectContaining({
           operation: expect.objectContaining({
-            kind: "switch-project-tab",
+            kind: "switch-project-surface",
             mode: "code",
-            tab: expect.objectContaining({ threadId: codeThreadId }),
+            surface: expect.objectContaining({ threadId: codeThreadId }),
           }),
         }),
       ),
@@ -2492,15 +2661,18 @@ describe("App", () => {
     expect(document.body).not.toHaveTextContent("/private/unvalidated-selection");
   });
 
-  it("renders an unavailable placeholder restored by the server bootstrap", async () => {
+  it("renders the mode welcome for a surface the server restored as layout-only", async () => {
     const restored = codeShellBootstrap();
     const code = restored.workspace.layouts.code;
-    if (code.kind !== "group") throw new Error("default code layout must be a group");
+    if (code.kind !== "pane") throw new Error("default code layout must be a pane");
+    // The server restores a pane whose surface no longer resolves as that
+    // mode's welcome surface in place, so the renderer only ever receives
+    // surfaces it can honestly show.
     const recoveredTab = {
-      kind: "unavailable" as const,
-      id: code.tabs[0]!.id,
-      title: "Recovered editor",
-      reason: "This tab type is unavailable in this version of Octant.",
+      kind: "welcome" as const,
+      id: code.surface.id,
+      mode: "code" as const,
+      title: "Welcome to Code",
     };
     const recovered: ShellBootstrap = {
       ...restored,
@@ -2508,7 +2680,7 @@ describe("App", () => {
         ...restored.workspace,
         layouts: {
           ...restored.workspace.layouts,
-          code: { ...code, tabs: [recoveredTab], activeTabId: recoveredTab.id },
+          code: { ...code, surface: recoveredTab },
         },
       },
     };
@@ -2522,14 +2694,9 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("heading", { name: "Recovered editor" })).toBeVisible();
     expect(
-      screen.getByText("This tab type is unavailable in this version of Octant."),
+      await screen.findByRole("region", { name: "Workspace pane: Welcome to Code" }),
     ).toBeVisible();
-    expect(screen.getByRole("tab", { name: "Recovered editor" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
   });
 
   it("opens implemented settings and deep-links search results to focused controls", async () => {
@@ -2545,14 +2712,13 @@ describe("App", () => {
       />,
     );
 
-    const activeTabId = (await screen.findByRole("tab", { selected: true })).getAttribute(
-      "data-workspace-tab-id",
-    );
+    const activePaneId = (
+      await screen.findByRole("region", { name: /Workspace pane:/ })
+    ).getAttribute("data-workspace-pane-id");
     await openSettingsFromSidebar(user);
     expect(await screen.findByRole("heading", { level: 1, name: "General" })).toBeVisible();
     expect(screen.getByRole("complementary", { name: "Settings sidebar" })).toBeVisible();
-    expect(screen.queryByRole("tab", { name: "Settings" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Welcome to Chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: /Workspace pane:/ })).not.toBeInTheDocument();
     expect(document.querySelector(".settings-view")).toBeVisible();
     // General is the default section; Chat/Work toggles are visible there.
     expect(screen.getByRole("switch", { name: "Enable Chat" })).toBeVisible();
@@ -2561,9 +2727,9 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Back to app" }));
     expect(screen.queryByRole("region", { name: "Settings" })).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { selected: true })).toHaveAttribute(
-      "data-workspace-tab-id",
-      activeTabId,
+    expect(screen.getByRole("region", { name: /Workspace pane:/ })).toHaveAttribute(
+      "data-workspace-pane-id",
+      activePaneId,
     );
 
     await openSettingsFromSidebar(user);
@@ -2659,18 +2825,21 @@ describe("App", () => {
         shellClient={client(bootstrap())}
       />,
     );
-    const tab = await screen.findByRole("tab", { name: "Welcome to Chat" });
-    tab.focus();
+    const launcher = await screen.findByRole("button", { name: "Open surface" });
+    launcher.focus();
+    await user.keyboard("{Enter}");
+    // The disclosure focuses its first action; Enter opens that surface.
     await user.keyboard("{Enter}");
     const liveRegion = document.querySelector('[aria-live="polite"]');
     await waitFor(() => expect(liveRegion).toHaveAttribute("data-announcement-sequence", "1"));
     expect(liveRegion).toHaveClass("sr-only");
     expect(liveRegion).toHaveStyle({ position: "absolute", width: "1px" });
-    expect(liveRegion).toHaveTextContent("Tab activated. Event 1.");
+    expect(liveRegion).toHaveTextContent("Welcome to Chat opened. Event 1.");
     expect(screen.getByText("Event 1.")).toHaveStyle({ position: "absolute", width: "1px" });
 
     await user.keyboard("{Enter}");
+    await user.keyboard("{Enter}");
     await waitFor(() => expect(liveRegion).toHaveAttribute("data-announcement-sequence", "2"));
-    expect(liveRegion).toHaveTextContent("Tab activated.");
+    expect(liveRegion).toHaveTextContent("Welcome to Chat opened.");
   });
 });

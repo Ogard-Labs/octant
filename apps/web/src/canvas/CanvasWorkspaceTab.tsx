@@ -21,7 +21,7 @@ import type {
   CanvasShareSnapshotRequest,
   CanvasShareSnapshotRevokeRequest,
 } from "@octant/contracts/canvas-share-snapshot";
-import type { TabGroupId, WorkspaceTab } from "@octant/contracts/shell";
+import type { WorkspaceTab } from "@octant/contracts/shell";
 import { ShellState } from "../shell/ShellState";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 import {
@@ -36,12 +36,7 @@ import { CanvasWorkspaceTabActions } from "./CanvasWorkspaceTabActions";
 
 export interface CanvasWorkspaceTabProps {
   readonly client: CanvasClient | undefined;
-  readonly groupId: TabGroupId;
   readonly onAttachContext?: (selection: CanvasContextSelection) => void;
-  readonly onTogglePin?: (
-    groupId: TabGroupId,
-    tab: Extract<WorkspaceTab, { readonly kind: "canvas" }>,
-  ) => void;
   readonly tab: Extract<WorkspaceTab, { readonly kind: "canvas" }>;
   readonly onPinCanvasInFocusZone?: (request: {
     readonly canvasId: CanvasId;
@@ -349,15 +344,12 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
 
   return (
     <div className="canvas-workspace-tab">
-      {props.onAttachContext !== undefined &&
-      props.onTogglePin !== undefined &&
-      selectedVersionId !== undefined ? (
+      {props.onAttachContext !== undefined && selectedVersionId !== undefined ? (
         <CanvasWorkspaceTabActions
           currentSequence={expectedSequence}
           currentVersionId={selectedVersionId}
           displayName={definition.title}
           onAttachContext={props.onAttachContext}
-          onTogglePin={() => props.onTogglePin?.(props.groupId, props.tab)}
           {...(props.onPinCanvasInFocusZone === undefined
             ? {}
             : {
@@ -367,7 +359,6 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
                     title: definition.title,
                   }),
               })}
-          pinned={props.tab.pinned === true}
           tab={props.tab}
         />
       ) : null}

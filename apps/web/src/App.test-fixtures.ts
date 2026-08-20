@@ -38,6 +38,7 @@ import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { contextFixture } from "./context/contextFixtures";
 import { type SplitWorkspaceProps } from "./shell/SplitWorkspace";
+import type { WorkspaceSurfaceDragHandle } from "./shell/useWorkspaceTabDrag";
 import {
   decodeChatBootstrap,
   decodeChatCommandResult,
@@ -201,14 +202,14 @@ export function chatShellBootstrap(): ShellBootstrap {
 export function splitChatShellBootstrap(): ShellBootstrap {
   const value = chatShellBootstrap();
   const chatLayout = value.workspace.layouts.chat;
-  if (chatLayout.kind !== "group") throw new Error("Expected the default Chat group.");
+  if (chatLayout.kind !== "pane") throw new Error("Expected the default Chat pane.");
   const withOlderChat = applyWorkspaceOperation(
     value.workspace,
     decodeWorkspaceOperation({
-      kind: "open-tab",
+      kind: "open-surface",
       mode: "chat",
-      groupId: chatLayout.groupId,
-      tab: {
+      paneId: String(chatLayout.paneId),
+      surface: {
         kind: "chat-thread",
         id: "00000000-0000-4000-8000-000000000831",
         threadId: oldChatThreadId,
@@ -217,33 +218,24 @@ export function splitChatShellBootstrap(): ShellBootstrap {
       },
     }),
   );
-  const withBothChats = applyWorkspaceOperation(
-    withOlderChat,
-    decodeWorkspaceOperation({
-      kind: "open-tab",
-      mode: "chat",
-      groupId: chatLayout.groupId,
-      tab: {
-        kind: "chat-thread",
-        id: "00000000-0000-4000-8000-000000000832",
-        threadId: createdChatThreadId,
-        mode: "chat",
-        title: "Exact created chat",
-      },
-    }),
-  );
   return {
     ...value,
     workspace: applyWorkspaceOperation(
-      withBothChats,
+      withOlderChat,
       decodeWorkspaceOperation({
-        kind: "split-group",
+        kind: "split-pane",
         mode: "chat",
-        groupId: chatLayout.groupId,
-        tabId: "00000000-0000-4000-8000-000000000832",
+        targetPaneId: String(chatLayout.paneId),
+        surface: {
+          kind: "chat-thread",
+          id: "00000000-0000-4000-8000-000000000832",
+          threadId: createdChatThreadId,
+          mode: "chat",
+          title: "Exact created chat",
+        },
         splitNodeId: "00000000-0000-4000-8000-000000000833",
-        newGroupNodeId: "00000000-0000-4000-8000-000000000834",
-        newGroupId: "00000000-0000-4000-8000-000000000835",
+        newPaneNodeId: "00000000-0000-4000-8000-000000000834",
+        newPaneId: "00000000-0000-4000-8000-000000000835",
         orientation: "horizontal",
         placement: "after",
         ratio: 0.5,
@@ -259,16 +251,16 @@ export function codeShellBootstrap(): ShellBootstrap {
     mode: "code",
   });
   const layout = activeCodeWorkspace.layouts.code;
-  if (layout.kind !== "group") throw new Error("Expected the default Code group.");
+  if (layout.kind !== "pane") throw new Error("Expected the default Code pane.");
   return {
     ...value,
     workspace: applyWorkspaceOperation(
       activeCodeWorkspace,
       decodeWorkspaceOperation({
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "code",
-        groupId: layout.groupId,
-        tab: {
+        paneId: String(layout.paneId),
+        surface: {
           kind: "code-overview",
           id: "00000000-0000-4000-8000-000000000806",
           threadId: codeThreadId,
@@ -614,7 +606,7 @@ export function workShellBootstrap(): ShellBootstrap {
     mode: "work",
   });
   const layout = activeWorkModeWorkspace.layouts.work;
-  if (layout.kind !== "group") throw new Error("Expected the default Work group.");
+  if (layout.kind !== "pane") throw new Error("Expected the default Work pane.");
   const boundWorkspace = {
     ...activeWorkModeWorkspace,
     contextByMode: {
@@ -631,10 +623,10 @@ export function workShellBootstrap(): ShellBootstrap {
     workspace: applyWorkspaceOperation(
       boundWorkspace,
       decodeWorkspaceOperation({
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "work",
-        groupId: layout.groupId,
-        tab: {
+        paneId: String(layout.paneId),
+        surface: {
           kind: "project",
           id: "00000000-0000-4000-8000-000000000808",
           projectId: workProjectId,
@@ -649,16 +641,16 @@ export function workShellBootstrap(): ShellBootstrap {
 export function workDraftShellBootstrap(): ShellBootstrap {
   const value = workShellBootstrap();
   const layout = value.workspace.layouts.work;
-  if (layout.kind !== "group") throw new Error("Expected the Work layout group.");
+  if (layout.kind !== "pane") throw new Error("Expected the Work layout pane.");
   return {
     ...value,
     workspace: applyWorkspaceOperation(
       value.workspace,
       decodeWorkspaceOperation({
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "work",
-        groupId: layout.groupId,
-        tab: {
+        paneId: String(layout.paneId),
+        surface: {
           kind: "draft-thread",
           id: "00000000-0000-4000-8000-000000000809",
           mode: "work",
@@ -682,7 +674,7 @@ export function codeDraftShellBootstrap(draftProjectId: ProjectId): ShellBootstr
     mode: "code",
   });
   const layout = activeWorkspace.layouts.code;
-  if (layout.kind !== "group") throw new Error("Expected the Code layout group.");
+  if (layout.kind !== "pane") throw new Error("Expected the Code layout pane.");
   return {
     ...value,
     workspace: applyWorkspaceOperation(
@@ -694,10 +686,10 @@ export function codeDraftShellBootstrap(draftProjectId: ProjectId): ShellBootstr
         },
       },
       decodeWorkspaceOperation({
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "code",
-        groupId: layout.groupId,
-        tab: {
+        paneId: String(layout.paneId),
+        surface: {
           kind: "draft-thread",
           id: "00000000-0000-4000-8000-000000000810",
           mode: "code",
@@ -884,56 +876,55 @@ export function splitLayout(
     orientation,
     ratio,
     first: {
-      kind: "group",
+      kind: "pane",
       nodeId: "00000000-0000-4000-8000-000000000611",
-      groupId: "00000000-0000-4000-8000-000000000612",
-      tabs: [
-        {
-          kind: "welcome",
-          id: "00000000-0000-4000-8000-000000000613",
-          mode: "code",
-          title: "First",
-        },
-        {
-          kind: "welcome",
-          id: "00000000-0000-4000-8000-000000000614",
-          mode: "code",
-          title: "Second",
-        },
-      ],
-      activeTabId: "00000000-0000-4000-8000-000000000613",
+      paneId: "00000000-0000-4000-8000-000000000612",
+      surface: {
+        kind: "welcome",
+        id: "00000000-0000-4000-8000-000000000613",
+        mode: "code",
+        title: "First",
+      },
     },
     second: {
-      kind: "group",
+      kind: "pane",
       nodeId: "00000000-0000-4000-8000-000000000621",
-      groupId: "00000000-0000-4000-8000-000000000622",
-      tabs: [
-        {
-          kind: "welcome",
-          id: "00000000-0000-4000-8000-000000000623",
-          mode: "code",
-          title: "Third",
-        },
-      ],
-      activeTabId: "00000000-0000-4000-8000-000000000623",
+      paneId: "00000000-0000-4000-8000-000000000622",
+      surface: {
+        kind: "welcome",
+        id: "00000000-0000-4000-8000-000000000623",
+        mode: "code",
+        title: "Second",
+      },
     },
   });
 }
 
-export function splitCallbacks(): Omit<SplitWorkspaceProps, "layout" | "renderTab"> {
+/** A drag handle whose gestures are recorded but never resolve a drop. */
+export function stubSurfaceDragHandle(): WorkspaceSurfaceDragHandle {
   return {
+    active: null,
+    consumeSuppressedClick: vi.fn(() => false),
+    onPointerCancel: vi.fn(),
+    onPointerDown: vi.fn(),
+    onPointerMove: vi.fn(),
+    onPointerUp: vi.fn(),
+    rootRef: { current: null },
+  };
+}
+
+export function splitCallbacks(): Omit<SplitWorkspaceProps, "layout" | "renderSurface"> {
+  return {
+    drag: stubSurfaceDragHandle(),
     mode: "code",
-    onActivate: vi.fn(),
+    onActivatePane: vi.fn(),
     onClearFocus: vi.fn(),
-    onClose: vi.fn(),
+    onClosePane: vi.fn(),
     onCommitResize: vi.fn(),
     onFocus: vi.fn(),
-    onDropTab: vi.fn(),
-    onMove: vi.fn(),
     onPreviewResize: vi.fn(),
-    onReorder: vi.fn(),
-    onSplit: vi.fn(),
-    totalWorkspaceGroupCount: 4,
+    onSplitPane: vi.fn(),
+    totalWorkspacePaneCount: 4,
   };
 }
 

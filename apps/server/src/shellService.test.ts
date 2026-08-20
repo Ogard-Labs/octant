@@ -265,7 +265,13 @@ describe("ShellService", () => {
         ...base.layouts,
         code: {
           ...code,
-          surface: { kind: "project", id: code.surface.id, projectId, mode: "code", title: "Saved" },
+          surface: {
+            kind: "project",
+            id: code.surface.id,
+            projectId,
+            mode: "code",
+            title: "Saved",
+          },
         },
       },
     } as never;

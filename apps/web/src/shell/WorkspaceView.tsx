@@ -1,13 +1,13 @@
 import type {
   EnvironmentPresentationState,
   LayoutNodeId,
-  TabGroupId,
+  PaneId,
   WindowWorkspace,
   WorkspaceLayoutNode,
+  WorkspacePane,
   WorkspaceSurfaceCatalog,
   WorkspaceSurfaceDescriptor,
   WorkspaceTab,
-  WorkspaceTabId,
 } from "@octant/contracts/shell";
 import { decodeWorkMutationRequestId } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
@@ -30,7 +30,7 @@ import type { OctantHostBridge } from "./hostBridge";
 import type { ProviderController } from "../providers/useProviderController";
 import { ShellState } from "./ShellState";
 import { TabActivationProvider, type TabActivationRegistry } from "./TabActivation";
-import type { WorkspaceTabDropDestination } from "./workspaceTabDragGeometry";
+import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import { CodeThreadEnvironment } from "../environment/CodeThreadEnvironment";
 import { Component, lazy, Suspense, useCallback, useMemo, useState, type ReactNode } from "react";
 import { buildModelPickerGroups } from "@octant/domain";
@@ -124,7 +124,12 @@ export interface WorkspaceViewProps {
   readonly workRequestClient?: WorkRequestClient;
   readonly onWorkThreadUpdated?: (thread: WorkThread) => void;
   readonly codeProviderChoices: ReadonlyArray<CodeThreadProviderChoice>;
-  readonly focusedGroupId?: TabGroupId;
+  /**
+   * The shared surface-drag pipeline, owned by the shell so sidebar rows and
+   * pane grips feed the same drag. Its root ref lands on the split workspace.
+   */
+  readonly drag: WorkspaceSurfaceDragHandle;
+  readonly focusedPaneId?: PaneId;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedCreateHostId?: import("@octant/contracts/host").HostId;
   readonly fixedCreateHostId?: import("@octant/contracts/host").HostId;
@@ -135,12 +140,10 @@ export interface WorkspaceViewProps {
   readonly layout: WorkspaceLayoutNode;
   readonly memoryRevision?: number;
   readonly mode: "chat" | "work" | "code";
-  readonly onActivate: (groupId: TabGroupId, tabId: WorkspaceTabId) => void;
+  /** A pointer landing in a pane makes it the window's active pane. */
+  readonly onActivatePane: (paneId: PaneId) => void;
   readonly onClearFocus: () => void;
-  readonly onClose: (
-    groupId: TabGroupId,
-    tabId: WorkspaceTabId,
-  ) => Promise<boolean | void> | boolean | void;
+  readonly onClosePane: (paneId: PaneId) => Promise<boolean | void> | boolean | void;
   readonly onCreateChat: (prompt?: string) => void;
   readonly onCreateChatProjectThread?: (
     projectId: ProjectId,
@@ -170,14 +173,7 @@ export interface WorkspaceViewProps {
   readonly workOverviewModel?: WorkOverviewModel;
   readonly workCreateThreadAvailable?: boolean;
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
-  readonly onFocus: (groupId: TabGroupId) => void;
-  readonly onDropTab: (destination: WorkspaceTabDropDestination) => void;
-  readonly onMove: (
-    fromGroupId: TabGroupId,
-    toGroupId: TabGroupId,
-    tabId: WorkspaceTabId,
-    index: number,
-  ) => void;
+  readonly onFocus: (paneId: PaneId) => void;
   readonly onOpenCodeThread: (threadId: CodeThreadId, title: string, projectId?: ProjectId) => void;
   readonly onOpenWorkThread?: (threadId: WorkThreadId, projectId: ProjectId) => void;
   /** Opens one repository file as a Code file tab, from the file explorer. */
@@ -214,19 +210,18 @@ export interface WorkspaceViewProps {
   }) => void;
   readonly onOpenSurface?: (
     surface: WorkspaceSurfaceDescriptor["kind"],
-    groupId: TabGroupId,
+    paneId: PaneId,
     /**
      * The Browser context this surface must attach to, when the caller created
      * one for it. Omitted for the ordinary Browser surface, which
-     * stays one shared tab per thread.
+     * stays one shared view per thread.
      */
     browserContextId?: BrowserContextId,
   ) => Promise<boolean>;
   readonly onPreviewResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
-  readonly onReorder: (groupId: TabGroupId, tabId: WorkspaceTabId, index: number) => void;
-  readonly onSplit: (
-    groupId: TabGroupId,
-    tabId: WorkspaceTabId,
+  /** A keyboard path to the edge-drop gesture: split a pane onto a welcome. */
+  readonly onSplitPane: (
+    paneId: PaneId,
     orientation: "horizontal" | "vertical",
     placement: "before" | "after",
   ) => void;
@@ -260,7 +255,6 @@ export interface WorkspaceViewProps {
   readonly onArchiveProject: (projectId: ProjectId) => void;
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
-  readonly renderTabAccessory?: (tab: WorkspaceTab, groupId: TabGroupId) => ReactNode;
   readonly statusBar?: ReactNode;
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
@@ -275,7 +269,6 @@ export interface WorkspaceViewProps {
   readonly canvasClient?: CanvasClient;
   readonly onOpenCanvas?: (entry: CanvasInventoryEntry) => void;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
-  readonly onToggleCanvasPin?: (groupId: TabGroupId, tab: WorkspaceTab) => void;
   readonly draftProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly codeProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
   readonly workProviderGroups?: ReadonlyArray<import("@octant/domain").PickerGroup>;
@@ -353,52 +346,52 @@ export function WorkspaceView(props: WorkspaceViewProps) {
     onAttachCanvasContext: pinCanvasContext,
     onRemoveCanvasSelection: removeCanvasSelection,
   };
-  const closeTab = useCallback(
-    async (groupId: TabGroupId, tabId: WorkspaceTabId) => {
-      const tab = findWorkspaceTab(props.workspace, tabId);
-      // A terminal tab that carries an identity of its own is the only thing
-      // that knows it: the identity was minted for that tab and is recorded
-      // nowhere else, so closing the tab would leave the shell running with
-      // nothing able to reach, watch, or stop it for the rest of the session.
-      // The shutdown therefore has to be confirmed before the tab goes, not
-      // after — a transient failure, a refused operation, or a checkout that
-      // will not resolve all mean the tab is what has to stay.
-      // A tab with no identity of its own only views the thread's original
+  const closePane = useCallback(
+    async (paneId: PaneId) => {
+      const surface = findWorkspacePane(props.workspace, paneId)?.surface;
+      // A terminal surface that carries an identity of its own is the only
+      // thing that knows it: the identity was minted for that view and is
+      // recorded nowhere else, so closing the pane would leave the shell
+      // running with nothing able to reach, watch, or stop it for the rest of
+      // the session. The shutdown therefore has to be confirmed before the
+      // pane goes, not after — a transient failure, a refused operation, or a
+      // checkout that will not resolve all mean the pane is what has to stay.
+      // A surface with no identity of its own only views the thread's original
       // terminal, which the thread's own Terminal surface still reaches, so it
       // is left running.
-      if (tab?.kind === "code-terminal" && tab.terminalId !== undefined) {
-        const checkoutId = resolveCodeTabCheckoutId(tab, props.codeController);
+      if (surface?.kind === "code-terminal" && surface.terminalId !== undefined) {
+        const checkoutId = resolveCodeTabCheckoutId(surface, props.codeController);
         if (checkoutId === undefined) return;
         const stopped = await props.codeController.client
           .executeOperation({
             kind: "stop-terminal",
             operationId: globalThis.crypto.randomUUID() as never,
-            terminalId: tab.terminalId,
-            threadId: tab.threadId,
+            terminalId: surface.terminalId,
+            threadId: surface.threadId,
             checkoutId,
           })
           .catch(() => undefined);
         // A terminal the host no longer owns has already stopped — the user
         // pressed Stop inside it, or its shell exited on its own — so there is
-        // nothing left to strand and the tab may go. Every other answer keeps
-        // the tab, because the tab is the only thing that can retry.
+        // nothing left to strand and the pane may go. Every other answer keeps
+        // the pane, because the pane is the only thing that can retry.
         const cleaned =
           stopped?.kind === "terminal-state" ||
           (stopped?.kind === "operation-failed" && stopped.failure.category === "unavailable");
         if (!cleaned) return;
       }
-      const closed = await props.onClose(groupId, tabId);
+      const closed = await props.onClosePane(paneId);
       if (closed === false) return;
       if (
-        tab?.kind === "browser" &&
-        tab.threadId !== undefined &&
+        surface?.kind === "browser" &&
+        surface.threadId !== undefined &&
         props.browserAutomationClient !== undefined
       ) {
-        // A tab that owns one context takes only that context with it; the
-        // thread's other Local servers sessions are none of its business
-        // Only the thread's shared Browser tab releases the thread.
-        const threadId = tab.threadId;
-        const contextId = tab.contextId;
+        // A surface that owns one context takes only that context with it; the
+        // thread's other Local servers sessions are none of its business.
+        // Only the thread's shared Browser surface releases the thread.
+        const threadId = surface.threadId;
+        const contextId = surface.contextId;
         await (
           contextId === undefined
             ? props.browserAutomationClient.releaseThread({ threadId })
@@ -406,7 +399,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         ).catch(() => undefined);
       }
     },
-    [props.browserAutomationClient, props.codeController, props.onClose, props.workspace],
+    [props.browserAutomationClient, props.codeController, props.onClosePane, props.workspace],
   );
 
   return (
@@ -427,15 +420,25 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           />
         )}
         <SplitWorkspace
-          {...props}
-          onClose={closeTab}
+          drag={props.drag}
+          layout={props.layout}
+          mode={props.mode}
+          onActivatePane={props.onActivatePane}
+          onClearFocus={props.onClearFocus}
+          onClosePane={(paneId) => void closePane(paneId)}
+          onCommitResize={props.onCommitResize}
+          onFocus={props.onFocus}
+          onPreviewResize={props.onPreviewResize}
+          onSplitPane={props.onSplitPane}
+          {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
           {...(props.availableSurfaces === undefined
             ? {}
             : { availableSurfaces: props.availableSurfaces })}
           {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
-          renderTab={(tab, groupId) => renderTab(tab, props, groupId, canvasContext)}
-          totalWorkspaceGroupCount={Object.values(props.workspace.layouts).reduce(
-            (count, layout) => count + countGroups(layout),
+          onOpenCodeSurface={props.onOpenCodeSurface}
+          renderSurface={(surface, paneId) => renderTab(surface, props, paneId, canvasContext)}
+          totalWorkspacePaneCount={Object.values(props.workspace.layouts).reduce(
+            (count, layout) => count + countPanes(layout),
             0,
           )}
         />
@@ -483,14 +486,14 @@ function CrossContextBanner(props: {
   );
 }
 
-function countGroups(layout: WorkspaceLayoutNode): number {
-  return layout.kind === "group" ? 1 : countGroups(layout.first) + countGroups(layout.second);
+function countPanes(layout: WorkspaceLayoutNode): number {
+  return layout.kind === "pane" ? 1 : countPanes(layout.first) + countPanes(layout.second);
 }
 
 function renderTab(
   tab: WorkspaceTab,
   props: WorkspaceViewProps,
-  groupId: TabGroupId,
+  paneId: PaneId,
   canvasContext: {
     readonly clearCanvasSelections: () => void;
     readonly pendingCanvasSelections: ReadonlyArray<CanvasContextSelection>;
@@ -502,11 +505,11 @@ function renderTab(
   if (isCodeWorkspaceTab(tab)) {
     return (
       <CodeThreadTabSurface controllers={props.codeControllers} key={tab.id} tab={tab}>
-        {(controller) => renderCodeTab(tab, props, groupId, controller)}
+        {(controller) => renderCodeTab(tab, props, paneId, controller)}
       </CodeThreadTabSurface>
     );
   }
-  return renderNonCodeTab(tab, props, groupId, canvasContext, openProviderSettings);
+  return renderNonCodeTab(tab, props, paneId, canvasContext, openProviderSettings);
 }
 
 /**
@@ -538,7 +541,7 @@ function CodeThreadTabSurface(props: {
 function renderCodeTab(
   tab: Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }>,
   props: WorkspaceViewProps,
-  groupId: TabGroupId,
+  paneId: PaneId,
   codeController: CodeController,
 ): React.ReactNode {
   const project = resolveCodeTabProject(tab, props);
@@ -569,7 +572,7 @@ function renderCodeTab(
         {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}
         {...(props.onOpenSurface === undefined
           ? {}
-          : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
+          : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
         onOpenSurface={(kind, options) =>
           options?.terminalId === undefined
             ? props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))
@@ -633,7 +636,7 @@ function renderCodeTab(
         : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
       {...(props.onOpenSurface === undefined
         ? {}
-        : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
+        : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
       threadId={tab.threadId as never}
     >
       {content}
@@ -690,7 +693,7 @@ function renderCodeTab(
                   // throwing, so only its adoption answer proves the context
                   // gained a close path; without one it is released here and
                   // the Open is reported as the failure it was.
-                  const adopted = await onOpenSurface("browser", groupId, contextId);
+                  const adopted = await onOpenSurface("browser", paneId, contextId);
                   if (adopted) return;
                   await releaseBrowserContext(browserAutomationClient, browserThreadId, contextId);
                   throw new Error("No Browser tab adopted the context opened for this server.");
@@ -722,7 +725,7 @@ function renderCodeTab(
 function renderNonCodeTab(
   tab: WorkspaceTab,
   props: WorkspaceViewProps,
-  groupId: TabGroupId,
+  paneId: PaneId,
   canvasContext: {
     readonly clearCanvasSelections: () => void;
     readonly pendingCanvasSelections: ReadonlyArray<CanvasContextSelection>;
@@ -800,12 +803,7 @@ function renderNonCodeTab(
         }}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
         onCancel={() => {
-          // Find the group containing this tab and close it
-          const layout = props.workspace.layouts[tab.mode];
-          const location = findTabLocation(layout, tab.id);
-          if (location !== undefined) {
-            props.onClose(location.groupId, tab.id);
-          }
+          void props.onClosePane(paneId);
         }}
         {...(props.onDraftCreating === undefined ? {} : { creating: props.onDraftCreating })}
         {...(props.onDraftError === undefined ? {} : { errorMessage: props.onDraftError })}
@@ -890,7 +888,7 @@ function renderNonCodeTab(
             : { onComputerUseSessionChange: props.onComputerUseSessionChange })}
           {...(props.onOpenSurface === undefined
             ? {}
-            : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
+            : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
           threadId={tab.threadId as never}
         >
           <WorkThreadWorkspace
@@ -904,7 +902,7 @@ function renderNonCodeTab(
             threadClient={props.workThreadClient}
             {...(props.onOpenSurface === undefined
               ? {}
-              : { onOpenBrowser: () => props.onOpenSurface?.("browser", groupId) })}
+              : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
             threadId={tab.threadId}
             title={tab.title}
             providerGroups={props.workProviderGroups ?? []}
@@ -957,16 +955,6 @@ function renderNonCodeTab(
       />
     );
   }
-  if (tab.kind === "unavailable") {
-    return (
-      <ShellState
-        eyebrow="Workspace unavailable"
-        message={tab.reason}
-        state="warning"
-        title={tab.title}
-      />
-    );
-  }
   if (tab.kind === "preview") {
     return <PreviewWorkspaceTab key={tab.id} tab={tab} client={props.previewClient} />;
   }
@@ -975,10 +963,8 @@ function renderNonCodeTab(
       <CanvasWorkspaceTab
         key={tab.id}
         client={props.canvasClient}
-        groupId={groupId}
         tab={tab}
         onAttachContext={canvasContext.onAttachCanvasContext}
-        {...(props.onToggleCanvasPin === undefined ? {} : { onTogglePin: props.onToggleCanvasPin })}
         {...(props.onPinCanvasInFocusZone === undefined
           ? {}
           : { onPinCanvasInFocusZone: props.onPinCanvasInFocusZone })}
@@ -1561,34 +1547,22 @@ function ChatThreadWorkspace(props: {
   );
 }
 
-function findTabLocation(
-  layout: WorkspaceLayoutNode,
-  tabId: WorkspaceTabId,
-): { readonly groupId: TabGroupId; readonly tabId: WorkspaceTabId } | undefined {
-  if (layout.kind === "group") {
-    const found = layout.tabs.find((candidate) => candidate.id === tabId);
-    return found === undefined ? undefined : { groupId: layout.groupId, tabId: found.id };
-  }
-  return findTabLocation(layout.first, tabId) ?? findTabLocation(layout.second, tabId);
-}
-
-function findWorkspaceTab(
+function findWorkspacePane(
   workspace: WorkspaceViewProps["workspace"],
-  tabId: WorkspaceTabId,
-): WorkspaceTab | undefined {
+  paneId: PaneId,
+): WorkspacePane | undefined {
   for (const mode of ["chat", "work", "code"] as const) {
-    const found = findTabInLayout(workspace.layouts[mode], tabId);
+    const found = findPaneInLayout(workspace.layouts[mode], paneId);
     if (found !== undefined) return found;
   }
   return undefined;
 }
 
-function findTabInLayout(
-  layout: WorkspaceLayoutNode,
-  tabId: WorkspaceTabId,
-): WorkspaceTab | undefined {
-  if (layout.kind === "group") return layout.tabs.find((tab) => tab.id === tabId);
-  return findTabInLayout(layout.first, tabId) ?? findTabInLayout(layout.second, tabId);
+function findPaneInLayout(layout: WorkspaceLayoutNode, paneId: PaneId): WorkspacePane | undefined {
+  if (layout.kind === "pane") {
+    return String(layout.paneId) === String(paneId) ? layout : undefined;
+  }
+  return findPaneInLayout(layout.first, paneId) ?? findPaneInLayout(layout.second, paneId);
 }
 
 function WorkProjectOverviewSlot(props: {

@@ -718,7 +718,6 @@ button:focus-visible {
 }
 
 .new-project:active,
-.workspace-group__action:active,
 .settings-view__action:active,
 .shell-boundary__action:active {
   background: var(--octant-control-pressed);
@@ -1441,7 +1440,7 @@ button:focus-visible {
   pointer-events: none;
 }
 
-.workspace-group {
+.workspace-pane {
   position: relative;
   display: grid;
   width: 100%;
@@ -1452,77 +1451,51 @@ button:focus-visible {
   background: var(--octant-workspace);
 }
 
-.workspace-group[data-focused="true"] {
-  box-shadow: none;
-}
-
-.workspace-group__header {
+.workspace-pane__header {
   position: relative;
   z-index: 3;
   display: flex;
   min-width: 0;
   min-height: 34px;
   align-items: center;
+  gap: 4px;
   padding: 2px var(--octant-window-chrome-reserved-width, 148px) 2px 4px;
 }
 
-.workspace-tabs {
-  display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  min-width: 0;
-  min-height: 30px;
-  gap: 4px;
-  padding: 0;
-  overflow-x: auto;
-  background: transparent;
-  scrollbar-width: thin;
-}
-
-.workspace-tabs:has(.workspace-disclosure),
-.workspace-group__header:has(.workspace-disclosure) {
-  overflow: visible;
-}
-
-/* The dock-tab precedent (.right-utility-dock__tabs button): compact ghost
-   items in a 34px chrome rail. At rest a tab is meta ink on nothing; pointing
-   at one, or the one that is active, takes the system's fg ink over the soft
-   fill. The single filled pill at rest is the active affordance — selection
-   stays neutral, with no accent and no border. */
-.workspace-tab-item {
-  position: relative;
+/* The grip carries the pane's surface title and is its one drag handle, in
+   the same quiet meta ink the header rail has always used — pointing at it
+   takes fg ink over the soft fill, exactly the dock-tab precedent. */
+.workspace-pane__grip {
   display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
+  flex: 1 1 auto;
   min-width: 0;
-  max-width: min(184px, 24vw);
   min-height: 26px;
-  overflow: visible;
-  background: transparent;
-  border: 1px solid transparent;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  overflow: hidden;
+  color: var(--oct-meta);
   border-radius: 6px;
+  cursor: grab;
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.workspace-tab-item:hover {
+.workspace-pane__grip:hover {
+  color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
 
-.workspace-tab-slot {
-  position: relative;
-  display: inline-flex;
+.workspace-pane__grip > svg {
   flex: 0 0 auto;
-  max-width: min(184px, 24vw);
 }
 
-.workspace-tab-insertion {
-  z-index: 5;
-  width: 2px;
-  min-height: 28px;
-  align-self: center;
-  background: var(--oct-accent);
-  border-radius: 999px;
-  box-shadow: 0 0 0 1px var(--oct-bg);
-  pointer-events: none;
+.workspace-pane__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .workspace-drop-overlay {
@@ -1581,68 +1554,6 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-.workspace-tab-item:has(.workspace-tab[aria-selected="true"]) {
-  background: var(--oct-fg-soft);
-}
-
-.workspace-tab {
-  width: auto;
-  max-width: 100%;
-  min-width: 96px;
-  min-height: 26px;
-  padding: 0 56px 0 9px;
-  overflow: hidden;
-  color: var(--oct-meta);
-  border-radius: inherit;
-  cursor: pointer;
-  font-size: var(--oct-text-xs);
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.workspace-tab:hover,
-.workspace-tab[aria-selected="true"] {
-  color: var(--oct-fg);
-}
-
-/* The btn-icon recipe's states at the 26px square this rail's pills can hold
-   — the same compromise .window-chrome__button makes in the 34px titlebar
-   row, pressed feedback included. */
-.workspace-tab__action {
-  display: grid;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  color: var(--oct-muted);
-  background: transparent;
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: var(--oct-text-xs);
-}
-
-.workspace-tab__action:hover,
-.workspace-tab__action[aria-expanded="true"] {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
-.workspace-tab__action:active {
-  color: var(--oct-fg);
-  background: var(--octant-control-pressed);
-}
-
-.workspace-tab__actions {
-  position: absolute;
-  right: 1px;
-  display: inline-flex;
-}
-
-.workspace-tab-item > .workspace-tab__action {
-  position: absolute;
-  right: 27px;
-}
-
 .workspace-disclosure {
   position: absolute;
   z-index: 20;
@@ -1656,7 +1567,13 @@ button:focus-visible {
   box-shadow: var(--octant-shadow-overlay);
 }
 
-.workspace-tab__disclosure {
+.workspace-tab-launcher {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.workspace-tab-launcher__disclosure {
   top: calc(100% + 4px);
   right: 0;
 }
@@ -1712,7 +1629,7 @@ button:focus-visible {
   right: 4px;
 }
 
-.workspace-group__panel {
+.workspace-pane__panel {
   display: grid;
   min-width: 0;
   min-height: 0;
@@ -1735,7 +1652,6 @@ button:focus-visible {
 
 /* Drawn to the system's .btn btn-secondary btn-sm recipe until these
    surfaces adopt the classes themselves. */
-.workspace-group__action,
 .settings-view__action,
 .shell-boundary__action {
   min-height: var(--oct-control-height-sm);
@@ -1753,7 +1669,6 @@ button:focus-visible {
     color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
-.workspace-group__action:hover,
 .settings-view__action:hover,
 .shell-boundary__action:hover {
   color: var(--oct-fg);
@@ -2241,7 +2156,7 @@ button:focus-visible {
   text-align: left;
 }
 
-.workspace-group__panel > .shell-state {
+.workspace-pane__panel > .shell-state {
   margin: clamp(36px, 8vh, 72px) clamp(28px, 6vw, 72px);
 }
 
@@ -4583,7 +4498,7 @@ button:focus-visible {
     min-height: 52vh;
   }
 
-  .workspace-group__panel {
+  .workspace-pane__panel {
     padding: 24px 18px;
   }
 
@@ -4669,7 +4584,6 @@ button:focus-visible {
   .new-project,
   .workspace-split__resize::before,
   .workspace-split__resize,
-  .workspace-group__action,
   .settings-view__action,
   .shell-boundary__action,
   .project-memory-inspector * {
@@ -4684,7 +4598,7 @@ button:focus-visible {
     --octant-text-muted: var(--octant-text-muted-high-contrast) !important;
   }
 
-  .workspace-group__header {
+  .workspace-pane__header {
     border-color: var(--octant-border-strong);
   }
 
@@ -4693,8 +4607,7 @@ button:focus-visible {
     border-color: var(--octant-border-strong);
   }
 
-  .project-row[data-active="true"],
-  .workspace-tab-item:has(.workspace-tab[aria-selected="true"]) {
+  .project-row[data-active="true"] {
     box-shadow: inset 0 0 0 1px var(--octant-border-strong);
   }
 
