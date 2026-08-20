@@ -1,5 +1,5 @@
 import { draftThreadModePresentation } from "@octant/contracts/thread-draft";
-import { ArrowUp, Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
+import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
@@ -9,6 +9,7 @@ import type { CreateHostViewScope, ModelPickerSelection, PickerGroup } from "@oc
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
+import { ThreadComposer } from "../composer/ThreadComposer";
 
 export interface ChatWelcomeProps {
   readonly creating?: boolean;
@@ -103,48 +104,46 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         </div>
 
         <div className="draft-thread__composer">
-          <div className="composer">
-            <OctantTextarea
-              aria-label="First message"
-              autoFocus
-              className="composer-input"
-              disabled={!ready || props.creating}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={presentation.composerPlaceholder}
-              ref={textareaRef}
-              rows={3}
-              value={prompt}
-            />
-            <div className="composer-row" aria-label="Thread context">
-              <ComposerModelPicker
-                ariaLabel="Provider and model"
-                disabled={!ready || props.creating === true}
-                groups={props.providerGroups ?? []}
-                onSelect={props.onSelectProvider ?? (() => undefined)}
-                {...(props.onOpenSettings === undefined
-                  ? {}
-                  : { onOpenSettings: props.onOpenSettings })}
-                {...(props.selectedModelId === undefined
-                  ? {}
-                  : { selectedModelId: props.selectedModelId })}
-                {...(props.selectedProviderInstanceId === undefined
-                  ? {}
-                  : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+          <ThreadComposer
+            input={
+              <OctantTextarea
+                aria-label="First message"
+                autoFocus
+                className="composer-input"
+                disabled={!ready || props.creating}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={presentation.composerPlaceholder}
+                ref={textareaRef}
+                rows={3}
+                value={prompt}
               />
-              <span className="composer-gap" />
-              <OctantButton
-                aria-label="Start chat"
-                disabled={!canSubmit}
-                onClick={submit}
-                size="icon"
-                type="button"
-                variant="default"
-              >
-                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-              </OctantButton>
-            </div>
-          </div>
+            }
+            row={{
+              ariaLabel: "Thread context",
+              leading: (
+                <ComposerModelPicker
+                  ariaLabel="Provider and model"
+                  disabled={!ready || props.creating === true}
+                  groups={props.providerGroups ?? []}
+                  onSelect={props.onSelectProvider ?? (() => undefined)}
+                  {...(props.onOpenSettings === undefined
+                    ? {}
+                    : { onOpenSettings: props.onOpenSettings })}
+                  {...(props.selectedModelId === undefined
+                    ? {}
+                    : { selectedModelId: props.selectedModelId })}
+                  {...(props.selectedProviderInstanceId === undefined
+                    ? {}
+                    : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                />
+              ),
+              actions: {
+                kind: "send",
+                send: { ariaLabel: "Start chat", disabled: !canSubmit, onSend: submit },
+              },
+            }}
+          />
           {statusMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">
               {statusMessage}
