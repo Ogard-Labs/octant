@@ -272,6 +272,25 @@ describe("useChatController", () => {
     );
   });
 
+  it("holds a thread the user marked unread until they explicitly read it again", async () => {
+    // With no sequence advanced this sitting, dropping the cursor alone leaves
+    // the comparison at zero-over-zero and the click does visibly nothing.
+    const readCursorStore = createChatReadCursorStore();
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(0)),
+      subscribe: vi.fn(async function* () {}),
+    });
+    const { result } = renderHook(() => useChatController({ client, readCursorStore }));
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
+
+    act(() => readCursorStore.unmark(threadId));
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(true));
+
+    act(() => result.current.markThreadRead(threadId));
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
+  });
+
   it("cancels inactive-thread refresh scheduling on unmount", async () => {
     vi.useFakeTimers();
     try {

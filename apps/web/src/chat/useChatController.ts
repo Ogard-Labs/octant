@@ -50,22 +50,69 @@ export interface ChatControllerOptions {
 
 export interface ChatReadCursorStore {
   readonly getSnapshot: () => ReadonlyMap<string, number>;
+  /**
+   * Thread ids the user explicitly asked to read as unread, over and above the
+   * cursor comparison. A thread with no sequence advanced this sitting has
+   * nothing for a dropped cursor to resurface — zero over zero — so the
+   * explicit request is held here until the next mark spends it. Deliberately
+   * shaped like Code's store: unread is the same sitting-scoped idea in both
+   * modes.
+   */
+  readonly getMarkedUnread: () => ReadonlySet<string>;
   readonly mark: (threadId: ChatThreadId, sequence: number) => void;
+  /**
+   * Drops what this sitting has seen of a thread, so it reads as unread again
+   * — and holds it unread even when no sequence advanced. The cursor only
+   * ever moves forward on its own — a refresh must never spend a mark the user
+   * did not see — but a person asking for the thread back in their unread list
+   * is not the refresh path.
+   */
+  readonly unmark: (threadId: ChatThreadId) => void;
   readonly subscribe: (listener: () => void) => () => void;
 }
 
 export function createChatReadCursorStore(): ChatReadCursorStore {
   let snapshot: ReadonlyMap<string, number> = new Map();
+  let markedUnread: ReadonlySet<string> = new Set();
   const listeners = new Set<() => void>();
+  const announce = () => {
+    for (const listener of listeners) listener();
+  };
   return {
     getSnapshot: () => snapshot,
+    getMarkedUnread: () => markedUnread,
     mark: (threadId, sequence) => {
       const key = String(threadId);
-      if (sequence <= (snapshot.get(key) ?? 0)) return;
-      const next = new Map(snapshot);
-      next.set(key, sequence);
-      snapshot = next;
-      for (const listener of listeners) listener();
+      // Reading a thread with no new sequence still spends an explicit unread
+      // mark: the cursor has nowhere to move, but the user has now seen what
+      // they asked to be reminded of.
+      const spendsUnreadMark = markedUnread.has(key);
+      if (spendsUnreadMark) {
+        const nextMarked = new Set(markedUnread);
+        nextMarked.delete(key);
+        markedUnread = nextMarked;
+      }
+      if (sequence > (snapshot.get(key) ?? 0)) {
+        const next = new Map(snapshot);
+        next.set(key, sequence);
+        snapshot = next;
+      } else if (!spendsUnreadMark) {
+        return;
+      }
+      announce();
+    },
+    unmark: (threadId) => {
+      const key = String(threadId);
+      if (!snapshot.has(key) && markedUnread.has(key)) return;
+      if (snapshot.has(key)) {
+        const next = new Map(snapshot);
+        next.delete(key);
+        snapshot = next;
+      }
+      const nextMarked = new Set(markedUnread);
+      nextMarked.add(key);
+      markedUnread = nextMarked;
+      announce();
     },
     subscribe: (listener) => {
       listeners.add(listener);
@@ -121,6 +168,11 @@ export function useChatController(options: ChatControllerOptions) {
     readCursorStore.subscribe,
     readCursorStore.getSnapshot,
     readCursorStore.getSnapshot,
+  );
+  const markedUnreadThreads = useSyncExternalStore(
+    readCursorStore.subscribe,
+    readCursorStore.getMarkedUnread,
+    readCursorStore.getMarkedUnread,
   );
   const [followUpByThread, setFollowUpByThread] = useState<ReadonlyMap<string, boolean>>(new Map());
   const [sequenceByThread, setSequenceByThread] = useState<ReadonlyMap<string, number>>(new Map());
@@ -180,22 +232,29 @@ export function useChatController(options: ChatControllerOptions) {
     });
   }, []);
 
-  const markThreadRead = useCallback(
-    (threadId: ChatThreadId, sequence: number) => {
-      readCursorStore.mark(threadId, sequence);
-    },
-    [readCursorStore],
-  );
-
   const applyAuthoritativeView = useCallback(
     (view: ChatThreadView, markRead: boolean) => {
       recordSequence(view.thread.id, view.lastSequence);
       recordFollowUp(view.thread.id, view.followUp?.state === "open");
       recordUpdatedAt(view.thread.id, view.thread.updatedAt);
       setActiveView(view);
-      if (markRead) markThreadRead(view.thread.id, view.lastSequence);
+      if (markRead) readCursorStore.mark(view.thread.id, view.lastSequence);
     },
-    [markThreadRead, recordFollowUp, recordSequence, recordUpdatedAt],
+    [readCursorStore, recordFollowUp, recordSequence, recordUpdatedAt],
+  );
+
+  /**
+   * Record a thread as read at the newest sequence this window has heard of,
+   * and spend any explicit unread mark, because the user asked — the row
+   * menu's "Mark as read". The activation and stream marks stay tied to a
+   * rendered view; this one is itself the user's gesture, so the freshest
+   * summary this window holds is what they are declaring seen.
+   */
+  const markThreadRead = useCallback(
+    (threadId: ChatThreadId) => {
+      readCursorStore.mark(threadId, sequenceByThread.get(String(threadId)) ?? 0);
+    },
+    [readCursorStore, sequenceByThread],
   );
 
   const loadBootstrap = useCallback(async () => {
@@ -415,8 +474,21 @@ export function useChatController(options: ChatControllerOptions) {
         });
       }
     }
-    return buildChatThreadNavigation(items);
-  }, [bootstrap, followUpByThread, readCursors, sequenceByThread, updatedAtByThread]);
+    const built = buildChatThreadNavigation(items);
+    if (markedUnreadThreads.size === 0) return built;
+    // The explicit unread mark wins over the cursor comparison, including for
+    // a thread whose latest sequence this window has not heard yet.
+    return built.map((item) =>
+      markedUnreadThreads.has(item.threadId) ? { ...item, unread: true } : item,
+    );
+  }, [
+    bootstrap,
+    followUpByThread,
+    markedUnreadThreads,
+    readCursors,
+    sequenceByThread,
+    updatedAtByThread,
+  ]);
 
   async function execute(command: ChatCommand): Promise<ChatCommandResult | undefined> {
     const commandThreadId = "threadId" in command ? String(command.threadId) : undefined;
@@ -617,6 +689,7 @@ export function useChatController(options: ChatControllerOptions) {
     errorMessage,
     discard,
     execute,
+    markThreadRead,
     navigation,
     pendingDraft,
     pendingDraftCaret: composerDraft.caretIndex,

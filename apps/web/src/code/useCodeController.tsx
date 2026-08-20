@@ -148,12 +148,21 @@ export interface CodeThreadNavigationItem {
  */
 export interface CodeReadCursorStore {
   readonly getSnapshot: () => ReadonlyMap<string, number>;
+  /**
+   * Thread ids the user explicitly asked to read as unread, over and above the
+   * cursor comparison. A thread with no journaled activity this sitting has
+   * nothing for a dropped cursor to resurface — zero over zero — which is
+   * exactly how "mark as unread" used to do visibly nothing. The explicit
+   * request is held here until the next mark spends it.
+   */
+  readonly getMarkedUnread: () => ReadonlySet<string>;
   readonly mark: (threadId: CodeThreadId, sequence: number) => void;
   /**
    * Drops what this sitting has seen of a thread, so its journaled activity
-   * reads as unread again. The cursor only ever moves forward on its own — a
-   * refresh must never spend a mark the user did not see — but a person asking
-   * for the thread back in their unread list is not the refresh path.
+   * reads as unread again — and holds it unread even when nothing was
+   * journaled. The cursor only ever moves forward on its own — a refresh must
+   * never spend a mark the user did not see — but a person asking for the
+   * thread back in their unread list is not the refresh path.
    */
   readonly unmark: (threadId: CodeThreadId) => void;
   readonly subscribe: (listener: () => void) => () => void;
@@ -161,24 +170,46 @@ export interface CodeReadCursorStore {
 
 export function createCodeReadCursorStore(): CodeReadCursorStore {
   let snapshot: ReadonlyMap<string, number> = new Map();
+  let markedUnread: ReadonlySet<string> = new Set();
   const listeners = new Set<() => void>();
+  const announce = () => {
+    for (const listener of listeners) listener();
+  };
   return {
     getSnapshot: () => snapshot,
+    getMarkedUnread: () => markedUnread,
     mark: (threadId, sequence) => {
       const key = String(threadId);
-      if (sequence <= (snapshot.get(key) ?? 0)) return;
-      const next = new Map(snapshot);
-      next.set(key, sequence);
-      snapshot = next;
-      for (const listener of listeners) listener();
+      // Reading a thread with no new journaled activity still spends an
+      // explicit unread mark: the cursor has nowhere to move, but the user
+      // has now seen what they asked to be reminded of.
+      const spendsUnreadMark = markedUnread.has(key);
+      if (spendsUnreadMark) {
+        const nextMarked = new Set(markedUnread);
+        nextMarked.delete(key);
+        markedUnread = nextMarked;
+      }
+      if (sequence > (snapshot.get(key) ?? 0)) {
+        const next = new Map(snapshot);
+        next.set(key, sequence);
+        snapshot = next;
+      } else if (!spendsUnreadMark) {
+        return;
+      }
+      announce();
     },
     unmark: (threadId) => {
       const key = String(threadId);
-      if (!snapshot.has(key)) return;
-      const next = new Map(snapshot);
-      next.delete(key);
-      snapshot = next;
-      for (const listener of listeners) listener();
+      if (!snapshot.has(key) && markedUnread.has(key)) return;
+      if (snapshot.has(key)) {
+        const next = new Map(snapshot);
+        next.delete(key);
+        snapshot = next;
+      }
+      const nextMarked = new Set(markedUnread);
+      nextMarked.add(key);
+      markedUnread = nextMarked;
+      announce();
     },
     subscribe: (listener) => {
       listeners.add(listener);
@@ -194,6 +225,13 @@ export function createCodeReadCursorStore(): CodeReadCursorStore {
  * looking at it.
  */
 const MAX_CODE_RECONNECT_DELAY_MS = 10_000;
+
+/**
+ * The one turn error the controller owns rather than relays. Activation sets
+ * it when replay fails and clears exactly it when a later activation succeeds,
+ * so a retried thread does not keep wearing a stale history banner.
+ */
+const HISTORY_UNAVAILABLE_MESSAGE = "Conversation history could not be loaded.";
 
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
@@ -270,6 +308,11 @@ export function useCodeController(options: CodeControllerOptions) {
     readCursorStore.subscribe,
     readCursorStore.getSnapshot,
     readCursorStore.getSnapshot,
+  );
+  const markedUnreadThreads = useSyncExternalStore(
+    readCursorStore.subscribe,
+    readCursorStore.getMarkedUnread,
+    readCursorStore.getMarkedUnread,
   );
   const client = useMemo(
     () =>
@@ -550,6 +593,20 @@ export function useCodeController(options: CodeControllerOptions) {
     [applyNavigationRefresh, client, markRenderedActivity, readCursorStore],
   );
 
+  /**
+   * Record everything the host has journaled for a thread as read, and spend
+   * any explicit unread mark, because the user asked — from the row's menu or
+   * by bringing the thread's already-open view back in front. Distinct from
+   * the render-driven marks above: those must never run for a thread nobody is
+   * looking at, while this one is itself the user's gesture.
+   */
+  const markThreadRead = useCallback(
+    (threadId: CodeThreadId) => {
+      void recordSeenActivity(threadId);
+    },
+    [recordSeenActivity],
+  );
+
   const installView = useCallback(
     (view: CodeThreadView) => {
       setActiveView(view);
@@ -727,25 +784,31 @@ export function useCodeController(options: CodeControllerOptions) {
         let conversationCursor = 0;
         let conversationIncomplete = false;
         let conversationOperationId: CodeOperationId | undefined;
-        let conversationRendered = false;
         try {
           const hydrated = await hydrateConversation(threadId, request);
           conversationIncomplete = hydrated?.incomplete === true;
           conversationOperationId = hydrated?.incompleteOperationId;
           conversationCursor = hydrated?.nextCursor ?? 0;
-          conversationRendered = true;
+          // A retried activation that succeeds must also take its own error
+          // banner down. Only that message: a first-turn failure noted just
+          // before activation still belongs to the user's bounced prompt.
+          setTurnError((current) =>
+            current === HISTORY_UNAVAILABLE_MESSAGE ? undefined : current,
+          );
         } catch {
           if (!isActive(request, threadGeneration, mounted)) return;
           setConversation([]);
           setConversationHistory("unavailable");
-          setTurnError("Conversation history could not be loaded.");
+          setTurnError(HISTORY_UNAVAILABLE_MESSAGE);
         }
         if (!isActive(request, threadGeneration, mounted)) return;
-        // The thread's own state and the turns it has recorded are on screen
-        // now, so everything the host has journaled for it counts as read. A
-        // thread whose history could not be loaded shows an error instead of
-        // that work, and is left to keep its mark.
-        if (conversationRendered) void recordSeenActivity(threadId);
+        // The thread is open in front of the user now: its recorded turns when
+        // history loaded, its explicit error state when it did not. Either way
+        // they have seen the thread's current state, which is everything the
+        // sidebar's unread dot was pointing at. History failures used to keep
+        // the mark, which left a dot no amount of opening the thread could
+        // clear. Marking stays tied to this open, never to a timer.
+        void recordSeenActivity(threadId);
         let cursor = Number(initial.lastSequence);
         const controller = new AbortController();
         streamAbort.current = controller;
@@ -1152,8 +1215,9 @@ export function useCodeController(options: CodeControllerOptions) {
           title: thread.title,
           followUp: followUps.get(String(thread.id))?.followUp?.state === "open",
           unread:
+            markedUnreadThreads.has(String(thread.id)) ||
             (activityByThread.get(String(thread.id)) ?? 0) >
-            (readCursors.get(String(thread.id)) ?? 0),
+              (readCursors.get(String(thread.id)) ?? 0),
           ...(thread.pinned === true ? { pinned: true } : {}),
           updatedAt: thread.updatedAt,
         }))
@@ -1161,7 +1225,7 @@ export function useCodeController(options: CodeControllerOptions) {
         // Sorting the whole list by recency instead would move a pinned thread
         // the moment anything else ran, which is the opposite of pinning it.
         .sort((left, right) => Number(right.pinned ?? false) - Number(left.pinned ?? false)),
-    [activityByThread, bootstrap, followUps, readCursors],
+    [activityByThread, bootstrap, followUps, markedUnreadThreads, readCursors],
   );
 
   // Only the thread in view streams, so the list is re-read on a timer to keep
@@ -1867,6 +1931,7 @@ export function useCodeController(options: CodeControllerOptions) {
     editorDrafts,
     execute,
     markFollowUp,
+    markThreadRead,
     navigation,
     pendingDraft,
     pendingDraftCaret: composerDraft.caretIndex,
@@ -1879,7 +1944,18 @@ export function useCodeController(options: CodeControllerOptions) {
     refreshFollowUp,
     restoreUndo,
     noteRestoreUndo,
-    retry: () => loadBootstrap("retry"),
+    // A retry issued from a thread view is asking for that thread back, not
+    // only for a fresh thread list: a hydration failure leaves the transcript
+    // in its error state until the thread is activated again, and nothing else
+    // re-activates a tab that is already open.
+    retry: async () => {
+      const reachable = await loadBootstrap("retry");
+      // Fired, not awaited: activation runs the thread's event stream until
+      // the thread is left, so its promise settles far after the retry does.
+      if (reachable && options.activeThreadId !== undefined) {
+        void activateThread(options.activeThreadId);
+      }
+    },
     conversationHistory,
     sendFollowUp,
     setPendingDraft,

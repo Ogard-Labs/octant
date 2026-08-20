@@ -434,11 +434,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           </div>
         )}
         <div className="work-thread-workspace__composer-shell">
-          <div className="draft-thread__input-row">
+          <div className="composer">
             <OctantTextarea
               aria-label="Work prompt"
               autoFocus
-              className="draft-thread__textarea"
+              className="composer-input"
               disabled={creating || completionLocked || props.mutationClient === undefined}
               onChange={(event) =>
                 rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart)
@@ -455,16 +455,19 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               rows={4}
               value={prompt}
             />
-            <OctantButton
-              aria-label="Create artifact"
-              className="draft-thread__send"
-              disabled={!canSubmit}
-              onClick={() => void submit()}
-              type="button"
-              variant="default"
-            >
-              <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-            </OctantButton>
+            <div className="composer-row">
+              <span className="composer-gap" />
+              <OctantButton
+                aria-label="Create artifact"
+                disabled={!canSubmit}
+                onClick={() => void submit()}
+                size="icon"
+                type="button"
+                variant="default"
+              >
+                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+              </OctantButton>
+            </div>
           </div>
           {errorMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">

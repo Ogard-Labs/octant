@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -7,7 +8,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { ArrowUp, Globe2, Paperclip, Slash, Square, X } from "lucide-react";
+import { ArrowUp, Globe2, Paperclip, Slash, SlidersHorizontal, Square, X } from "lucide-react";
 import type { ChatAttachmentId } from "@octant/contracts/chat";
 import { clipboardHasImage, collectPastedImages } from "./composerImagePaste";
 import {
@@ -31,7 +32,6 @@ import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
-import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import {
@@ -220,6 +220,48 @@ export function ChatComposer(props: ChatComposerProps) {
       ? "Stopping is unavailable for this response."
       : undefined);
   const controlDisabled = props.isSending;
+  const modelOptionsPanelId = useId();
+  const [modelOptionsOpen, setModelOptionsOpen] = useState(false);
+  const modelOptionsRef = useRef<HTMLDivElement>(null);
+  const declaredModelOptions = props.modelOptions ?? [];
+  const hasModelOptionControls = declaredModelOptions.length > 0 || props.poolControl !== undefined;
+  // "Set" mirrors the select's own fallback: a stored value the model no
+  // longer declares renders as the provider default, so it must not light the
+  // trigger either.
+  const anyModelOptionSet = declaredModelOptions.some(
+    (option) => option.value !== undefined && option.values.includes(option.value),
+  );
+
+  useEffect(() => {
+    if (!modelOptionsOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      if (modelOptionsRef.current === null) return;
+      if (event.target instanceof Node && modelOptionsRef.current.contains(event.target)) return;
+      // The option selects portal their popups to the body, so a click on an
+      // option is "outside" this panel's subtree; closing on it would dismiss
+      // the panel mid-choice. A listbox is only ever an open select's popup.
+      if (
+        event.target instanceof Node &&
+        Array.from(document.querySelectorAll('[role="listbox"]')).some((popup) =>
+          popup.contains(event.target as Node),
+        )
+      ) {
+        return;
+      }
+      setModelOptionsOpen(false);
+    }
+    // `globalThis.` because this file imports React's KeyboardEvent type,
+    // and a document listener receives the DOM event.
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") setModelOptionsOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [modelOptionsOpen]);
   const status = composeStatus({
     attachment,
     imageAttachment,
@@ -236,11 +278,17 @@ export function ChatComposer(props: ChatComposerProps) {
   // are visually hidden; only actionable state (errors, streaming) is loud.
   const quietStatus = !status.loud;
 
+  // `.composer-input` sizes itself through `field-sizing: content` with the
+  // system's 60–240px bounds; an inline height would override the stylesheet
+  // and reintroduce the legacy clamp. The measurement runs only for engines
+  // without field-sizing (remote clients in Safari/Firefox), mirroring the
+  // same bounds so both paths render the same composer.
   useLayoutEffect(() => {
     const message = messageRef.current;
     if (message === null) return;
+    if (typeof CSS?.supports === "function" && CSS.supports("field-sizing", "content")) return;
     message.style.height = "0px";
-    message.style.height = `${Math.min(Math.max(message.scrollHeight, 28), 180)}px`;
+    message.style.height = `${Math.min(Math.max(message.scrollHeight, 60), 240)}px`;
   }, [props.draft]);
 
   useLayoutEffect(() => {
@@ -366,10 +414,112 @@ export function ChatComposer(props: ChatComposerProps) {
   }
 
   return (
-    <section aria-label="Chat composer" className="chat-composer">
+    <section aria-label="Chat composer" className="composer chat-composer thread-column">
+      <ThreadMentionChips
+        chips={props.threadMentions?.chips ?? []}
+        disabled={controlDisabled}
+        onRemove={(threadId) => props.threadMentions?.onRemoveChip(threadId)}
+        {...(props.threadMentions?.onOpenSideChat === undefined
+          ? {}
+          : { onOpenSideChat: props.threadMentions.onOpenSideChat })}
+      />
+      {(props.pendingAttachments ?? []).length > 0 ? (
+        <ul aria-label="Attached files" className="composer-chips chat-composer__selections">
+          {(props.pendingAttachments ?? []).map((attachmentSelection) => (
+            <li key={String(attachmentSelection.id)} className="chip chat-composer__selection">
+              <span>{attachmentSelection.displayName}</span>
+              {props.onRemoveAttachment === undefined ? null : (
+                <button
+                  aria-label={`Remove ${attachmentSelection.displayName} attachment`}
+                  className="chip-x window-no-drag"
+                  disabled={controlDisabled}
+                  onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
+                  type="button"
+                >
+                  <X aria-hidden="true" size={10} strokeWidth={1.8} />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {(props.pendingPreviewSelections ?? []).length > 0 ? (
+        <ul
+          aria-label="Attached preview selections"
+          className="composer-chips chat-composer__selections"
+        >
+          {(props.pendingPreviewSelections ?? []).map((selection) => (
+            <li key={String(selection.id)} className="chip chat-composer__selection">
+              <span>{selection.displayName}</span>
+              {props.onRemovePreviewSelection === undefined ? null : (
+                <OctantButton
+                  aria-label={`Remove ${selection.displayName} selection`}
+                  disabled={controlDisabled}
+                  onClick={() => props.onRemovePreviewSelection?.(selection.id)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Remove
+                </OctantButton>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {(props.pendingCanvasSelections ?? []).length > 0 ? (
+        <ul
+          aria-label="Attached canvas selections"
+          className="composer-chips chat-composer__selections"
+        >
+          {(props.pendingCanvasSelections ?? []).map((selection) => (
+            <li key={String(selection.id)} className="chip chat-composer__selection">
+              <span>{selection.displayName}</span>
+              {props.onRemoveCanvasSelection === undefined ? null : (
+                <OctantButton
+                  aria-label={`Remove ${selection.displayName} canvas selection`}
+                  disabled={controlDisabled}
+                  onClick={() => props.onRemoveCanvasSelection?.(selection.id)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Remove
+                </OctantButton>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {(props.pendingExtensionSelections ?? []).length > 0 ? (
+        <ul aria-label="Selected extensions" className="composer-chips chat-composer__selections">
+          {(props.pendingExtensionSelections ?? []).map((item) => (
+            <li key={item.reference} className="chip chat-composer__selection">
+              <span>{item.label}</span>
+              <span className="chat-composer__selection-receipt">
+                {item.status.kind === "selected"
+                  ? "Selection verified"
+                  : `Blocked: ${item.status.reason}`}
+              </span>
+              {props.onRemoveExtensionSelection === undefined ? null : (
+                <OctantButton
+                  aria-label={`Remove ${item.label} extension`}
+                  disabled={controlDisabled}
+                  onClick={() => props.onRemoveExtensionSelection?.(item.reference)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  Remove
+                </OctantButton>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <label className="chat-composer__message-field">
         <span className="chat-composer__visually-hidden">Message</span>
-        <OctantTextarea
+        <textarea
           aria-activedescendant={
             activeCommand !== undefined
               ? `${commandListId}-${activeCommand.id}`
@@ -387,6 +537,7 @@ export function ChatComposer(props: ChatComposerProps) {
               ? undefined
               : commandOpen || mentionOpen
           }
+          className="composer-input window-no-drag"
           disabled={controlDisabled}
           onChange={(event) => {
             props.onDraftChange(event.currentTarget.value);
@@ -455,104 +606,11 @@ export function ChatComposer(props: ChatComposerProps) {
           onHover={mention.setActiveIndex}
         />
       ) : null}
-      <ThreadMentionChips
-        chips={props.threadMentions?.chips ?? []}
-        disabled={controlDisabled}
-        onRemove={(threadId) => props.threadMentions?.onRemoveChip(threadId)}
-        {...(props.threadMentions?.onOpenSideChat === undefined
-          ? {}
-          : { onOpenSideChat: props.threadMentions.onOpenSideChat })}
-      />
-      {(props.pendingAttachments ?? []).length > 0 ? (
-        <ul aria-label="Attached files" className="chat-composer__selections">
-          {(props.pendingAttachments ?? []).map((attachmentSelection) => (
-            <li key={String(attachmentSelection.id)} className="chat-composer__selection">
-              <span>{attachmentSelection.displayName}</span>
-              {props.onRemoveAttachment === undefined ? null : (
-                <OctantButton
-                  aria-label={`Remove ${attachmentSelection.displayName} attachment`}
-                  disabled={controlDisabled}
-                  onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <X aria-hidden="true" size={12} strokeWidth={1.8} />
-                </OctantButton>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {(props.pendingPreviewSelections ?? []).length > 0 ? (
-        <ul aria-label="Attached preview selections" className="chat-composer__selections">
-          {(props.pendingPreviewSelections ?? []).map((selection) => (
-            <li key={String(selection.id)} className="chat-composer__selection">
-              <span>{selection.displayName}</span>
-              {props.onRemovePreviewSelection === undefined ? null : (
-                <OctantButton
-                  aria-label={`Remove ${selection.displayName} selection`}
-                  disabled={controlDisabled}
-                  onClick={() => props.onRemovePreviewSelection?.(selection.id)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Remove
-                </OctantButton>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {(props.pendingCanvasSelections ?? []).length > 0 ? (
-        <ul aria-label="Attached canvas selections" className="chat-composer__selections">
-          {(props.pendingCanvasSelections ?? []).map((selection) => (
-            <li key={String(selection.id)} className="chat-composer__selection">
-              <span>{selection.displayName}</span>
-              {props.onRemoveCanvasSelection === undefined ? null : (
-                <OctantButton
-                  aria-label={`Remove ${selection.displayName} canvas selection`}
-                  disabled={controlDisabled}
-                  onClick={() => props.onRemoveCanvasSelection?.(selection.id)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Remove
-                </OctantButton>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {(props.pendingExtensionSelections ?? []).length > 0 ? (
-        <ul aria-label="Selected extensions" className="chat-composer__selections">
-          {(props.pendingExtensionSelections ?? []).map((item) => (
-            <li key={item.reference} className="chat-composer__selection">
-              <span>{item.label}</span>
-              <span className="chat-composer__selection-receipt">
-                {item.status.kind === "selected"
-                  ? "Selection verified"
-                  : `Blocked: ${item.status.reason}`}
-              </span>
-              {props.onRemoveExtensionSelection === undefined ? null : (
-                <OctantButton
-                  aria-label={`Remove ${item.label} extension`}
-                  disabled={controlDisabled}
-                  onClick={() => props.onRemoveExtensionSelection?.(item.reference)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  Remove
-                </OctantButton>
-              )}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <div aria-label="Composer controls" className="chat-composer__bar" role="toolbar">
+      <div
+        aria-label="Composer controls"
+        className="composer-row chat-composer__bar"
+        role="toolbar"
+      >
         <div className="chat-composer__leading">
           <label>
             <span className="chat-composer__visually-hidden">Add attachment</span>
@@ -633,33 +691,63 @@ export function ChatComposer(props: ChatComposerProps) {
               </label>
             </>
           )}
-          {(props.modelOptions ?? []).map((option) => (
-            <label key={option.id}>
-              <span className="chat-composer__visually-hidden">{option.displayName}</span>
-              <OctantSelectField
+          {hasModelOptionControls ? (
+            <div className="chat-composer__model-options" ref={modelOptionsRef}>
+              <OctantButton
+                aria-controls={modelOptionsPanelId}
+                aria-expanded={modelOptionsOpen}
+                aria-haspopup="dialog"
+                aria-label="Model options"
+                data-customized={anyModelOptionSet || undefined}
                 disabled={controlDisabled}
-                onValueChange={(value) =>
-                  props.onModelOptionChange?.(
-                    option.id,
-                    value === MODEL_OPTION_DEFAULT_ID ? undefined : value,
-                  )
-                }
-                options={[
-                  { id: MODEL_OPTION_DEFAULT_ID, label: `${option.displayName}: Default` },
-                  ...option.values.map((value) => ({
-                    id: value,
-                    label: `${option.displayName}: ${value}`,
-                  })),
-                ]}
-                value={
-                  option.value !== undefined && option.values.includes(option.value)
-                    ? option.value
-                    : MODEL_OPTION_DEFAULT_ID
-                }
-              />
-            </label>
-          ))}
-          {props.poolControl}
+                onClick={() => setModelOptionsOpen((current) => !current)}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <SlidersHorizontal aria-hidden="true" size={15} strokeWidth={1.8} />
+                {anyModelOptionSet ? (
+                  <span aria-hidden="true" className="chat-composer__model-options-dot" />
+                ) : null}
+              </OctantButton>
+              {modelOptionsOpen ? (
+                <div
+                  aria-label="Model options"
+                  className="popover-panel chat-composer__model-options-panel"
+                  id={modelOptionsPanelId}
+                  role="dialog"
+                >
+                  {declaredModelOptions.map((option) => (
+                    <label key={option.id}>
+                      <span className="chat-composer__visually-hidden">{option.displayName}</span>
+                      <OctantSelectField
+                        disabled={controlDisabled}
+                        onValueChange={(value) =>
+                          props.onModelOptionChange?.(
+                            option.id,
+                            value === MODEL_OPTION_DEFAULT_ID ? undefined : value,
+                          )
+                        }
+                        options={[
+                          { id: MODEL_OPTION_DEFAULT_ID, label: `${option.displayName}: Default` },
+                          ...option.values.map((value) => ({
+                            id: value,
+                            label: `${option.displayName}: ${value}`,
+                          })),
+                        ]}
+                        value={
+                          option.value !== undefined && option.values.includes(option.value)
+                            ? option.value
+                            : MODEL_OPTION_DEFAULT_ID
+                        }
+                      />
+                    </label>
+                  ))}
+                  {props.poolControl}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className="chat-composer__research">
           <OctantButton
@@ -695,27 +783,25 @@ export function ChatComposer(props: ChatComposerProps) {
         </div>
         <div className="chat-composer__actions">
           {props.isSending ? (
-            <OctantButton
+            <button
               aria-label="Stop response"
+              className="btn-send window-no-drag"
               disabled={stopDisabledReason !== undefined}
               onClick={() => props.onStop?.()}
-              size="icon"
               type="button"
-              variant="secondary"
             >
               <Square aria-hidden="true" fill="currentColor" size={10} strokeWidth={1.5} />
-            </OctantButton>
+            </button>
           ) : (
-            <OctantButton
+            <button
               aria-label="Send message"
+              className="btn-send window-no-drag"
               disabled={sendDisabledReason !== undefined}
               onClick={send}
-              size="icon"
               type="button"
-              variant="default"
             >
               <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-            </OctantButton>
+            </button>
           )}
         </div>
       </div>

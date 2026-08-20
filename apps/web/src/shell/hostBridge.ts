@@ -170,6 +170,16 @@ export interface OctantHostBridge {
   readonly subscribeResolvedMaterial: (
     listener: (material: ResolvedSidebarMaterial) => void,
   ) => () => void;
+  /**
+   * The host's word that native window vibrancy is actually applied. The
+   * renderer keeps its near-opaque native sidebar wash until this reports
+   * "sidebar", because CSS backdrop-filter cannot frost another app's window —
+   * translucency without host vibrancy shows the desktop behind sharp. Absent
+   * on hosts that never apply vibrancy.
+   */
+  readonly subscribeResolvedSidebarVibrancy?: (
+    listener: (vibrancy: "sidebar" | null) => void,
+  ) => () => void;
   readonly subscribeCodeDeepLinks?: (listener: (target: CodeDeepLink) => void) => () => void;
   readonly subscribeStartNewAgent?: (listener: () => void) => () => void;
 }

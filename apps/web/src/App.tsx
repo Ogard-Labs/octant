@@ -156,6 +156,7 @@ import {
 import {
   readSidebarCollapsed,
   useAutomaticUpdateCheckSync,
+  useHostReportedSidebarVibrancy,
   useNarrowViewport,
   useResolvedMaterial,
   useSidebarBackgroundFetcher,
@@ -439,6 +440,21 @@ function LaunchedShell(
       delete root.dataset.octantNativeHost;
     };
   }, [props.hostBridge]);
+  // The near-opaque native sidebar wash relaxes only on the host's word that
+  // window vibrancy is applied — never on the renderer's own preference, which
+  // the host may have refused (Reduce Transparency, thermals, high contrast).
+  const hostSidebarVibrancyActive = useHostReportedSidebarVibrancy(props.hostBridge);
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    if (!hostSidebarVibrancyActive) {
+      delete root.dataset.octantHostVibrancy;
+      return;
+    }
+    root.dataset.octantHostVibrancy = "active";
+    return () => {
+      delete root.dataset.octantHostVibrancy;
+    };
+  }, [hostSidebarVibrancyActive]);
   const viewportIsNarrow = useNarrowViewport();
   const isNarrow = props.isNarrow ?? viewportIsNarrow;
   const nativeHost = props.nativeHost ?? props.hostBridge;
@@ -1007,6 +1023,18 @@ function LaunchedShell(
     client: codeClient,
     readCursorStore: codeReadCursorStore,
   });
+  // Bringing a Code thread's tab in front is the user opening it: the thread's
+  // view — or its error state — fills the workspace, so its unread dot is
+  // spent here. A thread already open in a background tab re-runs no
+  // controller activation when it is refocused, so without this the dot a
+  // background turn raised survived the user opening the thread. Tied to the
+  // user's navigation, never a timer; a thread that turns unread while it is
+  // already in front keeps its dot until they leave and come back.
+  const markCodeThreadRead = codeController.markThreadRead;
+  useEffect(() => {
+    if (activeCodeThreadId === undefined) return;
+    markCodeThreadRead(activeCodeThreadId);
+  }, [activeCodeThreadId, markCodeThreadRead]);
   const openCodeThreadIds = useMemo(
     () =>
       controller.workspace === undefined
@@ -2085,12 +2113,20 @@ function LaunchedShell(
   // guessing at a thread it cannot see.
   const codeThreadRowActions: ThreadRowActions = {
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
+    onMarkThreadRead: (threadId) => codeController.markThreadRead(decodeCodeThreadId(threadId)),
     onMarkThreadUnread: (threadId) => codeReadCursorStore.unmark(decodeCodeThreadId(threadId)),
     onPinThread: (threadId, pinned) =>
       void codeController.pinThread(decodeCodeThreadId(threadId), pinned),
   };
   const renameCodeThreadFromRow = (threadId: string, title: string): void => {
     void codeController.renameThread(decodeCodeThreadId(threadId), title);
+  };
+  // What a Chat thread row offers on right-click. Chat rows carry no archive
+  // or pin authority yet, so the menu holds only the read-state pair — the
+  // shorter menu is the honest one, the same rule the Code rows follow.
+  const chatThreadRowActions: ThreadRowActions = {
+    onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
+    onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
   };
 
   // One thread-selection handler per mode. The sidebar and every Project
@@ -3306,6 +3342,7 @@ function LaunchedShell(
                   {...(activeMode === "chat" && chatController.status === "ready"
                     ? {
                         onSelectThread: selectChatThread,
+                        threadActions: chatThreadRowActions,
                         threads: chatController.navigation,
                       }
                     : activeMode === "code"

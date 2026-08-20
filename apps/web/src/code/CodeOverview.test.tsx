@@ -64,7 +64,7 @@ describe("CodeOverview", () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
-  it("composes exact-Project Code projections and the server-authorized quick start", async () => {
+  it("renders each thread once with its reported facts inline beside the quick start", async () => {
     const onOpenThread = vi.fn();
     const onCreateThread = vi.fn();
     const value = controller();
@@ -158,22 +158,25 @@ describe("CodeOverview", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Code sessions" })).toBeVisible(),
     );
-    expect(screen.getByRole("button", { name: /^Controller foundation/ })).toBeVisible();
+    // The thread title appears once, on its own row — never repeated by a
+    // facet section, because there are no facet sections any more.
+    expect(screen.getAllByText("Controller foundation")).toHaveLength(1);
     expect(screen.queryByText("Another Project")).not.toBeInTheDocument();
+    expect(screen.getByText("feature/controller")).toBeVisible();
     expect(
-      screen.getByRole("region", { name: "Repository, checkout, and worktree" }),
-    ).toHaveTextContent("feature/controller");
-    expect(screen.getByText("3 changed files · 1 staged · 2 committed ahead")).toBeVisible();
-    expect(screen.getByText("Stale observation")).toBeVisible();
-    expect(screen.getByRole("region", { name: "Tests and validation" })).toHaveTextContent(
-      "Passing",
-    );
-    expect(screen.getByRole("region", { name: "Delivery and pull request" })).toHaveTextContent(
-      "#806 · open",
-    );
-    expect(screen.getByRole("region", { name: "Active child agents" })).toHaveTextContent(
-      "1 active",
-    );
+      screen.getByText("3 changed files · 1 staged · 2 committed ahead · stale"),
+    ).toBeVisible();
+    expect(screen.getByText("Passing")).toBeVisible();
+    expect(screen.getByText("#806 · open")).toBeVisible();
+    expect(screen.getByText("1 active · 2 completed")).toBeVisible();
+    expect(screen.getByText("In progress")).toBeVisible();
+    expect(screen.getByText("Approval gated")).toBeVisible();
+    expect(screen.getByText("Follow-up")).toBeVisible();
+    // Rarely-glanced facts stay reachable behind the per-thread disclosure.
+    fireEvent.click(screen.getByText("Full detail"));
+    expect(screen.getByText("/opaque/worktree")).toBeVisible();
+    expect(screen.getByText("Opened pull request · Pending")).toBeVisible();
+    expect(screen.getByText("Reviewing the checkout")).toBeVisible();
     expect(screen.getByRole("region", { name: "Code quick start" })).toBeVisible();
     expect(screen.getByRole("combobox", { name: "Access policy" })).toHaveValue("approval-gated");
     expect(
@@ -187,8 +190,139 @@ describe("CodeOverview", () => {
     // command behind an empty-board state nobody reaches twice.
     fireEvent.click(screen.getByRole("button", { name: "Pin Controller foundation" }));
     expect(value.pinThread).toHaveBeenCalledWith(ids.thread, true);
-    fireEvent.click(screen.getByRole("button", { name: /^Controller foundation/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Controller foundation" }));
     expect(onOpenThread).toHaveBeenCalledWith(ids.thread);
+  });
+
+  it("shows a thread's branch fact only when the host reported one", async () => {
+    const value = controller();
+    value.navigation = [
+      navigationThread({ threadId: ids.thread, title: "Controller foundation" }),
+      navigationThread({
+        threadId: "10000000-0000-4000-8000-000000000002",
+        title: "Worktree pending",
+      }),
+    ];
+    value.client = {
+      queryBoard: vi.fn(async () =>
+        boardView([
+          boardCard({
+            threadId: ids.thread as never,
+            title: "Controller foundation",
+            worktree: {
+              kind: "available",
+              checkoutId: ids.checkout as never,
+              path: "/opaque/worktree" as never,
+              head: {
+                kind: "branch",
+                name: "feature/controller" as never,
+                oid: "a".repeat(40) as never,
+              },
+            },
+          }),
+          boardCard({
+            threadId: "10000000-0000-4000-8000-000000000002" as never,
+            title: "Worktree pending",
+          }),
+        ]),
+      ),
+    } as never;
+    render(
+      <CodeOverview controller={value} onOpenThread={vi.fn()} projectId={ids.project as never} />,
+    );
+
+    expect(await screen.findByText("feature/controller")).toBeVisible();
+    // Exactly one Branch row: the thread whose worktree the host reported.
+    expect(screen.getAllByText("Branch")).toHaveLength(1);
+    expect(screen.getByText("Worktree pending")).toBeVisible();
+  });
+
+  it("renders no placeholder for a facet the host did not report", async () => {
+    const value = controller();
+    value.navigation = [navigationThread({ threadId: ids.thread, title: "Controller foundation" })];
+    value.client = {
+      queryBoard: vi.fn(async () =>
+        boardView([boardCard({ threadId: ids.thread as never, title: "Controller foundation" })]),
+      ),
+    } as never;
+    render(
+      <CodeOverview controller={value} onOpenThread={vi.fn()} projectId={ids.project as never} />,
+    );
+
+    expect(await screen.findByText("Controller foundation")).toBeVisible();
+    // Absent facets are absent rows, not sentences about absence.
+    expect(screen.queryByText(/Unknown/)).not.toBeInTheDocument();
+    expect(screen.queryByText("None reported.")).not.toBeInTheDocument();
+    expect(screen.queryByText("No projection is currently reported.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Changed files unavailable")).not.toBeInTheDocument();
+    expect(screen.queryByText(/no mutation is authorized/)).not.toBeInTheDocument();
+    expect(screen.queryByText("No linked pull request reported.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Branch")).not.toBeInTheDocument();
+    expect(screen.queryByText("Changes")).not.toBeInTheDocument();
+    expect(screen.queryByText("Checks")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pull request")).not.toBeInTheDocument();
+    expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+  });
+
+  it("states the repository and authority note once at project level, never per thread", async () => {
+    const value = controller();
+    value.navigation = [
+      navigationThread({ threadId: ids.thread, title: "Controller foundation" }),
+      navigationThread({
+        threadId: "10000000-0000-4000-8000-000000000002",
+        title: "Second thread",
+      }),
+    ];
+    value.client = {
+      queryBoard: vi.fn(async () =>
+        boardView([
+          boardCard({
+            threadId: ids.thread as never,
+            title: "Controller foundation",
+            status: "waiting",
+            executing: false,
+          }),
+          boardCard({
+            threadId: "10000000-0000-4000-8000-000000000002" as never,
+            title: "Second thread",
+            status: "waiting",
+            executing: false,
+          }),
+        ]),
+      ),
+    } as never;
+    render(
+      <CodeOverview
+        controller={value}
+        onOpenThread={vi.fn()}
+        projectId={ids.project as never}
+        projectRoot="/opaque/repository"
+      />,
+    );
+
+    expect(await screen.findByText("2 threads are waiting")).toBeVisible();
+    expect(
+      screen.getAllByText(
+        "Waiting for server-reported approval, input, or recovery. The overview does not grant authority.",
+      ),
+    ).toHaveLength(1);
+    expect(screen.getAllByText("/opaque/repository")).toHaveLength(1);
+  });
+
+  it("renames a thread from the keyboard without leaving the overview", async () => {
+    const value = controller();
+    value.navigation = [navigationThread({ threadId: ids.thread, title: "Controller foundation" })];
+    value.client = { queryBoard: vi.fn(async () => boardView([])) } as never;
+    render(
+      <CodeOverview controller={value} onOpenThread={vi.fn()} projectId={ids.project as never} />,
+    );
+
+    const title = await screen.findByRole("button", { name: "Controller foundation" });
+    fireEvent.keyDown(title, { key: "F2" });
+    const field = screen.getByRole("textbox", { name: "Rename Code thread" });
+    fireEvent.change(field, { target: { value: "Renamed foundation" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(value.renameThread).toHaveBeenCalledWith(ids.thread, "Renamed foundation");
   });
 
   /**
@@ -267,7 +401,7 @@ describe("CodeOverview", () => {
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Code transport disconnected.");
-    expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
+    expect(screen.getByText("Code projections unavailable")).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "First message" })).not.toBeInTheDocument();
   });
 });
@@ -343,6 +477,7 @@ function controller(): CodeController {
     followUps: new Map(),
     lastExecuteError: { current: undefined },
     markFollowUp: vi.fn(async () => true),
+    markThreadRead: vi.fn(),
     navigation: [],
     pendingDraft: "",
     pendingDraftCaret: 0,
@@ -359,6 +494,20 @@ function controller(): CodeController {
     turnError: undefined,
     turnStatus: "idle",
     updateSettings: vi.fn(),
+  };
+}
+
+function navigationThread(overrides: {
+  readonly threadId: string;
+  readonly title: string;
+}): CodeController["navigation"][number] {
+  return {
+    executionPolicy: "approval-gated",
+    lifecycle: "active",
+    providerInstanceId: "provider-one" as never,
+    projectId: ids.project as never,
+    threadId: overrides.threadId as never,
+    title: overrides.title,
   };
 }
 

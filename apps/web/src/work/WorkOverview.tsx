@@ -223,9 +223,12 @@ export function WorkOverview(props: WorkOverviewProps) {
             Start a new Work thread
           </label>
           {images.staged.length === 0 && images.message === undefined ? null : (
-            <div className="work-composer-adapter__attachments" aria-label="Attached images">
+            <div
+              className="composer-chips work-composer-adapter__attachments"
+              aria-label="Attached images"
+            >
               {images.staged.map((attachment) => (
-                <span className="work-composer-adapter__attachment" key={attachment.id}>
+                <span className="chip work-composer-adapter__attachment" key={attachment.id}>
                   <img
                     alt={attachment.displayName}
                     className="work-composer-adapter__attachment-thumb"
@@ -236,7 +239,7 @@ export function WorkOverview(props: WorkOverviewProps) {
                   </span>
                   <button
                     aria-label={`Remove ${attachment.displayName}`}
-                    className="work-composer-adapter__attachment-remove"
+                    className="chip-x window-no-drag"
                     onClick={() => images.remove(attachment.id)}
                     type="button"
                   >

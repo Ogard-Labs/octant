@@ -14,8 +14,12 @@ export interface ZenThreadPickerProps {
 
 export function ZenThreadPicker(props: ZenThreadPickerProps) {
   return (
-    <section aria-label="Threads" className="zen-panel zen-thread-picker" role="dialog">
-      <header className="zen-panel__header">
+    <section
+      aria-label="Threads"
+      className="zen-panel card card-tight card-raised zen-thread-picker"
+      role="dialog"
+    >
+      <header className="card-head">
         <div>
           <h2>Threads</h2>
           <p>Authorized work on this Mac. A pinned card keeps its original authority.</p>
@@ -50,6 +54,7 @@ export function ZenThreadPicker(props: ZenThreadPickerProps) {
             <OctantButton
               aria-label={`Pin ${entry.title}`}
               onClick={() => props.onPin(entry.catalogRef)}
+              size="sm"
               type="button"
               variant="secondary"
             >
