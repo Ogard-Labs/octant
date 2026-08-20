@@ -1,4 +1,14 @@
 @import "./styles/tailwind.css";
+/* Octant design system, then the adapter that repoints its colour and font
+   tokens at the runtime theme. Import order is deliberate and load-bearing:
+   Tailwind's preflight lives in @layer base, so the system's unlayered base
+   rules always beat it regardless of position — but the app's own stylesheets
+   below must come AFTER the system so that, on surfaces not yet ported,
+   existing app rules win ties and nothing restyles out from under them.
+   Porting a surface means moving its markup onto system classes and deleting
+   its old rules, not fighting this order. */
+@import "./styles/octant.css";
+@import "./styles/octant-bridge.css";
 @import "./styles/shadcn-theme.css";
 @import "./styles/chat.css";
 @import "./styles/code.css";
@@ -50,9 +60,10 @@
   --octant-primary-foreground: #06111c;
   --octant-accent: #3d9aff;
   --octant-accent-foreground: #06111c;
+  --octant-accent-text: #3d9aff;
   --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 16%, transparent);
   --octant-divider-strong: #6f6f6f;
-  --octant-destructive: #ee5c61;
+  --octant-destructive: #f06b70;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
   --octant-shadow-sm: 0 0 0 1px var(--octant-border-strong), 0 1px 2px rgb(0 0 0 / 30%);
   --octant-shadow-md:
@@ -83,7 +94,7 @@
   --octant-warning-surface: #372d1d;
   --octant-warning-border: #a98443;
   --octant-warning-text: #f0c383;
-  --octant-danger-text: #ee5c61;
+  --octant-danger-text: #f06b70;
   --octant-addition-text: #8fd8ab;
   --octant-deletion-text: #ee5c61;
   --octant-palette-red: #ee5c61;
@@ -516,6 +527,12 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  /* octant.css sets a 16px reading scale on body for document surfaces; the
+     app's chrome runs on the user's typography settings instead. Components
+     ported to the design system carry their own explicit sizes, so this
+     override costs them nothing. */
+  font-family: var(--octant-ui-font-family);
+  font-size: var(--octant-ui-font-size);
 }
 
 h1,

@@ -12,7 +12,7 @@ describe("ThemeSettingsProvider", () => {
     );
 
     const root = document.documentElement;
-    expect(root.dataset.ooThemeMode).toBe("light");
+    expect(root.dataset.octantThemeMode).toBe("light");
     expect(root.style.getPropertyValue("--octant-workspace")).toBe("#fafafb");
     expect(root.style.getPropertyValue("--octant-surface")).toBe("#fafafb");
     expect(root.style.getPropertyValue("--octant-surface-raised")).toBe("#ffffff");
@@ -27,5 +27,38 @@ describe("ThemeSettingsProvider", () => {
     result.unmount();
     expect(root.style.getPropertyValue("--octant-surface")).toBe("");
     expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toBe("");
+  });
+
+  it("publishes accessibility state on the data-octant-* attributes the stylesheets read", () => {
+    const result = render(
+      <ThemeSettingsProvider
+        settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark", reducedMotion: true }}
+      >
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+
+    const root = document.documentElement;
+    expect(root.getAttribute("data-octant-theme-mode")).toBe("dark");
+    expect(root.getAttribute("data-octant-reduced-motion")).toBe("true");
+    expect(root.getAttribute("data-octant-reduced-transparency")).toBe("false");
+    expect(root.getAttribute("data-octant-increased-contrast")).toBe("false");
+
+    result.unmount();
+    expect(root.getAttribute("data-octant-theme-mode")).toBeNull();
+    expect(root.getAttribute("data-octant-reduced-motion")).toBeNull();
+  });
+
+  it("projects the accent-text role so accent used as text carries its own contrast guarantee", () => {
+    const result = render(
+      <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "dark" }}>
+        <div>Theme content</div>
+      </ThemeSettingsProvider>,
+    );
+
+    const root = document.documentElement;
+    expect(root.style.getPropertyValue("--octant-accent-text")).not.toBe("");
+
+    result.unmount();
   });
 });

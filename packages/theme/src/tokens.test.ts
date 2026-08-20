@@ -122,6 +122,30 @@ describe("theme semantic token catalog", () => {
     }
   });
 
+  it("keeps accent legible as text through the dedicated accent-text role", () => {
+    const role = getRoleDefinition("accent-text");
+    expect(role.category).toBe("accent");
+    expect(role.contrastTarget).toBe("workspace");
+    expect(role.contrastLevel).toBe("normal-text");
+    expect(meetsContrast(role.defaultLight, DEFAULT_LIGHT_TOKENS["workspace"]!, "normal-text")).toBe(
+      true,
+    );
+    expect(meetsContrast(role.defaultDark, DEFAULT_DARK_TOKENS["workspace"]!, "normal-text")).toBe(
+      true,
+    );
+  });
+
+  it("holds danger text to normal-text contrast on the floating surface it actually sits on", () => {
+    const role = getRoleDefinition("danger-text");
+    expect(role.contrastTarget).toBe("floating");
+    expect(meetsContrast(role.defaultLight, DEFAULT_LIGHT_TOKENS["floating"]!, "normal-text")).toBe(
+      true,
+    );
+    expect(meetsContrast(role.defaultDark, DEFAULT_DARK_TOKENS["floating"]!, "normal-text")).toBe(
+      true,
+    );
+  });
+
   it("rejects unknown token roles", () => {
     expect(isKnownThemeTokenRole("accent")).toBe(true);
     expect(isKnownThemeTokenRole("unknown-role")).toBe(false);

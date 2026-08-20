@@ -57,10 +57,10 @@ export function ThemeSettingsProvider(props: {
         );
       }
     }
-    root.dataset.ooThemeMode = resolved.mode;
-    root.dataset.ooIncreasedContrast = String(accessible.increasedContrast);
-    root.dataset.ooReducedMotion = String(accessible.reducedMotion);
-    root.dataset.ooReducedTransparency = String(accessible.reducedTransparency);
+    root.dataset.octantThemeMode = resolved.mode;
+    root.dataset.octantIncreasedContrast = String(accessible.increasedContrast);
+    root.dataset.octantReducedMotion = String(accessible.reducedMotion);
+    root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
     root.style.colorScheme = resolved.mode;
     return () => {
       for (const role of Object.keys(resolved.tokens)) {
@@ -72,10 +72,10 @@ export function ThemeSettingsProvider(props: {
       root.style.removeProperty("--octant-sidebar-translucent");
       root.style.removeProperty("--octant-sidebar-translucent-subtle");
       root.style.removeProperty("--octant-sidebar-translucent-strong");
-      delete root.dataset.ooThemeMode;
-      delete root.dataset.ooIncreasedContrast;
-      delete root.dataset.ooReducedMotion;
-      delete root.dataset.ooReducedTransparency;
+      delete root.dataset.octantThemeMode;
+      delete root.dataset.octantIncreasedContrast;
+      delete root.dataset.octantReducedMotion;
+      delete root.dataset.octantReducedTransparency;
       root.style.removeProperty("color-scheme");
     };
   }, [props.settings]);

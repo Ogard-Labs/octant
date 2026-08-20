@@ -198,6 +198,20 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultDark: "#06111c",
   },
   {
+    // Accent as TEXT, not as a fill. `accent` is held to 3:1 because it
+    // renders as a button; pointed at text it measured 3.0:1 on tinted
+    // chips in the shipped light preset. This role carries the hue at
+    // the 4.5:1 bar so links, active tabs, and current rows stay policed
+    // like every other text role.
+    id: "accent-text",
+    displayName: "Accent text",
+    category: "accent",
+    contrastTarget: "workspace",
+    contrastLevel: "normal-text",
+    defaultLight: "#0161c2",
+    defaultDark: "#3d9aff",
+  },
+  {
     id: "success-surface",
     displayName: "Success surface",
     category: "status",
@@ -243,13 +257,17 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     defaultDark: "#f0c383",
   },
   {
+    // Targeted at `floating`, not `workspace`: status text sits inside
+    // cards, and in dark mode the card is lighter than the workspace —
+    // #ee5c61 measured 5.03:1 on the workspace but 4.45:1 on the card
+    // it was actually read on.
     id: "danger-text",
     displayName: "Danger text",
     category: "status",
-    contrastTarget: "workspace",
+    contrastTarget: "floating",
     contrastLevel: "normal-text",
     defaultLight: "#c62f34",
-    defaultDark: "#ee5c61",
+    defaultDark: "#f06b70",
   },
   {
     id: "addition-text",
