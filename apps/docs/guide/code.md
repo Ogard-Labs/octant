@@ -36,7 +36,7 @@ Code threads run in one of four server-enforced authority modes:
 - **Auto-accept edits**: the same confinement as approval-gated, except file writes inside the bound root proceed without a prompt. Shell commands, network access, destructive actions, credential access, and anything outside the root still ask.
 - **Full access**: unsandboxed execution within the Project root. Starts only when explicitly selected. Use the permission-persistence control to apply to the current session or remember for the Project.
 
-Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The access control sits in the thread composer and applies from the next turn; raising a thread to Full access still needs the native confirmation.
+Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The composer shows the posture the next turn will run under, defaulting to the thread's. A turn may only narrow what the thread already grants; Plan mode stays read-only and cannot be overridden from the composer. The transcript records the posture each turn actually ran under. Raising a thread to Full access still needs the native confirmation.
 
 ## Export
 

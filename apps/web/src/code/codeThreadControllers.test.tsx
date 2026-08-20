@@ -69,7 +69,7 @@ function client(): CodeClient {
     bootstrap: vi.fn(async () => bootstrap()),
     queryBoard: vi.fn(),
     conversation: vi.fn(async (threadId: unknown) => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId,
       turns: [],
       nextCursor: 0,

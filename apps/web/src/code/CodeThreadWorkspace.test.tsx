@@ -77,7 +77,7 @@ describe("CodeThreadWorkspace", () => {
 
     await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], []);
+    expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], [], "approval-gated");
   });
 
   /**
@@ -472,6 +472,7 @@ describe("CodeThreadWorkspace", () => {
       "#[Release notes] does this still hold?",
       [mentionedThreadId],
       [],
+      "approval-gated",
     );
   });
 
@@ -518,7 +519,12 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "please");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     // The path travels as ordinary prompt text; naming a file reaches nothing.
-    expect(sendFollowUp).toHaveBeenCalledWith("explain @src/index.ts please", [], []);
+    expect(sendFollowUp).toHaveBeenCalledWith(
+      "explain @src/index.ts please",
+      [],
+      [],
+      "approval-gated",
+    );
   });
 
   it("uploads a pasted image before the turn and sends it by the host's own reference", async () => {
@@ -551,7 +557,12 @@ describe("CodeThreadWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     // The turn names what the host answered with, never bytes the composer held.
-    expect(sendFollowUp).toHaveBeenCalledWith("match this mockup", [], [reference]);
+    expect(sendFollowUp).toHaveBeenCalledWith(
+      "match this mockup",
+      [],
+      [reference],
+      "approval-gated",
+    );
     // Sending is not a discard: the image belongs to the turn that carried it.
     expect(discardAttachment).not.toHaveBeenCalled();
   });
@@ -586,7 +597,12 @@ describe("CodeThreadWorkspace", () => {
     expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("match this mockup", [], [reference]);
+    expect(sendFollowUp).toHaveBeenCalledWith(
+      "match this mockup",
+      [],
+      [reference],
+      "approval-gated",
+    );
     // The refused turn leaves both the text and its image in the composer.
     expect(screen.getByAltText("pasted.png")).toBeInTheDocument();
     expect(composer).toHaveValue("match this mockup");
@@ -651,7 +667,7 @@ describe("CodeThreadWorkspace", () => {
       expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId),
     );
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("never mind the picture", [], []);
+    expect(sendFollowUp).toHaveBeenCalledWith("never mind the picture", [], [], "approval-gated");
   });
 
   it("leaves an `@` that matches no file in this checkout as ordinary text", async () => {
@@ -691,7 +707,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "keep this prompt");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
 
-    expect(sendFollowUp).toHaveBeenCalledWith("keep this prompt", [], []);
+    expect(sendFollowUp).toHaveBeenCalledWith("keep this prompt", [], [], "approval-gated");
     expect(composer).toHaveValue("keep this prompt");
   });
 
@@ -739,27 +755,104 @@ describe("CodeThreadWorkspace", () => {
     });
   });
 
-  it("lowers thread access from the composer through the authoritative command", async () => {
+  it("shows the next turn's access and sends a narrower posture with the message", async () => {
     const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
     const execute = vi.fn(async () => undefined) as CodeController["execute"];
-    render(<CodeThreadWorkspace controller={controller({ execute })} threadId={threadId} />);
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ execute, sendFollowUp })}
+        threadId={threadId}
+      />,
+    );
 
-    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
+    expect(screen.getByRole("combobox", { name: "Next turn access" })).toHaveTextContent(
+      "Ask for approvals",
+    );
+    await user.click(screen.getByRole("combobox", { name: "Next turn access" }));
+    expect(screen.queryByRole("option", { name: "Auto-accept edits" })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Raise thread · Auto-accept edits" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Raise thread · Full access" })).toBeVisible();
     await user.click(await screen.findByRole("option", { name: "Plan · read-only" }));
+    expect(execute).not.toHaveBeenCalled();
 
+    await user.type(screen.getByLabelText("Follow-up message"), "just look");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(sendFollowUp).toHaveBeenCalledWith("just look", [], [], "plan");
+  });
+
+  it("offers auto-accept edits on a thread that already grants it, without changing the thread", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => true);
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          execute,
+          sendFollowUp,
+          activeView: {
+            ...controller().activeView!,
+            thread: { ...controller().activeView!.thread, executionPolicy: "auto-accept-edits" },
+          },
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("combobox", { name: "Next turn access" })).toHaveTextContent(
+      "Auto-accept edits",
+    );
+    await user.click(screen.getByRole("combobox", { name: "Next turn access" }));
+    expect(await screen.findByRole("option", { name: "Plan · read-only" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Ask for approvals" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Raise thread · Full access" })).toBeVisible();
+    expect(screen.queryByRole("option", { name: "Full access" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "Ask for approvals" }));
+    expect(execute).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText("Follow-up message"), "ask me first");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(sendFollowUp).toHaveBeenCalledWith("ask me first", [], [], "approval-gated");
+  });
+
+  it("cannot run a writing one-shot on a Plan thread, but can still raise the grant", async () => {
+    const user = userEvent.setup();
+    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          execute,
+          activeView: {
+            ...controller().activeView!,
+            thread: { ...controller().activeView!.thread, executionPolicy: "plan" },
+          },
+        })}
+        requestFullAccessApproval={vi.fn(async () => "approval-1" as never)}
+        threadId={threadId}
+      />,
+    );
+
+    const picker = screen.getByRole("combobox", { name: "Next turn access" });
+    expect(picker).toHaveTextContent("Plan · read-only");
+    expect(picker).toBeEnabled();
+    await user.click(picker);
+    expect(screen.queryByRole("option", { name: "Ask for approvals" })).not.toBeInTheDocument();
+    await user.click(
+      await screen.findByRole("option", { name: "Raise thread · Ask for approvals" }),
+    );
     expect(execute).toHaveBeenCalledWith({
       kind: "change-code-thread-access",
       threadId,
       expectedVersion: 1,
-      executionPolicy: "plan",
+      executionPolicy: "approval-gated",
       permissionPersistence: "current-session",
     });
   });
 
-  it("switches to auto-accept edits without asking for native confirmation", async () => {
+  it("raises an approval-gated thread to Full access through native confirmation", async () => {
     const user = userEvent.setup();
     const execute = vi.fn(async () => undefined) as CodeController["execute"];
-    const requestFullAccessApproval = vi.fn(async () => undefined);
+    const requestFullAccessApproval = vi.fn(async () => "approval-1" as never);
     render(
       <CodeThreadWorkspace
         controller={controller({ execute })}
@@ -768,35 +861,8 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
-    await user.click(await screen.findByRole("option", { name: "Auto-accept edits" }));
-
-    expect(requestFullAccessApproval).not.toHaveBeenCalled();
-    expect(execute).toHaveBeenCalledWith({
-      kind: "change-code-thread-access",
-      threadId,
-      expectedVersion: 1,
-      executionPolicy: "auto-accept-edits",
-      permissionPersistence: "current-session",
-    });
-  });
-
-  it("raises a thread to Full access only with the host's native confirmation", async () => {
-    const user = userEvent.setup();
-    const execute = vi.fn(async () => undefined) as CodeController["execute"];
-    const approvalId = "40000000-0000-4000-8000-000000000004";
-    const requestFullAccessApproval = vi.fn(async () => approvalId as never);
-    render(
-      <CodeThreadWorkspace
-        controller={controller({ execute })}
-        requestFullAccessApproval={requestFullAccessApproval}
-        threadId={threadId}
-      />,
-    );
-
-    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
-    await user.click(await screen.findByRole("option", { name: "Full access" }));
-
+    await user.click(screen.getByRole("combobox", { name: "Next turn access" }));
+    await user.click(await screen.findByRole("option", { name: "Raise thread · Full access" }));
     expect(requestFullAccessApproval).toHaveBeenCalledWith({
       kind: "change-thread-full-access",
       threadId,
@@ -809,42 +875,47 @@ describe("CodeThreadWorkspace", () => {
       expectedVersion: 1,
       executionPolicy: "full-access",
       permissionPersistence: "current-session",
-      approvalId,
+      approvalId: "approval-1",
     });
   });
 
-  it("keeps the current access when native confirmation is declined", async () => {
+  it("resets one-shot access as soon as the host accepts the start", async () => {
     const user = userEvent.setup();
-    const execute = vi.fn(async () => undefined) as CodeController["execute"];
+    const sendFollowUp = vi.fn(() => new Promise<boolean>(() => undefined));
+    render(<CodeThreadWorkspace controller={controller({ sendFollowUp })} threadId={threadId} />);
+
+    await user.click(screen.getByRole("combobox", { name: "Next turn access" }));
+    await user.click(await screen.findByRole("option", { name: "Plan · read-only" }));
+    expect(screen.getByRole("combobox", { name: "Next turn access" })).toHaveTextContent(
+      "Plan · read-only",
+    );
+    await user.type(screen.getByLabelText("Follow-up message"), "just look");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+    expect(sendFollowUp).toHaveBeenCalledWith("just look", [], [], "plan");
+    expect(screen.getByRole("combobox", { name: "Next turn access" })).toHaveTextContent(
+      "Ask for approvals",
+    );
+  });
+
+  it("says which posture a turn ran under", () => {
     render(
       <CodeThreadWorkspace
-        controller={controller({ execute })}
-        requestFullAccessApproval={vi.fn(async () => undefined)}
+        controller={controller({
+          conversation: [
+            {
+              id: "turn-1:user",
+              role: "user",
+              text: "rewrite the loader",
+              executionPolicy: "auto-accept-edits",
+            },
+            { id: "turn-1:assistant", role: "assistant", text: "Done." },
+          ],
+        })}
         threadId={threadId}
       />,
     );
 
-    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
-    await user.click(await screen.findByRole("option", { name: "Full access" }));
-
-    expect(execute).not.toHaveBeenCalled();
-    expect(
-      await screen.findByText(
-        "Full access was not confirmed. This thread keeps its current access.",
-      ),
-    ).toBeVisible();
-  });
-
-  it("does not offer Full access on a host that cannot confirm it natively", async () => {
-    const user = userEvent.setup();
-    const execute = vi.fn(async () => undefined) as CodeController["execute"];
-    render(<CodeThreadWorkspace controller={controller({ execute })} threadId={threadId} />);
-
-    await user.click(screen.getByRole("combobox", { name: "Thread access" }));
-    const option = await screen.findByRole("option", { name: "Full access" });
-    expect(option).toHaveAttribute("aria-disabled", "true");
-    await user.click(option);
-    expect(execute).not.toHaveBeenCalled();
+    expect(screen.getByText("Access · Auto-accept edits")).toBeVisible();
   });
 
   it("answers agent-initiated approvals and questions through the controller", async () => {
@@ -1072,7 +1143,7 @@ describe("CodeThreadWorkspace", () => {
     );
 
     // The transcript never implies it is showing the whole turn when it is not.
-    expect(screen.getByText("1 step · earliest kept")).toBeVisible();
+    expect(screen.getByText("Earliest steps kept")).toBeVisible();
   });
 
   it("collapses a turn's tool steps and reasoning until the user opens them", async () => {
@@ -1113,16 +1184,17 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    // Closed by default: the summary counts the work without printing it.
-    expect(screen.getByText("2 steps")).toBeVisible();
+    // Closed by default: each tool is a named row, not the printed summary.
+    expect(screen.getByRole("button", { name: "Bash, done" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Rewrite the pane, running" })).toBeVisible();
     expect(screen.queryByText("bun run verify")).not.toBeVisible();
     expect(screen.queryByText("Check the failing suite first.")).not.toBeVisible();
 
-    await user.click(screen.getByText("2 steps"));
+    await user.click(screen.getByRole("button", { name: "Bash, done" }));
     expect(screen.getByText("bun run verify")).toBeVisible();
     expect(screen.getByText("Bash")).toBeVisible();
 
-    await user.click(screen.getByText("Thinking"));
+    await user.click(screen.getByRole("button", { name: "Thinking" }));
     expect(screen.getByText("Check the failing suite first.")).toBeVisible();
   });
 
@@ -1145,7 +1217,7 @@ describe("CodeThreadWorkspace", () => {
     );
 
     expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
-    expect(screen.queryByText(/steps?$/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /done$/ })).not.toBeInTheDocument();
   });
 
   it("lets the engine skip layout for transcript rows scrolled out of view", () => {
@@ -1175,7 +1247,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "and then push");
     await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
 
-    expect(queueFollowUp).toHaveBeenCalledWith("and then push", [], []);
+    expect(queueFollowUp).toHaveBeenCalledWith("and then push", [], [], "approval-gated");
     expect(sendFollowUp).not.toHaveBeenCalled();
     await waitFor(() => expect(composer).toHaveValue(""));
   });
