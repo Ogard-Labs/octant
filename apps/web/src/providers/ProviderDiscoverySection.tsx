@@ -102,7 +102,7 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
 
       {!scanning && detected.length === 0 && snapshot !== undefined ? (
         <p className="setgroup-note">
-          Installed providers are already listed below. Use <strong>Add provider manually</strong>
+          Installed providers are already listed below. Use <strong>Add provider manually</strong>{" "}
           only for a custom endpoint or unusual binary path.
         </p>
       ) : null}

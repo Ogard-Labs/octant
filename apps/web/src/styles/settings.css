@@ -110,10 +110,13 @@
   margin-bottom: 0;
 }
 
+/* flex: none, because the sidebar is a scrolling flex column: when the nav
+   overflows, a shrinkable search row is the first thing squeezed to zero
+   height, leaving its input painted over the labels above it. */
 .settings-view__field.settings-view__field--search {
   position: relative;
   display: flex;
-  min-height: 0;
+  flex: 0 0 auto;
   align-items: center;
   margin: 6px 0 14px;
   padding: 0;
