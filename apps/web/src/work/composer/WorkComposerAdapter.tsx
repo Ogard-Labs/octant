@@ -81,86 +81,91 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         </div>
 
         <div className="work-composer-adapter__composer">
-          <div className="work-composer-adapter__input-row">
-            <OctantTextarea
-              aria-label="First message"
-              autoFocus
-              className="work-composer-adapter__textarea"
-              disabled={props.creating}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Describe the work…"
-              rows={3}
-              value={prompt}
-            />
-            <div className="work-composer-adapter__composer-bar">
-              <span className="work-composer-adapter__context-picker">
-                <ComposerModelPicker
-                  ariaLabel="Provider and model"
-                  groups={props.providerGroups}
-                  onSelect={props.onSelectProvider}
-                  {...(props.selectedModelId === undefined
-                    ? {}
-                    : { selectedModelId: props.selectedModelId })}
-                  {...(props.selectedProviderInstanceId === undefined
-                    ? {}
-                    : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                />
-              </span>
-              {props.poolControl}
-              <OctantButton
-                aria-label={
-                  props.errorMessage === undefined ? "Create thread" : "Retry creating thread"
-                }
-                className="work-composer-adapter__send"
-                disabled={!canSubmit}
-                onClick={submit}
-                size="icon"
-                type="button"
-                variant="default"
-              >
-                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-              </OctantButton>
+          {/* One card holds the prompt and everything the thread will be bound
+              to. The strip used to sit outside it, which read as loose chrome
+              under the composer rather than as part of what is being started. */}
+          <div className="work-composer-adapter__card">
+            <div className="work-composer-adapter__input-row">
+              <OctantTextarea
+                aria-label="First message"
+                autoFocus
+                className="work-composer-adapter__textarea"
+                disabled={props.creating}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Describe the work…"
+                rows={3}
+                value={prompt}
+              />
+              <div className="work-composer-adapter__composer-bar">
+                <span className="work-composer-adapter__context-picker">
+                  <ComposerModelPicker
+                    ariaLabel="Provider and model"
+                    groups={props.providerGroups}
+                    onSelect={props.onSelectProvider}
+                    {...(props.selectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.selectedModelId })}
+                    {...(props.selectedProviderInstanceId === undefined
+                      ? {}
+                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                  />
+                </span>
+                {props.poolControl}
+                <OctantButton
+                  aria-label={
+                    props.errorMessage === undefined ? "Create thread" : "Retry creating thread"
+                  }
+                  className="work-composer-adapter__send"
+                  disabled={!canSubmit}
+                  onClick={submit}
+                  size="icon"
+                  type="button"
+                  variant="default"
+                >
+                  <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+                </OctantButton>
+              </div>
             </div>
-          </div>
 
-          <div className="work-composer-adapter__context-strip" aria-label="Thread context">
-            <HostSelector
-              {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-              {...(props.selectedHostId === undefined
-                ? {}
-                : { selectedHostId: props.selectedHostId })}
-              {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-              {...(props.lastSelectedHealthyHostId === undefined
-                ? {}
-                : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-              {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-              {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
-              requiredCapability="work"
-            />
-            {props.folderControl}
-            {props.folderControl !== undefined ? null : hasFolder &&
-              props.projectName !== undefined ? (
-              <span className="work-composer-adapter__context-item" title={props.projectRoot}>
-                <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
-                <span>{props.projectName}</span>
-              </span>
-            ) : (
-              <span className="work-composer-adapter__context-item">
-                <AlertTriangle aria-hidden="true" size={12} strokeWidth={1.8} />
-                <span>No folder</span>
-                {props.onAttachFolder !== undefined ? (
-                  <OctantButton
-                    className="work-composer-adapter__attach-btn"
-                    onClick={props.onAttachFolder}
-                    type="button"
-                    variant="ghost"
-                  >
-                    Attach folder
-                  </OctantButton>
-                ) : null}
-              </span>
-            )}
+            <div className="work-composer-adapter__context-strip" aria-label="Thread context">
+              <HostSelector
+                {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                {...(props.selectedHostId === undefined
+                  ? {}
+                  : { selectedHostId: props.selectedHostId })}
+                {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+                {...(props.lastSelectedHealthyHostId === undefined
+                  ? {}
+                  : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+                {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
+                requiredCapability="work"
+              />
+              {props.folderControl}
+              {props.folderControl !== undefined ? null : hasFolder &&
+                props.projectName !== undefined ? (
+                <span className="work-composer-adapter__context-item" title={props.projectRoot}>
+                  <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <span>{props.projectName}</span>
+                </span>
+              ) : (
+                <span className="work-composer-adapter__context-item">
+                  <AlertTriangle aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <span>No folder</span>
+                  {props.onAttachFolder !== undefined ? (
+                    <OctantButton
+                      className="work-composer-adapter__attach-btn"
+                      onClick={props.onAttachFolder}
+                      type="button"
+                      variant="ghost"
+                    >
+                      Attach folder
+                    </OctantButton>
+                  ) : null}
+                </span>
+              )}
+            </div>
           </div>
 
           {props.errorMessage !== undefined ? (

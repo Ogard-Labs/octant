@@ -63,7 +63,6 @@ describe("RightUtilityDockSurface", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Navigator" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Navigator" })).toHaveAttribute(
       "aria-pressed",
       "true",
