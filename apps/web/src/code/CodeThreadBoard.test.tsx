@@ -292,6 +292,37 @@ describe("CodeThreadBoard", () => {
     expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
   });
 
+  it("shows a typed search term as typed in the active filters, not as an uppercase label", async () => {
+    const loadBoard = vi.fn(async () => view([card({ id: "01", status: "ready" })]));
+    render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
+
+    await screen.findByText("Thread 01");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search threads" }), {
+      target: { value: "MixedCase term" },
+    });
+    await waitFor(() =>
+      expect(loadBoard).toHaveBeenLastCalledWith({ version: 1, text: "MixedCase term" }),
+    );
+
+    const activeFilters = screen.getByRole("status", { name: "Active filters" });
+    // The tag recipe uppercases labels; a tag carrying what the person typed
+    // opts out via the value modifier so the term renders verbatim.
+    const searchTag = within(activeFilters).getByText("Search: MixedCase term");
+    expect(searchTag).toHaveClass("tag", "tag-value");
+
+    // Fixed-vocabulary filter labels stay plain tags and keep the label look.
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Pull request" }), {
+      target: { value: "open" },
+    });
+    expect(await within(activeFilters).findByText("Open PR")).not.toHaveClass("tag-value");
+    // A Project name is user-entered text too, so its tag renders verbatim.
+    fireEvent.change(screen.getByRole("combobox", { name: "Project" }), {
+      target: { value: String(projectB) },
+    });
+    expect(await within(activeFilters).findByText("Project B")).toHaveClass("tag", "tag-value");
+  });
+
   it("keeps secondary card metadata collapsed until Details is opened", async () => {
     const loadBoard = vi.fn(async () =>
       view([card({ id: "01", status: "waiting", title: "Waiting thread" })]),

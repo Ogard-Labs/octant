@@ -391,7 +391,10 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
         {activeFilters.length === 0 ? null : (
           <div aria-label="Active filters" className="code-board__active-filters" role="status">
             {activeFilters.map((filter) => (
-              <span className="tag" key={`${filter.kind}:${filter.label}`}>
+              <span
+                className={filter.verbatim ? "tag tag-value" : "tag"}
+                key={`${filter.kind}:${filter.label}`}
+              >
                 {filter.label}
               </span>
             ))}
@@ -562,7 +565,11 @@ function CodeBoardCardView(props: {
           onClick={() => props.onOpen?.(card.threadId as CodeThreadId)}
           type="button"
         >
-          <span className="board-card-title">{card.title}</span>
+          {/* the recipe clamps the title to two lines; the attribute keeps
+              the full title reachable on hover */}
+          <span className="board-card-title" title={card.title}>
+            {card.title}
+          </span>
         </button>
         {/*
          * The status is always text: a compact chip where the column does not
@@ -697,13 +704,21 @@ function statusSummary(statuses: ReadonlySet<CodeBoardStatus>): string {
     .join(", ");
 }
 
+interface ActiveFilterLabel {
+  readonly kind: string;
+  readonly label: string;
+  /** The label embeds text a person typed (a search term, a Project name),
+   * so it must render as typed rather than uppercased into a label. */
+  readonly verbatim?: true;
+}
+
 function activeFilterLabels(
   filters: FilterState,
   projectNames: ReadonlyMap<string, string>,
-): ReadonlyArray<{ readonly kind: string; readonly label: string }> {
-  const active: Array<{ readonly kind: string; readonly label: string }> = [];
+): ReadonlyArray<ActiveFilterLabel> {
+  const active: ActiveFilterLabel[] = [];
   const text = filters.text.trim();
-  if (text !== "") active.push({ kind: "search", label: `Search: ${text}` });
+  if (text !== "") active.push({ kind: "search", label: `Search: ${text}`, verbatim: true });
   if (filters.statuses.size !== ALL_STATUSES.length) {
     active.push({
       kind: "statuses",
@@ -714,6 +729,7 @@ function activeFilterLabels(
     active.push({
       kind: "project",
       label: projectNames.get(projectId) ?? "Selected Project",
+      verbatim: true,
     });
   }
   if (filters.pullRequest !== "any") {

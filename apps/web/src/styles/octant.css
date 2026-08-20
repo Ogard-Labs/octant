@@ -2728,8 +2728,13 @@ input.switch:checked::after {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  width: 268px;
-  flex: 0 0 268px;
+  /* Columns share the row instead of leaving a wide viewport half empty.
+     The floor keeps cards readable — below it the .board row scrolls
+     horizontally rather than squeezing; the ceiling stops a few columns
+     from stretching into slabs. */
+  flex: 1 1 268px;
+  min-width: 268px;
+  max-width: 420px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-lg);
   background: var(--oct-surface);
@@ -2799,7 +2804,13 @@ input.switch:checked::after {
   margin-bottom: var(--oct-space-2);
 }
 .board-card-title {
-  display: block;
+  /* two lines, then ellipsis — a long title must not make one card tower
+     over its column; the element carries the full title in its title
+     attribute */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   color: var(--oct-fg);
   font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-sm);
@@ -2930,6 +2941,12 @@ input.switch:checked::after {
 }
 .boardbar .boardbar-gap {
   flex: 1;
+}
+/* a tag whose text embeds something the person typed — a search term, a
+   Project name — keeps the tag look but must render that text as typed,
+   not uppercased into a label */
+.tag.tag-value {
+  text-transform: none;
 }
 
 /* ─── pull request pane ───────────────────────────────────────────────

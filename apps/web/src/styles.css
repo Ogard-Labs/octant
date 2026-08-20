@@ -7457,8 +7457,10 @@ p.board-col-empty {
 }
 
 .board[data-grouping="project"] .board-col {
-  width: auto;
   flex: 0 0 auto;
+  /* a project section is a full-width row of the stack, not a kanban
+     column, so the system column's growth ceiling does not apply */
+  max-width: none;
 }
 
 .board[data-grouping="project"] .board-col-body {
