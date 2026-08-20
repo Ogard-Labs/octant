@@ -14,7 +14,19 @@ export type CodeActivityRow =
       readonly id: string;
       readonly toolName: string;
       readonly state: "started" | "running" | "completed" | "failed";
+      /** Latest journaled summary, kept so replay and live folding share one row. */
       readonly summary?: string;
+      /**
+       * Text captured while the call was still open — typically the invocation.
+       * The journal does not split arguments from output; the transcript infers
+       * this from the open-state summary.
+       */
+      readonly arguments?: string;
+      /**
+       * Text from a completed or failed event — the result, or the reason the
+       * call failed or was refused. Absent when the host recorded none.
+       */
+      readonly output?: string;
     }
   | {
       readonly kind: "task";
@@ -48,6 +60,40 @@ function upsert(
   return rows.map((candidate, candidateIndex) => (candidateIndex === index ? row : candidate));
 }
 
+type ToolActivityRow = Extract<CodeActivityRow, { kind: "tool" }>;
+
+function previousTool(
+  rows: ReadonlyArray<CodeActivityRow>,
+  id: string,
+): ToolActivityRow | undefined {
+  return rows.find((row): row is ToolActivityRow => row.kind === "tool" && row.id === id);
+}
+
+/**
+ * Folds one journaled tool-activity event into a row. Open-state summaries
+ * become arguments; terminal summaries become output. A later event that omits
+ * summary keeps what the row already held, so a completed call still names the
+ * invocation that started it.
+ */
+function foldToolEvent(
+  previous: ToolActivityRow | undefined,
+  event: Extract<CodeOperationEvent, { kind: "tool-activity" }>,
+): ToolActivityRow {
+  const open = event.state === "started" || event.state === "running";
+  const summary = event.summary ?? previous?.summary;
+  const argumentsText = open ? (event.summary ?? previous?.arguments) : previous?.arguments;
+  const outputText = open ? previous?.output : (event.summary ?? previous?.output);
+  return {
+    kind: "tool",
+    id: String(event.toolCallId),
+    toolName: event.toolName,
+    state: event.state,
+    ...(summary === undefined ? {} : { summary }),
+    ...(argumentsText === undefined ? {} : { arguments: argumentsText }),
+    ...(outputText === undefined ? {} : { output: outputText }),
+  };
+}
+
 /**
  * Folds one journaled operation event into a turn's activity. Returns the same
  * activity when the event carries nothing the transcript renders, so callers can
@@ -58,15 +104,10 @@ export function applyActivityEvent(
   event: CodeOperationEvent,
 ): CodeTurnActivity {
   if (event.kind === "tool-activity") {
+    const id = String(event.toolCallId);
     return {
       ...activity,
-      rows: upsert(activity.rows, {
-        kind: "tool",
-        id: String(event.toolCallId),
-        toolName: event.toolName,
-        state: event.state,
-        ...(event.summary === undefined ? {} : { summary: event.summary }),
-      }),
+      rows: upsert(activity.rows, foldToolEvent(previousTool(activity.rows, id), event)),
     };
   }
   if (event.kind === "task-progress") {
@@ -88,7 +129,7 @@ export function appendReasoning(activity: CodeTurnActivity, chunk: string): Code
   return { ...activity, reasoning: `${activity.reasoning}${chunk}` };
 }
 
-/** How many rows are still open, for the collapsed row's summary line. */
+/** How many rows are still open. */
 export function activeRowCount(activity: CodeTurnActivity): number {
   return activity.rows.filter((row) =>
     row.kind === "tool"

@@ -972,7 +972,7 @@ describe("CodeThreadWorkspace", () => {
     );
 
     // The transcript never implies it is showing the whole turn when it is not.
-    expect(screen.getByText("1 step · earliest kept")).toBeVisible();
+    expect(screen.getByText("Earliest steps kept")).toBeVisible();
   });
 
   it("collapses a turn's tool steps and reasoning until the user opens them", async () => {
@@ -1013,16 +1013,17 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    // Closed by default: the summary counts the work without printing it.
-    expect(screen.getByText("2 steps")).toBeVisible();
+    // Closed by default: each tool is a named row, not the printed arguments.
+    expect(screen.getByRole("button", { name: "Bash, done" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Task, running" })).toBeVisible();
     expect(screen.queryByText("bun run verify")).not.toBeVisible();
     expect(screen.queryByText("Check the failing suite first.")).not.toBeVisible();
 
-    await user.click(screen.getByText("2 steps"));
+    await user.click(screen.getByRole("button", { name: "Bash, done" }));
     expect(screen.getByText("bun run verify")).toBeVisible();
     expect(screen.getByText("Bash")).toBeVisible();
 
-    await user.click(screen.getByText("Thinking"));
+    await user.click(screen.getByRole("button", { name: "Thinking" }));
     expect(screen.getByText("Check the failing suite first.")).toBeVisible();
   });
 
@@ -1045,7 +1046,7 @@ describe("CodeThreadWorkspace", () => {
     );
 
     expect(screen.queryByText("Thinking")).not.toBeInTheDocument();
-    expect(screen.queryByText(/steps?$/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /done$/ })).not.toBeInTheDocument();
   });
 
   it("lets the engine skip layout for transcript rows scrolled out of view", () => {

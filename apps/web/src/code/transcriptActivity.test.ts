@@ -28,8 +28,42 @@ describe("transcript activity", () => {
         toolName: "Bash",
         state: "completed",
         summary: "bun run verify",
+        arguments: "bun run verify",
+        output: "bun run verify",
       },
     ]);
+  });
+
+  it("keeps the invocation when a completed call records a different result", () => {
+    const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("running"));
+    const finished = applyActivityEvent(started, {
+      kind: "tool-activity",
+      toolCallId: "call-1" as never,
+      toolName: "Bash",
+      state: "completed",
+      summary: "exit 0",
+    } as CodeOperationEvent);
+    expect(finished.rows[0]).toMatchObject({
+      arguments: "bun run verify",
+      output: "exit 0",
+      state: "completed",
+    });
+  });
+
+  it("records a failed call's message as output so the fold still names the refusal", () => {
+    const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("running"));
+    const failed = applyActivityEvent(started, {
+      kind: "tool-activity",
+      toolCallId: "call-1" as never,
+      toolName: "Bash",
+      state: "failed",
+      summary: "Write refused: path is outside the checkout.",
+    } as CodeOperationEvent);
+    expect(failed.rows[0]).toMatchObject({
+      state: "failed",
+      arguments: "bun run verify",
+      output: "Write refused: path is outside the checkout.",
+    });
   });
 
   it("keeps tool and task rows apart even when their ids collide", () => {

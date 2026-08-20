@@ -815,6 +815,8 @@ describe("useCodeController", () => {
         toolName: "Bash",
         state: "completed",
         summary: "bun run verify",
+        arguments: "bun run verify",
+        output: "bun run verify",
       },
     ]);
     expect(activity?.reasoning).toBe("plan.");
@@ -1230,6 +1232,7 @@ describe("useCodeController", () => {
         toolName: "Read",
         state: "completed",
         summary: "read 40 lines",
+        output: "read 40 lines",
       },
     ]);
     unmount();
