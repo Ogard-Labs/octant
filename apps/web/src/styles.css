@@ -2523,6 +2523,15 @@ button:focus-visible {
   right: auto;
   bottom: auto;
   left: auto;
+
+  /*
+   * Said as the shared dialog's own variable, not as a competing max-width.
+   * These dialogs also carry `.octant-dialog__popup`, whose rule is imported
+   * later at the same specificity, so a flat cap here would simply lose and
+   * the dialog would open at the shared default.
+   */
+  --octant-dialog-width: 380px;
+
   width: min(100%, 380px);
   max-width: 380px;
   height: auto;
@@ -6427,15 +6436,44 @@ dialog.project-dialog {
   gap: 0.15rem;
 }
 
+/*
+ * Both columns must be allowed to shrink. With a bare `1fr` the name column
+ * kept its content's minimum width, so a long model id — `opencode-go/
+ * deepseek-v4-flash` and its kin — pushed its row wider than the list and the
+ * overflow painted over the row beneath it.
+ */
+/*
+ * The option is an OctantButton, and that recipe sets `whitespace-nowrap` for
+ * the short labels a button usually carries. A model name or id is neither
+ * short nor under our control, so wrapping is turned back on here — without it
+ * `overflow-wrap` has nothing to break, and a long name overflows its track
+ * instead of wrapping inside it.
+ */
 .model-picker__option {
   display: grid;
-  grid-template-columns: 1fr auto;
+  white-space: normal;
+
+  /*
+   * The button recipe also fixes the row at `h-8`, which was right when the
+   * label could not wrap. Now that it can — and badges or an unavailable
+   * reason add their own rows — the option has to grow instead of painting
+   * over the option beneath it.
+   */
+  height: auto;
+  min-height: 2rem;
+  /*
+   * The identifier is bounded so it cannot take the row from the name. Sized
+   * to its content it would, on a long id in a narrow picker, leave the name
+   * wrapping a character at a time.
+   */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 40%);
   grid-template-areas:
     "name id"
     "badges badges"
     "reason reason";
   gap: 0.2rem 0.5rem;
   width: 100%;
+  min-width: 0;
   text-align: left;
   padding: 0.4rem 0.5rem;
   border-radius: 0.4rem;
@@ -6458,14 +6496,18 @@ dialog.project-dialog {
 
 .model-picker__option-name {
   grid-area: name;
+  min-width: 0;
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 .model-picker__option-id {
   grid-area: id;
+  min-width: 0;
   font-size: 0.75rem;
   color: var(--octant-text-muted, rgba(255, 255, 255, 0.5));
   font-family: var(--octant-mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
 }
 
 .model-picker__badges {
