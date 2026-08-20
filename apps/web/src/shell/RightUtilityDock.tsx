@@ -11,16 +11,13 @@ import type {
 
 export interface RightUtilityDockProps {
   readonly availableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
-  readonly codeEnvironment: ReactNode;
   readonly context: ReactNode;
   readonly isNarrow: boolean;
   readonly navigator: ReactNode;
   readonly onClose: () => void;
   readonly onCommitWidth: (width: number) => void;
   readonly onPreviewWidth: (width: number) => void;
-  readonly onRefreshEnvironment?: () => Promise<void> | void;
   readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
-  readonly plan: ReactNode;
   readonly projectMemory: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
@@ -32,21 +29,19 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
 
   if (props.resolution.kind !== "surface") return null;
 
+  // Only the narrow dock is a modal that nothing else can dismiss. Docked, the
+  // window chrome's disclosure closes it, so the header carries no second
+  // close of its own.
+  const dismiss = props.isNarrow ? { closeButtonRef: closeButton, onClose: props.onClose } : {};
   const surface = (
     <RightUtilityDockSurface
       availableSurfaces={props.availableSurfaces}
-      closeButtonRef={closeButton}
-      codeEnvironment={props.codeEnvironment}
       context={props.context}
       navigator={props.navigator}
-      onClose={props.onClose}
-      {...(props.onRefreshEnvironment === undefined
-        ? {}
-        : { onRefreshEnvironment: props.onRefreshEnvironment })}
       onSelectSurface={props.onSelectSurface}
-      plan={props.plan}
       projectMemory={props.projectMemory}
       resolution={props.resolution}
+      {...dismiss}
     />
   );
 

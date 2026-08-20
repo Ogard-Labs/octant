@@ -6,12 +6,7 @@ import type {
   ProjectType,
 } from "@octant/contracts/projects";
 
-export type RightUtilityDockSurfaceId =
-  | "context"
-  | "project-memory"
-  | "code-environment"
-  | "navigator"
-  | "plan";
+export type RightUtilityDockSurfaceId = "context" | "project-memory" | "navigator";
 
 export interface RightUtilityDockSurfaceDescriptor {
   readonly id: RightUtilityDockSurfaceId;
@@ -79,6 +74,17 @@ export type RightUtilityDockResolution =
       readonly reason: RightUtilityDockClosedReason;
     };
 
+/*
+ * What the dock holds is decided by scope, not by convenience.
+ *
+ * Every surface here answers for a Project or for the host. The dock is scoped
+ * to the window, so with two threads open side by side it can only ever answer
+ * for one of them — which makes a thread-scoped surface here a surface that
+ * lies. `code-environment` was the plainest case: it rendered the very same git
+ * group the thread's own panel already showed under Changes. `plan` was the
+ * same mistake one step less obvious. Both now live in the thread panel that
+ * sits beside the thread they describe.
+ */
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
     id: "context",
@@ -92,12 +98,6 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     modes: ["chat", "work", "code"],
     projectRequired: true,
   },
-  {
-    id: "code-environment",
-    label: "Code environment",
-    modes: ["code"],
-    projectRequired: true,
-  },
   // Host-owned: Navigator answers for the host across every mode, so it is the
   // one surface here that is not about a Project.
   {
@@ -106,23 +106,13 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     modes: ["chat", "work", "code"],
     projectRequired: false,
   },
-  // A plan belongs to one Code thread, and that thread belongs to a Project, so
-  // it closes with the Project like every other Project-scoped surface.
-  {
-    id: "plan",
-    label: "Plan",
-    modes: ["code"],
-    projectRequired: true,
-  },
 ] as const satisfies ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 
 const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSurfaceDescriptor>> =
   {
     context: RIGHT_UTILITY_DOCK_SURFACES[0],
     "project-memory": RIGHT_UTILITY_DOCK_SURFACES[1],
-    "code-environment": RIGHT_UTILITY_DOCK_SURFACES[2],
-    navigator: RIGHT_UTILITY_DOCK_SURFACES[3],
-    plan: RIGHT_UTILITY_DOCK_SURFACES[4],
+    navigator: RIGHT_UTILITY_DOCK_SURFACES[2],
   };
 
 export function resolveRightUtilityDockSurface(
@@ -160,8 +150,7 @@ export function resolveRightUtilityDockSurface(
   if (
     project.lifecycle !== "active" ||
     project.type !== input.activeMode ||
-    (project.type !== "chat" && !hasBinding(project.binding)) ||
-    (surface.id === "code-environment" && project.type !== "code")
+    (project.type !== "chat" && !hasBinding(project.binding))
   ) {
     return closed("project-incompatible");
   }
@@ -181,11 +170,5 @@ function hasBinding(binding: CanonicalProjectBinding | undefined): boolean {
 }
 
 function isRightUtilityDockSurfaceId(value: unknown): value is RightUtilityDockSurfaceId {
-  return (
-    value === "context" ||
-    value === "project-memory" ||
-    value === "code-environment" ||
-    value === "navigator" ||
-    value === "plan"
-  );
+  return value === "context" || value === "project-memory" || value === "navigator";
 }

@@ -1,6 +1,4 @@
 import type { ProjectAvailability, ProjectSummary } from "@octant/contracts/projects";
-import type { RootlessThreadSummary } from "@octant/contracts/rootless-thread";
-import { rootlessThreadNavigationId } from "../rootless/useRootlessThreadNavigation";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/chat";
 import { defaultEnvironmentPresentationState } from "@octant/domain/shell-policy";
@@ -1550,53 +1548,6 @@ describe("WorkspaceView Work thread tab", () => {
   });
 });
 
-describe("WorkspaceView host-qualified rootless classification", () => {
-  it("keeps a persisted Code tab fail closed while rootless classification is loading", () => {
-    const tab = {
-      ...codeTab("code-overview", "Remote Code thread"),
-      hostId: "host-b",
-    } as WorkspaceTab;
-    const { container } = render(
-      <WorkspaceView
-        {...propsFor(tab)}
-        rootlessThreadStatus="loading"
-        rootlessThreads={new Map()}
-      />,
-    );
-
-    expect(screen.getByRole("heading", { name: "Loading rootless thread" })).toBeVisible();
-    expect(container.querySelector('[data-code-tab-kind="code-overview"]')).not.toBeInTheDocument();
-  });
-
-  it("keeps a persisted Work tab fail closed when rootless classification is unavailable", () => {
-    const tab = {
-      id: ids.tab,
-      kind: "work-thread",
-      mode: "work",
-      threadId: ids.thread,
-      title: "Remote Work thread",
-      hostId: "host-b",
-    } as WorkspaceTab;
-    const bootstrap = vi.fn(async () => ({ threads: [] }));
-    render(
-      <WorkspaceView
-        {...propsFor(tab)}
-        workThreadClient={{ bootstrap, execute: vi.fn() } as never}
-        mode="work"
-        rootlessThreadErrorMessage="Rootless threads are temporarily unavailable."
-        rootlessThreadStatus="unavailable"
-        rootlessThreads={new Map()}
-      />,
-    );
-
-    expect(screen.getByRole("heading", { name: "Rootless thread unavailable" })).toBeVisible();
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Rootless threads are temporarily unavailable.",
-    );
-    expect(bootstrap).not.toHaveBeenCalled();
-  });
-});
-
 describe("WorkspaceView Chat overview", () => {
   it("mounts Chat quick start in the existing Project workspace tab", async () => {
     const project = {
@@ -1833,106 +1784,6 @@ describe("WorkspaceView Chat overview", () => {
 });
 
 const now = "2026-07-29T12:00:00.000Z";
-
-function rootlessWorkThread(hostId = "host-b"): RootlessThreadSummary {
-  return {
-    threadId: ids.thread as never,
-    title: "Remote Work thread",
-    mode: "work",
-    hostId: hostId as never,
-    providerInstanceId: "00000000-0000-4000-8000-000000000010" as never,
-    modelId: "model-a" as never,
-    workspaceKind: "rootless",
-    createdAt: now as never,
-    updatedAt: now as never,
-  };
-}
-
-const rootlessProject = {
-  id: ids.project,
-  type: "work",
-  name: "Attached Docs",
-  binding: { canonicalRoot: "/docs" },
-  lifecycle: "active",
-  pinned: false,
-  rank: "0/1",
-  version: 1,
-  createdAt: now,
-  updatedAt: now,
-} as unknown as ProjectSummary;
-
-describe("WorkspaceView rootless attach entry and capability refresh", () => {
-  it("forwards the full thread (including remote hostId) when Attach folder is clicked", async () => {
-    const user = userEvent.setup();
-    const thread = rootlessWorkThread();
-    const tab = {
-      id: ids.tab,
-      kind: "work-thread",
-      mode: "work",
-      threadId: ids.thread,
-      title: "Remote Work thread",
-      hostId: "host-b",
-    } as WorkspaceTab;
-    const onAttach = vi.fn();
-    const rootlessThreads = new Map([[rootlessThreadNavigationId(thread), thread]]);
-
-    render(
-      <WorkspaceView
-        {...propsFor(tab)}
-        workThreadClient={{ bootstrap: vi.fn(), execute: vi.fn() } as never}
-        mode="work"
-        projects={[rootlessProject]}
-        rootlessThreads={rootlessThreads}
-        onAttachRootlessFolder={onAttach}
-      />,
-    );
-
-    await user.click(await screen.findByRole("button", { name: "Attach folder" }));
-    expect(onAttach).toHaveBeenCalledWith(thread);
-  });
-
-  it("re-renders an attached Work thread with mode-accurate continuation guidance", () => {
-    const thread = rootlessWorkThread();
-    const attached: RootlessThreadSummary = {
-      ...thread,
-      workspaceKind: "project-backed",
-      projectId: rootlessProject.id,
-    };
-    const tab = {
-      id: ids.tab,
-      kind: "work-thread",
-      mode: "work",
-      threadId: ids.thread,
-      title: "Remote Work thread",
-      hostId: "host-b",
-    } as WorkspaceTab;
-    const { rerender } = render(
-      <WorkspaceView
-        {...propsFor(tab)}
-        workThreadClient={{ bootstrap: vi.fn(), execute: vi.fn() } as never}
-        mode="work"
-        projects={[rootlessProject]}
-        rootlessThreads={new Map([[rootlessThreadNavigationId(thread), thread]])}
-      />,
-    );
-
-    expect(screen.getByText(/Unfiled/)).toBeInTheDocument();
-
-    rerender(
-      <WorkspaceView
-        {...propsFor(tab)}
-        workThreadClient={{ bootstrap: vi.fn(), execute: vi.fn() } as never}
-        mode="work"
-        projects={[rootlessProject]}
-        rootlessThreads={new Map([[rootlessThreadNavigationId(attached), attached]])}
-      />,
-    );
-
-    expect(screen.getByText(/Attached to Attached Docs/)).toBeInTheDocument();
-    const status = screen.getByRole("status", { name: "Folder attached" });
-    expect(status).toHaveTextContent(/Start a new Project thread to continue with Work tools/);
-  });
-});
 
 describe("WorkspaceView Chat thread Environment", () => {
   it("mounts authoritative Chat context inside the tab without filesystem or approval sections", async () => {

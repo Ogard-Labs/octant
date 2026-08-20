@@ -12,8 +12,6 @@ import type {
 import { decodeWorkMutationRequestId } from "@octant/contracts";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
-import type { ComposerFolderSelection } from "@octant/contracts/rootless-thread";
-import type { RootlessThreadSummary } from "@octant/contracts/rootless-thread";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { PreviewClient } from "@octant/client-runtime/preview-client";
@@ -68,6 +66,7 @@ import { WorkResearchPanel } from "../work/WorkResearchPanel";
 import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
 import { ShipPanel } from "../ship/ShipPanel";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
+import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
@@ -97,8 +96,6 @@ import { AgentModeWelcome } from "./AgentModeWelcome";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
-import { RootlessThreadWorkspace } from "../rootless/RootlessThreadWorkspace";
-import type { RootlessThreadNavigationStatus } from "../rootless/useRootlessThreadNavigation";
 import { ThreadActivityPictureInPicture } from "../threadActivity/ThreadActivityPictureInPicture";
 
 const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
@@ -260,15 +257,13 @@ export interface WorkspaceViewProps {
   readonly onRelinkProject: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRenameProject: (projectId: ProjectId, name: string) => Promise<boolean>;
   readonly renderTabAccessory?: (tab: WorkspaceTab, groupId: TabGroupId) => ReactNode;
-  readonly rootlessThreadErrorMessage?: string;
-  readonly rootlessThreadStatus?: RootlessThreadNavigationStatus;
-  readonly rootlessThreads?: ReadonlyMap<string, RootlessThreadSummary>;
-  readonly onRetryRootlessThreads?: () => void;
   readonly statusBar?: ReactNode;
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
   readonly environmentPresentation: EnvironmentPresentationState;
   readonly onSetEnvironmentPresentation: (next: EnvironmentPresentationState) => void;
+  /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
+  readonly onNewThreadInProject?: (projectId: ProjectSummary["id"]) => void;
   readonly projectClient?: ProjectClient;
   readonly projectServerUrl?: string;
   readonly projectWindowCapability?: string;
@@ -293,7 +288,7 @@ export interface WorkspaceViewProps {
   readonly onDraftCreateThread?: (
     mode: string,
     prompt: string,
-    folderSelection?: ComposerFolderSelection,
+    draftProjectId?: ProjectId,
     deliveryOutcome?: import("@octant/contracts/code").CodeDeliveryOutcomeKind,
   ) => void | Promise<void>;
   readonly draftCodeExecute?: (
@@ -322,9 +317,6 @@ export interface WorkspaceViewProps {
   readonly onDraftPendingMessage?: string;
   readonly onDraftCancelFirstTurn?: () => void;
   readonly onAttachFolder?: () => void;
-  readonly onAttachRootlessFolder?: (
-    thread: import("@octant/contracts/rootless-thread").RootlessThreadSummary,
-  ) => void;
   readonly onOpenDraftThread?: (mode: "work" | "code") => void;
   readonly onOpenProviderSettings?: () => void;
   readonly onOpenSettings?: () => void;
@@ -502,42 +494,6 @@ function renderTab(
   },
 ): React.ReactNode {
   const openProviderSettings = props.onOpenProviderSettings ?? props.onOpenSettings;
-  const rootlessThread = resolveRootlessThread(tab, props.rootlessThreads);
-  if (
-    rootlessThread?.workspaceKind === "rootless" ||
-    rootlessThread?.workspaceKind === "project-backed"
-  ) {
-    return (
-      <RootlessThreadWorkspace
-        key={tab.id}
-        projects={props.projects}
-        thread={rootlessThread}
-        {...(props.onAttachRootlessFolder === undefined
-          ? {}
-          : { onAttachFolder: props.onAttachRootlessFolder })}
-      />
-    );
-  }
-  if (isHostQualifiedThreadTab(tab) && rootlessThread === undefined) {
-    const loading = props.rootlessThreadStatus === "loading";
-    return (
-      <ShellState
-        {...(!loading && props.onRetryRootlessThreads !== undefined
-          ? { action: { label: "Retry thread", onClick: props.onRetryRootlessThreads } }
-          : {})}
-        eyebrow="Unfiled thread"
-        message={
-          loading
-            ? "Confirming the exact host and workspace authority before enabling this thread."
-            : (props.rootlessThreadErrorMessage ??
-              "The exact host-qualified thread is unavailable. Retry before using Project or root-backed tools.")
-        }
-        role={loading ? "status" : "alert"}
-        state={loading ? "loading" : "warning"}
-        title={loading ? "Loading rootless thread" : "Rootless thread unavailable"}
-      />
-    );
-  }
   if (isCodeWorkspaceTab(tab)) {
     return (
       <CodeThreadTabSurface controllers={props.codeControllers} key={tab.id} tab={tab}>
@@ -702,6 +658,9 @@ function renderCodeTab(
           presentation={props.environmentPresentation}
           onChangePresentation={props.onSetEnvironmentPresentation}
           {...(project === undefined ? {} : { project })}
+          {...(props.onNewThreadInProject === undefined
+            ? {}
+            : { onNewThreadInProject: props.onNewThreadInProject })}
           {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
           {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
           {...(props.projectWindowCapability === undefined
@@ -740,6 +699,7 @@ function renderCodeTab(
           tab={tab}
           onExecute={codeController.execute}
           files={files}
+          plan={<ThreadPlanPanel />}
           {...(shipClient === undefined
             ? {}
             : { publish: <ShipPanel client={shipClient} threadId={String(tab.threadId)} /> })}
@@ -1345,25 +1305,6 @@ function renderNonCodeTab(
         : { providerMessage: props.providerBootstrapMessage })}
     />
   );
-}
-
-function resolveRootlessThread(
-  tab: WorkspaceTab,
-  threads: ReadonlyMap<string, RootlessThreadSummary> | undefined,
-): RootlessThreadSummary | undefined {
-  if (threads === undefined || !isHostQualifiedThreadTab(tab)) {
-    return undefined;
-  }
-  for (const thread of threads.values()) {
-    if (
-      String(thread.threadId) === String(tab.threadId) &&
-      thread.mode === tab.mode &&
-      thread.hostId === tab.hostId
-    ) {
-      return thread;
-    }
-  }
-  return undefined;
 }
 
 function isHostQualifiedThreadTab(

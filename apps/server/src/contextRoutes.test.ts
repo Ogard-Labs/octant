@@ -99,6 +99,22 @@ describe("context routes", () => {
       message: "Octant Context service is unavailable.",
     });
   });
+
+  it("answers a subject nothing has planned yet without claiming the service failed", async () => {
+    const notPlanned = handler({
+      inspect: () => {
+        throw new ContextHarnessError("not-planned", "private subject detail");
+      },
+    });
+
+    const response = await notPlanned(request("/api/context/inspect", { subject }));
+
+    expect(response?.status).toBe(404);
+    await expect(response?.json()).resolves.toEqual({
+      category: "not-planned",
+      message: "This thread has no context plan yet.",
+    });
+  });
 });
 
 function handler(

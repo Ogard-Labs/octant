@@ -76,15 +76,6 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "GET" || method === "HEAD") return "project.overview.read";
     return undefined;
   }
-  if (path.startsWith("/api/rootless/")) {
-    if (path === "/api/rootless/threads" && method === "POST") return "code.create-thread";
-    if (path === "/api/rootless/turns" && method === "POST") return "code.plan-turn";
-    if (path === "/api/rootless/compatible-projects" && method === "POST") {
-      return "project.overview.read";
-    }
-    if (method === "GET" || method === "HEAD") return "project.overview.read";
-    return undefined;
-  }
   if (path.startsWith("/api/projects/")) {
     return method === "GET" || method === "HEAD" ? "project.overview.read" : undefined;
   }

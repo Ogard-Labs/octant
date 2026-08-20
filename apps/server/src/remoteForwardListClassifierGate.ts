@@ -46,7 +46,6 @@ const PRODUCT_PROBES = [
   { path: "/api/automations/list", method: "GET" },
   { path: "/api/automations/commands", method: "POST" },
   { path: "/api/canvas/share-access", method: "POST" },
-  { path: "/api/rootless/threads", method: "POST" },
   { path: "/api/agent-profiles", method: "GET" },
 ] as const;
 
