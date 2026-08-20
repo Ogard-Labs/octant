@@ -4006,6 +4006,13 @@ input.switch:checked::after {
 .composer-input:focus {
   outline: none;
 }
+/* The frame's :focus-within accent border is the composer's focus
+   affordance; editable elements match :focus-visible on every focus, so
+   without this the global ring draws a second box inside the frame (same
+   treatment as .zen-notes textarea). */
+.composer-input:focus-visible {
+  box-shadow: none;
+}
 .composer-input::placeholder {
   color: var(--oct-meta);
 }

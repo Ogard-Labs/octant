@@ -876,7 +876,11 @@
   flex: 1 1 auto;
 }
 
-.chat-composer label {
+/* Only toolbar labels shrink-wrap their control. The message field's label
+   must not match: `.chat-composer label` out-specified the lone
+   `.chat-composer__message-field` class and shrank the content-sized
+   textarea to its typed text. */
+.chat-composer__bar label {
   display: inline-flex;
   min-width: 0;
   align-items: center;
