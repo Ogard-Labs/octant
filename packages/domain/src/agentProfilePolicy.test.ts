@@ -569,13 +569,30 @@ describe("applyProfileToThread", () => {
       profile: profile({ defaultExecutionPolicy: "full-access" }),
       mode: "code",
       modelId: "gpt-5.6-luna" as ProviderModel["id"],
-      requestedExecutionPolicy: "approval-gated",
+      requestedExecutionPolicy: "full-access",
       requestedPermissionPersistence: "current-session",
       projectExecutionPolicy: "approval-gated",
     });
 
     expect(applied.status).toBe("refused");
     expect(applied.status === "refused" ? applied.code : undefined).toBe("authority-escalation");
+  });
+
+  it("starts a thread that asked for less than the Project allows under a broader profile", () => {
+    const applied = applyProfileToThread({
+      profile: profile({ defaultExecutionPolicy: "full-access" }),
+      mode: "code",
+      modelId: "gpt-5.6-luna" as ProviderModel["id"],
+      requestedExecutionPolicy: "plan",
+      requestedPermissionPersistence: "current-session",
+      projectExecutionPolicy: "approval-gated",
+    });
+
+    expect(applied).toEqual({
+      status: "applied",
+      executionPolicy: "plan",
+      permissionPersistence: "current-session",
+    });
   });
 
   it("keeps the shorter of the thread's permission duration and the profile's", () => {

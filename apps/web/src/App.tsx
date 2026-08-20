@@ -2453,6 +2453,21 @@ function LaunchedShell(
         );
         return;
       }
+      // Profiles are read from the launch host, so an identifier from here
+      // means nothing on another host — it would be refused as missing, or
+      // worse, match a different profile that happens to share the id. The
+      // composer still shows the selection, so starting the thread without it
+      // would leave someone believing a posture they never got; say so and
+      // start nothing instead.
+      if (
+        executionProfileController.selectedProfile !== undefined &&
+        String(createHostId) !== String(LOCAL_HOST_ID)
+      ) {
+        setDraftError(
+          "Profiles belong to this host. Clear the selected profile to start this thread on another host.",
+        );
+        return;
+      }
       const timestamp = new Date().toISOString();
       const title = input.prompt.length > 60 ? `${input.prompt.slice(0, 57)}…` : input.prompt;
       // The Project's remembered habit — overridable for this one thread
@@ -2469,14 +2484,7 @@ function LaunchedShell(
         title,
         // The server, not the composer, decides what the profile does to the
         // thread's posture; the renderer only says which one was selected.
-        //
-        // Profiles are read from the launch host, so an identifier from here
-        // means nothing on another host — it would be refused as missing, or
-        // worse, match a different profile that happens to share the id. A
-        // thread started elsewhere carries no profile until that host's own
-        // profiles are reachable.
-        ...(executionProfileController.selectedProfile === undefined ||
-        String(createHostId) !== String(LOCAL_HOST_ID)
+        ...(executionProfileController.selectedProfile === undefined
           ? {}
           : { profileId: executionProfileController.selectedProfile.id }),
       });

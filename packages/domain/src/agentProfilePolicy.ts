@@ -155,22 +155,21 @@ export function applyProfileToThread(input: {
       reason: `Profile "${input.profile.displayName}" does not allow model "${String(input.modelId)}".`,
     };
   }
-  try {
-    validateProfileAuthoritySafety({
-      profile: input.profile,
-      projectExecutionPolicy: input.projectExecutionPolicy,
-    });
-  } catch (error) {
-    return {
-      status: "refused",
-      code: "authority-escalation",
-      reason: error instanceof AgentProfileRejected ? error.message : "Profile rejected.",
-    };
-  }
   const executionPolicy =
     POLICY_RANK[input.profile.defaultExecutionPolicy] < POLICY_RANK[input.requestedExecutionPolicy]
       ? input.profile.defaultExecutionPolicy
       : input.requestedExecutionPolicy;
+  // The posture the thread would actually run under is what has to clear the
+  // Project, not the profile's own default. A Full-access profile asked to
+  // start in Plan produces a Plan thread and takes nothing the Project has not
+  // already granted; refusing it would refuse the narrower of the two choices.
+  if (POLICY_RANK[executionPolicy] > POLICY_RANK[input.projectExecutionPolicy]) {
+    return {
+      status: "refused",
+      code: "authority-escalation",
+      reason: `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
+    };
+  }
   const permissionPersistence =
     PERSISTENCE_RANK[input.profile.defaultPermissionPersistence] <
     PERSISTENCE_RANK[input.requestedPermissionPersistence]

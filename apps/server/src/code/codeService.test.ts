@@ -641,7 +641,7 @@ describe("CodeService commands", () => {
     ).resolves.toEqual({ kind: "thread-created", thread: created });
   });
 
-  it("refuses a profile whose posture reaches past what the Project grants", async () => {
+  it("starts a thread that asked for less than its Project grants under a broader profile", async () => {
     const created = thread({
       executionPolicy: "approval-gated",
       profileId: ids.profile as never,
@@ -651,10 +651,16 @@ describe("CodeService commands", () => {
       profiles: [agentProfile({ defaultExecutionPolicy: "full-access" })],
     });
 
+    // The thread runs approval-gated either way. A profile the Project would
+    // not grant in full is still bindable when the thread asked for less than
+    // the Project already allows; refusing here would refuse the narrower of
+    // the two choices.
     await expect(
       fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
-    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
-    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+    ).resolves.toMatchObject({
+      kind: "thread-created",
+      thread: { executionPolicy: "approval-gated", profileId: ids.profile },
+    });
   });
 
   it("shortens a thread's permission duration to its profile's", async () => {
