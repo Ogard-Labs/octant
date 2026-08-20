@@ -11,7 +11,7 @@ import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-cl
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
-import { ArrowUp, Check, Globe2 } from "lucide-react";
+import { Check, Globe2 } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -23,6 +23,7 @@ import {
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { ThreadComposer } from "../composer/ThreadComposer";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
@@ -396,33 +397,32 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           </div>
         )}
         <div className="work-thread-workspace__composer-shell">
-          <div className="composer">
-            <OctantTextarea
-              aria-label="Work prompt"
-              autoFocus
-              className="composer-input"
-              disabled={creating || completionLocked || props.mutationClient === undefined}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Describe the deliverable or paste a draft…"
-              ref={textareaRef}
-              rows={4}
-              value={prompt}
-            />
-            <div className="composer-row">
-              <span className="composer-gap" />
-              <OctantButton
-                aria-label="Create artifact"
-                disabled={!canSubmit}
-                onClick={() => void submit()}
-                size="icon"
-                type="button"
-                variant="default"
-              >
-                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-              </OctantButton>
-            </div>
-          </div>
+          <ThreadComposer
+            input={
+              <OctantTextarea
+                aria-label="Work prompt"
+                autoFocus
+                className="composer-input"
+                disabled={creating || completionLocked || props.mutationClient === undefined}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Describe the deliverable or paste a draft…"
+                ref={textareaRef}
+                rows={4}
+                value={prompt}
+              />
+            }
+            row={{
+              actions: {
+                kind: "send",
+                send: {
+                  ariaLabel: "Create artifact",
+                  disabled: !canSubmit,
+                  onSend: () => void submit(),
+                },
+              },
+            }}
+          />
           {errorMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">
               {errorMessage}
