@@ -836,9 +836,16 @@ export class CodeOperationService {
               "An image attached to this turn is no longer staged.",
             );
           } else {
+            const turnThread =
+              command.kind === "start-provider-turn"
+                ? threadForTurn(
+                    scope.thread,
+                    turnAccessPosture(scope.thread, command, recordedStart?.event.executionPolicy),
+                  )
+                : scope.thread;
             if (command.kind === "start-provider-turn" && recordedStart === undefined) {
               const checkpoint = await this.#checkpoint(
-                scope.thread,
+                turnThread,
                 scope.checkout.id,
                 root.checkoutRoot,
               );
@@ -852,7 +859,7 @@ export class CodeOperationService {
                   modelId: scope.thread.modelId,
                   sessionId: command.sessionId,
                   prompt: command.prompt,
-                  executionPolicy: turnAccessPosture(scope.thread, command),
+                  executionPolicy: turnThread.executionPolicy,
                   ...(starting.attachments.length === 0
                     ? {}
                     : { attachments: starting.attachments }),
@@ -865,16 +872,7 @@ export class CodeOperationService {
               result = await this.#execute(
                 command,
                 windowId,
-                command.kind === "start-provider-turn"
-                  ? threadForTurn(
-                      scope.thread,
-                      turnAccessPosture(
-                        scope.thread,
-                        command,
-                        recordedStart?.event.executionPolicy,
-                      ),
-                    )
-                  : scope.thread,
+                turnThread,
                 scope.checkout,
                 root,
                 starting.attachments,
@@ -2386,20 +2384,22 @@ function recordedTurnAccessPosture(
 }
 
 /**
- * The posture this provider turn runs under. A recorded start is the source of
- * truth so recovery cannot widen a turn that already ran narrower. Otherwise
- * the composer intent is clamped to the thread: the host never grants more
- * than the thread already allows.
+ * The posture this provider turn runs under. A recorded start is the requested
+ * ceiling so recovery cannot widen a turn that already ran narrower — and a
+ * later lower thread grant still clamps it, so a crashed Full-access turn
+ * cannot resume after the user has taken that grant away. Otherwise the
+ * composer intent is clamped to the thread: the host never grants more than
+ * the thread already allows.
  */
 function turnAccessPosture(
   thread: CodeThread,
   command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
   recorded?: CodeThread["executionPolicy"],
 ): CodeThread["executionPolicy"] {
-  if (recorded !== undefined) return recorded;
+  const requested = recorded ?? command.executionPolicy;
   return clampTurnAccessPosture({
     thread: thread.executionPolicy,
-    ...(command.executionPolicy === undefined ? {} : { requested: command.executionPolicy }),
+    ...(requested === undefined ? {} : { requested }),
   });
 }
 

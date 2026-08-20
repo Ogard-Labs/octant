@@ -1166,7 +1166,7 @@ describe("useCodeController", () => {
     const replyId = "60000000-0000-4000-8000-000000000011";
     const operationId = "70000000-0000-4000-8000-000000000010";
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1215,7 +1215,7 @@ describe("useCodeController", () => {
     const reasoningId = "60000000-0000-4000-8000-000000000014";
     const operationId = "70000000-0000-4000-8000-000000000012";
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1282,7 +1282,7 @@ describe("useCodeController", () => {
     const conversation = vi
       .fn()
       .mockResolvedValueOnce({
-        version: 2,
+        version: 3,
         threadId: ids.thread,
         turns: [
           {
@@ -1301,7 +1301,7 @@ describe("useCodeController", () => {
         hasMore: false,
       })
       .mockResolvedValueOnce({
-        version: 2,
+        version: 3,
         threadId: ids.thread,
         turns: [
           {
@@ -1320,7 +1320,7 @@ describe("useCodeController", () => {
         hasMore: false,
       })
       .mockResolvedValue({
-        version: 2,
+        version: 3,
         threadId: ids.thread,
         turns: [
           {
@@ -1381,7 +1381,7 @@ describe("useCodeController", () => {
     const liveId = "60000000-0000-4000-8000-000000000031";
     const operationId = "70000000-0000-4000-8000-000000000030";
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1454,6 +1454,36 @@ describe("useCodeController", () => {
       expect(result.current.turnError).toBe("Conversation history could not be loaded."),
     );
     expect(result.current.status).toBe("ready");
+    unmount();
+  });
+
+  it("re-hydrates a failed transcript when the user retries from the thread view", async () => {
+    const conversation = vi
+      .fn(async () => ({
+        version: 3 as const,
+        threadId: ids.thread,
+        turns: [],
+        nextCursor: 0,
+        hasMore: false,
+      }))
+      .mockRejectedValueOnce(new Error("offline"));
+    const client = fakeClient({ conversation });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be loaded."),
+    );
+
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    // Reloading only the bootstrap left the transcript in its error state
+    // forever, because nothing re-activates a thread that is already open.
+    await waitFor(() => expect(result.current.conversationHistory).toBe("loaded"));
+    expect(result.current.turnError).toBeUndefined();
     unmount();
   });
 
@@ -1531,7 +1561,7 @@ describe("useCodeController", () => {
     let status: "incomplete" | "completed" = "incomplete";
     const bootstrapRead = vi.fn(async () => bootstrap(1, activitySequence));
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1617,6 +1647,57 @@ describe("useCodeController", () => {
     expect(result.current.navigation[0]?.unread).toBe(false);
   });
 
+  it("marks a thread read when it opens even though its history could not be loaded", async () => {
+    // The error state is still the thread's current state in front of the
+    // user. Leaving the mark standing sent them back to a view with nothing
+    // more to show.
+    const readCursorStore = createCodeReadCursorStore();
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => bootstrap(1, 9)),
+      conversation: vi.fn(async () => Promise.reject(new Error("offline"))),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        readCursorStore,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await waitFor(() =>
+      expect(result.current.turnError).toBe("Conversation history could not be loaded."),
+    );
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
+    unmount();
+  });
+
+  it("holds a thread the user marked unread even when this sitting journaled no activity for it", async () => {
+    // With nothing journaled this sitting, dropping the cursor alone leaves
+    // the comparison at zero-over-zero and the click does visibly nothing.
+    const readCursorStore = createCodeReadCursorStore();
+    const client = fakeClient();
+    const { result } = renderHook(() => useCodeController({ client, readCursorStore }));
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
+
+    act(() => readCursorStore.unmark(ids.thread));
+
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(true));
+  });
+
+  it("spends an explicit unread mark when the user asks for the thread to be read", async () => {
+    const readCursorStore = createCodeReadCursorStore();
+    const client = fakeClient();
+    const { result } = renderHook(() => useCodeController({ client, readCursorStore }));
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
+    act(() => readCursorStore.unmark(ids.thread));
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(true));
+
+    act(() => result.current.markThreadRead(ids.thread));
+
+    await waitFor(() => expect(result.current.navigation[0]?.unread).toBe(false));
+  });
+
   it("marks a manual follow-up with a strictly newer trigger sequence", async () => {
     const executeFollowUp = vi.fn(async () => ({ kind: "code-follow-up-updated" }) as never);
     const client = fakeClient({
@@ -1684,7 +1765,7 @@ function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
     bootstrap: vi.fn(async () => bootstrap()),
     queryBoard: vi.fn(),
     conversation: vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [],
       nextCursor: 0,

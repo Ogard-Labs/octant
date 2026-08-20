@@ -1368,6 +1368,59 @@ describe("CodeOperationService", () => {
       }),
     );
   });
+
+  it("takes no restore point when a writing thread runs one Plan message", async () => {
+    const checkpoint = vi.fn(async () => ({ status: "captured" as const, snapshot: {} }));
+    const fixture = providerTurnFixture({ git: { checkpoint } as never });
+
+    await expect(
+      fixture.service.execute(ids.window, { ...startProviderTurn, executionPolicy: "plan" }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+    expect(checkpoint).not.toHaveBeenCalled();
+    expect(fixture.turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thread: expect.objectContaining({ executionPolicy: "plan" }),
+      }),
+    );
+  });
+
+  it("clamps a recorded Full-access turn to a later lower thread grant", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+    });
+    fixture.events.replay.mockReturnValue({
+      status: "ok" as const,
+      frames: [
+        {
+          threadId: ids.thread,
+          operationId: startProviderTurn.operationId,
+          cursor: 1,
+          occurredAt: "2026-07-21T10:00:00.000Z",
+          event: {
+            kind: "conversation-turn-started" as const,
+            providerInstanceId: thread().providerInstanceId,
+            modelId: thread().modelId,
+            sessionId: startProviderTurn.sessionId,
+            prompt: startProviderTurn.prompt,
+            executionPolicy: "full-access" as const,
+          },
+        },
+      ],
+      nextCursor: 1,
+    } as never);
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+
+    expect(fixture.turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thread: expect.objectContaining({ executionPolicy: "approval-gated" }),
+      }),
+    );
+  });
 });
 
 const startProviderTurn = {

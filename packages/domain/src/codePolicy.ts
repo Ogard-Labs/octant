@@ -146,6 +146,17 @@ export function accessPosturesAtOrBelow(
 }
 
 /**
+ * Postures that would widen the thread. The composer offers these as a grant
+ * raise, never as a one-shot: a turn may only sit at or below the thread.
+ */
+export function accessPosturesAbove(
+  floor: ProviderExecutionPolicy,
+): ReadonlyArray<ProviderExecutionPolicy> {
+  const rank = ACCESS_POSTURE_RANK[floor];
+  return ACCESS_POSTURES_NARROWEST_FIRST.filter((posture) => ACCESS_POSTURE_RANK[posture] > rank);
+}
+
+/**
  * Whether this posture decides gated Code effects by explicit approval.
  *
  * Auto-accept edits changes how one class is decided — project file writes —

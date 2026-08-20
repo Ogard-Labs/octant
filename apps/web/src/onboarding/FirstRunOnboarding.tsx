@@ -372,19 +372,19 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
         </div>
 
         {unnamed ? (
-          <p className="first-run__notice" data-tone="attention" role="status">
+          <p className="first-run__notice callout" data-tone="attention" role="status">
             Octant needs something to call you before it can go on. It stays on this Mac.
           </p>
         ) : null}
 
         {controller.blockedMessage === undefined ? null : (
-          <p className="first-run__notice" data-tone="attention" role="alert">
+          <p className="first-run__notice callout" data-tone="attention" role="alert">
             {controller.blockedMessage}
           </p>
         )}
 
         <footer className="first-run__actions">
-          <div className="first-run__buttons">
+          <div className="first-run__buttons btn-group">
             {back === undefined ? null : (
               <OctantButton
                 disabled={importing}

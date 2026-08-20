@@ -217,7 +217,7 @@ describe("CodeOperationEventStore", () => {
     const restarted = createStore(reopened.journal);
     const firstPage = restarted.conversation({ threadId, afterCursor: 0, limit: 1 });
     expect(firstPage).toMatchObject({
-      version: 2,
+      version: 3,
       threadId,
       hasMore: true,
       turns: [
@@ -534,6 +534,49 @@ describe("CodeOperationEventStore", () => {
     fixture.connection.close();
   });
 
+  it("reads a thread's small history even when unrelated aggregates dominate the journal", () => {
+    const fixture = openJournal();
+    const store = createStore(fixture.journal);
+    // A real dogfooding host reached ~22k journal events, 94% of them
+    // code-checkout observations, and every thread's history read failed the
+    // scan bound before reaching a single conversation event. The flood only
+    // has to exceed that old global bound to prove reads no longer pay for
+    // traffic that is not theirs.
+    appendCheckoutNoise(fixture.journal, 10_001);
+    const prompt = decodeCodeEvidenceReference({
+      contentId: "89000000-0000-4000-8000-000000000035",
+      digest: "c".repeat(64),
+      byteLength: 6,
+    });
+    store.append({
+      threadId,
+      operationId,
+      expectedCursor: 0,
+      event: decodeCodeOperationEvent({
+        kind: "conversation-turn-started",
+        providerInstanceId: "89000000-0000-4000-8000-000000000040",
+        modelId: "model-one",
+        sessionId: "89000000-0000-4000-8000-000000000050",
+        prompt,
+      }),
+    });
+    store.append({ threadId, operationId, expectedCursor: 1, event: stateEvent("completed") });
+
+    const page = store.conversation({ threadId, afterCursor: 0, limit: 10 });
+    expect(page.turns).toMatchObject([{ operationId, status: "completed" }]);
+    expect(page.hasMore).toBe(false);
+    expect(store.historyForThread(threadId)).toMatchObject({
+      status: "ok",
+      frames: [{ cursor: 1 }, { cursor: 2 }],
+    });
+    expect(store.replay({ threadId, operationId, afterCursor: 0, limit: 10 })).toMatchObject({
+      status: "ok",
+      frames: [{ cursor: 1 }, { cursor: 2 }],
+      nextCursor: 2,
+    });
+    fixture.connection.close();
+  });
+
   it("requires a snapshot when operation cursors or aggregate versions contain a gap", () => {
     const fixture = openJournal();
     appendRaw(fixture.journal, operationId, 0, frame(2, threadId, operationId));
@@ -602,6 +645,37 @@ function appendRaw(
   });
 }
 
+const CHECKOUT_NOISE_EVENT = "code.checkout-observed-fixture@1";
+
+/**
+ * Floods the journal with events that belong to a different aggregate type and
+ * carry no thread identity, batched because appending them one at a time makes
+ * the suite pay one transaction per row.
+ */
+function appendCheckoutNoise(journal: Journal, count: number): void {
+  const checkoutId = "89000000-0000-4000-8000-0000000000aa";
+  let version = 0;
+  let sequence = 0;
+  while (sequence < count) {
+    const batch = Math.min(1_000, count - sequence);
+    journal.append({
+      aggregate: { aggregateType: "code-checkout", aggregateId: checkoutId },
+      expectedVersion: version,
+      events: Array.from({ length: batch }, (_, index) => ({
+        eventId: `89000000-0000-4000-a000-${(sequence + index).toString().padStart(12, "0")}`,
+        eventName: CHECKOUT_NOISE_EVENT,
+        eventVersion: 1,
+        correlationId: "89000000-0000-4000-8000-0000000000ab",
+        actor,
+        occurredAt: now,
+        payload: { observedAt: now },
+      })),
+    });
+    version += batch;
+    sequence += batch;
+  }
+}
+
 function openJournal(path = databasePath()): { journal: Journal; connection: SqliteConnection } {
   const connection = openSqlite(path);
   applyMigrations(connection, MIGRATIONS, () => now);
@@ -609,11 +683,9 @@ function openJournal(path = databasePath()): { journal: Journal; connection: Sql
     connection,
     journal: new Journal({
       connection,
-      registry: new EventRegistry().register(
-        CODE_OPERATION_EVENT_RECORDED,
-        1,
-        CodeOperationEventFrame,
-      ),
+      registry: new EventRegistry()
+        .register(CODE_OPERATION_EVENT_RECORDED, 1, CodeOperationEventFrame)
+        .register(CHECKOUT_NOISE_EVENT, 1, Schema.Struct({ observedAt: Schema.String })),
       projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
       clock: () => now,
     }),

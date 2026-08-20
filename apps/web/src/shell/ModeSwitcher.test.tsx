@@ -18,10 +18,12 @@ describe("ModeSwitcher", () => {
 
     const group = screen.getByRole("group", { name: "Workspace mode" });
     const buttons = screen.getAllByRole("button");
-    expect(group).toHaveClass("mode-switcher", "window-no-drag");
+    expect(group).toHaveClass("modeswitch", "window-no-drag");
+    expect(group).toHaveAttribute("data-oct-modeswitch", "icons");
     expect(buttons.map((button) => button.textContent)).toEqual(["Chat", "Code"]);
     expect(screen.queryByRole("button", { name: "Work" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Chat" })).not.toHaveAttribute("aria-current");
 
     await user.click(screen.getByRole("button", { name: "Code" }));
     expect(onSelectMode).not.toHaveBeenCalled();
@@ -44,7 +46,7 @@ describe("ModeSwitcher", () => {
 
     const trigger = screen.getByRole("button", { name: "Workspace mode, Code" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
-    expect(trigger).toHaveClass("octant-menu__trigger", "window-no-drag");
+    expect(trigger).toHaveClass("mode-trigger", "window-no-drag");
     trigger.focus();
     await user.keyboard("{Enter}");
 

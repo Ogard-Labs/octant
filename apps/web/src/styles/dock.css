@@ -6,8 +6,8 @@
   min-height: 0;
   grid-template-columns: 7px minmax(0, 1fr);
   overflow: hidden;
-  color: var(--octant-text-primary);
-  background: var(--octant-workspace);
+  color: var(--oct-fg);
+  background: var(--oct-bg);
   border-left: 0;
 }
 
@@ -27,13 +27,15 @@
   bottom: 0;
   left: 3px;
   width: 1px;
-  background: var(--octant-border);
+  background: var(--oct-border);
   content: "";
 }
 
+/* The same feedback the system's .split-handle gives: the hairline takes the
+   accent ink while grabbed or focused. */
 .right-utility-dock__resize:hover::before,
 .right-utility-dock__resize:focus-visible::before {
-  background: var(--octant-focus-ring);
+  background: var(--oct-accent-fg);
 }
 
 .right-utility-dock__surface {
@@ -42,27 +44,23 @@
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  background: var(--octant-workspace);
+  background: var(--oct-bg);
 }
 
+/* The bar is the system's .dock-head; only the two-ended layout is ours,
+   because the surface tabs sit where .dock-head expects a static label. */
 .right-utility-dock__toolbar {
-  display: flex;
-  min-height: 42px;
-  align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 5px 8px;
-  background: var(--octant-chrome);
-  border-bottom: 1px solid var(--octant-border);
 }
 
+/* An h2 so the surface stays a landmark heading, dressed as the dock label
+   .dock-head already paints — the UA's heading size and weight would shout
+   over a 34px rail. */
 .right-utility-dock__identity {
   min-width: 0;
   margin: 0;
   overflow: hidden;
-  color: var(--octant-text-primary);
-  font-size: 12px;
-  font-weight: 600;
+  font: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -74,18 +72,6 @@
   gap: 2px;
 }
 
-.right-utility-dock__actions .shell-icon-button {
-  width: 26px;
-  height: 26px;
-  color: var(--octant-text-secondary);
-  cursor: pointer;
-}
-
-.right-utility-dock__actions .shell-icon-button:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
 .right-utility-dock__tabs {
   display: flex;
   flex: 1 1 auto;
@@ -95,27 +81,28 @@
   scrollbar-width: thin;
 }
 
+/* Ghost recipe buttons at the chrome's 26px metric: the .btn base height
+   would overflow the .dock-head rail. */
 .right-utility-dock__tabs button {
   min-height: 26px;
   padding: 0 8px;
-  color: var(--octant-text-muted);
-  border-radius: 5px;
+  color: var(--oct-meta);
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 10px;
+  font-size: var(--oct-text-xs);
   white-space: nowrap;
 }
 
 .right-utility-dock__tabs button:hover,
 .right-utility-dock__tabs button[aria-pressed="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
+/* Scroll and padding come from .dock-body. */
 .right-utility-dock__content {
   min-width: 0;
   min-height: 0;
-  padding: 12px;
-  overflow: auto;
   overscroll-behavior: contain;
 }
 
@@ -128,7 +115,7 @@
   position: fixed;
   z-index: 50;
   inset: 0;
-  background: rgb(0 0 0 / 28%);
+  background: var(--oct-scrim);
 }
 
 .octant-dialog__viewport {
@@ -149,23 +136,20 @@
  */
 .octant-dialog__popup {
   width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px));
-  /*
-   * The shared dialog recipe carries Tailwind's `max-w-lg`, which clamps every
-   * popup at 32rem no matter what width it asked for. A dialog that declares a
-   * wider `--octant-dialog-width` means it; restating the same expression as a
-   * max-width is what lets it actually reach that size.
-   */
+  /* A dialog that declares a wider `--octant-dialog-width` means it; the
+     explicit max-width guards it against any clamp a shared recipe might
+     reintroduce (the old Tailwind `max-w-lg` did exactly that). */
   max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px));
   height: auto;
   max-height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  color: var(--octant-text-primary);
-  background: var(--octant-workspace);
+  color: var(--oct-fg);
+  background: var(--oct-bg);
   border: 1px solid var(--octant-border-strong);
-  border-radius: 12px;
-  box-shadow: 0 16px 48px rgb(0 0 0 / 28%);
+  border-radius: var(--oct-radius-lg);
+  box-shadow: var(--oct-elev-raised);
   outline: 0;
   pointer-events: auto;
 }
@@ -205,13 +189,13 @@
 }
 
 .navigator-panel__header h2 {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
 }
 
 .navigator-panel__header p {
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
 }
 
 .navigator-panel__notice,
@@ -220,14 +204,14 @@
   gap: 6px;
   justify-items: start;
   padding: 10px 12px;
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 12px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-lg);
 }
 
 .navigator-panel__notice p,
 .navigator-panel__capability p {
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
 }
 
 .navigator-panel__transcript {
@@ -238,16 +222,16 @@
 }
 
 .navigator-panel__empty {
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
 }
 
 .navigator-panel__message {
   display: grid;
   gap: 4px;
   padding: 10px 12px;
-  border-radius: 12px;
-  background: var(--octant-surface-raised, rgb(255 255 255 / 4%));
+  border-radius: var(--oct-radius-lg);
+  background: var(--oct-surface);
 }
 
 .navigator-panel__message span {

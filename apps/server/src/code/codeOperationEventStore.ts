@@ -9,7 +9,6 @@ import {
   CorrelationId,
   EventActor,
   EventId,
-  ReplayCursor,
   UtcTimestamp,
   decodeCodeOperationEventFrame,
   decodeCodeConversationPage,
@@ -22,7 +21,6 @@ import {
   type CodeProviderLimit,
   type CodeOperationId,
   type CodeThreadId,
-  type EventEnvelope,
   type ProviderInstanceId,
 } from "@octant/contracts";
 import { Schema } from "effect";
@@ -32,7 +30,17 @@ export const CODE_OPERATION_EVENT_RECORDED = "code.operation-event-recorded@1";
 export const MAX_CODE_OPERATION_REPLAY_LIMIT = 256;
 
 const JOURNAL_REPLAY_BATCH_SIZE = 1_000;
-const MAX_JOURNAL_SCAN_EVENTS = 10_000;
+/**
+ * Ceiling on envelopes decoded for one read, counting only the requested
+ * stream's own events (the thread's, or the operation's). It exists so a
+ * hostile or corrupt journal cannot pin the CPU, not to ration honest history:
+ * an earlier global bound counted every envelope in the journal, and a real
+ * dogfooding host at ~22k events — 94% of them code-checkout observations —
+ * failed every thread's history read without touching a conversation event.
+ * 100k own events is far past any observed thread while still bounding a
+ * hostile stream's decode work.
+ */
+const MAX_STREAM_SCAN_EVENTS = 100_000;
 const decodeActor = Schema.decodeUnknownSync(EventActor);
 const decodeAggregateId = Schema.decodeUnknownSync(AggregateId);
 const decodeAggregateVersion = Schema.decodeUnknownSync(AggregateVersion);
@@ -40,9 +48,8 @@ const decodeActorId = Schema.decodeUnknownSync(ActorId);
 const decodeCorrelationId = Schema.decodeUnknownSync(CorrelationId);
 const decodeEventId = Schema.decodeUnknownSync(EventId);
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
-const decodeReplayCursor = Schema.decodeUnknownSync(ReplayCursor);
 
-type JournalPort = Pick<Journal, "append" | "replay">;
+type JournalPort = Pick<Journal, "append" | "replayAggregate" | "replayAggregateTypeForThread">;
 
 export class CodeOperationEventStoreError extends Error {
   override readonly name = "CodeOperationEventStoreError";
@@ -201,22 +208,24 @@ export class CodeOperationEventStore {
 
     const frames: Array<typeof CodeOperationEventFrame.Type> = [];
     let expectedCursor = 1;
-    let afterSequence = 0;
+    let afterVersion = 0;
     let scannedEvents = 0;
 
     while (frames.length < input.limit) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
+      const batch = this.#journal.replayAggregate({
+        aggregateType: "code-operation",
+        aggregateId: String(operationId),
+        afterVersion,
+        limit: JOURNAL_REPLAY_BATCH_SIZE,
+      });
       if (batch.length === 0) break;
 
       for (const envelope of batch) {
-        afterSequence = envelope.globalSequence;
+        afterVersion = envelope.aggregateVersion;
         scannedEvents += 1;
-        if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
+        if (scannedEvents > MAX_STREAM_SCAN_EVENTS) {
           return { status: "snapshot-required", reason: "scan-limit" };
         }
-        if (!isRequestedAggregate(envelope, operationId)) continue;
         if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1) {
           return { status: "snapshot-required", reason: "invalid-frame" };
         }
@@ -277,21 +286,20 @@ export class CodeOperationEventStore {
     let scannedEvents = 0;
 
     for (;;) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
+      const batch = this.#journal.replayAggregateTypeForThread({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        afterSequence,
+        limit: JOURNAL_REPLAY_BATCH_SIZE,
+      });
       if (batch.length === 0) break;
       for (const envelope of batch) {
         afterSequence = envelope.globalSequence;
         scannedEvents += 1;
-        if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
+        if (scannedEvents > MAX_STREAM_SCAN_EVENTS) {
           return { status: "rebuild-required" };
         }
-        if (
-          envelope.aggregateType !== "code-operation" ||
-          envelope.eventName !== CODE_OPERATION_EVENT_RECORDED ||
-          envelope.eventVersion !== 1
-        ) {
+        if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1) {
           continue;
         }
         let frame: typeof CodeOperationEventFrame.Type;
@@ -348,24 +356,23 @@ export class CodeOperationEventStore {
     let restoreUndo: CodeConversationPage["restoreUndo"];
 
     for (;;) {
-      const batch = this.#journal.replay(
-        decodeReplayCursor({ afterSequence, limit: JOURNAL_REPLAY_BATCH_SIZE }),
-      );
+      const batch = this.#journal.replayAggregateTypeForThread({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        afterSequence,
+        limit: JOURNAL_REPLAY_BATCH_SIZE,
+      });
       if (batch.length === 0) break;
       for (const envelope of batch) {
         afterSequence = envelope.globalSequence;
         scannedEvents += 1;
-        if (scannedEvents > MAX_JOURNAL_SCAN_EVENTS) {
+        if (scannedEvents > MAX_STREAM_SCAN_EVENTS) {
           throw new CodeOperationEventStoreError(
             "invalid",
             "Code conversation exceeds the bounded replay window.",
           );
         }
-        if (
-          envelope.aggregateType !== "code-operation" ||
-          envelope.eventName !== CODE_OPERATION_EVENT_RECORDED ||
-          envelope.eventVersion !== 1
-        ) {
+        if (envelope.eventName !== CODE_OPERATION_EVENT_RECORDED || envelope.eventVersion !== 1) {
           continue;
         }
         let frame: typeof CodeOperationEventFrame.Type;
@@ -509,7 +516,7 @@ export class CodeOperationEventStore {
       .map((entry) => entry.limit);
 
     return decodeCodeConversationPage({
-      version: 2,
+      version: 3,
       threadId,
       turns: turns.map(({ startCursor: _startCursor, steps, stepsTruncated, ...turn }) => ({
         ...turn,
@@ -554,13 +561,6 @@ function conversationStatus(
   state: "running" | "waiting" | "completed" | "interrupted" | "failed",
 ): CodeConversationTurn["status"] {
   return state === "running" ? "incomplete" : state;
-}
-
-function isRequestedAggregate(envelope: EventEnvelope, operationId: CodeOperationId): boolean {
-  return (
-    envelope.aggregateType === "code-operation" &&
-    String(envelope.aggregateId) === String(operationId)
-  );
 }
 
 function sameFrame(left: unknown, right: typeof CodeOperationEventFrame.Type): boolean {

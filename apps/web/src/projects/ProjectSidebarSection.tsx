@@ -466,7 +466,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           />
           {unfiled.length > 0 && props.onSelectThread !== undefined ? (
             <section aria-label={unfiledLabel} className="project-section project-section--unfiled">
-              <h2>{unfiledLabel}</h2>
+              <h2 className="sidebar-section">{unfiledLabel}</h2>
               <div className="project-threads">
                 <ProjectThreadRows
                   {...(props.threadActions === undefined ? {} : { actions: props.threadActions })}
@@ -546,7 +546,7 @@ function ProjectGroup(props: {
   }
   return (
     <section aria-label={props.label} className="project-section">
-      <div className="project-section__header">
+      <div className="project-section__header sidebar-section">
         <h2>{props.label}</h2>
         {props.onAddProject === undefined &&
         (props.onSortChange === undefined || props.sort === undefined) ? null : (
@@ -623,12 +623,6 @@ function ProjectGroup(props: {
                     )
                   ) : null}
                 </span>
-                <Folder
-                  aria-hidden="true"
-                  className="project-row__folder"
-                  size={15}
-                  strokeWidth={1.7}
-                />
                 <span className="project-row__copy">
                   <span>{project.name}</span>
                   {unavailable ? <small>Relink required</small> : null}
@@ -824,7 +818,7 @@ function ActivityThreadList(props: {
     <div className="activity-nav">
       {props.groups.map((group) => (
         <section aria-label={group.label} className="activity-nav__group" key={group.id}>
-          <h2>{group.label}</h2>
+          <h2 className="sidebar-section">{group.label}</h2>
           <div className="activity-nav__threads">
             {group.threads.map((thread) => (
               <ActivityThreadButton

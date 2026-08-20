@@ -660,7 +660,7 @@ describe("Code operation contracts", () => {
     ).toMatchObject({ executionPolicy: "auto-accept-edits" });
 
     const page = {
-      version: 2,
+      version: 3,
       threadId: ids.thread,
       turns: [
         {
@@ -688,11 +688,11 @@ describe("Code operation contracts", () => {
     expect(() =>
       decodeCodeConversationPage({ ...page, turns: [{ ...page.turns[0], providerPayload: {} }] }),
     ).toThrow();
-    // A page is read at exactly the version this build knows. Version 1 had no
-    // attachments, so accepting one would render a turn while dropping the
-    // images the user attached to it.
-    expect(() => decodeCodeConversationPage({ ...page, version: 1 })).toThrow();
-    expect(() => decodeCodeConversationPage({ ...page, version: 3 })).toThrow();
+    // A page is read at exactly the version this build knows. Version 2 had no
+    // turn posture, so accepting one would render a message while dropping the
+    // access the turn actually ran under.
+    expect(() => decodeCodeConversationPage({ ...page, version: 2 })).toThrow();
+    expect(() => decodeCodeConversationPage({ ...page, version: 4 })).toThrow();
   });
 
   it("owns the strict durable review-finding entity and journal event", () => {

@@ -89,8 +89,8 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
           for you, so this step reports what the host can actually reach.
         </p>
 
-        <section aria-labelledby="first-run-readiness-title" className="first-run__section">
-          <h3 className="first-run__section-title" id="first-run-readiness-title">
+        <section aria-labelledby="first-run-readiness-title" className="setgroup">
+          <h3 className="setgroup-head" id="first-run-readiness-title">
             Provider readiness
           </h3>
           <p className="first-run__summary" data-overall={readiness.overall} role="status">
@@ -122,7 +122,7 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
 
         {props.discoveryNotice === undefined ? null : (
           <p
-            className="first-run__notice"
+            className="first-run__notice callout"
             data-tone={props.discoveryNotice.tone}
             role={props.discoveryNotice.tone === "attention" ? "alert" : "status"}
           >
@@ -130,7 +130,7 @@ export const FirstRunProviderStep = forwardRef<HTMLButtonElement, FirstRunProvid
           </p>
         )}
 
-        <div className="first-run__setup">
+        <div className="btn-group">
           <OctantButton onClick={props.onOpenProviderSettings} ref={ref} type="button">
             Set up a provider
           </OctantButton>

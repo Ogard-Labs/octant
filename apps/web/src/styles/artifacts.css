@@ -1,13 +1,15 @@
 /* Artifact library: a host-wide gallery of everything Canvas has produced.
-   Sizes use rem/em so 200% zoom scales the whole page; the grid reflows by
-   available width rather than by a device breakpoint. */
+   Paint comes from the design system (octant.css `--oct-*` tokens and the
+   tab/select/input/check recipes); this sheet keeps layout and the card
+   gallery look. Sizes use rem/em so 200% zoom scales the whole page; the
+   grid reflows by available width rather than by a device breakpoint. */
 
 .artifact-library-layer {
   position: absolute;
   inset: 0;
   z-index: 5;
   overflow: auto;
-  background: var(--octant-surface-inset);
+  background: var(--oct-bg);
 }
 
 .artifact-library-surface {
@@ -15,7 +17,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  background: var(--octant-workspace);
+  background: var(--oct-bg);
 }
 
 .artifact-library-surface__chrome {
@@ -42,9 +44,10 @@
 
 .artifact-library__title {
   margin: 0;
-  color: var(--octant-text-primary);
-  font-size: 1.05rem;
-  font-weight: 600;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: 1rem;
+  font-weight: var(--oct-weight-strong);
 }
 
 .artifact-library__controls {
@@ -58,11 +61,12 @@
   align-items: center;
   gap: 0.375rem;
   flex: 1 1 14rem;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 0.375rem;
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-muted);
+  min-height: var(--oct-control-height-sm);
+  padding: 0 0.5rem;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+  color: var(--oct-muted);
 }
 
 .artifact-library__search-input {
@@ -70,39 +74,21 @@
   min-width: 0;
   border: none;
   background: transparent;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font: inherit;
   outline: none;
 }
 
+/* .select paints the filters; the recipe's width: 100% is for form
+   columns, and here each filter shares one wrapping toolbar row. */
 .artifact-library__select {
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 0.375rem;
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-primary);
-  font: inherit;
-}
-
-.artifact-library__tabs {
-  display: flex;
-  gap: 0.25rem;
-  border-bottom: 1px solid var(--octant-border-subtle);
+  width: auto;
+  min-height: var(--oct-control-height-sm);
+  font-size: var(--oct-text-sm);
 }
 
 .artifact-library__tab {
-  padding: 0.375rem 0.625rem;
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--octant-text-muted);
-  font: inherit;
   cursor: pointer;
-}
-
-.artifact-library__tab[aria-selected="true"] {
-  border-bottom-color: var(--octant-accent);
-  color: var(--octant-text-primary);
 }
 
 .artifact-library__grid {
@@ -122,16 +108,19 @@
 
 .artifact-library__group-title {
   margin: 0 0 0.5rem;
-  color: var(--octant-text-primary);
-  font-size: 0.8rem;
-  font-weight: 600;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: 0.6875rem;
+  font-weight: var(--oct-weight-display);
+  text-transform: uppercase;
+  letter-spacing: var(--oct-tracking-wide);
 }
 
 .artifact-library__message,
 .artifact-library__empty,
 .artifact-library__truncated {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 0.75rem;
 }
 
@@ -146,19 +135,19 @@
   width: 100%;
   padding: 0;
   overflow: hidden;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 0.5rem;
-  background: var(--octant-surface-raised);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
-  transition: border-color 120ms ease;
+  transition: border-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .artifact-card__button:hover,
 .artifact-card__button:focus-visible {
-  border-color: var(--octant-accent);
+  border-color: var(--oct-accent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -173,8 +162,8 @@
   justify-content: center;
   aspect-ratio: 8 / 5;
   overflow: hidden;
-  background: var(--octant-surface-inset);
-  color: var(--octant-text-muted);
+  background: var(--oct-bg);
+  color: var(--oct-muted);
   font-size: 0.7rem;
 }
 
@@ -194,17 +183,17 @@
 
 .artifact-card__title {
   overflow: hidden;
-  color: var(--octant-text-primary);
-  font-size: 0.8rem;
-  font-weight: 600;
+  color: var(--oct-fg);
+  font-size: 0.875rem;
+  font-weight: var(--oct-weight-strong);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .artifact-card__meta,
 .artifact-card__footer {
-  color: var(--octant-text-muted);
-  font-size: 0.7rem;
+  color: var(--oct-meta);
+  font-size: 0.6875rem;
 }
 
 .artifact-card__footer {
@@ -228,27 +217,29 @@
   max-width: 520px;
   margin: 1rem auto 0;
   padding: 0.75rem;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 8px;
-  font-size: 0.78rem;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  font-size: 0.875rem;
 }
 
 .artifact-mirror__title {
   margin: 0;
-  color: var(--octant-text-primary);
-  font-size: 0.85rem;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: 0.875rem;
+  font-weight: var(--oct-weight-strong);
 }
 
 .artifact-mirror__note,
 .artifact-mirror__message {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
+/* .check paints the radio; the row top-aligns it against the two-line
+   tier explanation instead of centring on both lines. */
 .artifact-mirror__tier {
-  display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
 }
 
 .artifact-mirror__tier-body {
@@ -258,12 +249,13 @@
 }
 
 .artifact-mirror__tier-label {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .artifact-mirror__tier-detail,
 .artifact-mirror__auto-commit {
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
+  font-size: 0.875rem;
 }
 
 .artifact-mirror__field {
@@ -272,22 +264,16 @@
   gap: 0.2rem;
 }
 
-.artifact-mirror__field input {
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 6px;
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-primary);
-  font: inherit;
+.artifact-mirror__field .input {
+  min-height: var(--oct-control-height-sm);
+  font-size: 0.875rem;
 }
 
 .artifact-mirror__auto-commit {
-  display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
 }
 
 .artifact-mirror__saved {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }

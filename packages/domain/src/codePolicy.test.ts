@@ -1,6 +1,7 @@
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { describe, expect, it } from "vitest";
 import {
+  accessPosturesAbove,
   accessPosturesAtOrBelow,
   authorizeCodeOperation,
   clampTurnAccessPosture,
@@ -82,6 +83,14 @@ describe("Code authority policy", () => {
       "auto-accept-edits",
       "full-access",
     ]);
+    expect(accessPosturesAbove("plan")).toEqual([
+      "approval-gated",
+      "auto-accept-edits",
+      "full-access",
+    ]);
+    expect(accessPosturesAbove("approval-gated")).toEqual(["auto-accept-edits", "full-access"]);
+    expect(accessPosturesAbove("auto-accept-edits")).toEqual(["full-access"]);
+    expect(accessPosturesAbove("full-access")).toEqual([]);
   });
 
   it("auto-accepts only edits and still prompts for every other mutation", () => {

@@ -719,6 +719,26 @@ describe("Code app-managed tools", () => {
     expect(result).toMatchObject({ isError: false, result: { status: "running" } });
   });
 
+  it("fails closed when a Full-access thread is running a narrower turn", async () => {
+    const executeOperation = vi.fn();
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread({ executionPolicy: "plan" }),
+      readThread: () => thread({ executionPolicy: "full-access" }),
+      uuid: uuidFactory(),
+      executeOperation,
+      terminal: { read: vi.fn() },
+    });
+
+    await expect(
+      tools.execute({
+        name: CODE_TERMINAL_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "run", command: "pwd" }),
+      }),
+    ).resolves.toEqual({ result: { error: "full-access-required" }, isError: true });
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
   it("fails closed outside Full access and never invokes a host tool", async () => {
     const executeOperation = vi.fn();
     const tools = createCodeAppManagedTools({

@@ -142,9 +142,11 @@ describe("ZenSurface", () => {
       />,
     );
     expect(screen.getByRole("status")).toHaveTextContent(/safe default/i);
-    expect(screen.getByRole("application", { name: "Zen workspace" })).toHaveStyle({
-      backgroundColor: "rgb(26, 26, 46)",
-    });
+    const surface = screen.getByRole("application", { name: "Zen workspace" });
+    // The safe default is the theme's own workspace ground with the system
+    // dot grid, not a colour of Zen's own — and never the unreadable image.
+    expect(surface).toHaveStyle({ backgroundColor: "var(--oct-bg)" });
+    expect(surface.querySelector(".zen-ground")).not.toBeNull();
   });
 
   it("renders a first-party built-in still with overlay and fill", () => {
@@ -624,7 +626,7 @@ describe("ZenSurface", () => {
     );
 
     const card = screen.getByRole("group", { name: "Move me" });
-    const header = card.querySelector<HTMLElement>(".zen-element__header");
+    const header = card.querySelector<HTMLElement>(".zen-el-head");
     if (header === null) throw new Error("Zen element header was not rendered.");
     fireEvent.pointerDown(header, { clientX: 100, clientY: 100 });
     fireEvent.pointerMove(card, { clientX: 140, clientY: 130 });
@@ -727,8 +729,53 @@ describe("ZenSurface", () => {
       />,
     );
 
-    expect(screen.getByRole("group", { name: "Minimized note" })).toBeInTheDocument();
+    const card = screen.getByRole("group", { name: "Minimized note" });
+    expect(card).toBeInTheDocument();
+    // The frame states minimisation for the stylesheet: only the title bar
+    // stays, so the element remains findable where the user put it.
+    expect(card).toHaveAttribute("data-minimized", "true");
     expect(screen.getByRole("button", { name: "Restore Minimized note" })).toBeInTheDocument();
+  });
+
+  it("states a locked element's lock on its frame and refuses to drag it", () => {
+    const onUpdateElement = vi.fn();
+    const space = makeSpace([
+      {
+        elementId,
+        kind: "notes",
+        widgetVersion: 0 as AggregateVersion,
+        content: "Locked note",
+        geometry: { x: 40, y: 40, width: 240, height: 160 },
+        zIndex: 1,
+        minimized: false,
+        locked: true,
+        title: "Locked note",
+      },
+    ]);
+
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onHideBar={() => undefined}
+        onRemoveElement={() => undefined}
+        onUpdateElement={onUpdateElement}
+        onUpdateViewport={() => undefined}
+        onExpandBar={() => undefined}
+        space={space}
+      />,
+    );
+
+    const card = screen.getByRole("group", { name: "Locked note" });
+    // Locked is stated, not implied: the frame carries the state the
+    // stylesheet renders as a dashed border with no grip.
+    expect(card).toHaveAttribute("data-locked", "true");
+    const header = card.querySelector<HTMLElement>(".zen-el-head");
+    if (header === null) throw new Error("Zen element header was not rendered.");
+    fireEvent.pointerDown(header, { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(card, { clientX: 140, clientY: 130 });
+    fireEvent.pointerUp(card, { clientX: 140, clientY: 130 });
+    expect(onUpdateElement).not.toHaveBeenCalled();
   });
 
   it("surfaces the recipe a turn proposed, because the proposal is Zen's, not the conversation's", async () => {

@@ -1904,7 +1904,8 @@ describe("WorkspaceView Chat thread Environment", () => {
     expect(screen.getAllByText("Sources").length).toBeGreaterThan(0);
     expect(screen.queryByText("Git")).not.toBeInTheDocument();
     expect(screen.queryByText("Approvals")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Canvas" }));
+    await user.click(screen.getByRole("button", { name: "Thread actions" }));
+    await user.click(await screen.findByRole("menuitemradio", { name: "Show canvas" }));
     expect(await screen.findByRole("region", { name: "Create Canvas" })).toBeVisible();
   });
 });
