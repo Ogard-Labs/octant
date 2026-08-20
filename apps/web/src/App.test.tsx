@@ -2808,11 +2808,13 @@ describe("App", () => {
     // Chat Projects already carry their own threads list, which can create a
     // thread and expand the full list, so the shared section stands down and
     // the overview shows exactly one list rather than the same threads twice.
+    // The region is in the document while bootstrap is still loading, so wait
+    // for the thread row instead of treating the heading as a filled list.
     const threads = await screen.findByRole("region", { name: "Active threads" });
     expect(
       screen.queryByRole("region", { name: /Threads and recent activity/ }),
     ).not.toBeInTheDocument();
-    await user.click(within(threads).getByRole("button", { name: /Older chat/ }));
+    await user.click(await within(threads).findByRole("button", { name: /Older chat/ }));
 
     expect(await screen.findByRole("tab", { name: "Older chat" })).toHaveAttribute(
       "aria-selected",
