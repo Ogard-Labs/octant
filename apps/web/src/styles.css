@@ -2523,6 +2523,15 @@ button:focus-visible {
   right: auto;
   bottom: auto;
   left: auto;
+
+  /*
+   * Said as the shared dialog's own variable, not as a competing max-width.
+   * These dialogs also carry `.octant-dialog__popup`, whose rule is imported
+   * later at the same specificity, so a flat cap here would simply lose and
+   * the dialog would open at the shared default.
+   */
+  --octant-dialog-width: 380px;
+
   width: min(100%, 380px);
   max-width: 380px;
   height: auto;
