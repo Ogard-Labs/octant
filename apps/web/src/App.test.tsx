@@ -1416,11 +1416,11 @@ describe("App", () => {
       />,
     );
 
-    // Child-run polling on the Code overview can unmount the Suspense fallback
-    // heading after findByRole resolves, so wait for a heading that stays up.
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Controller foundation" })).toBeVisible();
-    });
+    // CodeWorkspaceTab is lazy. Its Suspense fallback is a ShellState heading
+    // titled with the tab name, so "Controller foundation" exists before the
+    // chunk settles and then unmounts. The Code thread region does not.
+    const thread = await screen.findByRole("region", { name: "Code thread" });
+    expect(within(thread).getByRole("heading", { name: "Controller foundation" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Automations" }));
 
     expect(await screen.findByRole("heading", { name: "Automation Center" })).toBeVisible();
@@ -1442,7 +1442,10 @@ describe("App", () => {
       expect(screen.queryByRole("heading", { name: "Automation Center" })).not.toBeInTheDocument(),
     );
     expect(document.querySelector(".workspace")).not.toHaveAttribute("hidden");
-    expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
+    const restoredThread = await screen.findByRole("region", { name: "Code thread" });
+    expect(
+      within(restoredThread).getByRole("heading", { name: "Controller foundation" }),
+    ).toBeVisible();
   });
 
   it("dismisses a rail placeholder when the user changes modes", async () => {
@@ -2812,7 +2815,9 @@ describe("App", () => {
     expect(
       screen.queryByRole("region", { name: /Threads and recent activity/ }),
     ).not.toBeInTheDocument();
-    await user.click(within(threads).getByRole("button", { name: /Older chat/ }));
+    // The region exists while the list still says Loading, so wait for the
+    // thread row rather than clicking a button that has not been rendered yet.
+    await user.click(await within(threads).findByRole("button", { name: /Older chat/ }));
 
     expect(await screen.findByRole("tab", { name: "Older chat" })).toHaveAttribute(
       "aria-selected",
