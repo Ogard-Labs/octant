@@ -295,13 +295,18 @@ export class AgentProfileService implements AgentProfileServiceApi {
     });
   }
 
+  /**
+   * The scope a profile already has. An update carries the scope forward
+   * rather than restating one: a profile that is relabelled user-wide every
+   * time it is edited stops belonging to the Project, mode, or thread that
+   * made it, and any of them could then bind it.
+   */
   #scopeForProfile(profileId: AgentProfileId): AgentProfileScope {
-    const profiles = this.#persistence.readAgentProfiles();
-    const profile = profiles.find((p) => String(p.id) === String(profileId));
-    if (profile === undefined) {
+    const binding = this.#persistence.readAgentProfileBinding(profileId);
+    if (binding === undefined) {
       throw this.#invalid("Profile was not found.");
     }
-    return { scopeKind: "user", scopeRef: "00000000-0000-0000-0000-000000000010" };
+    return binding.scope;
   }
 
   #pendingEvent(eventName: string, payload: unknown) {
