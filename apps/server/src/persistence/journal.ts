@@ -114,6 +114,7 @@ export class Journal {
   readonly #selectHeadSequence: SqliteStatement;
   readonly #replayRows: SqliteStatement;
   readonly #replayAggregateTypeRows: SqliteStatement;
+  readonly #replayAggregateTypeThreadRows: SqliteStatement;
   readonly #replayAggregateRows: SqliteStatement;
 
   constructor(options: JournalOptions) {
@@ -176,6 +177,25 @@ export class Journal {
         actor_id, ${actorJsonSelect}, occurred_at, payload_json
       FROM event_journal
       WHERE aggregate_type = ? AND global_sequence > ?
+      ORDER BY global_sequence ASC
+      LIMIT ?
+    `);
+    // Filters on the payload's `threadId` in SQL so a per-thread read never
+    // decodes other threads' rows: a dogfooding host whose journal was 94%
+    // code-checkout observations made every thread history read exhaust its
+    // scan bound on rows that were never the thread's. The `'$.threadId'` key
+    // is the same payload ownership rule thread purge already relies on, and
+    // every returned row still goes through the registered schema in
+    // #decodeRow before a caller sees it.
+    this.#replayAggregateTypeThreadRows = options.connection.prepare(`
+      SELECT
+        global_sequence, event_id, aggregate_type, aggregate_id, aggregate_version,
+        event_name, event_version, host_id, correlation_id, causation_id, actor_kind,
+        actor_id, ${actorJsonSelect}, occurred_at, payload_json
+      FROM event_journal
+      WHERE aggregate_type = ?
+        AND json_extract(payload_json, '$.threadId') = ?
+        AND global_sequence > ?
       ORDER BY global_sequence ASC
       LIMIT ?
     `);
@@ -440,6 +460,33 @@ export class Journal {
     return (
       this.#replayAggregateTypeRows.all(
         cursor.aggregateType,
+        cursor.afterSequence,
+        cursor.limit,
+      ) as Array<JournalRow>
+    ).map((row) => this.#decodeRow(row));
+  }
+
+  replayAggregateTypeForThread(cursor: {
+    readonly aggregateType: string;
+    readonly threadId: string;
+    readonly afterSequence: number;
+    readonly limit: number;
+  }): ReadonlyArray<EventEnvelope> {
+    if (
+      cursor.aggregateType.trim().length === 0 ||
+      cursor.threadId.trim().length === 0 ||
+      !Number.isSafeInteger(cursor.afterSequence) ||
+      cursor.afterSequence < 0 ||
+      !Number.isSafeInteger(cursor.limit) ||
+      cursor.limit < 1 ||
+      cursor.limit > 1_000
+    ) {
+      throw new JournalInputInvalid({ operation: "replay" });
+    }
+    return (
+      this.#replayAggregateTypeThreadRows.all(
+        cursor.aggregateType,
+        cursor.threadId,
         cursor.afterSequence,
         cursor.limit,
       ) as Array<JournalRow>
