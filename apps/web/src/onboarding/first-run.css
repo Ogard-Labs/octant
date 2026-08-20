@@ -54,8 +54,12 @@
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "rail" "panel" "notice" "actions";
 
-    /* Stacked, the rail takes its own height and the step panel takes the rest. */
-    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    /*
+     * Stacked, every row takes its own height. A bounded panel row would clip
+     * or, once the panel stops scrolling itself, paint the current step over
+     * the notice and the footer beneath it.
+     */
+    grid-template-rows: auto auto auto auto;
     gap: 1.25rem;
     padding: 1.25rem;
 
@@ -69,7 +73,8 @@
     overflow-y: auto;
   }
 
-  /* One scroller, not two: the body took it over. */
+  /* One scroller, not two: the body took it over, and the panel's own row
+     grows with it rather than holding it to a height it does not have. */
   .first-run__panel {
     overflow-y: visible;
   }

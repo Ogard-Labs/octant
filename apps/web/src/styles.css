@@ -6461,6 +6461,15 @@ dialog.project-dialog {
 .model-picker__option {
   display: grid;
   white-space: normal;
+
+  /*
+   * The button recipe also fixes the row at `h-8`, which was right when the
+   * label could not wrap. Now that it can — and badges or an unavailable
+   * reason add their own rows — the option has to grow instead of painting
+   * over the option beneath it.
+   */
+  height: auto;
+  min-height: 2rem;
   grid-template-columns: minmax(0, 1fr) minmax(0, auto);
   grid-template-areas:
     "name id"
