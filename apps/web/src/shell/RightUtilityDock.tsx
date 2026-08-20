@@ -29,16 +29,19 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
 
   if (props.resolution.kind !== "surface") return null;
 
+  // Only the narrow dock is a modal that nothing else can dismiss. Docked, the
+  // window chrome's disclosure closes it, so the header carries no second
+  // close of its own.
+  const dismiss = props.isNarrow ? { closeButtonRef: closeButton, onClose: props.onClose } : {};
   const surface = (
     <RightUtilityDockSurface
       availableSurfaces={props.availableSurfaces}
-      closeButtonRef={closeButton}
       context={props.context}
       navigator={props.navigator}
-      onClose={props.onClose}
       onSelectSurface={props.onSelectSurface}
       projectMemory={props.projectMemory}
       resolution={props.resolution}
+      {...dismiss}
     />
   );
 

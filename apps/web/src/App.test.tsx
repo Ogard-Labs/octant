@@ -2842,7 +2842,9 @@ describe("App", () => {
       await screen.findByRole("heading", { name: "Controller foundation" }, { timeout: 5_000 }),
     ).toBeVisible();
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findByRole("heading", { name: "Project memory" })).toBeVisible();
+    expect(
+      await within(dock).findByRole("button", { name: "Project memory", pressed: true }),
+    ).toBeVisible();
     expect(projectApi.memory).toHaveBeenCalledWith(projectId);
   });
 
@@ -2887,9 +2889,11 @@ describe("App", () => {
     );
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findByRole("heading", { name: "Project memory" })).toBeVisible();
+    expect(
+      await within(dock).findByRole("button", { name: "Project memory", pressed: true }),
+    ).toBeVisible();
     expect(projectApi.memory).toHaveBeenCalledWith(projectId);
-    await user.click(within(dock).getByRole("button", { name: "Close Project memory" }));
+    await user.click(screen.getByRole("button", { name: "Close Project memory" }));
     await waitFor(() =>
       expect(shellApi.execute).toHaveBeenLastCalledWith(
         expect.objectContaining({

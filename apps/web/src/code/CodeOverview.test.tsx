@@ -337,6 +337,7 @@ function controller(): CodeController {
     errorCategory: undefined,
     errorMessage: undefined,
     conversation: [],
+    conversationHistory: "loaded" as const,
     completeFollowUp: vi.fn(async () => true),
     execute: vi.fn(),
     followUps: new Map(),
