@@ -128,8 +128,11 @@ describe("WindowChrome", () => {
     expect(root).toContain("--octant-danger-text:");
     expect(root).toContain("--octant-addition-text:");
     expect(root).toContain("--octant-deletion-text:");
+    // accent-text is a policed theme role (accent held to normal-text
+    // contrast), unlike the retired derived-accent palette guarded below.
+    expect(root).toContain("--octant-accent-text:");
     expect(root).not.toMatch(/#9a8cff|#d5ceff|154 140 255/i);
-    expect(root).not.toMatch(/--octant-accent-(focus|border|surface|text)/);
+    expect(root).not.toMatch(/--octant-accent-(focus|border|surface)/);
   });
 
   it("keeps ordinary palette literals behind neutral semantic roles", () => {
