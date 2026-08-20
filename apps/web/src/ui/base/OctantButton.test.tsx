@@ -4,7 +4,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { OctantButton, OctantIconButton } from "./OctantButton";
 
-function extractNamedLayer(source: string, name: string): { body: string; remainder: string } {
+function extractNamedLayer(raw: string, name: string): { body: string; remainder: string } {
+  // Prose can name a layer too ("preflight lives in @layer base"), and the
+  // first match must be the rule, not a comment about it.
+  const source = raw.replace(/\/\*[\s\S]*?\*\//g, "");
   const marker = `@layer ${name}`;
   const start = source.indexOf(marker);
   expect(start, `missing ${marker}`).toBeGreaterThanOrEqual(0);

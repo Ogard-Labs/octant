@@ -2174,8 +2174,8 @@ describe("App", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading Octant workspace");
     expect(await screen.findByRole("button", { name: "Code" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+      "aria-current",
+      "page",
     );
     expect(document.querySelector(".shell")).toHaveStyle({
       "--octant-sidebar-width": "232px",
@@ -2199,14 +2199,12 @@ describe("App", () => {
       "window-no-drag",
     );
     expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass("window-no-drag");
-    expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass(
-      "shell-icon-button",
-    );
+    expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass("btn-icon");
     expect(within(sidebar).getByRole("button", { name: "Set your name" })).toHaveClass(
       "window-no-drag",
     );
     expect(within(sidebar).getByRole("button", { name: "Set your name" })).toHaveClass(
-      "sidebar-profile__trigger",
+      "sidebar-item",
     );
     for (const button of within(sidebar).getAllByRole("button")) {
       expect(button).toHaveClass("window-no-drag");

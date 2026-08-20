@@ -199,17 +199,18 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   background: var(--octant-control-hover);
 }
 
+/* The container recipe (flex column, min-width, border, base surface) comes
+   from octant.css's .sidebar. Residual here is app plumbing only: shell grid
+   placement, the material backgrounds the vibrancy modes swap, and zeroed
+   padding/scrolling — the traffic-light drag row must reach the edges, so
+   .sidebar__content carries the padding and the scroll instead. */
 .shell-frame > .sidebar {
-  display: flex;
-  min-width: 0;
   min-height: 0;
   grid-column: 1;
   grid-row: 1 / -1;
-  flex-direction: column;
   padding: 0;
   overflow: hidden;
   background: var(--octant-sidebar-translucent);
-  border-right: 1px solid var(--octant-border);
 }
 
 .sidebar__native-leading {
@@ -324,9 +325,21 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   min-width: 0;
 }
 
-.sidebar__chrome .mode-switcher {
+/* Both presentations fill the row so the action icons keep to its far edge. */
+.sidebar__chrome .modeswitch,
+.sidebar__chrome .mode-trigger {
   flex: 1 1 auto;
   min-width: 0;
+}
+
+/* The activity toggle is contributed by the Project section pass and still
+   wears the 28px shell-icon-button metric; its neighbors in this row are
+   var(--oct-control-height-sm) .btn-icon squares. One row, one size. */
+.sidebar__chrome-activity .shell-icon-button {
+  width: var(--oct-control-height-sm);
+  min-width: var(--oct-control-height-sm);
+  height: var(--oct-control-height-sm);
+  min-height: var(--oct-control-height-sm);
 }
 
 .sidebar__chrome-actions,
@@ -366,7 +379,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   margin-top: 16px;
 }
 
-.sidebar-navigation__item {
+/* Navigation rows must not shrink when the Project tree below them grows. */
+.sidebar-navigation > .sidebar-item {
   flex: 0 0 auto;
 }
 
@@ -644,7 +658,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
     border-color: var(--octant-border-strong);
   }
 
-  .sidebar-navigation__item:focus-visible {
+  .sidebar-navigation > .sidebar-item:focus-visible {
     box-shadow: inset 0 0 0 1px var(--octant-border-strong);
   }
 }
