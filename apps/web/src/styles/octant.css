@@ -243,6 +243,13 @@
   --oct-canvas-measure: 62ch;
   --oct-canvas-gutter: 26px;
 
+  /* thread column. One reading measure for conversation surfaces — the
+     transcript, its callouts, the composer, and the header content above
+     them share it, in Chat and Code alike. Wider than the canvas measure
+     because a transcript interleaves code and tool output that wrap
+     badly at prose width. */
+  --oct-thread-measure: 760px;
+
   /* app shell. The sidebar width is a token rather than a literal because
      the drag handle writes to it — resizing and the default come from the
      same place, so a dragged sidebar and a fresh one behave identically. */
@@ -877,6 +884,18 @@ h4 {
 }
 .callout-danger {
   border-left-color: var(--oct-danger-fg);
+}
+
+/* ─── thread column ─────────────────────────────────────────────────────
+   The centered column a conversation surface lays its pieces in. Header
+   content, transcript, callouts, and composer all wear this one class, so
+   a callout is exactly as wide as the transcript above it and the composer
+   anchors under both — a full-bleed strip over a centered transcript is
+   the drift this exists to prevent (ADR 0038). A surface positions the
+   column (block margins, padding); it never redefines the measure. */
+.thread-column {
+  width: min(100% - 40px, var(--oct-thread-measure));
+  margin-inline: auto;
 }
 
 /* ─── form ──────────────────────────────────────────────────────────── */

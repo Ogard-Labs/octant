@@ -299,6 +299,18 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   background: var(--octant-sidebar-translucent-strong);
 }
 
+/* Under the native host the window itself is transparent, and CSS
+   backdrop-filter blurs only this page's own pixels — it can never frost
+   another app's window. Every point of alpha in the washes above therefore
+   shows the desktop behind Octant SHARP: at the 34–62% vibrancy tiers a code
+   editor behind the window stays readable through the sidebar. Until the
+   host delivers real vibrancy (Electron setVibrancy), the native sidebar
+   keeps a near-opaque wash — enough tint to stay a material, not enough
+   transparency to read through. The opaque material keeps its own rule. */
+html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar {
+  background: color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent);
+}
+
 /* Frost sidebar background art behind a mode-aware glass wash so preset and
    custom backgrounds read as material behind the glass, not paint on top. */
 .shell--material-translucent.shell-frame > .sidebar [data-octant-sidebar-background]::after {
@@ -578,10 +590,16 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   cursor: pointer;
 }
 
+/* Painted opaque at the layer itself, not only by the surfaces inside it:
+   under the native host the window and the shell frame are transparent, so
+   any pixel this column leaves unpainted — a rounding gutter at the right
+   edge, a surface that forgets its ground — shows whatever window sits
+   behind Octant, sharp. */
 .shell-frame > .workspace-layer {
   grid-column: 2;
   grid-row: 1 / -1;
   border-left: 0;
+  background: var(--oct-bg);
 }
 
 @media (min-width: 681px) and (max-width: 960px) {
@@ -607,6 +625,10 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   .shell-frame > .window-chrome {
     grid-column: 1;
     grid-row: 1;
+    /* In the stacked layout no workspace layer sits behind this row, and
+       under the native host an unpainted row shows the desktop through the
+       transparent frame. */
+    background: var(--oct-bg);
   }
 
   .shell-frame > .sidebar {
@@ -648,7 +670,8 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 @media (prefers-reduced-transparency: reduce) {
   .shell--material-translucent.shell-frame > .sidebar,
   .shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame > .sidebar,
-  .shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame > .sidebar {
+  .shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame > .sidebar,
+  html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar {
     background: var(--octant-sidebar-opaque);
     backdrop-filter: none;
   }

@@ -218,7 +218,7 @@ describe("WindowChrome", () => {
     expect(cssRule('.project-row[data-active="true"]')).toContain("color: var(--oct-fg);");
     expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple|background/i);
     expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])')).toContain(
-      "background: var(--octant-selection);",
+      "background: var(--oct-fg-soft);",
     );
     expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])')).not.toMatch(
       /accent|border-bottom-color/i,
@@ -243,11 +243,9 @@ describe("WindowChrome", () => {
     expect(cssRule(".workspace-tab__action")).toContain("width: 26px;");
     expect(cssRule(".workspace-tab__action")).toContain("height: 26px;");
     expect(cssRule(".workspace-tab__action")).toContain("background: transparent;");
-    expect(cssRule(".workspace-tab__action:hover")).toContain(
-      "background: var(--octant-control-hover);",
-    );
+    expect(cssRule(".workspace-tab__action:hover")).toContain("background: var(--oct-fg-soft);");
     expect(cssRule('.workspace-tab__action[aria-expanded="true"]')).toContain(
-      "background: var(--octant-control-hover);",
+      "background: var(--oct-fg-soft);",
     );
     expect(cssRule(".workspace-tab__action:active")).toContain(
       "background: var(--octant-control-pressed);",

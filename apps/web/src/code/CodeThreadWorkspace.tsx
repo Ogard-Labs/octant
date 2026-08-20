@@ -236,7 +236,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
         {childRunStatus === undefined ? null : (
-          <header className="code-thread-workspace__header">{childRunStatus}</header>
+          <header className="code-thread-workspace__header">
+            <div className="code-thread-workspace__header-row thread-column">{childRunStatus}</div>
+          </header>
         )}
         <ShellState
           action={{ label: "Retry Code", onClick: props.controller.retry }}
@@ -255,7 +257,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     return (
       <section aria-label="Code thread" className="code-thread-workspace">
         {childRunStatus === undefined ? null : (
-          <header className="code-thread-workspace__header">{childRunStatus}</header>
+          <header className="code-thread-workspace__header">
+            <div className="code-thread-workspace__header-row thread-column">{childRunStatus}</div>
+          </header>
         )}
         <ShellState
           {...(unavailable === undefined
@@ -536,93 +540,121 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   return (
     <section aria-label="Code thread" className="code-thread-workspace">
       <header className="code-thread-workspace__header">
-        <div className="code-thread-workspace__identity">
-          <h1>{thread.title}</h1>
-          <div className="code-thread-workspace__meta">
-            <span className="badge code-thread-workspace__lifecycle">
-              {lifecycleLabel(thread.lifecycle)}
-            </span>
-            <span>{headLabel(checkout.head)}</span>
-          </div>
-          <div
-            aria-label="Follow-up"
-            className="code-thread-workspace__follow-up"
-            data-follow-up={followUpOpen ? "true" : "false"}
-          >
-            {followUpOpen ? (
-              <span
-                aria-label="Follow-up required"
-                className="code-thread-workspace__follow-up-marker"
-                role="status"
-                title={followUp?.reason}
-              >
-                <span aria-hidden="true">◆</span> Follow-up: {followUp?.reason}
+        <div className="code-thread-workspace__header-row thread-column">
+          <div className="code-thread-workspace__identity">
+            <h1>{thread.title}</h1>
+            <div className="code-thread-workspace__meta">
+              <span className="badge code-thread-workspace__lifecycle">
+                {lifecycleLabel(thread.lifecycle)}
               </span>
-            ) : null}
-            {followUpOpen ? (
-              <OctantButton
-                onClick={() => void props.controller.completeFollowUp(thread.id)}
+              <span>{headLabel(checkout.head)}</span>
+            </div>
+            <div
+              aria-label="Follow-up"
+              className="code-thread-workspace__follow-up"
+              data-follow-up={followUpOpen ? "true" : "false"}
+            >
+              {followUpOpen ? (
+                <span
+                  aria-label="Follow-up required"
+                  className="code-thread-workspace__follow-up-marker"
+                  role="status"
+                  title={followUp?.reason}
+                >
+                  <span aria-hidden="true">◆</span> Follow-up: {followUp?.reason}
+                </span>
+              ) : null}
+              {followUpOpen ? (
+                <OctantButton
+                  onClick={() => void props.controller.completeFollowUp(thread.id)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Complete follow-up
+                </OctantButton>
+              ) : (
+                <OctantButton
+                  onClick={() => void props.controller.markFollowUp(thread.id)}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  Mark for follow-up
+                </OctantButton>
+              )}
+            </div>
+          </div>
+          {childRunStatus}
+          <div className="code-thread-workspace__toolbar" role="toolbar" aria-label="Code surfaces">
+            <ThreadExportControl
+              mode="code"
+              threadId={String(props.threadId)}
+              title={thread.title}
+              {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+              {...(props.windowCapability === undefined
+                ? {}
+                : { windowCapability: props.windowCapability })}
+            />
+            {props.agentRunClient === undefined ? null : (
+              <button
+                aria-pressed={auxiliarySurface === "agents"}
+                className="code-thread-workspace__tool window-no-drag"
+                onClick={() =>
+                  setAuxiliarySurface((current) => (current === "agents" ? undefined : "agents"))
+                }
                 type="button"
-                variant="ghost"
               >
-                Complete follow-up
-              </OctantButton>
-            ) : (
-              <OctantButton
-                onClick={() => void props.controller.markFollowUp(thread.id)}
-                type="button"
-                variant="ghost"
-              >
-                Mark for follow-up
-              </OctantButton>
+                <Bot aria-hidden="true" size={14} strokeWidth={1.7} />
+                <span>Agents</span>
+              </button>
             )}
           </div>
-        </div>
-        {childRunStatus}
-        <div className="code-thread-workspace__toolbar" role="toolbar" aria-label="Code surfaces">
-          <ThreadExportControl
-            mode="code"
-            threadId={String(props.threadId)}
-            title={thread.title}
-            {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-            {...(props.windowCapability === undefined
-              ? {}
-              : { windowCapability: props.windowCapability })}
-          />
-          {props.agentRunClient === undefined ? null : (
-            <button
-              aria-pressed={auxiliarySurface === "agents"}
-              className="code-thread-workspace__tool window-no-drag"
-              onClick={() =>
-                setAuxiliarySurface((current) => (current === "agents" ? undefined : "agents"))
-              }
-              type="button"
-            >
-              <Bot aria-hidden="true" size={14} strokeWidth={1.7} />
-              <span>Agents</span>
-            </button>
-          )}
         </div>
       </header>
 
       {props.controller.errorMessage === undefined ? null : (
-        <p className="code-thread-workspace__error" role="alert">
-          {props.controller.errorMessage}
-        </p>
+        <div
+          className="callout callout-warn thread-column code-thread-workspace__callout"
+          role="alert"
+        >
+          <p>{props.controller.errorMessage}</p>
+        </div>
       )}
 
       {props.controller.turnError === undefined ? null : (
-        <p className="code-thread-workspace__error" role="alert">
-          {props.controller.turnError}
-        </p>
+        <div
+          className="callout callout-warn thread-column code-thread-workspace__callout"
+          role="alert"
+        >
+          <p>{props.controller.turnError}</p>
+          {/* An unreachable history is worth another ask, and the offer sits
+              with the notice rather than leaving a dead end. The composer
+              below stays usable either way. */}
+          {props.controller.conversationHistory === "unavailable" ? (
+            <OctantButton
+              onClick={props.controller.retry}
+              size="sm"
+              type="button"
+              variant="secondary"
+            >
+              Retry
+            </OctantButton>
+          ) : null}
+        </div>
       )}
 
       {thread.lifecycle === "waiting" || thread.lifecycle === "interrupted" ? (
-        <p className="code-thread-workspace__banner" role="alert">
-          {thread.lifecycle === "waiting"
-            ? "This thread is waiting for authoritative recovery or user input."
-            : "This thread was interrupted and requires an explicit retry."}
-        </p>
+        <div
+          className="callout callout-warn thread-column code-thread-workspace__callout"
+          role="alert"
+        >
+          <p>
+            {thread.lifecycle === "waiting"
+              ? "This thread is waiting for authoritative recovery or user input."
+              : "This thread was interrupted and requires an explicit retry."}
+          </p>
+        </div>
       ) : null}
 
       {props.controller.providerRequests.map((request) =>
@@ -655,7 +687,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       )}
 
       {auxiliarySurface === "agents" && props.agentRunClient !== undefined ? (
-        <aside aria-label="Agent activity" className="code-thread-workspace__auxiliary">
+        <aside
+          aria-label="Agent activity"
+          className="code-thread-workspace__auxiliary thread-column"
+        >
           <AgentRunHierarchy
             // This thread is the parent authority the host verifies before it
             // admits a child, so creation belongs here rather than on a surface
@@ -670,7 +705,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         </aside>
       ) : null}
       <div className="code-thread-workspace__conversation" role="log" aria-live="polite">
-        <div className="code-thread-workspace__transcript">
+        <div className="code-thread-workspace__transcript thread-column">
           {showEmptyConversation ? (
             <>
               <p className="code-thread-workspace__empty" role="status">
@@ -882,7 +917,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
       <InlineThreadPlan />
 
-      <div className="composer code-thread-workspace__composer">
+      <div className="composer code-thread-workspace__composer thread-column">
         {/*
          * Side Chat has no surface in a Code tab, so the chip offers only
          * removal here: rendering a control whose sidecar this workspace
@@ -1268,7 +1303,7 @@ function ProviderApprovalPrompt(props: {
 }) {
   return (
     <div
-      className="code-thread-workspace__banner code-thread-workspace__provider-request"
+      className="callout callout-warn thread-column code-thread-workspace__callout code-thread-workspace__provider-request"
       role="group"
       aria-label="Provider approval"
     >
@@ -1292,7 +1327,7 @@ function ProviderInputPrompt(props: {
   const trimmed = answer.trim();
   return (
     <form
-      className="code-thread-workspace__banner code-thread-workspace__provider-request"
+      className="callout callout-warn thread-column code-thread-workspace__callout code-thread-workspace__provider-request"
       aria-label="Provider question"
       onSubmit={(event) => {
         event.preventDefault();
