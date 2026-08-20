@@ -2251,7 +2251,7 @@ button:focus-visible {
   height: 30px;
   place-items: center;
   color: var(--octant-text-muted);
-  background: var(--octant-selection);
+  background: var(--oct-selection);
   border: 1px solid var(--octant-border);
   border-radius: 7px;
 }
@@ -2948,7 +2948,7 @@ button:focus-visible {
 
 .project-memory-inspector__header button:hover {
   color: var(--octant-text-primary);
-  background: var(--octant-selection);
+  background: var(--oct-selection);
 }
 
 .project-memory-inspector__toolbar {
@@ -3174,9 +3174,12 @@ button:focus-visible {
   overflow: hidden;
 }
 
+/* flex-basis auto keeps the user's stored width, but the panel may shrink:
+   with flex-shrink 0 a wide dock plus this panel crushed the thread pane
+   instead, and the pane is the surface the user is reading. */
 .thread-environment-panel--pinned {
   position: relative;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   border-radius: 0;
   border-top: none;
   border-bottom: none;
@@ -3625,6 +3628,17 @@ button:focus-visible {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+}
+
+/* A wide right dock plus a pinned environment panel crushed the flexible
+   thread pane to ~146px (observed at a 1440px viewport with a 640px stored
+   dock width and a 360px pinned panel). The pane keeps the shell's readable
+   primary floor and the pinned panel yields instead. min(…, 100%) stands
+   down on panes narrower than the floor — below 680px the pinned panel
+   already overlays rather than sharing the row. */
+.thread-environment-wrapper--pinned .thread-environment-wrapper__content,
+.code-thread-environment--pinned .code-thread-environment__content {
+  min-width: min(var(--octant-wide-primary-min), 100%);
 }
 
 .project-memory-scroll {

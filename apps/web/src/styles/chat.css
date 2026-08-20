@@ -1,9 +1,9 @@
 /*
  * Residual Chat styles. The transcript and composer adopt the design system's
- * chat vocabulary (`.turn-user`/`.bubble`, `.turn-agent`, `.runstatus`,
- * `.composer`, `.composer-input`, `.composer-chips`, `.composer-row`,
- * `.btn-send`, `.chip`) from styles/octant.css; the welcome screen rides the
- * same composer vocabulary with hero-scale overrides. What remains here is
+ * chat vocabulary (`.thread-column`, `.turn-user`/`.bubble`, `.turn-agent`,
+ * `.runstatus`, `.composer`, `.composer-input`, `.composer-chips`,
+ * `.composer-row`, `.btn-send`, `.chip`) from styles/octant.css; the welcome
+ * screen rides the same composer vocabulary with hero-scale overrides. What remains here is
  * either a sub-surface that has not been ported (work shelf, workspace chrome)
  * or behavior the system has no vocabulary for (streaming state,
  * edit-in-place, typeahead placement).
@@ -20,8 +20,12 @@
   background: var(--oct-bg);
 }
 
+/* The un-ported draft-thread base (shell.css) imports after the system sheet
+   and wins width ties against `.thread-column`, so the welcome hero restates
+   the shared measure through its token instead of wearing the class. The
+   literal goes when the draft-thread surface itself is ported. */
 .chat-welcome .draft-thread__canvas {
-  width: min(100% - 40px, 760px);
+  width: min(100% - 40px, var(--oct-thread-measure));
   gap: 18px;
 }
 
@@ -124,18 +128,18 @@
   line-height: 1.5;
 }
 
+/* The measure is the shared `.thread-column`; this block only makes the
+   header stick and lays out its row. */
 .chat-workspace__header {
   position: sticky;
   z-index: 2;
   top: 0;
   display: flex;
-  width: min(100% - 40px, 760px);
   min-height: 36px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 14px 0 8px;
-  margin: 0 auto;
   background: var(--oct-bg);
 }
 
@@ -168,8 +172,7 @@
 }
 
 .chat-workspace__canvas {
-  width: min(100% - 40px, 760px);
-  margin: 8px auto 0;
+  margin-block: 8px 0;
 }
 
 .chat-workspace__error {
@@ -235,9 +238,7 @@
 
 .chat-transcript {
   flex: 1 0 auto;
-  width: min(100% - 40px, 760px);
   padding: 18px 0 32px;
-  margin: 0 auto;
 }
 
 .chat-transcript:has(.chat-transcript__empty) {
@@ -752,9 +753,8 @@
 .chat-composer {
   position: relative;
   z-index: 2;
-  width: min(calc(100% - 40px), 760px);
   flex: 0 0 auto;
-  margin: 0 auto 20px;
+  margin-block: 0 20px;
 }
 
 .chat-composer__status {
@@ -843,23 +843,18 @@
 }
 
 /* Opens upward: the composer sits at the window's bottom edge, so a panel
-   growing downward would clip. Mirrors the model picker's anchoring. */
+   growing downward would clip. Mirrors the model picker's anchoring. The
+   chrome is the system's `.popover-panel`; only anchoring and width are
+   this surface's own. */
 .chat-composer__model-options-panel {
-  position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  z-index: 40;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: var(--oct-space-2);
   min-width: 200px;
   max-width: min(320px, calc(100vw - 32px));
-  padding: var(--oct-space-3);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--octant-shadow-overlay);
 }
 
 .chat-composer .composer-pool-control__trigger {
@@ -989,7 +984,6 @@
 
 @media (max-width: 680px) {
   .chat-welcome .draft-thread__canvas {
-    width: calc(100% - 24px);
     justify-content: center;
     padding: 28px 0;
   }
@@ -1002,12 +996,7 @@
     padding-inline: 9px;
   }
 
-  .chat-workspace__header {
-    width: min(100% - 32px, 720px);
-  }
-
   .chat-transcript {
-    width: min(100% - 32px, 720px);
     padding-top: 22px;
   }
 
@@ -1020,7 +1009,6 @@
   }
 
   .chat-composer {
-    width: calc(100% - 24px);
     margin-bottom: 10px;
   }
 

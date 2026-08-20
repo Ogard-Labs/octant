@@ -43,6 +43,10 @@
   --oct-meta: light-dark(rgba(38, 37, 30, 0.62), rgba(242, 241, 237, 0.45));
   --oct-border: light-dark(rgba(38, 37, 30, 0.14), rgba(242, 241, 237, 0.13));
   --oct-border-soft: light-dark(rgba(38, 37, 30, 0.07), rgba(242, 241, 237, 0.07));
+  /* the chosen row: an opaque ground a step past hover, because active
+     rows in palettes and pickers scroll under sticky chrome and a
+     translucent tint would shift as content passes beneath it */
+  --oct-selection: light-dark(#d9d8d4, #353430);
 
   /* ── brand ──
      accent is the fill and stays brass in both themes so the brand does
@@ -1994,6 +1998,25 @@ input.switch:checked::after {
   margin: var(--oct-space-2) 0;
   background: var(--oct-border);
   border: 0;
+}
+
+/* ─── popover panel ───────────────────────────────────────────────────
+   A small dialog anchored to the control that opened it (model options,
+   execution profile). Like .menu, the surface is the system's; the caller
+   positions the panel against its trigger and sizes its width. The height
+   clamp is shared because it is chrome, not layout: a panel growing upward
+   from a bottom-row trigger climbed past the tab strip and clipped on short
+   windows, so every panel scrolls its own content instead. */
+.popover-panel {
+  position: absolute;
+  z-index: var(--oct-z-overlay);
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+  box-shadow: var(--oct-elev-raised);
 }
 
 /* ─── modal ───────────────────────────────────────────────────────────

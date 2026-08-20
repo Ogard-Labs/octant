@@ -101,7 +101,7 @@
 }
 
 .command-palette__result[data-active="true"] {
-  background: var(--octant-selection);
+  background: var(--oct-selection);
   border-color: var(--octant-border-strong);
 }
 
