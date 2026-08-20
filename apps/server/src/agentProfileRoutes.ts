@@ -31,15 +31,13 @@ export function createAgentProfileRouteHandler(dependencies: AgentProfileRouteDe
     const isList = url.pathname === "/api/agent-profiles";
     const isCommands = url.pathname === "/api/agent-profiles/commands";
     const isResolve = url.pathname === "/api/agent-profiles/resolve-effective-profile";
-    const isScopeProfiles = url.pathname === "/api/agent-profiles/scope";
     const profileMatch =
       /^\/api\/agent-profiles\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/.exec(
         url.pathname,
       );
-    const isProfileRead = profileMatch !== null && !isCommands && !isResolve && !isScopeProfiles;
+    const isProfileRead = profileMatch !== null && !isCommands && !isResolve;
 
-    if (!isList && !isCommands && !isResolve && !isProfileRead && !isScopeProfiles)
-      return undefined;
+    if (!isList && !isCommands && !isResolve && !isProfileRead) return undefined;
 
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
@@ -63,10 +61,7 @@ export function createAgentProfileRouteHandler(dependencies: AgentProfileRouteDe
     const isGet = request.method === "GET";
     const isPost = request.method === "POST";
 
-    if (
-      ((isList || isProfileRead || isScopeProfiles) && !isGet) ||
-      ((isCommands || isResolve) && !isPost)
-    ) {
+    if (((isList || isProfileRead) && !isGet) || ((isCommands || isResolve) && !isPost)) {
       return response(
         { category: "unsupported", message: "HTTP method is not supported for this route." },
         400,
@@ -150,10 +145,6 @@ export function createAgentProfileRouteHandler(dependencies: AgentProfileRouteDe
           );
         }
         return response(profile, 200, origin);
-      }
-
-      if (isScopeProfiles) {
-        return response(await dependencies.service.list(), 200, origin);
       }
 
       if (isResolve) {
