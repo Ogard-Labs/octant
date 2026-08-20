@@ -6,46 +6,47 @@ distilled successor of the earlier long-form design specifications.
 
 ## Index
 
-| ADR                                                     | Title                                                             | Status   |
-| ------------------------------------------------------- | ----------------------------------------------------------------- | -------- |
-| [0001](0001-plugin-architecture.md)                     | Plugin architecture                                               | Proposed |
-| [0002](0002-durable-event-journal.md)                   | Durable event journal and rebuildable projections                 | Accepted |
-| [0003](0003-product-modes-and-authority.md)             | Product modes: Chat, Work, and Code authority                     | Accepted |
-| [0004](0004-monorepo-layering.md)                       | Monorepo layering and dependency direction                        | Accepted |
-| [0005](0005-provider-sdk-contract.md)                   | Provider SDK contract, registry, and honest capabilities          | Accepted |
-| [0006](0006-acp-agent-drivers.md)                       | ACP agent drivers as one generic stack with per-provider profiles | Accepted |
-| [0007](0007-direct-api-providers-and-native-harness.md) | Direct API providers and the native agent harness                 | Accepted |
-| [0008](0008-context-budget-and-capacity.md)             | Context budget, provider limits, and capacity scheduling          | Accepted |
-| [0009](0009-sandbox-confinement-and-approvals.md)       | Sandbox confinement, approvals, and Plan mode                     | Accepted |
-| [0010](0010-secure-preview-and-canvas.md)               | Secure file preview and canvas artifacts                          | Accepted |
-| [0011](0011-extensions-activation-ladder.md)            | Extensions and skills: the activation ladder                      | Accepted |
-| [0012](0012-mixed-provider-subagents.md)                | Mixed-provider subagents and agent runs                           | Accepted |
-| [0013](0013-remote-access-and-mobile.md)                | Remote access: single host, paired devices, and mobile            | Accepted |
-| [0014](0014-apple-development-capability.md)            | Apple development and validation as an app-managed capability     | Accepted |
-| [0015](0015-workspace-shell-model.md)                   | Workspace shell model                                             | Accepted |
-| [0016](0016-component-foundation-and-theme.md)          | Component foundation and theme                                    | Accepted |
-| [0017](0017-code-projects-bind-any-folder.md)           | Code Projects bind any folder                                     | Accepted |
-| [0018](0018-auto-accept-edits-posture.md)               | Auto-accept edits as a fourth access posture                      | Accepted |
-| [0019](0019-user-profile-and-first-run-setup.md)        | User profile and first-run setup                                  | Accepted |
-| [0020](0020-checkpoints-and-restore-by-forking.md)      | Checkpoints and restore by forking                                | Accepted |
-| [0021](0021-remote-thread-surfaces.md)                  | Remote thread surfaces: watching the running product              | Accepted |
-| [0022](0022-pointed-at-product-feedback.md)             | Pointing at the running product                                   | Accepted |
-| [0023](0023-bringing-a-run-home.md)                     | Bringing a run home                                               | Accepted |
-| [0024](0024-curated-project-scaffolds.md)               | Curated project scaffolds                                         | Accepted |
-| [0025](0025-long-running-goal-loops.md)                 | Long-running goal loops                                           | Accepted |
-| [0026](0026-shipping-to-a-user-owned-target.md)         | Shipping to a user-owned target                                   | Accepted |
-| [0027](0027-plans-as-journaled-artifacts.md)            | Plans as journaled artifacts                                      | Accepted |
-| [0028](0028-the-artifact-library.md)                    | The artifact library                                              | Accepted |
-| [0029](0029-artifact-storage-mirror.md)                 | The artifact storage mirror                                       | Accepted |
-| [0030](0030-routines-that-run-themselves.md)            | Routines that run themselves                                      | Accepted |
-| [0031](0031-hosts-as-environments.md)                   | Hosts as environments                                             | Accepted |
-| [0032](0032-a-refusal-a-person-can-clear.md)            | A refusal a person can clear                                      | Proposed |
-| [0033](0033-first-run-asks-what-to-call-you.md)         | First run asks what to call you                                   | Accepted |
-| [0034](0034-signed-updates.md)                          | Signed, notarized, user-controlled updates                        | Proposed |
-| [0035](0035-thread-retention-and-purge.md)              | Thread retention and explicit purge                               | Accepted |
-| [0036](0036-thread-export.md)                           | Thread export                                                     | Accepted |
-| [0037](0037-a-thread-starts-in-a-project.md)            | A thread starts in a Project                                      | Accepted |
-| [0038](0038-owned-design-system-stylesheet.md)          | The owned design system stylesheet                                | Accepted |
+| ADR                                                           | Title                                                             | Status   |
+| ------------------------------------------------------------- | ----------------------------------------------------------------- | -------- |
+| [0001](0001-plugin-architecture.md)                           | Plugin architecture                                               | Proposed |
+| [0002](0002-durable-event-journal.md)                         | Durable event journal and rebuildable projections                 | Accepted |
+| [0003](0003-product-modes-and-authority.md)                   | Product modes: Chat, Work, and Code authority                     | Accepted |
+| [0004](0004-monorepo-layering.md)                             | Monorepo layering and dependency direction                        | Accepted |
+| [0005](0005-provider-sdk-contract.md)                         | Provider SDK contract, registry, and honest capabilities          | Accepted |
+| [0006](0006-acp-agent-drivers.md)                             | ACP agent drivers as one generic stack with per-provider profiles | Accepted |
+| [0007](0007-direct-api-providers-and-native-harness.md)       | Direct API providers and the native agent harness                 | Accepted |
+| [0008](0008-context-budget-and-capacity.md)                   | Context budget, provider limits, and capacity scheduling          | Accepted |
+| [0009](0009-sandbox-confinement-and-approvals.md)             | Sandbox confinement, approvals, and Plan mode                     | Accepted |
+| [0010](0010-secure-preview-and-canvas.md)                     | Secure file preview and canvas artifacts                          | Accepted |
+| [0011](0011-extensions-activation-ladder.md)                  | Extensions and skills: the activation ladder                      | Accepted |
+| [0012](0012-mixed-provider-subagents.md)                      | Mixed-provider subagents and agent runs                           | Accepted |
+| [0013](0013-remote-access-and-mobile.md)                      | Remote access: single host, paired devices, and mobile            | Accepted |
+| [0014](0014-apple-development-capability.md)                  | Apple development and validation as an app-managed capability     | Accepted |
+| [0015](0015-workspace-shell-model.md)                         | Workspace shell model                                             | Accepted |
+| [0016](0016-component-foundation-and-theme.md)                | Component foundation and theme                                    | Accepted |
+| [0017](0017-code-projects-bind-any-folder.md)                 | Code Projects bind any folder                                     | Accepted |
+| [0018](0018-auto-accept-edits-posture.md)                     | Auto-accept edits as a fourth access posture                      | Accepted |
+| [0019](0019-user-profile-and-first-run-setup.md)              | User profile and first-run setup                                  | Accepted |
+| [0020](0020-checkpoints-and-restore-by-forking.md)            | Checkpoints and restore by forking                                | Accepted |
+| [0021](0021-remote-thread-surfaces.md)                        | Remote thread surfaces: watching the running product              | Accepted |
+| [0022](0022-pointed-at-product-feedback.md)                   | Pointing at the running product                                   | Accepted |
+| [0023](0023-bringing-a-run-home.md)                           | Bringing a run home                                               | Accepted |
+| [0024](0024-curated-project-scaffolds.md)                     | Curated project scaffolds                                         | Accepted |
+| [0025](0025-long-running-goal-loops.md)                       | Long-running goal loops                                           | Accepted |
+| [0026](0026-shipping-to-a-user-owned-target.md)               | Shipping to a user-owned target                                   | Accepted |
+| [0027](0027-plans-as-journaled-artifacts.md)                  | Plans as journaled artifacts                                      | Accepted |
+| [0028](0028-the-artifact-library.md)                          | The artifact library                                              | Accepted |
+| [0029](0029-artifact-storage-mirror.md)                       | The artifact storage mirror                                       | Accepted |
+| [0030](0030-routines-that-run-themselves.md)                  | Routines that run themselves                                      | Accepted |
+| [0031](0031-hosts-as-environments.md)                         | Hosts as environments                                             | Accepted |
+| [0032](0032-a-refusal-a-person-can-clear.md)                  | A refusal a person can clear                                      | Proposed |
+| [0033](0033-first-run-asks-what-to-call-you.md)               | First run asks what to call you                                   | Accepted |
+| [0034](0034-signed-updates.md)                                | Signed, notarized, user-controlled updates                        | Proposed |
+| [0035](0035-thread-retention-and-purge.md)                    | Thread retention and explicit purge                               | Accepted |
+| [0036](0036-thread-export.md)                                 | Thread export                                                     | Accepted |
+| [0037](0037-a-thread-starts-in-a-project.md)                  | A thread starts in a Project                                      | Accepted |
+| [0038](0038-owned-design-system-stylesheet.md)                | The owned design system stylesheet                                | Accepted |
+| [0039](0039-journal-compaction-of-superseded-observations.md) | Journal compaction of superseded checkout observations            | Accepted |
 
 ## Adding an ADR
 
