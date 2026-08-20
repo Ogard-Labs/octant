@@ -25,10 +25,9 @@
   max-width: 100%;
 }
 
-/* Panel chrome mirrors the composer's other popovers (model picker, model
-   options): system surface, border, radius, and overlay shadow, so the panels
-   that share this control row read as one family. */
-.execution-profile-workflow__body,
+/* The dialogs keep the popover family's chrome so the panels that share the
+   composer's control row read as one family; the anchored composer body
+   itself wears the system's `.popover-panel` instead. */
 .execution-profile-workflow__form,
 .execution-profile-workflow__confirm {
   border: 1px solid var(--oct-border);
@@ -45,22 +44,14 @@
 /*
  * Opens upward because the trigger sits in the bottom composer row, and stays
  * clamped near the trigger's width: the previous 460px×460px panel hung far
- * up-and-left of the tiny chip and read as a detached broken dropdown. Only
- * the option list scrolls; the panel itself grows with its content.
+ * up-and-left of the tiny chip and read as a detached broken dropdown. Chrome
+ * and the short-window height clamp are the system's `.popover-panel`; only
+ * the option list scrolls in the ordinary case.
  */
 .execution-profile-workflow--composer .execution-profile-workflow__body {
-  position: absolute;
-  z-index: var(--oct-z-overlay);
   inset-block-end: calc(100% + var(--oct-space-2));
   inset-inline-end: 0;
   width: min(400px, calc(100vw - 2 * var(--oct-space-4)));
-  /* Growing upward from a bottom-row trigger, the panel's top is what runs
-     out of room first: on a short window it climbed past the tab strip and
-     clipped. The clamp only bites then — the option list's own scroll stays
-     the ordinary overflow path. */
-  max-height: calc(100vh - 96px);
-  overflow: auto;
-  padding: var(--oct-space-3);
 }
 
 .execution-profile-workflow--settings {
@@ -69,10 +60,16 @@
   border-top: 1px solid var(--oct-border);
 }
 
+/* Inline in Settings the body is a card in the page, not a floating panel:
+   same surface and border as the popover so the two placements read as the
+   same component, but flat — a drop shadow under a non-floating section
+   read as detached from the page. */
 .execution-profile-workflow--settings .execution-profile-workflow__body {
   margin-block-start: var(--oct-space-4);
   padding: var(--oct-space-4);
-  box-shadow: none;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
 }
 
 .execution-profile-workflow__header,

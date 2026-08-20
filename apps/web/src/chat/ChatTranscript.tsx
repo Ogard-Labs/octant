@@ -105,7 +105,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   );
 
   return (
-    <section aria-label="Conversation" className="chat-transcript">
+    <section aria-label="Conversation" className="chat-transcript thread-column">
       {props.connectionStatus === "disconnected" ? (
         <p aria-live="polite" className="chat-transcript__connection" role="status">
           Disconnected — reconnecting to the authoritative transcript.

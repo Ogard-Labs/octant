@@ -67,7 +67,7 @@
 .octant-chip[aria-pressed="true"],
 .octant-chip[data-active="true"] {
   color: var(--oct-fg);
-  background: var(--octant-selection);
+  background: var(--oct-selection);
   box-shadow: var(--octant-shadow-hairline);
 }
 
@@ -210,7 +210,7 @@ html[data-octant-reduced-transparency="true"] .folder-picker {
 }
 
 .thread-search__result[data-active="true"] {
-  background: var(--octant-selection);
+  background: var(--oct-selection);
   border-color: var(--octant-border-strong);
 }
 

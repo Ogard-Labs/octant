@@ -799,7 +799,7 @@ html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) >
 }
 
 .draft-thread__intent-card:hover {
-  background: var(--octant-selection);
+  background: var(--oct-selection);
   border-color: var(--octant-border-strong);
 }
 
@@ -892,7 +892,7 @@ html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) >
 
 .composer-folder-selector__option:hover,
 .composer-folder-selector__option--active {
-  background: var(--octant-selection);
+  background: var(--oct-selection);
 }
 
 .composer-folder-selector__option--selected {
@@ -1445,7 +1445,7 @@ form > .work-composer-adapter__attachments {
 }
 
 .code-branch-selector__option[aria-selected="true"] {
-  background: var(--octant-selection);
+  background: var(--oct-selection);
 }
 
 .code-branch-selector__option-name {
