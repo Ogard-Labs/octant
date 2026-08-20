@@ -73,6 +73,20 @@ describe("ProjectCreateDialog web folder parity", () => {
     expect(screen.queryByLabelText("Project name")).toBeNull();
   });
 
+  it("uses the filled button recipe for Chat Project confirm without a site class", () => {
+    render(
+      <ProjectCreateDialog mode="chat" onClose={vi.fn()} onCreate={vi.fn()} onCreated={vi.fn()} />,
+    );
+
+    const confirm = screen.getByRole("button", { name: "Create Project" });
+    expect(confirm.className).toContain("bg-primary");
+    expect(confirm.className).not.toContain("project-button");
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass(
+      "project-button",
+      "project-button--quiet",
+    );
+  });
+
   it("restores native retry and cancellation after a safe picker failure", async () => {
     const user = userEvent.setup();
     const selectProjectRoot = vi
