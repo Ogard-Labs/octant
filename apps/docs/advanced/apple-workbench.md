@@ -13,31 +13,44 @@ even when the Build iOS Apps extension is absent or disabled.
 
 ## Scope
 
-The workbench covers **local iOS and iPadOS Simulator development** and
-**local macOS development** (Xcode and Swift Package Manager):
+The intended first-release boundary is **local iOS and iPadOS Simulator
+development** and **local macOS development** (Xcode and Swift Package
+Manager). What you can do today is a slice of that shape:
 
 - Toolchain, project, and destination discovery (Xcode, `xcode-select`, SDKs,
-  Simulator runtimes, workspaces, projects, `Package.swift`, schemes, test
-  plans, destinations) — non-mutating, with setup guidance
-- Build, install, launch, terminate, and relaunch on an explicitly allocated
-  Simulator
-- Simulator boot, wait, shut down, and erase as explicit ownership-protected
-  actions — never implicit
-- macOS app build and staging, stopping only owned processes, launch and
-  focus, unified logs and crashes, and handoff to Xcode or an external editor
-- Tests via Swift Testing and XCTest — unit, integration, and UI — with
-  focused target, suite, test, tag, and test-plan selection, accessibility
-  audits, flake investigation, and `.xcresult` evidence parsed into navigable
-  build errors, warnings, test hierarchies, attachments, and coverage
+  Simulator runtimes, workspaces, projects, schemes, configurations, targets,
+  destinations) — non-mutating, with setup guidance when Xcode is missing.
+  The `octant_apple` tool can name a `Package.swift` path; the command palette
+  does not list Swift packages, and test plans are not discovered yet.
+- **Build** and **Test** against the workspace's first reported scheme, and
+  **Run** on an explicitly named Simulator — build, install, and launch (a
+  launch also terminates any already-running copy of that app). Separate
+  install, terminate, and relaunch controls are not yet built.
+- Simulator **Boot** and **Shut down** as explicit actions from the workbench
+  destination list — never as a side effect of Build or Test. Boot waits until
+  the destination is ready. Erase is not yet a workbench action.
+- **Capture screen** of a booted Simulator, stored as a screenshot artifact.
+
+macOS app staging, stopping only owned processes, launch and focus, unified
+logs and crashes, and handoff to Xcode or an external editor are not yet
+workbench actions. Tests run the scheme through `xcodebuild test` (Swift
+Testing and XCTest as the scheme defines them) and keep a `.xcresult` artifact
+reference. Focused target, suite, test, tag, and test-plan selection,
+accessibility audits, flake investigation, and a navigable parse of that
+`.xcresult` into build errors, warnings, test hierarchies, attachments, and
+coverage are not yet built.
 
 ## Workbench surface
 
-The workbench appears as a Code workspace tab and shows the project path, the
-"Apple development" eyebrow, Xcode version, scheme, revision, SDK count,
-**Simulator destinations**, **Current progress**, and **Validation
-evidence**. The Simulator is a first-class persistent split-tree pane with a
-live frame, orientation, accessibility hierarchy, and screenshot, recording,
-and log surfaces.
+The workbench appears as a Code workspace tab titled **Apple workbench** and
+shows the project path, the "Apple development" eyebrow, Xcode version,
+scheme, revision, SDK count, Simulator count, **Actions**, **Simulator
+destinations**, **Current progress**, and **Validation evidence**.
+
+An inline Simulator pane with a live frame, orientation, accessibility
+hierarchy, screenshot, recording, and log surfaces is not yet built. Today
+the Simulator is a destination list with the actions that destination can
+perform.
 
 States include loading the toolchain, waiting for Apple evidence, toolchain
 unavailable, action interrupted, and action failed, with **Retry**. Outcome
@@ -69,7 +82,8 @@ A Code thread on **Full access** also reaches the same actions through the
 app-managed `octant_apple` tool, so an agent can discover the toolchain, read
 Simulator state, build, test, run, boot, shut down, and capture the screen.
 It sends the same requests the workbench sends and is refused by the same
-policy; it is unavailable under Plan and approval-gated postures.
+policy; it is unavailable under Plan and approval-gated postures. The tool's
+`run` operation will boot a named Simulator if it is not already up.
 
 ## Honest verification
 
@@ -82,10 +96,10 @@ exercised:
 - A passing unit suite is not a passing UI or accessibility workflow.
 
 Evidence is stored as local artifact files with durable references, not
-copied wholesale into model context. Code mode includes a **Review changes**
-action that inspects the diff and evidence, produces durable inline findings
-with severity, and supports accept, dismiss, and fix — it never auto-merges
-or mutates a remote PR in V1.
+copied wholesale into model context. An automated **Review changes** pass
+that inspects the diff and Apple evidence and produces durable inline
+findings is not yet built; Code's local findings pane is a separate surface
+and does not consume Simulator captures.
 
 ## Boundaries
 
