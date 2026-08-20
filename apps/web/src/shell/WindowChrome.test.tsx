@@ -207,10 +207,12 @@ describe("WindowChrome", () => {
   });
 
   it("keeps ordinary navigation and tab selection neutral", () => {
-    expect(cssRule('.mode-button[aria-pressed="true"]')).toContain(
-      "background: var(--octant-selection);",
-    );
-    expect(cssRule('.mode-button[aria-pressed="true"]')).not.toMatch(/accent|purple/i);
+    // The mode switcher's active state moved to the design system sheet,
+    // where .mode[aria-current="page"] uses the neutral soft fill.
+    const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
+    const activeMode = systemStyles.match(/\.mode\[aria-current="page"\]\s*{[^}]*}/)?.[0] ?? "";
+    expect(activeMode).toContain("var(--oct-fg-soft)");
+    expect(activeMode).not.toMatch(/accent|purple/i);
     expect(cssRule('.project-row[data-active="true"]')).toContain(
       "background: var(--octant-selection);",
     );

@@ -577,20 +577,6 @@ button:focus-visible {
   border: 0;
 }
 
-.mode-switcher {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  gap: 2px;
-  padding: 0;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-}
-
-.mode-switcher--dropdown {
-  display: block;
-}
-
 .octant-menu__trigger {
   display: flex;
   width: 100%;
@@ -622,11 +608,6 @@ button:focus-visible {
 .octant-menu__item:focus-visible {
   outline: 2px solid var(--octant-focus-ring);
   outline-offset: 1px;
-}
-
-.octant-menu__trigger-chevron {
-  margin-left: auto;
-  color: var(--octant-text-muted);
 }
 
 .octant-menu__positioner {
@@ -696,41 +677,12 @@ button:focus-visible {
   color: var(--octant-focus-ring);
 }
 
-.mode-button,
 .new-project {
   border: 0;
   cursor: pointer;
   transition:
     background-color 140ms ease,
     color 140ms ease;
-}
-
-.mode-button {
-  display: inline-flex;
-  height: 30px;
-  min-width: 0;
-  min-height: 30px;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  padding: 0 7px;
-  color: var(--octant-text-muted);
-  background: transparent;
-  border-radius: 7px;
-  font-size: 12px;
-  font-weight: 500;
-  box-shadow: none;
-}
-
-.mode-button:hover {
-  color: var(--octant-text-secondary);
-  background: var(--octant-control-hover);
-}
-
-.mode-button[aria-pressed="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-selection);
-  box-shadow: var(--octant-shadow-hairline);
 }
 
 .new-project {
@@ -766,7 +718,6 @@ button:focus-visible {
 }
 
 .new-project:active,
-.sidebar__utility:active,
 .workspace-group__action:active,
 .settings-view__action:active,
 .shell-boundary__action:active {
@@ -1273,56 +1224,9 @@ button:focus-visible {
   font-size: 11px;
 }
 
-.sidebar__utility {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  width: 100%;
-  min-height: 30px;
-  gap: 8px;
-  margin: 4px 0 0;
-  padding: 0 9px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 12px;
-  text-align: left;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-}
-
-.sidebar__utility:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-  border-color: transparent;
-}
-
 .sidebar-profile {
   position: relative;
   margin-top: auto;
-}
-
-.sidebar-profile__trigger {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-height: 34px;
-  gap: 8px;
-  padding: 0 8px;
-  color: var(--octant-text-primary);
-  border-radius: 8px;
-  font-size: 12.5px;
-}
-
-.sidebar-profile__name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .sidebar-profile__disclosure {
@@ -1356,13 +1260,6 @@ button:focus-visible {
 .sidebar-profile__action:hover {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
-}
-
-.sidebar__utility kbd {
-  margin-left: auto;
-  color: var(--octant-text-muted);
-  font: inherit;
-  font-size: 10px;
 }
 
 .shell-icon-button {
@@ -4871,12 +4768,6 @@ dialog.project-dialog {
   }
 }
 
-@media (min-width: 681px) and (max-width: 960px) {
-  .mode-button {
-    padding-inline: 5px;
-  }
-}
-
 @media (max-width: 680px) {
   .thread-environment-wrapper--pinned .thread-environment-panel--pinned,
   .code-thread-environment--pinned .thread-environment-panel--pinned {
@@ -4997,11 +4888,9 @@ dialog.project-dialog {
     animation: none;
   }
 
-  .mode-button,
   .octant-menu__trigger,
   .octant-menu__item,
   .new-project,
-  .sidebar__utility,
   .workspace-split__resize::before,
   .workspace-split__resize,
   .workspace-group__action,
@@ -5021,10 +4910,6 @@ dialog.project-dialog {
 
   .workspace-group__header {
     border-color: var(--octant-border-strong);
-  }
-
-  .mode-switcher {
-    border: 1px solid var(--octant-border-strong);
   }
 
   .octant-menu__popup,
