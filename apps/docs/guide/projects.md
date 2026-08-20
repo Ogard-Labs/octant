@@ -32,7 +32,8 @@ Projects support the following operations:
 - **Rename**: change the Project display name.
 - **Pin/Order**: pin a Project to the sidebar and reorder pinned Projects.
 - **Archive/Restore**: archive a Project to reduce sidebar clutter. Archived Projects retain all data and can be restored.
-- **Search**: find Projects by name in the sidebar search.
+- **Search**: filter the current mode's sidebar threads by title or by their
+  Project, Recents, or Unfiled label.
 - **Relink**: when a bound root becomes unavailable (moved or removed), the Project shows `Relink required`. Use audited relink to point to the new location. Root availability is observed at bootstrap and is not journaled, so relinking does not rewrite durable history.
 
 ## Project hierarchy
