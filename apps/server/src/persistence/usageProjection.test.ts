@@ -36,8 +36,6 @@ const ids = {
   plan: "63000000-0000-4000-8000-000000000007",
   usage: "63000000-0000-4000-8000-000000000008",
   usage2: "63000000-0000-4000-8000-000000000009",
-  rootlessWork: "63000000-0000-4000-8000-00000000000a",
-  rootlessCode: "63000000-0000-4000-8000-00000000000b",
 } as const;
 
 afterEach(() => {
@@ -264,45 +262,6 @@ describe("UsageProjection", () => {
   });
 });
 
-/**
- * A Project-less Work thread and a Project-less Code thread, each with one
- * usage row. Their mode lives in the durable rootless projection, not in the
- * `rootless-thread` subject type the usage row carries.
- */
-function seedRootlessUsage(connection: SqliteConnection): void {
-  for (const [threadId, mode, sequence] of [
-    [ids.rootlessWork, "work", 90],
-    [ids.rootlessCode, "code", 91],
-  ] as const) {
-    connection
-      .prepare(`
-        INSERT INTO rootless_thread_projection (
-          thread_id, mode, host_id, workspace_kind, project_id, schema_version,
-          thread_json, aggregate_version, created_at, updated_at, last_sequence
-        ) VALUES (?, ?, 'local', 'rootless', NULL, 1, '{}', 1, ?, ?, 1)
-      `)
-      .run(threadId, mode, now, now);
-    connection
-      .prepare(`
-        INSERT INTO usage_record_projection (
-          reconciliation_id, subject_type, subject_id, provider_instance_id,
-          model_id, request_shape, quality, input_tokens, output_tokens,
-          planned_input_tokens, variance_tokens, schema_version,
-          attribution_json, observed_at, last_sequence, host_id
-        ) VALUES (?, 'rootless-thread', ?, ?, 'gpt-4o', 'chat-turn', 'exact', 10, 5, 10, 0, ?, ?, ?, ?, 'local')
-      `)
-      .run(
-        `63000000-0000-4000-8000-0000000000${sequence}`,
-        threadId,
-        ids.provider,
-        USAGE_PROJECTION_SCHEMA_VERSION,
-        JSON.stringify([{ category: "conversation", plannedTokens: 10, quality: "exact" }]),
-        now,
-        sequence,
-      );
-  }
-}
-
 describe("queryUsageRecords", () => {
   it("returns all records with no filter", () => {
     const { connection, journal } = openDatabase();
@@ -334,25 +293,6 @@ describe("queryUsageRecords", () => {
       unfiledScope,
     );
     expect(noRecords).toHaveLength(0);
-  });
-
-  it("counts a Project-less Work or Code thread under its own mode", () => {
-    const { connection, journal } = openDatabase();
-    appendFullUsageCycle(journal);
-    seedRootlessUsage(connection);
-
-    const work = queryUsageRecords(connection, { mode: "work" }, 100, 0, unfiledScope);
-    expect(work.records.map((record) => record.subject.aggregateId)).toEqual([ids.rootlessWork]);
-
-    const code = queryUsageRecords(connection, { mode: "code" }, 100, 0, unfiledScope);
-    expect(code.records.map((record) => record.subject.aggregateId)).toEqual([ids.rootlessCode]);
-
-    // The projection's mode column admits only work and code, so no rootless
-    // row can ever be a Chat thread.
-    const chat = queryUsageRecords(connection, { mode: "chat" }, 100, 0, unfiledScope);
-    expect(chat.records.map((record) => record.subject.aggregateId)).not.toContain(
-      ids.rootlessWork,
-    );
   });
 
   it("filters by quality", () => {
@@ -452,9 +392,7 @@ describe("usage project scope", () => {
     project: "63000000-0000-4000-8000-000000000010",
     otherProject: "63000000-0000-4000-8000-000000000011",
     workThread: "63000000-0000-4000-8000-000000000012",
-    rootlessThread: "63000000-0000-4000-8000-000000000013",
     workUsage: "63000000-0000-4000-8000-000000000014",
-    rootlessUsage: "63000000-0000-4000-8000-000000000015",
   } as const;
 
   function seedUsageRow(
@@ -510,21 +448,6 @@ describe("usage project scope", () => {
     });
   }
 
-  function seedRootlessThread(
-    connection: SqliteConnection,
-    threadId: string,
-    projectId: string | null,
-  ): void {
-    connection
-      .prepare(`
-        INSERT INTO rootless_thread_projection (
-          thread_id, mode, host_id, workspace_kind, project_id, schema_version,
-          thread_json, aggregate_version, created_at, updated_at, last_sequence
-        ) VALUES (?, 'work', 'local', ?, ?, 1, '{}', 1, ?, ?, 1)
-      `)
-      .run(threadId, projectId === null ? "rootless" : "project-backed", projectId, now, now);
-  }
-
   function subjectIds(connection: SqliteConnection, scope: UsageProjectScope): Array<string> {
     return queryUsageRecords(connection, {}, 100, 0, scope).records.map((record) =>
       String(record.subject.aggregateId),
@@ -562,59 +485,14 @@ describe("usage project scope", () => {
     ).toEqual([]);
   });
 
-  it("keeps a project-backed rootless thread's usage out of an unfiled window", () => {
-    const { connection } = openDatabase();
-    seedRootlessThread(connection, scopeIds.rootlessThread, scopeIds.project);
-    seedUsageRow(connection, {
-      reconciliationId: scopeIds.rootlessUsage,
-      subjectType: "rootless-thread",
-      subjectId: scopeIds.rootlessThread,
-      sequence: 11,
-    });
-
-    expect(subjectIds(connection, unfiledScope)).toEqual([]);
-    expect(subjectIds(connection, { kind: "projects", projectIds: [scopeIds.project] })).toEqual([
-      scopeIds.rootlessThread,
-    ]);
-  });
-
-  it("leaves a genuinely rootless thread and a host-level subject unfiled", () => {
-    const { connection } = openDatabase();
-    seedRootlessThread(connection, scopeIds.rootlessThread, null);
-    seedUsageRow(connection, {
-      reconciliationId: scopeIds.rootlessUsage,
-      subjectType: "rootless-thread",
-      subjectId: scopeIds.rootlessThread,
-      sequence: 11,
-    });
-    seedUsageRow(connection, {
-      reconciliationId: ids.usage,
-      subjectType: "context-ledger",
-      subjectId: ids.aggregate,
-      sequence: 12,
-    });
-
-    expect(subjectIds(connection, unfiledScope)).toEqual([scopeIds.rootlessThread, ids.aggregate]);
-    expect(subjectIds(connection, { kind: "projects", projectIds: [scopeIds.project] })).toEqual(
-      [],
-    );
-  });
-
   it("partitions the ledger so no row is visible to both scopes or to neither", () => {
     const { connection, journal } = openDatabase();
     seedWorkThread(journal, scopeIds.workThread, scopeIds.project);
-    seedRootlessThread(connection, scopeIds.rootlessThread, null);
     seedUsageRow(connection, {
       reconciliationId: scopeIds.workUsage,
       subjectType: "work-thread",
       subjectId: scopeIds.workThread,
       sequence: 10,
-    });
-    seedUsageRow(connection, {
-      reconciliationId: scopeIds.rootlessUsage,
-      subjectType: "rootless-thread",
-      subjectId: scopeIds.rootlessThread,
-      sequence: 11,
     });
     seedUsageRow(connection, {
       reconciliationId: ids.usage,
@@ -627,9 +505,7 @@ describe("usage project scope", () => {
     const filed = subjectIds(connection, { kind: "projects", projectIds: [scopeIds.project] });
 
     expect(unfiled.filter((subject) => filed.includes(subject))).toEqual([]);
-    expect([...unfiled, ...filed].sort()).toEqual(
-      [scopeIds.workThread, scopeIds.rootlessThread, ids.aggregate].sort(),
-    );
+    expect([...unfiled, ...filed].sort()).toEqual([scopeIds.workThread, ids.aggregate].sort());
   });
 });
 

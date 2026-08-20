@@ -230,11 +230,7 @@ export function formatThreadMentionContext(
   if (mentions.length === 0) return "";
   const blocks = mentions.map((mention) => {
     const placement =
-      mention.placement.kind === "project"
-        ? (mention.placement.label ?? "Project")
-        : mention.placement.kind === "recents"
-          ? "Recents"
-          : "Unfiled";
+      mention.placement.kind === "project" ? (mention.placement.label ?? "Project") : "Recents";
     const header = `Referenced thread: ${mention.title} (${mention.mode}, ${placement})`;
     const notice = mention.truncated
       ? "Only the most recent messages are included; older history was not read."

@@ -282,7 +282,7 @@ describe("DraftThreadWorkspace", () => {
   });
 
   it.each(["code", "work"] as const)(
-    "preserves the %s first prompt and exposes retry plus attach choices after a rootless failure",
+    "preserves the %s first prompt and exposes retry plus Project choices after a failed first turn",
     async (mode) => {
       const user = userEvent.setup();
       const onCreateThread = vi.fn();
@@ -309,7 +309,7 @@ describe("DraftThreadWorkspace", () => {
 
       expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("Keep this draft");
       expect(screen.getByRole("button", { name: "Retry creating thread" })).toBeVisible();
-      expect(screen.getByRole("button", { name: "Folder: No folder" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
     },
   );
 
@@ -360,16 +360,16 @@ describe("DraftThreadWorkspace", () => {
     ["code", "Octant", "Knowledge"],
     ["work", "Knowledge", "Octant"],
   ] as const)(
-    "lists only compatible saved Projects with Add local folder and No folder for %s",
+    "lists only compatible saved Projects and Add local folder for %s",
     async (mode, compatible, incompatible) => {
       const user = userEvent.setup();
       render(<DraftThreadWorkspace {...baseProps} mode={mode} projects={projects} />);
 
-      await user.click(screen.getByRole("button", { name: "Folder: No folder" }));
+      await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
       expect(screen.getByRole("option", { name: new RegExp(compatible) })).toBeVisible();
       expect(screen.queryByRole("option", { name: new RegExp(incompatible) })).toBeNull();
       expect(screen.getByRole("option", { name: "Add local folder…" })).toBeVisible();
-      expect(screen.getByRole("option", { name: "No folder" })).toBeVisible();
+      expect(screen.queryByRole("option", { name: "No folder" })).toBeNull();
     },
   );
 
@@ -386,7 +386,7 @@ describe("DraftThreadWorkspace", () => {
     );
 
   async function submitCodeDraft(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(screen.getByRole("button", { name: "Folder: No folder" }));
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: /Octant/ }));
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Fix search");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
@@ -444,7 +444,7 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Folder: No folder" }));
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: /Octant/ }));
     const workspace = screen.getByRole("combobox", { name: "Workspace" });
     expect(workspace).toHaveValue("managed-worktree");
@@ -471,15 +471,11 @@ describe("DraftThreadWorkspace", () => {
     );
 
     await user.type(screen.getByRole("textbox", { name: "First message" }), "Draft brief");
-    await user.click(screen.getByRole("button", { name: "Folder: No folder" }));
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: /Knowledge/ }));
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 
-    expect(onCreateThread).toHaveBeenCalledWith("Draft brief", {
-      kind: "project",
-      projectId: workProjectId,
-      displayName: "Knowledge",
-    });
+    expect(onCreateThread).toHaveBeenCalledWith("Draft brief", workProjectId);
   });
 
   it("returns from authenticated-web Add folder to the unchanged Code draft and settings", async () => {
@@ -528,7 +524,7 @@ describe("DraftThreadWorkspace", () => {
     await user.clear(screen.getByRole("textbox", { name: "Branch intent" }));
     await user.type(screen.getByRole("textbox", { name: "Branch intent" }), "feature/keep-me");
 
-    await user.click(screen.getByRole("button", { name: "Folder: No folder" }));
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: "Add local folder…" }));
     await user.click(await screen.findByRole("button", { name: "Select" }));
 
@@ -538,7 +534,7 @@ describe("DraftThreadWorkspace", () => {
     );
     expect(screen.getByRole("combobox", { name: "Access policy" })).toHaveValue("full-access");
     expect(screen.getByRole("textbox", { name: "Branch intent" })).toHaveValue("feature/keep-me");
-    expect(screen.getByRole("button", { name: "Folder: new-repository" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Project: new-repository" })).toBeVisible();
   });
 
   const GITHUB_RECEIPT = "R".repeat(43);
@@ -642,7 +638,7 @@ describe("DraftThreadWorkspace", () => {
     );
 
     expect(screen.getByRole("status", { name: /Host: This Mac/ })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Folder: No folder" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
     expect(screen.getByRole("button", { name: "GitHub repository" })).toBeVisible();
   });
 
@@ -678,7 +674,7 @@ describe("DraftThreadWorkspace", () => {
 
     // The new Project becomes the composer's Project selection, and the
     // draft prompt survives the whole onboarding round trip.
-    expect(screen.getByRole("button", { name: "Folder: atlas-docs" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Project: atlas-docs" })).toBeVisible();
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue("Keep this draft");
   });
 
@@ -695,7 +691,7 @@ describe("DraftThreadWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Folder: No folder" }));
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
     await user.click(screen.getByRole("option", { name: /Octant/ }));
     await user.click(screen.getByRole("button", { name: "GitHub repository" }));
 

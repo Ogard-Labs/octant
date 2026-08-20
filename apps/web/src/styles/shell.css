@@ -337,15 +337,16 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   gap: 2px;
 }
 
+/* Space separates the navigation actions from the Project tree. A rule here
+   reads as a third section boundary in a rail that already has section
+   headings, and it is the only horizontal line in the sidebar. */
 .sidebar-navigation__projects {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  padding-top: 8px;
-  margin-top: 8px;
-  border-top: 1px solid color-mix(in srgb, var(--octant-border) 72%, transparent);
+  margin-top: 16px;
 }
 
 .sidebar-navigation__item {
@@ -887,11 +888,9 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 .draft-thread__input-row,
-.work-composer-adapter__input-row {
+.work-composer-adapter__card {
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 10px 12px;
+  flex-direction: column;
   background: var(--octant-surface-raised, var(--octant-surface));
   border: 1px solid var(--octant-border);
   border-radius: var(--octant-radius-composer, 14px);
@@ -902,10 +901,22 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 .work-composer-adapter__input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+}
+
+.work-composer-adapter__input-row {
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
   padding: 12px 12px 8px 14px;
+}
+
+.work-composer-adapter__context-strip {
+  padding: 8px 12px 8px 14px;
+  border-top: 1px solid var(--octant-border-subtle, var(--octant-border));
 }
 
 .work-composer-adapter__composer-bar {
@@ -1004,7 +1015,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 }
 
 .work-composer-adapter__context-strip {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .draft-thread__input-row:focus-within {
@@ -1098,169 +1109,6 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   color: var(--octant-text-muted);
   font-size: 11px;
   opacity: 0.7;
-}
-
-.rootless-thread-workspace {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  width: 100%;
-  height: 100%;
-  min-height: 100%;
-  overflow: hidden;
-}
-
-.rootless-thread-workspace__header {
-  display: grid;
-  gap: 2px;
-  min-height: 44px;
-  padding: 7px 24px;
-  border-bottom: 1px solid var(--octant-border-subtle);
-}
-
-.rootless-thread-workspace__header h1,
-.rootless-thread-workspace__header p,
-.rootless-thread-workspace__message p,
-.rootless-thread-workspace__capability p,
-.rootless-thread-workspace__empty p {
-  margin: 0;
-}
-
-.rootless-thread-workspace__header h1 {
-  overflow: hidden;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.35;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rootless-thread-workspace__header p {
-  overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.rootless-thread-workspace__scroll {
-  min-height: 0;
-  overflow: auto;
-}
-
-.rootless-thread-workspace__conversation {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  width: min(760px, calc(100% - 40px));
-  min-height: 100%;
-  margin: 0 auto;
-  padding: 28px 0 96px;
-}
-
-.rootless-thread-workspace__message {
-  max-width: min(84%, 660px);
-  color: var(--octant-text-primary);
-  font-size: 13px;
-  line-height: 1.62;
-}
-
-.rootless-thread-workspace__message--user {
-  align-self: flex-end;
-  padding: 10px 13px;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 13px 13px 4px 13px;
-  background: var(--octant-surface-raised);
-}
-
-.rootless-thread-workspace__message--assistant {
-  align-self: flex-start;
-  width: 100%;
-}
-
-.rootless-thread-workspace__message--assistant > p {
-  white-space: pre-wrap;
-}
-
-.rootless-thread-workspace__message-label {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 12px;
-  margin-bottom: 6px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.rootless-thread-workspace__turn-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--octant-text-muted);
-  font-weight: 500;
-}
-
-.rootless-thread-workspace__turn-status[data-status="failed"],
-.rootless-thread-workspace__turn-status[data-status="cancelled"],
-.rootless-thread-workspace__turn-status[data-status="waiting"] {
-  color: var(--octant-warning-text);
-}
-
-.rootless-thread-workspace__empty {
-  display: grid;
-  gap: 5px;
-  padding: 28px 0;
-  color: var(--octant-text-secondary);
-  text-align: center;
-}
-
-.rootless-thread-workspace__empty strong {
-  color: var(--octant-text-primary);
-  font-size: 13px;
-}
-
-.rootless-thread-workspace__empty p,
-.rootless-thread-workspace__capability p {
-  margin-top: 4px;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
-.rootless-thread-workspace__capability {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  margin-top: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--octant-surface-raised) 72%, transparent);
-}
-
-.rootless-thread-workspace__capability svg {
-  flex: 0 0 auto;
-}
-
-@media (max-width: 640px) {
-  .rootless-thread-workspace__header {
-    padding-inline: 14px;
-  }
-
-  .rootless-thread-workspace__conversation {
-    width: calc(100% - 24px);
-    padding-top: 20px;
-  }
-
-  .rootless-thread-workspace__message {
-    max-width: 92%;
-  }
-
-  .rootless-thread-workspace__capability {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1495,7 +1343,20 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px 12px;
-  padding: 0 2px;
+  padding: 8px 12px 8px 14px;
+  border-top: 1px solid var(--octant-border-subtle, var(--octant-border));
+}
+
+/* Panels a strip control expands into are further rows of the same card, so
+   they drop the frame they wore as free-standing panels: a bordered box inside
+   a bordered card reads as two cards, not as one that grew a row. */
+.code-composer-adapter__card > .code-worktree-source,
+.code-composer-adapter__card > .code-composer-adapter__delivery {
+  padding: 10px 12px 10px 14px;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--octant-border-subtle, var(--octant-border));
+  border-radius: 0;
 }
 
 @media (max-width: 640px) {
@@ -1694,16 +1555,26 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   font-weight: 500;
 }
 
+/* The card is the composer. What the thread will be bound to — host, Project,
+   checkout, base, delivery — belongs inside the thing being started, divided
+   from the prompt by a hairline rather than floating below the card as loose
+   chrome. Only the error, the pending status, and the keyboard hint stay
+   outside it: they talk about the card, they are not part of it. */
+.code-composer-adapter__card {
+  display: flex;
+  flex-direction: column;
+  background: var(--octant-surface-raised, var(--octant-surface));
+  border: 1px solid var(--octant-border);
+  border-radius: var(--octant-radius-composer, 14px);
+  box-shadow: var(--octant-shadow-lg);
+}
+
 .code-composer-adapter__input-row {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
   padding: 12px 12px 8px 14px;
-  background: var(--octant-surface-raised, var(--octant-surface));
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-composer, 14px);
-  box-shadow: var(--octant-shadow-lg);
 }
 
 /* Bottom toolbar inside the composer card: model + policy left, send right. */
@@ -1742,12 +1613,14 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   margin-inline-start: auto;
 }
 
-/* The context strip sits below the card, centered like secondary context. */
+/* Inside the card the strip is a row of it, so it starts on the same edge as
+   the prompt and the toolbar above it rather than centring against nothing. */
 .code-composer-adapter__context-strip {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
-.code-composer-adapter__input-row:focus-within {
+/* The frame that reacts to focus is the one that draws the border. */
+.code-composer-adapter__card:focus-within {
   border-color: var(--octant-border-strong);
   box-shadow: var(--octant-shadow-lg);
 }

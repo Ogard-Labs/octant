@@ -19,7 +19,7 @@ const chatProjectB = {
 } as ProjectSummary;
 
 describe("ProjectSidebarSection chat thread nesting", () => {
-  it("nests chat threads under their Project and keeps Unfiled for rootless threads", async () => {
+  it("nests chat threads under their Project and keeps Unfiled for threads with none", async () => {
     const user = userEvent.setup();
     const onSelectThread = vi.fn();
     const onNewChatInProject = vi.fn();
@@ -461,7 +461,7 @@ describe("ProjectSidebarSection activity view", () => {
           onRestore={vi.fn()}
           onSelectThread={vi.fn()}
           projects={[chatProjectA]}
-          rootlessLabel="Recents"
+          unfiledLabel="Recents"
           threads={[
             {
               projectId: String(chatProjectA.id),
@@ -711,7 +711,7 @@ describe("ProjectSidebarSection code project views", () => {
 });
 
 describe("ProjectSidebarSection Code and Work recents", () => {
-  it("puts a discrete add control on the Projects header and lists rootless threads under Recents", async () => {
+  it("puts a discrete add control on the Projects header and lists unfiled threads under Recents", async () => {
     const user = userEvent.setup();
     const onAddProject = vi.fn();
     const onSelectThread = vi.fn();
@@ -728,7 +728,7 @@ describe("ProjectSidebarSection Code and Work recents", () => {
         onRestore={vi.fn()}
         onSelectThread={onSelectThread}
         projects={[codeProjectA]}
-        rootlessLabel="Recents"
+        unfiledLabel="Recents"
         threads={[
           {
             projectId: String(codeProjectA.id),

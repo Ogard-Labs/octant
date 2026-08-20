@@ -5,10 +5,6 @@ import {
   type ProjectId,
   type ProjectSummary,
 } from "@octant/contracts/projects";
-import type {
-  ComposerFolderEntry,
-  ComposerFolderSelection,
-} from "@octant/contracts/rootless-thread";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type {
   PermissionPersistence,
@@ -46,7 +42,10 @@ import { GitHubRepositoryOnboarding } from "../code/GitHubRepositoryOnboarding";
 import { WorkComposerAdapter } from "../work/composer/WorkComposerAdapter";
 import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
-import { ComposerFolderSelector } from "../rootless/ComposerFolderSelector";
+import {
+  ComposerProjectSelector,
+  type ComposerProjectEntry,
+} from "../projects/ComposerProjectSelector";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { HostSelector } from "./HostSelector";
@@ -83,7 +82,7 @@ export interface DraftThreadWorkspaceProps {
   }) => void;
   readonly onCreateThread: (
     prompt: string,
-    folderSelection?: ComposerFolderSelection,
+    draftProjectId?: ProjectId,
     deliveryOutcome?: CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
   ) => void | Promise<void>;
@@ -148,17 +147,16 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
   const selectedProject = compatibleProjects.find(
     (project) => String(project.id) === String(selectedProjectId),
   );
-  const folderSelection: ComposerFolderSelection =
+  const projectSelection =
     selectedProjectId === undefined
-      ? { kind: "no-folder" }
+      ? undefined
       : {
-          kind: "project",
           projectId: selectedProjectId,
-          displayName: selectedProject?.name ?? selectedProjectLabel ?? "Selected folder",
+          displayName: selectedProject?.name ?? selectedProjectLabel ?? "Selected Project",
         };
-  const folderEntries: ReadonlyArray<ComposerFolderEntry> = [
+  const projectEntries: ReadonlyArray<ComposerProjectEntry> = [
     ...compatibleProjects.map(
-      (project): ComposerFolderEntry => ({
+      (project): ComposerProjectEntry => ({
         kind: "saved-project",
         projectId: project.id,
         displayName: project.name,
@@ -166,13 +164,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       }),
     ),
     { kind: "add-folder" },
-    { kind: "no-folder" },
   ];
   const folderControl =
     props.mode === "code" || props.mode === "work" ? (
-      <ComposerFolderSelector
+      <ComposerProjectSelector
         {...(props.creating === undefined ? {} : { disabled: props.creating })}
-        entries={folderEntries}
+        entries={projectEntries}
         onAddFolder={() => {
           if (props.onCreateProject !== undefined) {
             setAddFolderOpen(true);
@@ -184,12 +181,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           if (entry.kind === "saved-project") {
             setSelectedProjectId(entry.projectId);
             setSelectedProjectLabel(entry.displayName);
-          } else if (entry.kind === "no-folder") {
-            setSelectedProjectId(undefined);
-            setSelectedProjectLabel(undefined);
           }
         }}
-        selection={folderSelection}
+        {...(projectSelection === undefined ? {} : { selection: projectSelection })}
       />
     ) : null;
   const selectedProjectName =
@@ -293,7 +287,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             // fallback path never re-derives or auto-confirms a suggestion.
             void props.onCreateThread(
               input.prompt,
-              folderSelection,
+              selectedProjectId,
               input.deliveryTarget.outcomeKind,
             );
           }}
@@ -329,8 +323,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           onSelectProvider={props.onSelectProvider}
           onCreateThread={(prompt, images) =>
             images === undefined
-              ? props.onCreateThread(prompt, folderSelection)
-              : props.onCreateThread(prompt, folderSelection, undefined, images)
+              ? props.onCreateThread(prompt, selectedProjectId)
+              : props.onCreateThread(prompt, selectedProjectId, undefined, images)
           }
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined

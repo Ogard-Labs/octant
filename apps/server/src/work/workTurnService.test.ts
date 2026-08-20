@@ -54,7 +54,6 @@ describe("WorkTurnService", () => {
     });
     expect(fixture.acquireInputs[0]).toMatchObject({
       mode: "work",
-      workspace: { kind: "project-backed" },
       workRequest: {
         projectId: ids.project,
         threadId: ids.thread,
@@ -293,7 +292,6 @@ function serviceFixture(
               instanceId: input.command.authority.providerInstanceId,
               projectRoot: input.projectRoot,
               mode: "work",
-              workspace: { kind: "project-backed" },
               workRequest: {
                 projectId: input.command.authority.projectId,
                 threadId: input.command.threadId,

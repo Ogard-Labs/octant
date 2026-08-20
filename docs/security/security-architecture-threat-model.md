@@ -293,7 +293,7 @@ window, or approves an action class the host policy reserves for the local user.
   environments.
 - **Worktree and workspace isolation.** Code children require a verified isolated worktree receipt
   (`validateWorkspaceReceipt`, `createVerifiedAgentRunWorktreeReceiptPort`); Chat tools use
-  isolated scratch areas (`apps/server/src/rootlessScratchStore.ts`, `chat/chatScratchStore.ts`).
+  isolated scratch areas (`apps/server/src/chat/chatScratchStore.ts`).
   Work Project/root children remain deferred until authoritative root resolution is wired.
 - **Browser and computer-use confinement.** Per-thread isolated browser contexts with
   deny-by-default origin allowlists and credential-field protection

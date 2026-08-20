@@ -97,7 +97,6 @@ describe("WorkTurnRuntime", () => {
 
     expect(acquireInputs[0]).toMatchObject({
       mode: "work",
-      workspace: { kind: "project-backed" },
       projectRoot: "/tmp/work-project",
       workRequest: {
         projectId: ids.project,

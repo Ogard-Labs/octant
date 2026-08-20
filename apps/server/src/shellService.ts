@@ -9,7 +9,6 @@ import {
   UtcTimestamp,
   decodeShellCommand,
   type ProjectId,
-  type RootlessThreadId,
   type ShellBootstrap,
   type ShellCommandResult,
   type ShellFailure,
@@ -38,7 +37,6 @@ import { Schema } from "effect";
 import { ConcurrencyConflict, JournalWriteFailed } from "./persistence/journalErrors";
 import type { PersistenceService } from "./persistence/persistenceService";
 import { ProjectionApplicationFailed } from "./persistence/projection";
-import type { ProjectedRootlessThread } from "./persistence/rootlessPersistenceSchema";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./persistence/shellProjection";
 
 const decodeActorId = Schema.decodeUnknownSync(ActorId);
@@ -57,7 +55,6 @@ export interface ShellServiceApi {
 export interface ShellServiceOptions {
   readonly persistence: PersistenceService;
   readonly readWorkThread?: (threadId: WorkThreadId) => WorkThread | undefined;
-  readonly readRootlessThread?: (threadId: RootlessThreadId) => ProjectedRootlessThread | undefined;
   readonly uuid: () => string;
   readonly clock: () => string;
 }
@@ -73,7 +70,6 @@ export class ShellServiceError extends Error {
 export class ShellService implements ShellServiceApi {
   readonly #persistence: PersistenceService;
   readonly #readWorkThread: ShellServiceOptions["readWorkThread"];
-  readonly #readRootlessThread: ShellServiceOptions["readRootlessThread"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #registeredWindowIds = new Set<WindowId>();
@@ -81,7 +77,6 @@ export class ShellService implements ShellServiceApi {
   constructor(options: ShellServiceOptions) {
     this.#persistence = options.persistence;
     this.#readWorkThread = options.readWorkThread;
-    this.#readRootlessThread = options.readRootlessThread;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
   }
@@ -295,8 +290,7 @@ export class ShellService implements ShellServiceApi {
   #contextResolves(): WorkspaceContextResolves {
     const persistence = this.#persistence;
     return {
-      tabContext: (tab) =>
-        resolveTabContext(tab, persistence, this.#readWorkThread, this.#readRootlessThread),
+      tabContext: (tab) => resolveTabContext(tab, persistence, this.#readWorkThread),
     };
   }
 
@@ -677,7 +671,6 @@ function resolveTabContext(
   tab: Parameters<WorkspaceContextResolves["tabContext"]>[0],
   persistence: PersistenceService,
   readWorkThread: ShellServiceOptions["readWorkThread"],
-  readRootlessThread: ShellServiceOptions["readRootlessThread"],
 ): WorkspaceContextKey | undefined {
   if (tab.kind === "project") {
     const project = persistence.readProject(tab.projectId);
@@ -706,41 +699,6 @@ function resolveTabContext(
       projectId,
       boundRoot: null,
     };
-  }
-  if ((tab.kind === "work-thread" || tab.kind === "code-overview") && tab.hostId !== undefined) {
-    const rootless = readRootlessThread?.(tab.threadId as unknown as RootlessThreadId);
-    if (rootless !== undefined) {
-      if (rootless.mode !== tab.mode || rootless.hostId !== tab.hostId) {
-        throw new WorkspaceContextRejected(
-          "This thread no longer matches its recorded mode or host. Open it again from the sidebar.",
-        );
-      }
-      if (rootless.workspaceKind === "rootless") {
-        if (rootless.projectId !== null) {
-          throw new WorkspaceContextRejected(
-            "This thread has an invalid workspace binding. Open it again from the sidebar.",
-          );
-        }
-        return undefined;
-      }
-      if (rootless.projectId === null) {
-        throw new WorkspaceContextRejected(
-          "This attached thread no longer has a valid Project binding. Open it again from the sidebar.",
-        );
-      }
-      const project = persistence.readProject(rootless.projectId);
-      if (project === undefined || project.lifecycle !== "active" || project.type !== tab.mode) {
-        throw new WorkspaceContextRejected(
-          "This attached thread no longer belongs to an active matching Project. Open it again from the sidebar.",
-        );
-      }
-      return {
-        host: rootless.hostId,
-        mode: tab.mode,
-        projectId: project.id,
-        boundRoot: project.binding.canonicalRoot,
-      };
-    }
   }
   if (tab.kind === "work-thread") {
     const thread = readWorkThread?.(tab.threadId);

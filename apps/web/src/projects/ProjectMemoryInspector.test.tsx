@@ -132,13 +132,12 @@ function renderInspector(
 }
 
 describe("ProjectMemoryInspector", () => {
-  it("embeds under the single utility dock landmark, visible title, and Close control", () => {
+  it("embeds under one utility dock landmark and title, with no close of its own", () => {
     const inspector = renderInspector();
     inspector.unmount();
     render(
       <RightUtilityDock
         availableSurfaces={[RIGHT_UTILITY_DOCK_SURFACES[1]]}
-        codeEnvironment={null}
         context={null}
         isNarrow={false}
         navigator={null}
@@ -146,7 +145,6 @@ describe("ProjectMemoryInspector", () => {
         onCommitWidth={vi.fn()}
         onPreviewWidth={vi.fn()}
         onSelectSurface={vi.fn()}
-        plan={null}
         projectMemory={<ProjectMemoryInspector {...inspector.props} embedded />}
         resolution={{
           kind: "surface",
@@ -159,7 +157,9 @@ describe("ProjectMemoryInspector", () => {
 
     expect(screen.getAllByRole("complementary", { name: "Right Utility Dock" })).toHaveLength(1);
     expect(screen.getAllByRole("heading", { name: "Project memory" })).toHaveLength(1);
-    expect(screen.getAllByRole("button", { name: "Close Project memory" })).toHaveLength(1);
+    // The window chrome's disclosure closes the docked dock; a second close in
+    // its header lands within a few pixels of that one and shares its name.
+    expect(screen.queryAllByRole("button", { name: "Close Project memory" })).toHaveLength(0);
     expect(screen.getByText("Source")).toBeVisible();
     expect(screen.getByRole("button", { name: "Add memory" })).toBeVisible();
   });

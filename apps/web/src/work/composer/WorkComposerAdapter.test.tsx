@@ -29,16 +29,16 @@ describe("WorkComposerAdapter", () => {
     expect(html).toContain("confined folder");
   });
 
-  it("renders rootless state with attach folder action", () => {
+  it("renders the no-Project state with an attach folder action", () => {
     const html = renderToStaticMarkup(
       <WorkComposerAdapter {...baseProps} onAttachFolder={() => {}} />,
     );
     expect(html).toContain("No folder");
     expect(html).toContain("Attach folder");
-    expect(html).toContain("without a folder");
+    expect(html).toContain("Choose a Project");
   });
 
-  it("renders rootless state without attach action when not provided", () => {
+  it("renders the no-Project state without an attach action when none is provided", () => {
     const html = renderToStaticMarkup(<WorkComposerAdapter {...baseProps} />);
     expect(html).toContain("No folder");
     expect(html).not.toContain("Attach folder");
@@ -107,6 +107,9 @@ describe("WorkComposerAdapter interactions", () => {
           onSelectProvider={() => {}}
           onCreateThread={onCreateThread}
           onCancel={onCancel}
+          projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+          projectName="My Docs"
+          projectRoot="/home/user/docs"
         />,
       );
     });
@@ -141,6 +144,9 @@ describe("WorkComposerAdapter interactions", () => {
         onSelectProvider={() => {}}
         onCreateThread={onCreateThread}
         onCancel={() => {}}
+        projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+        projectName="My Docs"
+        projectRoot="/home/user/docs"
       />,
     );
 
@@ -167,6 +173,9 @@ describe("WorkComposerAdapter interactions", () => {
         onSelectProvider={() => {}}
         onCreateThread={onCreateThread}
         onCancel={() => {}}
+        projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+        projectName="My Docs"
+        projectRoot="/home/user/docs"
       />,
     );
 
@@ -200,6 +209,38 @@ describe("WorkComposerAdapter interactions", () => {
       "The selected model does not accept images. Choose an image-capable model.",
     );
     expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
+  });
+
+  it("refuses to start the first turn until a Project is chosen", async () => {
+    const onCreateThread = vi.fn();
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(
+        <WorkComposerAdapter
+          providerGroups={[]}
+          onSelectProvider={() => {}}
+          onCreateThread={onCreateThread}
+          onCancel={() => {}}
+        />,
+      );
+    });
+    const textarea = container.querySelector("textarea");
+    await act(async () => {
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      nativeInputValueSetter?.call(textarea, "Draft the brief");
+      textarea!.dispatchEvent(new Event("input", { bubbles: true }));
+      textarea!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+
+    expect(onCreateThread).not.toHaveBeenCalled();
+    expect(container.querySelector('[aria-label="Create thread"]')).toBeDisabled();
+    root.unmount();
+    container.remove();
   });
 });
 

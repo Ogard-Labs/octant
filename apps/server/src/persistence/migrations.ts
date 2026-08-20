@@ -913,6 +913,18 @@ WHERE json_type(thread_json, '$.initialTurn.requestId') = 'text'
   AND json_type(thread_json, '$.initialTurnAcceptedEventId') = 'text';
 `;
 
+/*
+ * Rootless threads were retired by decision 0037. The tables the two
+ * migrations above created are dropped rather than left behind: no projector
+ * writes them and no read path queries them, so a stale copy could only ever
+ * be mistaken for live state. The journal keeps the events themselves.
+ */
+const DROP_ROOTLESS_PROJECTIONS_SQL = `
+DROP TABLE IF EXISTS rootless_turn_request_projection;
+DROP TABLE IF EXISTS rootless_thread_projection;
+DELETE FROM projection_checkpoints WHERE projection_name = 'rootless';
+`;
+
 const EXTENSION_PROJECTION_SQL = `
 CREATE TABLE extension_package_projection (
   extension_id TEXT PRIMARY KEY CHECK(length(trim(extension_id)) > 0),
@@ -1458,6 +1470,11 @@ ALTER TABLE code_runtime_projection
     version: 49,
     name: "create_product_feedback_projection",
     sql: PRODUCT_FEEDBACK_PROJECTION_SQL,
+  },
+  {
+    version: 50,
+    name: "drop_rootless_projections",
+    sql: DROP_ROOTLESS_PROJECTIONS_SQL,
   },
 ];
 

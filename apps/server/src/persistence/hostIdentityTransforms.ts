@@ -11,7 +11,6 @@ export function createRuntimeHostIdentityMigrationRegistry(
   const registry = new HostIdentityMigrationRegistry()
     .registerEnvelopeOnly(events.registrations())
     .register("workspace.layout-replaced", 1, migrateWorkspaceLayoutHostIdentity)
-    .register("rootless.thread-created@1", 1, migrateDirectHostIdentity)
     .register("zen.space-snapshot-recorded@1", 1, migrateZenHostIdentity)
     .register("zen.space-snapshot-recorded@2", 1, migrateZenHostIdentity)
     .register("zen.widget-mutation-recorded@1", 1, migrateZenHostIdentity)

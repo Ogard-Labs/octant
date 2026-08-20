@@ -117,7 +117,6 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         instanceId: input.command.authority.providerInstanceId,
         projectRoot: input.projectRoot,
         mode: "work",
-        workspace: { kind: "project-backed" },
         workRequest: {
           projectId: input.command.authority.projectId,
           threadId: input.command.threadId,

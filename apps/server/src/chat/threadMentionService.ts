@@ -799,7 +799,7 @@ function threadPlacement(
   projectId: unknown,
   projectLabel: ((projectId: string) => string | undefined) | undefined,
 ): ThreadMentionPlacement {
-  if (projectId === undefined || projectId === null) return { kind: "unfiled" };
+  if (projectId === undefined || projectId === null) return { kind: "recents" };
   const label = projectLabel?.(String(projectId));
   return label === undefined || label.trim().length === 0
     ? { kind: "recents" }

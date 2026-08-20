@@ -285,6 +285,14 @@ export function useCodeController(options: CodeControllerOptions) {
   const [errorMessage, setErrorMessage] = useState<string>();
   const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
+  /*
+   * Whether the empty transcript means "nothing has been said yet" or "we could
+   * not fetch what was said". Both leave `conversation` empty, and only the
+   * first one is an invitation to start something.
+   */
+  const [conversationHistory, setConversationHistory] = useState<"loaded" | "unavailable">(
+    "loaded",
+  );
   const [followUps, setFollowUps] = useState<ReadonlyMap<string, CodeThreadFollowUpView>>(
     () => new Map(),
   );
@@ -382,6 +390,8 @@ export function useCodeController(options: CodeControllerOptions) {
   );
   const mounted = useRef(true);
   const bootstrapGeneration = useRef(0);
+  /* Cancels a bootstrap that is still waiting to ask again when the hook goes. */
+  const bootstrapAbort = useRef(new AbortController());
   const threadGeneration = useRef(0);
   const streamAbort = useRef<AbortController | undefined>(undefined);
   const activeThreadId = useRef(options.activeThreadId);
@@ -446,16 +456,34 @@ export function useCodeController(options: CodeControllerOptions) {
       const request = ++bootstrapGeneration.current;
       setStatus(reason === "conflict" ? "conflict-reload" : "loading");
       clearFailure();
-      try {
-        const next = await client.bootstrap();
-        if (!mounted.current || request !== bootstrapGeneration.current) return false;
-        setBootstrap(next);
-        setStatus("ready");
-        return true;
-      } catch (error) {
-        if (!mounted.current || request !== bootstrapGeneration.current) return false;
-        fail(error);
-        return false;
+      let backoffMs = MIN_CODE_RECONNECT_BACKOFF_MS;
+      for (;;) {
+        try {
+          const next = await client.bootstrap();
+          if (!mounted.current || request !== bootstrapGeneration.current) return false;
+          setBootstrap(next);
+          clearFailure();
+          setStatus("ready");
+          return true;
+        } catch (error) {
+          if (!mounted.current || request !== bootstrapGeneration.current) return false;
+          fail(error);
+          /*
+           * A host the renderer cannot reach yet is a host to wait for: this
+           * window routinely asks for the bootstrap while the local service is
+           * still coming up, and one refusal there used to leave Code
+           * disconnected for the rest of the session on a machine that was
+           * healthy a second later — with no transcript and no new thread
+           * behind that state. The thread stream already waits this way. Any
+           * other category is an answer the host meant, and asking again would
+           * only collect it twice.
+           */
+          if (!worthAskingAgain(error)) return false;
+          await waitForReconnect(bootstrapAbort.current.signal, backoffMs);
+          if (!mounted.current || request !== bootstrapGeneration.current) return false;
+          if (bootstrapAbort.current.signal.aborted) return false;
+          backoffMs = Math.min(backoffMs * 2, MAX_CODE_RECONNECT_DELAY_MS);
+        }
       }
     },
     [clearFailure, client, fail],
@@ -684,6 +712,7 @@ export function useCodeController(options: CodeControllerOptions) {
       // reason: hydration may fail, and offering one thread's way back on
       // another thread's checkout would overwrite files nobody asked about.
       setRestoreUndo(undefined);
+      setConversationHistory("loaded");
       try {
         const initial = await client.thread(threadId);
         if (!isActive(request, threadGeneration, mounted)) return;
@@ -702,6 +731,7 @@ export function useCodeController(options: CodeControllerOptions) {
         } catch {
           if (!isActive(request, threadGeneration, mounted)) return;
           setConversation([]);
+          setConversationHistory("unavailable");
           setTurnError("Conversation history could not be loaded.");
         }
         if (!isActive(request, threadGeneration, mounted)) return;
@@ -1041,6 +1071,7 @@ export function useCodeController(options: CodeControllerOptions) {
       mounted.current = false;
       bootstrapGeneration.current += 1;
       threadGeneration.current += 1;
+      bootstrapAbort.current.abort();
       streamAbort.current?.abort();
       turnAbort.current?.abort();
     };
@@ -1054,6 +1085,7 @@ export function useCodeController(options: CodeControllerOptions) {
     turnAbort.current?.abort();
     turnAbort.current = undefined;
     setConversation([]);
+    setConversationHistory("loaded");
     setProviderRequests([]);
     setTurnActivity(new Map());
     setTurnStatus(
@@ -1833,6 +1865,7 @@ export function useCodeController(options: CodeControllerOptions) {
     restoreUndo,
     noteRestoreUndo,
     retry: () => loadBootstrap("retry"),
+    conversationHistory,
     sendFollowUp,
     setPendingDraft,
     startThreadTurn,
@@ -1872,6 +1905,12 @@ function draftKey(threadId: CodeThreadId | undefined): string {
 function required(value: string | undefined): string {
   if (value === undefined) throw new Error("Code controller requires launch authority.");
   return value;
+}
+
+/** Whether a refused bootstrap describes a host that may simply not be up yet. */
+function worthAskingAgain(error: unknown): boolean {
+  const category = codeFailure(error).category;
+  return category === "disconnected" || category === "unavailable";
 }
 
 function codeFailure(error: unknown): Pick<CodeFailure, "category" | "message"> {
