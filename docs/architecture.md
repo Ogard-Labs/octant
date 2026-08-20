@@ -16,7 +16,9 @@ credential references, layouts — stays on the host machine.
 The design rests on a small set of invariants that every package obeys:
 
 - **Local-first.** No Octant cloud account, relay, or telemetry is required.
-  Remote access is host-to-device over the user's own network.
+  Remote access is host-to-device over the user's own network. People share a
+  host they control or a git remote they control; hosts never trust each
+  other. See [decisions/0038](decisions/0038-share-a-host-or-a-git-remote.md).
 - **The server is the authority.** Every authority check (mode, Project,
   thread, provider, approval, remote principal) runs in `apps/server` before a
   side effect. The renderer and mobile app render what the server says is
@@ -297,7 +299,16 @@ mechanisms are:
   or thread authority, cannot mint local receipts, and every remote mutation is
   journaled with its principal.
 - **Hosts never trust each other.** Multi-host views merge read models
-  client-side; credentials and mutable authority never cross hosts.
+  client-side; credentials and mutable authority never cross hosts. People
+  share a host they control or a git remote they control, never by teaching
+  two hosts to trust each other. There is no Octant account or relay. The
+  three independently shippable layers — git-mediated artifact, plan, and
+  template bundles; a shared team host with distinct principals; and
+  on-demand co-presence — are recorded in
+  [decisions/0038](decisions/0038-share-a-host-or-a-git-remote.md).
+  On a shared host the host owner is the GDPR controller; teammates pair as
+  distinct principals, journaled mutations are the audit log, and approvals
+  stay single-winner.
 
 ## Package map
 

@@ -81,10 +81,12 @@ and across users with nothing in between. It is recorded here as direction, not
 as a decision: the import rules, the identity of a foreign provenance, and the
 conflict shape each need their own record. It must never become an
 Octant-operated store — the local-first invariant is not negotiable, and a
-sharing path that requires our infrastructure is not the one.
+sharing path that requires our infrastructure is not the one. Those questions
+are settled by [0038](0038-share-a-host-or-a-git-remote.md).
 
 ## Related
 
 - 0002 Durable event journal and rebuildable projections
 - 0010 Secure file preview and canvas artifacts
 - 0013 Remote access: single host, paired devices, and mobile
+- 0038 Collaboration: share a host or a git remote

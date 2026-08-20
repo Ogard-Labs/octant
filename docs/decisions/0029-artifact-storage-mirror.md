@@ -108,9 +108,9 @@ than adopting the other's.
 
 Nothing here is built, and one thing is settled in advance: **there is no
 Octant cloud, ever.** Cross-device and cross-user sharing reach a target the
-user already owns, or they do not happen. Whoever builds it owns the questions
-this record does not answer — how two people's versions of one artifact
-reconcile, and what a bundle proves about who wrote it.
+user already owns, or they do not happen. How two people's versions of one
+artifact reconcile, and what a bundle proves about who wrote it, are settled
+by [0038](0038-share-a-host-or-a-git-remote.md).
 
 ## Related
 
@@ -118,3 +118,4 @@ reconcile, and what a bundle proves about who wrote it.
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0010 Secure file preview and canvas artifacts
 - 0028 The artifact library
+- 0038 Collaboration: share a host or a git remote
