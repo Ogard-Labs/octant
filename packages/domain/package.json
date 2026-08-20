@@ -31,6 +31,7 @@
     "./work-promotion-policy": "./src/workPromotionPolicy.ts",
     "./work-research-policy": "./src/workResearchPolicy.ts",
     "./event-policy": "./src/eventPolicy.ts",
+    "./thread-retention-policy": "./src/threadRetentionPolicy.ts",
     "./memory-policy": "./src/memoryPolicy.ts",
     "./mode-policy": "./src/modePolicy.ts",
     "./multi-model-pool-policy": "./src/multiModelPoolPolicy.ts",

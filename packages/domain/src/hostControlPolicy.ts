@@ -20,7 +20,9 @@ export type HostControlOperation =
   | "enable"
   | "disable"
   | "backup"
-  | "restore";
+  | "restore"
+  | "retention"
+  | "purge";
 
 /**
  * Canonical least-authority catalogue names for every host control
@@ -36,6 +38,8 @@ export const HOST_CONTROL_ACTION_NAMES: Readonly<Record<HostControlOperation, st
   disable: "host.service.disable",
   backup: "host.store.backup",
   restore: "host.store.restore",
+  retention: "host.store.retention",
+  purge: "host.store.purge",
 };
 
 export function authorizeHostControlAction(input: {

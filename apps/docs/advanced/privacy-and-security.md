@@ -22,7 +22,9 @@ relative paths, and symlink components fail closed before persistence opens.
 
 The durable event journal is an SQLite-backed append-only store. Everything
 Octant does that matters is journaled as versioned events, and every
-projection can be rebuilt from the journal. See
+projection can be rebuilt from the journal. A confirmed thread purge is the
+one data-lifecycle exception that removes that thread's own journal events
+and derived projections so a rebuild cannot resurrect the transcript. See
 [Recovery and troubleshooting](/advanced/recovery) for how the journal backs
 recovery.
 
