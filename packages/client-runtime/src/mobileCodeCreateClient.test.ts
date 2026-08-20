@@ -59,6 +59,221 @@ describe("mobile Code creation", () => {
     ).toEqual([{ projectId, name: "Octant", root: "/repos/octant" }]);
   });
 
+  it("carries a stored new-thread workspace habit with the listed Project", () => {
+    expect(
+      listMobileCodeProjects([{ ...codeProject, newThreadWorkspace: "managed-worktree" }] as never),
+    ).toEqual([
+      {
+        projectId,
+        name: "Octant",
+        root: "/repos/octant",
+        newThreadWorkspace: "managed-worktree",
+      },
+    ]);
+  });
+
+  /**
+   * A Project that never chose, or that chose the current checkout, must bind
+   * that checkout. Inventing a managed worktree here would ignore the habit
+   * desktop already honors.
+   */
+  it("binds the Project's current checkout instead of creating a managed worktree", async () => {
+    const commands: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (request: { method: string; path: string; body?: string }) => {
+      if (request.method === "GET" && request.path === "/api/code/bootstrap") {
+        return Response.json({
+          settings: {
+            defaultExecutionPolicy: "full-access",
+            defaultPermissionPersistence: "project-default",
+            version: 1,
+            updatedAt: now,
+          },
+          threads: [],
+          checkouts: [checkout],
+          activity: [],
+        });
+      }
+      if (request.method === "POST" && request.path === "/api/code/commands") {
+        const payload = JSON.parse(request.body ?? "{}") as Record<string, unknown>;
+        commands.push(payload);
+        if (payload.kind === "prepare-code-project-checkout") {
+          return Response.json({ kind: "checkout-prepared", bindingRevisionId, checkout });
+        }
+        if (payload.kind === "get-worktree-remote-facts") {
+          return Response.json({
+            kind: "worktree-remote-facts-retrieved",
+            projectId,
+            facts: { remotes: ["origin"], defaultRemote: "origin" },
+          });
+        }
+        if (payload.kind === "create-code-thread") {
+          const thread = payload.thread as {
+            readonly id: string;
+            readonly checkoutId: string;
+            readonly title: string;
+          };
+          return Response.json({
+            kind: "thread-created",
+            thread: {
+              id: thread.id,
+              projectId,
+              bindingRevisionId,
+              repositoryId,
+              checkoutId: thread.checkoutId,
+              title: thread.title,
+              lifecycle: "active",
+              providerInstanceId,
+              modelId: "gpt-5.6",
+              executionPolicy: "approval-gated",
+              permissionPersistence: "current-session",
+              deliveryTarget: confirmedDeliveryTarget,
+              version: 1,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+        }
+        if (payload.kind === "start-provider-turn") {
+          return Response.json({
+            kind: "provider-turn-state",
+            operationId: payload.operationId,
+            state: "running",
+          });
+        }
+        return new Response("unexpected command", { status: 500 });
+      }
+      if (request.method === "PUT" && request.path === "/api/code/evidence") {
+        return Response.json({
+          contentId: "80000000-0000-4000-8000-000000000001",
+          digest: "b".repeat(64),
+          byteLength: 16,
+        });
+      }
+      return new Response("missing", { status: 404 });
+    });
+    const transport: MobileRemoteTransport = {
+      hostId,
+      authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+    };
+
+    await expect(
+      createMobileCodeFromPrompt({
+        transport,
+        prompt: "Fix search in the current checkout",
+        project: { projectId, name: "Octant", root: "/repos/octant" },
+        providerInstanceId,
+        modelId: "gpt-5.6",
+        threadId,
+        confirmDeliveryTarget: vi.fn(async (proposal) => {
+          expect(proposal).toMatchObject({
+            workspace: "current-checkout",
+            boundRoot: "/repos/octant",
+            proposedBaseBranch: "development",
+            branchIntent: "development",
+          });
+          return decodeCodeDeliveryTarget({
+            ...confirmedDeliveryTarget,
+            branchIntent: "development",
+            proposedBaseBranch: "development",
+          });
+        }),
+        uuid: vi
+          .fn()
+          .mockReturnValueOnce("81000000-0000-4000-8000-000000000001")
+          .mockReturnValueOnce("82000000-0000-4000-8000-000000000001"),
+      }),
+    ).resolves.toMatchObject({ threadId, mode: "code" });
+
+    expect(commands.map((command) => command.kind)).toEqual([
+      "prepare-code-project-checkout",
+      "get-worktree-remote-facts",
+      "create-code-thread",
+      "start-provider-turn",
+    ]);
+    expect(commands[2]).toMatchObject({
+      kind: "create-code-thread",
+      thread: {
+        checkoutId,
+        executionPolicy: "approval-gated",
+        deliveryTarget: { branchIntent: "development" },
+      },
+    });
+  });
+
+  it("fails closed when the host refuses the Project checkout", async () => {
+    const fetch = vi.fn(async (request: { method: string; path: string }) => {
+      if (request.method === "GET" && request.path === "/api/code/bootstrap") {
+        return Response.json({
+          settings: {
+            defaultExecutionPolicy: "approval-gated",
+            defaultPermissionPersistence: "current-session",
+            version: 1,
+            updatedAt: now,
+          },
+          threads: [],
+          checkouts: [],
+          activity: [],
+        });
+      }
+      if (request.method === "POST" && request.path === "/api/code/commands") {
+        return new Response("Code Project checkout is unauthorized.", { status: 403 });
+      }
+      return new Response("missing", { status: 404 });
+    });
+
+    await expect(
+      createMobileCodeFromPrompt({
+        transport: {
+          hostId,
+          authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+        },
+        prompt: "Fix search",
+        project: { projectId, name: "Octant", root: "/repos/octant" },
+        providerInstanceId,
+        modelId: "gpt-5.6",
+        threadId,
+        confirmDeliveryTarget: vi.fn(async () => confirmedDeliveryTarget),
+      }),
+    ).rejects.toMatchObject({ category: "rejected" });
+  });
+
+  it("fails closed when the bound checkout cannot be prepared", async () => {
+    const fetch = vi.fn(async (request: { method: string; path: string }) => {
+      if (request.method === "GET" && request.path === "/api/code/bootstrap") {
+        return Response.json({
+          settings: {
+            defaultExecutionPolicy: "approval-gated",
+            defaultPermissionPersistence: "current-session",
+            version: 1,
+            updatedAt: now,
+          },
+          threads: [],
+          checkouts: [],
+          activity: [],
+        });
+      }
+      if (request.method === "POST" && request.path === "/api/code/commands") {
+        return new Response("The bound Code repository is unavailable.", { status: 409 });
+      }
+      return new Response("missing", { status: 404 });
+    });
+
+    await expect(
+      createMobileCodeFromPrompt({
+        transport: {
+          hostId,
+          authenticatedFetch: fetch as MobileRemoteTransport["authenticatedFetch"],
+        },
+        prompt: "Fix search",
+        project: { projectId, name: "Octant", root: "/repos/octant" },
+        providerInstanceId,
+        modelId: "gpt-5.6",
+        threadId,
+        confirmDeliveryTarget: vi.fn(async () => confirmedDeliveryTarget),
+      }),
+    ).rejects.toMatchObject({ category: "unavailable" });
+  });
+
   it("prepares a checkout, creates an approval-gated thread, and starts its first turn", async () => {
     const editedBaseDeliveryTarget = decodeCodeDeliveryTarget({
       ...confirmedDeliveryTarget,
@@ -188,7 +403,12 @@ describe("mobile Code creation", () => {
       createMobileCodeFromPrompt({
         transport,
         prompt: "Polish the mobile Code flow",
-        project: { projectId, name: "Octant", root: "/repos/octant" },
+        project: {
+          projectId,
+          name: "Octant",
+          root: "/repos/octant",
+          newThreadWorkspace: "managed-worktree" as const,
+        },
         providerInstanceId,
         modelId: "gpt-5.6",
         threadId,
@@ -199,6 +419,8 @@ describe("mobile Code creation", () => {
             proposedBaseRepository: "",
             proposedBaseBranch: "development",
             suggestedOutcomeKind: "local-implementation",
+            workspace: "managed-worktree",
+            boundRoot: "/repos/octant",
           });
           return editedBaseDeliveryTarget;
         }),
@@ -339,7 +561,12 @@ describe("mobile Code creation", () => {
     const baseInput = {
       transport,
       prompt: "Open a pull request for the mobile Code flow",
-      project: { projectId, name: "Octant", root: "/repos/octant" },
+      project: {
+        projectId,
+        name: "Octant",
+        root: "/repos/octant",
+        newThreadWorkspace: "managed-worktree" as const,
+      },
       providerInstanceId,
       modelId: "gpt-5.6",
       threadId,
@@ -494,7 +721,12 @@ describe("mobile Code creation", () => {
     const baseInput = {
       transport,
       prompt: "Start a Code task",
-      project: { projectId, name: "Octant", root: "/repos/octant" },
+      project: {
+        projectId,
+        name: "Octant",
+        root: "/repos/octant",
+        newThreadWorkspace: "managed-worktree" as const,
+      },
       providerInstanceId,
       modelId: "gpt-5.6",
       threadId,
