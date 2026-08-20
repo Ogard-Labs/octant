@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { splitCallbacks, splitLayout } from "../App.test-fixtures";
 import { SplitWorkspace, type SplitWorkspaceProps } from "./SplitWorkspace";
 
 const firstGroup = {
@@ -274,6 +275,99 @@ describe("SplitWorkspace", () => {
 
     expect(handlers.onDropTab).not.toHaveBeenCalled();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("renders orientation and preview ratio as geometry and commits resize only on release", () => {
+    const callbacks = splitCallbacks();
+    const { rerender } = render(
+      <SplitWorkspace {...callbacks} layout={splitLayout()} renderTab={(tab) => tab.title} />,
+    );
+    const horizontal = screen.getByRole("group", { name: "horizontal workspace split" });
+    expect(horizontal).toHaveStyle({
+      display: "grid",
+      gridTemplateColumns: "minmax(0, 0.3fr) auto minmax(0, 0.7fr)",
+      height: "100%",
+      minHeight: "0",
+      minWidth: "0",
+      width: "100%",
+    });
+
+    const resize = screen.getByRole("slider", { name: "Resize split" });
+    expect(resize).toHaveClass("workspace-split__resize-input");
+    expect(resize.closest("label")).toHaveClass("workspace-split__resize");
+    fireEvent.change(resize, { target: { value: "0.7" } });
+    expect(callbacks.onPreviewResize).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000610",
+      0.7,
+    );
+    expect(callbacks.onCommitResize).not.toHaveBeenCalled();
+
+    rerender(
+      <SplitWorkspace
+        {...callbacks}
+        layout={splitLayout("vertical", 0.6)}
+        renderTab={(tab) => tab.title}
+      />,
+    );
+    const vertical = screen.getByRole("group", { name: "vertical workspace split" });
+    expect(vertical).toHaveStyle({
+      display: "grid",
+      gridTemplateRows: "minmax(0, 0.6fr) auto minmax(0, 0.4fr)",
+    });
+    Object.assign(vertical, {
+      getBoundingClientRect: () => ({ height: 600, left: 0, top: 0, width: 800 }),
+    });
+    const verticalResize = screen.getByRole("slider", { name: "Resize split" }).closest("label")!;
+    fireEvent.pointerDown(verticalResize, { button: 0, clientY: 360, pointerId: 51 });
+    fireEvent.pointerMove(verticalResize, { clientY: 420, pointerId: 51 });
+    fireEvent.pointerUp(verticalResize, { clientY: 420, pointerId: 51 });
+    expect(callbacks.onCommitResize).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000610",
+      0.7,
+    );
+  });
+
+  it("wires rendered tab, split, move, resize, and focus controls", async () => {
+    const user = userEvent.setup();
+    const callbacks = splitCallbacks();
+    render(<SplitWorkspace {...callbacks} layout={splitLayout()} renderTab={(tab) => tab.title} />);
+
+    const closeSecond = screen.getByRole("button", { name: "Close Second" });
+    expect(screen.getByRole("tab", { name: "Second" })).toHaveClass("workspace-tab");
+    expect(closeSecond).toHaveClass("workspace-tab__action");
+    expect(screen.queryByRole("button", { name: "Move Second left" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Split Second below" })).not.toBeInTheDocument();
+    closeSecond.focus();
+    await user.keyboard("{Enter}");
+    expect(callbacks.onClose).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000612",
+      "00000000-0000-4000-8000-000000000614",
+    );
+    await user.click(screen.getByRole("button", { name: "Tab actions for Second" }));
+    await user.click(screen.getByRole("button", { name: "Move Second left" }));
+    expect(callbacks.onReorder).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000612",
+      "00000000-0000-4000-8000-000000000614",
+      0,
+    );
+    await user.click(screen.getByRole("button", { name: "Tab actions for Second" }));
+    await user.click(screen.getByRole("button", { name: "Split Second below" }));
+    expect(callbacks.onSplit).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000612",
+      "00000000-0000-4000-8000-000000000614",
+      "vertical",
+      "after",
+    );
+    await user.click(screen.getByRole("button", { name: "Pane actions for First" }));
+    await user.click(screen.getByRole("button", { name: "Move active tab to next group" }));
+    expect(callbacks.onMove).toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Pane actions for First" }));
+    await user.click(screen.getByRole("button", { name: "Focus this group" }));
+    expect(callbacks.onFocus).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000612");
+    fireEvent.change(screen.getByRole("slider", { name: "Resize split" }), {
+      target: { value: "0.6" },
+    });
+    expect(callbacks.onPreviewResize).toHaveBeenCalled();
   });
 });
 
