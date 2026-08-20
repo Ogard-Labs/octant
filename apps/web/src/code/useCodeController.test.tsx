@@ -677,6 +677,46 @@ describe("useCodeController", () => {
     expect(result.current.turnStatus).toBe("idle");
   });
 
+  it("sends the requested turn posture as an intent the host clamps", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000009";
+    const executeOperation = vi.fn(async () => ({
+      kind: "provider-turn-state",
+      operationId,
+      state: "running",
+    }));
+    async function* completedFrames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      };
+    }
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => completedFrames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    await act(async () => {
+      await result.current.sendFollowUp("check tests", [], [], "plan");
+    });
+
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-provider-turn",
+        executionPolicy: "plan",
+      }),
+    );
+    expect(result.current.conversation[0]).toEqual(
+      expect.objectContaining({ role: "user", executionPolicy: "plan" }),
+    );
+  });
+
   it("names a follow-up's mentioned threads on the turn without staging them as the message", async () => {
     const operationId = "70000000-0000-4000-8000-000000000002";
     const putEvidence = vi.fn(async () => ({

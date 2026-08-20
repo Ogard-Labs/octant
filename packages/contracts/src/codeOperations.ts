@@ -30,6 +30,7 @@ import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import {
   PermissionPersistence,
+  ProviderExecutionPolicy,
   ProviderInstanceId,
   ProviderModelId,
   ProviderSessionId,
@@ -609,6 +610,12 @@ const StartProviderTurn = Schema.Struct({
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
   ),
+  /**
+   * The posture this turn asks to run under. The host clamps it to the
+   * thread's grant: a turn may only narrow, never widen. Absent means the
+   * thread's own posture.
+   */
+  executionPolicy: Schema.optional(ProviderExecutionPolicy),
 }).annotations(strict);
 const AnswerProviderInput = Schema.Struct({
   kind: Schema.Literal("answer-provider-input"),
@@ -1044,6 +1051,12 @@ const ConversationTurnStartedEvent = Schema.Struct({
    * existed.
    */
   checkpoint: Schema.optional(CodeCheckpoint),
+  /**
+   * The posture this turn actually ran under, after the host clamped any
+   * requested intent to the thread's grant. Absent on turns journaled before
+   * the host recorded it.
+   */
+  executionPolicy: Schema.optional(ProviderExecutionPolicy),
 }).annotations(strict);
 const ContentEvent = Schema.Struct({
   kind: Schema.Literal("provider-content"),
@@ -1238,6 +1251,11 @@ export const CodeConversationTurn = Schema.Struct({
   ),
   /** The checkout as it stood before this turn ran, when the host caught it. */
   checkpoint: Schema.optional(CodeCheckpoint),
+  /**
+   * The posture this turn ran under. Absent on turns journaled before the
+   * host recorded it, which is not the same as the thread's current grant.
+   */
+  executionPolicy: Schema.optional(ProviderExecutionPolicy),
   /**
    * What this turn consumed, as the provider reported it. Absent on a turn
    * whose provider reported nothing, which is not the same as zero.

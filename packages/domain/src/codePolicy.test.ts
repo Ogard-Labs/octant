@@ -1,7 +1,9 @@
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { describe, expect, it } from "vitest";
 import {
+  accessPosturesAtOrBelow,
   authorizeCodeOperation,
+  clampTurnAccessPosture,
   CODE_BOARD_PROJECT_STATUS_ORDER,
   CODE_BOARD_STATUS_COLUMN_ORDER,
   codeBoardProjectStatusRank,
@@ -45,6 +47,41 @@ describe("Code authority policy", () => {
         expect(decision(actor, "plan", operation)).toBe("deny");
       }
     }
+  });
+
+  it("clamps a per-message posture so it can only narrow the thread", () => {
+    expect(clampTurnAccessPosture({ thread: "approval-gated" })).toBe("approval-gated");
+    expect(clampTurnAccessPosture({ requested: "plan", thread: "full-access" })).toBe("plan");
+    expect(
+      clampTurnAccessPosture({ requested: "approval-gated", thread: "auto-accept-edits" }),
+    ).toBe("approval-gated");
+    expect(
+      clampTurnAccessPosture({ requested: "auto-accept-edits", thread: "auto-accept-edits" }),
+    ).toBe("auto-accept-edits");
+    // A composer that asks for more than the thread grants still runs, under
+    // the thread: the intent is not a widening path.
+    expect(clampTurnAccessPosture({ requested: "full-access", thread: "approval-gated" })).toBe(
+      "approval-gated",
+    );
+    expect(
+      clampTurnAccessPosture({ requested: "auto-accept-edits", thread: "approval-gated" }),
+    ).toBe("approval-gated");
+    // Plan is read-only from every entry point, including a turn intent.
+    expect(clampTurnAccessPosture({ requested: "full-access", thread: "plan" })).toBe("plan");
+    expect(clampTurnAccessPosture({ requested: "approval-gated", thread: "plan" })).toBe("plan");
+    expect(accessPosturesAtOrBelow("plan")).toEqual(["plan"]);
+    expect(accessPosturesAtOrBelow("approval-gated")).toEqual(["plan", "approval-gated"]);
+    expect(accessPosturesAtOrBelow("auto-accept-edits")).toEqual([
+      "plan",
+      "approval-gated",
+      "auto-accept-edits",
+    ]);
+    expect(accessPosturesAtOrBelow("full-access")).toEqual([
+      "plan",
+      "approval-gated",
+      "auto-accept-edits",
+      "full-access",
+    ]);
   });
 
   it("auto-accepts only edits and still prompts for every other mutation", () => {

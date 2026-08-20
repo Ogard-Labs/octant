@@ -6005,6 +6005,12 @@ dialog.project-dialog {
   font-size: 11px;
 }
 
+.code-thread-workspace__turn-access {
+  color: var(--octant-text-muted);
+  font-size: 11px;
+  margin: 4px 0 0;
+}
+
 .code-thread-workspace__limit {
   font-size: 11px;
   color: var(--octant-text-secondary);

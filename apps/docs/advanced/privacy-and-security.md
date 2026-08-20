@@ -74,8 +74,10 @@ native receipts; desktop admin routes are loopback-only.
 ## Confinement
 
 - **Work** uses OS-enforced macOS project confinement for one bound root.
-- **Code** starts approval-gated; Plan mode is strictly read-only, and Full
-  access must be explicitly selected. Full access is still confined to the
+- **Code** starts approval-gated; Plan mode is strictly read-only, auto-accept
+  edits waives only in-root file writes, and Full access must be explicitly
+  selected. A per-message posture may only narrow the thread's grant; the
+  server clamps composer intent. Full access is still confined to the
   repository root for user work; merge authority is never granted.
 - Provider execution and app-managed filesystem and shell tools cross an
   Octant-owned sandbox boundary; path checks alone are insufficient.

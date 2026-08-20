@@ -1,55 +1,54 @@
 import type { ProviderExecutionPolicy } from "@octant/contracts";
+import { accessPosturesAtOrBelow } from "@octant/domain/code-policy";
 import { useId } from "react";
 import { OctantSelectField, type OctantSelectOption } from "../ui/base/OctantSelect";
 
+export const CODE_ACCESS_POSTURE_LABEL: Record<ProviderExecutionPolicy, string> = {
+  plan: "Plan · read-only",
+  "approval-gated": "Ask for approvals",
+  "auto-accept-edits": "Auto-accept edits",
+  "full-access": "Full access",
+};
+
 export interface CodeAccessPickerProps {
   readonly disabled?: boolean;
-  readonly executionPolicy: ProviderExecutionPolicy;
   /**
-   * Whether this host can raise the native Full access confirmation. Without
-   * it the option is offered as unavailable rather than as a choice the host
-   * would refuse after the fact.
+   * The thread's grant. The next turn may sit at or below this, never above
+   * it. Plan is locked: a read-only thread cannot be overridden from here.
    */
-  readonly nativeConfirmationAvailable: boolean;
+  readonly ceiling: ProviderExecutionPolicy;
+  /** The posture the next turn will ask to run under. */
+  readonly value: ProviderExecutionPolicy;
   readonly onSelect: (executionPolicy: ProviderExecutionPolicy) => void;
 }
 
 /**
- * The thread's access posture, switchable from the composer.
+ * The posture the next turn will run under, defaulting to the thread's.
  *
- * The posture is thread state the host owns, not a renderer preference: every
- * change goes through the authoritative command, and raising a thread to Full
- * access still needs the same native confirmation the host demands anywhere
- * else. This control only names what the user may ask for.
+ * This control sends an intent with the message. The host clamps it to the
+ * thread's grant, so a composer choice can only narrow. Plan stays read-only
+ * even if something asks otherwise.
  */
 export function CodeAccessPicker(props: CodeAccessPickerProps) {
   const fieldId = useId();
-  const fullAccessBlocked =
-    !props.nativeConfirmationAvailable && props.executionPolicy !== "full-access";
-  const options: ReadonlyArray<OctantSelectOption> = [
-    { id: "plan", label: "Plan · read-only" },
-    { id: "approval-gated", label: "Ask for approvals" },
-    { id: "auto-accept-edits", label: "Auto-accept edits" },
-    {
-      id: "full-access",
-      label: "Full access",
-      ...(fullAccessBlocked
-        ? { disabled: true, disabledReason: "Full access requires native confirmation." }
-        : {}),
-    },
-  ];
+  const offered = accessPosturesAtOrBelow(props.ceiling);
+  const options: ReadonlyArray<OctantSelectOption> = offered.map((id) => ({
+    id,
+    label: CODE_ACCESS_POSTURE_LABEL[id],
+  }));
+  const locked = props.ceiling === "plan" || props.disabled === true;
   return (
     <label className="code-thread-workspace__access" htmlFor={fieldId}>
-      <span className="visually-hidden">Thread access</span>
+      <span className="visually-hidden">Next turn access</span>
       <OctantSelectField
-        {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
+        disabled={locked}
         id={fieldId}
         onValueChange={(value) => {
           const next = value as ProviderExecutionPolicy;
-          if (next !== props.executionPolicy) props.onSelect(next);
+          if (next !== props.value) props.onSelect(next);
         }}
         options={options}
-        value={props.executionPolicy}
+        value={props.value}
       />
     </label>
   );
