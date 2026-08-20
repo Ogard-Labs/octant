@@ -7,32 +7,57 @@
  * larger text and 200% zoom.
  */
 
+/*
+ * First run carries two columns and five steps' worth of content, so it asks
+ * the dialog for more than the default confirm-sized popup. It is also its own
+ * query container: the rail collapses when *this dialog* is narrow, which is
+ * not the same question as whether the window is — the popup stops growing
+ * long before the viewport does.
+ */
 .first-run {
-  max-width: 52rem;
+  --octant-dialog-width: 52rem;
+  --octant-dialog-height: min(86vh, 46rem);
+
+  container-type: inline-size;
+  container-name: first-run;
+
+  /*
+   * One height for every step. A wizard that resizes as the user moves
+   * through it makes the footer jump out from under the pointer, so the
+   * dialog holds its size and the step panel takes the scrolling.
+   */
+  block-size: var(--octant-dialog-height);
+  overflow: hidden;
 }
 
 /*
  * Two columns: the step rail and the current step. The rail collapses above
- * the panel on a narrow window or at large text sizes, so the dialog stays
- * usable at 200% zoom instead of squeezing both columns.
+ * the panel on a narrow dialog or at large text sizes, so it stays usable at
+ * 200% zoom instead of squeezing both columns.
  */
 .first-run__body {
   display: grid;
-  grid-template-columns: minmax(11rem, 15rem) minmax(0, 1fr);
+  grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
   grid-template-areas:
     "rail panel"
     "notice notice"
     "actions actions";
-  gap: 1rem 1.5rem;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  gap: 1.5rem 2rem;
   min-width: 0;
-  max-height: 80vh;
-  overflow-y: auto;
+  block-size: 100%;
+  padding: 1.5rem;
 }
 
-@media (max-width: 46rem) {
+@container first-run (max-width: 40rem) {
   .first-run__body {
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas: "rail" "panel" "notice" "actions";
+
+    /* Stacked, the rail takes its own height and the step panel takes the rest. */
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    gap: 1.25rem;
+    padding: 1.25rem;
   }
 }
 
@@ -106,9 +131,12 @@
   opacity: 0.75;
 }
 
+/* The only scrolling region: the rail and the footer stay put beside it. */
 .first-run__panel {
   grid-area: panel;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .first-run__step {

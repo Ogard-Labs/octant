@@ -528,18 +528,28 @@ strong {
   font-weight: 600;
 }
 
-button {
-  appearance: none;
-  padding: 0;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  font: inherit;
-}
+/*
+ * The bare-button reset belongs in the base layer, not outside every layer.
+ * Unlayered, it outranked the whole cascade — including the button recipe's
+ * own utilities — so a styled <Button> rendered as plain text and each site
+ * that wanted a real button had to restate the recipe by hand. In `base` it
+ * still strips the user-agent button for the many controls Octant draws
+ * itself, and the recipe wins where a recipe was asked for.
+ */
+@layer base {
+  button {
+    appearance: none;
+    padding: 0;
+    color: inherit;
+    background: transparent;
+    border: 0;
+    font: inherit;
+  }
 
-button:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
+  button:focus-visible {
+    outline: 2px solid var(--octant-focus-ring);
+    outline-offset: 2px;
+  }
 }
 
 .sr-only {
@@ -6435,15 +6445,22 @@ dialog.project-dialog {
   gap: 0.15rem;
 }
 
+/*
+ * Both columns must be allowed to shrink. With a bare `1fr` the name column
+ * kept its content's minimum width, so a long model id — `opencode-go/
+ * deepseek-v4-flash` and its kin — pushed its row wider than the list and the
+ * overflow painted over the row beneath it.
+ */
 .model-picker__option {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
   grid-template-areas:
     "name id"
     "badges badges"
     "reason reason";
   gap: 0.2rem 0.5rem;
   width: 100%;
+  min-width: 0;
   text-align: left;
   padding: 0.4rem 0.5rem;
   border-radius: 0.4rem;
@@ -6466,14 +6483,18 @@ dialog.project-dialog {
 
 .model-picker__option-name {
   grid-area: name;
+  min-width: 0;
   font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
 .model-picker__option-id {
   grid-area: id;
+  min-width: 0;
   font-size: 0.75rem;
   color: var(--octant-text-muted, rgba(255, 255, 255, 0.5));
   font-family: var(--octant-mono, ui-monospace, monospace);
+  overflow-wrap: anywhere;
 }
 
 .model-picker__badges {

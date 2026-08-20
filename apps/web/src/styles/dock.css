@@ -142,10 +142,15 @@
   pointer-events: none;
 }
 
+/*
+ * 420px suits a confirm or a short form, and nothing else. A dialog that
+ * carries columns says so by setting `--octant-dialog-width`; the viewport
+ * clamp still applies, so a wider dialog is only wider where there is room.
+ */
 .octant-dialog__popup {
-  width: min(420px, calc(100vw - 48px));
+  width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px));
   height: auto;
-  max-height: min(80vh, 640px);
+  max-height: min(var(--octant-dialog-height, 640px), calc(100vh - 48px));
   min-width: 0;
   min-height: 0;
   overflow: auto;
