@@ -4,6 +4,7 @@ import {
   type CodeCommand,
   type CodeCommandResult,
 } from "@octant/contracts/code";
+import type { AgentProfileId } from "@octant/contracts/agent-profile";
 import type { CodeNewThreadWorkspace, ProjectId } from "@octant/contracts/projects";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { CodeComposerSubmitInput } from "./composer/CodeComposerAdapter";
@@ -26,6 +27,12 @@ export interface CodeThreadCreateInput {
   readonly threadId: string;
   readonly timestamp: string;
   readonly title: string;
+  /**
+   * The profile the composer had selected when the thread was started. Carried
+   * into the command so the server, not the renderer, narrows the thread's
+   * posture to what the profile allows.
+   */
+  readonly profileId?: AgentProfileId;
 }
 
 /**
@@ -64,6 +71,7 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
         ...(input.composer.worktreeSource.remoteName === ""
           ? {}
           : { remoteName: input.composer.worktreeSource.remoteName }),
+        ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
       }),
     };
   }
@@ -96,6 +104,7 @@ export function planCodeThreadCreate(input: CodeThreadCreateInput): CodeThreadCr
         // Work in the existing checkout lands on the branch that checkout is
         // already on, never on a branch intent invented for a new worktree.
         deliveryTarget: { ...deliveryTarget, branchIntent: input.prepared.checkout.head.name },
+        ...(input.profileId === undefined ? {} : { profileId: input.profileId }),
         version: 1,
         createdAt: input.timestamp,
         updatedAt: input.timestamp,

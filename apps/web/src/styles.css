@@ -6000,6 +6000,17 @@ dialog.project-dialog {
   min-width: 168px;
 }
 
+.code-thread-workspace__profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--octant-border);
+  border-radius: 999px;
+  color: var(--octant-text-secondary);
+  font-size: 11px;
+}
+
 .code-thread-workspace__hint {
   color: var(--octant-text-muted);
   font-size: 11px;

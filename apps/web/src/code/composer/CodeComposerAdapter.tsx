@@ -92,6 +92,13 @@ export interface CodeComposerAdapterProps {
   /** Optional multi-model pool control slot rendered in the composer bar. */
   readonly poolControl?: ReactNode;
   /**
+   * The execution-profile control, rendered beside model and access because a
+   * profile decides the same thing they do: what this thread may do. It is a
+   * slot rather than a direct mount so the composer keeps no profile state of
+   * its own — the selection belongs to the shell that starts the thread.
+   */
+  readonly profileControl?: ReactNode;
+  /**
    * The selected Code Project's remembered habit for how new threads start. It only
    * preselects the Workspace control: choosing differently here overrides one thread
    * and never rewrites the Project setting.
@@ -343,6 +350,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                   />
                 </span>
                 {props.poolControl}
+                {props.profileControl}
                 <span className="code-composer-adapter__context-item">
                   <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
                   <OctantNativeSelect

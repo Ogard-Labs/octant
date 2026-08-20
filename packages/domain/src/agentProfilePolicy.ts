@@ -57,18 +57,88 @@ export function validateProfileAuthoritySafety(input: {
   readonly profile: AgentProfile;
   readonly projectExecutionPolicy: ProviderExecutionPolicy;
 }): void {
-  const policyRank = {
-    plan: 0,
-    "approval-gated": 1,
-    "auto-accept-edits": 2,
-    "full-access": 3,
-  } as const;
-  if (policyRank[input.profile.defaultExecutionPolicy] > policyRank[input.projectExecutionPolicy]) {
+  if (
+    POLICY_RANK[input.profile.defaultExecutionPolicy] > POLICY_RANK[input.projectExecutionPolicy]
+  ) {
     throw new AgentProfileRejected(
       "authority-escalation",
       `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
     );
   }
+}
+
+/**
+ * How much authority each posture carries. A thread may move down this list
+ * when a profile is stricter than it asked to be; it may never move up.
+ */
+const POLICY_RANK = {
+  plan: 0,
+  "approval-gated": 1,
+  "auto-accept-edits": 2,
+  "full-access": 3,
+} as const;
+
+/** What binding a profile to a thread did, or why it could not be done. */
+export type ProfileApplication =
+  | { readonly status: "applied"; readonly executionPolicy: ProviderExecutionPolicy }
+  | {
+      readonly status: "refused";
+      readonly code: AgentProfileRejectionCode;
+      readonly reason: string;
+    };
+
+/**
+ * Bind a profile to a thread that is starting, and say what posture the thread
+ * runs under as a result.
+ *
+ * A profile narrows and never widens. Where the thread asked for more authority
+ * than the profile carries, the profile's posture wins; where it asked for
+ * less, its own choice stands, because selecting "Reviewer" is not a request to
+ * be granted everything Reviewer is allowed.
+ *
+ * Refusal is a value rather than a throw: every caller has to answer for the
+ * incompatible-mode, disallowed-model, and escalating-profile cases, and a
+ * thread that silently started without its profile would run with authority
+ * the person believed they had constrained.
+ */
+export function applyProfileToThread(input: {
+  readonly profile: AgentProfile;
+  readonly mode: OctantMode;
+  readonly modelId: ProviderModelId;
+  readonly requestedExecutionPolicy: ProviderExecutionPolicy;
+  readonly projectExecutionPolicy: ProviderExecutionPolicy;
+}): ProfileApplication {
+  if (!isProfileModeCompatible(input.profile, input.mode)) {
+    return {
+      status: "refused",
+      code: "mode-incompatible",
+      reason: `Profile "${input.profile.displayName}" was not written for ${input.mode}.`,
+    };
+  }
+  if (!isModelAllowedByProfile(input.profile, input.modelId)) {
+    return {
+      status: "refused",
+      code: "model-not-allowed",
+      reason: `Profile "${input.profile.displayName}" does not allow model "${String(input.modelId)}".`,
+    };
+  }
+  try {
+    validateProfileAuthoritySafety({
+      profile: input.profile,
+      projectExecutionPolicy: input.projectExecutionPolicy,
+    });
+  } catch (error) {
+    return {
+      status: "refused",
+      code: "authority-escalation",
+      reason: error instanceof AgentProfileRejected ? error.message : "Profile rejected.",
+    };
+  }
+  const executionPolicy =
+    POLICY_RANK[input.profile.defaultExecutionPolicy] < POLICY_RANK[input.requestedExecutionPolicy]
+      ? input.profile.defaultExecutionPolicy
+      : input.requestedExecutionPolicy;
+  return { status: "applied", executionPolicy };
 }
 
 /**

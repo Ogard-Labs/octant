@@ -54,6 +54,16 @@ The thread starts in the authority mode you selected: **Full access**, **Approva
 
 Octant supports persisted execution profiles that capture settings, provider defaults, and effective context. Create, edit, and restore profiles through Settings to avoid reconfiguring each thread.
 
+Selecting a profile in the Code composer binds it to the thread you start. The
+profile can only narrow that thread: if it defaults to Approval-gated and you
+asked for Full access, the thread starts Approval-gated; if you asked for Plan,
+Plan stands. A profile written for another mode, or one that does not list the
+model you selected, refuses the thread rather than starting it. A profile can
+never grant authority the Project does not already give, and editing a profile
+afterwards does not change a thread that is already running under it — the
+thread shows which profile it started under beside its model and access
+controls.
+
 ## Next steps
 
 Explore the three modes in detail:

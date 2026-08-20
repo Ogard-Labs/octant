@@ -1,4 +1,5 @@
 import {
+  decodeAgentProfile,
   decodeCodeCheckoutIdentity,
   decodeCodeCommandResult,
   decodeBindingRevisionId,
@@ -11,6 +12,7 @@ import {
   decodeCodeWorktreeSourcePreview,
   decodeProjectId,
   decodeWindowId,
+  type AgentProfile,
   type Project,
   type CodeCheckoutIdentity,
   type CodeEventFrame,
@@ -45,6 +47,7 @@ const ids = {
   provider: "00000000-0000-4000-8000-000000001008",
   file: decodeCodeFileId("00000000-0000-4000-8000-000000001009"),
   content: decodeCodeEvidenceContentId("00000000-0000-4000-8000-000000001010"),
+  profile: "00000000-0000-4000-8000-000000001011",
 } as const;
 const testUuid = (sequence: number) =>
   `00000000-0000-4000-8000-${String(sequence).padStart(12, "0")}`;
@@ -85,6 +88,23 @@ function thread(
       outcomeKind: "opened-pr",
       confirmedAt: now,
     },
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  });
+}
+
+function agentProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
+  return decodeAgentProfile({
+    id: ids.profile,
+    displayName: "Reviewer",
+    approvedSkillIds: [],
+    toolConstraints: [],
+    modelConstraints: [],
+    defaultExecutionPolicy: "approval-gated",
+    defaultPermissionPersistence: "current-session",
+    compatibleModes: ["code"],
     version: 1,
     createdAt: now,
     updatedAt: now,
@@ -576,6 +596,109 @@ describe("CodeService commands", () => {
         ],
       }),
     );
+  });
+
+  it("starts a thread under the stricter posture its profile carries", async () => {
+    const created = thread({
+      executionPolicy: "full-access",
+      profileId: ids.profile as never,
+    });
+    const fixture = serviceFixture({ threads: [], profiles: [agentProfile()] });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).resolves.toMatchObject({
+      kind: "thread-created",
+      thread: { executionPolicy: "approval-gated", profileId: ids.profile },
+    });
+    // The narrowed thread never reaches Full access, so it never asks for the
+    // native confirmation Full access would have required.
+    expect(fixture.approvals.validate).not.toHaveBeenCalled();
+    expect(fixture.persistence.journal.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            payload: {
+              kind: "thread-created",
+              thread: { ...created, executionPolicy: "approval-gated" },
+            },
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("leaves a thread that asks for less than its profile allows alone", async () => {
+    const created = thread({
+      executionPolicy: "plan",
+      profileId: ids.profile as never,
+    });
+    const fixture = serviceFixture({ threads: [], profiles: [agentProfile()] });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).resolves.toEqual({ kind: "thread-created", thread: created });
+  });
+
+  it("refuses a profile whose posture reaches past what the Project grants", async () => {
+    const created = thread({
+      executionPolicy: "approval-gated",
+      profileId: ids.profile as never,
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      profiles: [agentProfile({ defaultExecutionPolicy: "full-access" })],
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).rejects.toMatchObject({ failure: { category: "unauthorized" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses a profile that was not written for Code", async () => {
+    const created = thread({
+      executionPolicy: "approval-gated",
+      profileId: ids.profile as never,
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      profiles: [agentProfile({ compatibleModes: ["chat"] })],
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses a model the selected profile does not list", async () => {
+    const created = thread({
+      executionPolicy: "approval-gated",
+      profileId: ids.profile as never,
+    });
+    const fixture = serviceFixture({
+      threads: [],
+      profiles: [agentProfile({ modelConstraints: ["model-b" as never] })],
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses to start a thread under a profile that no longer exists", async () => {
+    const created = thread({
+      executionPolicy: "approval-gated",
+      profileId: ids.profile as never,
+    });
+    const fixture = serviceFixture({ threads: [], profiles: [] });
+
+    await expect(
+      fixture.service.execute(ids.window, { kind: "create-code-thread", thread: created }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
   });
 
   it("denies renderer-selected full access without an exact host approval", async () => {
@@ -2546,6 +2669,7 @@ function serviceFixture(
     readonly activity?: ReturnType<CodePersistencePort["readCodeThreadActivity"]>;
     readonly approve?: boolean;
     readonly project?: Project;
+    readonly profiles?: ReadonlyArray<AgentProfile>;
     readonly sessionAuthority?: CodeSessionAuthorityStore;
     readonly worktreeSourcePreview?: CodeWorktreeSourcePreviewPort;
     readonly worktreeRefs?: CodeWorktreeRefsPort;
@@ -2560,6 +2684,9 @@ function serviceFixture(
   const persistence = {
     readCodeSettings: vi.fn(() => undefined),
     readProject: vi.fn(() => options.project),
+    readAgentProfile: vi.fn((profileId: string) =>
+      (options.profiles ?? []).find((candidate) => String(candidate.id) === String(profileId)),
+    ),
     readCodeThread: vi.fn((threadId) => threads.find((candidate) => candidate.id === threadId)),
     readCodeThreads: vi.fn(() => threads),
     readCodeThreadActivity: vi.fn(

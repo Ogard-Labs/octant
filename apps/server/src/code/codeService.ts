@@ -57,11 +57,14 @@ import {
   type Project,
   type EventEnvelope,
   type ProjectId,
+  type ProviderExecutionPolicy,
   type ProviderModelId,
   type ProviderProbeResult,
   type WindowId,
   type ThreadWorkingDirectory,
 } from "@octant/contracts";
+import type { AgentProfile, AgentProfileId } from "@octant/contracts/agent-profile";
+import { applyProfileToThread } from "@octant/domain/agent-profile-policy";
 import { authorizeCodeOperation } from "@octant/domain/code-policy";
 import { evaluateCodeDeliveryOutcomeProposal } from "@octant/domain/delivery-target-policy";
 import { Schema } from "effect";
@@ -193,6 +196,7 @@ export interface CodePersistencePort {
   readonly readCodeFileReferences: (threadId: CodeThreadId) => ReadonlyArray<CodeFileReference>;
   readonly readCodeThreadView: (threadId: CodeThreadId) => CodeThreadView | undefined;
   readonly readProject?: (projectId: ProjectId) => Project | undefined;
+  readonly readAgentProfile?: (profileId: AgentProfileId) => AgentProfile | undefined;
 }
 
 export interface CodeWindowAccessPort {
@@ -721,10 +725,19 @@ export class CodeService {
         if (this.#persistence.readCodeThread(command.threadId) !== undefined) {
           throw this.#failure("conflict", "Code thread already exists.");
         }
+        // The profile narrows the posture before any gate reads it, so a
+        // profile that pulls the thread below Full access also removes the
+        // confirmation Full access would have demanded.
+        const managedExecutionPolicy = this.#profiledExecutionPolicy({
+          profileId: command.profileId,
+          projectId: command.projectId,
+          modelId: command.modelId,
+          requestedExecutionPolicy: command.executionPolicy,
+        });
         // Authorization that is decidable before any mutation runs first.
         const project = this.#persistence.readProject?.(command.projectId);
         if (
-          command.executionPolicy === "full-access" &&
+          managedExecutionPolicy === "full-access" &&
           command.permissionPersistence === "project-default" &&
           (project?.type !== "code" || project.codeAccessPersistence !== "project-default")
         ) {
@@ -769,10 +782,11 @@ export class CodeService {
           lifecycle: "active",
           providerInstanceId: command.providerInstanceId,
           modelId: command.modelId,
-          executionPolicy: command.executionPolicy,
+          executionPolicy: managedExecutionPolicy,
           permissionPersistence: command.permissionPersistence,
           deliveryTarget: command.deliveryTarget,
           ...(command.forkedFrom === undefined ? {} : { forkedFrom: command.forkedFrom }),
+          ...(command.profileId === undefined ? {} : { profileId: command.profileId }),
           version: 1,
           createdAt: timestamp,
           updatedAt: timestamp,
@@ -1041,10 +1055,22 @@ export class CodeService {
         ) {
           throw this.#failure("stale", "Code thread checkout changed; prepare it again.");
         }
-        const project = this.#persistence.readProject?.(command.thread.projectId);
+        // The profile narrows the posture before any gate reads it; every check
+        // below, and the thread that is journaled, sees the narrowed value.
+        const profiledPolicy = this.#profiledExecutionPolicy({
+          profileId: command.thread.profileId,
+          projectId: command.thread.projectId,
+          modelId: command.thread.modelId,
+          requestedExecutionPolicy: command.thread.executionPolicy,
+        });
+        const thread =
+          profiledPolicy === command.thread.executionPolicy
+            ? command.thread
+            : decodeCodeThread({ ...command.thread, executionPolicy: profiledPolicy });
+        const project = this.#persistence.readProject?.(thread.projectId);
         if (
-          command.thread.executionPolicy === "full-access" &&
-          command.thread.permissionPersistence === "project-default" &&
+          thread.executionPolicy === "full-access" &&
+          thread.permissionPersistence === "project-default" &&
           (project?.type !== "code" || project.codeAccessPersistence !== "project-default")
         ) {
           throw this.#failure(
@@ -1053,13 +1079,13 @@ export class CodeService {
           );
         }
         if (
-          command.thread.executionPolicy === "full-access" &&
+          thread.executionPolicy === "full-access" &&
           checkout !== undefined &&
           !(await this.#approvals?.validate({
             windowId: authenticatedWindowId,
             effect: {
               kind: "create-thread-full-access",
-              thread: command.thread,
+              thread,
             } as CodeApprovalEffect,
             contextDigest: approvalContextDigest({
               projectId: command.thread.projectId,
@@ -1074,21 +1100,21 @@ export class CodeService {
           throw this.#failure("unauthorized", "Full access requires native confirmation.");
         }
         const durableThread =
-          command.thread.executionPolicy === "full-access" &&
-          command.thread.permissionPersistence === "current-session"
-            ? decodeCodeThread({ ...command.thread, executionPolicy: "approval-gated" })
-            : command.thread;
-        this.#append("code-thread", command.thread.id, 0, "code.thread-created@1", {
+          thread.executionPolicy === "full-access" &&
+          thread.permissionPersistence === "current-session"
+            ? decodeCodeThread({ ...thread, executionPolicy: "approval-gated" })
+            : thread;
+        this.#append("code-thread", thread.id, 0, "code.thread-created@1", {
           kind: "thread-created",
           thread: durableThread,
         });
         if (
-          command.thread.executionPolicy === "full-access" &&
-          command.thread.permissionPersistence === "current-session"
+          thread.executionPolicy === "full-access" &&
+          thread.permissionPersistence === "current-session"
         ) {
-          this.#sessionAuthority.grantFullAccess(authenticatedWindowId, command.thread.id);
+          this.#sessionAuthority.grantFullAccess(authenticatedWindowId, thread.id);
         }
-        return { kind: "thread-created", thread: command.thread };
+        return { kind: "thread-created", thread };
       }
 
       const current = this.#persistence.readCodeThread(command.threadId);
@@ -2105,6 +2131,52 @@ export class CodeService {
     if (!modelAvailable) {
       throw this.#failure("invalid", "Selected Code model is unavailable.");
     }
+  }
+
+  /**
+   * The most authority a Code Project hands out on its own. Full access above
+   * this line is granted per thread by a native confirmation that a profile
+   * cannot supply, so a profile asserting it is refused rather than quietly
+   * reduced — the person picked a working mode they cannot actually have here,
+   * and silently downgrading it would hide that.
+   */
+  #projectProfileCeiling(projectId: ProjectId): ProviderExecutionPolicy {
+    const project = this.#persistence.readProject?.(projectId);
+    return project?.type === "code" && project.codeAccessPersistence === "project-default"
+      ? "full-access"
+      : "auto-accept-edits";
+  }
+
+  /**
+   * Narrow a starting thread's posture to the profile it was started under.
+   * Runs before every authority gate so a profile that pulls the thread below
+   * Full access also removes the native confirmation it would otherwise demand.
+   */
+  #profiledExecutionPolicy(input: {
+    readonly profileId: AgentProfileId | undefined;
+    readonly projectId: ProjectId;
+    readonly modelId: ProviderModelId;
+    readonly requestedExecutionPolicy: ProviderExecutionPolicy;
+  }): ProviderExecutionPolicy {
+    if (input.profileId === undefined) return input.requestedExecutionPolicy;
+    const profile = this.#persistence.readAgentProfile?.(input.profileId);
+    if (profile === undefined) {
+      throw this.#failure("invalid", "The selected agent profile was not found.");
+    }
+    const applied = applyProfileToThread({
+      profile,
+      mode: "code",
+      modelId: input.modelId,
+      requestedExecutionPolicy: input.requestedExecutionPolicy,
+      projectExecutionPolicy: this.#projectProfileCeiling(input.projectId),
+    });
+    if (applied.status === "refused") {
+      throw this.#failure(
+        applied.code === "authority-escalation" ? "unauthorized" : "invalid",
+        applied.reason,
+      );
+    }
+    return applied.executionPolicy;
   }
 
   #failure(category: CodeFailure["category"], message: string): CodeServiceError {
