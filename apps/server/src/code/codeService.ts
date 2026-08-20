@@ -188,6 +188,15 @@ function currentCheckoutDigest(
   });
 }
 
+/** The broader of two postures, by the authority each one carries. */
+function highestPolicy(
+  left: ProviderExecutionPolicy,
+  right: ProviderExecutionPolicy,
+): ProviderExecutionPolicy {
+  const rank = { plan: 0, "approval-gated": 1, "auto-accept-edits": 2, "full-access": 3 } as const;
+  return rank[left] >= rank[right] ? left : right;
+}
+
 export interface CodePersistencePort {
   readonly journal: Pick<Journal, "append" | "replay" | "replayAggregate">;
   readonly readCodeSettings: () => { readonly settings: CodeSettings } | undefined;
@@ -2156,11 +2165,21 @@ export class CodeService {
    * reduced — the person picked a working mode they cannot actually have here,
    * and silently downgrading it would hide that.
    */
-  #projectProfileCeiling(projectId: ProjectId): ProviderExecutionPolicy {
+  #projectProfileCeiling(
+    projectId: ProjectId,
+    requestedExecutionPolicy: ProviderExecutionPolicy,
+  ): ProviderExecutionPolicy {
     const project = this.#persistence.readProject?.(projectId);
-    return project?.type === "code" && project.codeAccessPersistence === "project-default"
-      ? "full-access"
-      : "auto-accept-edits";
+    const standing: ProviderExecutionPolicy =
+      project?.type === "code" && project.codeAccessPersistence === "project-default"
+        ? "full-access"
+        : "auto-accept-edits";
+    // A profile that only matches what the person already asked for is not
+    // granting anything — the request is, and the request answers to its own
+    // gate, including the native confirmation session-only Full access needs.
+    // The check is here to stop a profile reaching past the request, not to
+    // refuse one for agreeing with it.
+    return highestPolicy(standing, requestedExecutionPolicy);
   }
 
   /**
@@ -2213,7 +2232,10 @@ export class CodeService {
       modelId: input.modelId,
       requestedExecutionPolicy: input.requestedExecutionPolicy,
       requestedPermissionPersistence: input.requestedPermissionPersistence,
-      projectExecutionPolicy: this.#projectProfileCeiling(input.projectId),
+      projectExecutionPolicy: this.#projectProfileCeiling(
+        input.projectId,
+        input.requestedExecutionPolicy,
+      ),
     });
     if (applied.status === "refused") {
       throw this.#failure(

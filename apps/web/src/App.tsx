@@ -2469,7 +2469,14 @@ function LaunchedShell(
         title,
         // The server, not the composer, decides what the profile does to the
         // thread's posture; the renderer only says which one was selected.
-        ...(executionProfileController.selectedProfile === undefined
+        //
+        // Profiles are read from the launch host, so an identifier from here
+        // means nothing on another host — it would be refused as missing, or
+        // worse, match a different profile that happens to share the id. A
+        // thread started elsewhere carries no profile until that host's own
+        // profiles are reachable.
+        ...(executionProfileController.selectedProfile === undefined ||
+        String(createHostId) !== String(LOCAL_HOST_ID)
           ? {}
           : { profileId: executionProfileController.selectedProfile.id }),
       });

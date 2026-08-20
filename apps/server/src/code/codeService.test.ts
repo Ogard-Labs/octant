@@ -703,6 +703,29 @@ describe("CodeService commands", () => {
     );
   });
 
+  it("starts a Full-access profile the person also asked for and confirmed", async () => {
+    const created = thread({
+      executionPolicy: "full-access",
+      permissionPersistence: "current-session",
+      profileId: ids.profile as never,
+    });
+    // The Project never remembered Full access, so the profile is not standing
+    // authority — the confirmed request is, and the profile only agrees with it.
+    const fixture = serviceFixture({
+      threads: [],
+      approve: true,
+      profiles: [agentProfile({ defaultExecutionPolicy: "full-access" })],
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        kind: "create-code-thread",
+        thread: created,
+        approvalId: "00000000-0000-4000-8000-000000000088" as never,
+      }),
+    ).resolves.toMatchObject({ thread: { executionPolicy: "full-access" } });
+  });
+
   it("refuses a profile another Project owns", async () => {
     const created = thread({
       executionPolicy: "approval-gated",
