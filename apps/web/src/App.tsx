@@ -1,9 +1,6 @@
 import { createContextClient, type ContextClient } from "@octant/client-runtime/context-client";
 import { createChatClient, type ChatClient } from "@octant/client-runtime/chat-client";
 import { createCodeClient, type CodeClient } from "@octant/client-runtime/code-client";
-import { ArtifactLibrarySurface } from "./artifacts/ArtifactLibrarySurface";
-import { AutomationCenter } from "./automation/AutomationCenter";
-import type { AutomationEditorCatalog } from "./automation/automationCenterModel";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import {
   createComputerUseClient,
@@ -63,7 +60,7 @@ import {
   createAppleToolchainClient,
   type AppleToolchainClient,
 } from "@octant/client-runtime/apple-toolchain-client";
-import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
+import { decodeChatThreadId } from "@octant/contracts/chat";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
   decodeCodeAttachmentId,
@@ -72,7 +69,6 @@ import {
   decodeCodeRelativePath,
   decodeCodeThreadId,
   type CodeDeliveryOutcomeKind,
-  type CodeThreadId,
 } from "@octant/contracts/code";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
 import { decodeContextSubjectRef } from "@octant/contracts/context";
@@ -87,7 +83,7 @@ import {
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import type { CodeOperationId } from "@octant/contracts";
-import { decodeWindowId, type WindowId } from "@octant/contracts/shell";
+import type { WindowId } from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ThemeTypography } from "@octant/contracts/theme";
@@ -114,16 +110,7 @@ import {
 } from "@octant/domain";
 import type { CreateHostViewScope, ModelPickerSelection } from "@octant/domain";
 import { resolveSidebarBackground } from "@octant/theme/backgrounds";
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import "./styles.css";
 import "./styles/shell.css";
 import "./styles/dock.css";
@@ -131,7 +118,7 @@ import "./styles/dock.css";
 import "./styles/components.css";
 import { ShellSidebar } from "./shell/ShellSidebar";
 import { WindowChrome } from "./shell/WindowChrome";
-import type { CodeDeepLink, OctantHostBridge, ResolvedSidebarMaterial } from "./shell/hostBridge";
+import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
 import { collectThreadAttentionSignals } from "./notifications/collectThreadAttention";
 import { useThreadAttentionNotifications } from "./notifications/useThreadAttentionNotifications";
 import { useShellController, type NativeShellHost } from "./shell/useShellController";
@@ -143,11 +130,52 @@ import {
 } from "./shell/createHostPreference";
 import { useLaunchSession } from "./shell/useLaunchSession";
 import { WorkspaceView } from "./shell/WorkspaceView";
+import { WorkspaceRailLayers } from "./shell/WorkspaceRailLayers";
+import { ShellDialogHost } from "./shell/ShellDialogHost";
+import { ShellSettingsSurface } from "./shell/ShellSettingsSurface";
+import {
+  clearLaunchTokenFragment,
+  isProjectWindowCapability,
+  launchFromLocation,
+  type ShellLaunch,
+} from "./shell/shellLaunch";
+import {
+  checkoutNotPreparedMessage,
+  resolveDraftProject,
+  resolveWorkProviderChoice,
+  UNRESOLVED_DRAFT_PROJECT_MESSAGE,
+} from "./shell/draftThreadResolution";
+import {
+  activeChatThreadTabId,
+  activeCodeThreadTabId,
+  activeDraftProjectId,
+  activeDraftTabKey,
+  activeProjectTabId,
+  activeSurfaceTitle,
+  activeWorkThreadTabId,
+  openLocalCodeThreadIds,
+} from "./shell/workspaceTabLifecycle";
+import {
+  readSidebarCollapsed,
+  useAutomaticUpdateCheckSync,
+  useNarrowViewport,
+  useResolvedMaterial,
+  useSidebarBackgroundFetcher,
+  useSidebarVibrancyModeSync,
+  useSidebarVibrancySupported,
+  writeSidebarCollapsed,
+} from "./shell/useShellPresentation";
+import {
+  codeThreadActivity,
+  projectThreadsAccessForMode,
+  sidebarThreadGroupsForMode,
+  threadSearchArchivedListingForStatus,
+  threadSearchListingForStatus,
+} from "./shell/shellModeRouting";
+import type { ThreadSearchThread } from "./shell/threadSearchViewModel";
+import { EXECUTION_POLICY_LABEL } from "./shell/shellCommandWiring";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
 import { ShellState } from "./shell/ShellState";
-import { ProjectCreateDialog } from "./projects/ProjectCreateDialog";
-import { ThreadSearchOverlay, type ThreadSearchListingStatus } from "./shell/ThreadSearchOverlay";
-import { FirstRunOnboarding } from "./onboarding/FirstRunOnboarding";
 import type { WorkspaceChoices } from "./onboarding/firstRunStepModel";
 import {
   describeDiscoveryNotice,
@@ -157,7 +185,6 @@ import {
   useFirstRunOnboardingController,
   type FirstRunOnboardingOutcome,
 } from "./onboarding/useFirstRunOnboardingController";
-import type { ThreadSearchThread } from "./shell/threadSearchViewModel";
 import { ProjectSidebarSection } from "./projects/ProjectSidebarSection";
 import { OctantButton } from "./ui/base/OctantButton";
 import { useProjectController } from "./projects/useProjectController";
@@ -165,10 +192,7 @@ import {
   ProjectMemoryInspector,
   ProjectMemoryInspectorProvider,
 } from "./projects/ProjectMemoryInspector";
-import {
-  ProjectThreadsProvider,
-  type ProjectThreadsAccess,
-} from "./projects/ProjectThreadsSection";
+import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import { useProviderController } from "./providers/useProviderController";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
 import { useProviderBootstrap } from "./providers/useProviderBootstrap";
@@ -179,8 +203,7 @@ import {
   autoConfigureChatDefaults,
   chatDefaultModelCommand,
 } from "./chat/autoConfigureChatDefaults";
-import { ShellFrame, ShellThemeRoot } from "./shell/ShellFrame";
-import { SettingsSurfaceErrorBoundary } from "./shell/SettingsSurfaceErrorBoundary";
+import { ShellFrame } from "./shell/ShellFrame";
 import { RemotePairingView } from "./remote/RemotePairingView";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
 import {
@@ -203,9 +226,7 @@ import {
   createCodeThreadControllers,
   useCodeThreadController,
 } from "./code/codeThreadControllers";
-import { CodeSearchDialog } from "./code/CodeSearchDialog";
 import { planCodeThreadCreate, type CodeThreadProviderChoice } from "./code/codeThreadCreate";
-import { CodeThreadBoard } from "./code/CodeThreadBoard";
 import type { ZenClient } from "@octant/client-runtime/zen-client";
 import { ZenRoot } from "./zen/ZenRoot";
 import { ZenSurface } from "./zen/ZenSurface";
@@ -220,57 +241,23 @@ import { ExecutionProfileWorkflow } from "./agentProfile/ExecutionProfileWorkflo
 import { useExecutionProfileController } from "./agentProfile/useExecutionProfileController";
 import { useWorkThreadNavigation } from "./work/useWorkThreadNavigation";
 import type { ThreadRowActions } from "./projects/ThreadRowMenu";
-import type {
-  ChatThreadNavigationItem,
-  ThreadProviderIdentity,
-  ThreadRowActivity,
-} from "./shell/navigationModel";
+import type { ChatThreadNavigationItem, ThreadProviderIdentity } from "./shell/navigationModel";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
-import { CommandPalette } from "./palette/CommandPalette";
 import { OctantCommandProvider } from "./palette/CommandRegistry";
 import { buildOctantCommands, type CommandProject } from "./palette/buildOctantCommands";
 import { useCommandSkills } from "./palette/useCommandSkills";
 
-const LazySettingsView = lazy(async () => {
-  const module = await import("./shell/SettingsView");
-  return { default: module.SettingsView };
-});
+export type { ShellLaunch } from "./shell/shellLaunch";
+export { launchFromLocation } from "./shell/shellLaunch";
+export type { DraftProjectResolution } from "./shell/draftThreadResolution";
+export { resolveDraftProject, resolveWorkProviderChoice } from "./shell/draftThreadResolution";
+export { activeCodeThreadTabId, openLocalCodeThreadIds } from "./shell/workspaceTabLifecycle";
 
 interface InspectorOpener {
   readonly element: HTMLElement;
   readonly logicalTarget: "dock";
-}
-
-/** Words for an agent profile's default policy, so a row never relies on colour. */
-const EXECUTION_POLICY_LABEL: Record<
-  import("@octant/contracts/providers").ProviderExecutionPolicy,
-  string
-> = {
-  "full-access": "Full access",
-  "approval-gated": "Approval gated",
-  "auto-accept-edits": "Auto-accept edits",
-  plan: "Plan",
-};
-
-const visuallyHiddenStyle = {
-  border: 0,
-  clip: "rect(0, 0, 0, 0)",
-  clipPath: "inset(50%)",
-  height: 1,
-  margin: -1,
-  overflow: "hidden",
-  padding: 0,
-  position: "absolute" as const,
-  whiteSpace: "nowrap" as const,
-  width: 1,
-};
-
-export interface ShellLaunch {
-  readonly serverUrl: string;
-  readonly windowId?: WindowId;
-  readonly developmentWebBootstrap?: true;
 }
 
 export interface AppProps {
@@ -304,66 +291,6 @@ export interface AppProps {
   readonly shellClient?: ShellClient;
   readonly themeClient?: ThemeClient;
   readonly zenClient?: ZenClient;
-}
-
-/**
- * What a draft that named a Project resolves to. `unresolved-selection` is its
- * own answer because an explicitly chosen Project that no longer exists is not
- * the same question as a draft that never named one.
- */
-export type DraftProjectResolution<TProject> =
-  | { readonly kind: "project"; readonly project: TProject | undefined }
-  | { readonly kind: "unresolved-selection" };
-
-/**
- * Resolve the Project a draft submits into.
- *
- * An explicitly chosen Project id is authoritative. When it no longer resolves
- * — archived or deleted while the draft stayed open — the draft is refused, not
- * retargeted: substituting whatever Project happens to be active would create
- * the thread, and start its first provider turn, in a repository or folder the
- * user never chose. Only a draft that named no Project at all falls back to the
- * active one.
- */
-export function resolveDraftProject<TProject extends { readonly id: ProjectId }>(input: {
-  readonly draftProjectId: ProjectId | undefined;
-  readonly candidates: ReadonlyArray<TProject>;
-  readonly activeProject: TProject | undefined;
-}): DraftProjectResolution<TProject> {
-  if (input.draftProjectId === undefined) {
-    return { kind: "project", project: input.activeProject };
-  }
-  const chosen = input.candidates.find(
-    (candidate) => String(candidate.id) === String(input.draftProjectId),
-  );
-  return chosen === undefined
-    ? { kind: "unresolved-selection" }
-    : { kind: "project", project: chosen };
-}
-
-/** Shown when a draft's explicitly chosen Project no longer resolves. */
-const UNRESOLVED_DRAFT_PROJECT_MESSAGE =
-  "The folder this draft was started in is no longer available. Choose another folder before starting the thread.";
-
-/**
- * Any directory can be bound as a Code Project, but a Code thread still needs a
- * repository checkout. Say what to do instead of a generic preparation error.
- */
-function checkoutNotPreparedMessage(projectName: string): string {
-  return `Code threads need a Git repository, and "${projectName}" could not be opened as one. Run git init in that folder and retry, or add the same folder as a Work Project to work there without Git.`;
-}
-
-export function resolveWorkProviderChoice(
-  choices: ReadonlyArray<CodeThreadProviderChoice>,
-  selectedProviderInstanceId?: CodeThreadProviderChoice["instanceId"],
-  selectedModelId?: CodeThreadProviderChoice["modelId"],
-): CodeThreadProviderChoice | undefined {
-  return (
-    choices.find(
-      (choice) =>
-        choice.instanceId === selectedProviderInstanceId && choice.modelId === selectedModelId,
-    ) ?? choices[0]
-  );
 }
 
 export function App(props: AppProps) {
@@ -494,14 +421,6 @@ export function App(props: AppProps) {
   return (
     <LaunchedShell {...props} launch={desktopLaunch} projectWindowCapability={injectedCapability} />
   );
-}
-
-function clearLaunchTokenFragment(): void {
-  if (window.location.hash === "") return;
-  const url = new URL(window.location.href);
-  if (url.hash === "" || !url.hash.startsWith("#launchToken=")) return;
-  url.hash = "";
-  window.history.replaceState(null, "", url.toString());
 }
 
 function LaunchedShell(
@@ -2083,19 +2002,11 @@ function LaunchedShell(
       : activeMode === "work"
         ? workNavigation.status
         : codeController.status;
-  const threadSearchListing =
-    threadSearchStatus === "ready"
-      ? "ready"
-      : threadSearchStatus === "loading"
-        ? "loading"
-        : "unavailable";
+  const threadSearchListing = threadSearchListingForStatus(threadSearchStatus);
   // `idle` means nothing was asked for yet, which is not an incomplete answer.
-  const threadSearchArchivedListing: ThreadSearchListingStatus =
-    archivedChatSearch.status === "loading"
-      ? "loading"
-      : archivedChatSearch.status === "unavailable"
-        ? "unavailable"
-        : "ready";
+  const threadSearchArchivedListing = threadSearchArchivedListingForStatus(
+    archivedChatSearch.status,
+  );
   const threadSearchProjects = [
     ...projectController.projects,
     ...projectController.archivedProjects,
@@ -2137,12 +2048,11 @@ function LaunchedShell(
         }))
       : [];
   const workProjectThreads = workNavigation.navigation;
-  const sidebarThreadGroups =
-    activeMode === "code"
-      ? { recents: codeProjectThreads, all: codeProjectThreads, unfiled: [] }
-      : activeMode === "work"
-        ? { recents: workProjectThreads, all: workProjectThreads, unfiled: [] }
-        : undefined;
+  const sidebarThreadGroups = sidebarThreadGroupsForMode({
+    activeMode,
+    codeThreads: codeProjectThreads,
+    workThreads: workProjectThreads,
+  });
 
   // A row names its provider by mark, not by model, so the instance id every
   // thread already carries is resolved once here rather than by each list that
@@ -2229,52 +2139,36 @@ function LaunchedShell(
   // through props. It carries the same list the sidebar nests, so neither can
   // claim a Project has threads the other cannot see. `errorMessage` is read
   // only from a disconnected bootstrap, never from a failed command.
-  const projectThreadsAccess: ProjectThreadsAccess =
-    activeMode === "chat"
-      ? {
-          ...(chatController.status === "disconnected" && chatController.errorMessage !== undefined
-            ? { errorMessage: chatController.errorMessage }
-            : {}),
-          onRetry: () => void chatController.retry(),
-          onSelectThread: selectChatThread,
-          status:
-            chatController.status === "ready"
-              ? "ready"
-              : chatController.status === "disconnected"
-                ? "unavailable"
-                : "loading",
-          threads: chatController.navigation,
-        }
-      : activeMode === "code"
-        ? {
-            ...(codeController.status === "disconnected" &&
-            codeController.errorMessage !== undefined
-              ? { errorMessage: codeController.errorMessage }
-              : {}),
-            onRetry: () => void codeController.retry(),
-            onSelectThread: selectCodeThread,
-            status:
-              codeController.status === "disconnected"
-                ? "unavailable"
-                : codeController.status === "ready"
-                  ? "ready"
-                  : "loading",
-            threads: codeProjectThreads,
-          }
-        : {
-            ...(workNavigation.status === "unavailable" && workNavigation.errorMessage !== undefined
-              ? { errorMessage: workNavigation.errorMessage }
-              : {}),
-            onRetry: () => void workNavigation.refresh(),
-            onSelectThread: selectWorkThread,
-            status:
-              workNavigation.status === "unavailable"
-                ? "unavailable"
-                : workNavigation.status === "ready"
-                  ? "ready"
-                  : "loading",
-            threads: workProjectThreads,
-          };
+  const projectThreadsAccess = projectThreadsAccessForMode({
+    activeMode,
+    chat: {
+      status: chatController.status,
+      ...(chatController.errorMessage === undefined
+        ? {}
+        : { errorMessage: chatController.errorMessage }),
+      onRetry: () => void chatController.retry(),
+      onSelectThread: selectChatThread,
+      threads: chatController.navigation,
+    },
+    code: {
+      status: codeController.status,
+      ...(codeController.errorMessage === undefined
+        ? {}
+        : { errorMessage: codeController.errorMessage }),
+      onRetry: () => void codeController.retry(),
+      onSelectThread: selectCodeThread,
+      threads: codeProjectThreads,
+    },
+    work: {
+      status: workNavigation.status,
+      ...(workNavigation.errorMessage === undefined
+        ? {}
+        : { errorMessage: workNavigation.errorMessage }),
+      onRetry: () => void workNavigation.refresh(),
+      onSelectThread: selectWorkThread,
+      threads: workProjectThreads,
+    },
+  });
 
   async function openSelectedProject(project: ProjectSummary) {
     closeThreadSearch();
@@ -3030,82 +2924,56 @@ function LaunchedShell(
     />
   );
   const settingsSurface = (
-    <ShellThemeRoot
+    <ShellSettingsSurface
       {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
       {...(themeController.draft?.typography === undefined && props.typography === undefined
         ? {}
         : { typography: themeController.draft?.typography ?? props.typography })}
       {...(themeController.draft === undefined ? {} : { theme: themeController.draft })}
-    >
-      <SettingsSurfaceErrorBoundary onReload={() => globalThis.location.reload()}>
-        <Suspense
-          fallback={
-            <main className="shell-boundary">
-              <ShellState
-                eyebrow="Settings"
-                message="Loading the Octant settings surface."
-                state="loading"
-                title="Opening Settings"
-              />
-            </main>
-          }
-        >
-          <LazySettingsView
-            chatController={chatController}
-            codeController={codeController}
-            discoveryController={discoveryController}
-            executionProfiles={
-              <ExecutionProfileWorkflow
-                controller={executionProfileController}
-                variant="settings"
-              />
-            }
-            extensionClient={extensionClient}
-            {...(props.hostBridge?.selectLocalPluginFolder === undefined
-              ? {}
-              : {
-                  pickLocalPluginFolder: async () => {
-                    const selected = await props.hostBridge!.selectLocalPluginFolder!();
-                    return selected.kind === "selected"
-                      ? { receiptId: selected.receiptId, displayName: selected.displayName }
-                      : undefined;
-                  },
-                })}
-            agentRunSettingsClient={agentRunSettingsClient}
-            automationNotificationClient={automationNotificationClient}
-            isNarrow={isNarrow}
-            nativeBoundsAvailable={nativeHost !== undefined}
-            onBack={controller.closeSettings}
-            onDeepLinkApplied={controller.clearPendingSettingsDeepLink}
-            onResetLayout={controller.resetActiveLayout}
-            onResetNativeBounds={controller.resetNativeBounds}
-            onSearchChange={controller.setSettingsSearch}
-            onSettingsChange={controller.updateSettings}
-            pendingDeepLink={controller.pendingSettingsDeepLink}
-            providerController={providerController}
-            search={controller.settingsSearch}
-            settings={controller.settings}
-            sidebarVibrancySupported={sidebarVibrancySupported}
-            themeController={themeController}
-            diagnosticsExportClient={diagnosticsExportClient}
-            hostControlClient={hostControlClient}
-            {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
-            githubClient={githubClient}
-            usageClient={usageClient}
-            visibleSettings={controller.visibleSettings}
-          />
-        </Suspense>
-      </SettingsSurfaceErrorBoundary>
-      <p
-        aria-atomic="true"
-        aria-live="polite"
-        className="sr-only"
-        data-announcement-sequence={controller.announcementSequence}
-        style={visuallyHiddenStyle}
-      >
-        {controller.announcement}
-      </p>
-    </ShellThemeRoot>
+      chatController={chatController}
+      codeController={codeController}
+      discoveryController={discoveryController}
+      executionProfiles={
+        <ExecutionProfileWorkflow controller={executionProfileController} variant="settings" />
+      }
+      extensionClient={extensionClient}
+      {...(props.hostBridge?.selectLocalPluginFolder === undefined
+        ? {}
+        : {
+            pickLocalPluginFolder: async () => {
+              const selected = await props.hostBridge!.selectLocalPluginFolder!();
+              return selected.kind === "selected"
+                ? { receiptId: selected.receiptId, displayName: selected.displayName }
+                : undefined;
+            },
+          })}
+      agentRunSettingsClient={agentRunSettingsClient}
+      automationNotificationClient={automationNotificationClient}
+      isNarrow={isNarrow}
+      nativeBoundsAvailable={nativeHost !== undefined}
+      onBack={controller.closeSettings}
+      onDeepLinkApplied={controller.clearPendingSettingsDeepLink}
+      onResetLayout={controller.resetActiveLayout}
+      onResetNativeBounds={controller.resetNativeBounds}
+      onSearchChange={controller.setSettingsSearch}
+      onSettingsChange={controller.updateSettings}
+      {...(controller.pendingSettingsDeepLink === undefined
+        ? {}
+        : { pendingDeepLink: controller.pendingSettingsDeepLink })}
+      providerController={providerController}
+      search={controller.settingsSearch}
+      settings={controller.settings}
+      sidebarVibrancySupported={sidebarVibrancySupported}
+      themeController={themeController}
+      diagnosticsExportClient={diagnosticsExportClient}
+      hostControlClient={hostControlClient}
+      {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
+      githubClient={githubClient}
+      usageClient={usageClient}
+      visibleSettings={controller.visibleSettings}
+      announcement={controller.announcement}
+      announcementSequence={controller.announcementSequence}
+    />
   );
 
   const shell = (
@@ -3486,101 +3354,73 @@ function LaunchedShell(
         workspace={
           <>
             <div className="primary-workspace-layer">
-              {railPlaceholder === undefined ? null : (
-                <div className="rail-placeholder" role="status">
-                  <ShellState
-                    action={{
-                      label: "Back to workspace",
-                      onClick: () => setRailPlaceholder(undefined),
-                    }}
-                    eyebrow="Sidebar"
-                    message={railPlaceholder.message}
-                    state="neutral"
-                    title={railPlaceholder.title}
-                  />
-                </div>
-              )}
-              {codeBoardOpen && activeMode === "code" ? (
-                <div className="code-board-layer">
-                  <CodeThreadBoard
-                    loadBoard={(query) => codeClient.queryBoard(query)}
-                    projects={codeBoardProjects}
-                    onClose={() => setCodeBoardOpen(false)}
-                    onOpenThread={(threadId) => {
-                      const thread = codeController.bootstrap?.threads.find(
-                        (candidate) => String(candidate.id) === String(threadId),
-                      );
-                      setCodeBoardOpen(false);
-                      void controller.openCodeThread(
-                        threadId,
-                        thread?.title ?? "Code thread",
-                        undefined,
-                        thread?.projectId,
-                      );
-                    }}
-                  />
-                </div>
-              ) : null}
-              {artifactLibraryOpen ? (
-                <div className="artifact-library-layer">
-                  <ArtifactLibrarySurface
-                    onClose={() => setArtifactLibraryOpen(false)}
-                    onCreate={() => {
-                      // An artifact carries the thread it was made in, so there
-                      // is nowhere to put one that has no origin. Starting a
-                      // thread is what "new artifact" means here.
-                      setArtifactLibraryOpen(false);
-                      createChat();
-                    }}
-                    onOpen={(entry) => {
-                      setArtifactLibraryOpen(false);
-                      void controller.openCanvas({
-                        mode: entry.mode,
-                        title: entry.title,
-                        canvasId: entry.canvasId,
-                        projectId: entry.projectId,
-                      });
-                    }}
-                    serverUrl={props.launch.serverUrl}
-                    {...(props.projectWindowCapability === undefined
-                      ? {}
-                      : { windowCapability: props.projectWindowCapability })}
-                  />
-                </div>
-              ) : null}
-              {automationCenterVisible ? (
-                <div className="automation-center-layer">
-                  <AutomationCenter
-                    catalog={automationEditorCatalog}
-                    client={automationClient}
-                    // What each connected host is called, so a routine's row and
-                    // the environment filter never disagree about a name. The
-                    // host this window runs on is always "Local", whatever the
-                    // machine is called and whatever it runs.
-                    environmentNames={
-                      new Map(hosts.map((host) => [String(host.hostId), host.displayName] as const))
-                    }
-                    localHostId={String(LOCAL_HOST_ID)}
-                    narrow={isNarrow}
-                    notificationClient={automationNotificationClient}
-                    onClose={() => setAutomationCenterOpen(false)}
-                    onOpenThread={(target) => {
-                      setAutomationCenterOpen(false);
-                      if (target.mode === "code") {
-                        void controller.openCodeThread(
-                          decodeCodeThreadId(target.threadId),
-                          target.title,
-                        );
-                      } else {
-                        void controller.openWorkThread(
-                          decodeWorkThreadId(target.threadId),
-                          target.title,
-                        );
-                      }
-                    }}
-                  />
-                </div>
-              ) : null}
+              <WorkspaceRailLayers
+                {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
+                onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
+                codeBoardOpen={codeBoardOpen}
+                activeMode={activeMode}
+                codeClient={codeClient}
+                codeBoardProjects={codeBoardProjects}
+                onCloseCodeBoard={() => setCodeBoardOpen(false)}
+                onOpenCodeBoardThread={(threadId) => {
+                  const thread = codeController.bootstrap?.threads.find(
+                    (candidate) => String(candidate.id) === String(threadId),
+                  );
+                  setCodeBoardOpen(false);
+                  void controller.openCodeThread(
+                    threadId,
+                    thread?.title ?? "Code thread",
+                    undefined,
+                    thread?.projectId,
+                  );
+                }}
+                artifactLibraryOpen={artifactLibraryOpen}
+                onCloseArtifactLibrary={() => setArtifactLibraryOpen(false)}
+                onCreateArtifact={() => {
+                  // An artifact carries the thread it was made in, so there
+                  // is nowhere to put one that has no origin. Starting a
+                  // thread is what "new artifact" means here.
+                  setArtifactLibraryOpen(false);
+                  createChat();
+                }}
+                onOpenArtifact={(entry) => {
+                  setArtifactLibraryOpen(false);
+                  void controller.openCanvas({
+                    mode: entry.mode,
+                    title: entry.title,
+                    canvasId: entry.canvasId,
+                    projectId: entry.projectId,
+                  });
+                }}
+                serverUrl={props.launch.serverUrl}
+                {...(props.projectWindowCapability === undefined
+                  ? {}
+                  : { windowCapability: props.projectWindowCapability })}
+                automationCenterVisible={automationCenterVisible}
+                automationEditorCatalog={automationEditorCatalog}
+                automationClient={automationClient}
+                environmentNames={
+                  new Map(hosts.map((host) => [String(host.hostId), host.displayName] as const))
+                }
+                localHostId={String(LOCAL_HOST_ID)}
+                isNarrow={isNarrow}
+                notificationClient={automationNotificationClient}
+                onCloseAutomationCenter={() => setAutomationCenterOpen(false)}
+                onOpenAutomationThread={(target) => {
+                  setAutomationCenterOpen(false);
+                  if (target.mode === "code") {
+                    void controller.openCodeThread(
+                      decodeCodeThreadId(target.threadId),
+                      target.title,
+                    );
+                  } else {
+                    void controller.openWorkThread(
+                      decodeWorkThreadId(target.threadId),
+                      target.title,
+                    );
+                  }
+                }}
+              />
               <ProjectMemoryInspectorProvider onOpen={openMemoryInspector}>
                 <WorkspaceView
                   onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
@@ -3960,154 +3800,105 @@ function LaunchedShell(
           </>
         }
       >
-        {createOpen ? (
-          <ProjectCreateDialog
-            folderBrowseClient={folderBrowseClient}
-            hostId={createHostId}
-            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-            mode={controller.workspace.activeMode}
-            onClose={() => setCreateOpen(false)}
-            onCreate={(mode, name, receiptId) =>
-              projectController.create(mode, name, receiptId, createHostId)
+        <ShellDialogHost
+          createOpen={createOpen}
+          folderBrowseClient={folderBrowseClient}
+          hostId={createHostId}
+          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+          mode={controller.workspace.activeMode}
+          onCloseCreate={() => setCreateOpen(false)}
+          onCreateProject={(mode, name, receiptId) =>
+            projectController.create(mode, name, receiptId, createHostId)
+          }
+          onCreatedProject={(projectId, mode, name) =>
+            void openDraftInKnownProject(projectId, mode, name)
+          }
+          searchOpen={searchOpen}
+          searchThreads={threadSearchThreads}
+          searchProjects={threadSearchProjects}
+          searchListing={threadSearchListing}
+          searchArchivedListing={threadSearchArchivedListing}
+          onSearchQueryChange={setSearchQuery}
+          onCloseSearch={closeThreadSearch}
+          onOpenSearchHit={(hit) => {
+            closeThreadSearch();
+            // The hit keeps its source thread's Project so a cross-Project
+            // open dispatches the Project switch, exactly like the sidebar's
+            // own open handlers, instead of a plain open-tab the
+            // server-authoritative workspace policy rejects.
+            const hitProjectId =
+              hit.projectId === undefined ? undefined : decodeProjectId(hit.projectId);
+            if (hit.mode === "chat") {
+              void controller.openChatThread(
+                decodeChatThreadId(hit.threadId),
+                hit.title,
+                hitProjectId,
+              );
+              return;
             }
-            onCreated={(projectId, mode, name) =>
-              void openDraftInKnownProject(projectId, mode, name)
-            }
-          />
-        ) : null}
-        {searchOpen ? (
-          <ThreadSearchOverlay
-            mode={activeMode}
-            threads={threadSearchThreads}
-            projects={threadSearchProjects}
-            unfiledLabel={activeMode === "chat" ? "Unfiled" : "Recents"}
-            listing={threadSearchListing}
-            {...(activeMode === "chat"
-              ? {
-                  archivedListing: threadSearchArchivedListing,
-                  onQueryChange: setSearchQuery,
-                }
-              : {})}
-            onClose={closeThreadSearch}
-            onOpenThread={(hit) => {
-              closeThreadSearch();
-              // The hit keeps its source thread's Project so a cross-Project
-              // open dispatches the Project switch, exactly like the sidebar's
-              // own open handlers, instead of a plain open-tab the
-              // server-authoritative workspace policy rejects.
-              const hitProjectId =
-                hit.projectId === undefined ? undefined : decodeProjectId(hit.projectId);
-              if (hit.mode === "chat") {
-                void controller.openChatThread(
-                  decodeChatThreadId(hit.threadId),
-                  hit.title,
-                  hitProjectId,
-                );
-                return;
-              }
-              if (hit.mode === "work") {
-                void controller.openWorkThread(
-                  decodeWorkThreadId(hit.threadId),
-                  hit.title,
-                  undefined,
-                  hitProjectId,
-                );
-                return;
-              }
-              void controller.openCodeThread(
-                decodeCodeThreadId(hit.threadId),
+            if (hit.mode === "work") {
+              void controller.openWorkThread(
+                decodeWorkThreadId(hit.threadId),
                 hit.title,
                 undefined,
                 hitProjectId,
               );
-            }}
-          />
-        ) : null}
-        {/* One palette for the window. Zen is a deliberate full-surface focus
-          mode, so the chord stays inert while it is active. */}
-        {zen.active ? null : <CommandPalette />}
-        {/* One quick-open for the window, scoped to the Code thread currently
-          in view. Mounting it per tab would make one chord open a dialog for
-          every split pane at once. */}
-        {zen.active || activeCodeThreadView === undefined ? null : (
-          <CodeSearchDialog
-            checkoutId={activeCodeThreadView.checkout.id}
-            onOpenFile={(relativePath) => {
-              void controller.openCodeSurface({
-                kind: "code-file",
-                threadId: activeCodeThreadView.thread.id,
-                title: relativePath,
-                relativePath,
-              });
-            }}
-            {...(props.launch.serverUrl === undefined ? {} : { serverUrl: props.launch.serverUrl })}
-            {...(props.projectWindowCapability === undefined
+              return;
+            }
+            void controller.openCodeThread(
+              decodeCodeThreadId(hit.threadId),
+              hit.title,
+              undefined,
+              hitProjectId,
+            );
+          }}
+          zenActive={zen.active}
+          {...(activeCodeThreadView === undefined ? {} : { activeCodeThreadView })}
+          onOpenCodeSearchFile={(relativePath) => {
+            if (activeCodeThreadView === undefined) return;
+            void controller.openCodeSurface({
+              kind: "code-file",
+              threadId: activeCodeThreadView.thread.id,
+              title: relativePath,
+              relativePath,
+            });
+          }}
+          {...(props.launch.serverUrl === undefined ? {} : { serverUrl: props.launch.serverUrl })}
+          {...(props.projectWindowCapability === undefined
+            ? {}
+            : { windowCapability: props.projectWindowCapability })}
+          firstRun={{
+            chatModelGroups: chatProviderGroups,
+            controller: firstRunController,
+            navigatorModelGroups: chatProviderGroups,
+            onClearNavigatorDefault: clearNavigatorDefault,
+            onSaveProfile: saveUserProfile,
+            onSelectChatDefault: selectChatDefaultModel,
+            onSelectColorScheme: selectColorScheme,
+            onSelectModeSwitcher: (modeSwitcherPresentation) =>
+              controller.updateSettings({ modeSwitcherPresentation }),
+            onSelectNavigatorDefault: selectNavigatorDefault,
+            onToggleChat: (chatEnabled) => controller.updateSettings({ chatEnabled }),
+            onToggleWork: (workEnabled) => controller.updateSettings({ workEnabled }),
+            workspace: firstRunWorkspace,
+            profile: controller.settings?.userProfile ?? defaultShellSettings().userProfile,
+            readiness: firstRunReadiness,
+            ...(firstRunDiscoveryNotice === undefined
               ? {}
-              : { windowCapability: props.projectWindowCapability })}
-            threadId={activeCodeThreadView.thread.id}
-          />
-        )}
-        <FirstRunOnboarding
-          chatModelGroups={chatProviderGroups}
-          controller={firstRunController}
-          navigatorModelGroups={chatProviderGroups}
-          onClearNavigatorDefault={clearNavigatorDefault}
-          onSaveProfile={saveUserProfile}
-          onSelectChatDefault={selectChatDefaultModel}
-          onSelectColorScheme={selectColorScheme}
-          onSelectModeSwitcher={(modeSwitcherPresentation) =>
-            controller.updateSettings({ modeSwitcherPresentation })
-          }
-          onSelectNavigatorDefault={selectNavigatorDefault}
-          onToggleChat={(chatEnabled) => controller.updateSettings({ chatEnabled })}
-          onToggleWork={(workEnabled) => controller.updateSettings({ workEnabled })}
-          workspace={firstRunWorkspace}
-          profile={controller.settings?.userProfile ?? defaultShellSettings().userProfile}
-          readiness={firstRunReadiness}
-          {...(firstRunDiscoveryNotice === undefined
-            ? {}
-            : { discoveryNotice: firstRunDiscoveryNotice })}
-          {...(firstRunChatDefault === undefined ? {} : { chatDefault: firstRunChatDefault })}
-          {...(controller.settings?.navigatorAssistant.defaultProvider === undefined
-            ? {}
-            : { navigatorDefault: controller.settings.navigatorAssistant.defaultProvider })}
-          onOpenProviderSettings={() => void controller.openSettings({ section: "providers" })}
-          onRescan={() => void discoveryController.scan()}
-          scanning={discoveryController.scanning}
+              : { discoveryNotice: firstRunDiscoveryNotice }),
+            ...(firstRunChatDefault === undefined ? {} : { chatDefault: firstRunChatDefault }),
+            ...(controller.settings?.navigatorAssistant.defaultProvider === undefined
+              ? {}
+              : { navigatorDefault: controller.settings.navigatorAssistant.defaultProvider }),
+            onOpenProviderSettings: () => void controller.openSettings({ section: "providers" }),
+            onRescan: () => void discoveryController.scan(),
+            scanning: discoveryController.scanning,
+          }}
+          announcement={controller.announcement}
+          announcementSequence={controller.announcementSequence}
+          projectAnnouncement={projectController.announcement}
+          projectAnnouncementSequence={projectController.announcementSequence}
         />
-        <p
-          aria-atomic="true"
-          aria-live="polite"
-          className="sr-only"
-          data-announcement-sequence={controller.announcementSequence}
-          style={visuallyHiddenStyle}
-        >
-          {controller.announcement}
-          {controller.announcementSequence > 0 ? (
-            <span
-              style={{
-                clip: "rect(0 0 0 0)",
-                clipPath: "inset(50%)",
-                height: 1,
-                overflow: "hidden",
-                position: "absolute",
-                whiteSpace: "nowrap",
-                width: 1,
-              }}
-            >
-              {" "}
-              Event {controller.announcementSequence}.
-            </span>
-          ) : null}
-        </p>
-        <p
-          aria-atomic="true"
-          aria-live="polite"
-          className="sr-only"
-          data-project-announcement-sequence={projectController.announcementSequence}
-        >
-          {projectController.announcement}
-        </p>
       </ShellFrame>
       <ComputerUseActivitySurface
         client={computerUseClient}
@@ -4138,372 +3929,4 @@ function focusLogicalOpener(opener: InspectorOpener): void {
       ? opener.element
       : document.querySelector<HTMLElement>(`[data-${opener.logicalTarget}-opener="true"]`);
   current?.focus();
-}
-
-function useResolvedMaterial(
-  preference: "opaque" | "system",
-  hostBridge: OctantHostBridge | undefined,
-): ResolvedSidebarMaterial {
-  const [material, setMaterial] = useState<ResolvedSidebarMaterial>("opaque");
-  useEffect(() => {
-    if (hostBridge === undefined) {
-      setMaterial(preference === "system" ? "translucent" : "opaque");
-      return;
-    }
-    let disposed = false;
-    let unsubscribe: (() => void) | undefined;
-    setMaterial("opaque");
-    if (preference === "system") {
-      unsubscribe = hostBridge.subscribeResolvedMaterial((resolved) => {
-        setMaterial(resolved === "translucent" ? "translucent" : "opaque");
-      });
-    }
-    let preferenceRequest: Promise<void>;
-    try {
-      preferenceRequest = Promise.resolve(hostBridge.setSidebarMaterialPreference(preference));
-    } catch {
-      preferenceRequest = Promise.reject(new Error("Host preference request failed."));
-    }
-    void preferenceRequest.catch(() => {
-      unsubscribe?.();
-      unsubscribe = undefined;
-      if (!disposed) setMaterial("opaque");
-    });
-    return () => {
-      disposed = true;
-      unsubscribe?.();
-    };
-  }, [hostBridge, preference]);
-  return material;
-}
-
-/**
- * Tell the host whether it may check for updates on its own.
- *
- * The preference is persisted with the rest of the shell settings, and the host
- * process starts with automatic checks off, so this is what turns them on. That
- * ordering is deliberate: a host that defaulted to on would check once on every
- * launch before it learned the person had said not to.
- */
-function useAutomaticUpdateCheckSync(
-  hostBridge: OctantHostBridge | undefined,
-  automaticUpdateChecks: boolean | undefined,
-): void {
-  const setAutomatic = hostBridge?.setAutomaticAppUpdateChecks;
-  useEffect(() => {
-    if (setAutomatic === undefined || automaticUpdateChecks === undefined) return;
-    void setAutomatic(automaticUpdateChecks).catch(() => undefined);
-  }, [automaticUpdateChecks, setAutomatic]);
-}
-
-function useSidebarVibrancySupported(hostBridge: OctantHostBridge | undefined): boolean {
-  const [supported, setSupported] = useState(false);
-  useEffect(() => {
-    if (hostBridge === undefined || hostBridge.getHostCapabilities === undefined) {
-      setSupported(false);
-      return;
-    }
-    let disposed = false;
-    const result = hostBridge.getHostCapabilities();
-    if (result instanceof Promise) {
-      result
-        .then((capabilities) => {
-          if (!disposed) setSupported(capabilities.sidebarVibrancySupported);
-        })
-        .catch(() => {
-          if (!disposed) setSupported(false);
-        });
-    } else {
-      setSupported(result.sidebarVibrancySupported);
-    }
-    return () => {
-      disposed = true;
-    };
-  }, [hostBridge]);
-  return supported;
-}
-
-function useSidebarBackgroundFetcher(
-  serverUrl: string,
-  windowCapability: string | undefined,
-): (backgroundId: string) => Promise<Blob> {
-  return useCallback(
-    async (backgroundId: string) => {
-      const headers: Record<string, string> = {};
-      if (windowCapability !== undefined) {
-        headers["x-octant-window-capability"] = windowCapability;
-      }
-      const response = await fetch(`${serverUrl}/api/theme/sidebar-backgrounds/${backgroundId}`, {
-        headers,
-      });
-      if (!response.ok) {
-        throw new Error(`Sidebar background fetch failed: ${response.status}`);
-      }
-      return response.blob();
-    },
-    [serverUrl, windowCapability],
-  );
-}
-
-function useSidebarVibrancyModeSync(
-  hostBridge: OctantHostBridge | undefined,
-  vibrancyMode: "off" | "subtle" | "strong",
-  supported: boolean,
-): void {
-  useEffect(() => {
-    if (hostBridge === undefined || hostBridge.setSidebarVibrancyMode === undefined || !supported) {
-      return;
-    }
-    void Promise.resolve(hostBridge.setSidebarVibrancyMode(vibrancyMode)).catch(() => {
-      // Host may reject unsupported modes; ignore silently.
-    });
-  }, [hostBridge, vibrancyMode, supported]);
-}
-
-function activeSurfaceTitle(
-  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
-  activeGroupId: import("@octant/contracts/shell").TabGroupId,
-): string {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  return group?.tabs.find((tab) => tab.id === group.activeTabId)?.title ?? "Octant";
-}
-
-function activeChatThreadTabId(
-  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
-  activeGroupId: import("@octant/contracts/shell").TabGroupId,
-): ChatThreadId | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  return tab?.kind === "chat-thread" ? tab.threadId : undefined;
-}
-
-function activeDraftProjectId(
-  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
-  activeGroupId: import("@octant/contracts/shell").TabGroupId,
-): ProjectId | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  return tab?.kind === "draft-thread" ? tab.projectId : undefined;
-}
-
-function activeDraftTabKey(
-  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
-  activeGroupId: import("@octant/contracts/shell").TabGroupId,
-): string | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  return tab?.kind === "draft-thread"
-    ? `${String(tab.id)}:${tab.projectId === undefined ? "unfiled" : String(tab.projectId)}`
-    : undefined;
-}
-
-/**
- * The local Code thread the focused group is showing. When the focused group
- * shows a utility surface (Browser, Files, Side Chat, Preview) instead, the
- * Code thread visible in a sibling split pane stays active so its transcript
- * is not unloaded just because the user clicked into the other pane.
- */
-export function activeCodeThreadTabId(
-  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
-  activeGroupId: import("@octant/contracts/shell").TabGroupId,
-): CodeThreadId | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  const focused = localCodeThreadTabId(tab);
-  if (focused !== undefined) return focused;
-  switch (tab?.kind) {
-    case "browser":
-    case "files":
-    case "side-chat":
-    case "preview":
-      return visibleLocalCodeThreadTabId(layout);
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Every local Code thread this window has open, in any group of the Code tree.
- *
- * Keyed on the thread, not the tab: a thread's overview, diff, terminal, and
- * workbench are several tabs of one conversation, and giving each its own
- * controller would open the same thread's stream several times over.
- */
-export function openLocalCodeThreadIds(
-  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
-): ReadonlyArray<CodeThreadId> {
-  const open: CodeThreadId[] = [];
-  collect(layout);
-  return open;
-
-  function collect(node: import("@octant/contracts/shell").WorkspaceLayoutNode): void {
-    if (node.kind !== "group") {
-      collect(node.first);
-      collect(node.second);
-      return;
-    }
-    for (const tab of node.tabs) {
-      const threadId = openCodeTabThreadId(tab);
-      if (threadId === undefined) continue;
-      if (open.some((candidate) => String(candidate) === String(threadId))) continue;
-      open.push(threadId);
-    }
-  }
-}
-
-function openCodeTabThreadId(
-  tab: import("@octant/contracts/shell").WorkspaceTab,
-): CodeThreadId | undefined {
-  const local = localCodeThreadTabId(tab);
-  if (local !== undefined) return local;
-  // An Apple workbench tab is bound to a Code thread like the other surfaces.
-  // The active-thread lookup leaves it out because focus resting there does not
-  // make it the thread in view; it still needs that thread's own controller.
-  if (tab.kind !== "apple-workbench") return undefined;
-  if ("hostId" in tab && tab.hostId !== undefined) return undefined;
-  return tab.threadId;
-}
-
-function localCodeThreadTabId(
-  tab: import("@octant/contracts/shell").WorkspaceTab | undefined,
-): CodeThreadId | undefined {
-  if (tab !== undefined && "hostId" in tab && tab.hostId !== undefined) return undefined;
-  switch (tab?.kind) {
-    case "code-overview":
-    case "code-file":
-    case "code-diff":
-    case "code-terminal":
-    case "code-test":
-    case "code-git":
-    case "code-pr":
-    case "code-local-review":
-      return tab.threadId;
-    default:
-      return undefined;
-  }
-}
-
-function visibleLocalCodeThreadTabId(
-  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
-): CodeThreadId | undefined {
-  if (layout.kind === "group") {
-    return localCodeThreadTabId(layout.tabs.find((tab) => tab.id === layout.activeTabId));
-  }
-  return visibleLocalCodeThreadTabId(layout.first) ?? visibleLocalCodeThreadTabId(layout.second);
-}
-
-function activeWorkThreadTabId(
-  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
-  activeGroupId: import("@octant/contracts/shell").TabGroupId,
-): string | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  return tab?.kind === "work-thread" && tab.hostId === undefined ? String(tab.threadId) : undefined;
-}
-
-function activeProjectTabId(
-  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
-  activeGroupId: import("@octant/contracts/shell").TabGroupId,
-): ProjectId | undefined {
-  const group = findWorkspaceGroup(layout, activeGroupId);
-  if (group === undefined) return undefined;
-  const tab = group.tabs.find((candidate) => candidate.id === group.activeTabId);
-  return tab?.kind === "project" ? tab.projectId : undefined;
-}
-
-function findWorkspaceGroup(
-  layout: import("@octant/contracts/shell").WorkspaceLayoutNode,
-  groupId: import("@octant/contracts/shell").TabGroupId,
-): Extract<import("@octant/contracts/shell").WorkspaceLayoutNode, { kind: "group" }> | undefined {
-  if (layout.kind === "group") return layout.groupId === groupId ? layout : undefined;
-  return findWorkspaceGroup(layout.first, groupId) ?? findWorkspaceGroup(layout.second, groupId);
-}
-
-function useNarrowViewport(): boolean {
-  const query = "(max-width: 960px)";
-  const [narrow, setNarrow] = useState(() =>
-    typeof window.matchMedia === "function" ? window.matchMedia(query).matches : false,
-  );
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia(query);
-    const update = () => setNarrow(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  return narrow;
-}
-
-export function launchFromLocation(href: string): ShellLaunch | undefined {
-  try {
-    const url = new URL(href);
-    const launchTokenFragment = url.hash.startsWith("#launchToken=");
-    const windowIdParam = url.searchParams.get("windowId");
-    const serverUrl = url.searchParams.get("serverUrl");
-    const developmentWebBootstrap = url.searchParams.get("developmentWebBootstrap") === "1";
-    if (serverUrl === null && !launchTokenFragment) return undefined;
-    const resolvedServerUrl =
-      serverUrl === null ? `${url.origin}${url.pathname === "/" ? "" : url.pathname}` : serverUrl;
-    const parsedServerUrl = new URL(resolvedServerUrl);
-    if (parsedServerUrl.protocol !== "http:" && parsedServerUrl.protocol !== "https:") {
-      return undefined;
-    }
-    const windowId = windowIdParam === null ? undefined : decodeWindowId(windowIdParam);
-    return {
-      serverUrl: parsedServerUrl.toString(),
-      ...(windowId === undefined ? {} : { windowId }),
-      ...(developmentWebBootstrap ? { developmentWebBootstrap: true as const } : {}),
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-function isProjectWindowCapability(value: string | undefined): value is string {
-  return value !== undefined && /^[A-Za-z0-9_-]{43}$/.test(value);
-}
-
-const SIDEBAR_COLLAPSED_STORAGE_KEY = "octant.shell.sidebar-collapsed.v1";
-
-function readSidebarCollapsed(scope: { readonly localStorage?: Storage }): boolean {
-  try {
-    return scope.localStorage?.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function writeSidebarCollapsed(scope: { readonly localStorage?: Storage }, collapsed: boolean) {
-  try {
-    if (collapsed) scope.localStorage?.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, "true");
-    else scope.localStorage?.removeItem(SIDEBAR_COLLAPSED_STORAGE_KEY);
-  } catch {
-    // Presentation persistence is best-effort.
-  }
-}
-
-/**
- * What a Code thread's status dot says.
- *
- * An open follow-up outranks everything: it is the one state a person has to
- * come back to. A waiting or interrupted thread is asking for something too.
- * `working` is deliberately absent — the host reports no per-thread run state
- * to the sidebar, and a dot that pulses on a thread nothing is running would
- * be a lie.
- */
-function codeThreadActivity(thread: {
-  readonly followUp?: boolean;
-  readonly lifecycle: "active" | "waiting" | "interrupted" | "archived";
-  readonly unread?: boolean;
-}): ThreadRowActivity {
-  if (thread.followUp === true) return "attention";
-  if (thread.lifecycle === "waiting" || thread.lifecycle === "interrupted") return "attention";
-  if (thread.unread === true) return "unread";
-  return "idle";
 }
