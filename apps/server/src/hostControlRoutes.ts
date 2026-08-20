@@ -9,6 +9,13 @@ import {
   type HostRestoreOutcome,
 } from "@octant/contracts/host-control";
 import {
+  decodePurgeThreadsRequest,
+  decodeSetThreadRetentionRequest,
+  type PurgeThreadsRequest,
+  type SetThreadRetentionRequest,
+} from "@octant/contracts/thread-retention";
+import type { ThreadRetentionService } from "./threadRetentionService";
+import {
   authorizeHostControlAction,
   deriveHostLifecycleControls,
   type HostControlOperation,
@@ -51,6 +58,8 @@ const ROUTES = {
   lifecycle: "/api/host-control/lifecycle",
   backup: "/api/host-control/backup",
   restore: "/api/host-control/restore",
+  retention: "/api/host-control/thread-retention",
+  purge: "/api/host-control/thread-purge",
 } as const;
 
 const RESTORE_GUIDANCE =
@@ -76,6 +85,7 @@ export interface HostControlRouteDependencies {
   /** Graceful owner drain request (the same authority the control socket uses). */
   readonly requestOwnerStop?: () => void;
   readonly backup?: (label: string) => HostControlBackupReceipt;
+  readonly threadRetention?: ThreadRetentionService;
   readonly now?: () => number;
   /** Defers the drain until after the response is written. Test seam. */
   readonly scheduleStop?: (callback: () => void) => void;
@@ -108,9 +118,15 @@ export function createHostControlRouteHandler(
     }
 
     const route = url.pathname as (typeof ROUTES)[keyof typeof ROUTES];
-    const expectedMethod = route === ROUTES.status ? "GET" : "POST";
-    if (request.method !== expectedMethod) {
-      return failure("HTTP method is not supported for this route.", 405, origin);
+    if (route === ROUTES.retention) {
+      if (request.method !== "GET" && request.method !== "POST") {
+        return failure("HTTP method is not supported for this route.", 405, origin);
+      }
+    } else {
+      const expectedMethod = route === ROUTES.status ? "GET" : "POST";
+      if (request.method !== expectedMethod) {
+        return failure("HTTP method is not supported for this route.", 405, origin);
+      }
     }
 
     try {
@@ -128,6 +144,9 @@ export function createHostControlRouteHandler(
 
     if (route === ROUTES.status) {
       return authorized("status", origin, () => handleStatus(dependencies, origin));
+    }
+    if (route === ROUTES.retention && request.method === "GET") {
+      return authorized("retention", origin, () => handleReadRetention(dependencies, origin));
     }
 
     const decoded = await readJson(request, BODY_LIMIT);
@@ -159,6 +178,24 @@ export function createHostControlRouteHandler(
       return authorized("backup", origin, () =>
         handleBackup(dependencies, body.label ?? "manual", origin),
       );
+    }
+    if (route === ROUTES.retention) {
+      let body;
+      try {
+        body = decodeSetThreadRetentionRequest(decoded.value);
+      } catch {
+        return failure("Thread retention request is invalid.", 400, origin);
+      }
+      return authorized("retention", origin, () => handleSetRetention(dependencies, body, origin));
+    }
+    if (route === ROUTES.purge) {
+      let body;
+      try {
+        body = decodePurgeThreadsRequest(decoded.value);
+      } catch {
+        return failure("Thread purge request is invalid.", 400, origin);
+      }
+      return authorized("purge", origin, () => handlePurgeThreads(dependencies, body, origin));
     }
     if (!isEmptyRecord(decoded.value)) {
       return failure("Host restore request is invalid.", 400, origin);
@@ -326,6 +363,40 @@ function handleBackup(
     byteLength: receipt.byteLength,
   };
   return json(outcome, 200, origin);
+}
+
+function handleReadRetention(
+  dependencies: HostControlRouteDependencies,
+  origin: string | null,
+): Response {
+  if (dependencies.threadRetention === undefined) {
+    return failure("Thread retention is unavailable while the owner is starting.", 503, origin);
+  }
+  return json(dependencies.threadRetention.readState(), 200, origin);
+}
+
+function handleSetRetention(
+  dependencies: HostControlRouteDependencies,
+  request: SetThreadRetentionRequest,
+  origin: string | null,
+): Response {
+  if (dependencies.threadRetention === undefined) {
+    return failure("Thread retention is unavailable while the owner is starting.", 503, origin);
+  }
+  const outcome = dependencies.threadRetention.setWindow(request, "local-window");
+  return json(outcome, "kind" in outcome ? 403 : 200, origin);
+}
+
+async function handlePurgeThreads(
+  dependencies: HostControlRouteDependencies,
+  request: PurgeThreadsRequest,
+  origin: string | null,
+): Promise<Response> {
+  if (dependencies.threadRetention === undefined) {
+    return failure("Thread retention is unavailable while the owner is starting.", 503, origin);
+  }
+  const outcome = await dependencies.threadRetention.purge(request, "local-window");
+  return json(outcome, "kind" in outcome ? 403 : 200, origin);
 }
 
 function handleRestore(origin: string | null): Response {

@@ -128,6 +128,8 @@ const LOCAL_HOST_ACTIONS = new Set([
   "host.service.logs",
   "host.store.backup",
   "host.store.restore",
+  "host.store.retention",
+  "host.store.purge",
   "diagnostics.export",
 ]);
 
