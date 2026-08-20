@@ -15,10 +15,14 @@ orchestration service, process supervision, and packaged child smoke — is
 landing on `main`. The full user-facing flow, including
 **Settings → Agents**, role cards, mixed-vendor routing, and a child-creation
 interface, remains a planned part of the technical-preview program. What you
-can use today is the read-only **Agents** hierarchy panel in Code threads,
-which shows active and history runs, posture, usage quality, recovery state,
-and an **"Acknowledge result"** button. Rows carry a "native read-only"
-marker when the child runs inside the provider's own runtime.
+can use today is compact child-run status on a live parent thread in Chat,
+Work, or Code — how many children are working, waiting, or blocked, with a
+stop control that cancels only that thread's children — and the read-only
+**Agents** hierarchy panel in Code threads, which shows active and history
+runs, posture, usage quality, recovery state, and an **"Acknowledge result"**
+button. Opening the list from the header chrome uses that same hierarchy, not
+a second surface. Rows carry a "native read-only" marker when the child runs
+inside the provider's own runtime.
 
 This page documents the designed behavior so you know where the product is
 going. Where a control is not yet available, the page says so explicitly.
