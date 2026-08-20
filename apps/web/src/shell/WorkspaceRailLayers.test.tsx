@@ -1,5 +1,5 @@
 import type { AutomationClient } from "@octant/client-runtime";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
@@ -95,9 +95,11 @@ describe("WorkspaceRailLayers", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Controller foundation" })).toBeVisible();
-    });
+    // CodeWorkspaceTab is lazy. Its Suspense fallback is a ShellState heading
+    // titled with the tab name, so "Controller foundation" exists before the
+    // chunk settles and then unmounts. The Code thread region does not.
+    const thread = await screen.findByRole("region", { name: "Code thread" });
+    expect(within(thread).getByRole("heading", { name: "Controller foundation" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Automations" }));
 
     expect(await screen.findByRole("heading", { name: "Automation Center" })).toBeVisible();
@@ -117,7 +119,10 @@ describe("WorkspaceRailLayers", () => {
       expect(screen.queryByRole("heading", { name: "Automation Center" })).not.toBeInTheDocument(),
     );
     expect(document.querySelector(".workspace")).not.toHaveAttribute("hidden");
-    expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
+    const restoredThread = await screen.findByRole("region", { name: "Code thread" });
+    expect(
+      within(restoredThread).getByRole("heading", { name: "Controller foundation" }),
+    ).toBeVisible();
   });
 
   it("dismisses a rail placeholder when the user changes modes", async () => {
