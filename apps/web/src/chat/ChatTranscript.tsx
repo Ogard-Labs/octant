@@ -180,6 +180,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         const editing = editingTurnId === String(turn.id);
         const checkpoints = props.checkpoints;
         const marked = checkpoints?.byTurnId.get(String(turn.id));
+        const routeDecision = routeDecisionByTurn.get(String(turn.id));
 
         return (
           <div className="chat-transcript__turn">
@@ -237,9 +238,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
                 />
               )}
             </article>
-            {routeDecisionByTurn.get(String(turn.id)) === undefined ? null : (
-              <RouteReceipt decision={routeDecisionByTurn.get(String(turn.id))!} />
-            )}
+            {routeDecision === undefined ? null : <RouteReceipt decision={routeDecision} />}
             {turn.attempts.map((attempt, index) => (
               <AttemptBlock
                 attempt={attempt}
