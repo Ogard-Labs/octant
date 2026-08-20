@@ -81,10 +81,9 @@ describe("ProjectCreateDialog web folder parity", () => {
     const confirm = screen.getByRole("button", { name: "Create Project" });
     expect(confirm.className).toContain("btn-primary");
     expect(confirm.className).not.toContain("project-button");
-    expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass(
-      "project-button",
-      "project-button--quiet",
-    );
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(cancel.className).toContain("btn-ghost");
+    expect(cancel.className).not.toContain("project-button");
   });
 
   it("restores native retry and cancellation after a safe picker failure", async () => {

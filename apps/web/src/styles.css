@@ -963,9 +963,9 @@ button:focus-visible {
 .project-dialog .code-project-views__choice {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: var(--octant-text-secondary);
-  font-size: 13px;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-sm);
 }
 
 /* 8px wide like the thread-status dot, so activity titles and tree titles
@@ -2308,32 +2308,23 @@ button:focus-visible {
   }
 }
 
-.project-dialog,
-.project-search,
 .folder-picker {
   position: fixed;
   z-index: 50;
   color: inherit;
 }
 
-.project-dialog::backdrop,
-.project-search::backdrop,
 .folder-picker::backdrop {
   background: var(--octant-scrim);
 }
 
 .project-dialog {
-  inset: auto;
-  top: auto;
-  right: auto;
-  bottom: auto;
-  left: auto;
-
   /*
    * Said as the shared dialog's own variable, not as a competing max-width.
    * These dialogs also carry `.octant-dialog__popup`, whose rule is imported
    * later at the same specificity, so a flat cap here would simply lose and
-   * the dialog would open at the shared default.
+   * the dialog would open at the shared default. Surface, border, radius,
+   * and shadow come from the shared dialog chrome and the material layer.
    */
   --octant-dialog-width: 380px;
 
@@ -2343,19 +2334,7 @@ button:focus-visible {
   max-height: min(80vh, 560px);
   margin: 0;
   overflow: auto;
-  padding: 16px;
-  color: var(--octant-text-primary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 12px;
-  box-shadow: none;
-}
-
-/* Native <dialog> path still uses the top-biased sheet layout. */
-dialog.project-dialog {
-  inset: 44px 0 0;
-  margin: auto;
-  max-height: none;
+  padding: var(--oct-space-4);
 }
 
 .project-dialog__header {
@@ -2364,97 +2343,89 @@ dialog.project-dialog {
   justify-content: space-between;
 }
 
+/* Mono meta, matching the system's .menu-label/.eyebrow treatment. */
 .project-dialog__header span,
 .project-overview__type,
 .project-overview__root > span {
-  color: var(--octant-text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }
 
 .project-dialog h1 {
   margin: 2px 0 0;
-  font-size: 16px;
+  font-size: var(--oct-text-base);
   font-weight: 600;
-  letter-spacing: -0.02em;
-}
-
-.project-dialog__header > button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  color: var(--octant-text-muted);
-  border-radius: 6px;
-  cursor: pointer;
-  place-items: center;
-}
-
-.project-dialog__header > button:hover {
-  background: var(--octant-selection);
+  letter-spacing: var(--oct-tracking-tight);
 }
 
 .project-dialog > p {
-  margin: 8px 0 14px;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-  line-height: 1.45;
+  margin: var(--oct-space-2) 0 var(--oct-space-4);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  line-height: var(--oct-leading-snug);
 }
 
 .project-dialog form,
 .project-dialog label {
   display: grid;
-  gap: 7px;
+  gap: var(--oct-space-2);
 }
 
+/* Reads as the system's .field label. */
 .project-dialog label {
-  color: var(--octant-text-secondary);
-  font-size: 12px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
 }
 
+/* Drawn to the system's .input/.select/.textarea recipe at the small
+   control height until these controls adopt the classes themselves. */
 .project-dialog input:not([type="checkbox"]):not([type="radio"]),
 .project-dialog select,
 .project-dialog textarea,
-.project-search input,
 .project-overview__name {
-  color: var(--octant-text-primary);
-  background: var(--octant-workspace);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 7px;
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
   font: inherit;
+  font-size: var(--oct-text-sm);
 }
 
 .project-dialog input:not([type="checkbox"]):not([type="radio"]) {
-  min-height: 38px;
-  padding: 0 10px;
+  min-height: var(--oct-control-height-sm);
+  padding: 0 var(--oct-space-3);
 }
 
 .project-dialog select,
 .project-dialog textarea {
   width: 100%;
-  padding: 9px 10px;
+  padding: var(--oct-space-2) var(--oct-space-3);
 }
 
 .project-dialog textarea {
   min-height: 112px;
   resize: vertical;
+  line-height: var(--oct-leading-snug);
 }
 
 .project-dialog input:not([type="checkbox"]):not([type="radio"]):focus-visible,
 .project-dialog select:focus-visible,
 .project-dialog textarea:focus-visible,
-.project-search input:focus-visible,
 .project-overview__name:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
+  border-color: var(--oct-accent-fg);
+  outline: none;
+  box-shadow: var(--oct-focus-ring);
 }
 
 .project-dialog__actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
 }
 
 .project-button {
@@ -2484,8 +2455,9 @@ dialog.project-dialog {
 
 .project-dialog__status {
   min-height: 17px;
-  margin: 8px 0 0 !important;
-  color: var(--octant-warning-text) !important;
+  margin: var(--oct-space-2) 0 0 !important;
+  color: var(--oct-warn-fg) !important;
+  font-size: var(--oct-text-xs);
 }
 
 .folder-picker {
@@ -2738,93 +2710,6 @@ dialog.project-dialog {
 .folder-picker__actions {
   display: flex;
   justify-content: flex-end;
-}
-
-.project-search {
-  top: 102px;
-  width: min(100%, 590px);
-  overflow: hidden;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 11px;
-  box-shadow: var(--octant-shadow-overlay);
-}
-
-.project-search__field {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  border-bottom: 1px solid var(--octant-border);
-}
-
-.project-search__field > span {
-  color: var(--octant-text-muted);
-  font-size: 18px;
-}
-
-.project-search input {
-  min-width: 0;
-  min-height: 34px;
-  padding: 0 9px;
-}
-
-.project-search__field button {
-  min-height: 25px;
-  padding: 0 7px;
-  color: var(--octant-text-muted);
-  background: var(--octant-selection);
-  border: 1px solid var(--octant-border);
-  border-radius: 5px;
-  cursor: pointer;
-  font-size: 10px;
-}
-
-.project-search__results {
-  max-height: min(52vh, 420px);
-  padding: 5px;
-  overflow-y: auto;
-}
-
-.project-search__status:not(.sr-only) {
-  margin: 0;
-  padding: 18px 12px;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-}
-
-.project-search__retry {
-  margin: -10px 12px 14px;
-}
-
-.project-search__result {
-  display: grid;
-  width: 100%;
-  gap: 3px;
-  padding: 9px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.project-search__results > button.project-search__result:hover,
-.project-search__results > button.project-search__result:focus-visible {
-  background: var(--octant-selection);
-}
-.project-search__result--archived {
-  color: var(--octant-text-muted);
-  cursor: default;
-}
-.project-search__results span {
-  font-size: 12px;
-}
-.project-search__results small {
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .project-overview {
@@ -3883,13 +3768,13 @@ dialog.project-dialog {
 }
 
 .memory-entry-dialog__original {
-  margin: 0 0 14px;
-  padding: 10px 11px;
-  color: var(--octant-text-muted);
-  background: var(--octant-chrome);
-  border-left: 2px solid var(--octant-divider-strong);
-  font-size: 11px;
-  line-height: 1.45;
+  margin: 0 0 var(--oct-space-4);
+  padding: var(--oct-space-3);
+  color: var(--oct-muted);
+  background: var(--oct-surface-warm);
+  border-left: 2px solid var(--oct-border);
+  font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
 }
 
 .project-overview__prompt {
@@ -4419,7 +4304,7 @@ dialog.project-dialog {
 .work-overview__section {
   min-width: 0;
   padding: 14px 0;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .work-overview__section:first-child {
@@ -4434,8 +4319,8 @@ dialog.project-dialog {
 
 .work-overview__section p {
   margin: 6px 0 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   line-height: 1.5;
 }
 
@@ -4455,14 +4340,14 @@ dialog.project-dialog {
   align-items: baseline;
   justify-content: space-between;
   min-width: 0;
-  color: var(--octant-text);
+  color: var(--oct-fg);
   font-size: 12px;
   line-height: 1.4;
 }
 
 .work-overview__items li > span:last-child {
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .work-overview__composer {
@@ -4472,7 +4357,7 @@ dialog.project-dialog {
   min-width: 0;
   margin: 0 16px 16px;
   padding: 14px 0 0;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .work-overview__composer form {
@@ -4493,8 +4378,8 @@ dialog.project-dialog {
   gap: 5px;
   align-items: center;
   min-width: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .work-overview__context-item span {
@@ -4503,25 +4388,8 @@ dialog.project-dialog {
   white-space: nowrap;
 }
 
-.work-overview__composer textarea {
-  width: 100%;
-  min-height: 72px;
-  padding: 10px 12px;
-  resize: vertical;
-  color: var(--octant-text);
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
-  font: inherit;
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.work-overview__composer textarea:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 1px;
-}
-
+/* The quick-start field and buttons are the system's Textarea and button
+   recipes; only their column placement is this surface's own. */
 .work-overview__composer button {
   align-self: flex-start;
 }
@@ -4569,13 +4437,13 @@ dialog.project-dialog {
 .chat-project-overview__section {
   min-width: 0;
   padding: 14px 16px 14px 0;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .chat-project-overview__section:nth-child(even) {
   padding-right: 0;
   padding-left: 16px;
-  border-left: 1px solid var(--octant-border);
+  border-left: 1px solid var(--oct-border);
 }
 
 .chat-project-overview__section:nth-child(-n + 2) {
@@ -4591,8 +4459,8 @@ dialog.project-dialog {
 .chat-project-overview__section p,
 .chat-project-overview__scope {
   margin: 6px 0 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   line-height: 1.5;
 }
 
@@ -4612,15 +4480,15 @@ dialog.project-dialog {
   align-items: baseline;
   justify-content: space-between;
   min-width: 0;
-  color: var(--octant-text);
+  color: var(--oct-fg);
   font-size: 12px;
   line-height: 1.4;
 }
 
 .chat-project-overview__items li > span:last-child,
 .chat-project-overview__items .project-button span:last-child {
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .chat-project-overview__archived {
@@ -4634,8 +4502,8 @@ dialog.project-dialog {
 .chat-project-overview__archived > .project-button {
   min-height: 0;
   padding: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .chat-project-overview__archived .chat-project-overview__items {
@@ -4652,7 +4520,7 @@ dialog.project-dialog {
 }
 
 .chat-project-overview:not(.chat-project-overview--home) .chat-project-overview__quick-start {
-  border-bottom: 1px solid var(--octant-border);
+  border-bottom: 1px solid var(--oct-border);
   padding-bottom: 16px;
 }
 
@@ -4681,27 +4549,36 @@ dialog.project-dialog {
   gap: 10px;
 }
 
-.chat-project-overview__quick-start textarea {
-  width: 100%;
+/* The frame, input, row, and send circle are the system's `.composer`
+   vocabulary; the quick-start only asks for a taller first message. */
+.chat-project-overview__quick-start .composer-input {
   min-height: 96px;
-  padding: 12px 14px;
-  resize: vertical;
-  color: var(--octant-text);
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 12px;
-  font: inherit;
-  font-size: 14px;
-  line-height: 1.5;
 }
 
-.chat-project-overview__quick-start textarea:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 1px;
+/* The provider control rides the composer row as a quiet trigger; the menu
+   opens downward because the quick-start sits mid-page, not at the window's
+   bottom edge. */
+.chat-project-overview__quick-start .composer-row .composer-model-picker__trigger {
+  min-height: 27px;
+  padding: 0 7px;
+  color: var(--oct-muted);
+  background: transparent;
+  border-color: transparent;
+  font-size: var(--oct-text-xs);
 }
 
-.chat-project-overview__quick-start button {
-  align-self: flex-start;
+.chat-project-overview__quick-start
+  .composer-row
+  .composer-model-picker__trigger:hover:not(:disabled) {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
+.chat-project-overview__quick-start .composer-row .composer-model-picker__menu {
+  top: calc(100% + 8px);
+  right: auto;
+  bottom: auto;
+  left: 0;
 }
 
 @media (max-width: 760px) {
@@ -4714,7 +4591,7 @@ dialog.project-dialog {
   .chat-project-overview__section:nth-child(-n + 2) {
     padding-right: 0;
     padding-left: 0;
-    border-top: 1px solid var(--octant-border);
+    border-top: 1px solid var(--oct-border);
     border-left: 0;
   }
 
@@ -4806,10 +4683,6 @@ dialog.project-dialog {
   }
 
   .project-dialog {
-    max-width: calc(100vw - 32px);
-  }
-  .project-search {
-    top: 66px;
     max-width: calc(100vw - 32px);
   }
 

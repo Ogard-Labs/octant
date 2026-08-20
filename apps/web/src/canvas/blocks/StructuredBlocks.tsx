@@ -25,7 +25,7 @@ export function StructuredBlocks({ block }: { readonly block: Block }) {
 
 function TableBlock({ block }: { readonly block: Extract<Block, { readonly kind: "table" }> }) {
   return (
-    <table className="canvas-block__table">
+    <table className="ds-table">
       <thead>
         <tr>
           {block.columns.map((column) => (

@@ -351,25 +351,27 @@
   min-width: 28px;
   min-height: 28px;
   padding: 0;
-  border: 1px solid var(--octant-border-strong);
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 26%, transparent);
 }
 
+/* Selection is carried by `aria-checked` in the markup; the accent ring is
+   reinforcement, and it is not the focus ring — that stays the system's. */
 .settings-view__preset-swatch[aria-checked="true"] {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-accent-fg);
   outline-offset: 2px;
 }
 
 .settings-view__setting-copy {
   display: grid;
   gap: 3px;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-size: 12px;
   font-weight: 500;
 }
 
 .settings-view__setting-copy p {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 11px;
   font-weight: 400;
   line-height: 1.4;
@@ -397,15 +399,21 @@
 
 .settings-theme-editor__disclosure {
   padding-top: 12px;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
-.settings-theme-editor__card > h3 {
+/* Card headings speak the settings vocabulary's mono group label, the same
+   voice as `.setgroup-head` on the rows around this editor. */
+.settings-theme-editor__card > h3,
+.settings-theme-editor__accessibility legend {
   margin: 0;
   padding: 0 0 8px;
-  color: var(--octant-text-primary);
-  font-size: 12.5px;
-  font-weight: 600;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
 }
 
 /* Color scheme cards: mini previews for System, Light, and Dark. */
@@ -422,25 +430,26 @@
   padding: 0;
   overflow: hidden;
   text-align: center;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
   cursor: pointer;
-  transition: border-color 120ms ease;
+  transition: border-color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .settings-scheme__card:hover {
-  border-color: var(--octant-border-strong);
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
 }
 
 .settings-scheme__card[aria-checked="true"] {
-  border-color: var(--octant-accent);
-  box-shadow: 0 0 0 1px var(--octant-accent);
+  border-color: var(--oct-accent-fg);
+  box-shadow: 0 0 0 1px var(--oct-accent-fg);
 }
 
+/* Same specificity as the checked ring and declared after it, so keyboard
+   focus stays visible on the card that is already chosen. */
 .settings-scheme__card:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
+  box-shadow: var(--oct-focus-ring);
 }
 
 .settings-scheme__preview {
@@ -462,6 +471,8 @@
   display: none;
 }
 
+/* The pane colours are literals on purpose: each card depicts what Light or
+   Dark would look like, so they must not follow the theme that is active. */
 .settings-scheme__preview-pane--light {
   background: #fafafb;
 }
@@ -515,19 +526,19 @@
   width: 8px !important;
   height: 8px !important;
   border-radius: 50% !important;
-  background: var(--octant-accent) !important;
+  background: var(--oct-accent) !important;
 }
 
 .settings-scheme__label {
   padding: 7px 0 8px;
-  color: var(--octant-text-secondary);
-  font-size: 11.5px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   font-weight: 500;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .settings-scheme__card[aria-checked="true"] .settings-scheme__label {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .settings-theme-editor__card > .settings-view__field:last-child,
@@ -540,10 +551,11 @@
   min-height: 42px;
   align-items: center;
   justify-content: space-between;
-  color: var(--octant-text-secondary);
+  color: var(--oct-fg-2);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
   list-style: none;
 }
 
@@ -553,8 +565,8 @@
 
 .settings-theme-editor__disclosure-icon {
   flex: 0 0 auto;
-  color: var(--octant-text-muted);
-  transition: transform 140ms ease;
+  color: var(--oct-muted);
+  transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .settings-theme-editor__disclosure[open] .settings-theme-editor__disclosure-icon {
@@ -569,45 +581,33 @@
   padding-top: 8px;
 }
 
-.settings-theme-editor__accessibility legend {
-  padding: 0 0 4px;
-  color: var(--octant-text-primary);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-/* Unsaved-changes bar: note on the left, Apply/Cancel/Reset on the right. */
+/* Unsaved-changes bar: note on the left, Apply/Cancel/Reset on the right.
+   The buttons are the system's small recipe; nothing resizes them here. */
 .settings-theme-editor__draft-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border);
-  border-radius: 10px;
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .settings-theme-editor__draft-bar .settings-view__actions {
   flex-wrap: nowrap;
 }
 
-.settings-theme-editor__draft-bar button {
-  min-height: 26px;
-  padding: 0 10px;
-  font-size: 11.5px;
-}
-
 .settings-view__preview-note,
 .settings-view__error {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
 }
 
 .settings-view__error {
-  color: var(--octant-danger-text);
+  color: var(--oct-danger-fg);
 }
 
 .settings-view__theme-group {
@@ -616,33 +616,30 @@
   padding: 8px 0;
   margin: 0;
   border: 0;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .settings-view__theme-group legend {
   padding: 0;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  font-weight: 600;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-strong);
 }
 
+/* Rides the `.textarea` recipe. Theme JSON is code, so the face is mono and
+   the box keeps a bounded width inside the wide settings pane. */
 .settings-view__textarea {
   width: min(100%, 520px);
   min-height: 100px;
-  padding: 8px;
-  color: var(--octant-text-primary);
-  font: 12px/1.4 var(--octant-editor-font-family);
-  background: var(--octant-surface-inset);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 4px;
-  resize: vertical;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
 }
 
 .settings-view__theme-transfer {
   display: grid;
   gap: 8px;
   padding-top: 8px;
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .shell--material-translucent .settings-view__effective-note {
@@ -700,7 +697,7 @@
 
 .settings-view__empty {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 12px;
 }
 
@@ -764,14 +761,14 @@
   flex-direction: column;
   gap: 8px;
   font-size: 12px;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .host-settings__heading {
   margin: 14px 0 2px;
   font-size: 13px;
-  font-weight: 600;
-  color: var(--octant-text-primary);
+  font-weight: var(--oct-weight-strong);
+  color: var(--oct-fg);
 }
 
 .host-settings__facts {
@@ -782,7 +779,7 @@
 }
 
 .host-settings__facts dt {
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-weight: 400;
 }
 
@@ -801,7 +798,7 @@
 .host-settings__note {
   margin: 0;
   max-width: 560px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -818,7 +815,7 @@
 }
 
 .host-settings__field label {
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 11px;
 }
 
@@ -841,14 +838,14 @@
   flex-direction: column;
   gap: 8px;
   font-size: 12px;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .github-settings__heading {
   margin: 14px 0 2px;
   font-size: 13px;
-  font-weight: 600;
-  color: var(--octant-text-primary);
+  font-weight: var(--oct-weight-strong);
+  color: var(--oct-fg);
 }
 
 .github-settings__facts {
@@ -859,7 +856,7 @@
 }
 
 .github-settings__facts dt {
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-weight: 400;
 }
 
@@ -878,7 +875,7 @@
 .github-settings__note {
   margin: 0;
   max-width: 560px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 11px;
   line-height: 1.4;
 }
@@ -898,11 +895,11 @@
 }
 
 .github-settings__capability-state--available {
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .github-settings__capability-state--unavailable {
-  color: var(--octant-status-warning, var(--octant-text-muted));
+  color: var(--oct-warn-fg);
 }
 
 .github-settings__device-flow {
@@ -912,12 +909,15 @@
   gap: 8px;
 }
 
+/* A code the user retypes elsewhere, so it reads in the mono face. */
 .github-settings__device-code {
-  font-size: 14px;
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-sm);
   letter-spacing: 0.12em;
   padding: 2px 8px;
-  border: 1px solid var(--octant-border-subtle, currentColor);
-  border-radius: 4px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface-warm);
 }
 
 .github-settings__scopes {
@@ -955,7 +955,7 @@
 
 .app-update__version {
   margin: 0;
-  font-weight: 600;
+  font-weight: var(--oct-weight-strong);
 }
 
 .app-update__actions {
@@ -967,7 +967,7 @@
 .app-update__notice {
   margin: 0;
   font-size: 12px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .app-update__automatic {
@@ -975,18 +975,18 @@
   flex-direction: column;
   gap: 6px;
   padding-top: 8px;
-  border-top: 1px solid var(--octant-border-subtle);
+  border-top: 1px solid var(--oct-border-soft);
 }
 
 .app-update__disclosure {
   margin: 0;
   font-size: 12px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .app-update__disclosure-list {
   margin: 0;
   padding-left: 18px;
   font-size: 12px;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }

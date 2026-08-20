@@ -2,10 +2,11 @@
  * Residual Chat styles. The transcript and composer adopt the design system's
  * chat vocabulary (`.turn-user`/`.bubble`, `.turn-agent`, `.runstatus`,
  * `.composer`, `.composer-input`, `.composer-chips`, `.composer-row`,
- * `.btn-send`, `.chip`) from styles/octant.css; what remains here is either a
- * sub-surface that has not been ported (welcome screen, work shelf, side chat,
- * workspace chrome) or behavior the system has no vocabulary for (streaming
- * state, edit-in-place, typeahead placement).
+ * `.btn-send`, `.chip`) from styles/octant.css; the welcome screen rides the
+ * same composer vocabulary with hero-scale overrides. What remains here is
+ * either a sub-surface that has not been ported (work shelf, workspace chrome)
+ * or behavior the system has no vocabulary for (streaming state,
+ * edit-in-place, typeahead placement).
  */
 
 .chat-workspace {
@@ -30,11 +31,14 @@
   gap: 8px;
 }
 
+/* The h1 element already wears the system display face; only the hero scale
+   and balance are this surface's own. */
 .chat-welcome .draft-thread__heading {
   max-width: 22ch;
+  color: var(--oct-fg);
   font-size: clamp(26px, 3vw, 34px);
   font-weight: 400;
-  letter-spacing: -0.025em;
+  letter-spacing: var(--oct-tracking-tight);
   line-height: 1.15;
   text-wrap: balance;
 }
@@ -42,86 +46,41 @@
 .chat-welcome .draft-thread__description {
   max-width: 52ch;
   margin-top: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font-size: 13px;
   line-height: 1.55;
   text-wrap: pretty;
 }
 
-.chat-welcome .draft-thread__composer {
-  gap: 0;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-composer, 14px);
-  box-shadow: var(--octant-shadow-lg);
-  transition:
-    border-color 120ms ease,
-    box-shadow 120ms ease;
+/* The frame, focus accent, input, row, and send circle are the system's
+   `.composer` vocabulary; the welcome hero only asks for a taller first
+   message than the in-thread composer's single line. */
+.chat-welcome .composer-input {
+  min-height: 96px;
 }
 
-.chat-welcome .draft-thread__composer:focus-within {
-  border-color: var(--octant-border-strong);
-  box-shadow: var(--octant-shadow-lg);
-}
-
-.chat-welcome .draft-thread__input-row {
-  min-height: 88px;
-  padding: 14px 16px 2px;
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
-}
-
-.chat-welcome .draft-thread__input-row:focus-within {
-  box-shadow: none;
-}
-
-.chat-welcome .draft-thread__textarea {
-  align-self: stretch;
-  min-height: 64px;
-  font-size: 14px;
-}
-
-/* Bottom toolbar: quiet model control on the left, round send on the right. */
-.chat-welcome .draft-thread__composer-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 8px 8px 10px;
-}
-
-.chat-welcome .draft-thread__composer-bar .draft-thread__context-picker {
-  min-width: 0;
-  margin-inline-start: 0;
-}
-
-.chat-welcome .draft-thread__composer-bar .composer-model-picker__trigger {
-  min-height: 26px;
+/* The provider control rides the composer row as a quiet trigger, and its
+   menu opens downward because this composer sits mid-screen rather than at
+   the window's bottom edge. */
+.chat-welcome .composer-row .composer-model-picker__trigger {
+  min-height: 27px;
   padding: 0 7px;
-  color: var(--octant-text-secondary);
+  color: var(--oct-muted);
   background: transparent;
   border-color: transparent;
-  font-size: 11.5px;
+  font-size: var(--oct-text-xs);
 }
 
-.chat-welcome .draft-thread__composer-bar .composer-model-picker__trigger:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
+.chat-welcome .composer-row .composer-model-picker__trigger:hover:not(:disabled) {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
-.chat-welcome .draft-thread__composer-bar .composer-model-picker__menu {
+.chat-welcome .composer-row .composer-model-picker__menu {
   top: calc(100% + 8px);
   right: auto;
   bottom: auto;
   left: 0;
-}
-
-.chat-welcome .draft-thread__send {
-  color: var(--octant-accent-foreground);
-  background: var(--octant-accent);
-  border-radius: var(--octant-radius-pill, 999px);
 }
 
 /* The hint sits below the card, like secondary context under the composer. */
@@ -130,7 +89,8 @@
   padding: 0;
   margin-top: -8px;
   border-top: 0;
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   line-height: 1.4;
   opacity: 0.7;
   text-align: center;
@@ -144,45 +104,26 @@
   gap: 6px;
 }
 
+/* Starter categories are the system ghost button reshaped into a pill. */
 .chat-welcome__suggestions button {
   min-height: 32px;
   gap: 7px;
   padding-inline: 11px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 1px solid var(--octant-border);
-  border-radius: var(--octant-radius-pill, 999px);
-  font-size: 12px;
+  color: var(--oct-muted);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
+  font-size: var(--oct-text-xs);
   font-weight: 500;
 }
 
 .chat-welcome__suggestions button:hover:not(:disabled) {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-  border-color: var(--octant-border-strong);
-}
-
-.chat-welcome .draft-thread__error {
-  padding: 0 12px 10px;
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
 }
 
 .chat-welcome__retry {
-  min-height: 28px;
-  padding: 0 10px;
-  margin: 0 12px 12px;
-  align-self: flex-start;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 600;
-}
-
-.chat-welcome__retry:hover {
-  color: var(--octant-text-primary);
-  border-color: var(--octant-text-primary);
+  align-self: center;
 }
 
 .chat-workspace__load-state {
@@ -1262,8 +1203,8 @@ html[data-octant-reduced-motion="true"]
 .side-chat__header {
   display: grid;
   gap: 2px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--octant-border);
+  padding: var(--oct-space-3) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border);
 }
 
 .side-chat__title {
@@ -1271,23 +1212,23 @@ html[data-octant-reduced-motion="true"]
   align-items: center;
   gap: 6px;
   margin: 0;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
   font-size: 13px;
   font-weight: 500;
 }
 
 .side-chat__notice {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
 .side-chat__empty {
   display: grid;
   justify-items: start;
-  gap: 8px;
-  padding: 16px;
-  color: var(--octant-text-muted);
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-4);
+  color: var(--oct-muted);
   font-size: 12px;
 }
 

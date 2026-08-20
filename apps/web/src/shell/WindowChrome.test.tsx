@@ -186,11 +186,11 @@ describe("WindowChrome", () => {
     expect(cssRule(".window-chrome__button")).toContain("width: 26px;");
     expect(cssRule(".window-chrome__button")).toContain("height: 26px;");
     expect(cssRule(".window-chrome__button")).toContain("background: transparent;");
-    expect(cssRule(".window-chrome__button:hover")).toContain(
-      "background: var(--octant-control-hover);",
-    );
+    // The hover fill is the design system's neutral soft ink (--oct-fg-soft),
+    // the same feedback .btn-icon gives, still no accent.
+    expect(cssRule(".window-chrome__button:hover")).toContain("background: var(--oct-fg-soft);");
     expect(cssRule('.window-chrome__button[aria-expanded="true"]')).toContain(
-      "background: var(--octant-control-hover);",
+      "background: var(--oct-fg-soft);",
     );
   });
 
@@ -326,18 +326,22 @@ describe("WindowChrome", () => {
     expect(cssRule(".octant-dialog__popup")).toContain(
       "max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
     );
-    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: 12px");
+    // 12px now arrives as the system radius token (--oct-radius-lg: 12px).
+    expect(cssRule(".octant-dialog__popup")).toContain("border-radius: var(--oct-radius-lg)");
     expect(cssRule(".octant-dialog__popup")).not.toContain("height: 100%");
     expect(cssRule(".octant-dialog__popup")).not.toContain("border-left: 1px solid");
-    expect(cssRule(".octant-dialog__backdrop")).toContain("rgb(0 0 0 / 28%)");
-    expect(cssRule(".project-dialog", 1)).toContain("width: min(100%, 380px)");
-    expect(cssRule(".project-dialog", 1)).toContain("padding: 16px");
-    expect(cssRule(".project-dialog h1")).toContain("font-size: 16px");
+    // The wash behind a modal is the system scrim token rather than a literal.
+    expect(cssRule(".octant-dialog__backdrop")).toContain("var(--oct-scrim)");
+    expect(cssRule(".project-dialog")).toContain("width: min(100%, 380px)");
+    expect(cssRule(".project-dialog")).toContain("padding: var(--oct-space-4)");
+    expect(cssRule(".project-dialog h1")).toContain("font-size: var(--oct-text-base)");
   });
 
   it("keeps the opaque utility dock and accessibility fallbacks", () => {
-    expect(cssRule(".right-utility-dock")).toContain("background: var(--octant-workspace);");
-    expect(cssRule(".octant-dialog__popup")).toContain("background: var(--octant-workspace);");
+    // --oct-bg is the bridge's alias for the opaque --octant-workspace ground,
+    // so the dock and dialog stay workspace-opaque under every theme.
+    expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
+    expect(cssRule(".octant-dialog__popup")).toContain("background: var(--oct-bg);");
     expect(cssRule(".environment-git-group dl")).toContain("background: var(--octant-control);");
     expect(cssRule(".environment-git-group dl")).toContain(
       "border: 1px solid var(--octant-border);",

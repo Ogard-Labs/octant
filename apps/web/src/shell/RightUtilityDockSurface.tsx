@@ -31,7 +31,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const dismiss = props.onClose;
   return (
     <div className="right-utility-dock__surface" data-dock-surface={activeSurface.id}>
-      <header className="right-utility-dock__toolbar">
+      <header className="dock-head right-utility-dock__toolbar">
         {/* The tabs name the surface. A heading above them repeated that name
             on its own line, under an eyebrow nobody outside the code calls a
             utility dock. */}
@@ -63,7 +63,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           </div>
         )}
       </header>
-      <div className="right-utility-dock__content">
+      <div className="dock-body right-utility-dock__content">
         {
           {
             context: props.context,

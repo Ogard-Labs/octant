@@ -66,7 +66,7 @@ export function WorkbookViewer(props: {
           <OctantButton
             aria-controls={panelId(index)}
             aria-selected={index === safeActive}
-            className={`preview-workbook__tab${index === safeActive ? " preview-workbook__tab--active" : ""}`}
+            className="sheet-tab"
             id={tabId(index)}
             key={index}
             onClick={() => setActive(index)}
@@ -102,7 +102,7 @@ export function WorkbookViewer(props: {
         aria-labelledby={tabId(safeActive)}
         tabIndex={0}
       >
-        <table className="preview-table" aria-label={`${sheet?.name ?? "Worksheet"}`}>
+        <table className="preview-table datatable" aria-label={`${sheet?.name ?? "Worksheet"}`}>
           <caption>
             Worksheet {sheet?.name ?? ""}: {rows.length} rows, {columnCount} columns.
           </caption>
