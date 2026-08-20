@@ -35,7 +35,7 @@ describe("SettingsNavigation", () => {
 
     const general = screen.getByRole("button", { name: "General" });
     const appearance = screen.getByRole("button", { name: "Appearance" });
-    expect(general).toHaveAttribute("aria-current", "true");
+    expect(general).toHaveAttribute("aria-current", "page");
     expect(appearance).not.toHaveAttribute("aria-current");
 
     fireEvent.click(appearance);

@@ -77,6 +77,54 @@ describe("ProjectOverview", () => {
     expect(screen.queryByRole("heading", { name: "Project workspace" })).not.toBeInTheDocument();
   });
 
+  it("shows a Code Project's threads once: the sessions list owns the page", () => {
+    render(
+      <ProjectMemoryInspectorProvider onOpen={vi.fn()}>
+        <ProjectThreadsProvider
+          value={{
+            onSelectThread: vi.fn(),
+            status: "ready",
+            threads: [
+              {
+                projectId: "20000000-0000-4000-8000-000000000001",
+                threadId: "thread-code",
+                title: "Fix the flaky smoke",
+                updatedAt: "2026-08-14T09:00:00.000Z",
+              },
+            ],
+          }}
+        >
+          <ProjectOverview
+            codeOverview={<section aria-label="Code sessions">Authoritative sessions</section>}
+            onArchive={vi.fn()}
+            onRelink={vi.fn()}
+            onRename={vi.fn()}
+            project={
+              {
+                id: "20000000-0000-4000-8000-000000000001",
+                name: "Octant",
+                lifecycle: "active",
+                pinned: true,
+                rank: "0/1",
+                version: 1,
+                createdAt: "2026-07-21T12:00:00.000Z",
+                updatedAt: "2026-07-21T12:00:00.000Z",
+                type: "code",
+                binding: { canonicalRoot: "/opaque/repository" },
+                codeAccessPersistence: "current-session",
+              } as never
+            }
+          />
+        </ProjectThreadsProvider>
+      </ProjectMemoryInspectorProvider>,
+    );
+
+    expect(screen.getByRole("region", { name: "Code sessions" })).toBeVisible();
+    expect(
+      screen.queryByRole("region", { name: /Threads and recent activity/ }),
+    ).not.toBeInTheDocument();
+  });
+
   it("composes the Work overview into a Work Project without Code affordances", () => {
     render(
       <ProjectOverview

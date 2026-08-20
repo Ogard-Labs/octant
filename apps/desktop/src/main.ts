@@ -166,6 +166,7 @@ const IPC_CHANNELS = {
   selectLocalPluginFolder: "octant:extensions:select-local-plugin-folder",
   setProviderCredential: "octant:provider-credential:set",
   resolvedMaterial: "octant:window:resolved-material",
+  resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
   sidebarMaterialPreference: "octant:window:sidebar-material-preference",
   sidebarVibrancyMode: "octant:window:sidebar-vibrancy-mode",
   privateListenerStatus: "octant:private-listener:status",
@@ -1190,6 +1191,7 @@ async function createWindow(): Promise<void> {
       });
 
       let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
+      let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
       const controller = createWindowPresentationController({
         window: {
           setVibrancy: (value) => window.setVibrancy(value),
@@ -1197,6 +1199,12 @@ async function createWindow(): Promise<void> {
             resolvedMaterial = material;
             if (!window.webContents.isDestroyed()) {
               window.webContents.send(IPC_CHANNELS.resolvedMaterial, material);
+            }
+          },
+          publishSidebarVibrancy: (vibrancy) => {
+            resolvedSidebarVibrancy = vibrancy;
+            if (!window.webContents.isDestroyed()) {
+              window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, vibrancy);
             }
           },
         },
@@ -1231,6 +1239,7 @@ async function createWindow(): Promise<void> {
 
       window.webContents.on("did-finish-load", () => {
         window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
+        window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
         while (pendingCodeDeepLinks.length > 0) {
           window.webContents.send(IPC_CHANNELS.codeDeepLink, pendingCodeDeepLinks.shift());
         }
@@ -1364,6 +1373,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
           windowId,
         });
         let resolvedMaterial: ResolvedSidebarMaterial = presentation.material;
+        let resolvedSidebarVibrancy: "sidebar" | null = presentation.vibrancy;
         const controller = createWindowPresentationController({
           window: {
             setVibrancy: (value) => window.setVibrancy(value),
@@ -1371,6 +1381,12 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
               resolvedMaterial = material;
               if (!window.webContents.isDestroyed()) {
                 window.webContents.send(IPC_CHANNELS.resolvedMaterial, material);
+              }
+            },
+            publishSidebarVibrancy: (vibrancy) => {
+              resolvedSidebarVibrancy = vibrancy;
+              if (!window.webContents.isDestroyed()) {
+                window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, vibrancy);
               }
             },
           },
@@ -1400,6 +1416,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         });
         window.webContents.on("did-finish-load", () => {
           window.webContents.send(IPC_CHANNELS.resolvedMaterial, resolvedMaterial);
+          window.webContents.send(IPC_CHANNELS.resolvedSidebarVibrancy, resolvedSidebarVibrancy);
         });
         window.webContents.on("render-process-gone", () => {
           void Promise.all([

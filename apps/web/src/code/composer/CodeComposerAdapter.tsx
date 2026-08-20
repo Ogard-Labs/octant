@@ -378,156 +378,157 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           {/* One card holds the prompt and everything the thread will be bound
               to. The strip used to sit outside it, which read as loose chrome
               under the composer rather than as part of what is being started. */}
-          <div className="code-composer-adapter__card">
-            <div className="code-composer-adapter__input-row">
-              {mention.open ? (
-                <ThreadMentionTypeahead
-                  activeIndex={mention.activeIndex}
-                  {...(threadMentions.composer?.busy === undefined
-                    ? {}
-                    : { busy: threadMentions.composer.busy })}
-                  candidates={threadMentions.composer?.candidates ?? []}
-                  listId={mentionListId}
-                  onChoose={mention.choose}
-                  onHover={mention.setActiveIndex}
-                />
-              ) : null}
-              <ThreadMentionChips
-                chips={threadMentions.chips}
-                onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
+          <div className="composer code-composer-adapter__card">
+            {mention.open ? (
+              <ThreadMentionTypeahead
+                activeIndex={mention.activeIndex}
+                {...(threadMentions.composer?.busy === undefined
+                  ? {}
+                  : { busy: threadMentions.composer.busy })}
+                candidates={threadMentions.composer?.candidates ?? []}
+                listId={mentionListId}
+                onChoose={mention.choose}
+                onHover={mention.setActiveIndex}
               />
-              {images.staged.length === 0 && images.message === undefined ? null : (
-                <div className="work-composer-adapter__attachments" aria-label="Attached images">
-                  {images.staged.map((attachment) => (
-                    <span className="work-composer-adapter__attachment" key={attachment.id}>
-                      <img
-                        alt={attachment.displayName}
-                        className="work-composer-adapter__attachment-thumb"
-                        src={attachment.previewUrl}
-                      />
-                      <span className="work-composer-adapter__attachment-name">
-                        {attachment.displayName}
-                      </span>
-                      <button
-                        aria-label={`Remove ${attachment.displayName}`}
-                        className="work-composer-adapter__attachment-remove"
-                        onClick={() => images.remove(attachment.id)}
-                        type="button"
-                      >
-                        ×
-                      </button>
+            ) : null}
+            <ThreadMentionChips
+              chips={threadMentions.chips}
+              onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
+            />
+            {images.staged.length === 0 && images.message === undefined ? null : (
+              <div
+                className="composer-chips work-composer-adapter__attachments"
+                aria-label="Attached images"
+              >
+                {images.staged.map((attachment) => (
+                  <span className="chip work-composer-adapter__attachment" key={attachment.id}>
+                    <img
+                      alt={attachment.displayName}
+                      className="work-composer-adapter__attachment-thumb"
+                      src={attachment.previewUrl}
+                    />
+                    <span className="work-composer-adapter__attachment-name">
+                      {attachment.displayName}
                     </span>
-                  ))}
-                  {images.message === undefined ? null : (
-                    <span className="work-composer-adapter__hint" role="status">
-                      {images.message}
-                    </span>
-                  )}
-                </div>
-              )}
-              <OctantTextarea
-                aria-label="First message"
-                autoFocus
-                className="code-composer-adapter__textarea"
-                disabled={props.creating}
-                onChange={(event) => {
-                  setPrompt(event.target.value);
-                  mention.sync(event.target.value, event.currentTarget.selectionStart);
-                }}
-                onClick={(event) =>
-                  mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
-                }
-                onKeyDown={handleKeyDown}
-                onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
-                  if (props.creating === true) return;
-                  if (attachFromTransfer(event.clipboardData)) event.preventDefault();
-                }}
-                placeholder="Describe the change…"
-                ref={textareaRef}
-                rows={3}
-                value={prompt}
-              />
-              <div className="code-composer-adapter__composer-bar">
-                <label>
-                  <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-                  <input
-                    aria-label="Choose attachment file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    className="work-composer-adapter__file-input"
-                    disabled={props.creating === true || imageSupport === false}
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.item(0);
-                      if (file !== null && file !== undefined) {
-                        if (imageSupport === false) {
-                          images.refuse(
-                            "The selected model does not accept images. Choose an image-capable model.",
-                          );
-                        } else {
-                          images.attach([file]);
-                        }
-                      }
-                      event.currentTarget.value = "";
-                    }}
-                    type="file"
-                  />
-                </label>
-                <OctantButton
-                  aria-label="Add attachment"
-                  disabled={props.creating === true || imageSupport === false}
-                  onClick={(event) => {
-                    event.currentTarget.parentElement
-                      ?.querySelector<HTMLInputElement>('input[type="file"]')
-                      ?.click();
-                  }}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
-                </OctantButton>
-                <span className="code-composer-adapter__context-picker">
-                  <ComposerModelPicker
-                    ariaLabel="Provider and model"
-                    groups={props.providerGroups}
-                    onSelect={props.onSelectProvider}
-                    {...(props.selectedModelId === undefined
-                      ? {}
-                      : { selectedModelId: props.selectedModelId })}
-                    {...(props.selectedProviderInstanceId === undefined
-                      ? {}
-                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                  />
-                </span>
-                {props.poolControl}
-                {props.profileControl}
-                <span className="code-composer-adapter__context-item">
-                  <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
-                  <OctantNativeSelect
-                    aria-label="Access policy"
-                    className="code-composer-adapter__policy-select"
-                    onChange={(e) => setExecutionPolicy(e.target.value as ProviderExecutionPolicy)}
-                    value={executionPolicy}
-                  >
-                    <option value="plan">Plan</option>
-                    <option value="approval-gated">Approval</option>
-                    <option value="auto-accept-edits">Auto-accept edits</option>
-                    <option value="full-access">Full access</option>
-                  </OctantNativeSelect>
-                </span>
-                <OctantButton
-                  aria-label={
-                    props.errorMessage === undefined ? "Create thread" : "Retry creating thread"
-                  }
-                  className="code-composer-adapter__send"
-                  disabled={!canSubmit}
-                  onClick={submit}
-                  size="icon"
-                  type="button"
-                  variant="default"
-                >
-                  <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-                </OctantButton>
+                    <button
+                      aria-label={`Remove ${attachment.displayName}`}
+                      className="chip-x window-no-drag"
+                      onClick={() => images.remove(attachment.id)}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {images.message === undefined ? null : (
+                  <span className="work-composer-adapter__hint" role="status">
+                    {images.message}
+                  </span>
+                )}
               </div>
+            )}
+            <OctantTextarea
+              aria-label="First message"
+              autoFocus
+              className="composer-input"
+              disabled={props.creating}
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                mention.sync(event.target.value, event.currentTarget.selectionStart);
+              }}
+              onClick={(event) =>
+                mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
+              }
+              onKeyDown={handleKeyDown}
+              onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+                if (props.creating === true) return;
+                if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+              }}
+              placeholder="Describe the change…"
+              ref={textareaRef}
+              rows={3}
+              value={prompt}
+            />
+            <div className="composer-row code-composer-adapter__composer-bar">
+              <label>
+                <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                <input
+                  aria-label="Choose attachment file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="work-composer-adapter__file-input"
+                  disabled={props.creating === true || imageSupport === false}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.item(0);
+                    if (file !== null && file !== undefined) {
+                      if (imageSupport === false) {
+                        images.refuse(
+                          "The selected model does not accept images. Choose an image-capable model.",
+                        );
+                      } else {
+                        images.attach([file]);
+                      }
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                  type="file"
+                />
+              </label>
+              <OctantButton
+                aria-label="Add attachment"
+                disabled={props.creating === true || imageSupport === false}
+                onClick={(event) => {
+                  event.currentTarget.parentElement
+                    ?.querySelector<HTMLInputElement>('input[type="file"]')
+                    ?.click();
+                }}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+              </OctantButton>
+              <span className="code-composer-adapter__context-picker">
+                <ComposerModelPicker
+                  ariaLabel="Provider and model"
+                  groups={props.providerGroups}
+                  onSelect={props.onSelectProvider}
+                  {...(props.selectedModelId === undefined
+                    ? {}
+                    : { selectedModelId: props.selectedModelId })}
+                  {...(props.selectedProviderInstanceId === undefined
+                    ? {}
+                    : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                />
+              </span>
+              {props.poolControl}
+              {props.profileControl}
+              <span className="code-composer-adapter__context-item">
+                <ShieldCheck aria-hidden="true" size={12} strokeWidth={1.8} />
+                <OctantNativeSelect
+                  aria-label="Access policy"
+                  className="code-composer-adapter__policy-select"
+                  onChange={(e) => setExecutionPolicy(e.target.value as ProviderExecutionPolicy)}
+                  value={executionPolicy}
+                >
+                  <option value="plan">Plan</option>
+                  <option value="approval-gated">Approval</option>
+                  <option value="auto-accept-edits">Auto-accept edits</option>
+                  <option value="full-access">Full access</option>
+                </OctantNativeSelect>
+              </span>
+              <span className="composer-gap" />
+              <OctantButton
+                aria-label={
+                  props.errorMessage === undefined ? "Create thread" : "Retry creating thread"
+                }
+                disabled={!canSubmit}
+                onClick={submit}
+                size="icon"
+                type="button"
+                variant="default"
+              >
+                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+              </OctantButton>
             </div>
 
             <div className="code-composer-adapter__context-strip" aria-label="Thread context">

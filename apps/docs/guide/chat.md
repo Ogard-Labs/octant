@@ -47,15 +47,18 @@ Side Chat is a separate Chat conversation about one source thread. Open it from 
 
 ## Export
 
-**Export thread** downloads a portable JSON cut of what the host holds for
+These actions live in the thread header's **Thread actions** menu (the ⋯
+button), alongside the canvas toggle.
+
+**Export…** downloads a portable JSON cut of what the host holds for
 this conversation: the active transcript, Canvas artifacts it originated,
 attachment names, citations, and provenance. The file says when it was cut.
 Attachment file bytes stay off the export and are listed as omissions.
 Secrets, credentials, and provider payloads never appear.
 
-**Copy Markdown** and **Save Markdown** remain a convenience for reading the
-prose. They are assembled from what this window last saw and are not the
-authoritative cut.
+**Copy conversation** and **Save as Markdown** remain a convenience for
+reading the prose. They are assembled from what this window last saw and are
+not the authoritative cut.
 
 A paired device can export a thread it can already open. It cannot dump the
 host.

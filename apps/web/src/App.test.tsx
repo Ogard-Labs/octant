@@ -685,10 +685,12 @@ describe("App", () => {
 
     await openSettingsFromSidebar(user);
     fireEvent.click(await screen.findByRole("button", { name: "Providers & Models" }));
-    await user.click(await screen.findByRole("button", { name: "Details for Primary Gateway" }));
-    await user.click(await screen.findByRole("button", { name: "Disable Primary Gateway" }));
+    await user.click(await screen.findByRole("switch", { name: "Enable Primary Gateway" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Enable Primary Gateway" })).toBeVisible(),
+      expect(screen.getByRole("switch", { name: "Enable Primary Gateway" })).toHaveAttribute(
+        "aria-checked",
+        "false",
+      ),
     );
     await user.click(screen.getByRole("button", { name: "Back to app" }));
 
@@ -1790,6 +1792,13 @@ describe("App", () => {
         return () => undefined;
       },
     );
+    let reportVibrancy: ((vibrancy: "sidebar" | null) => void) | undefined;
+    const subscribeResolvedSidebarVibrancy = vi.fn(
+      (listener: (vibrancy: "sidebar" | null) => void) => {
+        reportVibrancy = listener;
+        return () => undefined;
+      },
+    );
     const hostBridge: OctantHostBridge = {
       ...credentialHostOperations(),
       close: vi.fn(),
@@ -1800,6 +1809,7 @@ describe("App", () => {
       selectProjectRoot: vi.fn(),
       setSidebarMaterialPreference,
       subscribeResolvedMaterial,
+      subscribeResolvedSidebarVibrancy,
     };
     render(
       <App
@@ -1828,6 +1838,16 @@ describe("App", () => {
     resolveMaterial?.("translucent");
     await waitFor(() =>
       expect(document.querySelector(".shell")).toHaveClass("shell--material-translucent"),
+    );
+
+    // The near-opaque native wash relaxes only on the host's report that
+    // window vibrancy is applied, and returns as soon as the host withdraws it.
+    expect(document.documentElement.dataset.octantHostVibrancy).toBeUndefined();
+    reportVibrancy?.("sidebar");
+    await waitFor(() => expect(document.documentElement.dataset.octantHostVibrancy).toBe("active"));
+    reportVibrancy?.(null);
+    await waitFor(() =>
+      expect(document.documentElement.dataset.octantHostVibrancy).toBeUndefined(),
     );
 
     await openSettingsFromSidebar(user);
@@ -2175,8 +2195,8 @@ describe("App", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading Octant workspace");
     expect(await screen.findByRole("button", { name: "Code" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+      "aria-current",
+      "page",
     );
     expect(document.querySelector(".shell")).toHaveStyle({
       "--octant-sidebar-width": "232px",
@@ -2200,14 +2220,12 @@ describe("App", () => {
       "window-no-drag",
     );
     expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass("window-no-drag");
-    expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass(
-      "shell-icon-button",
-    );
+    expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass("btn-icon");
     expect(within(sidebar).getByRole("button", { name: "Set your name" })).toHaveClass(
       "window-no-drag",
     );
     expect(within(sidebar).getByRole("button", { name: "Set your name" })).toHaveClass(
-      "sidebar-profile__trigger",
+      "sidebar-item",
     );
     for (const button of within(sidebar).getAllByRole("button")) {
       expect(button).toHaveClass("window-no-drag");
@@ -2583,7 +2601,7 @@ describe("App", () => {
     providersListbox.focus();
     fireEvent.keyDown(providersListbox, { key: "ArrowDown" });
     fireEvent.keyDown(providersListbox, { key: "Enter" });
-    expect(screen.getByRole("heading", { name: "Providers" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Providers & Models" })).toBeVisible();
     expect(screen.getByLabelText("Permission persistence")).toHaveValue("current-session");
 
     // Keyword search still routes to the Providers section.
@@ -2592,7 +2610,7 @@ describe("App", () => {
     openCodeListbox.focus();
     fireEvent.keyDown(openCodeListbox, { key: "ArrowDown" });
     fireEvent.keyDown(openCodeListbox, { key: "Enter" });
-    expect(screen.getByRole("heading", { name: "Providers" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Providers & Models" })).toBeVisible();
   }, 15_000);
 
   it("renders recovery-required separately from a disconnected shell", async () => {

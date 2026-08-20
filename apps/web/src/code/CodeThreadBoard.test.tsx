@@ -21,6 +21,7 @@ function card(overrides: {
   readonly followUp?: boolean;
   readonly checks?: CodeBoardCard["checks"];
   readonly activeAgents?: number;
+  readonly unread?: boolean;
 }): CodeBoardCard {
   return {
     threadId: `00000000-0000-4000-8000-0000000051${overrides.id}`,
@@ -48,7 +49,7 @@ function card(overrides: {
       ? { kind: "recovering", reasons: ["project-projection-missing"] }
       : { kind: "ok" },
     githubFreshness: "fresh",
-    unread: false,
+    unread: overrides.unread ?? false,
     followUp: overrides.followUp ?? false,
     lastMeaningfulActivityAt: null,
   } as CodeBoardCard;
@@ -91,6 +92,27 @@ function memoryStorage() {
 describe("CodeThreadBoard", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("announces an unread card's marker to assistive technology", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([
+        card({ id: "01", status: "ready", title: "Unread thread", unread: true }),
+        card({ id: "02", status: "ready", title: "Read thread" }),
+      ]),
+    );
+    render(
+      <CodeThreadBoard
+        loadBoard={loadBoard}
+        onOpenThread={() => undefined}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Unread thread" });
+    expect(within(cardFor("Unread thread")).getByRole("img", { name: "Unread" })).toBeTruthy();
+    expect(within(cardFor("Read thread")).queryByRole("img", { name: "Unread" })).toBeNull();
   });
 
   it("renders every Status column by default, including empty ones, and opens a thread", async () => {
@@ -290,6 +312,37 @@ describe("CodeThreadBoard", () => {
     // Escape unmounts the dialog the person was in, so focus goes back to the
     // control that opened it rather than falling to the document body.
     expect(screen.getByRole("button", { name: "Filters" })).toHaveFocus();
+  });
+
+  it("shows a typed search term as typed in the active filters, not as an uppercase label", async () => {
+    const loadBoard = vi.fn(async () => view([card({ id: "01", status: "ready" })]));
+    render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
+
+    await screen.findByText("Thread 01");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search threads" }), {
+      target: { value: "MixedCase term" },
+    });
+    await waitFor(() =>
+      expect(loadBoard).toHaveBeenLastCalledWith({ version: 1, text: "MixedCase term" }),
+    );
+
+    const activeFilters = screen.getByRole("status", { name: "Active filters" });
+    // The tag recipe uppercases labels; a tag carrying what the person typed
+    // opts out via the value modifier so the term renders verbatim.
+    const searchTag = within(activeFilters).getByText("Search: MixedCase term");
+    expect(searchTag).toHaveClass("tag", "tag-value");
+
+    // Fixed-vocabulary filter labels stay plain tags and keep the label look.
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Pull request" }), {
+      target: { value: "open" },
+    });
+    expect(await within(activeFilters).findByText("Open PR")).not.toHaveClass("tag-value");
+    // A Project name is user-entered text too, so its tag renders verbatim.
+    fireEvent.change(screen.getByRole("combobox", { name: "Project" }), {
+      target: { value: String(projectB) },
+    });
+    expect(await within(activeFilters).findByText("Project B")).toHaveClass("tag", "tag-value");
   });
 
   it("keeps secondary card metadata collapsed until Details is opened", async () => {

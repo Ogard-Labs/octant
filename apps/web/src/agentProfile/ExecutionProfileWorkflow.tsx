@@ -2,7 +2,7 @@ import type { AgentProfile } from "@octant/contracts/agent-profile";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProviderModelId } from "@octant/contracts/providers";
 import { ChevronDown, Pencil, Plus, RotateCcw, Trash2, UserRoundCog } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
@@ -21,20 +21,54 @@ export function ExecutionProfileWorkflow(props: {
   const [open, setOpen] = useState(props.variant === "settings");
   const [editing, setEditing] = useState<AgentProfile | "create">();
   const [confirmDelete, setConfirmDelete] = useState<AgentProfile>();
+  const rootRef = useRef<HTMLElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverId = useId();
   const controller = props.controller;
   const selectedName = controller.selectedProfile?.displayName ?? "No profile";
+  const isComposerPopover = props.variant === "composer";
+
+  // Mirrors the composer's model-options popover: without this the panel had
+  // no dismissal at all, so it stayed open while the model picker opened next
+  // to it and two popovers overlapped over the draft.
+  useEffect(() => {
+    if (!isComposerPopover || !open) return;
+    function onPointerDown(event: PointerEvent) {
+      if (rootRef.current === null) return;
+      // Containment on the section root covers the trigger, the panel, and
+      // the fixed profile-form dialog it can open, so an in-panel press never
+      // dismisses the panel mid-interaction.
+      if (event.target instanceof Node && rootRef.current.contains(event.target)) return;
+      setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isComposerPopover, open]);
 
   return (
     <section
       aria-label="Execution profiles"
       className={`execution-profile-workflow execution-profile-workflow--${props.variant}`}
+      ref={rootRef}
     >
       {props.variant === "composer" ? (
         <OctantButton
+          aria-controls={popoverId}
           aria-expanded={open}
+          aria-haspopup="dialog"
           aria-label={`Execution profile: ${selectedName}`}
           className="execution-profile-workflow__trigger"
           onClick={() => setOpen((current) => !current)}
+          ref={triggerRef}
           type="button"
           variant="outline"
         >
@@ -60,7 +94,16 @@ export function ExecutionProfileWorkflow(props: {
       )}
 
       {!open ? null : (
-        <div className="execution-profile-workflow__body">
+        <div
+          className={
+            isComposerPopover
+              ? "popover-panel execution-profile-workflow__body"
+              : "execution-profile-workflow__body"
+          }
+          {...(isComposerPopover
+            ? { "aria-label": "Execution profile options", id: popoverId, role: "dialog" as const }
+            : {})}
+        >
           {props.variant === "composer" ? (
             <div className="execution-profile-workflow__composer-actions">
               <p>Choose provider, model, profile, and host placement for this draft.</p>
@@ -131,6 +174,7 @@ export function ExecutionProfileWorkflow(props: {
           </div>
 
           <OctantButton
+            className="execution-profile-workflow__reload"
             disabled={controller.busy}
             onClick={() => void controller.reload()}
             type="button"
@@ -203,31 +247,21 @@ function ResolutionReceipt(props: { readonly controller: ExecutionProfileControl
   );
   return (
     <div className="execution-profile-workflow__receipt" aria-label="Resolution receipt">
-      <dl>
-        <div>
-          <dt>Provider</dt>
-          <dd>{entry?.providerDisplayName ?? String(receipt.providerInstanceId)}</dd>
-        </div>
-        <div>
-          <dt>Model</dt>
-          <dd>{entry?.modelDisplayName ?? String(receipt.modelId)}</dd>
-        </div>
-        <div>
-          <dt>Profile</dt>
-          <dd>{entry?.profileDisplayName ?? "No profile"}</dd>
-        </div>
-        <div>
-          <dt>Host</dt>
-          <dd>{entry?.hostLabel ?? String(receipt.hostId)}</dd>
-        </div>
-        <div>
-          <dt>Permissions</dt>
-          <dd>{permissionLabel(receipt.effectivePermissions)}</dd>
-        </div>
-        <div>
-          <dt>Resolved from</dt>
-          <dd>{sourceLabel(receipt.source)}</dd>
-        </div>
+      {/* The system `.kv` fact table lays out dt/dd pairs itself, so the
+          pairs are direct children rather than wrapped in divs. */}
+      <dl className="kv">
+        <dt>Provider</dt>
+        <dd>{entry?.providerDisplayName ?? String(receipt.providerInstanceId)}</dd>
+        <dt>Model</dt>
+        <dd>{entry?.modelDisplayName ?? String(receipt.modelId)}</dd>
+        <dt>Profile</dt>
+        <dd>{entry?.profileDisplayName ?? "No profile"}</dd>
+        <dt>Host</dt>
+        <dd>{entry?.hostLabel ?? String(receipt.hostId)}</dd>
+        <dt>Permissions</dt>
+        <dd>{permissionLabel(receipt.effectivePermissions)}</dd>
+        <dt>Resolved from</dt>
+        <dd>{sourceLabel(receipt.source)}</dd>
       </dl>
       <p>Fallback: {receipt.fallbackChain.map(sourceLabel).join(" → ")}</p>
       {receipt.downgradeReasons.map((reason) => (

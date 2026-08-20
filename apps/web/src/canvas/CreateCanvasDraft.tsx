@@ -66,6 +66,7 @@ export function CreateCanvasDraft({ context, onCreate }: CreateCanvasDraftProps)
 
   return (
     <form
+      className="canvas-revise-form"
       data-testid="canvas-create-form"
       onSubmit={(e) => {
         e.preventDefault();
@@ -74,18 +75,24 @@ export function CreateCanvasDraft({ context, onCreate }: CreateCanvasDraftProps)
     >
       <input
         aria-label="Title"
+        className="input"
         data-testid="title-input"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
       />
       <textarea
         aria-label="Prompt"
+        className="textarea"
         data-testid="prompt-input"
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
       />
-      {denial ? <div data-testid="denial-message">{denial}</div> : null}
-      <button type="submit" data-testid="create-button">
+      {denial ? (
+        <div className="field-error" data-testid="denial-message">
+          {denial}
+        </div>
+      ) : null}
+      <button className="btn btn-primary btn-sm" type="submit" data-testid="create-button">
         Create Canvas
       </button>
     </form>

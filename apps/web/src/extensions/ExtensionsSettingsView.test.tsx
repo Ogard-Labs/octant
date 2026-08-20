@@ -422,12 +422,12 @@ describe("ExtensionsSettingsView", () => {
       (command) => command.kind === "set-source-trust" && command.trusted,
     );
 
-    fireEvent.click(screen.getByRole("switch", { name: /enable plugin/i }));
+    fireEvent.click(screen.getByRole("button", { name: /enable plugin/i }));
     await expectCommandThenSettled(
       (command) => command.kind === "set-plugin-desired" && command.desired,
     );
 
-    fireEvent.click(screen.getByRole("switch", { name: /enable component/i }));
+    fireEvent.click(screen.getByRole("button", { name: /enable component/i }));
     await expectCommandThenSettled(
       (command) => command.kind === "set-component-desired" && command.desired,
     );
@@ -448,14 +448,8 @@ describe("ExtensionsSettingsView", () => {
     const c = client({ snapshot });
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-    expect(screen.getByRole("switch", { name: /enable plugin/i })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    expect(screen.getByRole("switch", { name: /enable component/i })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
+    expect(screen.getByRole("button", { name: /enable plugin/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /enable component/i })).toBeDisabled();
   });
 
   it("allows disabling the plugin when it is desired-on but runtime-blocked (quarantined)", async () => {
@@ -477,9 +471,9 @@ describe("ExtensionsSettingsView", () => {
     const c = client({ snapshot });
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-    const pluginSwitch = screen.getByRole("switch", { name: /enable plugin/i });
-    expect(pluginSwitch).not.toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(pluginSwitch);
+    const disablePluginButton = screen.getByRole("button", { name: /disable plugin/i });
+    expect(disablePluginButton).not.toBeDisabled();
+    fireEvent.click(disablePluginButton);
     await waitFor(() =>
       expect(
         c.calls.some(
@@ -508,9 +502,9 @@ describe("ExtensionsSettingsView", () => {
     const c = client({ snapshot });
     render(<ExtensionsSettingsView client={c} scope={scope} />);
     await waitFor(() => expect(screen.getByText("Build Helper")).toBeInTheDocument());
-    const componentSwitch = screen.getByRole("switch", { name: /enable component/i });
-    expect(componentSwitch).not.toHaveAttribute("aria-disabled", "true");
-    fireEvent.click(componentSwitch);
+    const disableComponentButton = screen.getByRole("button", { name: /disable component/i });
+    expect(disableComponentButton).not.toBeDisabled();
+    fireEvent.click(disableComponentButton);
     await waitFor(() =>
       expect(
         c.calls.some(

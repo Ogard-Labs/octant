@@ -52,7 +52,7 @@ export function TableViewer(props: {
         </div>
       </div>
       <div className="preview-viewer__body preview-viewer__body--flush">
-        <table className="preview-table" aria-label={props.manifest.target.displayName}>
+        <table className="preview-table datatable" aria-label={props.manifest.target.displayName}>
           <caption>
             {delimiterLabel} preview of {props.manifest.target.displayName}: {rowCount} rows,{" "}
             {columnCount} columns.

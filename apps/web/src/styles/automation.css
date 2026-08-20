@@ -1,13 +1,18 @@
 /* Automation Center: one shared surface for Work and Code automations.
-   Sizes use rem/em so 200% zoom scales the whole scan path; motion is
-   limited to color transitions and respects prefers-reduced-motion. */
+   Paint comes from the design system (octant.css `--oct-*` tokens and the
+   btn/badge/segmented/menu/input recipes); this sheet keeps only layout
+   and the few automation-specific looks. Font sizes stay in rem — not the
+   px type-scale tokens — because 200% text zoom multiplies the root font
+   size and this surface promises to scale with it (the suite asserts it).
+   Motion is limited to color transitions and respects
+   prefers-reduced-motion. */
 
 .automation-center-layer {
   position: absolute;
   inset: 0;
   z-index: 5;
   overflow: auto;
-  background: var(--octant-surface-inset);
+  background: var(--oct-bg);
 }
 
 .automation-center {
@@ -18,7 +23,7 @@
   min-height: 0;
   padding: 1rem 1.25rem;
   overflow: auto;
-  background: var(--octant-workspace);
+  background: var(--oct-bg);
 }
 
 .automation-center__header {
@@ -30,14 +35,15 @@
 
 .automation-center__title {
   margin: 0;
-  font-size: 1.05rem;
-  font-weight: 600;
+  font-family: var(--oct-font-display);
+  font-size: 1rem;
+  font-weight: var(--oct-weight-strong);
 }
 
 .automation-center__subtitle {
   margin: 0.15rem 0 0;
-  color: var(--octant-text-muted);
-  font-size: 0.8rem;
+  color: var(--oct-muted);
+  font-size: 0.875rem;
 }
 
 .automation-center__notice {
@@ -46,10 +52,10 @@
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.4rem 0.6rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.5rem;
-  background: var(--octant-surface-raised);
-  font-size: 0.8rem;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+  font-size: 0.875rem;
 }
 
 .automation-center__body {
@@ -85,10 +91,11 @@
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.3rem 0.55rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.5rem;
-  background: var(--octant-control);
+  min-height: var(--oct-control-height-sm);
+  padding: 0 0.55rem;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
   flex: 1;
   min-width: 10rem;
 }
@@ -99,34 +106,26 @@
   border: none;
   background: transparent;
   color: inherit;
-  font-size: 0.8rem;
+  font-size: 0.875rem;
   outline: none;
 }
 
-.automation-center__filters {
-  display: inline-flex;
-  gap: 0.15rem;
-  margin: 0;
-  padding: 0.15rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.5rem;
-}
-
-.automation-center__filter {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: 0.4rem;
-  font-size: 0.78rem;
+/* The view and mode filters ride the .segmented/.segment recipe; the
+   rules here only translate its button idiom (aria-pressed) to this
+   markup's radio-in-label idiom. */
+.automation-center__filter,
+.automation-center__view {
   cursor: pointer;
 }
 
-.automation-center__filter:has(input:checked) {
-  background: var(--octant-surface-selected);
+.automation-center__filter:has(input:checked),
+.automation-center__view:has(input:checked) {
+  background: var(--oct-fg-soft);
+  color: var(--oct-fg);
 }
 
-.automation-center__filter input {
+.automation-center__filter input,
+.automation-center__view input {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -134,8 +133,9 @@
   clip-path: inset(50%);
 }
 
-.automation-center__filter:has(input:focus-visible) {
-  outline: 2px solid var(--octant-focus-ring);
+.automation-center__filter:has(input:focus-visible),
+.automation-center__view:has(input:focus-visible) {
+  outline: 2px solid var(--oct-accent-fg);
   outline-offset: 1px;
 }
 
@@ -157,9 +157,9 @@
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.25rem 0.5rem;
   padding: 0.5rem 0.65rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.55rem;
-  background: var(--octant-surface-raised);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
 }
 
 .automation-row__open {
@@ -168,8 +168,8 @@
   background: transparent;
   color: inherit;
   padding: 0;
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: 0.875rem;
+  font-weight: var(--oct-weight-strong);
   cursor: pointer;
   text-align: start;
 }
@@ -182,20 +182,21 @@
   grid-column: 1;
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.25rem 0.75rem;
-  color: var(--octant-text-muted);
-  font-size: 0.74rem;
+  color: var(--oct-meta);
+  font-size: 0.6875rem;
 }
 
+/* .badge paints the cadence and environment pills; the transparent
+   border keeps their box identical to the dashed one-time variant. */
 .automation-row__cadence,
 .automation-row__environment {
-  padding: 0 0.35rem;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 999px;
-  line-height: 1.5;
+  border: 1px solid transparent;
 }
 
 .automation-row__cadence[data-cadence="one-time"] {
+  border-color: var(--oct-border);
   border-style: dashed;
 }
 
@@ -204,26 +205,16 @@
   flex-direction: column;
   gap: 0.5rem;
   padding: 0.75rem;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 8px;
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-md);
 }
 
 .routine-composer__label {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  color: var(--octant-text-primary);
-  font-size: 0.8rem;
-}
-
-.routine-composer__input {
-  padding: 0.5rem;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 6px;
-  background: var(--octant-surface-raised);
-  color: var(--octant-text-primary);
-  font: inherit;
-  resize: vertical;
+  color: var(--oct-fg);
+  font-size: 0.875rem;
 }
 
 .routine-composer__suggestions {
@@ -237,17 +228,18 @@
 
 .routine-composer__chip {
   padding: 0.2rem 0.55rem;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 999px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-pill);
   background: transparent;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   font: inherit;
-  font-size: 0.74rem;
+  font-size: 0.6875rem;
   cursor: pointer;
+  transition: color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
 .routine-composer__chip:hover {
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .routine-composer__draft {
@@ -256,32 +248,29 @@
   align-items: flex-start;
   gap: 0.35rem;
   padding: 0.5rem;
-  border-radius: 6px;
-  background: var(--octant-surface-raised);
-  font-size: 0.78rem;
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
+  font-size: 0.875rem;
 }
 
 .routine-composer__draft-schedule {
   margin: 0;
-  color: var(--octant-text-primary);
+  color: var(--oct-fg);
 }
 
 .routine-composer__draft-work {
   margin: 0;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .automation-center__completed {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: var(--octant-text-muted);
-  font-size: 0.74rem;
+  color: var(--oct-muted);
+  font-size: 0.6875rem;
 }
 
 .automation-row__state[data-lifecycle="paused"],
 .automation-row__status[data-run-lifecycle="failed"] {
-  color: var(--octant-warning-text, #ffcf99);
+  color: var(--oct-warn-fg);
 }
 
 .automation-row__menu-wrap {
@@ -291,18 +280,14 @@
   align-self: start;
 }
 
+/* .menu paints the surface; this places it against the row's edge and
+   stacks the actions it holds. */
 .automation-row__menu {
   position: absolute;
   inset-inline-end: 0;
-  z-index: 5;
   display: flex;
   flex-direction: column;
   min-width: 9rem;
-  padding: 0.25rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.5rem;
-  background: var(--octant-floating);
-  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 40%);
 }
 
 .automation-row__menu > * {
@@ -310,14 +295,7 @@
 }
 
 .automation-center__empty {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 1.25rem;
-  border: 1px dashed var(--octant-border);
-  border-radius: 0.6rem;
-  color: var(--octant-text-muted);
-  font-size: 0.8rem;
+  font-size: 0.875rem;
 }
 
 .automation-detail {
@@ -325,9 +303,9 @@
   flex-direction: column;
   gap: 0.75rem;
   padding: 0.75rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.6rem;
-  background: var(--octant-surface-raised);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-lg);
+  background: var(--oct-surface);
   overflow: auto;
 }
 
@@ -340,12 +318,13 @@
 
 .automation-detail__title {
   margin: 0;
+  font-family: var(--oct-font-display);
   font-size: 0.95rem;
-  font-weight: 600;
+  font-weight: var(--oct-weight-strong);
 }
 
 .automation-detail__title:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
+  outline: 2px solid var(--oct-accent-fg);
   outline-offset: 2px;
 }
 
@@ -353,17 +332,17 @@
   display: flex;
   gap: 0.75rem;
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 0.78rem;
+  color: var(--oct-muted);
+  font-size: 0.875rem;
 }
 
 .automation-detail__blocked {
   margin: 0;
   padding: 0.4rem 0.6rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.5rem;
-  color: var(--octant-warning-text, #ffcf99);
-  font-size: 0.78rem;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-warn-fg);
+  font-size: 0.875rem;
 }
 
 .automation-detail__actions {
@@ -377,12 +356,11 @@
   flex-direction: column;
   gap: 0.45rem;
   margin: 0;
-  font-size: 0.78rem;
+  font-size: 0.875rem;
 }
 
 .automation-detail__facts dt {
-  color: var(--octant-text-muted);
-  font-weight: 500;
+  color: var(--oct-muted);
 }
 
 .automation-detail__facts dd {
@@ -390,7 +368,7 @@
 }
 
 .automation-detail__confirmed {
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .automation-detail__advanced summary,
@@ -399,8 +377,8 @@
   align-items: center;
   gap: 0.3rem;
   cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: 0.875rem;
+  font-weight: var(--oct-weight-strong);
 }
 
 .automation-history {
@@ -418,18 +396,18 @@
   align-items: center;
   gap: 0.25rem 0.75rem;
   padding: 0.35rem 0.5rem;
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 0.45rem;
-  font-size: 0.76rem;
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-sm);
+  font-size: 0.6875rem;
 }
 
 .automation-history__status[data-run-lifecycle="failed"] {
-  color: var(--octant-warning-text, #ffcf99);
+  color: var(--oct-warn-fg);
 }
 
 .automation-history__failure {
   flex-basis: 100%;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
 }
 
 .automation-editor {
@@ -437,24 +415,25 @@
   flex-direction: column;
   gap: 0.65rem;
   padding: 0.75rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.6rem;
-  background: var(--octant-surface-raised);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-lg);
+  background: var(--oct-surface);
   overflow: auto;
-  font-size: 0.8rem;
+  font-size: 0.875rem;
 }
 
 .automation-editor__title {
   margin: 0;
+  font-family: var(--oct-font-display);
   font-size: 0.95rem;
-  font-weight: 600;
+  font-weight: var(--oct-weight-strong);
 }
 
 .automation-editor__problems {
   padding: 0.45rem 0.6rem;
-  border: 1px solid var(--octant-warning-text, #ffcf99);
-  border-radius: 0.5rem;
-  color: var(--octant-warning-text, #ffcf99);
+  border: 1px solid var(--oct-warn-fg);
+  border-radius: var(--oct-radius-sm);
+  color: var(--oct-warn-fg);
 }
 
 .automation-editor__problems ul {
@@ -470,21 +449,15 @@
 
 .automation-editor__field label,
 .automation-editor__field legend {
-  font-weight: 500;
+  color: var(--oct-muted);
 }
 
-.automation-editor__field input[type="text"],
-.automation-editor__field input[type="number"],
-.automation-editor__field input[type="datetime-local"],
-.automation-editor__field input[type="time"],
-.automation-editor__field select,
-.automation-editor__field textarea {
-  padding: 0.35rem 0.5rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.45rem;
-  background: var(--octant-control);
-  color: inherit;
-  font: inherit;
+/* Editor controls carry the .input/.select/.textarea recipes; the recipe
+   sets the body type size, and the dense pane keeps its own instead. */
+.automation-editor__field .input,
+.automation-editor__field .select,
+.automation-editor__field .textarea {
+  font-size: 0.875rem;
 }
 
 .automation-editor__mode,
@@ -497,18 +470,10 @@
   border: none;
 }
 
-.automation-editor__mode-option,
-.automation-editor__weekday {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-weight: 400;
-}
-
 .automation-editor__note {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 0.74rem;
+  color: var(--oct-muted);
+  font-size: 0.6875rem;
 }
 
 .automation-editor__confirmation {
@@ -531,42 +496,6 @@
   }
 }
 
-.automation-center__views {
-  display: inline-flex;
-  gap: 0.15rem;
-  margin: 0;
-  padding: 0.15rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.5rem;
-}
-
-.automation-center__view {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: 0.4rem;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-
-.automation-center__view:has(input:checked) {
-  background: var(--octant-surface-selected);
-}
-
-.automation-center__view input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-}
-
-.automation-center__view:has(input:focus-visible) {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 1px;
-}
-
 .routine-calendar {
   display: flex;
   flex-direction: column;
@@ -582,8 +511,9 @@
 
 .routine-calendar__month {
   margin: 0;
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-family: var(--oct-font-display);
+  font-size: 0.875rem;
+  font-weight: var(--oct-weight-strong);
 }
 
 .routine-calendar__weekdays,
@@ -594,16 +524,17 @@
 }
 
 .routine-calendar__weekdays {
-  color: var(--octant-text-muted);
-  font-size: 0.7rem;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: 0.6875rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--oct-tracking-wide);
 }
 
 .routine-calendar__grid {
-  background: var(--octant-border-subtle);
-  border: 1px solid var(--octant-border-subtle);
-  border-radius: 0.5rem;
+  background: var(--oct-border-soft);
+  border: 1px solid var(--oct-border-soft);
+  border-radius: var(--oct-radius-sm);
   overflow: hidden;
 }
 
@@ -613,23 +544,23 @@
   gap: 0.2rem;
   min-height: 5rem;
   padding: 0.3rem;
-  background: var(--octant-surface-raised);
+  background: var(--oct-surface);
 }
 
 .routine-calendar__day[data-in-month="false"] {
-  background: var(--octant-surface);
-  color: var(--octant-text-muted);
+  background: var(--oct-bg);
+  color: var(--oct-muted);
 }
 
 .routine-calendar__day[data-today="true"] .routine-calendar__day-number {
-  color: var(--octant-text-primary);
-  font-weight: 700;
+  color: var(--oct-fg);
+  font-weight: var(--oct-weight-strong);
   text-decoration: underline;
 }
 
 .routine-calendar__day-number {
-  font-size: 0.72rem;
-  color: var(--octant-text-muted);
+  font-size: 0.6875rem;
+  color: var(--oct-meta);
 }
 
 .routine-calendar__entries {
@@ -648,17 +579,17 @@
   width: 100%;
   padding: 0.1rem 0.25rem;
   border: 0;
-  border-radius: 0.3rem;
-  background: var(--octant-surface-selected);
+  border-radius: 5px;
+  background: var(--oct-fg-soft);
   color: inherit;
   font: inherit;
-  font-size: 0.7rem;
+  font-size: 0.6875rem;
   text-align: left;
   cursor: pointer;
 }
 
 .routine-calendar__entry-time {
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
   white-space: nowrap;
 }
 
@@ -670,22 +601,24 @@
 
 .routine-calendar__note {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 0.72rem;
+  color: var(--oct-muted);
+  font-size: 0.6875rem;
 }
+
 .list-arrangement {
   display: inline-flex;
   gap: 0.25rem;
 }
 
 .list-arrangement__field select {
-  padding: 0.2rem 0.4rem;
-  border: 1px solid var(--octant-border);
-  border-radius: 0.4rem;
-  background: var(--octant-surface-raised);
+  min-height: var(--oct-control-height-sm);
+  padding: 0 0.4rem;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-surface);
   color: inherit;
   font: inherit;
-  font-size: 0.76rem;
+  font-size: 0.6875rem;
 }
 
 .automation-center__groups {
@@ -703,9 +636,10 @@
 
 .automation-center__group-heading {
   margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 0.72rem;
-  font-weight: 600;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: 0.6875rem;
+  font-weight: var(--oct-weight-display);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--oct-tracking-wide);
 }

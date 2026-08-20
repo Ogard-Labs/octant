@@ -75,7 +75,7 @@ export function ZenCanvasCard(props: ZenCanvasCardProps) {
       <div className="zen-canvas-card__chrome">
         <button
           aria-label="Re-read this canvas"
-          className="zen-canvas-card__refresh"
+          className="btn-icon"
           disabled={reading}
           onClick={() => setAttempt((previous) => previous + 1)}
           type="button"

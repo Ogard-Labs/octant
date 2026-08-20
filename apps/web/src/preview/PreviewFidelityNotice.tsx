@@ -9,7 +9,7 @@ import type { PreviewFidelity } from "@octant/contracts/previews";
 export function PreviewFidelityNotice(props: { readonly fidelity: PreviewFidelity }) {
   if (props.fidelity.level === "full") return null;
   return (
-    <div className="preview-fidelity-notice" role="status">
+    <div className="preview-fidelity-notice viewer-notice" role="status">
       <span className="preview-fidelity-notice__icon" aria-hidden="true">
         !
       </span>

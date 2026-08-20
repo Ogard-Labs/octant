@@ -57,6 +57,29 @@ export function useAutomaticUpdateCheckSync(
   }, [automaticUpdateChecks, setAutomatic]);
 }
 
+/**
+ * Whether the host says native window vibrancy is applied right now. False on
+ * remote clients and on hosts that never report it, so the native sidebar wash
+ * only relaxes when something is genuinely frosting the desktop behind the
+ * window.
+ */
+export function useHostReportedSidebarVibrancy(hostBridge: OctantHostBridge | undefined): boolean {
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    setActive(false);
+    if (hostBridge === undefined || hostBridge.subscribeResolvedSidebarVibrancy === undefined) {
+      return;
+    }
+    const unsubscribe = hostBridge.subscribeResolvedSidebarVibrancy((vibrancy) => {
+      setActive(vibrancy === "sidebar");
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [hostBridge]);
+  return active;
+}
+
 export function useSidebarVibrancySupported(hostBridge: OctantHostBridge | undefined): boolean {
   const [supported, setSupported] = useState(false);
   useEffect(() => {

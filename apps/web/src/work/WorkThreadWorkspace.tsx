@@ -524,68 +524,71 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           </div>
         )}
         <div className="work-thread-workspace__composer-shell">
-          {mention.open ? (
-            <ThreadMentionTypeahead
-              activeIndex={mention.activeIndex}
-              {...(threadMentions.composer?.busy === undefined
-                ? {}
-                : { busy: threadMentions.composer.busy })}
-              candidates={threadMentions.composer?.candidates ?? []}
-              listId={mentionListId}
-              onChoose={mention.choose}
-              onHover={mention.setActiveIndex}
+          <div className="composer">
+            {mention.open ? (
+              <ThreadMentionTypeahead
+                activeIndex={mention.activeIndex}
+                {...(threadMentions.composer?.busy === undefined
+                  ? {}
+                  : { busy: threadMentions.composer.busy })}
+                candidates={threadMentions.composer?.candidates ?? []}
+                listId={mentionListId}
+                onChoose={mention.choose}
+                onHover={mention.setActiveIndex}
+              />
+            ) : null}
+            {fileMentionOpen ? (
+              <PathMentionTypeahead
+                activeIndex={fileMentions.activeIndex}
+                busy={fileMentions.busy}
+                candidates={fileMentions.candidates}
+                listId={fileMentionListId}
+                onChoose={fileMentions.choose}
+                onHover={fileMentions.setActiveIndex}
+              />
+            ) : null}
+            <ThreadMentionChips
+              chips={threadMentions.chips}
+              onRemove={(mentionedThreadId) =>
+                threadMentions.composer?.onRemoveChip(mentionedThreadId)
+              }
             />
-          ) : null}
-          {fileMentionOpen ? (
-            <PathMentionTypeahead
-              activeIndex={fileMentions.activeIndex}
-              busy={fileMentions.busy}
-              candidates={fileMentions.candidates}
-              listId={fileMentionListId}
-              onChoose={fileMentions.choose}
-              onHover={fileMentions.setActiveIndex}
-            />
-          ) : null}
-          <ThreadMentionChips
-            chips={threadMentions.chips}
-            onRemove={(mentionedThreadId) =>
-              threadMentions.composer?.onRemoveChip(mentionedThreadId)
-            }
-          />
-          {images.staged.length === 0 && images.message === undefined ? null : (
-            <div className="work-composer-adapter__attachments" aria-label="Attached images">
-              {images.staged.map((attachment) => (
-                <span className="work-composer-adapter__attachment" key={attachment.id}>
-                  <img
-                    alt={attachment.displayName}
-                    className="work-composer-adapter__attachment-thumb"
-                    src={attachment.previewUrl}
-                  />
-                  <span className="work-composer-adapter__attachment-name">
-                    {attachment.displayName}
+            {images.staged.length === 0 && images.message === undefined ? null : (
+              <div
+                className="composer-chips work-composer-adapter__attachments"
+                aria-label="Attached images"
+              >
+                {images.staged.map((attachment) => (
+                  <span className="chip work-composer-adapter__attachment" key={attachment.id}>
+                    <img
+                      alt={attachment.displayName}
+                      className="work-composer-adapter__attachment-thumb"
+                      src={attachment.previewUrl}
+                    />
+                    <span className="work-composer-adapter__attachment-name">
+                      {attachment.displayName}
+                    </span>
+                    <button
+                      aria-label={`Remove ${attachment.displayName}`}
+                      className="chip-x window-no-drag"
+                      onClick={() => images.remove(attachment.id)}
+                      type="button"
+                    >
+                      ×
+                    </button>
                   </span>
-                  <button
-                    aria-label={`Remove ${attachment.displayName}`}
-                    className="work-composer-adapter__attachment-remove"
-                    onClick={() => images.remove(attachment.id)}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              {images.message === undefined ? null : (
-                <span className="work-composer-adapter__hint" role="status">
-                  {images.message}
-                </span>
-              )}
-            </div>
-          )}
-          <div className="draft-thread__input-row">
+                ))}
+                {images.message === undefined ? null : (
+                  <span className="work-composer-adapter__hint" role="status">
+                    {images.message}
+                  </span>
+                )}
+              </div>
+            )}
             <OctantTextarea
               aria-label="Work prompt"
               autoFocus
-              className="draft-thread__textarea"
+              className="composer-input"
               disabled={
                 creating ||
                 completionLocked ||
@@ -608,16 +611,19 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               rows={4}
               value={prompt}
             />
-            <OctantButton
-              aria-label={props.turnClient === undefined ? "Create artifact" : "Send follow-up"}
-              className="draft-thread__send"
-              disabled={!canSubmit}
-              onClick={() => void submit()}
-              type="button"
-              variant="default"
-            >
-              <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-            </OctantButton>
+            <div className="composer-row">
+              <span className="composer-gap" />
+              <OctantButton
+                aria-label={props.turnClient === undefined ? "Create artifact" : "Send follow-up"}
+                disabled={!canSubmit}
+                onClick={() => void submit()}
+                size="icon"
+                type="button"
+                variant="default"
+              >
+                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+              </OctantButton>
+            </div>
           </div>
           {errorMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">

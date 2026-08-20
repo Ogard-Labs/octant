@@ -105,7 +105,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
   );
 
   return (
-    <section aria-label="Conversation" className="chat-transcript">
+    <section aria-label="Conversation" className="chat-transcript thread-column">
       {props.connectionStatus === "disconnected" ? (
         <p aria-live="polite" className="chat-transcript__connection" role="status">
           Disconnected — reconnecting to the authoritative transcript.
@@ -152,37 +152,42 @@ export function ChatTranscript(props: ChatTranscriptProps) {
           const checkpoints = props.checkpoints;
           const marked = checkpoints?.byTurnId.get(String(turn.id));
 
+          const attachmentList =
+            attachments.length > 0 ? (
+              <ul aria-label="Attachments" className="chat-transcript__attachments">
+                {attachments.map((attachment, index) => (
+                  <li key={attachment?.id ?? `${turn.id}-${index}`}>
+                    {attachment === undefined
+                      ? "Attachment is unavailable."
+                      : attachment.displayName}
+                  </li>
+                ))}
+              </ul>
+            ) : null;
+
           return (
             <li className="chat-transcript__turn" key={turn.id}>
-              <article
-                aria-label="Your message"
-                className="chat-transcript__message chat-transcript__message--user"
-              >
+              <article aria-label="Your message" className="turn-user">
                 {editing && userContent !== undefined && props.onEditTurn !== undefined ? (
-                  <ChatTurnEditor
-                    busy={props.busy === true}
-                    initialPrompt={userContent.body}
-                    onCancel={() => setEditingTurnId(undefined)}
-                    onSubmit={(turnId, prompt) => {
-                      setEditingTurnId(undefined);
-                      props.onEditTurn?.(turnId, prompt);
-                    }}
-                    turnId={turn.id}
-                  />
+                  <>
+                    <ChatTurnEditor
+                      busy={props.busy === true}
+                      initialPrompt={userContent.body}
+                      onCancel={() => setEditingTurnId(undefined)}
+                      onSubmit={(turnId, prompt) => {
+                        setEditingTurnId(undefined);
+                        props.onEditTurn?.(turnId, prompt);
+                      }}
+                      turnId={turn.id}
+                    />
+                    {attachmentList}
+                  </>
                 ) : (
-                  <MessageBody content={userContent} missing="Message content is unavailable." />
+                  <div className="bubble">
+                    <MessageBody content={userContent} missing="Message content is unavailable." />
+                    {attachmentList}
+                  </div>
                 )}
-                {attachments.length > 0 ? (
-                  <ul aria-label="Attachments" className="chat-transcript__attachments">
-                    {attachments.map((attachment, index) => (
-                      <li key={attachment?.id ?? `${turn.id}-${index}`}>
-                        {attachment === undefined
-                          ? "Attachment is unavailable."
-                          : attachment.displayName}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
                 {editing || checkpoints === undefined ? null : (
                   <ThreadCheckpointControls
                     busy={props.busy === true || checkpoints.busy}
@@ -332,7 +337,7 @@ function AttemptBlock(props: {
       )}
       <article
         aria-label={`Assistant response · ${attemptLabels[props.attempt.outcome]}`}
-        className="chat-transcript__message chat-transcript__message--assistant"
+        className="turn-agent"
       >
         {props.attempt.responseRefs.length === 0 ? null : responseBody === undefined ? (
           <p role="alert">Response content is unavailable.</p>
@@ -397,7 +402,7 @@ function AttemptStatus(props: { readonly outcome: ChatAttemptOutcome }) {
   return (
     <p
       aria-live={props.outcome === "streaming" ? "polite" : undefined}
-      className={`chat-transcript__attempt-status chat-transcript__attempt-status--${props.outcome}`}
+      className={`runstatus chat-transcript__attempt-status--${props.outcome}`}
     >
       <StatusIcon aria-hidden="true" size={12} strokeWidth={1.8} />
       <span>{attemptLabels[props.outcome]}</span>

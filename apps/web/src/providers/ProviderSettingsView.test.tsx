@@ -48,6 +48,30 @@ describe("ProviderSettingsView", () => {
     );
   });
 
+  it("adds no pane heading of its own and orders discovery, then providers, then defaults", () => {
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture()}
+        discovery={<section aria-label="Detected on this Mac" />}
+      />,
+    );
+
+    // The settings shell owns the pane's single visible title; the pane body
+    // must not repeat a "Providers" heading of its own.
+    expect(screen.queryByRole("heading", { name: "Providers" })).not.toBeInTheDocument();
+
+    const discovery = screen.getByRole("region", { name: "Detected on this Mac" });
+    const providers = screen.getByRole("region", { name: "Providers" });
+    const defaults = screen.getByRole("region", { name: "Defaults" });
+    expect(within(defaults).getByLabelText("Permission persistence")).toBeVisible();
+    expect(
+      discovery.compareDocumentPosition(providers) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      providers.compareDocumentPosition(defaults) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("keeps manual provider setup behind an advanced disclosure", async () => {
     const user = userEvent.setup();
     renderProviderSettings(<ProviderSettingsView {...fixture()} />);
@@ -104,7 +128,7 @@ describe("ProviderSettingsView", () => {
       "/usr/local/bin/opencode",
     );
     await user.click(screen.getByRole("button", { name: "Save binary path for Existing CLI" }));
-    await user.click(screen.getByRole("button", { name: "Disable Existing CLI" }));
+    await user.click(screen.getByRole("switch", { name: "Enable Existing CLI" }));
     await user.click(screen.getByRole("button", { name: "Check connection for Existing CLI" }));
     await user.click(screen.getByRole("button", { name: "Remove Existing CLI" }));
     expect(props.onRename).toHaveBeenCalledWith(id, "Renamed CLI");
@@ -409,7 +433,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Codex local" });
-    expect(within(card).getByText(/Codex CLI · Enabled/)).toBeVisible();
+    expect(within(card).getByText("Codex CLI")).toBeVisible();
     expect(within(card).getByText(/codex login/i)).toBeVisible();
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(/one-shot/i);
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(
@@ -429,7 +453,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Kimi local" });
-    expect(within(card).getByText(/Kimi Code CLI · Enabled/)).toBeVisible();
+    expect(within(card).getByText("Kimi Code CLI")).toBeVisible();
     expect(within(card).getByText(/kimi login/i)).toHaveTextContent(/Octant-managed profile/i);
     expect(within(card).getByText(/kimi login/i)).toHaveTextContent(
       /do not use your ordinary Kimi profile/i,
@@ -455,7 +479,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Devin local" });
-    expect(within(card).getByText(/Devin ACP · Enabled/)).toBeVisible();
+    expect(within(card).getByText("Devin ACP")).toBeVisible();
     expect(within(card).getByText(/devin auth login/i)).toBeVisible();
     expect(within(card).getByLabelText("Binary path for Devin local")).toHaveValue(
       "/Users/example/.local/bin/devin",
@@ -473,7 +497,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Pi local" });
-    expect(within(card).getByText(/Pi RPC · Enabled/)).toBeVisible();
+    expect(within(card).getByText("Pi RPC")).toBeVisible();
     expect(within(card).getByText(/provider-owned/i)).toBeVisible();
     expect(within(card).getByLabelText("Binary path for Pi local")).toHaveValue(
       "/opt/homebrew/bin/pi",
@@ -493,7 +517,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Oh My Pi local" });
-    expect(within(card).getByText(/Oh My Pi RPC · Enabled/)).toBeVisible();
+    expect(within(card).getByText("Oh My Pi RPC")).toBeVisible();
     expect(within(card).getByText(/provider-owned Oh My Pi credentials/i)).toBeVisible();
     expect(within(card).getByText(/Supported version: 17.2.1/)).toBeVisible();
     expect(within(card).getByLabelText("Binary path for Oh My Pi local")).toHaveValue(
@@ -514,7 +538,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Kilo local" });
-    expect(within(card).getByText(/Kilo ACP · Enabled/)).toBeVisible();
+    expect(within(card).getByText("Kilo ACP")).toBeVisible();
     expect(within(card).getByText(/kilo auth login/i)).toBeVisible();
     expect(within(card).getByLabelText("Binary path for Kilo local")).toHaveValue(
       "/opt/homebrew/bin/kilo",
@@ -549,7 +573,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Claude local" });
-    expect(within(card).getByText(/Claude Agent SDK · Enabled/)).toBeVisible();
+    expect(within(card).getByText("Claude Agent SDK")).toBeVisible();
     expect(within(card).getAllByText(/official Claude Code/i)).toHaveLength(2);
     expect(within(card).getByText(/Remember for this Project/)).toHaveTextContent(/one-shot/i);
     expect(within(card).getByLabelText("Claude authentication for Claude local")).toHaveValue(
@@ -637,7 +661,7 @@ describe("ProviderSettingsView", () => {
     renderExpanded(<ProviderSettingsView {...fixture({ instance: httpProvider() })} />);
     const card = screen.getByRole("article", { name: "Private gateway" });
 
-    expect(within(card).getByText(/OpenAI-compatible HTTP · Enabled/)).toBeVisible();
+    expect(within(card).getByText("OpenAI-compatible HTTP")).toBeVisible();
     expect(within(card).getByText("https://gateway.example/v1/")).toBeVisible();
     expect(within(card).getByText(/Configured protocol: Automatic/)).toBeVisible();
     expect(within(card).getByText(/Authentication: Bearer/)).toBeVisible();
@@ -1191,10 +1215,9 @@ describe("ProviderSettingsView", () => {
       />,
     );
 
-    const disclosure = screen.getByRole("button", { name: "Provider order" });
-    expect(disclosure).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("button", { name: "Move Second Provider up" })).toBeNull();
-    await user.click(disclosure);
+    expect(screen.getByRole("button", { name: "Move Second Provider up" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Move Second Provider down" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move First Provider up" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Move Second Provider up" }));
     expect(props.onProviderOrderChange).toHaveBeenCalledWith([second.id, firstId]);
   });
@@ -1313,7 +1336,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Detected Codex" });
-    expect(within(card).getByRole("button", { name: "Enable Detected Codex" })).toBeVisible();
+    expect(within(card).getByRole("switch", { name: "Enable Detected Codex" })).toBeVisible();
     expect(
       within(card).getByRole("button", { name: "Details for Detected Codex" }),
     ).toHaveAttribute("aria-expanded", "false");
@@ -1342,7 +1365,7 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Ollama local" });
-    expect(within(card).getByRole("button", { name: "Enable Ollama local" })).toBeVisible();
+    expect(within(card).getByRole("switch", { name: "Enable Ollama local" })).toBeVisible();
   });
 
   it("runs one automatic connection check after enabling a disabled auto-registered provider", async () => {
@@ -1370,7 +1393,7 @@ describe("ProviderSettingsView", () => {
     });
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await user.click(screen.getByRole("button", { name: "Enable Detected Codex" }));
+    await user.click(screen.getByRole("switch", { name: "Enable Detected Codex" }));
 
     expect(props.onSetEnabled).toHaveBeenCalledWith(id, true);
     expect(props.onProbe).toHaveBeenCalledWith(id);

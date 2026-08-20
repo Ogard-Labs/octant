@@ -102,7 +102,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
           Filter by kind
         </label>
         <select
-          className="artifact-library__select"
+          className="artifact-library__select select"
           id="artifact-library-kind"
           onChange={(event) =>
             event.target.value === ""
@@ -124,7 +124,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
           Filter by Project
         </label>
         <select
-          className="artifact-library__select"
+          className="artifact-library__select select"
           id="artifact-library-project"
           onChange={(event) =>
             event.target.value === ""
@@ -145,7 +145,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
           Filter by mode
         </label>
         <select
-          className="artifact-library__select"
+          className="artifact-library__select select"
           id="artifact-library-mode"
           onChange={(event) =>
             event.target.value === ""
@@ -164,11 +164,11 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
         </select>
       </div>
 
-      <div aria-label="Artifact groups" className="artifact-library__tabs" role="tablist">
+      <div aria-label="Artifact groups" className="artifact-library__tabs tabs" role="tablist">
         {TABS.map((tab) => (
           <button
             aria-selected={filters.tab === tab.id}
-            className="artifact-library__tab"
+            className="artifact-library__tab tab"
             key={tab.id}
             onClick={() => change({ tab: tab.id })}
             role="tab"
