@@ -1,5 +1,6 @@
 import {
   decodeAgentProfile,
+  decodeAgentProfileScope,
   decodeAgentProfileCreated,
   decodeAgentProfileRemoved,
   decodeAgentProfileUpdated,
@@ -32,6 +33,7 @@ export class AgentProfileProjection implements Projection {
   #upsertByConnection = new WeakMap<SqliteConnection, SqliteStatement>();
   #removeByConnection = new WeakMap<SqliteConnection, SqliteStatement>();
   #aggregateHeadByConnection = new WeakMap<SqliteConnection, SqliteStatement>();
+  #createdScopeByConnection = new WeakMap<SqliteConnection, SqliteStatement>();
 
   reset(connection: SqliteConnection): void {
     connection.exec(`DELETE FROM agent_profile_projection;`);
@@ -50,7 +52,16 @@ export class AgentProfileProjection implements Projection {
           profile.version === event.aggregateVersion,
       );
       if (this.#isStale(connection, event)) return;
-      this.#upsertProfile(connection, profile, scope, event.aggregateVersion);
+      // An edit never restates the scope a profile belongs to. Updates journaled
+      // before the service carried the scope forward say "user" regardless of
+      // what the profile was created with, and thread binding reads this scope
+      // as authority, so the creation event decides it.
+      this.#upsertProfile(
+        connection,
+        profile,
+        this.#createdScope(connection, event.aggregateId) ?? scope,
+        event.aggregateVersion,
+      );
       return;
     }
 
@@ -64,6 +75,34 @@ export class AgentProfileProjection implements Projection {
       if (this.#isStale(connection, event)) return;
       this.#removeProfile(connection, removed.profileId, removed.version);
     }
+  }
+
+  /**
+   * The scope the profile was created with, read from the journal rather than
+   * from the projection. A rebuild resets the table and the stale-event check
+   * then skips every event but the aggregate's last, so a row's own history is
+   * not available to it; the creation event is, and it is the only record of
+   * the scope that was never meant to change.
+   */
+  #createdScope(connection: SqliteConnection, profileId: string): AgentProfileScope | undefined {
+    let statement = this.#createdScopeByConnection.get(connection);
+    if (statement === undefined) {
+      statement = connection.prepare(`
+        SELECT payload_json
+        FROM event_journal
+        WHERE aggregate_type = 'agent-profile'
+          AND aggregate_id = ?
+          AND event_name = 'agent.profile-created@1'
+        ORDER BY global_sequence
+        LIMIT 1
+      `);
+      this.#createdScopeByConnection.set(connection, statement);
+    }
+    const row = statement.get(profileId) as { readonly payload_json: string } | undefined;
+    if (row === undefined) return undefined;
+    const payload: unknown = JSON.parse(row.payload_json);
+    if (typeof payload !== "object" || payload === null || !("scope" in payload)) return undefined;
+    return decodeAgentProfileScope((payload as { readonly scope: unknown }).scope);
   }
 
   #isStale(connection: SqliteConnection, event: EventEnvelope): boolean {
@@ -149,6 +188,30 @@ export function readAgentProfile(
     `)
     .get(profileId) as AgentProfileProjectionRow | undefined;
   return row === undefined ? undefined : decodeProfileRow(row);
+}
+
+/**
+ * The profile together with the scope that owns it. A caller deciding whether a
+ * profile may start a given thread needs both: the identifier alone says
+ * nothing about which Project, mode, or thread the profile was written for.
+ */
+export function readAgentProfileBinding(
+  connection: SqliteConnection,
+  profileId: AgentProfileId,
+): { readonly profile: AgentProfile; readonly scope: AgentProfileScope } | undefined {
+  const row = connection
+    .prepare(`
+      SELECT profile_id, schema_version, scope_kind, scope_ref,
+             profile_json, aggregate_version
+      FROM agent_profile_projection
+      WHERE profile_id = ?
+    `)
+    .get(profileId) as AgentProfileProjectionRow | undefined;
+  if (row === undefined) return undefined;
+  return {
+    profile: decodeProfileRow(row),
+    scope: decodeAgentProfileScope({ scopeKind: row.scope_kind, scopeRef: row.scope_ref }),
+  };
 }
 
 export function readAgentProfiles(connection: SqliteConnection): ReadonlyArray<AgentProfile> {

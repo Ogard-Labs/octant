@@ -8,7 +8,9 @@ import {
   ProviderInstanceId,
   ProviderModelId,
 } from "./providers";
-import { HostId } from "./shell";
+// HostId comes from its own module rather than the shell barrel: `shell` pulls
+// in the Apple toolchain, which pulls in `code`, and `code` now names a profile.
+import { HostId } from "./host";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));

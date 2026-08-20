@@ -32,7 +32,7 @@ import {
   type PickerGroup,
 } from "@octant/domain";
 import { ArrowUp, FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
-import { useCallback, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   CodeComposerAdapter,
   type CodeComposerSubmitInput,
@@ -58,6 +58,12 @@ export interface DraftThreadWorkspaceProps {
   readonly projectRoot?: string;
   readonly branchName?: string;
   readonly approvalLabel?: string;
+  /**
+   * The execution-profile control. Only Code binds a thread to a profile today,
+   * so only the Code composer mounts it; showing it where it decides nothing was
+   * the reason it read as an unexplained dropdown.
+   */
+  readonly executionProfile?: ReactNode;
   readonly hosts?: ReadonlyArray<HostIdentity>;
   readonly selectedHostId?: HostId;
   readonly fixedHostId?: HostId;
@@ -278,6 +284,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { selectedModelId: props.selectedModelId })}
           onSelectProvider={props.onSelectProvider}
+          {...(props.executionProfile === undefined
+            ? {}
+            : { profileControl: props.executionProfile })}
           onCreateThread={(input) => {
             if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
               void props.onCreateCodeThread(input, selectedProjectId);

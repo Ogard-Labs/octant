@@ -9,6 +9,7 @@ import type {
   ExecutionResolutionSource,
 } from "@octant/contracts/agent-profile";
 import type {
+  PermissionPersistence,
   ProviderCatalogSnapshot,
   ProviderExecutionPolicy,
   ProviderInstanceId,
@@ -57,18 +58,124 @@ export function validateProfileAuthoritySafety(input: {
   readonly profile: AgentProfile;
   readonly projectExecutionPolicy: ProviderExecutionPolicy;
 }): void {
-  const policyRank = {
-    plan: 0,
-    "approval-gated": 1,
-    "auto-accept-edits": 2,
-    "full-access": 3,
-  } as const;
-  if (policyRank[input.profile.defaultExecutionPolicy] > policyRank[input.projectExecutionPolicy]) {
+  if (
+    POLICY_RANK[input.profile.defaultExecutionPolicy] > POLICY_RANK[input.projectExecutionPolicy]
+  ) {
     throw new AgentProfileRejected(
       "authority-escalation",
       `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
     );
   }
+}
+
+/**
+ * How much authority each posture carries. A thread may move down this list
+ * when a profile is stricter than it asked to be; it may never move up.
+ */
+const POLICY_RANK = {
+  plan: 0,
+  "approval-gated": 1,
+  "auto-accept-edits": 2,
+  "full-access": 3,
+} as const;
+
+/**
+ * How long a granted permission outlives the thread that asked for it. A
+ * profile may shorten this, never lengthen it: a profile written to hold Full
+ * access to one session must not produce a thread that remembers Full access
+ * for the whole Project.
+ */
+const PERSISTENCE_RANK = { "current-session": 0, "project-default": 1 } as const;
+
+/**
+ * Whether a profile's scope reaches the thread being started. Scopes exist to
+ * partition profiles by owner, so a Project's profile, another thread's one-off,
+ * or a profile written for a different mode must not start this thread just
+ * because its identifier was supplied.
+ */
+export function profileScopeApplies(input: {
+  readonly scope: AgentProfileScope;
+  readonly mode: OctantMode;
+  readonly projectId: string;
+  readonly threadId: string;
+}): boolean {
+  const ref = input.scope.scopeRef;
+  if (input.scope.scopeKind === "user") return true;
+  if (input.scope.scopeKind === "mode") return ref === String(input.mode);
+  if (input.scope.scopeKind === "project") return ref === String(input.projectId);
+  return ref === String(input.threadId);
+}
+
+/** What binding a profile to a thread did, or why it could not be done. */
+export type ProfileApplication =
+  | {
+      readonly status: "applied";
+      readonly executionPolicy: ProviderExecutionPolicy;
+      readonly permissionPersistence: PermissionPersistence;
+    }
+  | {
+      readonly status: "refused";
+      readonly code: AgentProfileRejectionCode;
+      readonly reason: string;
+    };
+
+/**
+ * Bind a profile to a thread that is starting, and say what posture the thread
+ * runs under as a result.
+ *
+ * A profile narrows and never widens. Where the thread asked for more authority
+ * than the profile carries, the profile's posture wins; where it asked for
+ * less, its own choice stands, because selecting "Reviewer" is not a request to
+ * be granted everything Reviewer is allowed.
+ *
+ * Refusal is a value rather than a throw: every caller has to answer for the
+ * incompatible-mode, disallowed-model, and escalating-profile cases, and a
+ * thread that silently started without its profile would run with authority
+ * the person believed they had constrained.
+ */
+export function applyProfileToThread(input: {
+  readonly profile: AgentProfile;
+  readonly mode: OctantMode;
+  readonly modelId: ProviderModelId;
+  readonly requestedExecutionPolicy: ProviderExecutionPolicy;
+  readonly requestedPermissionPersistence: PermissionPersistence;
+  readonly projectExecutionPolicy: ProviderExecutionPolicy;
+}): ProfileApplication {
+  if (!isProfileModeCompatible(input.profile, input.mode)) {
+    return {
+      status: "refused",
+      code: "mode-incompatible",
+      reason: `Profile "${input.profile.displayName}" was not written for ${input.mode}.`,
+    };
+  }
+  if (!isModelAllowedByProfile(input.profile, input.modelId)) {
+    return {
+      status: "refused",
+      code: "model-not-allowed",
+      reason: `Profile "${input.profile.displayName}" does not allow model "${String(input.modelId)}".`,
+    };
+  }
+  const executionPolicy =
+    POLICY_RANK[input.profile.defaultExecutionPolicy] < POLICY_RANK[input.requestedExecutionPolicy]
+      ? input.profile.defaultExecutionPolicy
+      : input.requestedExecutionPolicy;
+  // The posture the thread would actually run under is what has to clear the
+  // Project, not the profile's own default. A Full-access profile asked to
+  // start in Plan produces a Plan thread and takes nothing the Project has not
+  // already granted; refusing it would refuse the narrower of the two choices.
+  if (POLICY_RANK[executionPolicy] > POLICY_RANK[input.projectExecutionPolicy]) {
+    return {
+      status: "refused",
+      code: "authority-escalation",
+      reason: `Profile default policy "${input.profile.defaultExecutionPolicy}" exceeds Project policy "${input.projectExecutionPolicy}". A profile cannot widen Project authority.`,
+    };
+  }
+  const permissionPersistence =
+    PERSISTENCE_RANK[input.profile.defaultPermissionPersistence] <
+    PERSISTENCE_RANK[input.requestedPermissionPersistence]
+      ? input.profile.defaultPermissionPersistence
+      : input.requestedPermissionPersistence;
+  return { status: "applied", executionPolicy, permissionPersistence };
 }
 
 /**

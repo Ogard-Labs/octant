@@ -3,15 +3,19 @@
   font-size: 12px;
 }
 
+/*
+ * In the composer the profile control is one chip in the control row beside
+ * model and access, so it takes only the width of its own trigger and hangs its
+ * panel above itself. It used to be a 760px block floating over the draft,
+ * which read as an unexplained dropdown with no relationship to anything.
+ */
 .execution-profile-workflow--composer {
-  z-index: 3;
-  width: min(760px, calc(100% - 32px));
-  margin: 18px auto 0;
+  position: relative;
+  display: inline-flex;
 }
 
 .execution-profile-workflow__trigger {
   max-width: 100%;
-  margin-inline-start: auto;
 }
 
 .execution-profile-workflow__body,
@@ -24,20 +28,19 @@
 }
 
 .execution-profile-workflow--composer .execution-profile-workflow__body {
+  position: absolute;
+  z-index: 40;
+  inset-block-end: calc(100% + 6px);
+  inset-inline-end: 0;
+  width: min(460px, calc(100vw - 48px));
   max-height: min(460px, calc(100vh - 220px));
-  margin-block-start: 6px;
   overflow: auto;
   padding: 12px;
 }
 
-.draft-thread-execution-profile {
-  height: 100%;
-  min-height: 0;
-  overflow: auto;
-}
-
-.draft-thread-execution-profile > .draft-thread {
-  min-height: 560px;
+/* Six labelled facts do not fit three-up in a popover this narrow. */
+.execution-profile-workflow--composer .execution-profile-workflow__receipt dl {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .execution-profile-workflow--settings {
