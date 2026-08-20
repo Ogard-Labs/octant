@@ -303,11 +303,20 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
    backdrop-filter blurs only this page's own pixels — it can never frost
    another app's window. Every point of alpha in the washes above therefore
    shows the desktop behind Octant SHARP: at the 34–62% vibrancy tiers a code
-   editor behind the window stays readable through the sidebar. Until the
-   host delivers real vibrancy (Electron setVibrancy), the native sidebar
-   keeps a near-opaque wash — enough tint to stay a material, not enough
-   transparency to read through. The opaque material keeps its own rule. */
-html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar {
+   editor behind the window stays readable through the sidebar. The wash stays
+   unless the host reports vibrancy: the desktop process publishes its applied
+   window vibrancy over the resolved-sidebar-vibrancy channel, the renderer
+   mirrors it as data-octant-host-vibrancy="active", and only then do the
+   tiered translucent materials above show the natively frosted desktop. A
+   host that stays silent — or that refused vibrancy for Reduce Transparency,
+   high contrast, or thermals — keeps this near-opaque wash: enough tint to
+   stay a material, not enough transparency to read through. The gate sits in
+   :where() so the wash keeps its original specificity and the
+   prefers-reduced-transparency override below still wins. The opaque material
+   keeps its own rule. */
+html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="active"]))
+  .shell-frame:not(.shell--material-opaque)
+  > .sidebar {
   background: color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent);
 }
 
