@@ -27,8 +27,8 @@
   /* ─── ground ────────────────────────────────────────────────────────
      Octant's three steps line up with the app's three: the page ground,
      the card raised off it, and the warmer strip inside a card. */
-  --oct-bg:           var(--octant-workspace);
-  --oct-surface:      var(--octant-floating);
+  --oct-bg: var(--octant-workspace);
+  --oct-surface: var(--octant-floating);
   --oct-surface-warm: var(--octant-control);
 
   /* ─── text ──────────────────────────────────────────────────────────
@@ -36,17 +36,17 @@
      has no role of its own in the app, so it is derived rather than
      collapsed into fg — losing it would flatten every secondary line in
      a card to the same weight as its heading. */
-  --oct-fg:    var(--octant-text-primary);
-  --oct-fg-2:  color-mix(in oklab, var(--octant-text-primary) 90%, transparent);
+  --oct-fg: var(--octant-text-primary);
+  --oct-fg-2: color-mix(in oklab, var(--octant-text-primary) 90%, transparent);
   --oct-muted: var(--octant-text-secondary);
-  --oct-meta:  var(--octant-text-muted);
+  --oct-meta: var(--octant-text-muted);
 
   /* ─── lines ─────────────────────────────────────────────────────────
      The app's border is a solid colour, not a translucent ink, so the
      soft variant is mixed toward the workspace rather than toward
      transparent — mixing to transparent would let the ground show
      through and make the hairline read darker than the surface. */
-  --oct-border:      var(--octant-border);
+  --oct-border: var(--octant-border);
   --oct-border-soft: color-mix(in oklab, var(--octant-border) 55%, var(--octant-workspace));
 
   /* A translucent tint for chips and hover fills that sit over
@@ -58,7 +58,7 @@
      accent-text is a real theme role (contrast target: workspace, bar:
      normal text), so accent-as-text follows a custom theme and stays
      policed at 4.5:1 instead of borrowing the fill's 3:1 guarantee. */
-  --oct-accent:    var(--octant-accent);
+  --oct-accent: var(--octant-accent);
   --oct-accent-on: var(--octant-accent-foreground);
   --oct-accent-fg: var(--octant-accent-text);
 
@@ -70,25 +70,25 @@
      danger surface, so danger-soft is derived at the strength the
      design system uses. */
   --oct-success-fg: var(--octant-success-text);
-  --oct-warn-fg:    var(--octant-warning-text);
-  --oct-danger-fg:  var(--octant-danger-text);
+  --oct-warn-fg: var(--octant-warning-text);
+  --oct-danger-fg: var(--octant-danger-text);
 
   --oct-success-soft: var(--octant-success-surface);
-  --oct-warn-soft:    var(--octant-warning-surface);
-  --oct-danger-soft:  color-mix(in oklab, var(--octant-danger-text) 20%, transparent);
+  --oct-warn-soft: var(--octant-warning-surface);
+  --oct-danger-soft: color-mix(in oklab, var(--octant-danger-text) 20%, transparent);
 
   /* The saturated bases, used for fills and status dots rather than
      text. The app has no separate base, so they follow the text roles —
      which is what the design system does in dark mode anyway. */
   --oct-success: var(--octant-success-text);
-  --oct-warn:    var(--octant-warning-text);
-  --oct-danger:  var(--octant-danger-text);
+  --oct-warn: var(--octant-warning-text);
+  --oct-danger: var(--octant-danger-text);
 
   /* ─── depth ─────────────────────────────────────────────────────────
      Octant draws elevation as a ring and no shadow; the app has real
      shadows. Inside the app the app wins, because a flat card in a
      shadowed shell reads as a rendering bug rather than as restraint. */
-  --oct-elev-ring:   var(--octant-shadow-hairline);
+  --oct-elev-ring: var(--octant-shadow-hairline);
   --oct-elev-raised: var(--octant-shadow-overlay);
 
   /* ─── focus and scrim ───────────────────────────────────────────────
@@ -96,7 +96,7 @@
      ground colour separating the outer ring from the control. Only the
      colours come from the app. */
   --oct-focus-ring: 0 0 0 2px var(--octant-workspace), 0 0 0 4px var(--octant-focus-ring);
-  --oct-scrim:      var(--octant-scrim);
+  --oct-scrim: var(--octant-scrim);
 
   /* Chart chrome, derived so it tracks the theme. The grid stays
      fainter than border-soft: a gridline is a reading aid and must

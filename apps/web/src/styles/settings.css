@@ -70,26 +70,21 @@
   overflow-y: auto;
 }
 
-.settings-view__back,
+/* "Back to app" borrows the .setnav-item recipe; it only needs its slot. */
+.settings-view__back {
+  margin-bottom: var(--oct-space-2);
+}
+
 .settings-view__all-settings {
   display: flex;
   width: 100%;
-  min-height: 30px;
+  min-height: var(--oct-control-height-sm);
   align-items: center;
-  justify-content: flex-start;
-  gap: 7px;
-  padding: 0 7px;
-  color: var(--octant-text-secondary);
-  font-size: 11.5px;
-}
-
-.settings-view__back {
-  margin-bottom: 4px;
-}
-
-.settings-view__all-settings {
-  color: var(--octant-text-primary);
-  font-weight: 600;
+  gap: var(--oct-space-3);
+  padding: 0 var(--oct-space-2);
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
 }
 
 .settings-view__workspace {
@@ -105,22 +100,14 @@
   border-bottom: 1px solid transparent;
 }
 
+/* .setpane-title/.setpane-note carry the type; the header only spaces the
+   sections below it, and the note's own end margin must not stack on top. */
 .settings-view__header {
-  margin-bottom: 28px;
+  margin-bottom: var(--oct-space-6);
 }
 
-.settings-view__header h1 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.014em;
-}
-
-.settings-view__header-description {
-  margin: 5px 0 0;
-  color: var(--octant-text-muted);
-  font-size: 12px;
-  line-height: 1.45;
+.settings-view__header .setpane-note {
+  margin-bottom: 0;
 }
 
 .settings-view__field.settings-view__field--search {
@@ -153,159 +140,87 @@
   pointer-events: none;
 }
 
-.settings-view__text-input {
-  height: 28px;
+.settings-view__field--search .settings-view__text-input {
+  height: var(--oct-control-height-sm);
   padding-left: 27px;
-  background: var(--octant-control);
-  border-color: var(--octant-border);
+  background: var(--oct-surface);
+  border-color: var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
+/* The nav items are .setnav-item, but the column itself is the app's
+   sidebar rather than the design system's .setnav (which brings its own
+   border and background). Each group wraps its .setnav-section label, so
+   the label's own first-child margin logic never separates groups —
+   the grid gap does it instead. */
 .settings-navigation {
   display: grid;
-  gap: 16px;
+  gap: var(--oct-space-4);
+}
+
+.settings-navigation .setnav-section {
+  margin-top: 0;
 }
 
 .settings-navigation ul {
   display: grid;
-  gap: 1px;
+  gap: 2px;
   padding: 0;
   margin: 0;
   list-style: none;
 }
 
-.settings-navigation__group-label {
-  margin: 0 0 3px;
-  padding: 0 8px;
-  color: var(--octant-text-muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
+/* --- Settings primitives: app-side residue over .setrow/.setgroup --- */
 
-.settings-navigation__link {
-  display: flex;
-  width: 100%;
-  height: auto;
-  min-height: 28px;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 0 8px;
-  color: var(--octant-text-secondary);
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  box-shadow: none;
-  font-size: 12px;
-  font-weight: 500;
-  text-decoration: none;
-}
-
-.settings-navigation__link svg {
-  color: var(--octant-text-muted);
-}
-
-.settings-navigation__link:hover {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.settings-navigation__link[aria-current="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-selection);
-  box-shadow: var(--octant-shadow-hairline);
-  font-weight: 600;
-}
-
-.settings-navigation__link[aria-current="true"] svg {
-  color: var(--octant-text-primary);
-}
-
-.settings-navigation__link:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
-}
-
-/* --- Settings primitives (SettingRow, ScopeIndicator, SettingGroup) --- */
-
-.settings-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 24px;
-  padding: 12px 0;
-}
-
-.settings-row[data-focused="true"] {
+.setrow[data-focused="true"] {
   scroll-margin-top: 16px;
 }
 
-.settings-row__copy {
-  display: grid;
-  gap: 3px;
-  color: var(--octant-text-primary);
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.settings-row__label {
-  color: var(--octant-text-primary);
-}
-
-.settings-row__description {
-  margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11.5px;
-  font-weight: 400;
-  line-height: 1.45;
-}
-
-/* Scope reads as quiet metadata, not a badge. */
+/* Scope reads as quiet metadata inside the hint line, not a badge. */
 .settings-scope-indicator {
-  display: inline-block;
-  width: fit-content;
-  color: var(--octant-text-muted);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  opacity: 0.75;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
 }
 
-.settings-row__control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+/* SettingGroup's optional description; the divider under it comes from the
+   first row's own border-top, so the note draws none of its own. */
+.setgroup-note {
+  margin: 0;
+  padding: var(--oct-space-3) var(--oct-space-4) 0;
+  max-width: 64ch;
+  font-size: var(--oct-text-sm);
+  color: var(--oct-muted);
 }
 
-/* Compound editors (multi-field controls) stack under their label. */
-.settings-row[data-setting-id="sidebar-background"],
-.settings-row[data-setting-id="environment-presentation"],
-.settings-row[data-setting-id="default-model"],
-.settings-row[data-setting-id="vision-reviewer"] {
-  grid-template-columns: 1fr;
-  gap: 8px;
+/* Compound editors (multi-field controls) stack under their label instead of
+   hanging off the right edge as a one-line value. */
+.setrow[data-setting-id="sidebar-background"],
+.setrow[data-setting-id="environment-presentation"],
+.setrow[data-setting-id="default-model"],
+.setrow[data-setting-id="vision-reviewer"],
+.setrow[data-setting-id="user-profile"],
+.setrow[data-setting-id="keybindings"],
+.setrow[data-setting-id="app-updates"] {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-/*
- * A model picker is a searchable list, not a value on the right of a label. In
- * the trailing column it took its own natural width and ran off the pane, and
- * centring a one-line label against a list that tall left the label floating in
- * the middle of an empty block.
- */
-.settings-row[data-setting-id="default-model"] > .settings-row__control,
-.settings-row[data-setting-id="vision-reviewer"] > .settings-row__control {
-  display: grid;
-  align-items: start;
+.setrow[data-setting-id="sidebar-background"] > .setrow-control,
+.setrow[data-setting-id="environment-presentation"] > .setrow-control,
+.setrow[data-setting-id="default-model"] > .setrow-control,
+.setrow[data-setting-id="vision-reviewer"] > .setrow-control,
+.setrow[data-setting-id="user-profile"] > .setrow-control,
+.setrow[data-setting-id="keybindings"] > .setrow-control,
+.setrow[data-setting-id="app-updates"] > .setrow-control {
+  grid-column: 1;
+  grid-row: auto;
+  justify-self: stretch;
+  margin-top: var(--oct-space-3);
 }
 
-.settings-row[data-setting-id="sidebar-background"] .settings-row__control,
-.settings-row[data-setting-id="environment-presentation"] .settings-row__control {
-  display: block;
-  width: 100%;
-}
-
-.settings-row__control > .settings-view__setting {
+.setrow-control > .settings-view__setting {
   display: grid;
   grid-template-columns: 1fr;
   width: 100%;
@@ -316,35 +231,6 @@
 .settings-view__field-group {
   display: grid;
   width: 100%;
-  gap: 0;
-}
-
-.settings-group {
-  display: grid;
-  gap: 4px;
-  padding: 8px 0;
-}
-
-.settings-group__heading {
-  display: grid;
-  gap: 2px;
-}
-
-.settings-group__label {
-  color: var(--octant-text-primary);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.settings-group__description {
-  margin: 0;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 400;
-}
-
-.settings-group__rows {
-  display: grid;
   gap: 0;
 }
 
@@ -760,52 +646,47 @@
   display: none;
 }
 
+/* The Base UI switch, drawn to the design system's input.switch metrics.
+   The component is a button with a thumb span, so input.switch's
+   pseudo-element recipe cannot apply directly; this mirrors it. */
 .octant-switch {
   position: relative;
   display: inline-flex;
-  width: 30px;
-  height: 18px;
+  width: 38px;
+  height: 22px;
   flex: 0 0 auto;
   align-items: center;
-  padding: 2px;
+  padding: 3px;
   color: inherit;
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 999px;
+  background: var(--oct-border);
+  border: 0;
+  border-radius: var(--oct-radius-pill);
   cursor: pointer;
-  transition:
-    background-color 120ms ease,
-    border-color 120ms ease;
+  transition: background var(--oct-motion-base) var(--oct-ease-standard);
 }
 
 .octant-switch[data-checked] {
-  background: var(--octant-accent);
-  border-color: var(--octant-accent);
-}
-
-.octant-switch:focus-visible {
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: 2px;
+  background: var(--oct-accent);
 }
 
 .octant-switch[data-disabled] {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: var(--oct-disabled-opacity);
 }
 
 .octant-switch__thumb {
   display: block;
-  width: 12px;
-  height: 12px;
-  background: var(--octant-text-primary);
-  border-radius: 50%;
+  width: 16px;
+  height: 16px;
+  background: var(--oct-fg);
+  border-radius: var(--oct-radius-pill);
   transform: translateX(0);
-  transition: transform 120ms ease;
+  transition: transform var(--oct-motion-base) var(--oct-ease-standard);
 }
 
 .octant-switch__thumb[data-checked] {
-  background: #ffffff;
-  transform: translateX(12px);
+  background: var(--oct-accent-on);
+  transform: translateX(16px);
 }
 
 .settings-view__actions {
@@ -866,8 +747,10 @@
     display: block;
   }
 
+  /* The system switch is borderless; increased contrast draws the edge as an
+     inset ring instead of a border so the metrics stay identical. */
   .octant-switch {
-    border-color: var(--octant-text-primary);
+    box-shadow: inset 0 0 0 1px var(--oct-fg);
   }
 }
 

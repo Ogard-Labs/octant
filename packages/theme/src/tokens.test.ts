@@ -127,9 +127,9 @@ describe("theme semantic token catalog", () => {
     expect(role.category).toBe("accent");
     expect(role.contrastTarget).toBe("workspace");
     expect(role.contrastLevel).toBe("normal-text");
-    expect(meetsContrast(role.defaultLight, DEFAULT_LIGHT_TOKENS["workspace"]!, "normal-text")).toBe(
-      true,
-    );
+    expect(
+      meetsContrast(role.defaultLight, DEFAULT_LIGHT_TOKENS["workspace"]!, "normal-text"),
+    ).toBe(true);
     expect(meetsContrast(role.defaultDark, DEFAULT_DARK_TOKENS["workspace"]!, "normal-text")).toBe(
       true,
     );
