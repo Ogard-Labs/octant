@@ -1027,6 +1027,7 @@ function renderNonCodeTab(
         {...(props.projectWindowCapability === undefined
           ? {}
           : { windowCapability: props.projectWindowCapability })}
+        {...(props.onOpenSideChat === undefined ? {} : { onSidecarOpened: props.onOpenSideChat })}
       />
     );
   }

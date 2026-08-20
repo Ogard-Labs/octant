@@ -1589,20 +1589,38 @@ function createWorkspaceMutation(
         sourceThreadId: intent.sidecar.sourceThreadId,
         sidecarThreadId: intent.sidecar.sidecarThreadId,
       };
-      return existing === undefined
-        ? {
-            operation: { kind: "open-tab", mode, groupId: group.groupId, tab },
-            message: `${tab.title} opened.`,
-          }
-        : {
-            operation: {
-              kind: "activate-tab",
-              mode,
-              groupId: existing.groupId,
-              tabId: existing.tabId,
-            },
-            message: `${tab.title} selected.`,
-          };
+      if (existing === undefined) {
+        return {
+          operation: { kind: "open-tab", mode, groupId: group.groupId, tab },
+          message: `${tab.title} opened.`,
+        };
+      }
+      // A launcher-opened tab names the source thread but not the sidecar.
+      // Record the identity the host just answered so a restart can fail
+      // closed instead of silently swapping in a fresh conversation. A tab
+      // that already names a different sidecar stays as it is — the tab
+      // itself says the restored conversation is gone.
+      if (existing.sidecarThreadId === undefined) {
+        return {
+          operation: {
+            kind: "set-side-chat-sidecar",
+            mode,
+            groupId: existing.groupId,
+            tabId: existing.tabId,
+            sidecarThreadId: intent.sidecar.sidecarThreadId,
+          },
+          message: `${tab.title} selected.`,
+        };
+      }
+      return {
+        operation: {
+          kind: "activate-tab",
+          mode,
+          groupId: existing.groupId,
+          tabId: existing.tabId,
+        },
+        message: `${tab.title} selected.`,
+      };
     }
     case "open-surface": {
       const group =
@@ -2240,14 +2258,25 @@ function activeSideChatSource(
 function findSideChatTab(
   layout: WorkspaceLayoutNode,
   sourceThreadId: MentionableThreadId,
-): { readonly groupId: TabGroupId; readonly tabId: WorkspaceTabId } | undefined {
+):
+  | {
+      readonly groupId: TabGroupId;
+      readonly tabId: WorkspaceTabId;
+      readonly sidecarThreadId?: ChatThreadId;
+    }
+  | undefined {
   if (layout.kind === "group") {
     const tab = layout.tabs.find(
       (candidate) =>
         candidate.kind === "side-chat" &&
         String(candidate.sourceThreadId) === String(sourceThreadId),
     );
-    return tab === undefined ? undefined : { groupId: layout.groupId, tabId: tab.id };
+    if (tab === undefined || tab.kind !== "side-chat") return undefined;
+    return {
+      groupId: layout.groupId,
+      tabId: tab.id,
+      ...(tab.sidecarThreadId === undefined ? {} : { sidecarThreadId: tab.sidecarThreadId }),
+    };
   }
   return (
     findSideChatTab(layout.first, sourceThreadId) ?? findSideChatTab(layout.second, sourceThreadId)
