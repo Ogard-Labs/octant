@@ -47,7 +47,7 @@ Read the record that owns your change before editing, not all of them:
 | Extensions, skills, plugin host                     | `docs/decisions/0011`, `docs/decisions/0001` |
 | Subagents and agent runs                            | `docs/decisions/0012`                        |
 | Remote clients and mobile                           | `docs/decisions/0013`                        |
-| Collaboration, shared host, git-mediated sharing    | `docs/decisions/0038`                        |
+| Collaboration, shared host, git-mediated sharing    | `docs/decisions/0040`                        |
 | Apple build and validation                          | `docs/decisions/0014`                        |
 | Shell, navigation, workspace layout                 | `docs/decisions/0015`                        |
 | Components and theme                                | `docs/decisions/0016`                        |
