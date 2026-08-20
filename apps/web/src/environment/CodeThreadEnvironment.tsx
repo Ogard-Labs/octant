@@ -34,6 +34,12 @@ export interface CodeThreadEnvironmentProps {
   readonly files?: ReactNode;
   /** Publishing controls, mounted inside the collapsible Publish group. */
   readonly publish?: ReactNode;
+  /**
+   * The thread's plan, mounted inside its own collapsible group. The plan
+   * belongs to this thread, so it lives beside the thread's other facts rather
+   * than in the Project-scoped dock.
+   */
+  readonly plan?: ReactNode;
   /** Opens the thread's Changes (diff) surface. Absent hides the control. */
   readonly onOpenChanges?: () => void;
   /**
@@ -152,6 +158,9 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         </EnvironmentGroup>
         {props.files === undefined ? null : (
           <EnvironmentGroup title="Files">{props.files}</EnvironmentGroup>
+        )}
+        {props.plan === undefined ? null : (
+          <EnvironmentGroup title="Plan">{props.plan}</EnvironmentGroup>
         )}
         {props.publish === undefined ? null : (
           <EnvironmentGroup title="Publish">{props.publish}</EnvironmentGroup>
