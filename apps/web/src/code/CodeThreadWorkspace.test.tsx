@@ -42,7 +42,7 @@ describe("CodeThreadWorkspace", () => {
 
     await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], []);
+    expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], [], []);
   });
 
   /**
@@ -398,6 +398,7 @@ describe("CodeThreadWorkspace", () => {
       "#[Release notes] does this still hold?",
       [mentionedThreadId],
       [],
+      [],
     );
   });
 
@@ -443,8 +444,12 @@ describe("CodeThreadWorkspace", () => {
 
     await user.type(composer, "please");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    // The path travels as ordinary prompt text; naming a file reaches nothing.
-    expect(sendFollowUp).toHaveBeenCalledWith("explain @src/index.ts please", [], []);
+    expect(sendFollowUp).toHaveBeenCalledWith(
+      "explain @src/index.ts please",
+      [],
+      [],
+      ["src/index.ts"],
+    );
   });
 
   it("uploads a pasted image before the turn and sends it by the host's own reference", async () => {
@@ -477,7 +482,7 @@ describe("CodeThreadWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
     // The turn names what the host answered with, never bytes the composer held.
-    expect(sendFollowUp).toHaveBeenCalledWith("match this mockup", [], [reference]);
+    expect(sendFollowUp).toHaveBeenCalledWith("match this mockup", [], [reference], []);
     // Sending is not a discard: the image belongs to the turn that carried it.
     expect(discardAttachment).not.toHaveBeenCalled();
   });
@@ -512,7 +517,7 @@ describe("CodeThreadWorkspace", () => {
     expect(await screen.findByAltText("pasted.png")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("match this mockup", [], [reference]);
+    expect(sendFollowUp).toHaveBeenCalledWith("match this mockup", [], [reference], []);
     // The refused turn leaves both the text and its image in the composer.
     expect(screen.getByAltText("pasted.png")).toBeInTheDocument();
     expect(composer).toHaveValue("match this mockup");
@@ -577,7 +582,7 @@ describe("CodeThreadWorkspace", () => {
       expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId),
     );
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("never mind the picture", [], []);
+    expect(sendFollowUp).toHaveBeenCalledWith("never mind the picture", [], [], []);
   });
 
   it("leaves an `@` that matches no file in this checkout as ordinary text", async () => {
@@ -617,7 +622,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "keep this prompt");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
 
-    expect(sendFollowUp).toHaveBeenCalledWith("keep this prompt", [], []);
+    expect(sendFollowUp).toHaveBeenCalledWith("keep this prompt", [], [], []);
     expect(composer).toHaveValue("keep this prompt");
   });
 
@@ -1061,6 +1066,7 @@ describe("CodeThreadWorkspace", () => {
       prompt: "and then push",
       threadMentionIds: [],
       attachments: [],
+      fileMentionPaths: [],
     }));
     const sendFollowUp = vi.fn(async () => true);
     render(
@@ -1075,7 +1081,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "and then push");
     await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
 
-    expect(queueFollowUp).toHaveBeenCalledWith("and then push", [], []);
+    expect(queueFollowUp).toHaveBeenCalledWith("and then push", [], [], []);
     expect(sendFollowUp).not.toHaveBeenCalled();
     await waitFor(() => expect(composer).toHaveValue(""));
   });
@@ -1088,8 +1094,20 @@ describe("CodeThreadWorkspace", () => {
         controller={controller({
           cancelQueuedFollowUp,
           queuedFollowUps: [
-            { id: "queued-1", prompt: "run the tests", threadMentionIds: [], attachments: [] },
-            { id: "queued-2", prompt: "then open a PR", threadMentionIds: [], attachments: [] },
+            {
+              id: "queued-1",
+              prompt: "run the tests",
+              threadMentionIds: [],
+              attachments: [],
+              fileMentionPaths: [],
+            },
+            {
+              id: "queued-2",
+              prompt: "then open a PR",
+              threadMentionIds: [],
+              attachments: [],
+              fileMentionPaths: [],
+            },
           ],
           turnStatus: "running",
         })}

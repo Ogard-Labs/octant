@@ -1,5 +1,9 @@
 import {
+  decodeWorkAttachmentId,
+  decodeWorkAttachmentMediaType,
   decodeWorkMutationRequestId,
+  decodeWorkTurnId,
+  decodeWorkTurnRequestId,
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
@@ -15,8 +19,10 @@ import { ArrowUp, Check, Globe2 } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useId,
   useRef,
   useState,
+  type ClipboardEvent,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -25,8 +31,18 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
-import type { HostId } from "@octant/contracts/host";
+import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import { ThreadExportControl } from "../thread/ThreadExportControl";
+import {
+  ThreadMentionChips,
+  ThreadMentionTypeahead,
+  useThreadMentionTypeahead,
+} from "../chat/ThreadMentionPicker";
+import { useThreadMentions } from "../chat/useThreadMentions";
+import { clipboardHasImage } from "../chat/composerImagePaste";
+import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
+import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
+import { useWorkFileMentions } from "./useWorkFileMentions";
 
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
@@ -75,14 +91,42 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [completionFormOpen, setCompletionFormOpen] = useState(false);
   const [completionEvidence, setCompletionEvidence] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionListId = useId();
+  const fileMentionListId = useId();
   const trimmed = prompt.trim();
   const completionLocked = thread?.completionConfirmed === true;
+  const images = useWorkComposerImages();
+  const imageSupport = selectedModelReadsImages(props.providerGroups ?? [], {
+    ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
+    ...(thread === undefined ? {} : { modelId: thread.modelId }),
+  });
+  const threadMentions = useThreadMentions({
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+    draft: prompt,
+  });
+  const mention = useThreadMentionTypeahead({
+    mentions: threadMentions.composer,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    textarea: () => textareaRef.current,
+    disabled: creating || completionLocked,
+  });
+  const fileMentions = useWorkFileMentions({
+    threadId: props.threadId,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    textarea: () => textareaRef.current,
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const fileMentionOpen = fileMentions.open && !mention.open;
   const canSubmit =
     trimmed.length > 0 &&
     !creating &&
     !completionLocked &&
-    props.mutationClient !== undefined &&
-    projectId !== undefined;
+    projectId !== undefined &&
+    (props.turnClient !== undefined || props.mutationClient !== undefined);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,13 +225,64 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   );
 
   const submit = useCallback(async () => {
-    if (!canSubmit || props.mutationClient === undefined || projectId === undefined) {
+    if (!canSubmit || projectId === undefined) {
       return;
     }
     setCreating(true);
     setErrorMessage(undefined);
     setStatus(undefined);
     try {
+      if (
+        props.turnClient !== undefined &&
+        thread !== undefined &&
+        thread.bindingRevisionId !== undefined
+      ) {
+        const threadMentionIds = await threadMentions.resolveForSend();
+        const staged = images.takeForSend();
+        const attachmentIds = [];
+        for (const file of staged) {
+          const attachmentId = decodeWorkAttachmentId(globalThis.crypto.randomUUID());
+          await props.turnClient.putAttachment({
+            threadId: props.threadId,
+            attachmentId,
+            displayName: file.name.trim() === "" ? "Pasted image" : file.name,
+            mediaType: decodeWorkAttachmentMediaType(file.type),
+            bytes: new Uint8Array(await file.arrayBuffer()),
+          });
+          attachmentIds.push(attachmentId);
+        }
+        const started = await props.turnClient.startFirstTurn({
+          kind: "start-work-thread-turn",
+          requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
+          threadId: props.threadId,
+          turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
+          prompt: trimmed,
+          authority: {
+            hostId: props.hostId ?? LOCAL_HOST_ID,
+            projectId,
+            bindingRevisionId: thread.bindingRevisionId,
+            workingDirectory: thread.workingDirectory ?? ("." as never),
+            confinementPosture: "project-root-confined",
+            providerInstanceId: thread.providerInstanceId,
+            modelId: thread.modelId,
+          },
+          ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+          ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
+          ...(fileMentions.selectedPaths.length === 0
+            ? {}
+            : { fileMentionPaths: [...fileMentions.selectedPaths] }),
+        });
+        if (started.kind !== "accepted") {
+          setErrorMessage("The Work turn could not be started.");
+          return;
+        }
+        setPrompt("");
+        threadMentions.clear();
+        fileMentions.clear();
+        textareaRef.current?.focus();
+        return;
+      }
+      if (props.mutationClient === undefined) return;
       const reply = await props.mutationClient.mutate({
         kind: "create-artifact",
         requestId: decodeWorkMutationRequestId(globalThis.crypto.randomUUID()),
@@ -204,11 +299,27 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       setStatus(`Created ${reply.outcome.artifact.displayName} in the bound folder.`);
       textareaRef.current?.focus();
     } catch {
-      setErrorMessage("The artifact could not be created. Review the Work project status.");
+      setErrorMessage(
+        props.turnClient === undefined
+          ? "The artifact could not be created. Review the Work project status."
+          : "The Work turn could not be started.",
+      );
     } finally {
       setCreating(false);
     }
-  }, [canSubmit, projectId, props.mutationClient, thread?.completionConfirmed, trimmed]);
+  }, [
+    canSubmit,
+    fileMentions,
+    images,
+    projectId,
+    props.hostId,
+    props.mutationClient,
+    props.threadId,
+    props.turnClient,
+    thread,
+    threadMentions,
+    trimmed,
+  ]);
 
   const confirmCompletion = useCallback(async () => {
     const evidence = completionEvidence.trim();
@@ -248,11 +359,28 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     }
   }, [completing, completionEvidence, props.threadClient, thread]);
 
+  function attachFromTransfer(items: DataTransfer | null): boolean {
+    if (items === null) return false;
+    if (!clipboardHasImage(items)) return false;
+    if (imageSupport === false) {
+      images.refuse("The selected model does not accept images. Choose an image-capable model.");
+      return true;
+    }
+    return images.consumePaste(items);
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (mention.handleKeyDown(event)) return;
+    if (fileMentions.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void submit();
     }
+  }
+
+  function syncMentions(value: string, caret: number | null) {
+    mention.sync(value, caret);
+    fileMentions.sync(value, caret);
   }
 
   return (
@@ -396,21 +524,92 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           </div>
         )}
         <div className="work-thread-workspace__composer-shell">
+          {mention.open ? (
+            <ThreadMentionTypeahead
+              activeIndex={mention.activeIndex}
+              {...(threadMentions.composer?.busy === undefined
+                ? {}
+                : { busy: threadMentions.composer.busy })}
+              candidates={threadMentions.composer?.candidates ?? []}
+              listId={mentionListId}
+              onChoose={mention.choose}
+              onHover={mention.setActiveIndex}
+            />
+          ) : null}
+          {fileMentionOpen ? (
+            <PathMentionTypeahead
+              activeIndex={fileMentions.activeIndex}
+              busy={fileMentions.busy}
+              candidates={fileMentions.candidates}
+              listId={fileMentionListId}
+              onChoose={fileMentions.choose}
+              onHover={fileMentions.setActiveIndex}
+            />
+          ) : null}
+          <ThreadMentionChips
+            chips={threadMentions.chips}
+            onRemove={(mentionedThreadId) =>
+              threadMentions.composer?.onRemoveChip(mentionedThreadId)
+            }
+          />
+          {images.staged.length === 0 && images.message === undefined ? null : (
+            <div className="work-composer-adapter__attachments" aria-label="Attached images">
+              {images.staged.map((attachment) => (
+                <span className="work-composer-adapter__attachment" key={attachment.id}>
+                  <img
+                    alt={attachment.displayName}
+                    className="work-composer-adapter__attachment-thumb"
+                    src={attachment.previewUrl}
+                  />
+                  <span className="work-composer-adapter__attachment-name">
+                    {attachment.displayName}
+                  </span>
+                  <button
+                    aria-label={`Remove ${attachment.displayName}`}
+                    className="work-composer-adapter__attachment-remove"
+                    onClick={() => images.remove(attachment.id)}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              {images.message === undefined ? null : (
+                <span className="work-composer-adapter__hint" role="status">
+                  {images.message}
+                </span>
+              )}
+            </div>
+          )}
           <div className="draft-thread__input-row">
             <OctantTextarea
               aria-label="Work prompt"
               autoFocus
               className="draft-thread__textarea"
-              disabled={creating || completionLocked || props.mutationClient === undefined}
-              onChange={(event) => setPrompt(event.target.value)}
+              disabled={
+                creating ||
+                completionLocked ||
+                (props.mutationClient === undefined && props.turnClient === undefined)
+              }
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                syncMentions(event.target.value, event.currentTarget.selectionStart);
+              }}
+              onClick={(event) =>
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart)
+              }
               onKeyDown={handleKeyDown}
+              onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+                if (creating || completionLocked) return;
+                if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+              }}
               placeholder="Describe the deliverable or paste a draft…"
               ref={textareaRef}
               rows={4}
               value={prompt}
             />
             <OctantButton
-              aria-label="Create artifact"
+              aria-label={props.turnClient === undefined ? "Create artifact" : "Send follow-up"}
               className="draft-thread__send"
               disabled={!canSubmit}
               onClick={() => void submit()}
@@ -428,7 +627,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           <p className="draft-thread__hint">
             {completionLocked
               ? "Reactivate this Work thread before creating another artifact or changing its provider."
-              : "Press Enter to save a markdown artifact · Shift+Enter for a new line"}
+              : props.turnClient === undefined
+                ? "Press Enter to save a markdown artifact · Shift+Enter for a new line"
+                : "Press Enter to send · Shift+Enter for a new line · Type # to mention a thread, @ to mention a file"}
           </p>
         </div>
       </div>

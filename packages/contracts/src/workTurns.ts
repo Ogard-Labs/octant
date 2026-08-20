@@ -4,6 +4,8 @@ import { HostId } from "./host";
 import { BindingRevisionId, ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId, ProviderSessionId } from "./providers";
 import { ThreadWorkingDirectory } from "./workingDirectory";
+import { MAX_FILE_MENTION_RELATIVE_PATH_BYTES, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
+import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { WorkThreadId } from "./workThreads";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -172,6 +174,26 @@ export const StartWorkThreadTurnCommand = Schema.Struct({
    */
   attachmentIds: Schema.optional(
     Schema.Array(WorkAttachmentId).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),
+  ),
+  /**
+   * `#thread` mentions this turn points at. Ids only: the host re-derives the
+   * sender's Open authority over each thread and reads its bounded transcript
+   * at turn time, so a mention contributes read-only context to this turn
+   * alone and never enters the prompt the journal records as the user's
+   * message.
+   */
+  threadMentionIds: Schema.optional(
+    Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
+  ),
+  /**
+   * `@file` mentions this turn points at. Relative paths only: the host
+   * classifies each path against the thread's bound Project root and reads
+   * the file itself. A path that escapes is refused before any read.
+   */
+  fileMentionPaths: Schema.optional(
+    Schema.Array(
+      Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(MAX_FILE_MENTION_RELATIVE_PATH_BYTES)),
+    ).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
   ),
 }).annotations(strict);
 export type StartWorkThreadTurnCommand = typeof StartWorkThreadTurnCommand.Type;

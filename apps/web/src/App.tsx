@@ -66,6 +66,8 @@ import {
 import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
+  decodeCodeAttachmentId,
+  decodeCodeAttachmentMediaType,
   decodeCodeThread,
   decodeCodeRelativePath,
   decodeCodeThreadId,
@@ -2367,6 +2369,7 @@ function LaunchedShell(
     projectId: ProjectId,
     prompt: string,
     images?: ReadonlyArray<File>,
+    threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
   ): Promise<boolean> {
     const project = projectController.allProjects.find(
       (
@@ -2425,6 +2428,9 @@ function LaunchedShell(
           modelId,
         },
         ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+        ...(threadMentionIds === undefined || threadMentionIds.length === 0
+          ? {}
+          : { threadMentionIds }),
       });
       if (started.kind !== "accepted") return false;
       return true;
@@ -2585,13 +2591,28 @@ function LaunchedShell(
         );
         return;
       }
+      const checkoutId =
+        created.kind === "managed-thread-created" ? created.checkout.id : created.thread.checkoutId;
+      const attachmentIds: import("@octant/contracts").CodeAttachmentId[] = [];
+      for (const file of input.images ?? []) {
+        const attachmentId = decodeCodeAttachmentId(globalThis.crypto.randomUUID());
+        await codeClient.putAttachment({
+          threadId: created.thread.id,
+          attachmentId,
+          displayName: pastedImageName(file),
+          mediaType: decodeCodeAttachmentMediaType(file.type),
+          bytes: new Uint8Array(await file.arrayBuffer()),
+        });
+        attachmentIds.push(attachmentId);
+      }
       const firstTurnStarted = await codeController.startThreadTurn({
         threadId: created.thread.id,
-        checkoutId:
-          created.kind === "managed-thread-created"
-            ? created.checkout.id
-            : created.thread.checkoutId,
+        checkoutId,
         prompt: input.prompt,
+        ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
+          ? {}
+          : { threadMentionIds: input.threadMentionIds }),
+        ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
       });
       if (!firstTurnStarted) {
         setDraftError("The thread was created, but its first provider turn could not be started.");
@@ -2622,6 +2643,7 @@ function LaunchedShell(
     // or auto-confirms a heuristic suggestion of its own.
     deliveryOutcome?: CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
+    threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
   ): Promise<void> {
     setDraftCreating(true);
     setDraftError(undefined);
@@ -2856,6 +2878,9 @@ function LaunchedShell(
             modelId,
           },
           ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+          ...(threadMentionIds === undefined || threadMentionIds.length === 0
+            ? {}
+            : { threadMentionIds }),
         });
         if (started.kind !== "accepted") {
           setDraftError(

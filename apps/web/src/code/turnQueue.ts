@@ -15,6 +15,8 @@ export interface QueuedCodeTurn {
   readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
   /** Images already staged with the host for this turn. */
   readonly attachments: ReadonlyArray<CodeAttachmentReference>;
+  /** `@file` paths this follow-up names; the host re-checks each one. */
+  readonly fileMentionPaths: ReadonlyArray<string>;
 }
 
 export type CodeTurnQueues = ReadonlyMap<string, ReadonlyArray<QueuedCodeTurn>>;

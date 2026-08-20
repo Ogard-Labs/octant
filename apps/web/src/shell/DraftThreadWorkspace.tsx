@@ -25,6 +25,7 @@ import type {
   CodeCommandResult,
   CodeDeliveryOutcomeKind,
 } from "@octant/contracts/code";
+import type { MentionableThreadId } from "@octant/contracts";
 import { draftThreadModePresentation, type DraftIntentCard } from "@octant/contracts/thread-draft";
 import {
   resolveCodeNewThreadWorkspace,
@@ -85,6 +86,7 @@ export interface DraftThreadWorkspaceProps {
     draftProjectId?: ProjectId,
     deliveryOutcome?: CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
+    threadMentionIds?: ReadonlyArray<MentionableThreadId>,
   ) => void | Promise<void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
@@ -103,6 +105,8 @@ export interface DraftThreadWorkspaceProps {
     receiptId?: string,
   ) => Promise<ProjectId | undefined>;
   readonly onCancel: () => void;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
@@ -278,6 +282,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { selectedModelId: props.selectedModelId })}
           onSelectProvider={props.onSelectProvider}
+          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+          {...(props.windowCapability === undefined
+            ? {}
+            : { windowCapability: props.windowCapability })}
           onCreateThread={(input) => {
             if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
               void props.onCreateCodeThread(input, selectedProjectId);
@@ -321,10 +329,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { selectedModelId: props.selectedModelId })}
           onSelectProvider={props.onSelectProvider}
-          onCreateThread={(prompt, images) =>
-            images === undefined
-              ? props.onCreateThread(prompt, selectedProjectId)
-              : props.onCreateThread(prompt, selectedProjectId, undefined, images)
+          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+          {...(props.windowCapability === undefined
+            ? {}
+            : { windowCapability: props.windowCapability })}
+          onCreateThread={(prompt, images, threadMentionIds) =>
+            props.onCreateThread(prompt, selectedProjectId, undefined, images, threadMentionIds)
           }
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined

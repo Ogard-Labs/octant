@@ -310,10 +310,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     // pointed at once. This check is the composer's own report: a chip the
     // host refuses is shown as unavailable rather than silently dropped.
     const threadMentionIds = await threadMentions.resolveForSend();
+    const fileMentionPaths = pathMentions.selectedPaths;
     if (busy) {
       const queuedAttachments = attachments.peekForSend();
       if (
-        props.controller.queueFollowUp(trimmed, threadMentionIds, queuedAttachments) === undefined
+        props.controller.queueFollowUp(
+          trimmed,
+          threadMentionIds,
+          queuedAttachments,
+          fileMentionPaths,
+        ) === undefined
       ) {
         return;
       }
@@ -321,6 +327,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setDraft("");
       props.controller.setPendingDraft?.("");
       threadMentions.clear();
+      pathMentions.clear();
       return;
     }
     // The chips stay until the host accepts the turn: a refused or dropped send
@@ -329,11 +336,13 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       trimmed,
       threadMentionIds,
       attachments.peekForSend(),
+      fileMentionPaths,
     );
     if (sent) {
       attachments.takeForSend();
       setDraft("");
       threadMentions.clear();
+      pathMentions.clear();
     }
   }
 

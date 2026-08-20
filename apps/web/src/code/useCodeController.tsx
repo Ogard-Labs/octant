@@ -1241,6 +1241,7 @@ export function useCodeController(options: CodeControllerOptions) {
        * image and never decides what an id stands for.
        */
       readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
+      readonly fileMentionPaths?: ReadonlyArray<string>;
       readonly signal?: AbortSignal;
     }) => {
       const reference = await client.putEvidence(input.threadId, input.prompt);
@@ -1262,6 +1263,9 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
           ? {}
           : { attachmentIds: [...input.attachmentIds] }),
+        ...(input.fileMentionPaths === undefined || input.fileMentionPaths.length === 0
+          ? {}
+          : { fileMentionPaths: [...input.fileMentionPaths] }),
       });
       return { operationId, started } as const;
     },
@@ -1273,6 +1277,9 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly threadId: CodeThreadId;
       readonly checkoutId: CodeCheckoutId;
       readonly prompt: string;
+      readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
+      readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
+      readonly fileMentionPaths?: ReadonlyArray<string>;
     }): Promise<boolean> => {
       const prompt = input.prompt.trim();
       if (prompt.length === 0) return false;
@@ -1525,6 +1532,7 @@ export function useCodeController(options: CodeControllerOptions) {
       threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
       /** Images the host already staged for this thread. */
       attachments: ReadonlyArray<CodeAttachmentReference> = [],
+      fileMentionPaths: ReadonlyArray<string> = [],
     ): Promise<boolean> => {
       const trimmed = prompt.trim();
       const view = activeView?.thread.id === activeThreadId.current ? activeView : undefined;
@@ -1555,6 +1563,7 @@ export function useCodeController(options: CodeControllerOptions) {
           prompt: trimmed,
           threadMentionIds,
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+          fileMentionPaths,
           signal: controller.signal,
         });
         if (controller.signal.aborted) return false;
@@ -1741,6 +1750,7 @@ export function useCodeController(options: CodeControllerOptions) {
       prompt: string,
       threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
       attachments: ReadonlyArray<CodeAttachmentReference> = [],
+      fileMentionPaths: ReadonlyArray<string> = [],
     ): QueuedCodeTurn | undefined => {
       const trimmed = prompt.trim();
       const threadId = activeThreadId.current;
@@ -1750,6 +1760,7 @@ export function useCodeController(options: CodeControllerOptions) {
         prompt: trimmed,
         threadMentionIds,
         attachments,
+        fileMentionPaths,
       };
       setTurnQueues((current) => enqueueCodeTurn(current, String(threadId), turn));
       return turn;
@@ -1782,7 +1793,12 @@ export function useCodeController(options: CodeControllerOptions) {
     draining.current = true;
     void (async () => {
       try {
-        const sent = await sendFollowUp(next.prompt, next.threadMentionIds, next.attachments);
+        const sent = await sendFollowUp(
+          next.prompt,
+          next.threadMentionIds,
+          next.attachments,
+          next.fileMentionPaths,
+        );
         if (!mounted.current || !sent) return;
         setTurnQueues((current) => removeQueuedCodeTurn(current, String(threadId), next.id));
       } finally {

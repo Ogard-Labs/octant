@@ -295,6 +295,7 @@ export interface WorkspaceViewProps {
     draftProjectId?: ProjectId,
     deliveryOutcome?: import("@octant/contracts/code").CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
+    threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
   ) => void | Promise<void>;
   readonly draftCodeExecute?: (
     command: import("@octant/contracts/code").CodeCommand,
@@ -785,14 +786,19 @@ function renderNonCodeTab(
           {...(props.onDraftCreateCodeThread === undefined
             ? {}
             : { onCreateCodeThread: props.onDraftCreateCodeThread })}
-          onCreateThread={(prompt, folderSelection, deliveryOutcome, images) => {
+          {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+          {...(props.projectWindowCapability === undefined
+            ? {}
+            : { windowCapability: props.projectWindowCapability })}
+          onCreateThread={(prompt, folderSelection, deliveryOutcome, images, threadMentionIds) => {
             if (props.onDraftCreateThread !== undefined) {
               void props.onDraftCreateThread(
                 tab.mode,
                 prompt,
                 folderSelection,
                 deliveryOutcome,
-                ...(images === undefined ? [] : [images]),
+                images,
+                threadMentionIds,
               );
             }
           }}

@@ -2,6 +2,7 @@ import {
   MAX_WORK_TURN_RESPONSE_BYTES,
   type WorkTurnFailure,
   type ProviderAttachmentInput,
+  type ProviderContextBlock,
   type ProviderFailure,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
@@ -36,6 +37,7 @@ export interface WorkTurnRuntimePort {
     readonly driver: ProviderDriver;
     readonly signal: AbortSignal;
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
+    readonly context?: ReadonlyArray<ProviderContextBlock>;
     readonly onDelta?: (response: string) => void;
   }): Promise<WorkTurnRuntimeOutcome>;
 }
@@ -64,6 +66,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
     readonly driver: ProviderDriver;
     readonly signal: AbortSignal;
     readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
+    readonly context?: ReadonlyArray<ProviderContextBlock>;
     readonly onDelta?: (response: string) => void;
   }): Promise<WorkTurnRuntimeOutcome> {
     try {
@@ -106,6 +109,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       readonly driver: ProviderDriver;
       readonly signal: AbortSignal;
       readonly attachments?: ReadonlyArray<ProviderAttachmentInput>;
+      readonly context?: ReadonlyArray<ProviderContextBlock>;
       readonly onDelta?: (response: string) => void;
     },
     idle: IdleTimeout,
@@ -168,7 +172,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       yield* connection.send({
         sessionId: input.providerSessionId,
         prompt: input.command.prompt,
-        context: [],
+        context: [...(input.context ?? [])],
         attachments: [...(input.attachments ?? [])],
         tools: [],
       });

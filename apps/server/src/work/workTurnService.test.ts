@@ -52,6 +52,7 @@ describe("WorkTurnService", () => {
       role: "user",
       text: "Summarize the brief",
     });
+    await fixture.waitForIdle();
     expect(fixture.acquireInputs[0]).toMatchObject({
       mode: "work",
       workRequest: {
@@ -59,7 +60,6 @@ describe("WorkTurnService", () => {
         threadId: ids.thread,
       },
     });
-    await fixture.waitForIdle();
     const lookup = await fixture.service.lookupFirstTurn(ids.window, ids.request);
     expect(lookup).toMatchObject({
       kind: "accepted",

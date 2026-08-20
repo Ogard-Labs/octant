@@ -55,6 +55,7 @@ export * from "./remotePairingClient";
 export * from "./remoteSessionBridge";
 export * from "./shellClient";
 export * from "./threadMentionClient";
+export * from "./fileMentionClient";
 export * from "./usageClient";
 export * from "./usageDashboardClient";
 export * from "./diagnosticsExportClient";

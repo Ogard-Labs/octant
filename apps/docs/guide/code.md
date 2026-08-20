@@ -67,7 +67,7 @@ heading and a numbered list reads as one. What you type stays exactly as typed.
 
 Paste or drop a PNG, JPEG, WebP, or GIF into the thread composer to send it with your next message. Each image uploads to the host as you attach it, and the turn sends only the identifier the host answered with, so the provider receives bytes the host itself accepted.
 
-A turn carries at most eight images, each up to 10 MB, alongside a written message. Repository files do not need attaching — name them with `@path` instead. If the thread's model does not read images, the composer says so at the paste — _"Local OpenCode — Model One does not support images. Choose a vision model to attach one."_ — instead of taking the upload. The host checks the thread's own model again at send, so a turn never reaches a model with its pictures quietly dropped.
+A turn carries at most eight images, each up to 10 MB, alongside a written message. Repository files do not need attaching — name them with `@file` instead. Type `@` to complete a path inside this checkout; the host refuses a path outside the bound root before reading it. If the thread's model does not read images, the composer says so at the paste — _"Local OpenCode — Model One does not support images. Choose a vision model to attach one."_ — instead of taking the upload. The host checks the thread's own model again at send, so a turn never reaches a model with its pictures quietly dropped.
 
 Images stay readable in the transcript after a restart. Removing a chip before sending discards the image on the host too.
 
@@ -96,7 +96,7 @@ Code exposes repository-valid engineering surfaces:
 - Files/Explorer, which follows the checkout live: when the agent or anything else changes a file, the tree relists and an open editor reloads. A file you have edited but not saved is never overwritten — Octant reports the external change as a conflict instead.
 - Diff viewer, including discarding a tracked file's uncommitted changes (asked about every time outside Full access, because nothing can restore them)
 - Git/Review surfaces
-- Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn or inheriting the repository. Type `#` in the composer to mention another thread as read-only context; `@` still names a file in this checkout.
+- Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn or inheriting the repository. Type `#` in the composer to mention another thread as read-only context; `@` names a file in this checkout.
 - Browser tabs
 - Extension-contributed surfaces approved by effective activation policy
 

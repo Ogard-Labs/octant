@@ -13,6 +13,7 @@ import {
   decodeWorkTurnRequestId,
   decodeWorkTurnState,
   decodeStartWorkThreadTurnCommand,
+  type MentionableThreadId,
   type WorkAttachmentId,
   type WorkAttachmentMediaType,
   type WorkAttachmentReference,
@@ -26,12 +27,17 @@ import {
   type Project,
   type ProjectId,
   type ProviderAttachmentInput,
+  type ProviderContextBlock,
   type ProviderInstance,
   type ThreadWorkingDirectory,
   type WindowId,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { decideWorkTurnAuthority } from "@octant/domain";
+import {
+  decideWorkTurnAuthority,
+  FILE_MENTION_UNREADABLE_CONTEXT,
+  THREAD_MENTION_UNREADABLE_CONTEXT,
+} from "@octant/domain";
 import { Schema } from "effect";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
@@ -134,6 +140,24 @@ export interface WorkTurnServiceDependencies {
     readonly modelId: WorkThread["modelId"];
   }) => boolean;
   readonly turnRuntime?: WorkTurnRuntimePort;
+  /**
+   * Resolves the `#thread` mentions a Work turn names. Absent on a host that
+   * cannot re-derive Open authority, which reports every mention unread rather
+   * than inventing transcript.
+   */
+  readonly resolveThreadMentionContext?: (input: {
+    readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    readonly windowId: WindowId;
+  }) => Promise<ReadonlyArray<ProviderContextBlock>>;
+  /**
+   * Resolves the `@file` mentions a Work turn names against the bound Project
+   * root. Out-of-root paths are refused before any read.
+   */
+  readonly resolveFileMentionContext?: (input: {
+    readonly fileMentionPaths: ReadonlyArray<string>;
+    readonly windowId: WindowId;
+    readonly threadId: WorkThreadId;
+  }) => Promise<ReadonlyArray<ProviderContextBlock>>;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly expectedHostId?: string;
@@ -149,6 +173,8 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #turnRuntime: WorkTurnRuntimePort;
+  readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
+  readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #expectedHostId: string;
@@ -166,6 +192,8 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
+    this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
+    this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
     this.#expectedHostId = dependencies.expectedHostId ?? "local";
@@ -313,6 +341,7 @@ export class WorkTurnService {
       projectRoot,
       driver,
       attachments: attachmentInputs,
+      windowId: authenticatedWindowId,
       signal: controller.signal,
     }).finally(() => {
       this.#controllers.delete(String(command.requestId));
@@ -419,12 +448,21 @@ export class WorkTurnService {
     readonly projectRoot: string;
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
+    readonly windowId: WindowId;
     readonly signal: AbortSignal;
   }): Promise<void> {
     const current = this.#projection.lookup(input.command.requestId);
     if (current === undefined) return;
     this.#persistUpdate(current, { status: "running" });
 
+    const context = [
+      ...(await this.#resolveThreadMentions(input.command.threadMentionIds, input.windowId)),
+      ...(await this.#resolveFileMentions(
+        input.command.fileMentionPaths,
+        input.windowId,
+        input.command.threadId,
+      )),
+    ];
     const outcome = await this.#turnRuntime.run({
       command: input.command,
       providerSessionId: input.providerSessionId,
@@ -432,6 +470,7 @@ export class WorkTurnService {
       driver: input.driver,
       signal: input.signal,
       ...(input.attachments.length === 0 ? {} : { attachments: input.attachments }),
+      ...(context.length === 0 ? {} : { context }),
       onDelta: (response) => {
         this.#liveResponses.set(String(input.command.requestId), response);
       },
@@ -443,6 +482,45 @@ export class WorkTurnService {
       live === undefined ? latest : decodeWorkTurnState({ ...latest, response: live }),
       outcome,
     );
+  }
+
+  async #resolveThreadMentions(
+    threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
+    windowId: WindowId,
+  ): Promise<ReadonlyArray<ProviderContextBlock>> {
+    if (threadMentionIds === undefined || threadMentionIds.length === 0) return [];
+    const unreadable = () =>
+      threadMentionIds.map(() => ({
+        kind: "user-message" as const,
+        text: THREAD_MENTION_UNREADABLE_CONTEXT,
+      }));
+    const resolve = this.#resolveThreadMentionContext;
+    if (resolve === undefined) return unreadable();
+    try {
+      return await resolve({ threadMentionIds, windowId });
+    } catch {
+      return unreadable();
+    }
+  }
+
+  async #resolveFileMentions(
+    fileMentionPaths: ReadonlyArray<string> | undefined,
+    windowId: WindowId,
+    threadId: WorkThreadId,
+  ): Promise<ReadonlyArray<ProviderContextBlock>> {
+    if (fileMentionPaths === undefined || fileMentionPaths.length === 0) return [];
+    const unreadable = () =>
+      fileMentionPaths.map(() => ({
+        kind: "user-message" as const,
+        text: FILE_MENTION_UNREADABLE_CONTEXT,
+      }));
+    const resolve = this.#resolveFileMentionContext;
+    if (resolve === undefined) return unreadable();
+    try {
+      return await resolve({ fileMentionPaths, windowId, threadId });
+    } catch {
+      return unreadable();
+    }
   }
 
   #persistOutcome(turn: WorkTurnState, outcome: WorkTurnRuntimeOutcome): void {

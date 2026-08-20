@@ -349,6 +349,8 @@ import {
 } from "./chat/threadMentionService";
 import { codeForkHandoffResolver } from "./code/codeForkHandoff";
 import { createThreadMentionRouteHandler } from "./threadMentionRoutes";
+import { createFileMentionRouteHandler } from "./fileMentionRoutes";
+import { FileMentionService, fileMentionContextBlocks } from "./fileMentionService";
 import { createLocalServerRouteHandler } from "./localServerRoutes";
 import { createLiveLocalListenerPort } from "./localServers/localListenerPort";
 import {
@@ -476,6 +478,7 @@ import {
   defaultAgentRunAuthorityCeilingForMode,
   defaultShellSettings,
   formatThreadMentionContext,
+  THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   resolveAgentRunLiveParentGrant,
   type PreviewPosture,
@@ -2739,6 +2742,12 @@ export function startOctantServer(
         },
         credentialResolver: { resolve: async () => undefined },
         resolveThreadMentionContext: threadMentionContextResolver(() => threadMentionService),
+        resolveFileMentionContext: async ({ fileMentionPaths, windowId, threadId, checkoutId }) =>
+          fileMentionContextBlocks(fileMentionService, {
+            windowId,
+            scope: { mode: "code", threadId, checkoutId },
+            paths: fileMentionPaths,
+          }),
         takeProductFeedbackForTurn: createProductFeedbackTurnPort({
           service: productFeedbackService,
         }),
@@ -3429,8 +3438,72 @@ export function startOctantServer(
             String(model.id) === String(thread.modelId) && model.inputModalities.includes("image"),
         );
       },
+      resolveThreadMentionContext: async ({ threadMentionIds, windowId }) => {
+        const resolved = await threadMentionContextResolver(() => threadMentionService)({
+          threadMentionIds,
+          windowId,
+        });
+        return resolved.map((mention) => ({
+          kind: "user-message" as const,
+          text: mention.kind === "resolved" ? mention.text : THREAD_MENTION_UNREADABLE_CONTEXT,
+        }));
+      },
+      resolveFileMentionContext: async ({ fileMentionPaths, windowId, threadId }) =>
+        fileMentionContextBlocks(fileMentionService, {
+          windowId,
+          scope: { mode: "work", threadId },
+          paths: fileMentionPaths,
+        }),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
+    });
+    const fileMentionService = new FileMentionService({
+      authority: {
+        resolveCodeRoot: async (windowId, threadId, checkoutId) => {
+          try {
+            const view = await codeService.read(windowId, decodeCodeThreadId(threadId));
+            if (String(view.checkout.id) !== checkoutId) return { kind: "unauthorized" };
+            const root = await roots.resolve(
+              windowId,
+              view.thread,
+              view.checkout,
+              codeWorkingDirectoryProbePath,
+            );
+            if (root === undefined) return { kind: "unavailable" };
+            return { kind: "ok", rootPath: root.rootPath };
+          } catch {
+            return { kind: "unauthorized" };
+          }
+        },
+        resolveWorkRoot: async (windowId, threadId) => {
+          try {
+            const bootstrap = await workThreadService.bootstrap(windowId);
+            const thread = bootstrap.threads.find((candidate) => String(candidate.id) === threadId);
+            if (thread === undefined) return { kind: "not-found" };
+            const project = persistence.readProject(thread.projectId);
+            if (
+              project === undefined ||
+              project.type !== "work" ||
+              project.lifecycle !== "active"
+            ) {
+              return { kind: "unauthorized" };
+            }
+            const workingDirectory = thread.workingDirectory ?? decodeThreadWorkingDirectory(".");
+            const rootPath = await resolveThreadWorkingDirectory(
+              project.binding.canonicalRoot,
+              workingDirectory,
+            );
+            return { kind: "ok", rootPath };
+          } catch {
+            return { kind: "unavailable" };
+          }
+        },
+      },
+    });
+    const fileMentionRoutes = createFileMentionRouteHandler({
+      service: fileMentionService,
+      windowAuthorityStore,
+      maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     const threadExportService = new ThreadExportService({
       hostId: LOCAL_HOST_ID,
@@ -5002,6 +5075,7 @@ export function startOctantServer(
       (await navigatorAssistantRoutes(request)) ??
       (await localServerRoutes(request)) ??
       (await threadMentionRoutes(request)) ??
+      (await fileMentionRoutes(request)) ??
       (await usageDashboardRoutes(request)) ??
       (await usageRoutes(request)) ??
       (await diagnosticsExportRoutes(request)) ??
