@@ -44,7 +44,14 @@ const rootStyles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8"
   .replace('@import "./styles/code.css";', "");
 const shellStyles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 const dockStyles = readFileSync(resolve(process.cwd(), "src/styles/dock.css"), "utf8");
-const styles = [rootStyles, shellStyles, dockStyles].join("\n");
+/*
+ * Comments are stripped before matching. `cssRule` reads a rule's prelude as
+ * "everything since the last brace", so a comment written above a rule became
+ * part of the selector it was documenting and the rule stopped being found —
+ * the assertion then silently moved on to the next rule sharing that selector,
+ * usually one inside a media query.
+ */
+const styles = [rootStyles, shellStyles, dockStyles].join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
 
 function cssRule(selector: string, occurrence = 0): string {
   if (selector === ":root" && occurrence === 0) {
@@ -303,7 +310,17 @@ describe("WindowChrome", () => {
     expect(cssRule(".octant-dialog__viewport")).toContain("align-items: center");
     expect(cssRule(".octant-dialog__viewport")).toContain("justify-content: center");
     expect(cssRule(".octant-dialog__popup")).toContain("height: auto");
-    expect(cssRule(".octant-dialog__popup")).toContain("width: min(420px, calc(100vw - 48px))");
+    // A dialog may ask for more room, but the default stays confirm-sized and
+    // the viewport clamp applies whatever it asks for.
+    expect(cssRule(".octant-dialog__popup")).toContain(
+      "width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
+    );
+    // The shared dialog recipe caps every popup at max-w-lg, so a width alone
+    // is a request the recipe overrules. Both properties, or a dialog that asks
+    // to be wide silently is not.
+    expect(cssRule(".octant-dialog__popup")).toContain(
+      "max-width: min(var(--octant-dialog-width, 420px), calc(100vw - 48px))",
+    );
     expect(cssRule(".octant-dialog__popup")).toContain("border-radius: 12px");
     expect(cssRule(".octant-dialog__popup")).not.toContain("height: 100%");
     expect(cssRule(".octant-dialog__popup")).not.toContain("border-left: 1px solid");
