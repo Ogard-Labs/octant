@@ -54,6 +54,12 @@
   inset-block-end: calc(100% + var(--oct-space-2));
   inset-inline-end: 0;
   width: min(400px, calc(100vw - 2 * var(--oct-space-4)));
+  /* Growing upward from a bottom-row trigger, the panel's top is what runs
+     out of room first: on a short window it climbed past the tab strip and
+     clipped. The clamp only bites then — the option list's own scroll stays
+     the ordinary overflow path. */
+  max-height: calc(100vh - 96px);
+  overflow: auto;
   padding: var(--oct-space-3);
 }
 
