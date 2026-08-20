@@ -5,17 +5,19 @@ import {
   decodeCodeEvidenceReference,
   decodeCodeOperationEventFrame,
   decodeCodeOperationResult,
+  decodeCodeThread,
   decodeCodeThreadView,
   MAX_CODE_OPERATION_TEXT_BYTES,
   decodeProjectBootstrap,
   type CodeDeliveryOutcomeKind,
   type CodeDeliveryTarget,
   type CodeCheckoutIdentity,
+  type CodeNewThreadWorkspace,
   type CodeOperationResult,
   type CodeThread,
   type ProjectSummary,
 } from "@octant/contracts";
-import { suggestCodeDeliveryOutcome } from "@octant/domain";
+import { resolveCodeNewThreadWorkspace, suggestCodeDeliveryOutcome } from "@octant/domain";
 import {
   MobileInboxFailure,
   type MobileInboxRow,
@@ -26,6 +28,11 @@ export interface MobileCodeProjectOption {
   readonly projectId: string;
   readonly name: string;
   readonly root: string;
+  /**
+   * The Project's remembered habit. Absent means the owner never chose;
+   * readers apply the current-checkout default rather than inventing a worktree.
+   */
+  readonly newThreadWorkspace?: CodeNewThreadWorkspace;
 }
 
 export interface MobileCodeDeliveryTargetProposal {
@@ -34,6 +41,10 @@ export interface MobileCodeDeliveryTargetProposal {
   readonly proposedBaseRepository: string;
   readonly proposedBaseBranch: string;
   readonly suggestedOutcomeKind: CodeDeliveryOutcomeKind;
+  /** Which checkout the new thread will bind, before anything is created. */
+  readonly workspace: CodeNewThreadWorkspace;
+  /** The Project root that checkout is resolved from. */
+  readonly boundRoot: string;
 }
 
 export interface MobileCodeCreationRetry {
@@ -101,6 +112,9 @@ export function listMobileCodeProjects(
       projectId: String(project.id),
       name: project.name,
       root: project.binding.canonicalRoot,
+      ...(project.newThreadWorkspace === undefined
+        ? {}
+        : { newThreadWorkspace: project.newThreadWorkspace }),
     }));
 }
 
@@ -145,6 +159,43 @@ function requireBranchCheckout(checkout: CodeCheckoutIdentity): string {
     );
   }
   return checkout.head.name;
+}
+
+function resolveMobileNewThreadWorkspace(project: MobileCodeProjectOption): CodeNewThreadWorkspace {
+  return resolveCodeNewThreadWorkspace({
+    type: "code",
+    ...(project.newThreadWorkspace === undefined
+      ? {}
+      : { newThreadWorkspace: project.newThreadWorkspace }),
+  });
+}
+
+async function resolveRemoteName(input: {
+  readonly transport: MobileRemoteTransport;
+  readonly projectId: string;
+  readonly required: boolean;
+}): Promise<string | undefined> {
+  let remoteFacts;
+  try {
+    remoteFacts = await executeCodeCommand(input.transport, {
+      kind: "get-worktree-remote-facts",
+      projectId: input.projectId,
+    });
+  } catch (cause) {
+    if (input.required) throw cause;
+    return undefined;
+  }
+  if (remoteFacts.kind !== "worktree-remote-facts-retrieved") {
+    if (input.required) {
+      throw new MobileInboxFailure("unavailable", "The host did not provide repository remotes.");
+    }
+    return undefined;
+  }
+  return (
+    remoteFacts.facts.defaultRemote ??
+    remoteFacts.facts.upstreamRemote ??
+    remoteFacts.facts.remotes[0]
+  );
 }
 
 async function findCodeThreadForRetry(
@@ -287,32 +338,32 @@ export async function createMobileCodeFromPrompt(input: {
       throw new MobileInboxFailure("unavailable", "The repository checkout could not be prepared.");
     }
     const checkoutBranch = requireBranchCheckout(prepared.checkout);
+    const workspace = resolveMobileNewThreadWorkspace(input.project);
     if (input.retry !== undefined) {
       deliveryTarget = decodeCodeDeliveryTarget(input.retry.deliveryTarget);
     } else {
-      const remoteFacts = await executeCodeCommand(input.transport, {
-        kind: "get-worktree-remote-facts",
+      const remoteName = await resolveRemoteName({
+        transport: input.transport,
         projectId: input.project.projectId,
+        required: workspace === "managed-worktree",
       });
-      if (remoteFacts.kind !== "worktree-remote-facts-retrieved") {
-        throw new MobileInboxFailure("unavailable", "The host did not provide repository remotes.");
-      }
-      const remoteName =
-        remoteFacts.facts.defaultRemote ??
-        remoteFacts.facts.upstreamRemote ??
-        remoteFacts.facts.remotes[0];
-      if (remoteName === undefined) {
+      if (workspace === "managed-worktree" && remoteName === undefined) {
         throw new MobileInboxFailure(
           "unavailable",
           "The host did not provide a repository remote.",
         );
       }
       const proposal: MobileCodeDeliveryTargetProposal = {
-        branchIntent: `octant/mobile-${threadId.slice(0, 8)}`,
-        remoteName,
+        branchIntent:
+          workspace === "managed-worktree"
+            ? `octant/mobile-${threadId.slice(0, 8)}`
+            : checkoutBranch,
+        remoteName: remoteName ?? "origin",
         proposedBaseRepository: "",
         proposedBaseBranch: checkoutBranch,
         suggestedOutcomeKind: suggestCodeDeliveryOutcome(prompt),
+        workspace,
+        boundRoot: input.project.root,
       };
       const confirmed = await input.confirmDeliveryTarget(proposal);
       if (confirmed === undefined) {
@@ -336,38 +387,75 @@ export async function createMobileCodeFromPrompt(input: {
         "The Code delivery target could not be resolved.",
       );
     }
+    // Work in the current checkout delivers onto the branch that checkout is
+    // already on, never onto a branch intent invented for a new worktree.
+    if (workspace === "current-checkout") {
+      deliveryTarget = decodeCodeDeliveryTarget({
+        ...deliveryTarget,
+        branchIntent: checkoutBranch,
+      });
+    }
     const sourceBranch = deliveryTarget.proposedBaseBranch;
+    const timestamp = new Date().toISOString();
+    const title = titleFromPrompt(prompt);
 
     const retry = { threadId, deliveryTarget, operationId, sessionId };
     let created;
     try {
-      created = await executeCodeCommand(input.transport, {
-        kind: "create-managed-code-thread",
-        threadId,
-        projectId: input.project.projectId,
-        bindingRevisionId: prepared.bindingRevisionId,
-        title: titleFromPrompt(prompt),
-        providerInstanceId: input.providerInstanceId,
-        modelId: input.modelId,
-        executionPolicy: "approval-gated",
-        permissionPersistence: "current-session",
-        deliveryTarget,
-        sourceBranch,
-        startFromOrigin: false,
-        remoteName: deliveryTarget.remoteName,
-      });
+      created =
+        workspace === "managed-worktree"
+          ? await executeCodeCommand(input.transport, {
+              kind: "create-managed-code-thread",
+              threadId,
+              projectId: input.project.projectId,
+              bindingRevisionId: prepared.bindingRevisionId,
+              title,
+              providerInstanceId: input.providerInstanceId,
+              modelId: input.modelId,
+              executionPolicy: "approval-gated",
+              permissionPersistence: "current-session",
+              deliveryTarget,
+              sourceBranch,
+              startFromOrigin: false,
+              remoteName: deliveryTarget.remoteName,
+            })
+          : await executeCodeCommand(input.transport, {
+              kind: "create-code-thread",
+              thread: decodeCodeThread({
+                id: threadId,
+                projectId: input.project.projectId,
+                bindingRevisionId: prepared.bindingRevisionId,
+                repositoryId: prepared.checkout.repositoryId,
+                checkoutId: prepared.checkout.id,
+                title,
+                lifecycle: "active",
+                providerInstanceId: input.providerInstanceId,
+                modelId: input.modelId,
+                executionPolicy: "approval-gated",
+                permissionPersistence: "current-session",
+                deliveryTarget,
+                version: 1,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              }),
+            });
     } catch (cause) {
       throw codeCreationFailure(cause, retry);
     }
-    if (created.kind !== "managed-thread-created") {
+    if (created.kind === "managed-thread-created") {
+      thread = created.thread;
+      checkout = created.checkout;
+      deliveryTarget = created.thread.deliveryTarget;
+    } else if (created.kind === "thread-created") {
+      thread = created.thread;
+      checkout = prepared.checkout;
+      deliveryTarget = created.thread.deliveryTarget;
+    } else {
       throw codeCreationFailure(
         new MobileInboxFailure("unavailable", "The host did not confirm Code task creation."),
         retry,
       );
     }
-    thread = created.thread;
-    checkout = created.checkout;
-    deliveryTarget = created.thread.deliveryTarget;
   }
 
   if (thread === undefined || checkout === undefined || deliveryTarget === undefined) {
