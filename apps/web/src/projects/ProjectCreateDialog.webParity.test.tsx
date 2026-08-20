@@ -79,7 +79,7 @@ describe("ProjectCreateDialog web folder parity", () => {
     );
 
     const confirm = screen.getByRole("button", { name: "Create Project" });
-    expect(confirm.className).toContain("bg-primary");
+    expect(confirm.className).toContain("btn-primary");
     expect(confirm.className).not.toContain("project-button");
     expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass(
       "project-button",

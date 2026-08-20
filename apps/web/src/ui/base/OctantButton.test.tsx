@@ -34,8 +34,7 @@ describe("OctantButton", () => {
     render(<OctantButton type="button">Save Project</OctantButton>);
 
     const button = screen.getByRole("button", { name: "Save Project" });
-    expect(button.className).toContain("bg-primary");
-    expect(button.className).toContain("text-primary-foreground");
+    expect(button).toHaveClass("btn", "btn-primary");
     expect(button.className).not.toContain("project-button");
   });
 
@@ -51,11 +50,13 @@ describe("OctantButton", () => {
       </>,
     );
 
-    expect(screen.getByRole("button", { name: "Cancel" }).className).not.toContain("bg-primary");
-    expect(screen.getByRole("button", { name: "Close dock" })).toHaveClass("shell-icon-button");
-    expect(screen.getByRole("button", { name: "Close dock" }).className).not.toContain(
-      "bg-primary",
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass("btn", "btn-ghost");
+    expect(screen.getByRole("button", { name: "Cancel" }).className).not.toContain("btn-primary");
+    expect(screen.getByRole("button", { name: "Close dock" })).toHaveClass(
+      "btn-icon",
+      "shell-icon-button",
     );
+    expect(screen.getByRole("button", { name: "Close dock" }).className).not.toContain("btn-send");
   });
 
   it("layers the element reset so recipes can paint and leaves the keyboard outline unlayered", () => {
