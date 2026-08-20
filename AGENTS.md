@@ -108,7 +108,7 @@ test count.
   Code is always available; disabling Chat or Work never deletes their data.
 - Chat Projects are virtual, memory-scoped containers with no implicit filesystem
   or shell authority. Work binds one OS-confined project root. Code binds one
-  repository root and starts approval-gated unless Full access was explicitly
+  OS-confined directory and starts approval-gated unless Full access was explicitly
   remembered; Plan mode is always read-only.
 - Work never silently becomes Code. Coding work promotes to a linked Code
   thread only with explicit user approval.
