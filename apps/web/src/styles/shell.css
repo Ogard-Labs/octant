@@ -337,6 +337,23 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   gap: 2px;
 }
 
+.sidebar__search {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0 4px;
+}
+
+.sidebar__search input {
+  min-width: 0;
+  height: 28px;
+  border-color: transparent;
+  background: color-mix(in srgb, var(--octant-control-hover) 86%, transparent);
+  font-size: 12px;
+}
+
 /* Space separates the navigation actions from the Project tree. A rule here
    reads as a third section boundary in a rail that already has section
    headings, and it is the only horizontal line in the sidebar. */
