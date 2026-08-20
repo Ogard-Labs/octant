@@ -6446,7 +6446,12 @@ dialog.project-dialog {
    */
   height: auto;
   min-height: 2rem;
-  grid-template-columns: minmax(0, 1fr) minmax(0, auto);
+  /*
+   * The identifier is bounded so it cannot take the row from the name. Sized
+   * to its content it would, on a long id in a narrow picker, leave the name
+   * wrapping a character at a time.
+   */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 40%);
   grid-template-areas:
     "name id"
     "badges badges"

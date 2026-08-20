@@ -804,10 +804,21 @@ function ConfirmDialog({ action, onCancel, onConfirm }: ConfirmDialogProps) {
     <div className="usage-dashboard__confirm" role="alertdialog" aria-label="Confirm usage action">
       <p>{message}</p>
       <div className="usage-dashboard__confirm-actions">
-        <OctantButton onClick={onCancel} type="button">
+        <OctantButton onClick={onCancel} type="button" variant="outline">
           Cancel
         </OctantButton>
-        <OctantButton autoFocus onClick={onConfirm} type="button">
+        {/*
+          Reset and retain purge usage data for good. Backing out and going
+          through with it must not look like the same button, so the one that
+          destroys says so and the way out stays neutral. Export keeps the
+          ordinary treatment: it takes nothing away.
+        */}
+        <OctantButton
+          autoFocus
+          onClick={onConfirm}
+          type="button"
+          variant={action.kind === "export" ? "default" : "destructive"}
+        >
           Confirm
         </OctantButton>
       </div>
