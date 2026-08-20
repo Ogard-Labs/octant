@@ -1,7 +1,8 @@
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { AggregateVersion } from "@octant/contracts/events";
 import type {
-  TabGroupId,
+  LayoutNodeId,
+  PaneId,
   WindowId,
   WorkspaceOperation,
   WorkspaceTabId,
@@ -29,7 +30,7 @@ export interface WorkspacePresetRouteDependencies {
   readonly presets: ReadonlyArray<WorkspacePreset>;
   readonly windowAuthorityStore: WindowAuthorityStore;
   /**
-   * The group a preset's panes open into and the thread they open against.
+   * The pane a preset's surfaces open against and the thread they open for.
    * Resolved from the window's own workspace, never from the request, so a
    * preset cannot be applied to a thread the caller merely named.
    */
@@ -51,9 +52,15 @@ export interface WorkspacePresetRouteDependencies {
 }
 
 export interface WorkspacePresetTarget {
-  readonly groupId: TabGroupId;
+  readonly paneId: PaneId;
   readonly mentionableThreadId: MentionableThreadId;
   readonly title: string;
+}
+
+export interface WorkspacePresetMint {
+  readonly mintTabId: () => WorkspaceTabId;
+  readonly mintPaneId: () => PaneId;
+  readonly mintNodeId: () => LayoutNodeId;
 }
 
 /**
@@ -66,7 +73,7 @@ export interface WorkspacePresetTarget {
  */
 export function createWorkspacePresetRouteHandler(
   deps: WorkspacePresetRouteDependencies,
-  mintTabId: () => WorkspaceTabId,
+  mint: WorkspacePresetMint,
 ) {
   const now = deps.now ?? Date.now;
   const clock = deps.clock ?? (() => new Date().toISOString());
@@ -132,11 +139,10 @@ export function createWorkspacePresetRouteHandler(
           mentionableThreadId: target.mentionableThreadId,
           title: target.title,
         },
-        groupId: target.groupId,
-        mintTabId: () =>
-          mintTabId() as Parameters<typeof planWorkspacePreset>[0] extends never
-            ? never
-            : ReturnType<Parameters<typeof planWorkspacePreset>[0]["mintTabId"]>,
+        paneId: target.paneId,
+        mintTabId: mint.mintTabId,
+        mintPaneId: mint.mintPaneId,
+        mintNodeId: mint.mintNodeId,
       });
       const version = await deps.applyOperations(windowId, operations);
       // Reported, never changed: a preset names skills, and whether the thread

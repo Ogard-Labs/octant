@@ -1,14 +1,16 @@
 import {
   decodeLayoutNodeId,
-  decodeTabGroupId,
+  decodePaneId,
   decodeWindowId,
   decodeWorkspaceOperation,
   decodeWorkspaceTab,
   decodeWorkspaceTabId,
+  type PaneId,
   type ShellSettings,
-  type TabGroupId,
   type WindowWorkspace,
   type WorkspaceLayoutNode,
+  type WorkspacePane,
+  type WorkspaceTab,
 } from "@octant/contracts/shell";
 import type { CodeEnvironmentObservation } from "@octant/contracts";
 import { decodeCodeEnvironmentObservation, decodeWorkThreadId } from "@octant/contracts";
@@ -18,8 +20,7 @@ import { decodeCodeThreadId } from "@octant/contracts/code";
 import { describe, expect, it } from "vitest";
 import {
   MAX_LAYOUT_DEPTH,
-  MAX_TAB_GROUPS,
-  MAX_WORKSPACE_TABS,
+  MAX_WORKSPACE_PANES,
   ShellPolicyRejected,
   WorkspaceContextRejected,
   applyWorkspaceOperation,
@@ -41,6 +42,7 @@ import {
   resolveEnvironmentPinnedWidth,
   resolveSurfaceDescriptors,
   resolveWorkspaceContext,
+  sameWorkspaceSurface,
   validateWorkspace,
 } from "./shellPolicy";
 
@@ -49,90 +51,76 @@ const ids = {
   tabA: decodeWorkspaceTabId("00000000-0000-4000-8000-000000000101"),
   tabB: decodeWorkspaceTabId("00000000-0000-4000-8000-000000000102"),
   tabC: decodeWorkspaceTabId("00000000-0000-4000-8000-000000000103"),
-  groupA: decodeTabGroupId("00000000-0000-4000-8000-000000000201"),
-  groupB: decodeTabGroupId("00000000-0000-4000-8000-000000000202"),
+  paneA: decodePaneId("00000000-0000-4000-8000-000000000201"),
+  paneB: decodePaneId("00000000-0000-4000-8000-000000000202"),
   nodeA: decodeLayoutNodeId("00000000-0000-4000-8000-000000000301"),
   nodeB: decodeLayoutNodeId("00000000-0000-4000-8000-000000000302"),
   splitA: decodeLayoutNodeId("00000000-0000-4000-8000-000000000401"),
   splitB: decodeLayoutNodeId("00000000-0000-4000-8000-000000000402"),
   nodeC: decodeLayoutNodeId("00000000-0000-4000-8000-000000000303"),
-  groupC: decodeTabGroupId("00000000-0000-4000-8000-000000000203"),
+  paneC: decodePaneId("00000000-0000-4000-8000-000000000203"),
   project: decodeProjectId("00000000-0000-4000-8000-000000000501"),
   thread: decodeChatThreadId("00000000-0000-4000-8000-000000000601"),
   codeThread: decodeCodeThreadId("00000000-0000-4000-8000-000000000602"),
 };
 
-const tab = (id = ids.tabA, kind: "welcome" | "unavailable" = "welcome") =>
-  decodeWorkspaceTab(
-    kind === "welcome"
-      ? { kind, id, mode: "code", title: `Tab ${id.slice(-3)}` }
-      : { kind, id, title: `Tab ${id.slice(-3)}`, reason: "Temporarily missing" },
-  );
+const welcomeSurface = (id = ids.tabA, mode: "chat" | "work" | "code" = "code") =>
+  decodeWorkspaceTab({ kind: "welcome", id, mode, title: `Surface ${id.slice(-3)}` });
 
-function onlyGroup(layout: WorkspaceLayoutNode) {
-  expect(layout.kind).toBe("group");
-  if (layout.kind !== "group") throw new Error("expected group");
+const settingsSurface = (id = ids.tabA) =>
+  decodeWorkspaceTab({ kind: "settings", id, title: "Settings" });
+
+const overviewSurface = (id = ids.tabA, title = "Overview") =>
+  decodeWorkspaceTab({ kind: "code-overview", id, threadId: ids.codeThread, mode: "code", title });
+
+function onlyPane(layout: WorkspaceLayoutNode) {
+  expect(layout.kind).toBe("pane");
+  if (layout.kind !== "pane") throw new Error("expected pane");
   return layout;
 }
 
-function codeGroup(workspace: WindowWorkspace) {
-  return onlyGroup(workspace.layouts.code);
+function codePane(workspace: WindowWorkspace) {
+  return onlyPane(workspace.layouts.code);
 }
 
-describe("Code tab mode authority", () => {
-  it("accepts Code tabs only in the Code layout", () => {
-    const codeTab = decodeWorkspaceTab({
-      kind: "code-overview",
-      id: ids.tabA,
-      threadId: ids.codeThread,
-      mode: "code",
-      title: "Overview",
-    });
-    const workspace = defaultWindowWorkspace(ids.window);
-    const code = codeGroup(workspace);
-    expect(
-      validateWorkspace({
-        ...workspace,
-        layouts: {
-          ...workspace.layouts,
-          code: { ...code, tabs: [codeTab], activeTabId: codeTab.id },
-        },
-      }),
-    ).toBeDefined();
+function withCodeSurface(workspace: WindowWorkspace, surface: WorkspaceTab): WindowWorkspace {
+  const code = codePane(workspace);
+  return {
+    ...workspace,
+    layouts: { ...workspace.layouts, code: { ...code, surface } },
+  };
+}
 
-    const chat = onlyGroup(workspace.layouts.chat);
+describe("Code surface mode authority", () => {
+  it("accepts Code surfaces only in the Code layout", () => {
+    const codeSurface = overviewSurface();
+    const workspace = defaultWindowWorkspace(ids.window);
+    expect(validateWorkspace(withCodeSurface(workspace, codeSurface))).toBeDefined();
+
+    const chat = onlyPane(workspace.layouts.chat);
     expect(() =>
       validateWorkspace({
         ...workspace,
-        layouts: {
-          ...workspace.layouts,
-          chat: { ...chat, tabs: [codeTab], activeTabId: codeTab.id },
-        },
+        layouts: { ...workspace.layouts, chat: { ...chat, surface: codeSurface } },
       }),
     ).toThrow(ShellPolicyRejected);
   });
 });
 
-function firstGroupId(layout: WorkspaceLayoutNode): TabGroupId {
-  return layout.kind === "group" ? layout.groupId : firstGroupId(layout.first);
+function firstPaneId(layout: WorkspaceLayoutNode): PaneId {
+  return layout.kind === "pane" ? layout.paneId : firstPaneId(layout.first);
 }
 
-function codeLayoutWithGroups(groupCount: number): WorkspaceLayoutNode {
-  const groups: ReadonlyArray<WorkspaceLayoutNode> = Array.from(
-    { length: groupCount },
-    (_, index) => {
-      const tabId = decodeWorkspaceTabId(
-        `a3000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
-      );
-      return {
-        kind: "group",
-        nodeId: decodeLayoutNodeId(`a1000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
-        groupId: decodeTabGroupId(`a2000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
-        tabs: [tab(tabId)],
-        activeTabId: tabId,
-      };
-    },
-  );
+function codeLayoutWithPanes(paneCount: number): WorkspaceLayoutNode {
+  const panes: ReadonlyArray<WorkspacePane> = Array.from({ length: paneCount }, (_, index) => {
+    const tabId = decodeWorkspaceTabId(`a3000000-0000-4000-8000-${String(index).padStart(12, "0")}`);
+    return {
+      kind: "pane",
+      nodeId: decodeLayoutNodeId(`a1000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
+      paneId: decodePaneId(`a2000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
+      surface: welcomeSurface(tabId),
+    };
+  });
   const join = (nodes: ReadonlyArray<WorkspaceLayoutNode>): WorkspaceLayoutNode =>
     nodes.length === 1
       ? nodes[0]!
@@ -146,7 +134,7 @@ function codeLayoutWithGroups(groupCount: number): WorkspaceLayoutNode {
           first: nodes[0]!,
           second: join(nodes.slice(1)),
         };
-  return join(groups);
+  return join(panes);
 }
 
 describe("shell settings policy", () => {
@@ -236,19 +224,19 @@ describe("shell settings policy", () => {
 });
 
 describe("workspace validation", () => {
-  it("builds independent welcome layouts for every mode with Chat active", () => {
+  it("builds independent single-pane welcome layouts for every mode with Chat active", () => {
     const workspace = defaultWindowWorkspace(ids.window);
 
     expect(workspace.activeMode).toBe("chat");
-    expect(workspace.activeGroupIds).toEqual({
-      chat: onlyGroup(workspace.layouts.chat).groupId,
-      work: onlyGroup(workspace.layouts.work).groupId,
-      code: onlyGroup(workspace.layouts.code).groupId,
+    expect(workspace.activePaneIds).toEqual({
+      chat: onlyPane(workspace.layouts.chat).paneId,
+      work: onlyPane(workspace.layouts.work).paneId,
+      code: onlyPane(workspace.layouts.code).paneId,
     });
-    expect(workspace.focusedGroupId).toBeUndefined();
+    expect(workspace.focusedPaneId).toBeUndefined();
     expect(workspace.version).toBe(0);
     expect(
-      Object.entries(workspace.layouts).map(([mode, layout]) => [mode, onlyGroup(layout).tabs[0]]),
+      Object.entries(workspace.layouts).map(([mode, layout]) => [mode, onlyPane(layout).surface]),
     ).toEqual([
       ["chat", expect.objectContaining({ kind: "welcome", mode: "chat" })],
       ["work", expect.objectContaining({ kind: "welcome", mode: "work" })],
@@ -257,22 +245,18 @@ describe("workspace validation", () => {
     expect(() => validateWorkspace(workspace)).not.toThrow();
   });
 
-  it("rejects invalid active membership, duplicate identities, unreachable focus, and limits", () => {
+  it("rejects duplicate identities, unreachable focus and active panes, and limits", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codeGroup(base);
+    const code = codePane(base);
     const expectRejected = (workspace: WindowWorkspace) =>
       expect(() => validateWorkspace(workspace)).toThrow(ShellPolicyRejected);
 
-    expectRejected({
-      ...base,
-      layouts: { ...base.layouts, code: { ...code, activeTabId: ids.tabA } },
-    });
     expectRejected({ ...base, layouts: { ...base.layouts, work: base.layouts.chat } });
-    expectRejected({ ...base, focusedGroupId: ids.groupA });
-    expectRejected({ ...base, focusedGroupId: onlyGroup(base.layouts.code).groupId });
+    expectRejected({ ...base, focusedPaneId: ids.paneA });
+    expectRejected({ ...base, focusedPaneId: onlyPane(base.layouts.code).paneId });
     expectRejected({
       ...base,
-      activeGroupIds: { ...base.activeGroupIds, code: onlyGroup(base.layouts.chat).groupId },
+      activePaneIds: { ...base.activePaneIds, code: onlyPane(base.layouts.chat).paneId },
     });
 
     let deep: WorkspaceLayoutNode = code;
@@ -286,83 +270,42 @@ describe("workspace validation", () => {
         second: {
           ...code,
           nodeId: decodeLayoutNodeId(`20000000-0000-4000-8000-${String(depth).padStart(12, "0")}`),
-          groupId: decodeTabGroupId(`30000000-0000-4000-8000-${String(depth).padStart(12, "0")}`),
-          tabs: [
-            tab(decodeWorkspaceTabId(`40000000-0000-4000-8000-${String(depth).padStart(12, "0")}`)),
-          ],
-          activeTabId: decodeWorkspaceTabId(
-            `40000000-0000-4000-8000-${String(depth).padStart(12, "0")}`,
+          paneId: decodePaneId(`30000000-0000-4000-8000-${String(depth).padStart(12, "0")}`),
+          surface: welcomeSurface(
+            decodeWorkspaceTabId(`40000000-0000-4000-8000-${String(depth).padStart(12, "0")}`),
           ),
         },
       };
     }
     expectRejected({ ...base, layouts: { ...base.layouts, code: deep } });
 
-    const tooManyGroups = Array.from({ length: MAX_TAB_GROUPS + 1 }, (_, index) => ({
-      ...code,
-      nodeId: decodeLayoutNodeId(`50000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
-      groupId: decodeTabGroupId(`60000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
-      tabs: [
-        tab(decodeWorkspaceTabId(`70000000-0000-4000-8000-${String(index).padStart(12, "0")}`)),
-      ],
-      activeTabId: decodeWorkspaceTabId(
-        `70000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
-      ),
-    }));
-    const join = (groups: ReadonlyArray<WorkspaceLayoutNode>): WorkspaceLayoutNode =>
-      groups.length === 1
-        ? groups[0]!
-        : {
-            kind: "split",
-            nodeId: decodeLayoutNodeId(
-              `80000000-0000-4000-8000-${String(groups.length).padStart(12, "0")}`,
-            ),
-            orientation: "vertical",
-            ratio: 0.5,
-            first: groups[0]!,
-            second: join(groups.slice(1)),
-          };
-    expectRejected({ ...base, layouts: { ...base.layouts, code: join(tooManyGroups) } });
-
-    const tabs = Array.from({ length: MAX_WORKSPACE_TABS + 1 }, (_, index) =>
-      tab(decodeWorkspaceTabId(`90000000-0000-4000-8000-${String(index).padStart(12, "0")}`)),
-    );
     expectRejected({
       ...base,
-      layouts: { ...base.layouts, code: { ...code, tabs, activeTabId: tabs[0]!.id } },
-    });
-
-    const crossModeTabs = tabs.slice(0, MAX_WORKSPACE_TABS - 1);
-    expectRejected({
-      ...base,
-      layouts: {
-        ...base.layouts,
-        code: { ...code, tabs: crossModeTabs, activeTabId: crossModeTabs[0]!.id },
+      layouts: { ...base.layouts, code: codeLayoutWithPanes(MAX_WORKSPACE_PANES + 1) },
+      activePaneIds: {
+        ...base.activePaneIds,
+        code: firstPaneId(codeLayoutWithPanes(MAX_WORKSPACE_PANES + 1)),
       },
     });
   });
 
-  it("rejects welcome tabs whose mode differs from the enclosing layout", () => {
+  it("rejects welcome surfaces whose mode differs from the enclosing layout", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const chat = onlyGroup(base.layouts.chat);
-    const mismatched = tab(ids.tabA);
+    const chat = onlyPane(base.layouts.chat);
 
     expect(() =>
       validateWorkspace({
         ...base,
-        layouts: {
-          ...base.layouts,
-          chat: { ...chat, tabs: [mismatched], activeTabId: mismatched.id },
-        },
+        layouts: { ...base.layouts, chat: { ...chat, surface: welcomeSurface(ids.tabA) } },
       }),
     ).toThrow(ShellPolicyRejected);
   });
 
-  it("rejects Chat thread tabs outside Chat layouts and accepts them in Chat", () => {
+  it("rejects Chat thread surfaces outside Chat layouts and accepts them in Chat", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const chat = onlyGroup(base.layouts.chat);
-    const code = onlyGroup(base.layouts.code);
-    const chatThreadTab = decodeWorkspaceTab({
+    const chat = onlyPane(base.layouts.chat);
+    const code = onlyPane(base.layouts.code);
+    const chatThreadSurface = decodeWorkspaceTab({
       kind: "chat-thread",
       id: ids.tabA,
       threadId: ids.thread,
@@ -373,28 +316,22 @@ describe("workspace validation", () => {
     expect(
       validateWorkspace({
         ...base,
-        layouts: {
-          ...base.layouts,
-          chat: { ...chat, tabs: [chatThreadTab], activeTabId: chatThreadTab.id },
-        },
+        layouts: { ...base.layouts, chat: { ...chat, surface: chatThreadSurface } },
       }),
     ).toMatchObject({
-      layouts: { chat: { tabs: [chatThreadTab] } },
+      layouts: { chat: { surface: chatThreadSurface } },
     });
     expect(() =>
       validateWorkspace({
         ...base,
-        layouts: {
-          ...base.layouts,
-          code: { ...code, tabs: [chatThreadTab], activeTabId: chatThreadTab.id },
-        },
+        layouts: { ...base.layouts, code: { ...code, surface: chatThreadSurface } },
       }),
     ).toThrow(ShellPolicyRejected);
   });
 
-  it("rejects Project tabs whose mode differs from the enclosing layout", () => {
+  it("rejects Project surfaces whose mode differs from the enclosing layout", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const chat = onlyGroup(base.layouts.chat);
+    const chat = onlyPane(base.layouts.chat);
     const mismatched = decodeWorkspaceTab({
       kind: "project",
       id: ids.tabA,
@@ -406,221 +343,384 @@ describe("workspace validation", () => {
     expect(() =>
       validateWorkspace({
         ...base,
-        layouts: {
-          ...base.layouts,
-          chat: { ...chat, tabs: [mismatched], activeTabId: mismatched.id },
-        },
+        layouts: { ...base.layouts, chat: { ...chat, surface: mismatched } },
       }),
     ).toThrow(ShellPolicyRejected);
   });
 
   it("accepts a layout exactly at depth 6", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codeLayoutWithGroups(MAX_LAYOUT_DEPTH);
+    const code = codeLayoutWithPanes(MAX_LAYOUT_DEPTH);
     const workspace = {
       ...base,
       layouts: { ...base.layouts, code },
-      activeGroupIds: { ...base.activeGroupIds, code: firstGroupId(code) },
+      activePaneIds: { ...base.activePaneIds, code: firstPaneId(code) },
     };
 
     expect(validateWorkspace(workspace)).toBe(workspace);
   });
 
-  it("accepts exactly 8 groups across the workspace", () => {
+  it("accepts exactly 8 panes across the workspace", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codeLayoutWithGroups(MAX_TAB_GROUPS - 2);
+    const code = codeLayoutWithPanes(MAX_WORKSPACE_PANES - 2);
     const workspace = {
       ...base,
       layouts: { ...base.layouts, code },
-      activeGroupIds: { ...base.activeGroupIds, code: firstGroupId(code) },
-    };
-
-    expect(validateWorkspace(workspace)).toBe(workspace);
-  });
-
-  it("accepts exactly 48 tabs across the workspace", () => {
-    const base = defaultWindowWorkspace(ids.window);
-    const code = codeGroup(base);
-    const tabs = Array.from({ length: MAX_WORKSPACE_TABS - 2 }, (_, index) =>
-      tab(decodeWorkspaceTabId(`b0000000-0000-4000-8000-${String(index).padStart(12, "0")}`)),
-    );
-    const workspace = {
-      ...base,
-      layouts: { ...base.layouts, code: { ...code, tabs, activeTabId: tabs[0]!.id } },
+      activePaneIds: { ...base.activePaneIds, code: firstPaneId(code) },
     };
 
     expect(validateWorkspace(workspace)).toBe(workspace);
   });
 });
 
-describe("workspace settings reconciliation", () => {
-  it.each(["chat", "work"] as const)(
-    "falls back from disabled %s to Code without deleting layout state and clears focus",
-    (mode) => {
-      const base = defaultWindowWorkspace(ids.window);
-      const workspace = {
-        ...base,
-        activeMode: mode,
-        focusedGroupId: onlyGroup(base.layouts[mode]).groupId,
-      };
-      const settings = {
-        ...defaultShellSettings(),
-        chatEnabled: mode !== "chat",
-        workEnabled: mode !== "work",
-      };
+describe("workspace surface identity", () => {
+  it("treats two welcome placeholders as distinct so a split may hold several", () => {
+    expect(sameWorkspaceSurface(welcomeSurface(ids.tabA), welcomeSurface(ids.tabB))).toBe(false);
+  });
 
-      const reconciled = reconcileWorkspaceWithSettings(workspace, settings);
-
-      const { focusedGroupId: _focusedGroupId, ...unfocused } = workspace;
-      expect(reconciled).toEqual({ ...unfocused, activeMode: "code" });
-      expect(reconciled.layouts).toBe(workspace.layouts);
-      expect(reconciled.focusedGroupId).toBeUndefined();
-      expect(() => validateWorkspace(reconciled)).not.toThrow();
-    },
-  );
-
-  it("returns the original workspace when the active mode is enabled or already Code", () => {
-    const base = defaultWindowWorkspace(ids.window);
-    const chat = {
-      ...base,
-      activeMode: "chat" as const,
-      focusedGroupId: onlyGroup(base.layouts.chat).groupId,
-    };
-
-    expect(reconcileWorkspaceWithSettings(chat, defaultShellSettings())).toBe(chat);
-    const code = { ...base, activeMode: "code" as const };
+  it("recognizes the same thread under a freshly minted surface id", () => {
     expect(
-      reconcileWorkspaceWithSettings(code, {
-        ...defaultShellSettings(),
-        chatEnabled: false,
-        workEnabled: false,
-      }),
-    ).toBe(code);
+      sameWorkspaceSurface(overviewSurface(ids.tabA, "One title"), overviewSurface(ids.tabB, "Another")),
+    ).toBe(true);
+  });
+
+  it("keeps two files of one thread distinct by path and two terminals by identity", () => {
+    const file = (id: typeof ids.tabA, relativePath: string) =>
+      decodeWorkspaceTab({
+        kind: "code-file",
+        id,
+        threadId: ids.codeThread,
+        mode: "code",
+        title: relativePath,
+        relativePath,
+      });
+    expect(sameWorkspaceSurface(file(ids.tabA, "src/a.ts"), file(ids.tabB, "src/a.ts"))).toBe(true);
+    expect(sameWorkspaceSurface(file(ids.tabA, "src/a.ts"), file(ids.tabB, "src/b.ts"))).toBe(
+      false,
+    );
+
+    const terminal = (id: typeof ids.tabA, terminalId?: string) =>
+      decodeWorkspaceTab({
+        kind: "code-terminal",
+        id,
+        threadId: ids.codeThread,
+        mode: "code",
+        title: "Terminal",
+        ...(terminalId === undefined ? {} : { terminalId }),
+      });
+    const shellA = "00000000-0000-4000-8000-00000000e001";
+    const shellB = "00000000-0000-4000-8000-00000000e002";
+    expect(sameWorkspaceSurface(terminal(ids.tabA, shellA), terminal(ids.tabB, shellA))).toBe(true);
+    expect(sameWorkspaceSurface(terminal(ids.tabA, shellA), terminal(ids.tabB, shellB))).toBe(
+      false,
+    );
   });
 });
 
 describe("workspace operations", () => {
-  it("rejects opening a welcome tab into a different mode layout", () => {
+  it("rejects opening a welcome surface into a different mode layout", () => {
     const base = defaultWindowWorkspace(ids.window);
 
     expect(() =>
       applyWorkspaceOperation(base, {
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "chat",
-        groupId: onlyGroup(base.layouts.chat).groupId,
-        tab: tab(ids.tabA),
+        paneId: onlyPane(base.layouts.chat).paneId,
+        surface: welcomeSurface(ids.tabA),
       }),
     ).toThrow(ShellPolicyRejected);
   });
 
-  it("opens, recovers, activates, reorders, and closes tabs immutably", () => {
+  it("opening a surface replaces the target pane's content instead of adding a view", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const groupId = codeGroup(base).groupId;
+    const paneId = codePane(base).paneId;
     const opened = applyWorkspaceOperation(
       base,
-      decodeWorkspaceOperation({ kind: "open-tab", mode: "code", groupId, tab: tab(ids.tabA) }),
-    );
-    const unavailable = applyWorkspaceOperation(
-      opened,
       decodeWorkspaceOperation({
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "code",
-        groupId,
-        tab: tab(ids.tabB, "unavailable"),
+        paneId,
+        surface: overviewSurface(ids.tabA),
       }),
-    );
-    const recovered = applyWorkspaceOperation(
-      unavailable,
-      decodeWorkspaceOperation({ kind: "open-tab", mode: "code", groupId, tab: tab(ids.tabB) }),
-    );
-    const activated = applyWorkspaceOperation(
-      recovered,
-      decodeWorkspaceOperation({ kind: "activate-tab", mode: "code", groupId, tabId: ids.tabA }),
-    );
-    const reordered = applyWorkspaceOperation(
-      activated,
-      decodeWorkspaceOperation({
-        kind: "reorder-tab",
-        mode: "code",
-        groupId,
-        tabId: ids.tabA,
-        index: 0,
-      }),
-    );
-    const closed = applyWorkspaceOperation(
-      reordered,
-      decodeWorkspaceOperation({ kind: "close-tab", mode: "code", groupId, tabId: ids.tabA }),
     );
 
-    expect(codeGroup(base).tabs).toHaveLength(1);
-    expect(codeGroup(recovered).tabs.find((item) => item.id === ids.tabB)?.kind).toBe("welcome");
-    expect(codeGroup(activated).activeTabId).toBe(ids.tabA);
-    expect(codeGroup(reordered).tabs[0]?.id).toBe(ids.tabA);
-    expect(codeGroup(closed).tabs.some((item) => item.id === ids.tabA)).toBe(false);
-    expect(closed.version).toBe(base.version + 6);
+    expect(opened.layouts.code.kind).toBe("pane");
+    expect(codePane(opened).surface).toMatchObject({ kind: "code-overview", id: ids.tabA });
+    expect(opened.activePaneIds.code).toBe(paneId);
+    expect(opened.version).toBe(base.version + 1);
   });
 
-  it("recovers a sole unavailable placeholder in place", () => {
+  it("opening a surface already visible in another pane activates that pane instead of duplicating it", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const group = codeGroup(base);
-    const unavailable = tab(ids.tabA, "unavailable");
-    const workspace = {
-      ...base,
-      layouts: {
-        ...base.layouts,
-        code: { ...group, tabs: [unavailable], activeTabId: unavailable.id },
-      },
-    };
-
-    const recovered = applyWorkspaceOperation(workspace, {
-      kind: "open-tab",
+    const paneId = codePane(base).paneId;
+    const opened = applyWorkspaceOperation(base, {
+      kind: "open-surface",
       mode: "code",
-      groupId: group.groupId,
-      tab: tab(ids.tabA),
+      paneId,
+      surface: overviewSurface(ids.tabA),
+    });
+    const split = applyWorkspaceOperation(opened, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: paneId,
+      surface: settingsSurface(ids.tabB),
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
+    });
+    expect(split.activePaneIds.code).toBe(ids.paneB);
+
+    // A second open of the same thread carries a freshly minted surface id;
+    // the workspace must find the existing view rather than mint another.
+    const reopened = applyWorkspaceOperation(split, {
+      kind: "open-surface",
+      mode: "code",
+      paneId: ids.paneB,
+      surface: overviewSurface(ids.tabC),
+    });
+    expect(reopened.activePaneIds.code).toBe(paneId);
+    expect(reopened.layouts.code).toEqual(split.layouts.code);
+  });
+
+  it("moves the zoom to the pane showing the opened surface while a pane is focused", () => {
+    const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
+    const paneId = codePane(base).paneId;
+    const opened = applyWorkspaceOperation(base, {
+      kind: "open-surface",
+      mode: "code",
+      paneId,
+      surface: overviewSurface(ids.tabA),
+    });
+    const split = applyWorkspaceOperation(opened, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: paneId,
+      surface: settingsSurface(ids.tabB),
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
+    });
+    const zoomed = applyWorkspaceOperation(split, {
+      kind: "focus-pane",
+      mode: "code",
+      paneId: ids.paneB,
+    });
+    expect(zoomed.focusedPaneId).toBe(ids.paneB);
+
+    const reopened = applyWorkspaceOperation(zoomed, {
+      kind: "open-surface",
+      mode: "code",
+      paneId: ids.paneB,
+      surface: overviewSurface(ids.tabC),
+    });
+    expect(reopened.focusedPaneId).toBe(paneId);
+    expect(reopened.activePaneIds.code).toBe(paneId);
+  });
+
+  it("splits a pane on each edge and places the new surface in the new pane", () => {
+    for (const [orientation, placement] of [
+      ["horizontal", "before"],
+      ["horizontal", "after"],
+      ["vertical", "before"],
+      ["vertical", "after"],
+    ] as const) {
+      const base = defaultWindowWorkspace(ids.window);
+      const paneId = codePane(base).paneId;
+      const split = applyWorkspaceOperation(
+        base,
+        decodeWorkspaceOperation({
+          kind: "split-pane",
+          mode: "code",
+          targetPaneId: paneId,
+          surface: overviewSurface(ids.tabA),
+          splitNodeId: ids.splitA,
+          newPaneNodeId: ids.nodeB,
+          newPaneId: ids.paneB,
+          orientation,
+          placement,
+          ratio: 0.7,
+        }),
+      );
+
+      expect(split.layouts.code).toMatchObject({
+        kind: "split",
+        nodeId: ids.splitA,
+        orientation,
+        ratio: 0.7,
+        [placement === "before" ? "first" : "second"]: {
+          kind: "pane",
+          paneId: ids.paneB,
+          surface: { id: ids.tabA },
+        },
+        [placement === "before" ? "second" : "first"]: { kind: "pane", paneId },
+      });
+      expect(split.activePaneIds.code).toBe(ids.paneB);
+    }
+  });
+
+  it("moves an already-visible surface into an edge drop instead of duplicating it", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const paneId = codePane(base).paneId;
+    const opened = applyWorkspaceOperation(base, {
+      kind: "open-surface",
+      mode: "code",
+      paneId,
+      surface: overviewSurface(ids.tabA),
+    });
+    const split = applyWorkspaceOperation(opened, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: paneId,
+      surface: settingsSurface(ids.tabB),
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
     });
 
-    expect(codeGroup(recovered)).toMatchObject({
-      groupId: group.groupId,
-      tabs: [{ kind: "welcome", id: ids.tabA }],
-      activeTabId: ids.tabA,
+    // Drag the overview (visible in the first pane) onto the settings pane's
+    // edge: its old pane collapses and the surviving surface keeps its id.
+    const moved = applyWorkspaceOperation(split, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: ids.paneB,
+      surface: overviewSurface(ids.tabC),
+      splitNodeId: ids.splitB,
+      newPaneNodeId: ids.nodeC,
+      newPaneId: ids.paneC,
+      orientation: "vertical",
+      placement: "before",
+      ratio: 0.5,
+    });
+
+    expect(moved.layouts.code).toMatchObject({
+      kind: "split",
+      nodeId: ids.splitB,
+      first: { kind: "pane", paneId: ids.paneC, surface: { kind: "code-overview", id: ids.tabA } },
+      second: { kind: "pane", paneId: ids.paneB, surface: { kind: "settings" } },
     });
   });
 
-  it("splits, resizes, moves tabs, and collapses empty split branches", () => {
+  it("refuses to split a pane off itself", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const groupA = codeGroup(base).groupId;
-    const withTab = applyWorkspaceOperation(
-      base,
-      decodeWorkspaceOperation({
-        kind: "open-tab",
-        mode: "code",
-        groupId: groupA,
-        tab: tab(ids.tabA),
-      }),
-    );
-    const split = applyWorkspaceOperation(
-      withTab,
-      decodeWorkspaceOperation({
-        kind: "split-group",
-        mode: "code",
-        groupId: groupA,
-        tabId: ids.tabA,
-        splitNodeId: ids.splitA,
-        newGroupNodeId: ids.nodeB,
-        newGroupId: ids.groupB,
-        orientation: "horizontal",
-        placement: "before",
-        ratio: 0.7,
-      }),
-    );
-    expect(split.layouts.code).toMatchObject({
-      kind: "split",
-      nodeId: ids.splitA,
-      ratio: 0.7,
-      first: { kind: "group", groupId: ids.groupB },
-      second: { kind: "group", groupId: groupA },
+    const paneId = codePane(base).paneId;
+    const opened = applyWorkspaceOperation(base, {
+      kind: "open-surface",
+      mode: "code",
+      paneId,
+      surface: overviewSurface(ids.tabA),
     });
-    expect(split.activeGroupIds.code).toBe(ids.groupB);
+
+    expect(() =>
+      applyWorkspaceOperation(opened, {
+        kind: "split-pane",
+        mode: "code",
+        targetPaneId: paneId,
+        surface: overviewSurface(ids.tabB),
+        splitNodeId: ids.splitA,
+        newPaneNodeId: ids.nodeB,
+        newPaneId: ids.paneB,
+        orientation: "horizontal",
+        placement: "after",
+        ratio: 0.5,
+      }),
+    ).toThrow(ShellPolicyRejected);
+  });
+
+  it("a center drop replaces the pane's surface, collapsing the source pane of a visible surface", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const paneId = codePane(base).paneId;
+    const opened = applyWorkspaceOperation(base, {
+      kind: "open-surface",
+      mode: "code",
+      paneId,
+      surface: overviewSurface(ids.tabA),
+    });
+    const split = applyWorkspaceOperation(opened, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: paneId,
+      surface: settingsSurface(ids.tabB),
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
+    });
+
+    const replaced = applyWorkspaceOperation(split, {
+      kind: "replace-pane-surface",
+      mode: "code",
+      paneId: ids.paneB,
+      surface: overviewSurface(ids.tabC),
+    });
+
+    // Two panes held overview and settings; dropping the overview on the
+    // settings pane's center leaves one pane showing the overview.
+    expect(replaced.layouts.code).toMatchObject({
+      kind: "pane",
+      paneId: ids.paneB,
+      surface: { kind: "code-overview", id: ids.tabA },
+    });
+    expect(replaced.activePaneIds.code).toBe(ids.paneB);
+  });
+
+  it("closing a pane collapses its split and closing the last pane resets to welcome", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const paneId = codePane(base).paneId;
+    const split = applyWorkspaceOperation(base, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: paneId,
+      surface: overviewSurface(ids.tabA),
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
+    });
+
+    const collapsed = applyWorkspaceOperation(split, {
+      kind: "close-pane",
+      mode: "code",
+      paneId,
+    });
+    expect(collapsed.layouts.code).toMatchObject({ kind: "pane", paneId: ids.paneB });
+    expect(collapsed.activePaneIds.code).toBe(ids.paneB);
+
+    const emptied = applyWorkspaceOperation(collapsed, {
+      kind: "close-pane",
+      mode: "code",
+      paneId: ids.paneB,
+    });
+    expect(codePane(emptied).surface).toMatchObject({ kind: "welcome", mode: "code" });
+  });
+
+  it("clamps resize ratios to the supported range", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const paneId = codePane(base).paneId;
+    const split = applyWorkspaceOperation(base, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: paneId,
+      surface: overviewSurface(ids.tabA),
+      splitNodeId: ids.splitA,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5,
+    });
 
     const resized = applyWorkspaceOperation(split, {
       kind: "resize-split",
@@ -629,201 +729,99 @@ describe("workspace operations", () => {
       ratio: 9,
     });
     expect(resized.layouts.code).toMatchObject({ ratio: 0.8 });
-
-    const collapsed = applyWorkspaceOperation(
-      resized,
-      decodeWorkspaceOperation({
-        kind: "move-tab",
-        mode: "code",
-        fromGroupId: groupA,
-        toGroupId: ids.groupB,
-        tabId: codeGroup(base).tabs[0]!.id,
-        index: 1,
-      }),
-    );
-    expect(collapsed.layouts.code).toMatchObject({ kind: "group", groupId: ids.groupB });
-    expect(collapsed.activeGroupIds.code).toBe(ids.groupB);
-    expect(onlyGroup(collapsed.layouts.code).tabs).toHaveLength(2);
   });
 
-  it.each([
-    ["horizontal", "before"],
-    ["horizontal", "after"],
-    ["vertical", "before"],
-    ["vertical", "after"],
-  ] as const)("atomically docks a tab %s %s another group", (orientation, placement) => {
-    const base = defaultWindowWorkspace(ids.window);
-    const sourceGroupId = codeGroup(base).groupId;
-    const withTab = applyWorkspaceOperation(base, {
-      kind: "open-tab",
-      mode: "code",
-      groupId: sourceGroupId,
-      tab: tab(ids.tabA),
-    });
-    const split = applyWorkspaceOperation(withTab, {
-      kind: "split-group",
-      mode: "code",
-      groupId: sourceGroupId,
-      tabId: ids.tabA,
-      splitNodeId: ids.splitA,
-      newGroupNodeId: ids.nodeB,
-      newGroupId: ids.groupB,
-      orientation: "horizontal",
-      placement: "after",
-      ratio: 0.5,
-    });
-
-    const docked = applyWorkspaceOperation(split, {
-      kind: "dock-tab",
-      mode: "code",
-      fromGroupId: ids.groupB,
-      targetGroupId: sourceGroupId,
-      tabId: ids.tabA,
-      splitNodeId: ids.splitB,
-      newGroupNodeId: ids.nodeC,
-      newGroupId: ids.groupC,
-      orientation,
-      placement,
-      ratio: 0.5,
-    });
-
-    expect(docked.version).toBe(split.version + 1);
-    expect(docked.activeGroupIds.code).toBe(ids.groupC);
-    expect(docked.layouts.code).toMatchObject({
-      kind: "split",
-      nodeId: ids.splitB,
-      orientation,
-      [placement === "before" ? "first" : "second"]: {
-        kind: "group",
-        groupId: ids.groupC,
-        tabs: [{ id: ids.tabA }],
-      },
-      [placement === "before" ? "second" : "first"]: {
-        kind: "group",
-        groupId: sourceGroupId,
-      },
-    });
-  });
-
-  it("rejects stale or colliding atomic docks without mutating the source workspace", () => {
-    const base = defaultWindowWorkspace(ids.window);
-    const sourceGroupId = codeGroup(base).groupId;
-    const withTab = applyWorkspaceOperation(base, {
-      kind: "open-tab",
-      mode: "code",
-      groupId: sourceGroupId,
-      tab: tab(ids.tabA),
-    });
-    const split = applyWorkspaceOperation(withTab, {
-      kind: "split-group",
-      mode: "code",
-      groupId: sourceGroupId,
-      tabId: ids.tabA,
-      splitNodeId: ids.splitA,
-      newGroupNodeId: ids.nodeB,
-      newGroupId: ids.groupB,
-      orientation: "horizontal",
-      placement: "after",
-      ratio: 0.5,
-    });
-    const valid = {
-      kind: "dock-tab" as const,
-      mode: "code" as const,
-      fromGroupId: ids.groupB,
-      targetGroupId: sourceGroupId,
-      tabId: ids.tabA,
-      splitNodeId: ids.splitB,
-      newGroupNodeId: ids.nodeC,
-      newGroupId: ids.groupC,
-      orientation: "vertical" as const,
-      placement: "before" as const,
-      ratio: 0.5 as const,
-    };
-
-    for (const operation of [
-      { ...valid, fromGroupId: ids.groupC },
-      { ...valid, targetGroupId: ids.groupC },
-      { ...valid, targetGroupId: ids.groupB },
-      { ...valid, splitNodeId: ids.splitA },
-      { ...valid, newGroupNodeId: codeGroup(base).nodeId },
-      { ...valid, newGroupId: sourceGroupId },
-    ]) {
-      expect(() => applyWorkspaceOperation(split, operation)).toThrow(ShellPolicyRejected);
-      expect(split.layouts.code).toMatchObject({ kind: "split", nodeId: ids.splitA });
-    }
-  });
-
-  it("focuses only reachable active-mode groups, unfocuses, resets, and switches modes", () => {
+  it("focuses only reachable active-mode panes, unfocuses, resets, and switches modes", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
-    const codeGroupId = codeGroup(base).groupId;
+    const codePaneId = codePane(base).paneId;
     const focused = applyWorkspaceOperation(
       base,
-      decodeWorkspaceOperation({ kind: "focus-group", mode: "code", groupId: codeGroupId }),
+      decodeWorkspaceOperation({ kind: "focus-pane", mode: "code", paneId: codePaneId }),
     );
-    expect(focused.focusedGroupId).toBe(codeGroupId);
-    expect(focused.activeGroupIds.code).toBe(codeGroupId);
+    expect(focused.focusedPaneId).toBe(codePaneId);
+    expect(focused.activePaneIds.code).toBe(codePaneId);
 
     expect(() =>
       applyWorkspaceOperation(
         focused,
         decodeWorkspaceOperation({
-          kind: "focus-group",
+          kind: "focus-pane",
           mode: "chat",
-          groupId: onlyGroup(base.layouts.chat).groupId,
+          paneId: onlyPane(base.layouts.chat).paneId,
         }),
       ),
     ).toThrow(ShellPolicyRejected);
 
     const unfocused = applyWorkspaceOperation(
       focused,
-      decodeWorkspaceOperation({ kind: "unfocus-group", mode: "code" }),
+      decodeWorkspaceOperation({ kind: "unfocus-pane", mode: "code" }),
     );
-    expect(unfocused.focusedGroupId).toBeUndefined();
+    expect(unfocused.focusedPaneId).toBeUndefined();
 
     const switched = applyWorkspaceOperation(
       focused,
       decodeWorkspaceOperation({ kind: "set-active-mode", mode: "chat" }),
     );
     expect(switched.activeMode).toBe("chat");
-    expect(switched.focusedGroupId).toBeUndefined();
+    expect(switched.focusedPaneId).toBeUndefined();
 
     const changedChat = applyWorkspaceOperation(
       switched,
       decodeWorkspaceOperation({
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "chat",
-        groupId: onlyGroup(switched.layouts.chat).groupId,
-        tab: { kind: "settings", id: ids.tabC, title: "Settings" },
+        paneId: onlyPane(switched.layouts.chat).paneId,
+        surface: { kind: "settings", id: ids.tabC, title: "Settings" },
       }),
     );
     const reset = applyWorkspaceOperation(
       changedChat,
       decodeWorkspaceOperation({ kind: "reset-mode", mode: "chat" }),
     );
-    expect(onlyGroup(reset.layouts.chat).tabs).toHaveLength(1);
-    expect(onlyGroup(reset.layouts.chat).tabs[0]).toMatchObject({ kind: "welcome", mode: "chat" });
+    expect(onlyPane(reset.layouts.chat).surface).toMatchObject({ kind: "welcome", mode: "chat" });
     expect(reset.layouts.code).toBe(changedChat.layouts.code);
   });
 
-  it("rejects malformed references, duplicate IDs, invalid indexes, and redundant splits", () => {
+  it("rejects malformed references, duplicate identities, and colliding splits", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const groupId = codeGroup(base).groupId;
-    const missingGroup = ids.groupA;
-    const existingTab = codeGroup(base).tabs[0]!;
-    const reject = (operation: Parameters<typeof applyWorkspaceOperation>[1]) =>
+    const paneId = codePane(base).paneId;
+    const existingSurface = codePane(base).surface;
+    const rejectOp = (operation: Parameters<typeof applyWorkspaceOperation>[1]) =>
       expect(() => applyWorkspaceOperation(base, operation)).toThrow(ShellPolicyRejected);
 
-    reject({ kind: "activate-tab", mode: "code", groupId: missingGroup, tabId: existingTab.id });
-    reject({ kind: "open-tab", mode: "code", groupId, tab: existingTab });
-    reject({ kind: "reorder-tab", mode: "code", groupId, tabId: existingTab.id, index: 2 });
-    reject({
-      kind: "split-group",
+    rejectOp({
+      kind: "open-surface",
       mode: "code",
-      groupId,
-      tabId: existingTab.id,
+      paneId: ids.paneA,
+      surface: overviewSurface(ids.tabA),
+    });
+    rejectOp({
+      kind: "open-surface",
+      mode: "code",
+      paneId,
+      surface: overviewSurface(existingSurface.id),
+    });
+    rejectOp({ kind: "close-pane", mode: "code", paneId: ids.paneA });
+    rejectOp({
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: paneId,
+      surface: overviewSurface(ids.tabA),
+      splitNodeId: codePane(base).nodeId,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: ids.paneB,
+      orientation: "vertical",
+      placement: "after",
+      ratio: 0.5,
+    });
+    rejectOp({
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: paneId,
+      surface: overviewSurface(ids.tabA),
       splitNodeId: ids.splitA,
-      newGroupNodeId: ids.nodeB,
-      newGroupId: ids.groupB,
+      newPaneNodeId: ids.nodeB,
+      newPaneId: paneId,
       orientation: "vertical",
       placement: "after",
       ratio: 0.5,
@@ -832,37 +830,29 @@ describe("workspace operations", () => {
 });
 
 describe("workspace context validation", () => {
-  it("rejects Browser and Files tabs when the mode context has no bound root", () => {
+  it("rejects Browser and Files surfaces when the mode context has no bound root", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codeGroup(base);
-    const browserTab = decodeWorkspaceTab({
+    const browserSurface = decodeWorkspaceTab({
       kind: "browser",
       id: ids.tabA,
       mode: "code",
       title: "Browser",
     });
-    expect(() =>
-      validateWorkspace({
-        ...base,
-        layouts: {
-          ...base.layouts,
-          code: { ...code, tabs: [browserTab], activeTabId: browserTab.id },
-        },
-      }),
-    ).toThrow(ShellPolicyRejected);
+    expect(() => validateWorkspace(withCodeSurface(base, browserSurface))).toThrow(
+      ShellPolicyRejected,
+    );
   });
 
-  it("accepts Browser and Files tabs when the mode context binds a root", () => {
+  it("accepts Browser and Files surfaces when the mode context binds a root", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codeGroup(base);
-    const browserTab = decodeWorkspaceTab({
+    const browserSurface = decodeWorkspaceTab({
       kind: "browser",
       id: ids.tabA,
       mode: "code",
       title: "Browser",
     });
     const bound: WindowWorkspace = {
-      ...base,
+      ...withCodeSurface(base, browserSurface),
       contextByMode: {
         chat: base.contextByMode.chat,
         work: base.contextByMode.work,
@@ -873,18 +863,13 @@ describe("workspace context validation", () => {
           boundRoot: "/home/repo",
         },
       },
-      layouts: {
-        ...base.layouts,
-        code: { ...code, tabs: [browserTab], activeTabId: browserTab.id },
-      },
     };
     expect(validateWorkspace(bound)).toBeDefined();
   });
 
-  it("accepts a Project tab whose Project differs from the mode context (authority enforced at server boundary)", () => {
+  it("accepts a Project surface whose Project differs from the mode context (authority enforced at server boundary)", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codeGroup(base);
-    const projectTab = decodeWorkspaceTab({
+    const projectSurface = decodeWorkspaceTab({
       kind: "project",
       id: ids.tabA,
       projectId: ids.project,
@@ -897,7 +882,7 @@ describe("workspace context validation", () => {
     // surface the cross-context failure with an Open-in-new-window offer.
     expect(() =>
       validateWorkspace({
-        ...base,
+        ...withCodeSurface(base, projectSurface),
         contextByMode: {
           chat: base.contextByMode.chat,
           work: base.contextByMode.work,
@@ -907,10 +892,6 @@ describe("workspace context validation", () => {
             projectId: otherProject,
             boundRoot: "/home/other",
           },
-        },
-        layouts: {
-          ...base.layouts,
-          code: { ...code, tabs: [projectTab], activeTabId: projectTab.id },
         },
       } satisfies WindowWorkspace),
     ).not.toThrow();
@@ -923,8 +904,8 @@ describe("set-side-chat-sidecar", () => {
 
   function workspaceWithSideChat(sidecar?: string) {
     const base = defaultWindowWorkspace(ids.window);
-    const work = onlyGroup(base.layouts.work);
-    const tab = decodeWorkspaceTab({
+    const work = onlyPane(base.layouts.work);
+    const surface = decodeWorkspaceTab({
       kind: "side-chat",
       id: ids.tabA,
       mode: "work",
@@ -935,83 +916,75 @@ describe("set-side-chat-sidecar", () => {
     return applyWorkspaceOperation(
       base,
       decodeWorkspaceOperation({
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "work",
-        groupId: work.groupId,
-        tab,
+        paneId: work.paneId,
+        surface,
       }),
     );
   }
 
-  it("records the sidecar a Side Chat tab was showing so a restart can reopen it", () => {
+  it("records the sidecar a Side Chat pane was showing so a restart can reopen it", () => {
     const opened = workspaceWithSideChat();
-    const work = onlyGroup(opened.layouts.work);
+    const work = onlyPane(opened.layouts.work);
     const recorded = applyWorkspaceOperation(
       opened,
       decodeWorkspaceOperation({
         kind: "set-side-chat-sidecar",
         mode: "work",
-        groupId: work.groupId,
-        tabId: ids.tabA,
+        paneId: work.paneId,
         sidecarThreadId,
       }),
     );
-    const tab = onlyGroup(recorded.layouts.work).tabs.find(
-      (candidate) => candidate.id === ids.tabA,
-    );
-    expect(tab?.kind).toBe("side-chat");
-    if (tab?.kind !== "side-chat") throw new Error("expected a Side Chat tab");
-    expect(String(tab.sidecarThreadId)).toBe(String(sidecarThreadId));
+    const surface = onlyPane(recorded.layouts.work).surface;
+    expect(surface.kind).toBe("side-chat");
+    if (surface.kind !== "side-chat") throw new Error("expected a Side Chat surface");
+    expect(String(surface.sidecarThreadId)).toBe(String(sidecarThreadId));
   });
 
-  it("is a no-op when the tab already names that sidecar", () => {
+  it("is a no-op when the pane already names that sidecar", () => {
     const opened = workspaceWithSideChat(String(sidecarThreadId));
-    const work = onlyGroup(opened.layouts.work);
+    const work = onlyPane(opened.layouts.work);
     const recorded = applyWorkspaceOperation(
       opened,
       decodeWorkspaceOperation({
         kind: "set-side-chat-sidecar",
         mode: "work",
-        groupId: work.groupId,
-        tabId: ids.tabA,
+        paneId: work.paneId,
         sidecarThreadId,
       }),
     );
-    const tab = onlyGroup(recorded.layouts.work).tabs.find(
-      (candidate) => candidate.id === ids.tabA,
-    );
-    if (tab?.kind !== "side-chat") throw new Error("expected a Side Chat tab");
-    expect(String(tab.sidecarThreadId)).toBe(String(sidecarThreadId));
+    const surface = onlyPane(recorded.layouts.work).surface;
+    if (surface.kind !== "side-chat") throw new Error("expected a Side Chat surface");
+    expect(String(surface.sidecarThreadId)).toBe(String(sidecarThreadId));
   });
 
-  it("refuses to swap a Side Chat tab onto a different sidecar", () => {
+  it("refuses to swap a Side Chat pane onto a different sidecar", () => {
     const opened = workspaceWithSideChat("00000000-0000-4000-8000-000000000202");
-    const work = onlyGroup(opened.layouts.work);
+    const work = onlyPane(opened.layouts.work);
     expect(() =>
       applyWorkspaceOperation(
         opened,
         decodeWorkspaceOperation({
           kind: "set-side-chat-sidecar",
           mode: "work",
-          groupId: work.groupId,
-          tabId: ids.tabA,
+          paneId: work.paneId,
           sidecarThreadId,
         }),
       ),
     ).toThrow(ShellPolicyRejected);
   });
 
-  it("rejects the operation for a tab that is not Side Chat", () => {
+  it("rejects the operation for a pane that does not show Side Chat", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const work = onlyGroup(base.layouts.work);
+    const work = onlyPane(base.layouts.work);
     expect(() =>
       applyWorkspaceOperation(
         base,
         decodeWorkspaceOperation({
           kind: "set-side-chat-sidecar",
           mode: "work",
-          groupId: work.groupId,
-          tabId: work.activeTabId,
+          paneId: work.paneId,
           sidecarThreadId,
         }),
       ),
@@ -1044,8 +1017,8 @@ describe("workspace surface descriptors", () => {
     expect(code.find((d) => d.kind === "browser")?.available).toBe(true);
     expect(code.find((d) => d.kind === "files")?.available).toBe(true);
     // terminal, diff, and git-review require an active Code thread context and
-    // are opened within a Code thread via code surface controls, not the
-    // New Tab launcher, so they are not advertised in the surface catalog.
+    // are opened within a Code thread via code surface controls, so they are
+    // not advertised in the surface catalog.
     expect(code.some((d) => d.kind === "terminal")).toBe(false);
     expect(code.some((d) => d.kind === "diff")).toBe(false);
     expect(code.some((d) => d.kind === "git-review")).toBe(false);
@@ -1075,7 +1048,7 @@ describe("workspace surface descriptors", () => {
 
 describe("workspace context resolution", () => {
   const host = baseHost();
-  const projectTab = decodeWorkspaceTab({
+  const projectSurface = decodeWorkspaceTab({
     kind: "project",
     id: ids.tabA,
     projectId: ids.project,
@@ -1084,18 +1057,12 @@ describe("workspace context resolution", () => {
   });
   const otherProject = decodeProjectId("00000000-0000-4000-8000-000000000502");
 
-  it("anchors an unfiled context to the opened Project tab", () => {
+  it("anchors an unfiled context to the opened Project surface", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codeGroup(base);
+    const code = codePane(base);
     const resolved = resolveWorkspaceContext(
-      {
-        ...base,
-        layouts: {
-          ...base.layouts,
-          code: { ...code, tabs: [projectTab], activeTabId: projectTab.id },
-        },
-      },
-      { kind: "open-tab", mode: "code", groupId: code.groupId, tab: projectTab },
+      withCodeSurface(base, projectSurface),
+      { kind: "open-surface", mode: "code", paneId: code.paneId, surface: projectSurface },
       {
         tabContext: (tab) =>
           tab.kind === "project"
@@ -1107,7 +1074,7 @@ describe("workspace context resolution", () => {
     expect(resolved.contextByMode.code.boundRoot).toBe("/home/repo");
   });
 
-  it("rejects opening a Project tab into a context bound to a different Project", () => {
+  it("rejects opening a Project surface into a context bound to a different Project", () => {
     const base = defaultWindowWorkspace(ids.window);
     const anchored: WindowWorkspace = {
       ...base,
@@ -1120,7 +1087,49 @@ describe("workspace context resolution", () => {
     expect(() =>
       resolveWorkspaceContext(
         anchored,
-        { kind: "open-tab", mode: "code", groupId: codeGroup(base).groupId, tab: projectTab },
+        {
+          kind: "open-surface",
+          mode: "code",
+          paneId: codePane(base).paneId,
+          surface: projectSurface,
+        },
+        {
+          tabContext: (tab) =>
+            tab.kind === "project"
+              ? { host, mode: "code", projectId: tab.projectId, boundRoot: "/home/repo" }
+              : undefined,
+        },
+      ),
+    ).toThrow(WorkspaceContextRejected);
+  });
+
+  it("resolves the context of a surface introduced by an edge drop", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const anchored: WindowWorkspace = {
+      ...base,
+      contextByMode: {
+        chat: base.contextByMode.chat,
+        work: base.contextByMode.work,
+        code: { host, mode: "code", projectId: otherProject, boundRoot: "/home/other" },
+      },
+    };
+    // A sidebar drag lands as split-pane without passing through open-surface;
+    // a cross-Project surface must still be refused before layout mutation.
+    expect(() =>
+      resolveWorkspaceContext(
+        anchored,
+        {
+          kind: "split-pane",
+          mode: "code",
+          targetPaneId: codePane(base).paneId,
+          surface: projectSurface,
+          splitNodeId: ids.splitA,
+          newPaneNodeId: ids.nodeB,
+          newPaneId: ids.paneB,
+          orientation: "horizontal",
+          placement: "after",
+          ratio: 0.5,
+        },
         {
           tabContext: (tab) =>
             tab.kind === "project"
@@ -1141,9 +1150,9 @@ describe("workspace context resolution", () => {
       },
     };
     const operation = decodeWorkspaceOperation({
-      kind: "switch-project-tab",
+      kind: "switch-project-surface",
       mode: "code",
-      tab: projectTab,
+      surface: projectSurface,
     });
     const resolved = resolveWorkspaceContext(anchored, operation, {
       tabContext: (candidate) =>
@@ -1159,63 +1168,51 @@ describe("workspace context resolution", () => {
       projectId: ids.project,
       boundRoot: "/home/repo",
     });
-    expect(codeGroup(switched).tabs).toEqual([projectTab]);
-    expect(codeGroup(switched).activeTabId).toBe(projectTab.id);
+    expect(codePane(switched).surface).toEqual(projectSurface);
   });
 
   it("stows the outgoing Project layout and restores it when switching back", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codeGroup(base);
-    const threadTabA1 = decodeWorkspaceTab({
+    const code = codePane(base);
+    const threadSurfaceA1 = decodeWorkspaceTab({
       kind: "code-overview",
       id: ids.tabB,
       threadId: ids.codeThread,
       mode: "code",
       title: "A first",
     });
-    const threadTabA2 = decodeWorkspaceTab({
-      kind: "code-overview",
+    const threadSurfaceA2 = decodeWorkspaceTab({
+      kind: "code-file",
       id: ids.tabC,
       threadId: ids.codeThread,
       mode: "code",
-      title: "A second",
+      title: "src/a.ts",
+      relativePath: "src/a.ts",
     });
     const splitLayout: WorkspaceLayoutNode = {
       kind: "split",
       nodeId: ids.splitA,
       orientation: "horizontal",
       ratio: 0.5,
-      first: {
-        ...code,
-        nodeId: ids.nodeA,
-        groupId: ids.groupA,
-        tabs: [threadTabA1],
-        activeTabId: threadTabA1.id,
-      },
-      second: {
-        ...code,
-        nodeId: ids.nodeB,
-        groupId: ids.groupB,
-        tabs: [threadTabA2],
-        activeTabId: threadTabA2.id,
-      },
+      first: { ...code, nodeId: ids.nodeA, paneId: ids.paneA, surface: threadSurfaceA1 },
+      second: { ...code, nodeId: ids.nodeB, paneId: ids.paneB, surface: threadSurfaceA2 },
     };
     const anchored: WindowWorkspace = {
       ...base,
       layouts: { ...base.layouts, code: splitLayout },
-      activeGroupIds: { ...base.activeGroupIds, code: ids.groupB },
+      activePaneIds: { ...base.activePaneIds, code: ids.paneB },
       contextByMode: {
         ...base.contextByMode,
         code: { host, mode: "code", projectId: otherProject, boundRoot: "/home/other" },
       },
     };
     const switchToB = decodeWorkspaceOperation({
-      kind: "switch-project-tab",
+      kind: "switch-project-surface",
       mode: "code",
-      tab: projectTab,
+      surface: projectSurface,
     });
     const resolverB = {
-      tabContext: (candidate: typeof projectTab) =>
+      tabContext: (candidate: typeof projectSurface) =>
         candidate.kind === "project"
           ? { host, mode: "code" as const, projectId: candidate.projectId, boundRoot: "/home/repo" }
           : undefined,
@@ -1224,13 +1221,13 @@ describe("workspace context resolution", () => {
       resolveWorkspaceContext(anchored, switchToB, resolverB),
       switchToB,
     );
-    expect(codeGroup(inB).tabs).toEqual([projectTab]);
+    expect(codePane(inB).surface).toEqual(projectSurface);
     expect(inB.stowedLayouts).toHaveLength(1);
     expect(inB.stowedLayouts[0]?.context.projectId).toBe(otherProject);
     expect(inB.stowedLayouts[0]?.layout).toEqual(splitLayout);
-    expect(inB.stowedLayouts[0]?.activeGroupId).toBe(ids.groupB);
+    expect(inB.stowedLayouts[0]?.activePaneId).toBe(ids.paneB);
 
-    const returnTab = decodeWorkspaceTab({
+    const returnSurface = decodeWorkspaceTab({
       kind: "project",
       id: decodeWorkspaceTabId("00000000-0000-4000-8000-000000000104"),
       projectId: otherProject,
@@ -1238,12 +1235,12 @@ describe("workspace context resolution", () => {
       title: "Project A",
     });
     const switchToA = decodeWorkspaceOperation({
-      kind: "switch-project-tab",
+      kind: "switch-project-surface",
       mode: "code",
-      tab: returnTab,
+      surface: returnSurface,
     });
     const resolverA = {
-      tabContext: (candidate: typeof returnTab) =>
+      tabContext: (candidate: typeof returnSurface) =>
         candidate.kind === "project"
           ? {
               host,
@@ -1265,16 +1262,18 @@ describe("workspace context resolution", () => {
       boundRoot: "/home/other",
     });
     expect(backInA.layouts.code).toMatchObject({ kind: "split" });
-    const restoredFirst = onlyGroup(
+    const restoredFirst = onlyPane(
       backInA.layouts.code.kind === "split" ? backInA.layouts.code.first : backInA.layouts.code,
     );
-    expect(restoredFirst.tabs).toEqual([threadTabA1]);
-    const restoredSecond = onlyGroup(
+    expect(restoredFirst.surface).toEqual(threadSurfaceA1);
+    // The Project surface replaces the restored active pane's content: a pane
+    // holds one surface, so returning to a Project shows its overview where
+    // the last-active surface was rather than growing the layout.
+    const restoredSecond = onlyPane(
       backInA.layouts.code.kind === "split" ? backInA.layouts.code.second : backInA.layouts.code,
     );
-    expect(restoredSecond.tabs).toEqual([threadTabA2, returnTab]);
-    expect(restoredSecond.activeTabId).toBe(returnTab.id);
-    expect(backInA.activeGroupIds.code).toBe(ids.groupB);
+    expect(restoredSecond.surface).toEqual(returnSurface);
+    expect(backInA.activePaneIds.code).toBe(ids.paneB);
     expect(backInA.stowedLayouts).toHaveLength(1);
     expect(backInA.stowedLayouts[0]?.context.projectId).toBe(ids.project);
   });
@@ -1282,9 +1281,9 @@ describe("workspace context resolution", () => {
   it("does not stow a welcome-only outgoing layout", () => {
     const base = defaultWindowWorkspace(ids.window);
     const operation = decodeWorkspaceOperation({
-      kind: "switch-project-tab",
+      kind: "switch-project-surface",
       mode: "code",
-      tab: projectTab,
+      surface: projectSurface,
     });
     const switched = applyWorkspaceOperation(
       resolveWorkspaceContext(base, operation, {
@@ -1301,12 +1300,12 @@ describe("workspace context resolution", () => {
       operation,
     );
     expect(switched.stowedLayouts).toEqual([]);
-    expect(codeGroup(switched).tabs).toEqual([projectTab]);
+    expect(codePane(switched).surface).toEqual(projectSurface);
   });
 
   it("rejects stowed layouts beyond the bounded count or with duplicate contexts", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codeGroup(base);
+    const code = codePane(base);
     const entry = (index: number) => ({
       context: {
         host,
@@ -1314,12 +1313,8 @@ describe("workspace context resolution", () => {
         projectId: decodeProjectId(`b1000000-0000-4000-8000-${String(index).padStart(12, "0")}`),
         boundRoot: `/home/repo-${index}`,
       },
-      layout: {
-        ...code,
-        tabs: [tab(ids.tabA)],
-        activeTabId: ids.tabA,
-      },
-      activeGroupId: code.groupId,
+      layout: { ...code, surface: welcomeSurface(ids.tabA) },
+      activePaneId: code.paneId,
     });
     const within = { ...base, stowedLayouts: Array.from({ length: 12 }, (_, i) => entry(i)) };
     expect(() => validateWorkspace(within)).not.toThrow();
@@ -1329,10 +1324,10 @@ describe("workspace context resolution", () => {
     expect(() => validateWorkspace(duplicate)).toThrow(ShellPolicyRejected);
   });
 
-  it("rejects activating a restored thread tab from a different Project", () => {
+  it("rejects re-opening a restored thread surface from a different Project", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const code = codeGroup(base);
-    const threadTab = decodeWorkspaceTab({
+    const code = codePane(base);
+    const threadSurface = decodeWorkspaceTab({
       kind: "code-overview",
       id: ids.tabA,
       threadId: ids.codeThread,
@@ -1340,11 +1335,7 @@ describe("workspace context resolution", () => {
       title: "Other Project thread",
     });
     const anchored: WindowWorkspace = {
-      ...base,
-      layouts: {
-        ...base.layouts,
-        code: { ...code, tabs: [threadTab], activeTabId: threadTab.id },
-      },
+      ...withCodeSurface(base, threadSurface),
       contextByMode: {
         ...base.contextByMode,
         code: { host, mode: "code", projectId: ids.project, boundRoot: "/home/repo" },
@@ -1355,10 +1346,10 @@ describe("workspace context resolution", () => {
       resolveWorkspaceContext(
         anchored,
         {
-          kind: "activate-tab",
+          kind: "open-surface",
           mode: "code",
-          groupId: code.groupId,
-          tabId: threadTab.id,
+          paneId: code.paneId,
+          surface: threadSurface,
         },
         {
           tabContext: (tab) =>
@@ -1372,7 +1363,7 @@ describe("workspace context resolution", () => {
 
   it("rejects Browser and Files surfaces when no root is bound", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const browserTab = decodeWorkspaceTab({
+    const browserSurface = decodeWorkspaceTab({
       kind: "browser",
       id: ids.tabA,
       mode: "code",
@@ -1381,7 +1372,12 @@ describe("workspace context resolution", () => {
     expect(() =>
       resolveWorkspaceContext(
         base,
-        { kind: "open-tab", mode: "code", groupId: codeGroup(base).groupId, tab: browserTab },
+        {
+          kind: "open-surface",
+          mode: "code",
+          paneId: codePane(base).paneId,
+          surface: browserSurface,
+        },
         { tabContext: () => undefined },
       ),
     ).toThrow(WorkspaceContextRejected);
@@ -1390,7 +1386,7 @@ describe("workspace context resolution", () => {
   it("rejects a cross-host surface with a new-window offer", () => {
     const base = defaultWindowWorkspace(ids.window);
     const remoteHost = "remote-host";
-    const chatThreadTab = decodeWorkspaceTab({
+    const chatThreadSurface = decodeWorkspaceTab({
       kind: "chat-thread",
       id: ids.tabA,
       threadId: ids.thread,
@@ -1401,10 +1397,10 @@ describe("workspace context resolution", () => {
       resolveWorkspaceContext(
         base,
         {
-          kind: "open-tab",
+          kind: "open-surface",
           mode: "chat",
-          groupId: onlyGroup(base.layouts.chat).groupId,
-          tab: chatThreadTab,
+          paneId: onlyPane(base.layouts.chat).paneId,
+          surface: chatThreadSurface,
         },
         {
           tabContext: () => ({
@@ -1430,7 +1426,12 @@ describe("workspace context resolution", () => {
     };
     const resolved = resolveWorkspaceContext(
       anchored,
-      { kind: "open-tab", mode: "code", groupId: codeGroup(base).groupId, tab: projectTab },
+      {
+        kind: "open-surface",
+        mode: "code",
+        paneId: codePane(base).paneId,
+        surface: projectSurface,
+      },
       {
         tabContext: (tab) =>
           tab.kind === "project"
@@ -1442,9 +1443,9 @@ describe("workspace context resolution", () => {
     expect(resolved.contextByMode.code.projectId).toBe(ids.project);
   });
 
-  it("rejects a thread tab whose Project context cannot be resolved", () => {
+  it("rejects a thread surface whose Project context cannot be resolved", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const chatThreadTab = decodeWorkspaceTab({
+    const chatThreadSurface = decodeWorkspaceTab({
       kind: "chat-thread",
       id: ids.tabA,
       threadId: ids.thread,
@@ -1455,10 +1456,10 @@ describe("workspace context resolution", () => {
       resolveWorkspaceContext(
         base,
         {
-          kind: "open-tab",
+          kind: "open-surface",
           mode: "chat",
-          groupId: onlyGroup(base.layouts.chat).groupId,
-          tab: chatThreadTab,
+          paneId: onlyPane(base.layouts.chat).paneId,
+          surface: chatThreadSurface,
         },
         { tabContext: () => undefined },
       ),
@@ -1466,11 +1467,11 @@ describe("workspace context resolution", () => {
   });
 
   it.each(["code", "work"] as const)(
-    "refuses to open a %s thread tab whose Project cannot be resolved",
+    "refuses to open a %s thread surface whose Project cannot be resolved",
     (mode) => {
       const base = defaultWindowWorkspace(ids.window);
-      const layout = onlyGroup(base.layouts[mode]);
-      const unresolvableTab = decodeWorkspaceTab(
+      const layout = onlyPane(base.layouts[mode]);
+      const unresolvableSurface = decodeWorkspaceTab(
         mode === "code"
           ? {
               kind: "code-overview",
@@ -1493,16 +1494,16 @@ describe("workspace context resolution", () => {
       expect(() =>
         resolveWorkspaceContext(
           base,
-          { kind: "open-tab", mode, groupId: layout.groupId, tab: unresolvableTab },
+          { kind: "open-surface", mode, paneId: layout.paneId, surface: unresolvableSurface },
           { tabContext: () => undefined },
         ),
       ).toThrow(WorkspaceContextRejected);
     },
   );
 
-  it("anchors an unbound context to the opened preview tab's Project", () => {
+  it("anchors an unbound context to the opened preview surface's Project", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const previewTab = decodeWorkspaceTab({
+    const previewSurface = decodeWorkspaceTab({
       kind: "preview",
       id: ids.tabA,
       mode: "work",
@@ -1517,17 +1518,17 @@ describe("workspace context resolution", () => {
     const resolved = resolveWorkspaceContext(
       base,
       {
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "work",
-        groupId: onlyGroup(base.layouts.work).groupId,
-        tab: previewTab,
+        paneId: onlyPane(base.layouts.work).paneId,
+        surface: previewSurface,
       },
       { tabContext: () => undefined },
     );
     expect(resolved.contextByMode.work.projectId).toBe(ids.project);
   });
 
-  it("allows a same-Project preview tab to coexist with the bound context", () => {
+  it("allows a same-Project preview surface to coexist with the bound context", () => {
     const base = defaultWindowWorkspace(ids.window);
     const anchored: WindowWorkspace = {
       ...base,
@@ -1542,7 +1543,7 @@ describe("workspace context resolution", () => {
         code: base.contextByMode.code,
       },
     };
-    const previewTab = decodeWorkspaceTab({
+    const previewSurface = decodeWorkspaceTab({
       kind: "preview",
       id: ids.tabA,
       mode: "work",
@@ -1557,17 +1558,17 @@ describe("workspace context resolution", () => {
     const resolved = resolveWorkspaceContext(
       anchored,
       {
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "work",
-        groupId: onlyGroup(base.layouts.work).groupId,
-        tab: previewTab,
+        paneId: onlyPane(base.layouts.work).paneId,
+        surface: previewSurface,
       },
       { tabContext: () => undefined },
     );
     expect(resolved.contextByMode.work.projectId).toBe(ids.project);
   });
 
-  it("rejects a cross-Project preview tab before layout mutation", () => {
+  it("rejects a cross-Project preview surface before layout mutation", () => {
     const base = defaultWindowWorkspace(ids.window);
     const anchored: WindowWorkspace = {
       ...base,
@@ -1582,7 +1583,7 @@ describe("workspace context resolution", () => {
         code: base.contextByMode.code,
       },
     };
-    const previewTab = decodeWorkspaceTab({
+    const previewSurface = decodeWorkspaceTab({
       kind: "preview",
       id: ids.tabA,
       mode: "work",
@@ -1598,19 +1599,19 @@ describe("workspace context resolution", () => {
       resolveWorkspaceContext(
         anchored,
         {
-          kind: "open-tab",
+          kind: "open-surface",
           mode: "work",
-          groupId: onlyGroup(base.layouts.work).groupId,
-          tab: previewTab,
+          paneId: onlyPane(base.layouts.work).paneId,
+          surface: previewSurface,
         },
         { tabContext: () => undefined },
       ),
     ).toThrow(WorkspaceContextRejected);
   });
 
-  it("rejects a preview tab whose mode does not match the operation mode", () => {
+  it("rejects a preview surface whose mode does not match the operation mode", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const previewTab = decodeWorkspaceTab({
+    const previewSurface = decodeWorkspaceTab({
       kind: "preview",
       id: ids.tabA,
       mode: "work",
@@ -1626,19 +1627,19 @@ describe("workspace context resolution", () => {
       resolveWorkspaceContext(
         base,
         {
-          kind: "open-tab",
+          kind: "open-surface",
           mode: "code",
-          groupId: onlyGroup(base.layouts.code).groupId,
-          tab: previewTab,
+          paneId: onlyPane(base.layouts.code).paneId,
+          surface: previewSurface,
         },
         { tabContext: () => undefined },
       ),
     ).toThrow(WorkspaceContextRejected);
   });
 
-  it("validateWorkspace rejects a preview tab in a context with no bound Project", () => {
+  it("validateWorkspace rejects a preview surface in a context with no bound Project", () => {
     const base = defaultWindowWorkspace(ids.window);
-    const previewTab = decodeWorkspaceTab({
+    const previewSurface = decodeWorkspaceTab({
       kind: "preview",
       id: ids.tabA,
       mode: "work",
@@ -1654,11 +1655,7 @@ describe("workspace context resolution", () => {
       ...base,
       layouts: {
         ...base.layouts,
-        work: {
-          ...onlyGroup(base.layouts.work),
-          tabs: [previewTab],
-          activeTabId: previewTab.id,
-        },
+        work: { ...onlyPane(base.layouts.work), surface: previewSurface },
       },
     };
     expect(() => validateWorkspace(withPreview)).toThrow(ShellPolicyRejected);

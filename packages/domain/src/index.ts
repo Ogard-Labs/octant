@@ -27,7 +27,6 @@ export * from "./canvasRevisionPolicy";
 export * from "./canvasRefreshPolicy";
 export * from "./canvasSkillPolicy";
 export * from "./canvasSharePolicy";
-export * from "./canvasTabPolicy";
 export * from "./contextCompaction";
 export * from "./contextPolicy";
 export * from "./diagnosticsPolicy";
