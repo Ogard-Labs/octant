@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
+import { settingsPastFirstRun } from "../App.test-fixtures";
 import { SettingsView, type SettingsViewProps } from "./SettingsView";
 import type { ChatController } from "../chat/useChatController";
 import type { CodeController } from "../code/useCodeController";
@@ -726,5 +727,81 @@ describe("SettingsView", () => {
       effectivePlugins: new Map([["github-integration", false]]),
     });
     expect(screen.queryByRole("button", { name: "GitHub" })).not.toBeInTheDocument();
+  });
+
+  it("assigns the settings surface an explicit visual class contract", () => {
+    const onSettingsChange = vi.fn();
+    render(
+      <SettingsView
+        nativeBoundsAvailable
+        onResetLayout={vi.fn()}
+        onResetNativeBounds={vi.fn()}
+        onBack={vi.fn()}
+        onSearchChange={vi.fn()}
+        onSettingsChange={onSettingsChange}
+        search=""
+        settings={settingsPastFirstRun()}
+        sidebarVibrancySupported={false}
+        visibleSettings={[
+          "enable-chat",
+          "enable-work",
+          "sidebar-width",
+          "sidebar-material",
+          "mode-switcher",
+          "reset-layout",
+          "reset-window-bounds",
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("region", { name: "Settings" })).toHaveClass("settings-view");
+    expect(screen.getByRole("complementary", { name: "Settings sidebar" })).toHaveClass(
+      "settings-view__sidebar",
+    );
+    expect(screen.getByRole("button", { name: "Back to app" })).toBeVisible();
+    expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveClass(
+      "settings-view__text-input",
+    );
+    expect(screen.getByRole("switch", { name: "Enable Chat" })).toHaveClass("octant-switch");
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    expect(screen.getByRole("slider", { name: "Sidebar width" })).toHaveClass(
+      "settings-view__range",
+    );
+    expect(screen.getByRole("switch", { name: "Translucent sidebar" })).toHaveClass(
+      "octant-switch",
+    );
+    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveValue("buttons");
+    fireEvent.change(screen.getByRole("combobox", { name: "Mode switcher" }), {
+      target: { value: "dropdown" },
+    });
+    expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "dropdown" });
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveClass(
+      "settings-view__action",
+    );
+    expect(screen.getByRole("button", { name: "Reset native window bounds" })).toHaveClass(
+      "settings-view__action",
+    );
+  });
+
+  it("resets the active mode layout from Advanced settings", async () => {
+    const user = userEvent.setup();
+    const onResetLayout = vi.fn();
+    render(
+      <SettingsView
+        nativeBoundsAvailable={false}
+        onResetLayout={onResetLayout}
+        onResetNativeBounds={vi.fn()}
+        onSearchChange={vi.fn()}
+        onSettingsChange={vi.fn()}
+        search=""
+        settings={settingsPastFirstRun()}
+        sidebarVibrancySupported={false}
+        visibleSettings={["reset-layout"]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
+    await user.click(screen.getByRole("button", { name: "Reset active mode layout" }));
+    expect(onResetLayout).toHaveBeenCalledOnce();
   });
 });
