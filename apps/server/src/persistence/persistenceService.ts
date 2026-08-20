@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import type {
   AgentProfile,
   AgentProfileId,
+  AgentProfileScope,
   ChatThread,
   ChatThreadId,
   ChatThreadView,
@@ -75,6 +76,7 @@ import {
 } from "./projectProjection";
 import {
   readAgentProfile,
+  readAgentProfileBinding,
   readAgentProfiles,
   readProfilesForScope,
 } from "./agentProfileProjection";
@@ -212,6 +214,9 @@ export interface PersistenceService {
   readonly readZenSpaceByWindowId: (windowId: WindowId) => ZenSpace | null;
   readonly readZenSpaces: () => ReadonlyArray<ZenSpace>;
   readonly readAgentProfile: (profileId: AgentProfileId) => AgentProfile | undefined;
+  readonly readAgentProfileBinding: (
+    profileId: AgentProfileId,
+  ) => { readonly profile: AgentProfile; readonly scope: AgentProfileScope } | undefined;
   readonly readAgentProfiles: () => ReadonlyArray<AgentProfile>;
   readonly readProfilesForScope: (
     scopeKind: ProfileScopeKind,
@@ -384,6 +389,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readZenSpaceByWindowId: (windowId) => loadZenSpaceByWindowId(connection, windowId),
       readZenSpaces: () => loadZenSpaces(connection),
       readAgentProfile: (profileId) => readAgentProfile(connection, profileId),
+      readAgentProfileBinding: (profileId) => readAgentProfileBinding(connection, profileId),
       readAgentProfiles: () => readAgentProfiles(connection),
       readProfilesForScope: (scopeKind, scopeRef) =>
         readProfilesForScope(connection, scopeKind, scopeRef),
