@@ -1,33 +1,59 @@
 import type { OctantMode } from "@octant/contracts/modes";
+import type {
+  ExtensionAppearancePresetContribution,
+  ExtensionBoardViewContribution,
+  ExtensionContribution,
+  ExtensionPreviewViewerContribution,
+  ExtensionPreviewViewerKind,
+  ExtensionSettingsSectionContribution,
+  ExtensionSidebarDestinationContribution,
+  ExtensionThreadPaneContribution,
+  ExtensionWorkspaceTabContribution,
+} from "@octant/contracts/extensions";
+import {
+  firstPartyContributions,
+  FIRST_PARTY_PLUGINS_EFFECTIVE,
+  isFirstPartyPluginComponentId,
+  type FirstPartyPluginComponentId,
+} from "./firstPartyPluginCatalog";
 import type { SidebarNavigationDescriptorId } from "./navigationModel";
 
-/**
- * First-party plugin components that can contribute a sidebar destination or
- * settings section. Narrower than the general extension component id space
- * on purpose: only the two component kinds ADR 0001 step 4 converts land
- * here (see docs/decisions/0001-plugin-architecture.md).
- */
-export type FirstPartyPluginComponentId = "board" | "github-integration";
+export {
+  FIRST_PARTY_PLUGINS_EFFECTIVE,
+  type FirstPartyPluginComponentId,
+} from "./firstPartyPluginCatalog";
 
-export interface PluginSidebarContribution {
-  readonly componentId: FirstPartyPluginComponentId;
-  readonly destinationId: SidebarNavigationDescriptorId;
-  readonly modes: ReadonlyArray<OctantMode>;
+const HOST_APPEARANCE_PRESET_IDS = new Set(["system", "light", "dark"]);
+const HOST_PREVIEW_VIEWER_KINDS = new Set<ExtensionPreviewViewerKind>([
+  "text",
+  "markdown",
+  "image",
+]);
+
+function catalog(): ReadonlyArray<ExtensionContribution> {
+  return firstPartyContributions();
 }
 
-export interface PluginSettingsSectionContribution {
-  readonly componentId: FirstPartyPluginComponentId;
-  readonly sectionId: string;
+function isEffective(
+  componentId: string,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
+): boolean {
+  return isFirstPartyPluginComponentId(componentId) && (effective.get(componentId) ?? false);
 }
 
-const SIDEBAR_CONTRIBUTIONS: ReadonlyArray<PluginSidebarContribution> = [
-  { componentId: "board", destinationId: "thread-board", modes: ["work", "code"] },
-  { componentId: "github-integration", destinationId: "pull-requests", modes: ["code"] },
-];
+function contributionsOf<T extends ExtensionContribution>(
+  point: T["point"],
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
+): ReadonlyArray<T> {
+  return catalog().filter(
+    (contribution): contribution is T =>
+      contribution.point === point && isEffective(contribution.componentId, effective),
+  );
+}
 
-const SETTINGS_SECTION_CONTRIBUTIONS: ReadonlyArray<PluginSettingsSectionContribution> = [
-  { componentId: "github-integration", sectionId: "github" },
-];
+function isSidebarDestinationId(value: string): value is SidebarNavigationDescriptorId {
+  return value === "thread-board" || value === "pull-requests";
+}
 
 /**
  * Which sidebar destinations the effective first-party plugins contribute
@@ -40,10 +66,10 @@ export function resolveSidebarContributions(
   effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
 ): ReadonlySet<SidebarNavigationDescriptorId> {
   return new Set(
-    SIDEBAR_CONTRIBUTIONS.filter(
-      (contribution) =>
-        contribution.modes.includes(mode) && (effective.get(contribution.componentId) ?? false),
-    ).map((contribution) => contribution.destinationId),
+    contributionsOf<ExtensionSidebarDestinationContribution>("sidebar.destination", effective)
+      .filter((contribution) => contribution.modes.includes(mode))
+      .map((contribution) => contribution.destinationId)
+      .filter(isSidebarDestinationId),
   );
 }
 
@@ -52,8 +78,105 @@ export function resolveSettingsSectionContributions(
   effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
 ): ReadonlySet<string> {
   return new Set(
-    SETTINGS_SECTION_CONTRIBUTIONS.filter(
-      (contribution) => effective.get(contribution.componentId) ?? false,
-    ).map((contribution) => contribution.sectionId),
+    contributionsOf<ExtensionSettingsSectionContribution>("settings.section", effective).map(
+      (contribution) => contribution.sectionId,
+    ),
   );
+}
+
+/**
+ * Host-owned settings sections stay visible. A section that a plugin
+ * contributes is present only while that component is effective.
+ */
+export function isSettingsSectionAvailable(
+  sectionId: string,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean> = FIRST_PARTY_PLUGINS_EFFECTIVE,
+): boolean {
+  const contributed = catalog()
+    .filter(
+      (contribution): contribution is ExtensionSettingsSectionContribution =>
+        contribution.point === "settings.section",
+    )
+    .map((contribution) => contribution.sectionId);
+  if (!contributed.includes(sectionId)) return true;
+  return resolveSettingsSectionContributions(effective).has(sectionId);
+}
+
+export function resolveWorkspaceTabContributions(
+  mode: OctantMode,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
+): ReadonlySet<string> {
+  return new Set(
+    contributionsOf<ExtensionWorkspaceTabContribution>("workspace.tab", effective)
+      .filter((contribution) => contribution.modes.includes(mode))
+      .map((contribution) => contribution.tabId),
+  );
+}
+
+export function resolveThreadPaneContributions(
+  mode: OctantMode,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
+): ReadonlySet<string> {
+  return new Set(
+    contributionsOf<ExtensionThreadPaneContribution>("thread.pane", effective)
+      .filter((contribution) => contribution.modes.includes(mode))
+      .map((contribution) => contribution.paneId),
+  );
+}
+
+export function resolveBoardViewContributions(
+  mode: OctantMode,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
+): ReadonlySet<string> {
+  if (mode !== "work" && mode !== "code") return new Set();
+  return new Set(
+    contributionsOf<ExtensionBoardViewContribution>("board.view", effective)
+      .filter((contribution) => contribution.modes.includes(mode))
+      .map((contribution) => contribution.viewId),
+  );
+}
+
+export function resolveAppearancePresetContributions(
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
+): ReadonlySet<string> {
+  return new Set(
+    contributionsOf<ExtensionAppearancePresetContribution>("appearance.preset", effective).map(
+      (contribution) => contribution.presetId,
+    ),
+  );
+}
+
+/**
+ * Host built-in presets remain available. Plugin-contributed presets appear
+ * only while their appearance-pack component is effective.
+ */
+export function isAppearancePresetAvailable(
+  presetId: string,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean> = FIRST_PARTY_PLUGINS_EFFECTIVE,
+): boolean {
+  if (HOST_APPEARANCE_PRESET_IDS.has(presetId)) return true;
+  return resolveAppearancePresetContributions(effective).has(presetId);
+}
+
+export function resolvePreviewViewerContributions(
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean>,
+): ReadonlySet<ExtensionPreviewViewerKind> {
+  return new Set(
+    contributionsOf<ExtensionPreviewViewerContribution>("preview.viewer", effective).flatMap(
+      (contribution) => contribution.kinds,
+    ),
+  );
+}
+
+/**
+ * Host primitive viewers stay available. Structured kinds come from the
+ * preview-viewers package and disappear when that component is not effective.
+ */
+export function isPreviewViewerAvailable(
+  kind: string,
+  effective: ReadonlyMap<FirstPartyPluginComponentId, boolean> = FIRST_PARTY_PLUGINS_EFFECTIVE,
+): boolean {
+  if (kind === "unsupported") return true;
+  if (HOST_PREVIEW_VIEWER_KINDS.has(kind as ExtensionPreviewViewerKind)) return true;
+  return resolvePreviewViewerContributions(effective).has(kind as ExtensionPreviewViewerKind);
 }

@@ -25,6 +25,11 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import {
+  FIRST_PARTY_PLUGINS_EFFECTIVE,
+  isSettingsSectionAvailable,
+  type FirstPartyPluginComponentId,
+} from "./contributionRegistry";
 import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
 import { ChatSettingsView } from "../chat/ChatSettingsView";
 import type { ChatController } from "../chat/useChatController";
@@ -111,6 +116,12 @@ export interface SettingsViewProps {
   readonly executionProfiles?: ReactNode;
   readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly automationNotificationClient?: AutomationNotificationClient;
+  /**
+   * Stand-in override for first-party plugin effectiveness. Production uses
+   * the bundled catalog default; tests pass a map to prove a disabled
+   * settings-section contribution disappears.
+   */
+  readonly effectivePlugins?: ReadonlyMap<FirstPartyPluginComponentId, boolean>;
 }
 
 const SECTION_LABELS: Readonly<Partial<Record<SettingsSectionId, string>>> = Object.fromEntries(
@@ -142,7 +153,13 @@ export function SettingsView(props: SettingsViewProps) {
     nativeBoundsAvailable: props.nativeBoundsAvailable,
     sidebarVibrancySupported: props.sidebarVibrancySupported,
   };
-  const availableSections = listAvailableSections(octantSettingsRegistry, capabilities);
+  const availableSections = listAvailableSections(octantSettingsRegistry, capabilities).filter(
+    (section) =>
+      isSettingsSectionAvailable(
+        section.id,
+        props.effectivePlugins ?? FIRST_PARTY_PLUGINS_EFFECTIVE,
+      ),
+  );
   const route = useSettingsRoute({
     availableSections,
     capabilities,
