@@ -96,7 +96,7 @@ Code exposes repository-valid engineering surfaces:
 - Files/Explorer, which follows the checkout live: when the agent or anything else changes a file, the tree relists and an open editor reloads. A file you have edited but not saved is never overwritten — Octant reports the external change as a conflict instead.
 - Diff viewer, including discarding a tracked file's uncommitted changes (asked about every time outside Full access, because nothing can restore them)
 - Git/Review surfaces
-- Side Chat
+- Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn or inheriting the repository. Type `#` in the composer to mention another thread as read-only context; `@` still names a file in this checkout.
 - Browser tabs
 - Extension-contributed surfaces approved by effective activation policy
 

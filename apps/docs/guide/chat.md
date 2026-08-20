@@ -35,6 +35,16 @@ A Chat thread not assigned to a Project uses an explicit unfiled Chat context. I
 
 When you drag or drop a Chat thread into another workspace, the server resolves the action against the context key (host, mode, Project, bound root). A cross-Project drop does not silently change authority; it offers to open the thread in a new window instead.
 
+## Mentioning another thread
+
+Type `#` in the composer to pick a thread you can already open. Octant inserts a `#[Title]` chip. The mentioned thread is not interrupted: this turn receives a bounded, read-only excerpt of its title, filing, and recent messages. `@plugin` and `$skill` addressing is unchanged; an unmatched `#` or `@` stays ordinary text.
+
+A chip you can no longer open is marked unavailable and contributes no content. Cross-mode mentions are read-only context, not mixed execution — mentioning a Work or Code thread from Chat does not grant that thread's filesystem or shell.
+
+## Side Chat
+
+Side Chat is a separate Chat conversation about one source thread. Open it from a mention chip, or from the workspace launcher while that thread is focused. It can answer questions using the same bounded excerpt; it cannot approve, steer, change criteria, or write to the source thread. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation.
+
 ## Export
 
 **Export thread** downloads a portable JSON cut of what the host holds for
