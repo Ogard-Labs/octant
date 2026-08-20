@@ -461,7 +461,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>Provider</span>
         <OctantInput
           aria-label="Filter by provider instance id"
-          className="usage-dashboard__text-input window-no-drag"
+          className="usage-dashboard__text-input input window-no-drag"
           onChange={(event) =>
             update(
               "providerInstanceId",
@@ -479,7 +479,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>Model</span>
         <OctantInput
           aria-label="Filter by model id"
-          className="usage-dashboard__text-input window-no-drag"
+          className="usage-dashboard__text-input input window-no-drag"
           onChange={(event) =>
             update(
               "modelId",
@@ -497,7 +497,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>Host</span>
         <OctantInput
           aria-label="Filter by host id"
-          className="usage-dashboard__text-input window-no-drag"
+          className="usage-dashboard__text-input input window-no-drag"
           onChange={(event) =>
             update(
               "hostId",
@@ -515,7 +515,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>Mode</span>
         <OctantNativeSelect
           aria-label="Filter by mode"
-          className="usage-dashboard__select window-no-drag"
+          className="usage-dashboard__select select window-no-drag"
           onChange={(event) =>
             update(
               "mode",
@@ -537,7 +537,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>Project</span>
         <OctantInput
           aria-label="Filter by project id"
-          className="usage-dashboard__text-input window-no-drag"
+          className="usage-dashboard__text-input input window-no-drag"
           onChange={(event) =>
             update(
               "projectId",
@@ -555,7 +555,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>Thread</span>
         <OctantInput
           aria-label="Filter by thread id"
-          className="usage-dashboard__text-input window-no-drag"
+          className="usage-dashboard__text-input input window-no-drag"
           onChange={(event) => {
             const value = event.currentTarget.value.trim();
             if (value === "") {
@@ -573,7 +573,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>Request shape</span>
         <OctantInput
           aria-label="Filter by request shape"
-          className="usage-dashboard__text-input window-no-drag"
+          className="usage-dashboard__text-input input window-no-drag"
           onChange={(event) =>
             update(
               "requestShape",
@@ -591,7 +591,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>Quality</span>
         <OctantNativeSelect
           aria-label="Filter by measurement quality"
-          className="usage-dashboard__select window-no-drag"
+          className="usage-dashboard__select select window-no-drag"
           onChange={(event) =>
             update(
               "quality",
@@ -613,7 +613,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>Category</span>
         <OctantNativeSelect
           aria-label="Filter by context category"
-          className="usage-dashboard__select window-no-drag"
+          className="usage-dashboard__select select window-no-drag"
           onChange={(event) =>
             update(
               "category",
@@ -636,7 +636,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>From date</span>
         <OctantInput
           aria-label="Usage from date"
-          className="usage-dashboard__text-input window-no-drag"
+          className="usage-dashboard__text-input input window-no-drag"
           onChange={(event) => updateDate("from", event.currentTarget.value)}
           type="date"
           value={dateInputValue(filter.from)}
@@ -646,7 +646,7 @@ function UsageFilters({ filter, onChange }: UsageFiltersProps) {
         <span>To date</span>
         <OctantInput
           aria-label="Usage to date"
-          className="usage-dashboard__text-input window-no-drag"
+          className="usage-dashboard__text-input input window-no-drag"
           onChange={(event) => updateDate("to", event.currentTarget.value)}
           type="date"
           value={dateInputValue(filter.to)}

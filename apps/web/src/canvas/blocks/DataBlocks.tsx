@@ -7,6 +7,16 @@ type Block = Extract<
   { readonly kind: "metric" | "progress" | "status" | "key-value" }
 >;
 
+/* The status block is the design system's badge; each tone maps onto the
+   badge recipe that carries the same meaning. */
+const statusToneClass: Record<Extract<Block, { readonly kind: "status" }>["tone"], string> = {
+  neutral: "badge",
+  info: "badge badge-accent",
+  success: "badge badge-ok",
+  warning: "badge badge-warn",
+  danger: "badge badge-danger",
+};
+
 export function DataBlocks({ block }: { readonly block: Block }) {
   switch (block.kind) {
     case "metric":
@@ -38,7 +48,7 @@ export function DataBlocks({ block }: { readonly block: Block }) {
         <div
           role="status"
           aria-label={`${block.label}: ${block.value}`}
-          className={`canvas-block__status canvas-block__status--${block.tone}`}
+          className={statusToneClass[block.tone]}
         >
           <span className="canvas-block__status-label">{block.label}</span>
           <span className="canvas-block__status-value">{block.value}</span>
@@ -46,7 +56,7 @@ export function DataBlocks({ block }: { readonly block: Block }) {
       );
     case "key-value":
       return (
-        <dl className="canvas-block__key-value">
+        <dl className="kv">
           {block.entries.map((entry) => (
             <Fragment key={entry.key}>
               <dt>{entry.key}</dt>

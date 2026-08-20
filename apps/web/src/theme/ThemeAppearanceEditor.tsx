@@ -54,14 +54,15 @@ export function ThemeAppearanceEditor(props: {
             <OctantButton
               disabled={theme.status === "loading"}
               onClick={() => void theme.apply()}
+              size="sm"
               type="button"
             >
               Apply
             </OctantButton>
-            <OctantButton onClick={theme.cancel} type="button" variant="secondary">
+            <OctantButton onClick={theme.cancel} size="sm" type="button" variant="secondary">
               Cancel
             </OctantButton>
-            <OctantButton onClick={theme.reset} type="button" variant="secondary">
+            <OctantButton onClick={theme.reset} size="sm" type="button" variant="secondary">
               Reset
             </OctantButton>
           </div>
@@ -338,7 +339,7 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
         <span>Theme JSON</span>
         <textarea
           aria-label="Theme JSON"
-          className="settings-view__textarea"
+          className="textarea settings-view__textarea"
           onChange={(event) => setValue(event.currentTarget.value)}
           value={value}
         />

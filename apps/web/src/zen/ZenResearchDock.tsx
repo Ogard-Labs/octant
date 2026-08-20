@@ -190,7 +190,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
         <span className="zen-research__title">Research</span>
         <button
           aria-label="Collapse research browser"
-          className="zen-research__chrome-button"
+          className="btn-icon"
           onClick={() => props.onCollapse(true)}
           type="button"
         >
@@ -198,7 +198,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
         </button>
         <button
           aria-label="Undock research browser"
-          className="zen-research__chrome-button"
+          className="btn-icon"
           onClick={() => {
             void close();
             props.onUndock();
@@ -253,6 +253,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
                 {tabs.length > 1 ? (
                   <button
                     aria-label={`Close ${tab.title === "" ? "new tab" : tab.title}`}
+                    className="btn-icon"
                     onClick={() => void tabCommand("close", tab.tabId)}
                     type="button"
                   >
@@ -264,7 +265,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
             {canOpenTab ? (
               <button
                 aria-label="Open a new research tab"
-                className="zen-research__new-tab"
+                className="btn-icon"
                 onClick={() => void tabCommand("open")}
                 type="button"
               >
@@ -275,7 +276,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
           <div className="zen-research__chrome">
             <button
               aria-label="Back"
-              className="zen-research__chrome-button"
+              className="btn-icon"
               disabled={state?.canGoBack !== true}
               onClick={() => void command("back")}
               type="button"
@@ -284,7 +285,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
             </button>
             <button
               aria-label="Forward"
-              className="zen-research__chrome-button"
+              className="btn-icon"
               disabled={state?.canGoForward !== true}
               onClick={() => void command("forward")}
               type="button"
@@ -293,7 +294,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
             </button>
             <button
               aria-label={state?.loading === true ? "Stop loading" : "Reload"}
-              className="zen-research__chrome-button"
+              className="btn-icon"
               onClick={() => void command(state?.loading === true ? "stop" : "reload")}
               type="button"
             >

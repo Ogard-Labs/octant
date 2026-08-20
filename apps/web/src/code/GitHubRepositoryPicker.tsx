@@ -233,6 +233,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
         />
         <OctantButton
           onClick={() => void loadPage(trimmedQuery, { refresh: true })}
+          size="sm"
           type="button"
           variant="secondary"
         >
@@ -247,6 +248,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
           <p role="alert">{catalogue.message}</p>
           <OctantButton
             onClick={() => void loadPage(trimmedQuery)}
+            size="sm"
             type="button"
             variant="secondary"
           >
@@ -260,6 +262,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
           <p role="alert">{catalogue.remediation ?? UNAVAILABLE_FALLBACKS[catalogue.reason]}</p>
           <OctantButton
             onClick={() => void loadPage(trimmedQuery)}
+            size="sm"
             type="button"
             variant="secondary"
           >
@@ -318,6 +321,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
             <OctantButton
               disabled={loadingMore}
               onClick={() => void loadMore()}
+              size="sm"
               type="button"
               variant="secondary"
             >
@@ -332,6 +336,7 @@ export function GitHubRepositoryPicker(props: GitHubRepositoryPickerProps) {
           <OctantButton
             aria-expanded={detailsOpen}
             onClick={() => setDetailsOpen((open) => !open)}
+            size="sm"
             type="button"
             variant="ghost"
           >

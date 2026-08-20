@@ -1,9 +1,14 @@
+/* Usage dashboard: totals, quality coverage, and activity for one scope.
+   Paint comes from the design system (octant.css `--oct-*` tokens and the
+   input/select recipes); this sheet keeps layout and the border-style
+   encodings that keep measurement quality readable without colour. */
+
 .usage-dashboard {
   display: grid;
   width: 100%;
   min-width: 0;
-  gap: 16px;
-  color: var(--octant-text-primary);
+  gap: var(--oct-space-4);
+  color: var(--oct-fg);
 }
 
 .usage-dashboard__header,
@@ -11,7 +16,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--oct-space-3);
 }
 
 .usage-dashboard__header--embedded {
@@ -33,7 +38,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 15px;
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
 }
 
 .usage-dashboard__filters {
@@ -41,25 +48,28 @@
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   min-width: 0;
-  padding: 12px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .usage-dashboard__field {
   display: grid;
   min-width: 0;
   gap: 4px;
-  color: var(--octant-text-muted);
-  font-size: 11px;
-  font-weight: 500;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
 }
 
+/* The .input/.select recipes paint the filter controls; the dense filter
+   grid keeps the small control height and type size. */
 .usage-dashboard__text-input,
 .usage-dashboard__select {
   min-width: 0;
   width: 100%;
+  min-height: var(--oct-control-height-sm);
+  font-size: var(--oct-text-sm);
 }
 
 .usage-dashboard__totals {
@@ -72,24 +82,27 @@
   display: grid;
   min-width: 0;
   gap: 3px;
-  padding: 12px;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
+  padding: var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
 }
 
 .usage-dashboard__total-value {
   overflow-wrap: anywhere;
-  color: var(--octant-text-primary);
-  font-size: 18px;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-lg);
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
 }
 
 .usage-dashboard__total-label,
 .usage-dashboard__footer {
-  color: var(--octant-text-muted);
-  font-size: 11px;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
 }
 
 .usage-dashboard__quality,
@@ -97,21 +110,23 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
+/* Border STYLE, not colour, separates the measurement qualities, so the
+   pill stays bespoke instead of riding .badge (which has no border). */
 .usage-dashboard__quality-badge {
   display: inline-flex;
   min-height: 24px;
   align-items: center;
-  padding: 3px 7px;
-  color: var(--octant-text-secondary);
-  background: var(--octant-control);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: 999px;
-  font-size: 11px;
+  padding: 3px 9px;
+  color: var(--oct-muted);
+  background: var(--oct-surface-warm);
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 26%, transparent);
+  border-radius: var(--oct-radius-pill);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
 }
 
 .usage-dashboard__quality-badge--exact {
@@ -131,31 +146,31 @@
 }
 
 .usage-dashboard__quality-badge--unavailable {
-  color: var(--octant-warning-text);
-  border-color: var(--octant-warning-border);
+  color: var(--oct-warn-fg);
+  border-color: color-mix(in oklab, var(--oct-warn) 45%, transparent);
 }
 
 .usage-dashboard__unavailable-note,
 .usage-dashboard__error,
 .usage-dashboard__confirm {
   padding: 10px 12px;
-  background: var(--octant-warning-surface);
-  border: 1px solid var(--octant-warning-border);
-  border-radius: 8px;
+  background: var(--oct-warn-soft);
+  border: 1px solid color-mix(in oklab, var(--oct-warn) 45%, transparent);
+  border-radius: var(--oct-radius-md);
 }
 
 .usage-dashboard__unavailable-note,
 .usage-dashboard__error,
 .usage-dashboard__action-message,
 .usage-dashboard__filter-error {
-  color: var(--octant-warning-text);
-  font-size: 12px;
+  color: var(--oct-warn-fg);
+  font-size: var(--oct-text-xs);
 }
 
 .usage-dashboard__error {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 .usage-dashboard__error p {
@@ -167,12 +182,17 @@
   display: grid;
   min-width: 0;
   gap: 10px;
-  padding-top: 12px;
-  border-top: 1px solid var(--octant-border);
+  padding-top: var(--oct-space-3);
+  border-top: 1px solid var(--oct-border);
 }
 
 .usage-dashboard__section h3 {
-  font-size: 13px;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-display);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
 }
 
 .usage-dashboard__view-toggle {
@@ -186,8 +206,8 @@
   min-width: 0;
   table-layout: fixed;
   border-collapse: collapse;
-  color: var(--octant-text-secondary);
-  font-size: 11px;
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
 }
 
 .usage-dashboard__table th,
@@ -199,15 +219,16 @@
 }
 
 .usage-dashboard__table th {
-  color: var(--octant-text-muted);
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-weight: 500;
+  letter-spacing: var(--oct-tracking-wordmark);
   text-transform: uppercase;
 }
 
 .usage-dashboard__table tbody tr {
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border-soft);
 }
 
 .usage-dashboard__table--narrow {
@@ -221,19 +242,19 @@
 
 .usage-dashboard__confirm {
   display: grid;
-  gap: 12px;
+  gap: var(--oct-space-3);
 }
 
 .usage-dashboard__confirm p {
   margin: 0;
-  color: var(--octant-text-primary);
-  font-size: 12px;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
 }
 
 .usage-dashboard__confirm-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: var(--oct-space-2);
 }
 
 @media (max-width: 680px) {
@@ -273,7 +294,7 @@
   .usage-dashboard__unavailable-note,
   .usage-dashboard__error,
   .usage-dashboard__confirm {
-    border-color: var(--octant-text-primary);
+    border-color: var(--oct-fg);
   }
 }
 

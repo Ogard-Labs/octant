@@ -101,6 +101,7 @@ describe("Project window BrowserWindow construction", () => {
           titleBarStyle: "hiddenInset",
           trafficLightPosition: { x: 16, y: 18 },
           transparent: true,
+          vibrancy: "sidebar",
         },
       }),
     ).toMatchObject({
@@ -115,6 +116,8 @@ describe("Project window BrowserWindow construction", () => {
       titleBarStyle: "hiddenInset",
       trafficLightPosition: { x: 16, y: 18 },
       transparent: true,
+      vibrancy: "sidebar",
+      visualEffectState: "followWindow",
       webPreferences: {
         additionalArguments: [`--octant-project-capability=${"A".repeat(43)}`],
         preload: "/app/preload.mjs",

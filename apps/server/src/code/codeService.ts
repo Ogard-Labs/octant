@@ -174,6 +174,42 @@ function sameAvailableCheckout(
         current.head.oid === observed.head.oid;
 }
 
+/**
+ * True when an observation restates what the journal already recorded for this
+ * checkout — every fact equal, only `observedAt` fresher. The journal records
+ * changes of state, and observations arrive from paths that repeat freely
+ * (bootstrap runs on every navigation refresh and stream reconnect, prepare on
+ * every composer open and retry). Journaling each repeat grew one dogfooding
+ * host's journal by ~21k identical "unavailable" observations of a single
+ * checkout in days, enough to exhaust the bounded conversation replay scan.
+ */
+function repeatsJournaledCheckout(
+  current: CodeCheckoutIdentity | undefined,
+  observed: CodeCheckoutIdentity,
+): boolean {
+  if (
+    current === undefined ||
+    String(current.id) !== String(observed.id) ||
+    current.kind !== observed.kind ||
+    current.repositoryId !== observed.repositoryId ||
+    current.availability !== observed.availability
+  ) {
+    return false;
+  }
+  if (
+    current.kind === "managed-worktree" &&
+    observed.kind === "managed-worktree" &&
+    String(current.ownershipReceiptId) !== String(observed.ownershipReceiptId)
+  ) {
+    return false;
+  }
+  return current.head.kind === "detached"
+    ? observed.head.kind === "detached" && current.head.oid === observed.head.oid
+    : observed.head.kind === "branch" &&
+        current.head.name === observed.head.name &&
+        current.head.oid === observed.head.oid;
+}
+
 function currentCheckoutDigest(
   checkout: CodeCheckoutIdentity | undefined,
   thread: CodeThread,
@@ -612,7 +648,7 @@ export class CodeService {
           }
         }
         if (recovered === undefined) continue;
-        if (!sameAvailableCheckout(persisted, recovered)) {
+        if (!repeatsJournaledCheckout(persisted, recovered)) {
           this.#append(
             "code-checkout",
             recovered.id,
@@ -982,16 +1018,20 @@ export class CodeService {
         } catch {
           throw this.#failure("unavailable", "The bound Code repository is unavailable.");
         }
-        const expectedVersion = this.#persistence.readCodeCheckoutAggregateVersion(
-          prepared.checkout.id,
-        );
-        this.#append(
-          "code-checkout",
-          prepared.checkout.id,
-          expectedVersion,
-          "code.checkout-observed@1",
-          { kind: "checkout-observed", checkout: prepared.checkout },
-        );
+        if (
+          !repeatsJournaledCheckout(
+            this.#persistence.readCodeCheckout(prepared.checkout.id),
+            prepared.checkout,
+          )
+        ) {
+          this.#append(
+            "code-checkout",
+            prepared.checkout.id,
+            this.#persistence.readCodeCheckoutAggregateVersion(prepared.checkout.id),
+            "code.checkout-observed@1",
+            { kind: "checkout-observed", checkout: prepared.checkout },
+          );
+        }
         return {
           kind: "checkout-prepared",
           bindingRevisionId: prepared.bindingRevisionId,

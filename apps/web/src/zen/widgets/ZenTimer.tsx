@@ -69,24 +69,28 @@ export function ZenTimer({ timer, reducedMotion, onAction, onElapsed }: ZenTimer
           : "Ready";
 
   return (
-    <section className={`zen-timer${reducedMotion ? " zen-timer--reduced-motion" : ""}`}>
-      <div aria-label={remainingLabel(roundedSeconds)} className="zen-timer__time" role="timer">
+    <section
+      className={`zen-timer${reducedMotion ? " zen-timer--reduced-motion" : ""}`}
+      data-status={timer.status}
+    >
+      <div aria-label={remainingLabel(roundedSeconds)} className="zen-timer-clock" role="timer">
         {minutes.toString().padStart(2, "0")}:{seconds.toString().padStart(2, "0")}
       </div>
       <div
         aria-label="Timer status"
         aria-live="polite"
         aria-atomic="true"
-        className={`zen-timer__status zen-timer__status--${timer.status}`}
+        className="zen-timer-status"
         role="status"
       >
         {statusLabel}
       </div>
-      <div aria-label="Timer controls" className="zen-timer__controls" role="group">
+      <div aria-label="Timer controls" className="zen-timer-acts" role="group">
         {timer.status === "running" ? (
           <OctantButton
             aria-label="Pause timer"
             onClick={() => onAction("pause")}
+            size="sm"
             type="button"
             variant="secondary"
           >
@@ -96,6 +100,7 @@ export function ZenTimer({ timer, reducedMotion, onAction, onElapsed }: ZenTimer
           <OctantButton
             aria-label="Start timer"
             onClick={() => onAction("start")}
+            size="sm"
             type="button"
             variant="secondary"
           >
@@ -106,6 +111,7 @@ export function ZenTimer({ timer, reducedMotion, onAction, onElapsed }: ZenTimer
           aria-label="Reset timer"
           disabled={timer.status === "idle" && timer.remainingMs === timer.durationMs}
           onClick={() => onAction("reset")}
+          size="sm"
           type="button"
           variant="ghost"
         >

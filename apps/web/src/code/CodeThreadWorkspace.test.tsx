@@ -107,6 +107,45 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("region", { name: "Set up this workspace" })).not.toBeInTheDocument();
   });
 
+  it("offers a retry beside the unloadable-history notice and keeps the composer usable", async () => {
+    const user = userEvent.setup();
+    const retry = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [],
+          conversationHistory: "unavailable",
+          retry,
+          turnError: "Conversation history could not be loaded.",
+        })}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+
+    // The notice and the way out sit together; an ordinary turn error carries
+    // no retry, so the control appears only while history is unreachable.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Conversation history could not be loaded.",
+    );
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(retry).toHaveBeenCalledOnce();
+    // The thread itself is live even without its history.
+    expect(screen.getByLabelText("Follow-up message")).toBeEnabled();
+  });
+
+  it("keeps the retry control off an ordinary turn error", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller({ turnError: "The provider refused the turn." })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("The provider refused the turn.");
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
   it("reads a plan the assistant wrote as a plan, not as one long line", () => {
     render(
       <CodeThreadWorkspace
