@@ -48,6 +48,7 @@ distilled successor of the earlier long-form design specifications.
 | [0038](0038-owned-design-system-stylesheet.md)                | The owned design system stylesheet                                | Accepted |
 | [0039](0039-journal-compaction-of-superseded-observations.md) | Journal compaction of superseded checkout observations            | Accepted |
 | [0040](0040-share-a-host-or-a-git-remote.md)                  | Collaboration: share a host or a git remote                       | Proposed |
+| [0041](0041-panes-hold-one-surface.md)                        | Panes hold one surface; the sidebar is the only switcher          | Proposed |
 
 ## Adding an ADR
 

@@ -106,7 +106,7 @@ Code exposes repository-valid engineering surfaces:
 - Diff viewer, including discarding a tracked file's uncommitted changes (asked about every time outside Full access, because nothing can restore them)
 - Git/Review surfaces
 - Side Chat, a Chat-mode lane that can ask about this thread without interrupting its Lead turn or inheriting the repository. Type `#` in the composer to mention another thread as read-only context; `@` names a file in this checkout.
-- Browser tabs
+- Browser surfaces
 - Extension-contributed surfaces approved by effective activation policy
 
 ## Next steps

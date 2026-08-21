@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
+import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
@@ -109,6 +110,10 @@ export interface ProjectThreadRowsProps {
  */
 export function ProjectThreadRows(props: ProjectThreadRowsProps) {
   const [renamingThreadId, setRenamingThreadId] = useState<string>();
+  // The workspace's surface drag, when a workspace is present to drop into.
+  // A completed drag ends over a pane, yet the pointer began on this row, so
+  // the click that follows it must not also open the thread.
+  const drag = useContext(SidebarThreadDragContext);
   const renameable = props.onRenameThread !== undefined;
   const actions: ThreadRowActions = {
     ...props.actions,
@@ -142,7 +147,24 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
             data-pinned={thread.pinned === true ? "true" : undefined}
             data-thread-id={thread.threadId}
             data-unread={thread.unread === undefined ? undefined : thread.unread ? "true" : "false"}
-            onClick={() => props.onSelectThread(rowId)}
+            onClick={() => {
+              if (drag?.consumeThreadClickSuppression(rowId) === true) return;
+              props.onSelectThread(rowId);
+            }}
+            {...(drag === null
+              ? {}
+              : {
+                  onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) =>
+                    drag.beginThreadDrag(event, {
+                      rowId,
+                      threadId: thread.threadId,
+                      title: thread.title,
+                      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+                    }),
+                  onPointerMove: drag.onPointerMove,
+                  onPointerUp: drag.onPointerUp,
+                  onPointerCancel: drag.onPointerCancel,
+                })}
             type="button"
             variant="ghost"
           >

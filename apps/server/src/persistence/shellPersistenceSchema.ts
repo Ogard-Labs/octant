@@ -9,9 +9,6 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 
-export const UNAVAILABLE_PERSISTED_TAB_REASON =
-  "This tab type is unavailable in this version of Octant.";
-
 const PersistedShellSettings = Schema.transform(Schema.Unknown, ShellSettings, {
   strict: false,
   decode: upcastPersistedShellSettings,
@@ -130,10 +127,17 @@ function sanitizePersistedWorkspaceEvent(value: unknown): unknown {
   return { ...value, workspace: sanitizePersistedWorkspace(value.workspace) };
 }
 
+/**
+ * Upcast persisted workspaces into the pane model. A leaf journaled as a tab
+ * group collapses to one pane showing the group's active tab — background
+ * tabs are deliberately lost; the group's id survives as the pane's, and the
+ * renamed top-level fields (`activeGroupIds`, `focusedGroupId`, a stowed
+ * entry's `activeGroupId`) carry over under their pane names so restore keeps
+ * the same view in front.
+ */
 function sanitizePersistedWorkspace(value: unknown): unknown {
   if (!isRecord(value) || !isRecord(value.layouts)) return value;
   const layouts = {
-    ...value.layouts,
     chat: sanitizeLayout(value.layouts.chat, "chat"),
     work: sanitizeLayout(value.layouts.work, "work"),
     code: sanitizeLayout(value.layouts.code, "code"),
@@ -149,19 +153,45 @@ function sanitizePersistedWorkspace(value: unknown): unknown {
         work: defaultContextKey("work"),
         code: defaultContextKey("code"),
       };
-  return {
-    ...value,
+  // The result is built explicitly rather than spread from the input: the wire
+  // schema rejects excess properties, so the legacy tab-group field names must
+  // not survive into the decoded document.
+  const result: Record<string, unknown> = {
+    windowId: value.windowId,
+    activeMode: value.activeMode,
     layouts,
     contextByMode,
-    activeGroupIds:
-      "activeGroupIds" in value
-        ? value.activeGroupIds
-        : {
-            chat: firstPersistedGroupId(layouts.chat),
-            work: firstPersistedGroupId(layouts.work),
-            code: firstPersistedGroupId(layouts.code),
-          },
+    activePaneIds: value.activePaneIds ??
+      value.activeGroupIds ?? {
+        chat: firstPersistedPaneId(layouts.chat),
+        work: firstPersistedPaneId(layouts.work),
+        code: firstPersistedPaneId(layouts.code),
+      },
+    version: value.version,
   };
+  const focusedPaneId = value.focusedPaneId ?? value.focusedGroupId;
+  if (focusedPaneId !== undefined) result.focusedPaneId = focusedPaneId;
+  if (Array.isArray(value.stowedLayouts)) {
+    result.stowedLayouts = value.stowedLayouts.map((entry) => sanitizeStowedLayout(entry));
+  }
+  return result;
+}
+
+function sanitizeStowedLayout(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const mode =
+    isRecord(value.context) && isPersistedMode(value.context.mode) ? value.context.mode : undefined;
+  if (mode === undefined) return value;
+  const layout = sanitizeLayout(value.layout, mode);
+  return {
+    context: sanitizeContextKey(value.context, mode),
+    layout,
+    activePaneId: value.activePaneId ?? value.activeGroupId ?? firstPersistedPaneId(layout),
+  };
+}
+
+function isPersistedMode(value: unknown): value is "chat" | "work" | "code" {
+  return value === "chat" || value === "work" || value === "code";
 }
 
 function defaultContextKey(mode: "chat" | "work" | "code"): unknown {
@@ -178,10 +208,11 @@ function sanitizeContextKey(value: unknown, mode: "chat" | "work" | "code"): unk
   };
 }
 
-function firstPersistedGroupId(value: unknown): unknown {
+function firstPersistedPaneId(value: unknown): unknown {
   if (!isRecord(value)) return undefined;
+  if (value.kind === "pane") return value.paneId;
   if (value.kind === "group") return value.groupId;
-  return value.kind === "split" ? firstPersistedGroupId(value.first) : undefined;
+  return value.kind === "split" ? firstPersistedPaneId(value.first) : undefined;
 }
 
 function sanitizeLayout(value: unknown, mode: "chat" | "work" | "code"): unknown {
@@ -193,89 +224,89 @@ function sanitizeLayout(value: unknown, mode: "chat" | "work" | "code"): unknown
       second: sanitizeLayout(value.second, mode),
     };
   }
+  if (value.kind === "pane") {
+    return {
+      kind: "pane",
+      nodeId: value.nodeId,
+      paneId: value.paneId,
+      surface: sanitizeSurface(value.surface, mode),
+    };
+  }
   if (value.kind !== "group" || !Array.isArray(value.tabs)) return value;
-  return { ...value, tabs: value.tabs.map((tab) => sanitizeTab(tab, mode)) };
-}
-
-function sanitizeTab(value: unknown, mode: "chat" | "work" | "code"): unknown {
-  if (!isRecord(value) || typeof value.kind !== "string") return value;
-  if (value.kind === "draft-thread") {
-    if (value.mode !== mode) return unavailablePersistedTab(value);
-    try {
-      return decodeWorkspaceTab(value);
-    } catch {
-      return unavailablePersistedTab(value);
-    }
-  }
-  if (value.kind === "work-thread") {
-    if (mode !== "work") return unavailablePersistedTab(value);
-    try {
-      return decodeWorkspaceTab(value);
-    } catch {
-      return unavailablePersistedTab(value);
-    }
-  }
-  if (value.kind === "chat-thread") {
-    if (mode !== "chat") return unavailablePersistedTab(value);
-    try {
-      return decodeWorkspaceTab(value);
-    } catch {
-      return unavailablePersistedTab(value);
-    }
-  }
-  if (value.kind.startsWith("code-")) {
-    if (mode !== "code") return unavailablePersistedTab(value);
-    try {
-      return decodeWorkspaceTab(value);
-    } catch {
-      return unavailablePersistedTab(value);
-    }
-  }
-  if (value.kind === "browser" || value.kind === "files") {
-    if (mode === "chat") return unavailablePersistedTab(value);
-    try {
-      return decodeWorkspaceTab(value);
-    } catch {
-      return unavailablePersistedTab(value);
-    }
-  }
-  if (value.kind === "side-chat") {
-    try {
-      return decodeWorkspaceTab(value);
-    } catch {
-      return unavailablePersistedTab(value);
-    }
-  }
-  if (value.kind === "preview") {
-    try {
-      return decodeWorkspaceTab(value);
-    } catch {
-      return unavailablePersistedTab(value);
-    }
-  }
-  if (value.kind === "canvas") {
-    try {
-      return decodeWorkspaceTab(value);
-    } catch {
-      return unavailablePersistedTab(value);
-    }
-  }
-  if (["welcome", "settings", "project", "unavailable"].includes(value.kind)) return value;
-  return unavailablePersistedTab(value);
-}
-
-function unavailablePersistedTab(value: Record<string, unknown>): unknown {
-  if (!validTitle(value.title)) return value;
+  // A tab-group leaf collapses to one pane showing its active tab; background
+  // tabs are deliberately lost. A group with no usable tab renders the mode's
+  // welcome surface, reusing the group's uuid as the surface id so the pane
+  // keeps a stable identity.
+  const active =
+    value.tabs.find((tab) => isRecord(tab) && tab.id === value.activeTabId) ??
+    value.tabs.find(isRecord);
   return {
-    kind: "unavailable",
-    id: value.id,
-    title: value.title,
-    reason: UNAVAILABLE_PERSISTED_TAB_REASON,
+    kind: "pane",
+    nodeId: value.nodeId,
+    paneId: value.groupId,
+    surface:
+      active === undefined
+        ? welcomePersistedSurface(mode, value.groupId)
+        : sanitizeSurface(active, mode),
   };
 }
 
-function validTitle(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.trim() === value;
+function sanitizeSurface(value: unknown, mode: "chat" | "work" | "code"): unknown {
+  if (!isRecord(value) || typeof value.kind !== "string") return value;
+  const welcomeInPlace = () => welcomePersistedSurface(mode, value.id);
+  if (value.kind === "draft-thread") {
+    if (value.mode !== mode) return welcomeInPlace();
+    return decodeOrWelcome(value, welcomeInPlace);
+  }
+  if (value.kind === "work-thread") {
+    if (mode !== "work") return welcomeInPlace();
+    return decodeOrWelcome(value, welcomeInPlace);
+  }
+  if (value.kind === "chat-thread") {
+    if (mode !== "chat") return welcomeInPlace();
+    return decodeOrWelcome(value, welcomeInPlace);
+  }
+  if (value.kind.startsWith("code-")) {
+    if (mode !== "code") return welcomeInPlace();
+    return decodeOrWelcome(value, welcomeInPlace);
+  }
+  if (value.kind === "browser" || value.kind === "files") {
+    if (mode === "chat") return welcomeInPlace();
+    return decodeOrWelcome(value, welcomeInPlace);
+  }
+  if (value.kind === "side-chat" || value.kind === "preview") {
+    return decodeOrWelcome(value, welcomeInPlace);
+  }
+  if (value.kind === "canvas") {
+    // Canvas tabs briefly persisted a tab-strip `pinned` ordering flag; the
+    // pane model has no strip, so the flag is dropped on decode.
+    const { pinned: _pinned, ...withoutPin } = value;
+    return decodeOrWelcome(withoutPin, welcomeInPlace);
+  }
+  if (["welcome", "settings", "project"].includes(value.kind)) return value;
+  // Unknown kinds and the retired `unavailable` placeholder both render the
+  // mode's welcome surface in place: a pane never shows a dead view.
+  return welcomeInPlace();
+}
+
+function decodeOrWelcome(value: Record<string, unknown>, fallback: () => unknown): unknown {
+  try {
+    return decodeWorkspaceTab(value);
+  } catch {
+    return fallback();
+  }
+}
+
+// Persistence upcasts operate on untyped JSON before any schema decode, so the
+// welcome surface is built raw here; the copy mirrors the domain's mode titles.
+const WELCOME_TITLES = {
+  chat: "Welcome to Chat",
+  work: "Welcome to Work",
+  code: "Welcome to Code",
+} as const;
+
+function welcomePersistedSurface(mode: "chat" | "work" | "code", id: unknown): unknown {
+  return { kind: "welcome", id, mode, title: WELCOME_TITLES[mode] };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

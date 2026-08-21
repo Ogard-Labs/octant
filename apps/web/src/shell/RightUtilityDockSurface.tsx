@@ -2,6 +2,7 @@ import { X } from "lucide-react";
 import type { ReactNode, Ref } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
+import { ShellState } from "./ShellState";
 import type {
   RightUtilityDockResolution,
   RightUtilityDockSurfaceDescriptor,
@@ -25,7 +26,7 @@ export interface RightUtilityDockSurfaceProps {
 }
 
 export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
-  if (props.resolution.kind !== "surface") return null;
+  if (props.resolution.kind === "closed") return null;
 
   const activeSurface = props.resolution.surface;
   const dismiss = props.onClose;
@@ -64,13 +65,22 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         )}
       </header>
       <div className="dock-body right-utility-dock__content">
-        {
+        {/* An unavailable panel renders this state and nothing else: the
+            previous pane's content must never stand in for a pane the panel
+            cannot describe. */}
+        {props.resolution.kind === "unavailable" ? (
+          <ShellState
+            message="The dock describes the active pane, and this pane has no compatible Project. Activate a pane with one to fill this panel again."
+            state="neutral"
+            title={`${activeSurface.label} has nothing to describe here`}
+          />
+        ) : (
           {
             context: props.context,
             "project-memory": props.projectMemory,
             navigator: props.navigator,
           }[activeSurface.id]
-        }
+        )}
       </div>
     </div>
   );

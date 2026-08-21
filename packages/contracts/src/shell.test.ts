@@ -24,27 +24,24 @@ import { MAX_AVATAR_IMAGE_CHARACTERS } from "./userProfile";
 const ids = {
   window: "11111111-1111-4111-8111-111111111111",
   chatNode: "22222222-2222-4222-8222-222222222222",
-  chatGroup: "33333333-3333-4333-8333-333333333333",
+  chatPane: "33333333-3333-4333-8333-333333333333",
   chatTab: "44444444-4444-4444-8444-444444444444",
   workNode: "55555555-5555-4555-8555-555555555555",
-  workGroup: "66666666-6666-4666-8666-666666666666",
+  workPane: "66666666-6666-4666-8666-666666666666",
   workTab: "77777777-7777-4777-8777-777777777777",
   codeSplit: "88888888-8888-4888-8888-888888888888",
   codeNodeA: "99999999-9999-4999-8999-999999999999",
-  codeGroupA: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  codePaneA: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   codeTabA: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   codeNodeB: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-  codeGroupB: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  codePaneB: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
   codeTabB: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
   newNode: "12121212-1212-4212-8212-121212121212",
-  newGroup: "13131313-1313-4313-8313-131313131313",
+  newPane: "13131313-1313-4313-8313-131313131313",
   newTab: "14141414-1414-4414-8414-141414141414",
-  newGroupNode: "15151515-1515-4515-8515-151515151515",
+  newPaneNode: "15151515-1515-4515-8515-151515151515",
   project: "16161616-1616-4616-8616-161616161616",
   thread: "17171717-1717-4717-8717-171717171717",
-  dockSplit: "18181818-1818-4818-8818-181818181818",
-  dockGroupNode: "18181818-1818-4818-8818-181818181818",
-  dockGroup: "19191919-1919-4919-8919-191919191919",
 } as const;
 
 const settings = {
@@ -69,79 +66,58 @@ const settings = {
   userProfile: { accent: "indigo", avatar: { kind: "initials" } },
 } as const;
 
-const group = (nodeId: string, groupId: string, tab: object, activeTabId: string) => ({
-  kind: "group",
+const pane = (nodeId: string, paneId: string, surface: object) => ({
+  kind: "pane",
   nodeId,
-  groupId,
-  tabs: [tab],
-  activeTabId,
+  paneId,
+  surface,
 });
 
 const workspace = {
   windowId: ids.window,
   activeMode: "code",
   layouts: {
-    chat: group(
-      ids.chatNode,
-      ids.chatGroup,
-      {
-        kind: "welcome",
-        id: ids.chatTab,
-        mode: "chat",
-        title: "Chat",
-      },
-      ids.chatTab,
-    ),
-    work: group(
-      ids.workNode,
-      ids.workGroup,
-      {
-        kind: "unavailable",
-        id: ids.workTab,
-        title: "Unavailable",
-        reason: "Content is not available yet.",
-      },
-      ids.workTab,
-    ),
+    chat: pane(ids.chatNode, ids.chatPane, {
+      kind: "welcome",
+      id: ids.chatTab,
+      mode: "chat",
+      title: "Chat",
+    }),
+    work: pane(ids.workNode, ids.workPane, {
+      kind: "welcome",
+      id: ids.workTab,
+      mode: "work",
+      title: "Work",
+    }),
     code: {
       kind: "split",
       nodeId: ids.codeSplit,
       orientation: "horizontal",
       ratio: 0.5,
-      first: group(
-        ids.codeNodeA,
-        ids.codeGroupA,
-        {
-          kind: "welcome",
-          id: ids.codeTabA,
-          mode: "code",
-          title: "Code",
-        },
-        ids.codeTabA,
-      ),
-      second: group(
-        ids.codeNodeB,
-        ids.codeGroupB,
-        {
-          kind: "settings",
-          id: ids.codeTabB,
-          title: "Settings",
-        },
-        ids.codeTabB,
-      ),
+      first: pane(ids.codeNodeA, ids.codePaneA, {
+        kind: "welcome",
+        id: ids.codeTabA,
+        mode: "code",
+        title: "Code",
+      }),
+      second: pane(ids.codeNodeB, ids.codePaneB, {
+        kind: "settings",
+        id: ids.codeTabB,
+        title: "Settings",
+      }),
     },
   },
-  activeGroupIds: {
-    chat: ids.chatGroup,
-    work: ids.workGroup,
-    code: ids.codeGroupA,
+  activePaneIds: {
+    chat: ids.chatPane,
+    work: ids.workPane,
+    code: ids.codePaneA,
   },
   contextByMode: {
     chat: { host: "local", mode: "chat", projectId: null, boundRoot: null },
     work: { host: "local", mode: "work", projectId: null, boundRoot: null },
     code: { host: "local", mode: "code", projectId: null, boundRoot: null },
   },
-  focusedGroupId: ids.codeGroupA,
+  focusedPaneId: ids.codePaneA,
   version: 7,
 } as const;
 
@@ -288,7 +264,7 @@ describe("shell bootstrap contracts", () => {
     ).toThrow();
   });
 
-  it("decodes a valid bootstrap with recursive group and split layouts", () => {
+  it("decodes a valid bootstrap with recursive pane and split layouts", () => {
     const bootstrap = decodeShellBootstrap({
       settings,
       workspace,
@@ -328,13 +304,13 @@ describe("shell bootstrap contracts", () => {
 
     const stowed = {
       context: { host: "local", mode: "code", projectId: ids.project, boundRoot: "/home/repo" },
-      layout: group(
-        ids.newGroupNode,
-        ids.newGroup,
-        { kind: "welcome", id: ids.newTab, mode: "code", title: "Code" },
-        ids.newTab,
-      ),
-      activeGroupId: ids.newGroup,
+      layout: pane(ids.newPaneNode, ids.newPane, {
+        kind: "welcome",
+        id: ids.newTab,
+        mode: "code",
+        title: "Code",
+      }),
+      activePaneId: ids.newPane,
     } as const;
     const decoded = decodeWindowWorkspace({ ...workspace, stowedLayouts: [stowed] });
     expect(decoded.stowedLayouts).toHaveLength(1);
@@ -380,15 +356,15 @@ describe("shell bootstrap contracts", () => {
 describe("shell command contracts", () => {
   const operations = [
     {
-      kind: "open-tab",
+      kind: "open-surface",
       mode: "code",
-      groupId: ids.codeGroupA,
-      tab: { kind: "settings", id: ids.newTab, title: "Settings" },
+      paneId: ids.codePaneA,
+      surface: { kind: "settings", id: ids.newTab, title: "Settings" },
     },
     {
-      kind: "switch-project-tab",
+      kind: "switch-project-surface",
       mode: "code",
-      tab: {
+      surface: {
         kind: "project",
         id: ids.newTab,
         projectId: ids.project,
@@ -396,52 +372,34 @@ describe("shell command contracts", () => {
         title: "Octant",
       },
     },
-    { kind: "activate-tab", mode: "code", groupId: ids.codeGroupA, tabId: ids.codeTabA },
-    { kind: "close-tab", mode: "code", groupId: ids.codeGroupA, tabId: ids.codeTabA },
-    { kind: "reorder-tab", mode: "code", groupId: ids.codeGroupA, tabId: ids.codeTabA, index: 0 },
     {
-      kind: "split-group",
+      kind: "replace-pane-surface",
       mode: "code",
-      groupId: ids.codeGroupA,
-      tabId: ids.codeTabA,
+      paneId: ids.codePaneA,
+      surface: { kind: "settings", id: ids.newTab, title: "Settings" },
+    },
+    {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: ids.codePaneA,
+      surface: { kind: "settings", id: ids.newTab, title: "Settings" },
       splitNodeId: ids.newNode,
-      newGroupNodeId: ids.newGroupNode,
-      newGroupId: ids.newGroup,
+      newPaneNodeId: ids.newPaneNode,
+      newPaneId: ids.newPane,
       orientation: "vertical",
       placement: "after",
       ratio: 0.5,
     },
-    {
-      kind: "move-tab",
-      mode: "code",
-      fromGroupId: ids.codeGroupA,
-      toGroupId: ids.codeGroupB,
-      tabId: ids.codeTabA,
-      index: 0,
-    },
-    {
-      kind: "dock-tab",
-      mode: "code",
-      fromGroupId: ids.codeGroupA,
-      targetGroupId: ids.codeGroupB,
-      tabId: ids.codeTabA,
-      splitNodeId: ids.dockSplit,
-      newGroupNodeId: ids.dockGroupNode,
-      newGroupId: ids.dockGroup,
-      orientation: "horizontal",
-      placement: "after",
-      ratio: 0.5,
-    },
+    { kind: "close-pane", mode: "code", paneId: ids.codePaneA },
     { kind: "resize-split", mode: "code", splitNodeId: ids.codeSplit, ratio: 0.6 },
-    { kind: "focus-group", mode: "code", groupId: ids.codeGroupA },
-    { kind: "unfocus-group", mode: "code" },
+    { kind: "focus-pane", mode: "code", paneId: ids.codePaneA },
+    { kind: "unfocus-pane", mode: "code" },
     { kind: "reset-mode", mode: "code" },
     { kind: "set-active-mode", mode: "chat" },
     {
       kind: "set-side-chat-sidecar",
       mode: "work",
-      groupId: ids.workGroup,
-      tabId: ids.workTab,
+      paneId: ids.workPane,
       sidecarThreadId: ids.thread,
     },
   ] as const;
@@ -495,8 +453,8 @@ describe("shell command contracts", () => {
     ).toMatchObject({ kind: "apply-workspace-operation", operation: { kind: operation.kind } });
   });
 
-  it("keeps atomic dock-tab operations strict and bounded", () => {
-    const operation = operations.find((candidate) => candidate.kind === "dock-tab");
+  it("keeps atomic split-pane operations strict and bounded", () => {
+    const operation = operations.find((candidate) => candidate.kind === "split-pane");
     expect(operation).toBeDefined();
 
     expect(() =>
@@ -517,15 +475,15 @@ describe("shell command contracts", () => {
     ).toThrow();
   });
 
-  it("requires and decodes a separate layout node ID for a split's new group", () => {
+  it("requires and decodes a separate layout node ID for a split's new pane", () => {
     const operation = {
-      kind: "split-group",
+      kind: "split-pane",
       mode: "code",
-      groupId: ids.codeGroupA,
-      tabId: ids.codeTabA,
+      targetPaneId: ids.codePaneA,
+      surface: { kind: "settings", id: ids.newTab, title: "Settings" },
       splitNodeId: ids.newNode,
-      newGroupNodeId: ids.newGroupNode,
-      newGroupId: ids.newGroup,
+      newPaneNodeId: ids.newPaneNode,
+      newPaneId: ids.newPane,
       orientation: "vertical",
       placement: "after",
       ratio: 0.5,
@@ -538,15 +496,15 @@ describe("shell command contracts", () => {
         expectedVersion: 7,
         operation,
       }),
-    ).toMatchObject({ operation: { newGroupNodeId: ids.newGroupNode } });
+    ).toMatchObject({ operation: { newPaneNodeId: ids.newPaneNode } });
 
-    const { newGroupNodeId: _, ...missingNewGroupNodeId } = operation;
+    const { newPaneNodeId: _, ...missingNewPaneNodeId } = operation;
     expect(() =>
       decodeShellCommand({
         kind: "apply-workspace-operation",
         windowId: ids.window,
         expectedVersion: 7,
-        operation: missingNewGroupNodeId,
+        operation: missingNewPaneNodeId,
       }),
     ).toThrow();
   });
@@ -635,23 +593,23 @@ describe("Project workspace tabs", () => {
         windowId: ids.window,
         expectedVersion: 7,
         operation: {
-          kind: "open-tab",
+          kind: "open-surface",
           mode: "code",
-          groupId: ids.codeGroupA,
-          tab: projectTab,
+          paneId: ids.codePaneA,
+          surface: projectTab,
         },
       }),
-    ).toMatchObject({ operation: { tab: projectTab } });
+    ).toMatchObject({ operation: { surface: projectTab } });
     expect(() =>
       decodeShellCommand({
         kind: "apply-workspace-operation",
         windowId: ids.window,
         expectedVersion: 7,
         operation: {
-          kind: "open-tab",
+          kind: "open-surface",
           mode: "code",
-          groupId: ids.codeGroupA,
-          tab: { ...projectTab, root: "/tmp/octant" },
+          paneId: ids.codePaneA,
+          surface: { ...projectTab, root: "/tmp/octant" },
         },
       }),
     ).toThrow();

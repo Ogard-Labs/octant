@@ -13,10 +13,7 @@ import { Journal } from "./journal";
 import { applyMigrations, MIGRATIONS } from "./migrations";
 import { ProjectionQuarantined, rebuildProjection } from "./projection";
 import { createPhase1RuntimeRegistries } from "./runtimeRegistry";
-import {
-  decodePersistedWindowWorkspace,
-  UNAVAILABLE_PERSISTED_TAB_REASON,
-} from "./shellPersistenceSchema";
+import { decodePersistedWindowWorkspace } from "./shellPersistenceSchema";
 import {
   ShellProjection,
   readEnvironmentPresentation,
@@ -51,11 +48,11 @@ const workspace = decodeWindowWorkspace({
   windowId: ids.window,
   activeMode: "code",
   layouts: {
-    chat: group("1", "chat"),
-    work: group("2", "work"),
-    code: group("3", "code"),
+    chat: pane("1", "chat"),
+    work: pane("2", "work"),
+    code: pane("3", "code"),
   },
-  activeGroupIds: {
+  activePaneIds: {
     chat: "10000000-0000-4000-8000-000000000002",
     work: "20000000-0000-4000-8000-000000000002",
     code: "30000000-0000-4000-8000-000000000002",
@@ -68,12 +65,33 @@ const workspace = decodeWindowWorkspace({
   version: 1,
 });
 
-function group(prefix: string, mode: "chat" | "work" | "code") {
+function pane(prefix: string, mode: "chat" | "work" | "code") {
+  return {
+    kind: "pane" as const,
+    nodeId: `${prefix}0000000-0000-4000-8000-000000000001`,
+    paneId: `${prefix}0000000-0000-4000-8000-000000000002`,
+    surface: {
+      kind: "welcome" as const,
+      id: `${prefix}0000000-0000-4000-8000-000000000003`,
+      mode,
+      title: `Welcome to ${mode}`,
+    },
+  };
+}
+
+// The tab-group shape a pre-pane journal persisted; migration collapses it to
+// one pane showing the group's active tab.
+function legacyGroup(
+  prefix: string,
+  mode: "chat" | "work" | "code",
+  tabs?: ReadonlyArray<Record<string, unknown>>,
+  activeTabId?: string,
+) {
   return {
     kind: "group" as const,
     nodeId: `${prefix}0000000-0000-4000-8000-000000000001`,
     groupId: `${prefix}0000000-0000-4000-8000-000000000002`,
-    tabs: [
+    tabs: tabs ?? [
       {
         kind: "welcome" as const,
         id: `${prefix}0000000-0000-4000-8000-000000000003`,
@@ -81,7 +99,30 @@ function group(prefix: string, mode: "chat" | "work" | "code") {
         title: `Welcome to ${mode}`,
       },
     ],
-    activeTabId: `${prefix}0000000-0000-4000-8000-000000000003`,
+    activeTabId: activeTabId ?? `${prefix}0000000-0000-4000-8000-000000000003`,
+  };
+}
+
+function legacyGroupWorkspace() {
+  return {
+    windowId: ids.window,
+    activeMode: "code",
+    layouts: {
+      chat: legacyGroup("1", "chat"),
+      work: legacyGroup("2", "work"),
+      code: legacyGroup("3", "code"),
+    },
+    activeGroupIds: {
+      chat: "10000000-0000-4000-8000-000000000002",
+      work: "20000000-0000-4000-8000-000000000002",
+      code: "30000000-0000-4000-8000-000000000002",
+    },
+    contextByMode: {
+      chat: { host: "local", mode: "chat", projectId: null, boundRoot: null },
+      work: { host: "local", mode: "work", projectId: null, boundRoot: null },
+      code: { host: "local", mode: "code", projectId: null, boundRoot: null },
+    },
+    version: 1,
   };
 }
 
@@ -135,12 +176,12 @@ afterEach(() => {
 });
 
 describe("ShellProjection", () => {
-  it("restores persisted Project tabs without downgrading them to unavailable", () => {
+  it("restores persisted Project surfaces without downgrading them", () => {
     const code = workspace.layouts.code;
-    if (code.kind !== "group") throw new Error("fixture code layout must be a group");
-    const projectTab = {
+    if (code.kind !== "pane") throw new Error("fixture code layout must be a pane");
+    const projectSurface = {
       kind: "project" as const,
-      id: code.tabs[0]!.id,
+      id: code.surface.id,
       projectId: "60000000-0000-4000-8000-000000000020",
       mode: "code" as const,
       title: "Octant",
@@ -149,17 +190,17 @@ describe("ShellProjection", () => {
     expect(
       decodePersistedWindowWorkspace({
         ...workspace,
-        layouts: { ...workspace.layouts, code: { ...code, tabs: [projectTab] } },
+        layouts: { ...workspace.layouts, code: { ...code, surface: projectSurface } },
       }).layouts.code,
-    ).toMatchObject({ tabs: [projectTab] });
+    ).toMatchObject({ surface: projectSurface });
   });
 
-  it("restores persisted Chat thread tabs without downgrading them to unavailable", () => {
+  it("restores persisted Chat thread surfaces without downgrading them", () => {
     const chat = workspace.layouts.chat;
-    if (chat.kind !== "group") throw new Error("fixture chat layout must be a group");
-    const chatThreadTab = {
+    if (chat.kind !== "pane") throw new Error("fixture chat layout must be a pane");
+    const chatThreadSurface = {
       kind: "chat-thread" as const,
-      id: chat.tabs[0]!.id,
+      id: chat.surface.id,
       threadId: "70000000-0000-4000-8000-000000000021",
       mode: "chat" as const,
       title: "Planning",
@@ -168,17 +209,17 @@ describe("ShellProjection", () => {
     expect(
       decodePersistedWindowWorkspace({
         ...workspace,
-        layouts: { ...workspace.layouts, chat: { ...chat, tabs: [chatThreadTab] } },
+        layouts: { ...workspace.layouts, chat: { ...chat, surface: chatThreadSurface } },
       }).layouts.chat,
-    ).toMatchObject({ tabs: [chatThreadTab] });
+    ).toMatchObject({ surface: chatThreadSurface });
   });
 
-  it("restores persisted Code tabs without downgrading them to unavailable", () => {
+  it("restores persisted Code surfaces without downgrading them", () => {
     const code = workspace.layouts.code;
-    if (code.kind !== "group") throw new Error("fixture Code layout must be a group");
-    const codeTab = {
+    if (code.kind !== "pane") throw new Error("fixture Code layout must be a pane");
+    const codeSurface = {
       kind: "code-file" as const,
-      id: code.tabs[0]!.id,
+      id: code.surface.id,
       threadId: "70000000-0000-4000-8000-000000000022",
       mode: "code" as const,
       title: "code.ts",
@@ -188,17 +229,17 @@ describe("ShellProjection", () => {
     expect(
       decodePersistedWindowWorkspace({
         ...workspace,
-        layouts: { ...workspace.layouts, code: { ...code, tabs: [codeTab] } },
+        layouts: { ...workspace.layouts, code: { ...code, surface: codeSurface } },
       }).layouts.code,
-    ).toMatchObject({ tabs: [codeTab] });
+    ).toMatchObject({ surface: codeSurface });
   });
 
-  it("restores a Side Chat tab with its sidecar identity intact", () => {
+  it("restores a Side Chat surface with its sidecar identity intact", () => {
     const work = workspace.layouts.work;
-    if (work.kind !== "group") throw new Error("fixture Work layout must be a group");
-    const sideChatTab = {
+    if (work.kind !== "pane") throw new Error("fixture Work layout must be a pane");
+    const sideChatSurface = {
       kind: "side-chat" as const,
-      id: work.tabs[0]!.id,
+      id: work.surface.id,
       mode: "work" as const,
       title: "Side Chat about Release notes",
       sourceThreadId: "70000000-0000-4000-8000-000000000041",
@@ -208,55 +249,54 @@ describe("ShellProjection", () => {
     expect(
       decodePersistedWindowWorkspace({
         ...workspace,
-        layouts: { ...workspace.layouts, work: { ...work, tabs: [sideChatTab] } },
+        layouts: { ...workspace.layouts, work: { ...work, surface: sideChatSurface } },
       }).layouts.work,
-    ).toMatchObject({ tabs: [sideChatTab] });
+    ).toMatchObject({ surface: sideChatSurface });
   });
 
-  it("fails a Side Chat tab closed when it names no sidecar to restore", () => {
+  it("restores a Side Chat surface that names no sidecar as the mode welcome surface", () => {
     const work = workspace.layouts.work;
-    if (work.kind !== "group") throw new Error("fixture Work layout must be a group");
+    if (work.kind !== "pane") throw new Error("fixture Work layout must be a pane");
     const restored = decodePersistedWindowWorkspace({
       ...workspace,
       layouts: {
         ...workspace.layouts,
         work: {
           ...work,
-          tabs: [
-            {
-              kind: "side-chat",
-              id: work.tabs[0]!.id,
-              mode: "work",
-              title: "Side Chat",
-            },
-          ],
+          surface: {
+            kind: "side-chat",
+            id: work.surface.id,
+            mode: "work",
+            title: "Side Chat",
+          },
         },
       },
     }).layouts.work;
-    if (restored.kind !== "group") throw new Error("restored Work layout must be a group");
-    expect(restored.tabs[0]).toMatchObject({
-      kind: "unavailable",
-      title: "Side Chat",
-      reason: UNAVAILABLE_PERSISTED_TAB_REASON,
+    if (restored.kind !== "pane") throw new Error("restored Work layout must be a pane");
+    expect(restored.surface).toEqual({
+      kind: "welcome",
+      id: work.surface.id,
+      mode: "work",
+      title: "Welcome to Work",
     });
   });
 
-  it("preserves draft-thread and work-thread tabs when mode matches", () => {
+  it("preserves draft-thread and work-thread surfaces when mode matches", () => {
     const code = workspace.layouts.code;
     const work = workspace.layouts.work;
-    if (code.kind !== "group") throw new Error("fixture Code layout must be a group");
-    if (work.kind !== "group") throw new Error("fixture Work layout must be a group");
+    if (code.kind !== "pane") throw new Error("fixture Code layout must be a pane");
+    if (work.kind !== "pane") throw new Error("fixture Work layout must be a pane");
 
-    const draftTab = {
+    const draftSurface = {
       kind: "draft-thread" as const,
-      id: code.tabs[0]!.id,
+      id: code.surface.id,
       mode: "code" as const,
       title: "New Code thread",
       projectId: "10000000-0000-4000-8000-000000000001",
     };
-    const workThreadTab = {
+    const workThreadSurface = {
       kind: "work-thread" as const,
-      id: work.tabs[0]!.id,
+      id: work.surface.id,
       threadId: "70000000-0000-4000-8000-000000000031",
       mode: "work" as const,
       title: "Brief draft",
@@ -266,23 +306,23 @@ describe("ShellProjection", () => {
       ...workspace,
       layouts: {
         ...workspace.layouts,
-        code: { ...code, tabs: [draftTab], activeTabId: draftTab.id },
-        work: { ...work, tabs: [workThreadTab], activeTabId: workThreadTab.id },
+        code: { ...code, surface: draftSurface },
+        work: { ...work, surface: workThreadSurface },
       },
     });
     const restoredCode = restored.layouts.code;
     const restoredWork = restored.layouts.work;
-    if (restoredCode.kind !== "group") throw new Error("restored Code layout must be a group");
-    if (restoredWork.kind !== "group") throw new Error("restored Work layout must be a group");
-    expect(restoredCode.tabs[0]).toEqual(draftTab);
-    expect(restoredWork.tabs[0]).toEqual(workThreadTab);
+    if (restoredCode.kind !== "pane") throw new Error("restored Code layout must be a pane");
+    if (restoredWork.kind !== "pane") throw new Error("restored Work layout must be a pane");
+    expect(restoredCode.surface).toEqual(draftSurface);
+    expect(restoredWork.surface).toEqual(workThreadSurface);
   });
 
-  it("recovers thread tabs found outside their mode layouts", () => {
+  it("recovers thread surfaces found outside their mode layouts as welcome surfaces", () => {
     const chat = workspace.layouts.chat;
     const code = workspace.layouts.code;
-    if (chat.kind !== "group") throw new Error("fixture Chat layout must be a group");
-    if (code.kind !== "group") throw new Error("fixture Code layout must be a group");
+    if (chat.kind !== "pane") throw new Error("fixture Chat layout must be a pane");
+    if (code.kind !== "pane") throw new Error("fixture Code layout must be a pane");
 
     const restored = decodePersistedWindowWorkspace({
       ...workspace,
@@ -290,46 +330,36 @@ describe("ShellProjection", () => {
         ...workspace.layouts,
         chat: {
           ...chat,
-          tabs: [
-            {
-              kind: "draft-thread",
-              id: chat.tabs[0]!.id,
-              mode: "code",
-              title: "New Code thread",
-            },
-          ],
+          surface: {
+            kind: "draft-thread",
+            id: chat.surface.id,
+            mode: "code",
+            title: "New Code thread",
+          },
         },
         code: {
           ...code,
-          tabs: [
-            {
-              kind: "work-thread",
-              id: code.tabs[0]!.id,
-              threadId: "70000000-0000-4000-8000-000000000031",
-              mode: "work",
-              title: "Brief draft",
-            },
-          ],
+          surface: {
+            kind: "work-thread",
+            id: code.surface.id,
+            threadId: "70000000-0000-4000-8000-000000000031",
+            mode: "work",
+            title: "Brief draft",
+          },
         },
       },
     });
     const restoredChat = restored.layouts.chat;
     const restoredCode = restored.layouts.code;
-    if (restoredChat.kind !== "group") throw new Error("restored Chat layout must be a group");
-    if (restoredCode.kind !== "group") throw new Error("restored Code layout must be a group");
-    expect(restoredChat.tabs[0]).toMatchObject({
-      kind: "unavailable",
-      title: "New Code thread",
-    });
-    expect(restoredCode.tabs[0]).toMatchObject({
-      kind: "unavailable",
-      title: "Brief draft",
-    });
+    if (restoredChat.kind !== "pane") throw new Error("restored Chat layout must be a pane");
+    if (restoredCode.kind !== "pane") throw new Error("restored Code layout must be a pane");
+    expect(restoredChat.surface).toMatchObject({ kind: "welcome", mode: "chat" });
+    expect(restoredCode.surface).toMatchObject({ kind: "welcome", mode: "code" });
   });
 
-  it("recovers malformed thread tabs through the unavailable-tab path", () => {
+  it("recovers malformed thread surfaces through the welcome-in-place path", () => {
     const work = workspace.layouts.work;
-    if (work.kind !== "group") throw new Error("fixture Work layout must be a group");
+    if (work.kind !== "pane") throw new Error("fixture Work layout must be a pane");
 
     const restored = decodePersistedWindowWorkspace({
       ...workspace,
@@ -337,54 +367,51 @@ describe("ShellProjection", () => {
         ...workspace.layouts,
         work: {
           ...work,
-          tabs: [
-            {
-              kind: "work-thread",
-              id: work.tabs[0]!.id,
-              mode: "work",
-              title: "Missing thread identity",
-            },
-          ],
+          surface: {
+            kind: "work-thread",
+            id: work.surface.id,
+            mode: "work",
+            title: "Missing thread identity",
+          },
         },
       },
     });
     const restoredWork = restored.layouts.work;
-    if (restoredWork.kind !== "group") throw new Error("restored Work layout must be a group");
-    expect(restoredWork.tabs[0]).toMatchObject({
-      kind: "unavailable",
-      title: "Missing thread identity",
+    if (restoredWork.kind !== "pane") throw new Error("restored Work layout must be a pane");
+    expect(restoredWork.surface).toMatchObject({
+      kind: "welcome",
+      id: work.surface.id,
+      mode: "work",
     });
   });
 
-  it("recovers a persisted Code tab found outside the Code layout", () => {
+  it("recovers a persisted Code surface found outside the Code layout", () => {
     const chat = workspace.layouts.chat;
-    if (chat.kind !== "group") throw new Error("fixture Chat layout must be a group");
+    if (chat.kind !== "pane") throw new Error("fixture Chat layout must be a pane");
     const restored = decodePersistedWindowWorkspace({
       ...workspace,
       layouts: {
         ...workspace.layouts,
         chat: {
           ...chat,
-          tabs: [
-            {
-              kind: "code-overview",
-              id: chat.tabs[0]!.id,
-              threadId: "70000000-0000-4000-8000-000000000022",
-              mode: "code",
-              title: "Overview",
-            },
-          ],
+          surface: {
+            kind: "code-overview",
+            id: chat.surface.id,
+            threadId: "70000000-0000-4000-8000-000000000022",
+            mode: "code",
+            title: "Overview",
+          },
         },
       },
     });
     const restoredChat = restored.layouts.chat;
-    if (restoredChat.kind !== "group") throw new Error("restored Chat layout must be a group");
-    expect(restoredChat.tabs[0]).toMatchObject({ kind: "unavailable", title: "Overview" });
+    if (restoredChat.kind !== "pane") throw new Error("restored Chat layout must be a pane");
+    expect(restoredChat.surface).toMatchObject({ kind: "welcome", mode: "chat" });
   });
 
-  it("recovers a malformed persisted Chat thread tab through the unavailable-tab path", () => {
+  it("recovers a malformed persisted Chat thread surface through the welcome-in-place path", () => {
     const chat = workspace.layouts.chat;
-    if (chat.kind !== "group") throw new Error("fixture chat layout must be a group");
+    if (chat.kind !== "pane") throw new Error("fixture chat layout must be a pane");
 
     const restored = decodePersistedWindowWorkspace({
       ...workspace,
@@ -392,31 +419,29 @@ describe("ShellProjection", () => {
         ...workspace.layouts,
         chat: {
           ...chat,
-          tabs: [
-            {
-              kind: "chat-thread",
-              id: chat.tabs[0]!.id,
-              mode: "chat",
-              title: "Planning",
-              legacyTranscript: "must not enter renderer state",
-            },
-          ],
+          surface: {
+            kind: "chat-thread",
+            id: chat.surface.id,
+            mode: "chat",
+            title: "Planning",
+            legacyTranscript: "must not enter renderer state",
+          },
         },
       },
     });
     const restoredChat = restored.layouts.chat;
-    if (restoredChat.kind !== "group") throw new Error("restored Chat layout must be a group");
-    expect(restoredChat.tabs[0]).toEqual({
-      kind: "unavailable",
-      id: chat.tabs[0]!.id,
-      title: "Planning",
-      reason: "This tab type is unavailable in this version of Octant.",
+    if (restoredChat.kind !== "pane") throw new Error("restored Chat layout must be a pane");
+    expect(restoredChat.surface).toEqual({
+      kind: "welcome",
+      id: chat.surface.id,
+      mode: "chat",
+      title: "Welcome to Chat",
     });
   });
 
-  it("recovers a persisted Chat thread tab found outside the Chat layout", () => {
+  it("recovers a persisted Chat thread surface found outside the Chat layout", () => {
     const code = workspace.layouts.code;
-    if (code.kind !== "group") throw new Error("fixture Code layout must be a group");
+    if (code.kind !== "pane") throw new Error("fixture Code layout must be a pane");
 
     const restored = decodePersistedWindowWorkspace({
       ...workspace,
@@ -424,55 +449,116 @@ describe("ShellProjection", () => {
         ...workspace.layouts,
         code: {
           ...code,
-          tabs: [
-            {
-              kind: "chat-thread",
-              id: code.tabs[0]!.id,
-              threadId: "70000000-0000-4000-8000-000000000021",
-              mode: "chat",
-              title: "Planning",
-            },
-          ],
+          surface: {
+            kind: "chat-thread",
+            id: code.surface.id,
+            threadId: "70000000-0000-4000-8000-000000000021",
+            mode: "chat",
+            title: "Planning",
+          },
         },
       },
     });
     const restoredCode = restored.layouts.code;
-    if (restoredCode.kind !== "group") throw new Error("restored Code layout must be a group");
-    expect(restoredCode.tabs[0]).toMatchObject({
-      kind: "unavailable",
-      id: code.tabs[0]!.id,
-      title: "Planning",
+    if (restoredCode.kind !== "pane") throw new Error("restored Code layout must be a pane");
+    expect(restoredCode.surface).toMatchObject({
+      kind: "welcome",
+      id: code.surface.id,
+      mode: "code",
     });
   });
 
-  it("replays a valid Chat thread tab through the durable shell projection", () => {
+  it("replays a valid Chat thread surface through the durable shell projection", () => {
     const chat = workspace.layouts.chat;
-    if (chat.kind !== "group") throw new Error("fixture chat layout must be a group");
-    const chatThreadTab = {
+    if (chat.kind !== "pane") throw new Error("fixture chat layout must be a pane");
+    const chatThreadSurface = {
       kind: "chat-thread" as const,
-      id: chat.tabs[0]!.id,
+      id: chat.surface.id,
       threadId: "70000000-0000-4000-8000-000000000021",
       mode: "chat" as const,
       title: "Planning",
     };
     const durableWorkspace = decodeWindowWorkspace({
       ...workspace,
-      layouts: { ...workspace.layouts, chat: { ...chat, tabs: [chatThreadTab] } },
+      layouts: { ...workspace.layouts, chat: { ...chat, surface: chatThreadSurface } },
     });
     const connection = openConnection();
 
     appendShellEvents(connection, durableWorkspace);
 
     expect(readWindowWorkspace(connection, ids.window)?.workspace.layouts.chat).toMatchObject({
-      tabs: [chatThreadTab],
+      surface: chatThreadSurface,
     });
     connection.close();
   });
 
-  it("upcasts legacy workspaces with one deterministic active group per mode", () => {
-    const { activeGroupIds: _activeGroupIds, ...legacy } = workspace;
+  it("collapses a legacy tab group to one pane showing its active tab, dropping the rest", () => {
+    const legacy = legacyGroupWorkspace();
+    const activeTab = {
+      kind: "code-overview" as const,
+      id: "30000000-0000-4000-8000-000000000004",
+      threadId: "70000000-0000-4000-8000-000000000022",
+      mode: "code" as const,
+      title: "Overview",
+    };
+    legacy.layouts.code = legacyGroup(
+      "3",
+      "code",
+      [
+        {
+          kind: "welcome",
+          id: "30000000-0000-4000-8000-000000000003",
+          mode: "code",
+          title: "Welcome to code",
+        },
+        activeTab,
+      ],
+      activeTab.id,
+    );
 
-    expect(decodePersistedWindowWorkspace(legacy).activeGroupIds).toEqual({
+    const restored = decodePersistedWindowWorkspace(legacy);
+
+    // Background tabs are deliberately lost; the group's id survives as the
+    // pane's so the renamed active-pane pointer still resolves.
+    expect(restored.layouts.code).toEqual({
+      kind: "pane",
+      nodeId: "30000000-0000-4000-8000-000000000001",
+      paneId: "30000000-0000-4000-8000-000000000002",
+      surface: activeTab,
+    });
+    expect(restored.activePaneIds).toEqual({
+      chat: "10000000-0000-4000-8000-000000000002",
+      work: "20000000-0000-4000-8000-000000000002",
+      code: "30000000-0000-4000-8000-000000000002",
+    });
+  });
+
+  it("carries a legacy focused group and stowed active group forward under pane names", () => {
+    const legacy = {
+      ...legacyGroupWorkspace(),
+      focusedGroupId: "30000000-0000-4000-8000-000000000002",
+      stowedLayouts: [
+        {
+          context: { host: "local", mode: "code", projectId: null, boundRoot: null },
+          layout: legacyGroup("4", "code"),
+          activeGroupId: "40000000-0000-4000-8000-000000000002",
+        },
+      ],
+    };
+
+    const restored = decodePersistedWindowWorkspace(legacy);
+
+    expect(restored.focusedPaneId).toBe("30000000-0000-4000-8000-000000000002");
+    expect(restored.stowedLayouts?.[0]).toMatchObject({
+      layout: { kind: "pane", paneId: "40000000-0000-4000-8000-000000000002" },
+      activePaneId: "40000000-0000-4000-8000-000000000002",
+    });
+  });
+
+  it("upcasts legacy workspaces with one deterministic active pane per mode", () => {
+    const { activeGroupIds: _activeGroupIds, ...legacy } = legacyGroupWorkspace();
+
+    expect(decodePersistedWindowWorkspace(legacy).activePaneIds).toEqual({
       chat: "10000000-0000-4000-8000-000000000002",
       work: "20000000-0000-4000-8000-000000000002",
       code: "30000000-0000-4000-8000-000000000002",
@@ -732,7 +818,7 @@ describe("ShellProjection", () => {
     connection.close();
   });
 
-  it("rebuilds the final atomic docked layout without an intermediate projection", () => {
+  it("rebuilds the final atomic split layout without an intermediate projection", () => {
     const connection = openConnection();
     const runtime = createPhase1RuntimeRegistries();
     const journal = new Journal({
@@ -741,7 +827,7 @@ describe("ShellProjection", () => {
       projections: runtime.projections,
       clock: () => now,
     });
-    const dockedWorkspace = decodeWindowWorkspace({
+    const splitWorkspace = decodeWindowWorkspace({
       ...workspace,
       layouts: {
         ...workspace.layouts,
@@ -750,9 +836,13 @@ describe("ShellProjection", () => {
           nodeId: "60000000-0000-4000-8000-000000000001",
           orientation: "vertical",
           ratio: 0.5,
-          first: group("4", "code"),
-          second: group("5", "code"),
+          first: pane("4", "code"),
+          second: pane("5", "code"),
         },
+      },
+      activePaneIds: {
+        ...workspace.activePaneIds,
+        code: "40000000-0000-4000-8000-000000000002",
       },
       version: 1,
     });
@@ -760,7 +850,7 @@ describe("ShellProjection", () => {
       aggregate: { aggregateType: "window-workspace", aggregateId: ids.window },
       expectedVersion: 0,
       events: [
-        pending(ids.workspaceEvent, "workspace.layout-replaced", { workspace: dockedWorkspace }),
+        pending(ids.workspaceEvent, "workspace.layout-replaced", { workspace: splitWorkspace }),
       ],
     });
     const projection = runtime.projections.get("shell")!;
@@ -769,7 +859,7 @@ describe("ShellProjection", () => {
     rebuildProjection({ connection, journal, projection, clock: () => now });
 
     expect(readWindowWorkspace(connection, ids.window)).toEqual({
-      workspace: dockedWorkspace,
+      workspace: splitWorkspace,
       aggregateVersion: 1,
     });
     expect(journal.replay({ afterSequence: 0, limit: 10 } as never)).toHaveLength(1);
@@ -874,16 +964,16 @@ describe("ShellProjection", () => {
 
     rebuildProjection({ connection, journal, projection, clock: () => now });
 
+    // The unknown kind renders welcome in place: the pane survives, the
+    // persisted title never enters renderer state.
     expect(readWindowWorkspace(connection, ids.window)?.workspace.layouts.code).toMatchObject({
-      kind: "group",
-      tabs: [
-        {
-          kind: "unavailable",
-          id: unsupported.layouts.code.tabs[0]!.id,
-          title: "Recovered editor",
-          reason: "This tab type is unavailable in this version of Octant.",
-        },
-      ],
+      kind: "pane",
+      surface: {
+        kind: "welcome",
+        id: unsupported.layouts.code.tabs[0]!.id,
+        mode: "code",
+        title: "Welcome to Code",
+      },
     });
     connection.close();
   });
@@ -897,14 +987,12 @@ describe("ShellProjection", () => {
       .run(JSON.stringify(unsupported), ids.window);
 
     expect(readWindowWorkspace(connection, ids.window)?.workspace.layouts.code).toMatchObject({
-      kind: "group",
-      tabs: [
-        {
-          kind: "unavailable",
-          id: unsupported.layouts.code.tabs[0]!.id,
-          title: "Recovered editor",
-        },
-      ],
+      kind: "pane",
+      surface: {
+        kind: "welcome",
+        id: unsupported.layouts.code.tabs[0]!.id,
+        mode: "code",
+      },
     });
     connection.close();
   });
@@ -1052,28 +1140,63 @@ describe("ShellProjection", () => {
     ["numeric", { title: 42 }],
     ["empty", { title: "" }],
     ["whitespace-padded", { title: " Recovered editor " }],
-  ])("rejects an unsupported projected tab with a %s title", (_name, titleFields) => {
-    const connection = openConnection();
-    appendShellEvents(connection);
-    connection
-      .prepare("UPDATE window_workspace_projection SET workspace_json = ? WHERE window_id = ?")
-      .run(JSON.stringify(workspaceWithUnsupportedCodeTab(titleFields)), ids.window);
+  ])(
+    "recovers an unsupported projected tab with a %s title as the mode welcome surface",
+    (_name, titleFields) => {
+      const connection = openConnection();
+      appendShellEvents(connection);
+      connection
+        .prepare("UPDATE window_workspace_projection SET workspace_json = ? WHERE window_id = ?")
+        .run(JSON.stringify(workspaceWithUnsupportedCodeTab(titleFields)), ids.window);
 
-    expect(() => readWindowWorkspace(connection, ids.window)).toThrow();
-    connection.close();
-  });
+      // The welcome surface carries canonical copy, so a garbage persisted
+      // title can never enter renderer state.
+      expect(readWindowWorkspace(connection, ids.window)?.workspace.layouts.code).toMatchObject({
+        kind: "pane",
+        surface: { kind: "welcome", title: "Welcome to Code" },
+      });
+      connection.close();
+    },
+  );
 
-  it("decodes persisted rows instead of silently recovering invalid JSON", () => {
+  it("decodes persisted settings rows instead of silently recovering invalid JSON", () => {
     const connection = openConnection();
     appendShellEvents(connection);
     connection
       .prepare("UPDATE shell_settings_projection SET settings_json = ?")
       .run(JSON.stringify({ ...settings, sidebarWidth: 999 }));
+
+    expect(() => readShellSettings(connection)).toThrow();
+    connection.close();
+  });
+
+  it("restores an unreadable workspace row as the default welcome workspace at its projected version", () => {
+    const connection = openConnection();
+    appendShellEvents(connection);
     connection
       .prepare("UPDATE window_workspace_projection SET workspace_json = ? WHERE window_id = ?")
       .run(JSON.stringify({ ...workspace, activeMode: "invalid" }), ids.window);
 
-    expect(() => readShellSettings(connection)).toThrow();
+    const restored = readWindowWorkspace(connection, ids.window);
+    expect(restored?.workspace.windowId).toBe(ids.window);
+    expect(restored?.workspace.layouts.code).toMatchObject({
+      kind: "pane",
+      surface: { kind: "welcome" },
+    });
+    // The projected version survives the fallback so the next command does
+    // not conflict against the journal.
+    expect(restored?.workspace.version).toBe(1);
+    expect(restored?.aggregateVersion).toBe(1);
+    connection.close();
+  });
+
+  it("still refuses a workspace row whose window identity is unreadable", () => {
+    const connection = openConnection();
+    appendShellEvents(connection);
+    connection
+      .prepare("UPDATE window_workspace_projection SET workspace_json = ? WHERE window_id = ?")
+      .run(JSON.stringify({ activeMode: "invalid" }), ids.window);
+
     expect(() => readWindowWorkspace(connection, ids.window)).toThrow();
     connection.close();
   });
@@ -1191,25 +1314,28 @@ function insertJournalEvent(connection: SqliteConnection, event: EventEnvelope):
     );
 }
 
+// A legacy tab-group leaf holding a tab kind this version does not know;
+// migration collapses the group and renders welcome in the resulting pane.
 function workspaceWithUnsupportedCodeTab(
   titleFields: Readonly<Record<string, unknown>> = { title: "Recovered editor" },
 ) {
-  const code = workspace.layouts.code;
-  if (code.kind !== "group") throw new Error("fixture code layout must be a group");
   return {
     ...workspace,
     layouts: {
       ...workspace.layouts,
       code: {
-        ...code,
+        kind: "group",
+        nodeId: "30000000-0000-4000-8000-000000000001",
+        groupId: "30000000-0000-4000-8000-000000000002",
         tabs: [
           {
             kind: "editor-v2",
-            id: code.tabs[0]!.id,
+            id: "30000000-0000-4000-8000-000000000003",
             ...titleFields,
             documentId: "future-document",
           },
         ],
+        activeTabId: "30000000-0000-4000-8000-000000000003",
       },
     },
   } as const;

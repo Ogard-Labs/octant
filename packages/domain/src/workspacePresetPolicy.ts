@@ -6,7 +6,9 @@ import type {
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { MentionableThreadId } from "@octant/contracts";
 import type {
-  TabGroupId,
+  LayoutNodeId,
+  PaneId,
+  SplitRatio,
   WorkspaceLayoutNode,
   WorkspaceOperation,
   WorkspaceTabId,
@@ -26,8 +28,10 @@ export interface WorkspacePresetThread {
 export interface WorkspacePresetPlanInput {
   readonly preset: WorkspacePreset;
   readonly thread: WorkspacePresetThread;
-  readonly groupId: TabGroupId;
+  readonly paneId: PaneId;
   readonly mintTabId: () => WorkspaceTabId;
+  readonly mintPaneId: () => PaneId;
+  readonly mintNodeId: () => LayoutNodeId;
 }
 
 /**
@@ -39,42 +43,59 @@ export interface WorkspacePresetPlanInput {
  * which is why the pane list is closed and the thread is the caller's rather
  * than something the preset names.
  *
- * The panes open in the group the thread is already working in, in the order
- * the preset lists them, and the first one is left in front. Splitting them
- * apart stays the user's: an arrangement the host imposed would be one more
- * thing to undo.
+ * A pane holds one surface, so each preset surface after the first splits off
+ * the pane the thread is already working in; the first replaces that pane's
+ * content and is refocused at the end so it is left in front. The split ratio
+ * shrinks the existing side as surfaces accumulate so the panes come out
+ * roughly even rather than halving into a sliver.
  */
 export function planWorkspacePreset(
   input: WorkspacePresetPlanInput,
 ): ReadonlyArray<WorkspaceOperation> {
   const operations: WorkspaceOperation[] = [];
-  let leadTabId: WorkspaceTabId | undefined;
-  for (const pane of input.preset.panes) {
-    const tabId = input.mintTabId();
-    leadTabId ??= tabId;
+  const [lead, ...rest] = input.preset.panes;
+  if (lead === undefined) return operations;
+  const leadSurface = presetSurface(lead, input.mintTabId(), input.thread);
+  operations.push({
+    kind: "open-surface",
+    mode: "code",
+    paneId: input.paneId,
+    surface: leadSurface,
+  });
+  for (const [index, pane] of rest.entries()) {
     operations.push({
-      kind: "open-tab",
+      kind: "split-pane",
       mode: "code",
-      groupId: input.groupId,
-      tab: presetTab(pane, tabId, input.thread),
+      targetPaneId: input.paneId,
+      surface: presetSurface(pane, input.mintTabId(), input.thread),
+      splitNodeId: input.mintNodeId(),
+      newPaneNodeId: input.mintNodeId(),
+      newPaneId: input.mintPaneId(),
+      orientation: "horizontal",
+      placement: "after",
+      // The lead keeps 1/2, then 1/3, then 1/4 of its remaining width so the
+      // panes come out roughly even instead of halving into a sliver.
+      ratio: Math.max(0.2, 1 / (index + 2)) as SplitRatio,
     });
   }
-  if (leadTabId !== undefined) {
+  if (rest.length > 0) {
+    // Splitting activates each new pane in turn; re-opening the lead surface
+    // finds it already visible and activates its pane, leaving it in front.
     operations.push({
-      kind: "activate-tab",
+      kind: "open-surface",
       mode: "code",
-      groupId: input.groupId,
-      tabId: leadTabId,
+      paneId: input.paneId,
+      surface: leadSurface,
     });
   }
   return operations;
 }
 
-function presetTab(
+function presetSurface(
   pane: WorkspacePresetPane,
   id: WorkspaceTabId,
   thread: WorkspacePresetThread,
-): Extract<WorkspaceOperation, { kind: "open-tab" }>["tab"] {
+): Extract<WorkspaceOperation, { kind: "open-surface" }>["surface"] {
   switch (pane) {
     case "code-overview":
       return {
@@ -136,8 +157,8 @@ export function reportWorkspacePresetSkills(
 }
 
 /**
- * The group a preset's panes should open into: the one already showing this
- * Code thread.
+ * The pane a preset's surfaces should open against: the one already showing
+ * this Code thread.
  *
  * Resolved from the window's own layout rather than from the request, so a
  * preset lands on a thread the window already has open. A caller naming a
@@ -146,12 +167,11 @@ export function reportWorkspacePresetSkills(
 export function findWorkspacePresetTarget(
   layout: WorkspaceLayoutNode,
   threadId: CodeThreadId,
-): { readonly groupId: TabGroupId; readonly title: string } | undefined {
-  if (layout.kind === "group") {
-    for (const tab of layout.tabs) {
-      if ("threadId" in tab && String(tab.threadId) === String(threadId)) {
-        return { groupId: layout.groupId, title: tab.title };
-      }
+): { readonly paneId: PaneId; readonly title: string } | undefined {
+  if (layout.kind === "pane") {
+    const surface = layout.surface;
+    if ("threadId" in surface && String(surface.threadId) === String(threadId)) {
+      return { paneId: layout.paneId, title: surface.title };
     }
     return undefined;
   }

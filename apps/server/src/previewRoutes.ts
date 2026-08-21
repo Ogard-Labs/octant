@@ -62,7 +62,7 @@ export function resolvePreviewActiveContext(bootstrap: ShellBootstrap): PreviewA
   const context = workspace.contextByMode[mode];
   const activeThreadId =
     mode === "code"
-      ? findActiveCodeThreadId(workspace.layouts.code, workspace.activeGroupIds.code)
+      ? findActiveCodeThreadId(workspace.layouts.code, workspace.activePaneIds.code)
       : undefined;
   return {
     mode,
@@ -73,23 +73,18 @@ export function resolvePreviewActiveContext(bootstrap: ShellBootstrap): PreviewA
 
 function findActiveCodeThreadId(
   layout: WorkspaceLayoutNode,
-  activeGroupId: ShellBootstrap["workspace"]["activeGroupIds"]["code"],
+  activePaneId: ShellBootstrap["workspace"]["activePaneIds"]["code"],
 ): CodeThreadId | undefined {
   if (layout.kind === "split") {
     return (
-      findActiveCodeThreadId(layout.first, activeGroupId) ??
-      findActiveCodeThreadId(layout.second, activeGroupId)
+      findActiveCodeThreadId(layout.first, activePaneId) ??
+      findActiveCodeThreadId(layout.second, activePaneId)
     );
   }
-  if (layout.groupId !== activeGroupId) return undefined;
-  const activeTab = layout.tabs.find((tab) => tab.id === layout.activeTabId);
-  if (
-    activeTab !== undefined &&
-    activeTab.kind !== "browser" &&
-    "threadId" in activeTab &&
-    activeTab.mode === "code"
-  ) {
-    return activeTab.threadId;
+  if (layout.paneId !== activePaneId) return undefined;
+  const surface = layout.surface;
+  if (surface.kind !== "browser" && "threadId" in surface && surface.mode === "code") {
+    return surface.threadId;
   }
   return undefined;
 }

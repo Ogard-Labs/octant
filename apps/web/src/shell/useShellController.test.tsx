@@ -7,10 +7,13 @@ import {
   decodeProjectId,
   decodeSideChatSidecar,
   decodeWindowId,
+  decodeWorkspaceTabId,
+  type CodeThreadId,
   type ShellBootstrap,
   type ShellCommand,
   type ShellCommandResult,
   type WorkspaceLayoutNode,
+  type WorkspaceTab,
 } from "@octant/contracts";
 import {
   decodePreviewHostId,
@@ -113,18 +116,33 @@ function statefulClient(initial = codeBootstrap()) {
   return { client, execute, bootstrap, read: () => state };
 }
 
-function firstGroup(layout: WorkspaceLayoutNode): Extract<WorkspaceLayoutNode, { kind: "group" }> {
-  return layout.kind === "group" ? layout : firstGroup(layout.first);
+type PaneNode = Extract<WorkspaceLayoutNode, { kind: "pane" }>;
+
+function firstPane(layout: WorkspaceLayoutNode): PaneNode {
+  return layout.kind === "pane" ? layout : firstPane(layout.first);
 }
 
-function groups(
-  layout: WorkspaceLayoutNode,
-): Array<Extract<WorkspaceLayoutNode, { kind: "group" }>> {
-  return layout.kind === "group" ? [layout] : [...groups(layout.first), ...groups(layout.second)];
+function panes(layout: WorkspaceLayoutNode): Array<PaneNode> {
+  return layout.kind === "pane" ? [layout] : [...panes(layout.first), ...panes(layout.second)];
+}
+
+/**
+ * A sidebar drag or drop mints a fresh surface object every time, exactly like
+ * the production drag source; the workspace deduplicates by surface identity,
+ * never by object or tab id.
+ */
+function mintedCodeThreadSurface(threadId: CodeThreadId, title: string): WorkspaceTab {
+  return {
+    kind: "code-overview",
+    id: decodeWorkspaceTabId(crypto.randomUUID()),
+    mode: "code",
+    threadId,
+    title,
+  };
 }
 
 describe("useShellController", () => {
-  it("switches to Chat and opens one durable thread tab on repeated selection", async () => {
+  it("switches to Chat and reuses the pane already showing a repeated thread selection", async () => {
     const server = statefulClient();
     const threadId = decodeChatThreadId("00000000-0000-4000-8000-000000000898");
     const { result } = renderHook(() =>
@@ -136,15 +154,16 @@ describe("useShellController", () => {
     await act(async () => result.current.openChatThread(threadId, "Planning"));
 
     expect(result.current.workspace?.activeMode).toBe("chat");
-    const group = firstGroup(result.current.workspace!.layouts.chat);
-    const tabs = group.tabs.filter(
-      (tab) => tab.kind === "chat-thread" && tab.threadId === threadId,
+    const threadPanes = panes(result.current.workspace!.layouts.chat).filter(
+      (pane) => pane.surface.kind === "chat-thread" && pane.surface.threadId === threadId,
     );
-    expect(tabs).toHaveLength(1);
-    expect(group.activeTabId).toBe(tabs[0]!.id);
+    expect(threadPanes).toHaveLength(1);
+    expect(String(result.current.workspace!.activePaneIds.chat)).toBe(
+      String(threadPanes[0]!.paneId),
+    );
     expect(server.client.execute).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        operation: expect.objectContaining({ kind: "activate-tab", mode: "chat" }),
+        operation: expect.objectContaining({ kind: "open-surface", mode: "chat" }),
       }),
     );
   });
@@ -172,7 +191,7 @@ describe("useShellController", () => {
     expect(result.current.errorMessage).toBe("Workspace persistence failed.");
   });
 
-  it("opens one mode-matched Project tab and activates it on repeat selection", async () => {
+  it("opens one mode-matched Project surface and reuses its pane on repeat selection", async () => {
     const server = statefulClient();
     const projectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
     const { result } = renderHook(() =>
@@ -183,13 +202,16 @@ describe("useShellController", () => {
     await act(async () => result.current.openProject(projectId, "code", "Octant"));
     await act(async () => result.current.openProject(projectId, "code", "Octant"));
 
-    const group = firstGroup(result.current.workspace!.layouts.code);
-    const tabs = group.tabs.filter((tab) => tab.kind === "project" && tab.projectId === projectId);
-    expect(tabs).toHaveLength(1);
-    expect(group.activeTabId).toBe(tabs[0]!.id);
+    const projectPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "project" && pane.surface.projectId === projectId,
+    );
+    expect(projectPanes).toHaveLength(1);
+    expect(String(result.current.workspace!.activePaneIds.code)).toBe(
+      String(projectPanes[0]!.paneId),
+    );
     expect(server.client.execute).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        operation: expect.objectContaining({ kind: "activate-tab", mode: "code" }),
+        operation: expect.objectContaining({ kind: "open-surface", mode: "code" }),
       }),
     );
   });
@@ -216,17 +238,17 @@ describe("useShellController", () => {
       expect(command).toMatchObject({
         kind: "apply-workspace-operation",
         operation: {
-          kind: "switch-project-tab",
+          kind: "switch-project-surface",
           mode: "code",
-          tab: { kind: "project", projectId: nextProjectId },
+          surface: { kind: "project", projectId: nextProjectId },
         },
       });
       const operation =
         command.kind === "apply-workspace-operation" ? command.operation : undefined;
-      if (operation === undefined || operation.kind !== "switch-project-tab") {
+      if (operation === undefined || operation.kind !== "switch-project-surface") {
         throw new Error("expected Project switch");
       }
-      const group = firstGroup(bootstrap.workspace.layouts.code);
+      const pane = firstPane(bootstrap.workspace.layouts.code);
       return {
         kind: "workspace-replaced",
         workspace: {
@@ -241,7 +263,7 @@ describe("useShellController", () => {
           },
           layouts: {
             ...bootstrap.workspace.layouts,
-            code: { ...group, tabs: [operation.tab], activeTabId: operation.tab.id },
+            code: { ...pane, surface: operation.surface },
           },
         },
         version: 1 as ShellBootstrap["workspaceVersion"],
@@ -264,7 +286,7 @@ describe("useShellController", () => {
     expect(execute).toHaveBeenCalledOnce();
   });
 
-  it("opens Side Chat about the group's active thread and reuses that tab", async () => {
+  it("opens Side Chat about the pane's visible thread in that same pane", async () => {
     const server = statefulClient();
     const { result } = renderHook(() =>
       useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
@@ -273,20 +295,21 @@ describe("useShellController", () => {
     const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000895");
 
     await act(async () => result.current.openCodeThread(threadId, "Release notes"));
-    await act(async () => result.current.openSurface("side-chat"));
+    const threadPane = firstPane(result.current.workspace!.layouts.code);
     await act(async () => result.current.openSurface("side-chat"));
 
-    const sideChatTabs = groups(result.current.workspace!.layouts.code).flatMap((group) =>
-      group.tabs.filter((tab) => tab.kind === "side-chat"),
+    const sideChatPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "side-chat",
     );
-    expect(sideChatTabs).toHaveLength(1);
-    expect(sideChatTabs[0]).toMatchObject({
+    expect(sideChatPanes).toHaveLength(1);
+    expect(String(sideChatPanes[0]!.paneId)).toBe(String(threadPane.paneId));
+    expect(sideChatPanes[0]!.surface).toMatchObject({
       sourceThreadId: String(threadId),
       title: "Side Chat about Release notes",
     });
   });
 
-  it("refuses Side Chat when the group has no thread to ask about", async () => {
+  it("refuses Side Chat when the pane shows no thread to ask about", async () => {
     const server = statefulClient();
     const { result } = renderHook(() =>
       useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
@@ -296,14 +319,14 @@ describe("useShellController", () => {
     await act(async () => result.current.openSurface("side-chat"));
 
     expect(
-      groups(result.current.workspace!.layouts.code).flatMap((group) =>
-        group.tabs.filter((tab) => tab.kind === "side-chat"),
+      panes(result.current.workspace!.layouts.code).filter(
+        (pane) => pane.surface.kind === "side-chat",
       ),
     ).toEqual([]);
     expect(result.current.errorMessage).toBe("This surface is not available here.");
   });
 
-  it("records the sidecar identity on a Side Chat tab opened from the launcher", async () => {
+  it("records the sidecar identity on a Side Chat surface opened from the launcher", async () => {
     const server = statefulClient();
     const { result } = renderHook(() =>
       useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
@@ -320,30 +343,25 @@ describe("useShellController", () => {
 
     await act(async () => result.current.openCodeThread(threadId, "Release notes"));
     await act(async () => result.current.openSurface("side-chat"));
-    expect(
-      groups(result.current.workspace!.layouts.code).flatMap((group) =>
-        group.tabs.filter((tab) => tab.kind === "side-chat"),
-      )[0],
-    ).toMatchObject({ sourceThreadId: String(threadId) });
-    expect(
-      groups(result.current.workspace!.layouts.code).flatMap((group) =>
-        group.tabs.filter((tab) => tab.kind === "side-chat"),
-      )[0],
-    ).not.toHaveProperty("sidecarThreadId");
+    const opened = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "side-chat",
+    );
+    expect(opened[0]!.surface).toMatchObject({ sourceThreadId: String(threadId) });
+    expect(opened[0]!.surface).not.toHaveProperty("sidecarThreadId");
 
     await act(async () => result.current.openSideChat(sidecar));
 
-    const sideChatTabs = groups(result.current.workspace!.layouts.code).flatMap((group) =>
-      group.tabs.filter((tab) => tab.kind === "side-chat"),
+    const sideChatPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "side-chat",
     );
-    expect(sideChatTabs).toHaveLength(1);
-    expect(sideChatTabs[0]).toMatchObject({
+    expect(sideChatPanes).toHaveLength(1);
+    expect(sideChatPanes[0]!.surface).toMatchObject({
       sourceThreadId: String(threadId),
       sidecarThreadId: "00000000-0000-4000-8000-000000000201",
     });
   });
 
-  it("opens the Side Chat tab a host-resolved sidecar names", async () => {
+  it("opens the Side Chat surface a host-resolved sidecar names", async () => {
     const server = statefulClient(workBootstrap());
     const { result } = renderHook(() =>
       useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
@@ -360,20 +378,21 @@ describe("useShellController", () => {
     await act(async () => result.current.openSideChat(sidecar));
     await act(async () => result.current.openSideChat(sidecar));
 
-    const sideChatTabs = groups(result.current.workspace!.layouts.work).flatMap((group) =>
-      group.tabs.filter((tab) => tab.kind === "side-chat"),
+    const sideChatPanes = panes(result.current.workspace!.layouts.work).filter(
+      (pane) => pane.surface.kind === "side-chat",
     );
-    expect(sideChatTabs).toHaveLength(1);
-    expect(sideChatTabs[0]).toMatchObject({
+    expect(sideChatPanes).toHaveLength(1);
+    expect(sideChatPanes[0]!.surface).toMatchObject({
       mode: "work",
       sourceThreadId: "00000000-0000-4000-8000-000000000895",
       sidecarThreadId: "00000000-0000-4000-8000-000000000201",
     });
   });
 
-  it("gives each Local servers Open its own Browser tab", async () => {
-    // A second classified local server opens beside the first rather
-    // than reusing — and so replacing — the tab the first one is showing.
+  it("routes every Local servers Open through one Browser pane, keeping the newest context", async () => {
+    // With one surface per pane, a second classified local server takes over
+    // the Browser pane rather than opening beside the first; only the same
+    // context reopened reuses the committed surface.
     const initial = codeBootstrap();
     const server = statefulClient({
       ...initial,
@@ -409,29 +428,26 @@ describe("useShellController", () => {
     await act(async () => {
       adopted.push(await result.current.openSurface("browser", undefined, second));
     });
-    // The same context reopened is still the same tab.
+    // The same context reopened is still the same surface.
     await act(async () => {
       adopted.push(await result.current.openSurface("browser", undefined, second));
     });
 
-    // Each Open is told, from the committed workspace, that its context now has
-    // a tab — and so a close path.
+    // Each Open is told, from the committed workspace at that moment, that its
+    // context had a pane — and so a close path.
     expect(adopted).toEqual([true, true, true]);
 
-    const browserTabs = groups(result.current.workspace!.layouts.code).flatMap((group) =>
-      group.tabs.filter((tab) => tab.kind === "browser"),
+    const browserPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "browser",
     );
-    expect(browserTabs).toHaveLength(2);
-    expect(browserTabs.map((tab) => (tab as { contextId?: string }).contextId)).toEqual([
-      first,
-      second,
-    ]);
+    expect(browserPanes).toHaveLength(1);
+    expect((browserPanes[0]!.surface as { contextId?: string }).contextId).toBe(second);
   });
 
-  it("reports a Local servers Open whose Browser tab could not be committed", async () => {
+  it("reports a Local servers Open whose Browser surface could not be committed", async () => {
     // A rejected workspace mutation is recovered rather than thrown, so the
     // caller that minted the context has only this answer to go on: reporting
-    // success here would strand the context with no tab to close it.
+    // success here would strand the context with no pane to close it.
     const initial = codeBootstrap();
     const server = statefulClient({
       ...initial,
@@ -472,13 +488,13 @@ describe("useShellController", () => {
 
     expect(adopted).toBe(false);
     expect(
-      groups(result.current.workspace!.layouts.code).flatMap((group) =>
-        group.tabs.filter((tab) => tab.kind === "browser"),
+      panes(result.current.workspace!.layouts.code).filter(
+        (pane) => pane.surface.kind === "browser",
       ),
     ).toHaveLength(0);
   });
 
-  it("activates an existing Browser tab instead of creating duplicates", async () => {
+  it("activates the existing Browser pane instead of creating duplicates", async () => {
     const initial = codeBootstrap();
     const server = statefulClient({
       ...initial,
@@ -494,27 +510,25 @@ describe("useShellController", () => {
         },
       },
     });
+    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000895");
     const { result } = renderHook(() =>
       useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    await act(async () =>
-      result.current.openCodeThread(
-        decodeCodeThreadId("00000000-0000-4000-8000-000000000895"),
-        "Browser QA",
-      ),
-    );
+    await act(async () => result.current.openCodeThread(threadId, "Browser QA"));
     await act(async () => result.current.openSurface("browser"));
     await act(async () => result.current.openSurface("browser"));
 
-    const browserTabs = groups(result.current.workspace!.layouts.code).flatMap((group) =>
-      group.tabs.filter((tab) => tab.kind === "browser"),
+    const browserPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "browser",
     );
-    expect(browserTabs).toHaveLength(1);
+    expect(browserPanes).toHaveLength(1);
+    // The surface stays bound to the thread that owned the pane it replaced.
+    expect(browserPanes[0]!.surface).toMatchObject({ kind: "browser", threadId });
     expect(server.client.execute).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        operation: expect.objectContaining({ kind: "activate-tab", mode: "code" }),
+        operation: expect.objectContaining({ kind: "open-surface", mode: "code" }),
       }),
     );
   });
@@ -585,7 +599,10 @@ describe("useShellController", () => {
     expect(result.current.crossContextOffer).toBeUndefined();
   });
 
-  it("preserves unrelated drafts when opening a Project-scoped draft", async () => {
+  it("lets a Project-scoped draft take over the pane the generic draft occupied", async () => {
+    // Open replaces: drafts for different Projects are different surfaces, and
+    // the newer one lands in the pane the person is working in rather than
+    // spawning a second view.
     const server = statefulClient();
     const projectId = decodeProjectId("00000000-0000-4000-8000-000000000897");
     const { result } = renderHook(() =>
@@ -594,19 +611,41 @@ describe("useShellController", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
     await act(async () => result.current.openDraftThread("code"));
+    expect(result.current.announcement).toBe("New Code thread draft opened.");
     await act(async () => result.current.openDraftThread("code", projectId));
 
-    const group = firstGroup(result.current.workspace!.layouts.code);
-    const drafts = group.tabs.filter((tab) => tab.kind === "draft-thread");
-    expect(drafts).toHaveLength(2);
-    const genericDraft = drafts.find((tab) => tab.projectId === undefined);
-    const projectDraft = drafts.find((tab) => tab.projectId === projectId);
-    expect(genericDraft).toMatchObject({ kind: "draft-thread", mode: "code" });
-    expect(projectDraft).toMatchObject({ kind: "draft-thread", mode: "code", projectId });
-    expect(group.activeTabId).toBe(projectDraft!.id);
+    const draftPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "draft-thread",
+    );
+    expect(draftPanes).toHaveLength(1);
+    expect(draftPanes[0]!.surface).toMatchObject({ kind: "draft-thread", mode: "code", projectId });
+    expect(String(result.current.workspace!.activePaneIds.code)).toBe(
+      String(draftPanes[0]!.paneId),
+    );
   });
 
-  it("opens one durable preview tab per opaque target and activates it on repeat selection", async () => {
+  it("rebinds the draft's pane when the thread minted from it opens", async () => {
+    const server = statefulClient();
+    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000893");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openDraftThread("code"));
+    const draftPane = firstPane(result.current.workspace!.layouts.code);
+    expect(draftPane.surface.kind).toBe("draft-thread");
+
+    await act(async () => result.current.openCodeThread(threadId, "Minted thread"));
+
+    const allPanes = panes(result.current.workspace!.layouts.code);
+    expect(allPanes).toHaveLength(1);
+    expect(String(allPanes[0]!.paneId)).toBe(String(draftPane.paneId));
+    expect(allPanes[0]!.surface).toMatchObject({ kind: "code-overview", threadId });
+    expect(allPanes.filter((pane) => pane.surface.kind === "draft-thread")).toEqual([]);
+  });
+
+  it("opens one durable preview pane per opaque target and reuses it on repeat selection", async () => {
     const projectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
     const base = workBootstrap();
     const workContext = base.workspace.contextByMode.work;
@@ -641,18 +680,21 @@ describe("useShellController", () => {
     await act(async () => result.current.openPreview(previewInput));
 
     expect(result.current.workspace?.activeMode).toBe("work");
-    const group = firstGroup(result.current.workspace!.layouts.work);
-    const tabs = group.tabs.filter((tab) => tab.kind === "preview" && tab.targetId === targetId);
-    expect(tabs).toHaveLength(1);
-    expect(group.activeTabId).toBe(tabs[0]!.id);
+    const previewPanes = panes(result.current.workspace!.layouts.work).filter(
+      (pane) => pane.surface.kind === "preview" && pane.surface.targetId === targetId,
+    );
+    expect(previewPanes).toHaveLength(1);
+    expect(String(result.current.workspace!.activePaneIds.work)).toBe(
+      String(previewPanes[0]!.paneId),
+    );
     expect(server.client.execute).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        operation: expect.objectContaining({ kind: "activate-tab", mode: "work" }),
+        operation: expect.objectContaining({ kind: "open-surface", mode: "work" }),
       }),
     );
   });
 
-  it("opens one durable canvas tab per canvasId and activates it on repeat selection", async () => {
+  it("opens one durable canvas pane per canvasId and reuses it on repeat selection", async () => {
     const projectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
     const canvasId = decodeCanvasId("11111111-1111-4111-8111-111111111111");
     const bootstrap: ShellBootstrap = {
@@ -686,24 +728,22 @@ describe("useShellController", () => {
     await act(async () => result.current.openCanvas(canvasInput));
 
     expect(result.current.workspace?.activeMode).toBe("chat");
-    const group = firstGroup(result.current.workspace!.layouts.chat);
-    const tabs = group.tabs.filter((tab) => tab.kind === "canvas" && tab.canvasId === canvasId);
-    expect(tabs).toHaveLength(1);
-    expect(group.activeTabId).toBe(tabs[0]!.id);
-    expect(tabs[0]).toMatchObject({
+    const canvasPanes = panes(result.current.workspace!.layouts.chat).filter(
+      (pane) => pane.surface.kind === "canvas" && pane.surface.canvasId === canvasId,
+    );
+    expect(canvasPanes).toHaveLength(1);
+    expect(canvasPanes[0]!.surface).toMatchObject({
       kind: "canvas",
       title: "Quarterly summary",
       canvasId,
       projectId,
     });
-    expect(server.client.execute).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        operation: expect.objectContaining({ kind: "activate-tab", mode: "chat" }),
-      }),
+    expect(String(result.current.workspace!.activePaneIds.chat)).toBe(
+      String(canvasPanes[0]!.paneId),
     );
   });
 
-  it("closes a canvas tab and restores canvas identity after bootstrap reload", async () => {
+  it("closes a canvas pane and restores canvas identity after bootstrap reload", async () => {
     const projectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
     const canvasId = decodeCanvasId("11111111-1111-4111-8111-111111111111");
     const bootstrap: ShellBootstrap = {
@@ -734,25 +774,22 @@ describe("useShellController", () => {
       projectId,
     };
     await act(async () => result.current.openCanvas(canvasInput));
-    const openedGroup = firstGroup(result.current.workspace!.layouts.chat);
-    const canvasTab = openedGroup.tabs.find(
-      (tab) => tab.kind === "canvas" && tab.canvasId === canvasId,
-    );
-    expect(canvasTab).toBeDefined();
+    const openedPane = firstPane(result.current.workspace!.layouts.chat);
+    expect(openedPane.surface).toMatchObject({ kind: "canvas", canvasId });
 
-    await act(async () => result.current.closeTab(openedGroup.groupId, canvasTab!.id));
+    let closed!: boolean;
+    await act(async () => {
+      closed = await result.current.closePane(openedPane.paneId);
+    });
+    expect(closed).toBe(true);
     expect(
-      firstGroup(result.current.workspace!.layouts.chat).tabs.filter(
-        (tab) => tab.kind === "canvas" && tab.canvasId === canvasId,
+      panes(result.current.workspace!.layouts.chat).filter(
+        (pane) => pane.surface.kind === "canvas",
       ),
     ).toHaveLength(0);
 
     await act(async () => result.current.openCanvas(canvasInput));
-    const reopenedGroup = firstGroup(result.current.workspace!.layouts.chat);
-    const reopenedTab = reopenedGroup.tabs.find(
-      (tab) => tab.kind === "canvas" && tab.canvasId === canvasId,
-    );
-    expect(reopenedTab).toMatchObject({
+    expect(firstPane(result.current.workspace!.layouts.chat).surface).toMatchObject({
       kind: "canvas",
       title: "Quarterly summary",
       canvasId,
@@ -762,77 +799,18 @@ describe("useShellController", () => {
     await act(async () => result.current.retry());
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    const reloadedGroup = firstGroup(result.current.workspace!.layouts.chat);
-    const restoredTab = reloadedGroup.tabs.find(
-      (tab) => tab.kind === "canvas" && tab.canvasId === canvasId,
-    );
-    expect(restoredTab).toMatchObject({
+    const restoredPane = firstPane(result.current.workspace!.layouts.chat);
+    expect(restoredPane.surface).toMatchObject({
       kind: "canvas",
       title: "Quarterly summary",
       canvasId,
       projectId,
     });
-    expect(reloadedGroup.activeTabId).toBe(restoredTab?.id);
+    expect(String(result.current.workspace!.activePaneIds.chat)).toBe(String(restoredPane.paneId));
     expect(server.client.bootstrap).toHaveBeenCalledTimes(2);
   });
 
-  it("pins a canvas tab, persists presentation order, and restores pin after reload", async () => {
-    const projectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
-    const canvasId = decodeCanvasId("11111111-1111-4111-8111-111111111111");
-    const bootstrap: ShellBootstrap = {
-      ...initialBootstrap(),
-      workspace: {
-        ...initialBootstrap().workspace,
-        activeMode: "chat",
-        contextByMode: {
-          ...initialBootstrap().workspace.contextByMode,
-          chat: {
-            ...initialBootstrap().workspace.contextByMode.chat,
-            projectId,
-            boundRoot: null,
-          },
-        },
-      },
-    };
-    const server = statefulClient(bootstrap);
-    const { result } = renderHook(() =>
-      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
-    );
-    await waitFor(() => expect(result.current.status).toBe("ready"));
-
-    await act(async () =>
-      result.current.openCanvas({
-        mode: "chat",
-        title: "Quarterly summary",
-        canvasId,
-        projectId,
-      }),
-    );
-    const group = firstGroup(result.current.workspace!.layouts.chat);
-    const canvasTab = group.tabs.find((tab) => tab.kind === "canvas");
-    expect(canvasTab).toBeDefined();
-
-    await act(async () => result.current.toggleCanvasTabPin(group.groupId, canvasTab!));
-    const pinnedGroup = firstGroup(result.current.workspace!.layouts.chat);
-    const pinnedTab = pinnedGroup.tabs.find((tab) => tab.id === canvasTab!.id);
-    expect(pinnedTab?.kind).toBe("canvas");
-    if (pinnedTab?.kind !== "canvas") throw new Error("expected canvas");
-    expect(pinnedTab.pinned).toBe(true);
-    expect(pinnedGroup.tabs[0]?.id).toBe(canvasTab!.id);
-    expect(result.current.announcement).toMatch(/pinned/i);
-
-    await act(async () => result.current.retry());
-    await waitFor(() => expect(result.current.status).toBe("ready"));
-
-    const reloadedGroup = firstGroup(result.current.workspace!.layouts.chat);
-    const restoredTab = reloadedGroup.tabs.find((tab) => tab.id === canvasTab!.id);
-    expect(restoredTab?.kind).toBe("canvas");
-    if (restoredTab?.kind !== "canvas") throw new Error("expected canvas");
-    expect(restoredTab.pinned).toBe(true);
-    expect(reloadedGroup.tabs[0]?.id).toBe(canvasTab!.id);
-  });
-
-  it("reorders and splits canvas tabs through the split workspace tree", async () => {
+  it("keeps a canvas visible by splitting before the next thread opens", async () => {
     const projectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
     const canvasId = decodeCanvasId("11111111-1111-4111-8111-111111111111");
     const threadId = decodeChatThreadId("00000000-0000-4000-8000-000000000898");
@@ -865,47 +843,39 @@ describe("useShellController", () => {
         projectId,
       }),
     );
+    const canvasPane = firstPane(result.current.workspace!.layouts.chat);
+    await act(async () => result.current.splitPane(canvasPane.paneId, "vertical"));
+    // The new pane is now the active one, so the next open lands there and the
+    // canvas keeps its view instead of being replaced.
     await act(async () => result.current.openChatThread(threadId, "Planning"));
 
-    const group = firstGroup(result.current.workspace!.layouts.chat);
-    const canvasTab = group.tabs.find((tab) => tab.kind === "canvas");
-    const threadTab = group.tabs.find((tab) => tab.kind === "chat-thread");
-    expect(canvasTab).toBeDefined();
-    expect(threadTab).toBeDefined();
-
-    await act(async () =>
-      result.current.reorderTab(group.groupId, canvasTab!.id, group.tabs.length - 1),
-    );
-    const reordered = firstGroup(result.current.workspace!.layouts.chat);
-    expect(reordered.tabs[reordered.tabs.length - 1]?.id).toBe(canvasTab!.id);
-
-    await act(async () =>
-      result.current.splitGroup(group.groupId, canvasTab!.id, "vertical", "after"),
-    );
-    const splitLayout = result.current.workspace!.layouts.chat;
-    expect(splitLayout.kind).toBe("split");
-    const splitGroups = groups(splitLayout);
-    expect(splitGroups).toHaveLength(2);
+    const layout = result.current.workspace!.layouts.chat;
+    expect(layout.kind).toBe("split");
+    const allPanes = panes(layout);
+    expect(allPanes).toHaveLength(2);
     expect(
-      splitGroups.some((candidate) =>
-        candidate.tabs.some((tab) => tab.kind === "canvas" && tab.canvasId === canvasId),
+      allPanes.some((pane) => pane.surface.kind === "canvas" && pane.surface.canvasId === canvasId),
+    ).toBe(true);
+    expect(
+      allPanes.some(
+        (pane) => pane.surface.kind === "chat-thread" && pane.surface.threadId === threadId,
       ),
     ).toBe(true);
   });
 
-  it("denies a cross-Project canvas tab drop without journaling a move", async () => {
+  it("denies a cross-Project canvas drop without journaling an operation", async () => {
     const workProjectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
     const codeProjectId = decodeProjectId("00000000-0000-4000-8000-000000000900");
     const canvasId = decodeCanvasId("11111111-1111-4111-8111-111111111111");
     const base = workBootstrap();
     const workLayout = base.workspace.layouts.work;
     const codeLayout = base.workspace.layouts.code;
-    if (workLayout.kind !== "group" || codeLayout.kind !== "group") {
-      throw new Error("expected groups");
+    if (workLayout.kind !== "pane" || codeLayout.kind !== "pane") {
+      throw new Error("expected panes");
     }
-    const canvasTab = {
+    const canvasSurface = {
       kind: "canvas" as const,
-      id: workLayout.tabs[0]!.id,
+      id: workLayout.surface.id,
       mode: "work" as const,
       title: "Quarterly summary",
       canvasId,
@@ -930,7 +900,7 @@ describe("useShellController", () => {
         },
         layouts: {
           ...base.workspace.layouts,
-          work: { ...workLayout, tabs: [canvasTab], activeTabId: canvasTab.id },
+          work: { ...workLayout, surface: canvasSurface },
         },
       },
     };
@@ -940,15 +910,11 @@ describe("useShellController", () => {
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    const codeGroup = firstGroup(result.current.workspace!.layouts.code);
     const executeCallsBefore = server.execute.mock.calls.length;
     await act(async () =>
-      result.current.dropTab({
+      result.current.dropSurface(canvasSurface, {
         kind: "center",
-        sourceGroupId: firstGroup(result.current.workspace!.layouts.work).groupId,
-        targetGroupId: codeGroup.groupId,
-        tabId: canvasTab.id,
-        index: 0,
+        targetPaneId: codeLayout.paneId,
       }),
     );
 
@@ -956,18 +922,18 @@ describe("useShellController", () => {
     expect(result.current.announcement).toMatch(/different Project/i);
   });
 
-  it("denies a cross-Project preview tab drop without journaling a move", async () => {
+  it("denies a cross-Project preview drop without journaling an operation", async () => {
     const workProjectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
     const codeProjectId = decodeProjectId("00000000-0000-4000-8000-000000000900");
     const base = workBootstrap();
     const workLayout = base.workspace.layouts.work;
     const codeLayout = base.workspace.layouts.code;
-    if (workLayout.kind !== "group" || codeLayout.kind !== "group") {
-      throw new Error("expected groups");
+    if (workLayout.kind !== "pane" || codeLayout.kind !== "pane") {
+      throw new Error("expected panes");
     }
-    const previewTab = {
+    const previewSurface = {
       kind: "preview" as const,
-      id: workLayout.tabs[0]!.id,
+      id: workLayout.surface.id,
       mode: "work" as const,
       title: "report.pdf",
       targetId: decodePreviewTargetId("11111111-2222-4333-8444-555555555555"),
@@ -996,7 +962,7 @@ describe("useShellController", () => {
         },
         layouts: {
           ...base.workspace.layouts,
-          work: { ...workLayout, tabs: [previewTab], activeTabId: previewTab.id },
+          work: { ...workLayout, surface: previewSurface },
         },
       },
     };
@@ -1006,15 +972,11 @@ describe("useShellController", () => {
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    const codeGroup = firstGroup(result.current.workspace!.layouts.code);
     const executeCallsBefore = server.execute.mock.calls.length;
     await act(async () =>
-      result.current.dropTab({
+      result.current.dropSurface(previewSurface, {
         kind: "center",
-        sourceGroupId: firstGroup(result.current.workspace!.layouts.work).groupId,
-        targetGroupId: codeGroup.groupId,
-        tabId: previewTab.id,
-        index: 0,
+        targetPaneId: codeLayout.paneId,
       }),
     );
 
@@ -1024,7 +986,7 @@ describe("useShellController", () => {
     expect(result.current.announcement).toMatch(/different Project/i);
   });
 
-  it("switches to Code and opens one durable overview tab per thread", async () => {
+  it("switches to Code and reuses one overview pane per thread", async () => {
     const server = statefulClient();
     const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000897");
     const { result } = renderHook(() =>
@@ -1036,20 +998,24 @@ describe("useShellController", () => {
     await act(async () => result.current.openCodeThread(threadId, "Controller foundation"));
 
     expect(result.current.workspace?.activeMode).toBe("code");
-    const group = firstGroup(result.current.workspace!.layouts.code);
-    const tabs = group.tabs.filter(
-      (tab) => tab.kind === "code-overview" && tab.threadId === threadId,
+    const overviewPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "code-overview" && pane.surface.threadId === threadId,
     );
-    expect(tabs).toHaveLength(1);
-    expect(group.activeTabId).toBe(tabs[0]!.id);
+    expect(overviewPanes).toHaveLength(1);
+    expect(String(result.current.workspace!.activePaneIds.code)).toBe(
+      String(overviewPanes[0]!.paneId),
+    );
     expect(server.client.execute).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        operation: expect.objectContaining({ kind: "activate-tab", mode: "code" }),
+        operation: expect.objectContaining({ kind: "open-surface", mode: "code" }),
       }),
     );
   });
 
-  it("keeps identical thread IDs from different hosts in distinct durable tabs", async () => {
+  it("treats a Code thread as one surface regardless of reporting host", async () => {
+    // A Code thread is the same conversation whichever host reports it, so a
+    // second selection carrying a different host activates the visible pane
+    // instead of minting a second view of the same thread.
     const server = statefulClient();
     const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000899");
     const { result } = renderHook(() =>
@@ -1064,39 +1030,13 @@ describe("useShellController", () => {
       result.current.openCodeThread(threadId, "Duplicate title", decodeHostId("host-b")),
     );
 
-    const tabs = firstGroup(result.current.workspace!.layouts.code).tabs.filter(
-      (tab) => tab.kind === "code-overview" && tab.threadId === threadId,
+    const overviewPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "code-overview" && pane.surface.threadId === threadId,
     );
-    expect(tabs).toHaveLength(2);
-    expect(tabs.map((tab) => ("hostId" in tab ? tab.hostId : undefined))).toEqual([
-      "local",
-      "host-b",
-    ]);
-  });
-
-  it("does not retarget a host-qualified Code tab when opening a hostless Project thread", async () => {
-    const server = statefulClient();
-    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000895");
-    const { result } = renderHook(() =>
-      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
-    );
-    await waitFor(() => expect(result.current.status).toBe("ready"));
-
-    await act(async () =>
-      result.current.openCodeThread(threadId, "Remote host thread", decodeHostId("host-b")),
-    );
-    await act(async () => result.current.openCodeThread(threadId, "Project thread"));
-
-    const group = firstGroup(result.current.workspace!.layouts.code);
-    const tabs = group.tabs.filter(
-      (tab) => tab.kind === "code-overview" && tab.threadId === threadId,
-    );
-    expect(tabs).toHaveLength(2);
-    expect(tabs.map((tab) => ("hostId" in tab ? tab.hostId : undefined))).toEqual([
-      "host-b",
-      undefined,
-    ]);
-    expect(group.activeTabId).toBe(tabs[1]!.id);
+    expect(overviewPanes).toHaveLength(1);
+    // Activation keeps the committed surface, so the first host binding stays.
+    expect(overviewPanes[0]!.surface).toMatchObject({ hostId: "local" });
+    expect(result.current.announcement).toBe("Duplicate title selected.");
   });
 
   it("preserves a Project-bound context when opening Code returns a cross-context offer", async () => {
@@ -1144,13 +1084,14 @@ describe("useShellController", () => {
       boundRoot: "/repo",
     });
     expect(
-      firstGroup(result.current.workspace!.layouts.code).tabs.some(
-        (tab) => tab.kind === "code-overview" && tab.title === "Other Project Code",
+      panes(result.current.workspace!.layouts.code).some(
+        (pane) =>
+          pane.surface.kind === "code-overview" && pane.surface.title === "Other Project Code",
       ),
     ).toBe(false);
   });
 
-  it("switches to Work and opens one durable thread tab per thread", async () => {
+  it("switches to Work and reuses one thread pane per thread", async () => {
     const server = statefulClient();
     const threadId = decodeWorkThreadId("00000000-0000-4000-8000-000000000896");
     const { result } = renderHook(() =>
@@ -1162,20 +1103,25 @@ describe("useShellController", () => {
     await act(async () => result.current.openWorkThread(threadId, "Draft brief"));
 
     expect(result.current.workspace?.activeMode).toBe("work");
-    const group = firstGroup(result.current.workspace!.layouts.work);
-    const tabs = group.tabs.filter(
-      (tab) => tab.kind === "work-thread" && tab.threadId === threadId,
+    const threadPanes = panes(result.current.workspace!.layouts.work).filter(
+      (pane) => pane.surface.kind === "work-thread" && pane.surface.threadId === threadId,
     );
-    expect(tabs).toHaveLength(1);
-    expect(group.activeTabId).toBe(tabs[0]!.id);
+    expect(threadPanes).toHaveLength(1);
+    expect(String(result.current.workspace!.activePaneIds.work)).toBe(
+      String(threadPanes[0]!.paneId),
+    );
     expect(server.client.execute).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        operation: expect.objectContaining({ kind: "activate-tab", mode: "work" }),
+        operation: expect.objectContaining({ kind: "open-surface", mode: "work" }),
       }),
     );
   });
 
-  it("does not retarget a host-qualified Work tab when opening a hostless Project thread", async () => {
+  it("replaces the pane when the same Work thread arrives from a different host", async () => {
+    // Work threads keep their host qualification: the hostless Project row is
+    // a different surface from the host-qualified one, so it opens fresh — in
+    // the same pane, because open replaces — rather than activating the
+    // host-qualified view.
     const server = statefulClient(workBootstrap());
     const threadId = decodeWorkThreadId("00000000-0000-4000-8000-000000000894");
     const { result } = renderHook(() =>
@@ -1188,52 +1134,12 @@ describe("useShellController", () => {
     );
     await act(async () => result.current.openWorkThread(threadId, "Project thread"));
 
-    const group = firstGroup(result.current.workspace!.layouts.work);
-    const tabs = group.tabs.filter(
-      (tab) => tab.kind === "work-thread" && tab.threadId === threadId,
+    const threadPanes = panes(result.current.workspace!.layouts.work).filter(
+      (pane) => pane.surface.kind === "work-thread" && pane.surface.threadId === threadId,
     );
-    expect(tabs).toHaveLength(2);
-    expect(tabs.map((tab) => ("hostId" in tab ? tab.hostId : undefined))).toEqual([
-      "host-b",
-      undefined,
-    ]);
-    expect(group.activeTabId).toBe(tabs[1]!.id);
-  });
-
-  it("binds a Browser surface to the active owning thread", async () => {
-    const initial = codeBootstrap();
-    const server = statefulClient({
-      ...initial,
-      workspace: {
-        ...initial.workspace,
-        contextByMode: {
-          ...initial.workspace.contextByMode,
-          code: {
-            ...initial.workspace.contextByMode.code,
-            projectId: decodeProjectId("00000000-0000-4000-8000-000000000894"),
-            boundRoot: "/repo",
-          },
-        },
-      },
-    });
-    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000895");
-    const { result } = renderHook(() =>
-      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
-    );
-    await waitFor(() => expect(result.current.status).toBe("ready"));
-    await act(async () => result.current.openCodeThread(threadId, "Browser owner"));
-    await act(async () => result.current.openSurface("browser"));
-
-    const codeGroups = groups(result.current.workspace!.layouts.code);
-    const browserGroup = codeGroups.find((group) =>
-      group.tabs.some((tab) => tab.kind === "browser"),
-    );
-    expect(codeGroups).toHaveLength(2);
-    expect(browserGroup?.tabs).toEqual([expect.objectContaining({ kind: "browser", threadId })]);
-    expect(result.current.workspace!.layouts.code).toMatchObject({
-      kind: "split",
-      orientation: "horizontal",
-    });
+    expect(threadPanes).toHaveLength(1);
+    expect(threadPanes[0]!.surface).not.toHaveProperty("hostId");
+    expect(result.current.announcement).toBe("Project thread opened.");
   });
 
   it("opens reviewed Code evidence through the authoritative workspace command path", async () => {
@@ -1254,14 +1160,15 @@ describe("useShellController", () => {
     expect(server.client.execute).toHaveBeenLastCalledWith(
       expect.objectContaining({
         operation: expect.objectContaining({
-          kind: "open-tab",
+          kind: "open-surface",
           mode: "code",
-          tab: expect.objectContaining({ kind: "code-file", relativePath: "src/index.ts" }),
+          surface: expect.objectContaining({ kind: "code-file", relativePath: "src/index.ts" }),
         }),
       }),
     );
   });
-  it("gives a second terminal its own tab and a title that tells it from the first", async () => {
+
+  it("gives a second terminal its own pane and a title that tells it from the first", async () => {
     const server = statefulClient();
     const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000898");
     const { result } = renderHook(() =>
@@ -1271,6 +1178,8 @@ describe("useShellController", () => {
     await act(async () =>
       result.current.openCodeSurface({ kind: "code-terminal", threadId, title: "Terminal" }),
     );
+    const firstTerminalPane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () => result.current.splitPane(firstTerminalPane.paneId, "horizontal"));
     await act(async () =>
       result.current.openCodeSurface({
         kind: "code-terminal",
@@ -1279,16 +1188,19 @@ describe("useShellController", () => {
         terminalId: "80000000-0000-4000-8000-000000000042" as never,
       }),
     );
-    // Reopening the surface without naming a terminal returns to the first tab
-    // rather than starting a third shell.
+    // Reopening the surface without naming a terminal returns to the first
+    // pane rather than starting a third shell.
     await act(async () =>
       result.current.openCodeSurface({ kind: "code-terminal", threadId, title: "Terminal" }),
     );
 
-    const terminals = groups(result.current.workspace!.layouts.code)
-      .flatMap((group) => group.tabs)
-      .filter((tab) => tab.kind === "code-terminal");
-    expect(terminals.map((tab) => tab.title)).toEqual(["Terminal", "Terminal 2"]);
+    const terminalPanes = panes(result.current.workspace!.layouts.code).filter(
+      (pane) => pane.surface.kind === "code-terminal",
+    );
+    expect(terminalPanes.map((pane) => pane.surface.title)).toEqual(["Terminal", "Terminal 2"]);
+    expect(String(result.current.workspace!.activePaneIds.code)).toBe(
+      String(firstTerminalPane.paneId),
+    );
   });
 
   it("holds loading until authoritative bootstrap completes and retries disconnection", async () => {
@@ -1393,8 +1305,10 @@ describe("useShellController", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
     await act(async () => result.current.setMode("chat"));
-    await act(async () => result.current.createShellTab());
+    const chatPane = firstPane(result.current.workspace!.layouts.chat);
+    await act(async () => result.current.splitPane(chatPane.paneId, "horizontal"));
     const chatLayout = result.current.workspace!.layouts.chat;
+    expect(chatLayout.kind).toBe("split");
     await act(async () => result.current.updateSettings({ chatEnabled: false }));
 
     expect(result.current.settings?.chatEnabled).toBe(false);
@@ -1627,33 +1541,24 @@ describe("useShellController", () => {
     expect(result.current.announcement).toMatch(/repair storage/i);
   });
 
-  it("opens, activates, reorders, splits, moves, resizes, focuses, closes, and resets tabs", async () => {
+  it("splits, resizes, focuses, opens, closes, and resets panes", async () => {
     const server = statefulClient();
+    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000890");
     const { result } = renderHook(() =>
       useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
-    const original = firstGroup(result.current.workspace!.layouts.code);
+    const original = firstPane(result.current.workspace!.layouts.code);
 
-    await act(async () => result.current.createShellTab());
-    await act(async () => result.current.createShellTab());
-    let group = firstGroup(result.current.workspace!.layouts.code);
-    expect(group.tabs).toHaveLength(3);
-
-    const welcomeId = group.tabs[0]!.id;
-    await act(async () => result.current.activateTab(group.groupId, welcomeId));
-    await act(async () => result.current.reorderTab(group.groupId, welcomeId, 2));
-    group = firstGroup(result.current.workspace!.layouts.code);
-    expect(group.activeTabId).toBe(welcomeId);
-    expect(group.tabs[2]!.id).toBe(welcomeId);
-
-    await act(async () => result.current.splitGroup(group.groupId, welcomeId, "horizontal"));
+    await act(async () => result.current.splitPane(original.paneId, "horizontal"));
     let layout = result.current.workspace!.layouts.code;
     expect(layout.kind).toBe("split");
-    const [left, right] = groups(layout);
     const split = layout.kind === "split" ? layout : undefined;
     expect(split).toBeDefined();
-    expect(result.current.workspace!.activeGroupIds.code).toBe(right!.groupId);
+    const [left, right] = panes(layout);
+    expect(String(left!.paneId)).toBe(String(original.paneId));
+    expect(String(result.current.workspace!.activePaneIds.code)).toBe(String(right!.paneId));
+    expect(result.current.announcement).toBe("Horizontal split created.");
 
     const storedRatio = split!.ratio;
     act(() => result.current.previewSplitResize(split!.nodeId, 0.7));
@@ -1662,25 +1567,117 @@ describe("useShellController", () => {
     await act(async () => result.current.commitSplitResize(split!.nodeId, 0.7));
     expect(result.current.workspace!.layouts.code).toHaveProperty("ratio", 0.7);
 
-    await act(async () => result.current.focusGroup(right!.groupId));
-    expect(result.current.workspace?.focusedGroupId).toBe(right!.groupId);
+    await act(async () => result.current.focusPane(right!.paneId));
+    expect(String(result.current.workspace?.focusedPaneId)).toBe(String(right!.paneId));
     expect(result.current.announcement).toMatch(/focused/i);
     await act(async () => result.current.clearFocus());
-    expect(result.current.workspace?.focusedGroupId).toBeUndefined();
+    expect(result.current.workspace?.focusedPaneId).toBeUndefined();
 
-    const movable = left!.tabs[0]!;
-    await act(async () => result.current.moveTab(left!.groupId, right!.groupId, movable.id, 1));
-    expect(result.current.workspace!.activeGroupIds.code).toBe(right!.groupId);
-    expect(groups(result.current.workspace!.layouts.code)[1]!.tabs).toHaveLength(2);
-    await act(async () => result.current.closeTab(right!.groupId, movable.id));
-    expect(result.current.announcement).toMatch(/closed/i);
+    // The thread lands in the active pane — the new one the split created.
+    await act(async () => result.current.openCodeThread(threadId, "Gesture thread"));
+    layout = result.current.workspace!.layouts.code;
+    const threadPane = panes(layout).find((pane) => pane.surface.kind === "code-overview");
+    expect(String(threadPane?.paneId)).toBe(String(right!.paneId));
+
+    // Clicking the welcome pane is not an activation worth journaling.
+    const executeCalls = server.execute.mock.calls.length;
+    await act(async () => result.current.activatePane(left!.paneId));
+    expect(server.execute.mock.calls.length).toBe(executeCalls);
+
+    let closed!: boolean;
+    await act(async () => {
+      closed = await result.current.closePane(right!.paneId);
+    });
+    expect(closed).toBe(true);
+    expect(result.current.announcement).toBe("Pane closed.");
+    expect(result.current.workspace!.layouts.code).toEqual(original);
 
     await act(async () => result.current.resetActiveLayout());
     expect(result.current.workspace!.layouts.code).toEqual(original);
-    expect(result.current.workspace!.activeGroupIds.code).toBe(original.groupId);
+    expect(String(result.current.workspace!.activePaneIds.code)).toBe(String(original.paneId));
   });
 
-  it("presents the authoritative active group at narrow widths without rewriting the split tree", async () => {
+  it("makes a clicked pane the one the window is about without journaling no-ops", async () => {
+    const server = statefulClient();
+    const firstThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000891");
+    const secondThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000892");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openCodeThread(firstThreadId, "First"));
+    const firstThreadPane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () => result.current.splitPane(firstThreadPane.paneId, "horizontal"));
+    await act(async () => result.current.openCodeThread(secondThreadId, "Second"));
+    expect(String(result.current.workspace!.activePaneIds.code)).not.toBe(
+      String(firstThreadPane.paneId),
+    );
+
+    await act(async () => result.current.activatePane(firstThreadPane.paneId));
+
+    expect(String(result.current.workspace!.activePaneIds.code)).toBe(
+      String(firstThreadPane.paneId),
+    );
+    expect(result.current.announcement).toBe("First selected.");
+    // The activation reuses the pane's own committed surface object.
+    const activated = firstPane(result.current.workspace!.layouts.code);
+    expect(String(activated.surface.id)).toBe(String(firstThreadPane.surface.id));
+
+    // Activating the already-active pane changes nothing worth journaling.
+    const executeCalls = server.execute.mock.calls.length;
+    await act(async () => result.current.activatePane(firstThreadPane.paneId));
+    expect(server.execute.mock.calls.length).toBe(executeCalls);
+  });
+
+  it("re-targets the active pane when focus moves to another pane", async () => {
+    // The right utility dock and thread controllers resolve against the active
+    // pane, so focusing a pane must re-target it in the same committed write —
+    // one source of truth, not a renderer-side shadow of it.
+    const server = statefulClient();
+    const firstThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000891");
+    const secondThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000892");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openCodeThread(firstThreadId, "First"));
+    const firstThreadPane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () => result.current.splitPane(firstThreadPane.paneId, "horizontal"));
+    await act(async () => result.current.openCodeThread(secondThreadId, "Second"));
+
+    await act(async () => result.current.focusPane(firstThreadPane.paneId));
+
+    expect(String(result.current.workspace?.focusedPaneId)).toBe(String(firstThreadPane.paneId));
+    expect(String(result.current.workspace!.activePaneIds.code)).toBe(
+      String(firstThreadPane.paneId),
+    );
+  });
+
+  it("reports nothing lost when closing the last welcome pane", async () => {
+    const server = statefulClient();
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const welcomePane = firstPane(result.current.workspace!.layouts.code);
+    expect(welcomePane.surface.kind).toBe("welcome");
+
+    let closed!: boolean;
+    await act(async () => {
+      closed = await result.current.closePane(welcomePane.paneId);
+    });
+
+    // Closing the last pane recreates the mode's default welcome pane, so the
+    // surface never actually left the workspace.
+    expect(closed).toBe(false);
+    const remaining = result.current.workspace!.layouts.code;
+    expect(remaining.kind).toBe("pane");
+    expect(firstPane(remaining).surface.kind).toBe("welcome");
+  });
+
+  it("presents the authoritative active pane at narrow widths without rewriting the split tree", async () => {
     const server = statefulClient();
     const { result } = renderHook(() =>
       useShellController({
@@ -1692,38 +1689,33 @@ describe("useShellController", () => {
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    await act(async () => result.current.createShellTab());
-    const source = firstGroup(result.current.workspace!.layouts.code);
-    const moved = source.tabs.at(-1)!;
-    await act(async () => result.current.splitGroup(source.groupId, moved.id, "horizontal"));
+    const source = firstPane(result.current.workspace!.layouts.code);
+    await act(async () => result.current.splitPane(source.paneId, "horizontal"));
     const authoritative = result.current.workspace!.layouts.code;
-    const activeGroupId = result.current.workspace!.activeGroupIds.code;
+    const activePaneId = result.current.workspace!.activePaneIds.code;
 
     expect(authoritative.kind).toBe("split");
-    expect(result.current.presentedLayout).toMatchObject({ kind: "group", groupId: activeGroupId });
+    expect(result.current.presentedLayout).toMatchObject({ kind: "pane", paneId: activePaneId });
     expect(result.current.workspace!.layouts.code).toBe(authoritative);
   });
 
-  it("translates cross-group directional docking into one atomic operation", async () => {
+  it("translates an edge drop into one atomic split and a center drop into a replace", async () => {
     const server = statefulClient();
+    const firstThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000891");
+    const secondThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000892");
+    const thirdThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000893");
     const { result } = renderHook(() =>
       useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    await act(async () => result.current.createShellTab());
-    await act(async () => result.current.createShellTab());
-    const initialGroup = firstGroup(result.current.workspace!.layouts.code);
-    const tabId = initialGroup.tabs.at(-1)!.id;
-    await act(async () => result.current.splitGroup(initialGroup.groupId, tabId, "horizontal"));
-    const [target, source] = groups(result.current.workspace!.layouts.code);
+    await act(async () => result.current.openCodeThread(firstThreadId, "First"));
+    const targetPane = firstPane(result.current.workspace!.layouts.code);
 
     await act(async () =>
-      result.current.dropTab({
+      result.current.dropSurface(mintedCodeThreadSurface(secondThreadId, "Second"), {
         kind: "edge",
-        sourceGroupId: source!.groupId,
-        targetGroupId: target!.groupId,
-        tabId,
+        targetPaneId: targetPane.paneId,
         edge: "top",
       }),
     );
@@ -1731,10 +1723,8 @@ describe("useShellController", () => {
     expect(server.client.execute).toHaveBeenLastCalledWith(
       expect.objectContaining({
         operation: expect.objectContaining({
-          kind: "dock-tab",
-          fromGroupId: source!.groupId,
-          targetGroupId: target!.groupId,
-          tabId,
+          kind: "split-pane",
+          targetPaneId: targetPane.paneId,
           orientation: "vertical",
           placement: "before",
           ratio: 0.5,
@@ -1744,70 +1734,67 @@ describe("useShellController", () => {
     expect(result.current.workspace!.layouts.code).toMatchObject({
       kind: "split",
       orientation: "vertical",
-      first: { kind: "group", tabs: [{ id: tabId }] },
-      second: { kind: "group", groupId: target!.groupId },
+      first: { kind: "pane", surface: { threadId: secondThreadId } },
+      second: { kind: "pane", paneId: targetPane.paneId },
     });
+
+    await act(async () =>
+      result.current.dropSurface(mintedCodeThreadSurface(thirdThreadId, "Third"), {
+        kind: "center",
+        targetPaneId: targetPane.paneId,
+      }),
+    );
+
+    expect(server.client.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        operation: expect.objectContaining({
+          kind: "replace-pane-surface",
+          paneId: targetPane.paneId,
+        }),
+      }),
+    );
+    const replaced = panes(result.current.workspace!.layouts.code).find(
+      (pane) => String(pane.paneId) === String(targetPane.paneId),
+    );
+    expect(replaced?.surface).toMatchObject({ kind: "code-overview", threadId: thirdThreadId });
   });
 
-  it("translates reorder, center, and same-group edge destinations through existing operations", async () => {
+  it("moves an already-visible surface instead of duplicating it on a center drop", async () => {
     const server = statefulClient();
+    const firstThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000891");
+    const secondThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000892");
     const { result } = renderHook(() =>
       useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
-    await act(async () => result.current.createShellTab());
-    await act(async () => result.current.createShellTab());
-    let group = firstGroup(result.current.workspace!.layouts.code);
-    const tabId = group.tabs.at(-1)!.id;
-    await act(async () =>
-      result.current.dropTab({
-        kind: "reorder",
-        sourceGroupId: group.groupId,
-        targetGroupId: group.groupId,
-        tabId,
-        index: 0,
-      }),
+    await act(async () => result.current.openCodeThread(firstThreadId, "First"));
+    const sourcePane = firstPane(result.current.workspace!.layouts.code);
+    await act(async () => result.current.splitPane(sourcePane.paneId, "horizontal"));
+    await act(async () => result.current.openCodeThread(secondThreadId, "Second"));
+    const targetPane = panes(result.current.workspace!.layouts.code).find(
+      (pane) => pane.surface.kind === "code-overview" && pane.surface.threadId === secondThreadId,
     );
-    expect(server.client.execute).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        operation: expect.objectContaining({ kind: "reorder-tab", index: 0 }),
-      }),
-    );
+    expect(targetPane).toBeDefined();
 
-    group = firstGroup(result.current.workspace!.layouts.code);
+    // The sidebar drag mints a fresh surface object; the workspace recognizes
+    // the thread as already visible and moves its pane instead of duplicating.
     await act(async () =>
-      result.current.dropTab({
-        kind: "edge",
-        sourceGroupId: group.groupId,
-        targetGroupId: group.groupId,
-        tabId,
-        edge: "left",
-      }),
-    );
-    expect(server.client.execute).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        operation: expect.objectContaining({
-          kind: "split-group",
-          orientation: "horizontal",
-          placement: "before",
-        }),
-      }),
-    );
-
-    const [source, target] = groups(result.current.workspace!.layouts.code);
-    await act(async () =>
-      result.current.dropTab({
+      result.current.dropSurface(mintedCodeThreadSurface(firstThreadId, "First"), {
         kind: "center",
-        sourceGroupId: source!.groupId,
-        targetGroupId: target!.groupId,
-        tabId,
-        index: target!.tabs.length,
+        targetPaneId: targetPane!.paneId,
       }),
     );
-    expect(server.client.execute).toHaveBeenLastCalledWith(
-      expect.objectContaining({ operation: expect.objectContaining({ kind: "move-tab" }) }),
-    );
+
+    const layout = result.current.workspace!.layouts.code;
+    expect(layout.kind).toBe("pane");
+    const survivor = firstPane(layout);
+    expect(String(survivor.paneId)).toBe(String(targetPane!.paneId));
+    expect(survivor.surface).toMatchObject({ kind: "code-overview", threadId: firstThreadId });
+    // The committed surface object survives the move, so per-surface state
+    // keyed on its id does too.
+    expect(String(survivor.surface.id)).toBe(String(sourcePane.surface.id));
+    expect(result.current.announcement).toBe("First moved.");
   });
 
   it("reloads authoritative state after a conflict", async () => {
@@ -1957,9 +1944,10 @@ describe("useShellController", () => {
       older = result.current.setMode("chat");
     });
     await waitFor(() => expect(result.current.workspace?.activeMode).toBe("chat"));
+    const chatPane = firstPane(result.current.workspace!.layouts.chat);
     let newer!: Promise<void>;
     act(() => {
-      newer = result.current.createShellTab();
+      newer = result.current.splitPane(chatPane.paneId, "horizontal");
     });
     expect(client.execute).toHaveBeenCalledOnce();
     await act(async () =>
@@ -2176,22 +2164,23 @@ describe("useShellController", () => {
 
   it("assigns a new sequence to repeated identical announcements", async () => {
     const server = statefulClient();
+    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000898");
     const { result } = renderHook(() =>
       useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
-    const group = firstGroup(result.current.workspace!.layouts.code);
 
-    await act(async () => result.current.activateTab(group.groupId, group.activeTabId));
+    await act(async () => result.current.openCodeThread(threadId, "Planning"));
+    await act(async () => result.current.openCodeThread(threadId, "Planning"));
     const firstSequence = result.current.announcementSequence;
-    expect(result.current.announcement).toBe("Tab activated.");
-    await act(async () => result.current.activateTab(group.groupId, group.activeTabId));
+    expect(result.current.announcement).toBe("Planning selected.");
+    await act(async () => result.current.openCodeThread(threadId, "Planning"));
 
-    expect(result.current.announcement).toBe("Tab activated.");
+    expect(result.current.announcement).toBe("Planning selected.");
     expect(result.current.announcementSequence).toBeGreaterThan(firstSequence);
   });
 
-  it("filters implemented settings, resets native bounds, and presents one group narrowly without changing the tree", async () => {
+  it("filters implemented settings, resets native bounds, and presents one pane narrowly without changing the tree", async () => {
     const server = statefulClient();
     const nativeHost = { resetBounds: vi.fn(async () => undefined) };
     const { result, rerender } = renderHook(
@@ -2206,13 +2195,12 @@ describe("useShellController", () => {
       { initialProps: { narrow: false } },
     );
     await waitFor(() => expect(result.current.status).toBe("ready"));
-    await act(async () => result.current.createShellTab());
-    const group = firstGroup(result.current.workspace!.layouts.code);
-    await act(async () => result.current.splitGroup(group.groupId, group.tabs[1]!.id, "vertical"));
+    const source = firstPane(result.current.workspace!.layouts.code);
+    await act(async () => result.current.splitPane(source.paneId, "vertical"));
     expect(result.current.workspace!.layouts.code.kind).toBe("split");
 
     rerender({ narrow: true });
-    expect(result.current.presentedLayout?.kind).toBe("group");
+    expect(result.current.presentedLayout?.kind).toBe("pane");
     expect(result.current.workspace!.layouts.code.kind).toBe("split");
 
     for (const query of [

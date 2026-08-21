@@ -2,7 +2,6 @@ import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasInventoryEntry } from "@octant/contracts";
 import type { WorkspaceTab } from "@octant/contracts/shell";
-import { decodeTabGroupId } from "@octant/contracts/shell";
 import { StrictMode, useCallback, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CanvasWorkspaceTab } from "./CanvasWorkspaceTab";
@@ -16,8 +15,6 @@ import {
   roadmapInventoryEntry,
 } from "../projects/canvasInventoryFixtures";
 import { canvasFixture } from "./test-fixtures";
-
-const harnessGroupId = decodeTabGroupId("66666666-6666-4666-8666-666666666666");
 
 type CanvasTab = Extract<WorkspaceTab, { readonly kind: "canvas" }>;
 
@@ -183,7 +180,6 @@ function CanvasInventoryHarness() {
         ) : (
           <CanvasWorkspaceTab
             key={`${String(activeTab.canvasId)}-${reloadToken}`}
-            groupId={harnessGroupId}
             tab={activeTab}
             client={client}
           />
@@ -191,7 +187,6 @@ function CanvasInventoryHarness() {
       </section>
       <section data-canvas-inventory-evidence="unavailable">
         <CanvasWorkspaceTab
-          groupId={harnessGroupId}
           tab={tabForEntry({
             ...roadmapInventoryEntry,
             title: "Missing projection row",

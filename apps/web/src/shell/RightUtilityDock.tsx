@@ -27,7 +27,7 @@ export interface RightUtilityDockProps {
 export function RightUtilityDock(props: RightUtilityDockProps) {
   const closeButton = useRef<HTMLButtonElement>(null);
 
-  if (props.resolution.kind !== "surface") return null;
+  if (props.resolution.kind === "closed") return null;
 
   // Only the narrow dock is a modal that nothing else can dismiss. Docked, the
   // window chrome's disclosure closes it, so the header carries no second

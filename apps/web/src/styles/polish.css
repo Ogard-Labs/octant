@@ -6,37 +6,10 @@
   border-color: var(--octant-border-strong);
 }
 
-.workspace-tab {
+.workspace-pane__grip {
   transition:
     background-color 120ms ease,
     color 120ms ease;
-}
-
-.workspace-tab__pin {
-  flex-shrink: 0;
-  margin-right: 4px;
-  opacity: 0.72;
-}
-
-.workspace-tab__action {
-  opacity: 0;
-  pointer-events: none;
-  transition:
-    background-color 120ms ease,
-    opacity 120ms ease,
-    transform 100ms ease;
-}
-
-.workspace-tab-item:hover .workspace-tab__action,
-.workspace-tab[aria-selected="true"] ~ .workspace-tab__action,
-.workspace-tab[aria-selected="true"] ~ .workspace-tab__actions .workspace-tab__action,
-.workspace-tab-item:focus-within .workspace-tab__action {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.workspace-tab__action:active {
-  transform: scale(0.96);
 }
 
 .settings-view__header h1 {
@@ -94,8 +67,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .workspace-tab,
-  .workspace-tab__action,
+  .workspace-pane__grip,
   .provider-card,
   .chat-composer select,
   .chat-composer button,

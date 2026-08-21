@@ -38,8 +38,8 @@ export const WindowId = brandedUuid("WindowId");
 export type WindowId = typeof WindowId.Type;
 export const LayoutNodeId = brandedUuid("LayoutNodeId");
 export type LayoutNodeId = typeof LayoutNodeId.Type;
-export const TabGroupId = brandedUuid("TabGroupId");
-export type TabGroupId = typeof TabGroupId.Type;
+export const PaneId = brandedUuid("PaneId");
+export type PaneId = typeof PaneId.Type;
 export const WorkspaceTabId = brandedUuid("WorkspaceTabId");
 export type WorkspaceTabId = typeof WorkspaceTabId.Type;
 
@@ -280,13 +280,6 @@ const SettingsWorkspaceTab = Schema.Struct({
   title: Schema.NonEmptyTrimmedString,
 }).annotations(strict);
 
-const UnavailableWorkspaceTab = Schema.Struct({
-  kind: Schema.Literal("unavailable"),
-  id: WorkspaceTabId,
-  title: Schema.NonEmptyTrimmedString,
-  reason: Schema.NonEmptyTrimmedString,
-}).annotations(strict);
-
 const ProjectWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("project"),
   id: WorkspaceTabId,
@@ -448,14 +441,19 @@ const CanvasWorkspaceTab = Schema.Struct({
   title: Schema.NonEmptyTrimmedString,
   canvasId: CanvasId,
   projectId: ProjectId,
-  pinned: Schema.optional(Schema.Literal(true)),
 }).annotations(strict);
 
+/**
+ * The surface a pane shows. Still named `WorkspaceTab` because persisted state
+ * addresses surfaces by this identity — `EnvironmentTabPresentation.tabId` and
+ * every journaled layout carry `WorkspaceTabId`s — and renaming the wire name
+ * would churn hundreds of call sites without changing any behavior. A pane
+ * holds exactly one of these; there is no tab strip.
+ */
 export const WorkspaceTab = Schema.Union(
   WelcomeWorkspaceTab,
   DraftThreadWorkspaceTab,
   SettingsWorkspaceTab,
-  UnavailableWorkspaceTab,
   ProjectWorkspaceTab,
   ChatThreadWorkspaceTab,
   WorkThreadWorkspaceTab,
@@ -476,12 +474,16 @@ export const WorkspaceTab = Schema.Union(
 );
 export type WorkspaceTab = typeof WorkspaceTab.Type;
 
-export interface WorkspaceTabGroup {
-  readonly kind: "group";
+/**
+ * A leaf of the split tree: one pane showing exactly one surface. There is no
+ * tab strip and no hidden sibling surfaces — the sidebar is the only switcher,
+ * so everything a pane holds is visible.
+ */
+export interface WorkspacePane {
+  readonly kind: "pane";
   readonly nodeId: LayoutNodeId;
-  readonly groupId: TabGroupId;
-  readonly tabs: ReadonlyArray<WorkspaceTab>;
-  readonly activeTabId: WorkspaceTabId;
+  readonly paneId: PaneId;
+  readonly surface: WorkspaceTab;
 }
 
 export interface WorkspaceSplit {
@@ -493,14 +495,13 @@ export interface WorkspaceSplit {
   readonly second: WorkspaceLayoutNode;
 }
 
-export type WorkspaceLayoutNode = WorkspaceTabGroup | WorkspaceSplit;
+export type WorkspaceLayoutNode = WorkspacePane | WorkspaceSplit;
 
-interface EncodedWorkspaceTabGroup {
-  readonly kind: "group";
+interface EncodedWorkspacePane {
+  readonly kind: "pane";
   readonly nodeId: string;
-  readonly groupId: string;
-  readonly tabs: ReadonlyArray<typeof WorkspaceTab.Encoded>;
-  readonly activeTabId: string;
+  readonly paneId: string;
+  readonly surface: typeof WorkspaceTab.Encoded;
 }
 
 interface EncodedWorkspaceSplit {
@@ -512,17 +513,16 @@ interface EncodedWorkspaceSplit {
   readonly second: EncodedWorkspaceLayoutNode;
 }
 
-type EncodedWorkspaceLayoutNode = EncodedWorkspaceTabGroup | EncodedWorkspaceSplit;
+type EncodedWorkspaceLayoutNode = EncodedWorkspacePane | EncodedWorkspaceSplit;
 
 export const WorkspaceLayoutNode: Schema.Schema<WorkspaceLayoutNode, EncodedWorkspaceLayoutNode> =
   Schema.suspend(() =>
     Schema.Union(
       Schema.Struct({
-        kind: Schema.Literal("group"),
+        kind: Schema.Literal("pane"),
         nodeId: LayoutNodeId,
-        groupId: TabGroupId,
-        tabs: Schema.Array(WorkspaceTab),
-        activeTabId: WorkspaceTabId,
+        paneId: PaneId,
+        surface: WorkspaceTab,
       }).annotations(strict),
       Schema.Struct({
         kind: Schema.Literal("split"),
@@ -538,7 +538,7 @@ export const WorkspaceLayoutNode: Schema.Schema<WorkspaceLayoutNode, EncodedWork
 export const StowedWorkspaceLayout = Schema.Struct({
   context: WorkspaceContextKey,
   layout: WorkspaceLayoutNode,
-  activeGroupId: TabGroupId,
+  activePaneId: PaneId,
 }).annotations(strict);
 export type StowedWorkspaceLayout = typeof StowedWorkspaceLayout.Type;
 
@@ -550,10 +550,10 @@ export const WindowWorkspace = Schema.Struct({
     work: WorkspaceLayoutNode,
     code: WorkspaceLayoutNode,
   }).annotations(strict),
-  activeGroupIds: Schema.Struct({
-    chat: TabGroupId,
-    work: TabGroupId,
-    code: TabGroupId,
+  activePaneIds: Schema.Struct({
+    chat: PaneId,
+    work: PaneId,
+    code: PaneId,
   }).annotations(strict),
   contextByMode: Schema.Struct({
     chat: WorkspaceContextKey,
@@ -564,7 +564,7 @@ export const WindowWorkspace = Schema.Struct({
     Schema.Array(StowedWorkspaceLayout).pipe(Schema.maxItems(MAX_STOWED_WORKSPACE_LAYOUTS)),
     { default: () => [] },
   ),
-  focusedGroupId: Schema.optional(TabGroupId),
+  focusedPaneId: Schema.optional(PaneId),
   version: AggregateVersion,
 }).annotations(strict);
 export type WindowWorkspace = typeof WindowWorkspace.Type;
@@ -584,68 +584,56 @@ export type ShellBootstrap = typeof ShellBootstrap.Type;
 const ModeOperationFields = { mode: OctantMode } as const;
 
 export const WorkspaceOperation = Schema.Union(
+  /**
+   * Open a surface: if the same surface is already visible in some pane, that
+   * pane becomes active; otherwise the surface replaces the named pane's
+   * content. Opening never mints a duplicate view of a surface the workspace
+   * already shows.
+   */
   Schema.Struct({
-    kind: Schema.Literal("open-tab"),
+    kind: Schema.Literal("open-surface"),
     ...ModeOperationFields,
-    groupId: TabGroupId,
-    tab: WorkspaceTab,
+    paneId: PaneId,
+    surface: WorkspaceTab,
   }).annotations(strict),
   Schema.Struct({
-    kind: Schema.Literal("switch-project-tab"),
+    kind: Schema.Literal("switch-project-surface"),
     ...ModeOperationFields,
-    tab: WorkspaceTab,
+    surface: WorkspaceTab,
   }).annotations(strict),
+  /**
+   * A center drop: the named pane's surface is replaced outright. When the
+   * dropped surface is already visible in another pane, that pane collapses
+   * and its surface moves here, so the workspace never shows the same surface
+   * twice.
+   */
   Schema.Struct({
-    kind: Schema.Literal("activate-tab"),
+    kind: Schema.Literal("replace-pane-surface"),
     ...ModeOperationFields,
-    groupId: TabGroupId,
-    tabId: WorkspaceTabId,
+    paneId: PaneId,
+    surface: WorkspaceTab,
   }).annotations(strict),
+  /**
+   * An edge drop: split the target pane and place the surface in the new pane.
+   * When the surface is already visible in another pane, that pane collapses
+   * and its surface moves into the split rather than duplicating.
+   */
   Schema.Struct({
-    kind: Schema.Literal("close-tab"),
+    kind: Schema.Literal("split-pane"),
     ...ModeOperationFields,
-    groupId: TabGroupId,
-    tabId: WorkspaceTabId,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("reorder-tab"),
-    ...ModeOperationFields,
-    groupId: TabGroupId,
-    tabId: WorkspaceTabId,
-    index: Schema.Int.pipe(Schema.nonNegative()),
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("split-group"),
-    ...ModeOperationFields,
-    groupId: TabGroupId,
-    tabId: WorkspaceTabId,
+    targetPaneId: PaneId,
+    surface: WorkspaceTab,
     splitNodeId: LayoutNodeId,
-    newGroupNodeId: LayoutNodeId,
-    newGroupId: TabGroupId,
+    newPaneNodeId: LayoutNodeId,
+    newPaneId: PaneId,
     orientation: Schema.Literal("horizontal", "vertical"),
     placement: Schema.Literal("before", "after"),
     ratio: SplitRatio,
   }).annotations(strict),
   Schema.Struct({
-    kind: Schema.Literal("move-tab"),
+    kind: Schema.Literal("close-pane"),
     ...ModeOperationFields,
-    fromGroupId: TabGroupId,
-    toGroupId: TabGroupId,
-    tabId: WorkspaceTabId,
-    index: Schema.Int.pipe(Schema.nonNegative()),
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("dock-tab"),
-    ...ModeOperationFields,
-    fromGroupId: TabGroupId,
-    targetGroupId: TabGroupId,
-    tabId: WorkspaceTabId,
-    splitNodeId: LayoutNodeId,
-    newGroupNodeId: LayoutNodeId,
-    newGroupId: TabGroupId,
-    orientation: Schema.Literal("horizontal", "vertical"),
-    placement: Schema.Literal("before", "after"),
-    ratio: SplitRatio,
+    paneId: PaneId,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("resize-split"),
@@ -654,11 +642,11 @@ export const WorkspaceOperation = Schema.Union(
     ratio: SplitRatio,
   }).annotations(strict),
   Schema.Struct({
-    kind: Schema.Literal("focus-group"),
+    kind: Schema.Literal("focus-pane"),
     ...ModeOperationFields,
-    groupId: TabGroupId,
+    paneId: PaneId,
   }).annotations(strict),
-  Schema.Struct({ kind: Schema.Literal("unfocus-group"), ...ModeOperationFields }).annotations(
+  Schema.Struct({ kind: Schema.Literal("unfocus-pane"), ...ModeOperationFields }).annotations(
     strict,
   ),
   Schema.Struct({ kind: Schema.Literal("reset-mode"), ...ModeOperationFields }).annotations(strict),
@@ -666,17 +654,9 @@ export const WorkspaceOperation = Schema.Union(
     strict,
   ),
   Schema.Struct({
-    kind: Schema.Literal("set-canvas-tab-pin"),
-    ...ModeOperationFields,
-    groupId: TabGroupId,
-    tabId: WorkspaceTabId,
-    pinned: Schema.Boolean,
-  }).annotations(strict),
-  Schema.Struct({
     kind: Schema.Literal("set-side-chat-sidecar"),
     ...ModeOperationFields,
-    groupId: TabGroupId,
-    tabId: WorkspaceTabId,
+    paneId: PaneId,
     sidecarThreadId: ChatThreadId,
   }).annotations(strict),
 );
@@ -767,7 +747,7 @@ export type EnvironmentPresentationReplaced = typeof EnvironmentPresentationRepl
 
 export const decodeWindowId = Schema.decodeUnknownSync(WindowId);
 export const decodeLayoutNodeId = Schema.decodeUnknownSync(LayoutNodeId);
-export const decodeTabGroupId = Schema.decodeUnknownSync(TabGroupId);
+export const decodePaneId = Schema.decodeUnknownSync(PaneId);
 export const decodeWorkspaceTabId = Schema.decodeUnknownSync(WorkspaceTabId);
 export const decodeWorkspaceContextKey = Schema.decodeUnknownSync(WorkspaceContextKey);
 export const decodeWorkspaceSurfaceDescriptor = Schema.decodeUnknownSync(

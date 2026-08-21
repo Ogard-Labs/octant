@@ -1,5 +1,6 @@
-import type { TabGroupId, WorkspaceTabGroup, WorkspaceTabId } from "@octant/contracts/shell";
+import type { PaneId } from "@octant/contracts/shell";
 import {
+  createContext,
   useCallback,
   useEffect,
   useRef,
@@ -8,73 +9,99 @@ import {
   type RefObject,
 } from "react";
 import {
-  WorkspaceTabDragController as PointerDragController,
-  type WorkspaceTabDragSnapshot,
+  WorkspaceSurfaceDragController as PointerDragController,
+  type WorkspaceSurfaceDragSnapshot,
 } from "./workspaceTabDragController";
 import {
-  resolveWorkspaceTabDropDestination,
-  type WorkspaceDragGroupGeometry,
-  type WorkspaceTabDropDestination,
+  resolveWorkspaceSurfaceDropDestination,
+  type WorkspaceDragPaneGeometry,
+  type WorkspaceSurfaceDragSource,
+  type WorkspaceSurfaceDropDestination,
 } from "./workspaceTabDragGeometry";
 
-interface DragSource {
-  readonly groupId: TabGroupId;
-  readonly index: number;
-  readonly tabId: WorkspaceTabId;
-  readonly title: string;
-}
-
-export interface WorkspaceTabDragState {
-  readonly destination: WorkspaceTabDropDestination | null;
+export interface WorkspaceSurfaceDragState {
+  readonly destination: WorkspaceSurfaceDropDestination | null;
   readonly point: { readonly x: number; readonly y: number };
-  readonly source: DragSource;
+  readonly source: WorkspaceSurfaceDragSource;
 }
 
-export interface WorkspaceTabDragController {
-  readonly active: WorkspaceTabDragState | null;
-  readonly consumeSuppressedClick: (tabId: WorkspaceTabId) => boolean;
+export interface WorkspaceSurfaceDragHandle {
+  readonly active: WorkspaceSurfaceDragState | null;
+  readonly consumeSuppressedClick: (dragKey: string) => boolean;
   readonly onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void;
   readonly onPointerDown: (
     event: ReactPointerEvent<HTMLElement>,
-    group: WorkspaceTabGroup,
-    tabId: WorkspaceTabId,
-    index: number,
-    title: string,
+    source: WorkspaceSurfaceDragSource,
   ) => void;
   readonly onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
   readonly onPointerUp: (event: ReactPointerEvent<HTMLElement>) => void;
+  /** Attached to the workspace root; pane rects are measured under it. */
+  readonly rootRef: RefObject<HTMLDivElement | null>;
 }
 
-export function useWorkspaceTabDrag(options: {
-  readonly focusedGroupId?: TabGroupId;
-  readonly onDrop: (destination: WorkspaceTabDropDestination) => void;
-  readonly rootRef: RefObject<HTMLDivElement | null>;
-}): WorkspaceTabDragController {
-  const [active, setActive] = useState<WorkspaceTabDragState | null>(null);
+/**
+ * A sidebar thread row offered as a drag source. The shell mints the surface
+ * for the row's thread, so the row itself never learns the workspace's surface
+ * vocabulary.
+ */
+export interface SidebarThreadDragRow {
+  readonly rowId: string;
+  readonly threadId: string;
+  readonly title: string;
+  readonly projectId?: string;
+}
+
+export interface SidebarThreadDragTargets {
+  readonly beginThreadDrag: (
+    event: ReactPointerEvent<HTMLElement>,
+    row: SidebarThreadDragRow,
+  ) => void;
+  readonly onPointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
+  readonly onPointerUp: (event: ReactPointerEvent<HTMLElement>) => void;
+  readonly onPointerCancel: (event: ReactPointerEvent<HTMLElement>) => void;
+  /** Whether the row's click follows a completed drag and must not open it. */
+  readonly consumeThreadClickSuppression: (rowId: string) => boolean;
+}
+
+/**
+ * Reaches sidebar rows without threading drag props through every list layer.
+ * `null` where no workspace accepts drops (tests rendering rows alone).
+ */
+export const SidebarThreadDragContext = createContext<SidebarThreadDragTargets | null>(null);
+
+export function useWorkspaceSurfaceDrag(options: {
+  readonly focusedPaneId?: PaneId;
+  readonly onDrop: (
+    source: WorkspaceSurfaceDragSource,
+    destination: WorkspaceSurfaceDropDestination,
+  ) => void;
+}): WorkspaceSurfaceDragHandle {
+  const [active, setActive] = useState<WorkspaceSurfaceDragState | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const captured = useRef<{ readonly element: HTMLElement; readonly pointerId: number } | null>(
     null,
   );
   const onDrop = useRef(options.onDrop);
   const resolveDestination = useRef(
-    (_point: { readonly x: number; readonly y: number }, _source: DragSource) =>
-      null as WorkspaceTabDropDestination | null,
+    (_point: { readonly x: number; readonly y: number }, _source: WorkspaceSurfaceDragSource) =>
+      null as WorkspaceSurfaceDropDestination | null,
   );
   onDrop.current = options.onDrop;
   resolveDestination.current = (point, source) => {
-    const root = options.rootRef.current;
+    const root = rootRef.current;
     if (root === null) return null;
-    return resolveWorkspaceTabDropDestination({
+    return resolveWorkspaceSurfaceDropDestination({
       point,
       workspaceRect: toRect(root.getBoundingClientRect()),
-      groups: measureGroups(root),
-      source: { groupId: source.groupId, tabId: source.tabId, index: source.index },
-      ...(options.focusedGroupId === undefined ? {} : { focusedGroupId: options.focusedGroupId }),
+      panes: measurePanes(root),
+      source,
+      ...(options.focusedPaneId === undefined ? {} : { focusedPaneId: options.focusedPaneId }),
     });
   };
   const controller = useRef<PointerDragController | null>(null);
   if (controller.current === null) {
     controller.current = new PointerDragController({
-      onDrop: (destination) => onDrop.current(destination),
+      onDrop: (source, destination) => onDrop.current(source, destination),
       resolveDestination: (point, source) => resolveDestination.current(point, source),
       onSnapshotChange: (snapshot) => setActive(activeSnapshot(snapshot)),
     });
@@ -105,16 +132,13 @@ export function useWorkspaceTabDrag(options: {
 
   return {
     active,
-    consumeSuppressedClick: (tabId) => controller.current?.consumeClickSuppression(tabId) ?? false,
-    onPointerDown(event, group, tabId, index, title) {
+    consumeSuppressedClick: (dragKey) =>
+      controller.current?.consumeClickSuppression(dragKey) ?? false,
+    onPointerDown(event, source) {
       if (event.button !== 0) return;
       event.currentTarget.setPointerCapture?.(event.pointerId);
       captured.current = { element: event.currentTarget, pointerId: event.pointerId };
-      controller.current?.start(
-        event.pointerId,
-        { groupId: group.groupId, index, tabId, title },
-        { x: event.clientX, y: event.clientY },
-      );
+      controller.current?.start(event.pointerId, source, { x: event.clientX, y: event.clientY });
     },
     onPointerMove(event) {
       controller.current?.move(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -125,33 +149,25 @@ export function useWorkspaceTabDrag(options: {
       captured.current = null;
     },
     onPointerCancel: cancel,
+    rootRef,
   };
 }
 
-function activeSnapshot(snapshot: WorkspaceTabDragSnapshot): WorkspaceTabDragState | null {
+function activeSnapshot(snapshot: WorkspaceSurfaceDragSnapshot): WorkspaceSurfaceDragState | null {
   return snapshot.phase === "dragging"
     ? { destination: snapshot.destination, point: snapshot.point, source: snapshot.source }
     : null;
 }
 
-function measureGroups(root: HTMLElement): Array<WorkspaceDragGroupGeometry> {
-  return [...root.querySelectorAll<HTMLElement>("[data-workspace-group-id]")].flatMap((group) => {
-    const groupId = group.dataset.workspaceGroupId as TabGroupId | undefined;
-    const strip = group.querySelector<HTMLElement>("[data-workspace-tab-strip]");
-    if (groupId === undefined || strip === null) return [];
-    const tabs = [...strip.querySelectorAll<HTMLElement>("[data-workspace-tab-id]")].flatMap(
-      (tab) => {
-        const tabId = tab.dataset.workspaceTabId as WorkspaceTabId | undefined;
-        return tabId === undefined ? [] : [{ tabId, rect: toRect(tab.getBoundingClientRect()) }];
-      },
-    );
+function measurePanes(root: HTMLElement): Array<WorkspaceDragPaneGeometry> {
+  return [...root.querySelectorAll<HTMLElement>("[data-workspace-pane-id]")].flatMap((pane) => {
+    const paneId = pane.dataset.workspacePaneId as PaneId | undefined;
+    if (paneId === undefined) return [];
     return [
       {
-        groupId,
-        rect: toRect(group.getBoundingClientRect()),
-        tabCount: tabs.length,
-        tabStrip: { rect: toRect(strip.getBoundingClientRect()), tabs },
-        canSplit: group.dataset.workspaceCanSplit !== "false",
+        paneId,
+        rect: toRect(pane.getBoundingClientRect()),
+        canSplit: pane.dataset.workspaceCanSplit !== "false",
       },
     ];
   });
