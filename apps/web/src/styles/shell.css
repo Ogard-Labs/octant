@@ -42,6 +42,9 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
 
 .shell-frame > .window-chrome {
   position: relative;
+  /* hiddenInset reserves the top strip for native window movement. Controls in
+     that strip receive move gestures instead of pointer clicks on macOS. */
+  top: 24px;
   z-index: 4;
   display: flex;
   min-width: 0;
@@ -423,7 +426,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   min-width: 0;
   align-items: center;
   justify-content: flex-start;
-  gap: var(--oct-space-3);
+  gap: var(--oct-space-2);
   min-height: var(--oct-control-height-sm);
   padding-block: 0;
   padding-inline: var(--oct-space-2);
@@ -452,7 +455,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
-  box-shadow: inset 2px 0 0 var(--oct-accent);
+  box-shadow: inset 1px 0 0 var(--octant-border-strong);
   font-weight: 500;
 }
 
@@ -478,9 +481,13 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   border-radius: 999px;
 }
 
+.sidebar-navigation__thread-status[data-activity="idle"] {
+  opacity: 0;
+}
+
 .sidebar-navigation__thread-status[data-activity="unread"] {
-  background: var(--oct-accent);
-  border-color: var(--oct-accent);
+  background: var(--octant-text-secondary);
+  border-color: var(--octant-text-secondary);
 }
 
 .sidebar-navigation__thread-status[data-activity="attention"] {
@@ -519,12 +526,12 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   display: inline-flex;
   flex: none;
   align-items: center;
-  opacity: 0.85;
+  opacity: 0;
 }
 
 .sidebar-navigation__thread:hover .sidebar-navigation__thread-provider,
-.sidebar-navigation__thread[aria-current="page"] .sidebar-navigation__thread-provider {
-  opacity: 1;
+.sidebar-navigation__thread:focus-visible .sidebar-navigation__thread-provider {
+  opacity: 0.7;
 }
 
 .sidebar-navigation__thread-title {

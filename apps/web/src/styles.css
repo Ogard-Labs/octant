@@ -995,7 +995,7 @@ button:focus-visible {
 /* A Project name is a section header over its thread rows, not a row among
    them: generous room above each header, none below, and no per-row seams. */
 .project-block + .project-block {
-  margin-top: var(--oct-space-3);
+  margin-top: 2px;
 }
 
 /* Nested threads keep the header's left edge: the header's chevron gutter plus
@@ -1020,6 +1020,15 @@ button:focus-visible {
 .project-section__header h2 {
   margin: 0;
   font: inherit;
+}
+
+.project-section > .sidebar-section {
+  color: var(--octant-text-muted);
+  font-family: var(--oct-font-ui);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 /* The header's controls answer for the section the pointer is already on, so
@@ -1113,14 +1122,13 @@ button:focus-visible {
   gap: 2px;
 }
 
-/* The Project's name wears the system's section-label type, so the tree reads
-   header-over-rows instead of two competing row styles. */
+/* Project names belong to the navigation tree, not to a code or metadata
+   register. Hierarchy comes from the disclosure and nesting. */
 .project-row__copy > span {
   overflow: hidden;
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  font-family: var(--oct-font-ui);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1584,7 +1592,8 @@ button:focus-visible {
 
 .workspace-tab-launcher__disclosure {
   top: calc(100% + 4px);
-  right: 0;
+  right: auto;
+  left: 0;
 }
 
 .workspace-disclosure__action {

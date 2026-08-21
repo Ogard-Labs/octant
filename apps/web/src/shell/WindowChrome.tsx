@@ -27,7 +27,7 @@ export function WindowChrome(props: WindowChromeProps) {
   return (
     <header
       aria-label={`Workspace actions for ${props.activeSurface}`}
-      className={`window-chrome window-chrome--material-${props.material}`}
+      className={`window-chrome window-chrome--material-${props.material} window-drag-region`}
     >
       {props.onExpandSidebar === undefined ? null : (
         <div className="window-chrome__leading">
@@ -40,7 +40,7 @@ export function WindowChrome(props: WindowChromeProps) {
           />
         </div>
       )}
-      <span aria-hidden="true" className="window-chrome__drag-space window-drag-region" />
+      <span aria-hidden="true" className="window-chrome__drag-space" />
       {props.developmentAuthentication ? (
         <span
           className="badge badge-warn window-chrome__development-auth window-no-drag"
@@ -64,7 +64,7 @@ export function WindowChrome(props: WindowChromeProps) {
           )}
         </div>
       ) : null}
-      <div className="window-chrome__trailing">
+      <div className="window-chrome__trailing window-no-drag">
         {props.isNarrow ? (
           <NarrowOverflow
             dockAvailable={props.dockAvailable}

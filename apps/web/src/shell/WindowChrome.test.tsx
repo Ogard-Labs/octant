@@ -181,6 +181,7 @@ describe("WindowChrome", () => {
 
   it("keeps compact native chrome geometry and neutral tool controls", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
+    expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 24px;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
     expect(cssRule(".window-chrome__button")).toContain("width: 26px;");
@@ -218,6 +219,28 @@ describe("WindowChrome", () => {
     expect(cssRule('.project-row[data-active="true"]')).toContain("color: var(--oct-fg);");
     expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple|background/i);
     expect(styles).not.toMatch(/\.project-row__mark\[data-type=/);
+  });
+
+  it("keeps the Project tree readable and reserves status ink for active work", () => {
+    const projectName = cssRule(".project-row__copy > span");
+    expect(projectName).toContain("font-family: var(--oct-font-ui);");
+    expect(projectName).toContain("font-weight: 500;");
+    expect(projectName).not.toMatch(/text-transform|letter-spacing|mono/);
+    expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
+      "opacity: 0;",
+    );
+    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("opacity: 0;");
+    expect(cssRule('.sidebar-navigation__thread[aria-current="page"]')).not.toContain(
+      "var(--oct-accent)",
+    );
+    const sectionLabel = cssRule(".project-section > .sidebar-section");
+    expect(sectionLabel).toContain("font-family: var(--oct-font-ui);");
+    expect(sectionLabel).toContain("letter-spacing: normal;");
+    expect(sectionLabel).toContain("text-transform: none;");
+    expect(sectionLabel).not.toContain("mono");
+    expect(cssRule('.sidebar-navigation__thread-status[data-activity="unread"]')).toContain(
+      "background: var(--octant-text-secondary);",
+    );
   });
 
   it("keeps semantic shell borders and controls restrained", () => {
@@ -427,7 +450,7 @@ describe("WindowChrome", () => {
     expect(screen.getByRole("banner")).toHaveAccessibleName(
       "Workspace actions for Welcome to Code",
     );
-    expect(container.querySelector(".window-chrome__trailing")).toBeInTheDocument();
+    expect(container.querySelector(".window-chrome__trailing")).toHaveClass("window-no-drag");
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
@@ -500,7 +523,7 @@ describe("WindowChrome", () => {
     expect(screen.getByRole("button", { name: "Open Zen" })).toHaveFocus();
   });
 
-  it("marks only empty rail space draggable and exposes the opaque material fallback", () => {
+  it("maps the whole chrome as draggable while controls carve out no-drag regions", () => {
     const { container } = render(
       <WindowChrome
         activeSurface="Welcome to Code"
@@ -515,7 +538,10 @@ describe("WindowChrome", () => {
     );
 
     expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
-    expect(container.querySelector(".window-chrome__drag-space")).toHaveClass("window-drag-region");
+    expect(container.firstChild).toHaveClass("window-drag-region");
+    expect(container.querySelector(".window-chrome__drag-space")).not.toHaveClass(
+      "window-drag-region",
+    );
     expect(container.querySelectorAll(".window-drag-region")).toHaveLength(1);
     for (const control of screen.getAllByRole("button")) {
       expect(control).toHaveClass("window-no-drag");
