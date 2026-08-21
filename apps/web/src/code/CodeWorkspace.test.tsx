@@ -394,9 +394,7 @@ function controller(
     threadUsage: { inputTokens: 0, outputTokens: 0, limits: [] },
     providerRequests: [],
     answerProviderRequest: vi.fn(async () => true),
-    cancelQueuedFollowUp: vi.fn(),
-    queueFollowUp: vi.fn(),
-    queuedFollowUps: [],
+
     turnActivity: new Map(),
     followUps: new Map(),
     markFollowUp: vi.fn(async () => true),

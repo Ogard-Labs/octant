@@ -4,6 +4,7 @@ import type { WorkRequestClient } from "@octant/client-runtime/work-request-clie
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
+import type { HostId } from "@octant/contracts/host";
 import { decodeWorkThreadId, type WorkThreadId } from "@octant/contracts/work-threads";
 import type { ZenSourceContext, ZenThreadCatalogEntry } from "@octant/contracts/zen";
 import { buildModelPickerGroups } from "@octant/domain";
@@ -94,6 +95,7 @@ function buildCardSurface(
     if (workThreadClient === undefined) return undefined;
     return (
       <ZenWorkCardSurface
+        hostId={sourceContext.hostId}
         {...(clients.providerController === undefined
           ? {}
           : { providerController: clients.providerController })}
@@ -172,6 +174,7 @@ function ZenChatCardSurface(props: {
 
 /** One Work thread, live inside its card, bound to that thread's own root. */
 function ZenWorkCardSurface(props: {
+  readonly hostId: HostId;
   readonly mutationClient?: WorkMutationClient;
   readonly providerController?: ZenCardProviderView;
   readonly requestClient?: WorkRequestClient;
@@ -195,6 +198,7 @@ function ZenWorkCardSurface(props: {
   );
   return (
     <WorkThreadWorkspace
+      hostId={props.hostId}
       {...(props.mutationClient === undefined ? {} : { mutationClient: props.mutationClient })}
       providerGroups={providerGroups}
       {...(props.requestClient === undefined ? {} : { requestClient: props.requestClient })}

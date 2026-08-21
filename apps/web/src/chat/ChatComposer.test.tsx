@@ -102,6 +102,63 @@ describe("ChatComposer", () => {
     expect(onSend).toHaveBeenCalledWith("Reply");
   });
 
+  it("lets the user type during a running turn and says the message is queued", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => true);
+    const onDraftChange = vi.fn();
+    const onDiscardQueued = vi.fn();
+    const { rerender, props } = renderComposer({
+      draft: "Next instruction",
+      isSending: true,
+      onDiscardQueued,
+      onDraftChange,
+      onSend,
+      queueStatus: "queued",
+    });
+
+    const draft = screen.getByLabelText("Message");
+    expect(draft).toBeEnabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "This message is queued and will send when the response finishes.",
+    );
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
+    expect(onDiscardQueued).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+
+    rerender(
+      <ChatComposer
+        {...props}
+        draft="Edited follow-up"
+        isSending={false}
+        onDiscardQueued={onDiscardQueued}
+        onDraftChange={onDraftChange}
+        onSend={onSend}
+        queueStatus="held"
+        statusMessage="The response was cancelled. The queued message was not sent."
+      />,
+    );
+    expect(screen.getByLabelText("Message")).toHaveValue("Edited follow-up");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "The response was cancelled. The queued message was not sent.",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("Edited follow-up");
+  });
+
+  it("queues Enter during a running turn instead of sending immediately", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => true);
+    renderComposer({ draft: "After this", isSending: true, onSend, onStop: vi.fn() });
+
+    const draft = screen.getByLabelText("Message");
+    expect(draft).toBeEnabled();
+    await user.click(draft);
+    await user.keyboard("{Enter}");
+    expect(onSend).toHaveBeenCalledWith("After this");
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled();
+  });
+
   it("passes only the chosen File to the attachment callback and explains unsupported attachments", async () => {
     const user = userEvent.setup();
     const onFileSelected = vi.fn();
@@ -252,7 +309,7 @@ describe("ChatComposer", () => {
     rerender(<ChatComposer {...props} modelOptions={[]} />);
     expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
     rerender(<ChatComposer {...props} isSending />);
-    expect(screen.getByRole("combobox", { name: "Effort" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Model options" })).toBeDisabled();
   });
 
   it("makes disabled reasons available without relying on color", async () => {
