@@ -25,6 +25,7 @@ import type {
   CodeCommandResult,
   CodeDeliveryOutcomeKind,
 } from "@octant/contracts/code";
+import type { MentionableThreadId } from "@octant/contracts";
 import { draftThreadModePresentation, type DraftIntentCard } from "@octant/contracts/thread-draft";
 import {
   resolveCodeNewThreadWorkspace,
@@ -91,11 +92,12 @@ export interface DraftThreadWorkspaceProps {
     draftProjectId?: ProjectId,
     deliveryOutcome?: CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
-  ) => void | Promise<void>;
+    threadMentionIds?: ReadonlyArray<MentionableThreadId>,
+  ) => boolean | void | Promise<boolean | void>;
   readonly onCreateCodeThread?: (
     input: CodeComposerSubmitInput,
     projectId?: ProjectId,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   readonly codeExecute?: (
     command: CodeCommand,
     signal?: AbortSignal,
@@ -109,6 +111,8 @@ export interface DraftThreadWorkspaceProps {
     receiptId?: string,
   ) => Promise<ProjectId | undefined>;
   readonly onCancel: () => void;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly pendingMessage?: string;
@@ -284,17 +288,20 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { selectedModelId: props.selectedModelId })}
           onSelectProvider={props.onSelectProvider}
+          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+          {...(props.windowCapability === undefined
+            ? {}
+            : { windowCapability: props.windowCapability })}
           {...(props.executionProfile === undefined
             ? {}
             : { profileControl: props.executionProfile })}
           onCreateThread={(input) => {
             if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
-              void props.onCreateCodeThread(input, selectedProjectId);
-              return;
+              return props.onCreateCodeThread(input, selectedProjectId);
             }
             // Carry the outcome the user confirmed in the composer so the
             // fallback path never re-derives or auto-confirms a suggestion.
-            void props.onCreateThread(
+            return props.onCreateThread(
               input.prompt,
               selectedProjectId,
               input.deliveryTarget.outcomeKind,
@@ -330,10 +337,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
             ? {}
             : { selectedModelId: props.selectedModelId })}
           onSelectProvider={props.onSelectProvider}
-          onCreateThread={(prompt, images) =>
-            images === undefined
-              ? props.onCreateThread(prompt, selectedProjectId)
-              : props.onCreateThread(prompt, selectedProjectId, undefined, images)
+          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+          {...(props.windowCapability === undefined
+            ? {}
+            : { windowCapability: props.windowCapability })}
+          onCreateThread={(prompt, images, threadMentionIds) =>
+            props.onCreateThread(prompt, selectedProjectId, undefined, images, threadMentionIds)
           }
           onCancel={props.onCancel}
           {...(props.onCancelFirstTurn === undefined

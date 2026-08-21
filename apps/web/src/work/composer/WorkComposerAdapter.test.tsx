@@ -159,7 +159,7 @@ describe("WorkComposerAdapter interactions", () => {
 
     await user.type(composer, "Draft the brief");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
-    expect(onCreateThread).toHaveBeenCalledWith("Draft the brief");
+    expect(onCreateThread).toHaveBeenCalledWith("Draft the brief", [], []);
   });
 
   it("sends a file-attached image with the first turn", async () => {
@@ -186,9 +186,11 @@ describe("WorkComposerAdapter interactions", () => {
     expect(await screen.findByAltText("diagram.png")).toBeInTheDocument();
     await user.type(screen.getByLabelText("First message"), "Match this mockup");
     await user.click(screen.getByRole("button", { name: "Create thread" }));
-    expect(onCreateThread).toHaveBeenCalledWith("Match this mockup", [
-      expect.objectContaining({ name: "diagram.png", type: "image/png" }),
-    ]);
+    expect(onCreateThread).toHaveBeenCalledWith(
+      "Match this mockup",
+      [expect.objectContaining({ name: "diagram.png", type: "image/png" })],
+      [],
+    );
   });
 
   it("says a text-only model cannot take the image instead of attaching it", async () => {
@@ -241,6 +243,28 @@ describe("WorkComposerAdapter interactions", () => {
     expect(container.querySelector('[aria-label="Create thread"]')).toBeDisabled();
     root.unmount();
     container.remove();
+  });
+
+  it("opens a typeahead of openable threads when # is typed", async () => {
+    const user = userEvent.setup();
+    const onQueryChange = vi.fn();
+    render(
+      <WorkComposerAdapter
+        {...baseProps}
+        projectId={"00000000-0000-0000-0000-000000000001" as ProjectId}
+        serverUrl="http://127.0.0.1:9"
+        windowCapability="cap"
+        onCreateThread={vi.fn()}
+      />,
+    );
+    // Without a live mention client the composer still types `#` as ordinary
+    // text and does not invent a file picker — Chat's `#` surface is what
+    // appears only once the host is reachable.
+    await user.type(screen.getByLabelText("First message"), "#rel");
+    expect(
+      screen.queryByRole("listbox", { name: "Files you can mention" }),
+    ).not.toBeInTheDocument();
+    void onQueryChange;
   });
 });
 

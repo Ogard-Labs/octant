@@ -35,6 +35,7 @@ import {
   ProviderModelId,
   ProviderSessionId,
 } from "./providers";
+import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -609,6 +610,15 @@ const StartProviderTurn = Schema.Struct({
   ),
   threadMentionIds: Schema.optional(
     Schema.Array(MentionableThreadId).pipe(Schema.maxItems(MAX_THREAD_MENTIONS_PER_TURN)),
+  ),
+  /**
+   * `@file` mentions this turn points at. Relative paths only: the host
+   * classifies each path against the thread's bound checkout and reads the
+   * file itself, so a renderer cannot include bytes from outside the root.
+   * A path that escapes is refused before any read.
+   */
+  fileMentionPaths: Schema.optional(
+    Schema.Array(FileMentionPathInput).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
   ),
   /**
    * The posture this turn asks to run under. The host clamps it to the

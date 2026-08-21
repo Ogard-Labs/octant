@@ -34,6 +34,7 @@ import {
 } from "@octant/domain/code-policy";
 import {
   decideRunMerge,
+  FILE_MENTION_UNREADABLE_CONTEXT,
   runMergeRefusalText,
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
@@ -686,6 +687,20 @@ export interface CodeOperationServiceOptions {
     readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
     readonly windowId: WindowId;
   }) => Promise<ReadonlyArray<CodeThreadMentionContext>>;
+  /**
+   * Resolves the `@file` mentions a Code turn names.
+   *
+   * The command carries relative paths only. The host classifies each path
+   * against this thread's bound checkout and reads the file itself, so a
+   * renderer cannot include bytes from outside the root. Out-of-root paths
+   * are refused before any read and reported in words rather than dropped.
+   */
+  readonly resolveFileMentionContext?: (input: {
+    readonly fileMentionPaths: ReadonlyArray<string>;
+    readonly windowId: WindowId;
+    readonly threadId: CodeThreadId;
+    readonly checkoutId: CodeThread["checkoutId"];
+  }) => Promise<ReadonlyArray<ProviderContextBlock>>;
   /**
    * Takes the notes the user pointed at the running product and hands them to
    * this turn. The port marks each note carried in the same step, so a note
@@ -2141,6 +2156,7 @@ export class CodeOperationService {
     const context = [
       ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
       ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
+      ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
       ...(feedback?.context === undefined || feedback.context.trim().length === 0
         ? []
         : [{ kind: "user-message", text: feedback.context } as const]),
@@ -2303,6 +2319,34 @@ export class CodeOperationService {
             : mention.text,
       } as const;
     });
+  }
+
+  async #resolveFileMentions(
+    fileMentionPaths: ReadonlyArray<string> | undefined,
+    windowId: WindowId,
+    thread: CodeThread,
+  ): Promise<ReadonlyArray<ProviderContextBlock>> {
+    if (fileMentionPaths === undefined || fileMentionPaths.length === 0) return [];
+    const resolve = this.#options.resolveFileMentionContext;
+    if (resolve === undefined) {
+      return fileMentionPaths.map(() => ({
+        kind: "user-message" as const,
+        text: FILE_MENTION_UNREADABLE_CONTEXT,
+      }));
+    }
+    try {
+      return await resolve({
+        fileMentionPaths,
+        windowId,
+        threadId: thread.id,
+        checkoutId: thread.checkoutId,
+      });
+    } catch {
+      return fileMentionPaths.map(() => ({
+        kind: "user-message" as const,
+        text: FILE_MENTION_UNREADABLE_CONTEXT,
+      }));
+    }
   }
 
   async #providerInput(

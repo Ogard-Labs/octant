@@ -1,3 +1,4 @@
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CodeComposerAdapter } from "./CodeComposerAdapter";
@@ -454,5 +455,51 @@ describe("CodeComposerAdapter interactions", () => {
     expect(container.textContent).toContain("project-b-only");
     root.unmount();
     container.remove();
+  });
+
+  it("says a text-only model cannot take a pasted image instead of attaching it", async () => {
+    render(
+      <CodeComposerAdapter
+        {...defaultProps}
+        providerGroups={[
+          {
+            driverLabel: "OpenCode",
+            endpointHost: "local",
+            executionHost: "local",
+            instance: {
+              id: "80000000-0000-4000-8000-0000000000a1",
+              displayName: "Local OpenCode",
+            },
+            readiness: "ready",
+            sections: [
+              {
+                label: "Models",
+                models: [
+                  {
+                    model: {
+                      id: "model-one",
+                      displayName: "Model One",
+                      inputModalities: ["text"],
+                    },
+                  },
+                ],
+              },
+            ],
+          } as never,
+        ]}
+        selectedProviderInstanceId={"80000000-0000-4000-8000-0000000000a1" as never}
+        selectedModelId={"model-one" as never}
+      />,
+    );
+
+    const file = new File([new Uint8Array([137, 80, 78])], "pasted.png", { type: "image/png" });
+    fireEvent.paste(screen.getByLabelText("First message"), {
+      clipboardData: { files: [file], items: [] },
+    });
+    const attached = await screen.findByLabelText("Attached images");
+    expect(attached).toHaveTextContent(
+      "The selected model does not accept images. Choose an image-capable model.",
+    );
+    expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
   });
 });

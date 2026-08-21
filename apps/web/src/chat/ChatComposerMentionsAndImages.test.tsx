@@ -290,6 +290,21 @@ describe("ChatComposer thread mentions", () => {
   });
 });
 
+describe("ChatComposer @file absence", () => {
+  it("does not offer a file mention picker, because Chat has no filesystem authority", async () => {
+    const user = userEvent.setup();
+    renderControlled();
+
+    const message = screen.getByLabelText("Message");
+    await user.click(message);
+    await user.type(message, "look at @src");
+
+    expect(
+      screen.queryByRole("listbox", { name: "Files you can mention" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("ChatComposer image paste", () => {
   it("turns a pasted PNG into a pending attachment through the ordinary file path", () => {
     const onFileSelected = vi.fn();

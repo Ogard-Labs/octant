@@ -801,7 +801,7 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
 
     await act(async () => {
-      await result.current.sendFollowUp("check tests", [], [], "plan");
+      await result.current.sendFollowUp("check tests", [], [], [], "plan");
     });
 
     expect(executeOperation).toHaveBeenCalledWith(

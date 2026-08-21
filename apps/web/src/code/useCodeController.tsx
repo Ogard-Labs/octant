@@ -1336,6 +1336,7 @@ export function useCodeController(options: CodeControllerOptions) {
        * image and never decides what an id stands for.
        */
       readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
+      readonly fileMentionPaths?: ReadonlyArray<string>;
       /**
        * The posture this turn asks to run under. The host clamps it to the
        * thread's grant, so this is an intent, not a grant.
@@ -1362,6 +1363,9 @@ export function useCodeController(options: CodeControllerOptions) {
         ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
           ? {}
           : { attachmentIds: [...input.attachmentIds] }),
+        ...(input.fileMentionPaths === undefined || input.fileMentionPaths.length === 0
+          ? {}
+          : { fileMentionPaths: [...input.fileMentionPaths] }),
         ...(input.executionPolicy === undefined ? {} : { executionPolicy: input.executionPolicy }),
       });
       return { operationId, started } as const;
@@ -1374,6 +1378,9 @@ export function useCodeController(options: CodeControllerOptions) {
       readonly threadId: CodeThreadId;
       readonly checkoutId: CodeCheckoutId;
       readonly prompt: string;
+      readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
+      readonly attachmentIds?: ReadonlyArray<CodeAttachmentId>;
+      readonly fileMentionPaths?: ReadonlyArray<string>;
     }): Promise<boolean> => {
       const prompt = input.prompt.trim();
       if (prompt.length === 0) return false;
@@ -1631,6 +1638,8 @@ export function useCodeController(options: CodeControllerOptions) {
       threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
       /** Images the host already staged for this thread. */
       attachments: ReadonlyArray<CodeAttachmentReference> = [],
+      /** `@file` paths this follow-up names; the host re-checks each one. */
+      fileMentionPaths: ReadonlyArray<string> = [],
       /**
        * The posture this follow-up asks to run under. The host clamps it to
        * the thread's grant. Absent means the thread's own posture.
@@ -1676,6 +1685,7 @@ export function useCodeController(options: CodeControllerOptions) {
           prompt: trimmed,
           threadMentionIds,
           attachmentIds: attachments.map((attachment) => attachment.attachmentId),
+          fileMentionPaths,
           ...(executionPolicy === undefined ? {} : { executionPolicy }),
           signal: controller.signal,
         });
@@ -1872,6 +1882,7 @@ export function useCodeController(options: CodeControllerOptions) {
       prompt: string,
       threadMentionIds: ReadonlyArray<MentionableThreadId> = [],
       attachments: ReadonlyArray<CodeAttachmentReference> = [],
+      fileMentionPaths: ReadonlyArray<string> = [],
       executionPolicy?: ProviderExecutionPolicy,
     ): QueuedCodeTurn | undefined => {
       const trimmed = prompt.trim();
@@ -1882,6 +1893,7 @@ export function useCodeController(options: CodeControllerOptions) {
         prompt: trimmed,
         threadMentionIds,
         attachments,
+        fileMentionPaths,
         ...(executionPolicy === undefined ? {} : { executionPolicy }),
       };
       setTurnQueues((current) => enqueueCodeTurn(current, String(threadId), turn));
@@ -1919,6 +1931,7 @@ export function useCodeController(options: CodeControllerOptions) {
           next.prompt,
           next.threadMentionIds,
           next.attachments,
+          next.fileMentionPaths,
           next.executionPolicy,
         );
         if (!mounted.current || !sent) return;
