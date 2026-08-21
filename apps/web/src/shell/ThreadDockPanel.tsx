@@ -1,5 +1,4 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
@@ -20,7 +19,6 @@ export interface ThreadDockPanelProps {
   readonly planClient?: PlanClient;
   readonly shipClient?: ShipClient;
   readonly agentRunClient?: AgentRunClient;
-  readonly agentRunSettingsClient?: AgentRunSettingsClient;
 }
 
 /**
@@ -28,12 +26,11 @@ export interface ThreadDockPanelProps {
  * *with* on a thread, as opposed to the live status of its environment.
  *
  * Each group mounts its body only while open, so a panel opened for its Files
- * does not also start the agent-run and publish reads. Agents is here rather
- * than in the thread header because what it offers is a creation console —
- * provider instance, model, authority, execution policy — and a configuration
- * form stacked above a transcript is what made the thread window unreadable.
- * The parent's compact live child status stays in the thread header, which is
- * where it belongs.
+ * does not also start the agent-run and publish reads. Agents is here for the
+ * authoritative hierarchy and result controls. Code child creation stays
+ * absent until this surface can supply the verified isolated worktree the host
+ * requires; a Chat-scoped fallback would misrepresent the parent and its
+ * authority. The parent's compact live child status stays in the thread header.
  */
 export function ThreadDockPanel(props: ThreadDockPanelProps) {
   return (
@@ -71,15 +68,8 @@ export function ThreadDockPanel(props: ThreadDockPanelProps) {
       {props.agentRunClient === undefined ? null : (
         <EnvironmentGroup title="Agents">
           <AgentRunHierarchy
-            // This thread is the parent authority the host verifies before it
-            // admits a child, so creation belongs here rather than on a surface
-            // that would have to invent one.
-            allowCreation
             client={props.agentRunClient}
             parentThreadId={decodeAgentRunParentThreadId(String(props.threadId))}
-            {...(props.agentRunSettingsClient === undefined
-              ? {}
-              : { settingsClient: props.agentRunSettingsClient })}
           />
         </EnvironmentGroup>
       )}

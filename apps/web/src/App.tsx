@@ -1886,9 +1886,7 @@ function LaunchedShell(
       void controller.updateSettings({ lastContextSurface: null });
     }
   }
-  function toggleDock() {
-    const opener = document.activeElement;
-    if (!(opener instanceof HTMLElement)) return;
+  function toggleDock(opener: HTMLElement) {
     if (dockOpen) {
       dockOpener.current = { element: opener, logicalTarget: "dock" };
       closeDock();
@@ -4060,7 +4058,6 @@ function LaunchedShell(
                 dockThread === undefined ? null : (
                   <ThreadDockPanel
                     agentRunClient={agentRunClient}
-                    agentRunSettingsClient={agentRunSettingsClient}
                     {...(dockThread.checkoutId === undefined
                       ? {}
                       : { checkoutId: dockThread.checkoutId })}

@@ -158,6 +158,7 @@ function createHandler(
         readonly mode: string;
       }) => ReadonlyArray<{ readonly kind: string; readonly text: string }> | undefined;
     };
+    readonly parentMode?: "chat" | "code";
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-routes-"));
@@ -221,6 +222,7 @@ function createHandler(
       options.authorizeCreation?.() === false
         ? undefined
         : {
+            parentMode: options.parentMode ?? "chat",
             parentAuthority: { ...authority, subagents: true },
             liveAuthority: { ...authority, subagents: true },
           },
@@ -488,6 +490,24 @@ describe("agentRunRoutes", () => {
       }),
     );
     expect(response?.status).toBe(403);
+  });
+
+  it("refuses a child whose requested mode does not match its actual parent thread", async () => {
+    const { handler, persistence, token } = createHandler({ parentMode: "code" });
+
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/request", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify(creationBody()),
+      }),
+    );
+
+    expect(response?.status).toBe(400);
+    expect(await response?.json()).toMatchObject({
+      error: "AgentRun child mode must match the parent thread mode.",
+    });
+    expect(persistence.getByRequestId(ids.request)).toBeUndefined();
   });
 
   it("does not reserve capacity again when the request id is retried", async () => {

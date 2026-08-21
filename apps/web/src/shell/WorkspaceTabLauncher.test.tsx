@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { WorkspaceTabLauncher } from "./WorkspaceTabLauncher";
@@ -23,7 +25,15 @@ const catalog: WorkspaceSurfaceCatalog = {
   ],
 };
 
+const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+
 describe("WorkspaceTabLauncher", () => {
+  it("opens its disclosure into the workspace instead of under the clipped sidebar edge", () => {
+    const rule = styles.match(/\.workspace-tab-launcher__disclosure\s*{([^}]*)}/)?.[1] ?? "";
+    expect(rule).toContain("left: 0;");
+    expect(rule).toContain("right: auto;");
+  });
+
   it("lists only available surfaces for the active mode and opens one on selection", () => {
     const onOpenSurface = vi.fn();
     render(<WorkspaceTabLauncher catalog={catalog} mode="work" onOpenSurface={onOpenSurface} />);
