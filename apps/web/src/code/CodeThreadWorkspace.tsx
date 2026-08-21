@@ -42,6 +42,7 @@ import {
 import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
+import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
@@ -744,40 +745,54 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           />
         </aside>
       ) : null}
-      <div className="code-thread-workspace__conversation" role="log" aria-live="polite">
-        <div className="code-thread-workspace__transcript thread-column">
-          {showEmptyConversation ? (
-            <>
-              <p className="code-thread-workspace__empty" role="status">
-                No messages yet. Send a prompt to start this thread.
-              </p>
-              {/* A thread on an empty checkout has nothing to talk about yet.
-                  Offering the curated scaffolds here, and only here, keeps the
-                  choice next to the moment it matters. */}
-              {presets.available ? (
-                <WorkspacePresetPicker
-                  busy={presets.busy}
-                  {...(presets.message === undefined ? {} : { message: presets.message })}
-                  onApply={(preset) => void presets.apply(preset)}
-                  presets={presets.presets}
-                  skills={presets.skills}
-                />
-              ) : null}
-              {scaffolds.available ? (
-                <ScaffoldPicker
-                  busy={scaffolds.busy}
-                  entries={scaffolds.entries}
-                  {...(scaffolds.lastRun === undefined ? {} : { lastRun: scaffolds.lastRun })}
-                  {...(scaffolds.message === undefined ? {} : { message: scaffolds.message })}
-                  onStart={(entry, directoryName) => {
-                    void scaffolds.start(entry, directoryName);
-                  }}
-                  runnable={scaffolds.runnable}
-                />
-              ) : null}
-            </>
-          ) : null}
-          {messages.map((message, index) => {
+      {messages.length === 0 ? (
+        <div className="code-thread-workspace__conversation" role="log" aria-live="polite">
+          <div className="code-thread-workspace__transcript thread-column">
+            {showEmptyConversation ? (
+              <>
+                <p className="code-thread-workspace__empty" role="status">
+                  No messages yet. Send a prompt to start this thread.
+                </p>
+                {/* A thread on an empty checkout has nothing to talk about yet.
+                    Offering the curated scaffolds here, and only here, keeps the
+                    choice next to the moment it matters. */}
+                {presets.available ? (
+                  <WorkspacePresetPicker
+                    busy={presets.busy}
+                    {...(presets.message === undefined ? {} : { message: presets.message })}
+                    onApply={(preset) => void presets.apply(preset)}
+                    presets={presets.presets}
+                    skills={presets.skills}
+                  />
+                ) : null}
+                {scaffolds.available ? (
+                  <ScaffoldPicker
+                    busy={scaffolds.busy}
+                    entries={scaffolds.entries}
+                    {...(scaffolds.lastRun === undefined ? {} : { lastRun: scaffolds.lastRun })}
+                    {...(scaffolds.message === undefined ? {} : { message: scaffolds.message })}
+                    onStart={(entry, directoryName) => {
+                      void scaffolds.start(entry, directoryName);
+                    }}
+                    runnable={scaffolds.runnable}
+                  />
+                ) : null}
+              </>
+            ) : null}
+          </div>
+        </div>
+      ) : (
+        <TranscriptWindow
+          align="start"
+          className="code-thread-workspace__conversation"
+          estimateSize={96}
+          gap={18}
+          itemKey={(message) => message.id}
+          items={messages}
+          key={String(props.threadId)}
+          listClassName="code-thread-workspace__transcript thread-column"
+          {...(confirmingRestore === undefined ? {} : { pinnedKeys: [confirmingRestore] })}
+          renderItem={(message, index) => {
             const previousAssistant = previousAssistantMessage(messages, index);
             const handoff =
               message.role === "assistant" &&
@@ -792,10 +807,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 ? undefined
                 : checkpoints.byAnchor.get(String(message.operationId));
             return (
-              // Long threads stay cheap without a windowing library: the engine
-              // skips laying out rows that are scrolled out of view, and the
-              // reserved size keeps the scrollbar honest.
-              <div className="code-thread-workspace__row" key={message.id}>
+              <div className="code-thread-workspace__row">
                 {handoff ? (
                   <div
                     aria-label="Provider handoff"
@@ -956,9 +968,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 </article>
               </div>
             );
-          })}
-        </div>
-      </div>
+          }}
+          restoreKey={String(props.threadId)}
+          role="region"
+        />
+      )}
 
       <InlineThreadPlan />
 

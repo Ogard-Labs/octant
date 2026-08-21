@@ -123,6 +123,59 @@ function body(contentId: string, role: "user" | "assistant", text: string, diges
   };
 }
 
+function longView(count: number) {
+  const turns = Array.from({ length: count }, (_, index) => {
+    const n = String(index + 1).padStart(12, "0");
+    return {
+      id: `00000000-0000-4000-8000-${n}`,
+      threadId: ids.thread,
+      sequence: index + 1,
+      userMessageRef: {
+        contentId: `10000000-0000-4000-8000-${n}`,
+        digest: "a".repeat(64),
+        byteLength: 12,
+      },
+      attachmentIds: [],
+      attempts: [
+        {
+          id: `30000000-0000-4000-8000-${n}`,
+          turnId: `00000000-0000-4000-8000-${n}`,
+          threadId: ids.thread,
+          providerInstanceId: "10000000-0000-4000-8000-000000000001",
+          providerSessionId: "20000000-0000-4000-8000-000000000001",
+          modelId: "model-a",
+          contextManifestId: "30000000-0000-4000-8000-000000000001",
+          outcome: "completed" as const,
+          responseRefs: [
+            { contentId: `20000000-0000-4000-8000-${n}`, digest: "b".repeat(64), byteLength: 12 },
+          ],
+          citationIds: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      ],
+      createdAt: now,
+    };
+  });
+  const contents = turns.flatMap((turn, index) => [
+    body(String(turn.userMessageRef.contentId), "user", `User turn ${String(index)}`, "a"),
+    body(
+      String(turn.attempts[0]!.responseRefs[0]!.contentId),
+      "assistant",
+      `Assistant turn ${String(index)}`,
+      "b",
+    ),
+  ]);
+  return decodeChatThreadView({
+    ...viewFixture(),
+    lastSequence: count,
+    turns,
+    contents,
+    attachments: [],
+    citations: [],
+  });
+}
+
 describe("ChatTranscript", () => {
   it("renders immutable ordered content, attachment names, attempt states, citations, and handoffs", () => {
     render(<ChatTranscript view={viewFixture()} />);
@@ -139,7 +192,7 @@ describe("ChatTranscript", () => {
       "https://example.test/guide",
     );
 
-    const content = screen.getByRole("log", { name: "Chat transcript" });
+    const content = screen.getByRole("list", { name: "Chat transcript" });
     expect(content.textContent).toMatch(
       /Please summarize this\.\s*diagram\.png[\s\S]*Interrupted[\s\S]*Provider handoff · model-b[\s\S]*Here is the summary\.[\s\S]*Completed/,
     );
@@ -537,6 +590,22 @@ describe("ChatTranscript", () => {
     render(<ChatTranscript view={viewFixture()} />);
 
     expect(screen.queryByRole("button", { name: "Checkpoint" })).toBeNull();
+  });
+
+  it("windows a 1000-turn conversation so only a bounded number of rows mount", () => {
+    render(<ChatTranscript view={longView(1000)} />);
+
+    expect(document.querySelectorAll("[data-transcript-row]").length).toBeLessThan(80);
+    expect(screen.getByText("User turn 0")).toBeVisible();
+    expect(screen.queryByText("User turn 999")).not.toBeInTheDocument();
+  });
+
+  it("jumps to a turn that was outside the window", async () => {
+    const view = longView(1000);
+    const turnId = view.turns[500]!.id;
+    render(<ChatTranscript revealTurnId={turnId} view={view} />);
+
+    expect(await screen.findByText("User turn 500")).toBeVisible();
   });
 });
 
