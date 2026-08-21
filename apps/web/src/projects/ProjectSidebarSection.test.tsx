@@ -1,3 +1,4 @@
+import type { ContextHealth } from "@octant/contracts/context";
 import type { ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -953,5 +954,59 @@ describe("ProjectSidebarSection search", () => {
     } finally {
       window.localStorage.clear();
     }
+  });
+});
+
+describe("ProjectSidebarSection context health", () => {
+  const sidebar = (
+    contextHealthByProject: Map<ProjectId, ContextHealth>,
+    onOpenContextHealth = vi.fn(),
+  ) => (
+    <ProjectSidebarSection
+      archivedProjects={[]}
+      availabilityByProject={new Map()}
+      contextHealthByProject={contextHealthByProject}
+      onArchive={vi.fn()}
+      onMove={vi.fn()}
+      onOpenContextHealth={onOpenContextHealth}
+      onProjectOpen={vi.fn()}
+      onReorder={vi.fn()}
+      onRestore={vi.fn()}
+      projects={[chatProjectA, chatProjectB]}
+    />
+  );
+
+  it("makes non-focused warnings keyboard actionable and non-color-only", async () => {
+    const user = userEvent.setup();
+    const onOpenContextHealth = vi.fn();
+    render(sidebar(new Map([[chatProjectA.id, "rate-limited"]]), onOpenContextHealth));
+
+    const warning = screen.getByRole("button", { name: /Test.*Rate limited/ });
+    expect(warning).toHaveTextContent("Rate limited");
+    warning.focus();
+    await user.keyboard("{Enter}");
+    expect(onOpenContextHealth).toHaveBeenCalledOnce();
+    expect(onOpenContextHealth.mock.calls[0]?.[0]).toBe(chatProjectA.id);
+  });
+
+  it("marks only the Projects whose context is degraded", () => {
+    render(
+      sidebar(
+        new Map([
+          [chatProjectA.id, "blocked"],
+          [chatProjectB.id, "healthy"],
+        ]),
+      ),
+    );
+
+    expect(screen.getByRole("button", { name: /Test: Blocked/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Research:/ })).not.toBeInTheDocument();
+  });
+
+  it("says nothing about a Project whose context has never been measured", () => {
+    render(sidebar(new Map()));
+
+    expect(screen.queryByText(/Open context inspector/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse Test" })).toBeVisible();
   });
 });

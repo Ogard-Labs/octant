@@ -1,4 +1,5 @@
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import type { ContextHealth } from "@octant/contracts/context";
 import type { ProjectViewSwitcherPresentation } from "@octant/contracts/shell";
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { Menu as MenuPrimitive } from "@base-ui/react/menu";
@@ -25,6 +26,7 @@ import {
   Terminal,
   type LucideIcon,
 } from "lucide-react";
+import { ContextHealthWarning } from "../context/ContextHealthWarning";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantDialog } from "../ui/base/OctantDialog";
@@ -152,6 +154,14 @@ export interface ProjectSidebarSectionProps {
   readonly activeThreadId?: string;
   readonly archivedProjects: ReadonlyArray<ProjectSummary>;
   readonly availabilityByProject: ReadonlyMap<ProjectId, ProjectAvailability>;
+  /**
+   * Each Project's last known context health. A Project the window has never
+   * planned context for is simply absent: an unmeasured Project must not read
+   * as a healthy one, and it must not read as a warning either.
+   */
+  readonly contextHealthByProject?: ReadonlyMap<ProjectId, ContextHealth>;
+  /** Absent leaves the health mark out; nothing else can act on it here. */
+  readonly onOpenContextHealth?: (projectId: ProjectId, opener: HTMLElement) => void;
   /** Requests a visible, keyboard-reachable complete thread list for a Project Overview action. */
   readonly expandProjectThreadsRequest?: Readonly<{
     readonly projectId: ProjectId;
@@ -406,6 +416,12 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               : { activeThreadId: props.activeThreadId })}
             availabilityByProject={props.availabilityByProject}
             collapsedProjects={collapsedProjects}
+            {...(props.contextHealthByProject === undefined
+              ? {}
+              : { contextHealthByProject: props.contextHealthByProject })}
+            {...(props.onOpenContextHealth === undefined
+              ? {}
+              : { onOpenContextHealth: props.onOpenContextHealth })}
             hideWhenEmpty={searching}
             label="Pinned"
             onArchive={props.onArchive}
@@ -435,6 +451,12 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               : { activeThreadId: props.activeThreadId })}
             availabilityByProject={props.availabilityByProject}
             collapsedProjects={collapsedProjects}
+            {...(props.contextHealthByProject === undefined
+              ? {}
+              : { contextHealthByProject: props.contextHealthByProject })}
+            {...(props.onOpenContextHealth === undefined
+              ? {}
+              : { onOpenContextHealth: props.onOpenContextHealth })}
             hideWhenEmpty={searching}
             label="Projects"
             onArchive={props.onArchive}
@@ -516,6 +538,8 @@ function ProjectGroup(props: {
   readonly activeThreadId?: string;
   readonly availabilityByProject: ReadonlyMap<ProjectId, ProjectAvailability>;
   readonly collapsedProjects: ReadonlySet<ProjectId>;
+  readonly contextHealthByProject?: ReadonlyMap<ProjectId, ContextHealth>;
+  readonly onOpenContextHealth?: (projectId: ProjectId, opener: HTMLElement) => void;
   readonly hideWhenEmpty?: boolean;
   readonly label: string;
   readonly onAddProject?: () => void;
@@ -585,6 +609,12 @@ function ProjectGroup(props: {
       {props.projects.map((project, index) => {
         const availability = props.availabilityByProject.get(project.id);
         const unavailable = project.type !== "chat" && availability?.status === "unavailable";
+        // Only a degraded reading is worth a mark. "Healthy" and "never
+        // measured" both mean there is nothing here for the reader to act on,
+        // and they must not be collapsed into the same claim anywhere else.
+        const contextHealth = props.contextHealthByProject?.get(project.id);
+        const degradedContext =
+          contextHealth === undefined || contextHealth === "healthy" ? undefined : contextHealth;
         const nestedThreads = props.threadsByProjectId?.get(String(project.id)) ?? [];
         const showNested =
           props.onSelectThread !== undefined && props.threadsByProjectId !== undefined;
@@ -628,6 +658,13 @@ function ProjectGroup(props: {
                   {unavailable ? <small>Relink required</small> : null}
                 </span>
               </OctantButton>
+              {degradedContext === undefined || props.onOpenContextHealth === undefined ? null : (
+                <ContextHealthWarning
+                  health={degradedContext}
+                  label={project.name}
+                  onOpen={(opener) => props.onOpenContextHealth!(project.id, opener)}
+                />
+              )}
               <ProjectActionsMenu
                 canMoveDown={
                   (props.sort === undefined || props.sort === "manual") &&
