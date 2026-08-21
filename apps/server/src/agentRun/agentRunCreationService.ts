@@ -39,7 +39,16 @@ export type AgentRunCreationRejectionReason =
   | "pool-request-invalid"
   | "pool-routing-unavailable"
   | "parent-context-unavailable"
-  | "workspace-unsupported";
+  | "workspace-unsupported"
+  | "stale"
+  | "expired"
+  | "foreign-thread"
+  | "foreign-project"
+  | "parent-checkout"
+  | "unavailable"
+  | "wider-than-parent"
+  | "unconfirmed"
+  | "unauthorized";
 
 export class AgentRunCreationRejected extends Error {
   override readonly name = "AgentRunCreationRejected";
@@ -119,6 +128,12 @@ export interface BuildAgentRunRequestCommandInput {
    */
   readonly worktreeReceipts?: AgentRunWorktreeReceiptPort;
   /**
+   * Server-admitted journaled workspace, already checked against the live
+   * parent. When present it is used as-is; Chat/Code tests may still resolve
+   * a workspace through the dedicated ports below.
+   */
+  readonly admittedWorkspace?: AgentRunWorkspaceReceipt;
+  /**
    * Required when the request asks for parent context. Absent means this host
    * cannot resolve a parent thread's conversation, so such a request fails
    * closed instead of being admitted with an empty selection.
@@ -130,9 +145,10 @@ export interface BuildAgentRunRequestCommandInput {
  * Builds the immutable `AgentRunRoutingReceipt` and full `request-agent-run`
  * command for an explicit, one-off child creation request.
  *
- * Chat virtual children remain research-only. Code children require a
- * server-verified isolated worktree receipt and equal-or-narrower sandbox
- * relative to the parent checkout. Work Project/root children stay deferred.
+ * Chat virtual children remain research-only. Work children stay inside the
+ * current Project binding. Code children require a server-verified isolated
+ * worktree receipt and equal-or-narrower sandbox relative to the parent
+ * checkout.
  *
  * Execution kind is always `octant-managed`: native eligibility checking
  * is not wired into this creation path yet.
@@ -157,10 +173,10 @@ export function buildAgentRunRequestCommand(
         "Code AgentRun children are limited to implementation or review roles in this slice.",
       );
     }
-  } else {
+  } else if (request.mode !== "work") {
     throw new AgentRunCreationRejected(
       "workspace-unsupported",
-      "Work AgentRun children require authoritative Project/root resolution.",
+      "AgentRun creation supports Chat virtual, Work binding, and verified Code worktree children.",
     );
   }
 
@@ -287,6 +303,19 @@ function resolveAdmittedContext(
 function resolveWorkspaceReceipt(
   input: BuildAgentRunRequestCommandInput,
 ): AgentRunWorkspaceReceipt {
+  if (input.admittedWorkspace !== undefined) {
+    try {
+      assertAgentRunSandboxEqualOrNarrower({ childWorkspace: input.admittedWorkspace });
+    } catch {
+      throw new AgentRunCreationRejected(
+        input.admittedWorkspace.kind === "code-worktree"
+          ? "code-worktree-unverified"
+          : "wider-than-parent",
+        "The admitted child workspace is not equal-or-narrower than its parent.",
+      );
+    }
+    return input.admittedWorkspace;
+  }
   const { request } = input;
   if (request.mode === "chat" && request.workspace.kind === "chat-virtual") {
     return { kind: "chat-virtual", mode: "chat" };
@@ -330,7 +359,7 @@ function resolveWorkspaceReceipt(
 
   throw new AgentRunCreationRejected(
     "workspace-unsupported",
-    "AgentRun creation supports Chat virtual and verified Code worktree children only.",
+    "AgentRun creation supports Chat virtual, Work binding, and verified Code worktree children.",
   );
 }
 

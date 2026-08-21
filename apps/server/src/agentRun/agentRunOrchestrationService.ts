@@ -55,6 +55,12 @@ export interface AgentRunWorktreePort {
   ) => boolean;
 }
 
+export interface AgentRunWorkBindingPort {
+  readonly isCurrent: (
+    workspace: Extract<AgentRunWorkspaceReceipt, { kind: "work-root" }>,
+  ) => boolean;
+}
+
 export interface AgentRunApprovalPort {
   readonly isCurrent: (input: {
     readonly runId: AgentRunId;
@@ -73,6 +79,7 @@ export interface AgentRunOrchestrationServiceOptions {
   readonly persistence: AgentRunPersistenceService;
   readonly capacity: AgentRunCapacityPort;
   readonly worktree: AgentRunWorktreePort;
+  readonly workBinding?: AgentRunWorkBindingPort;
   readonly approvals: AgentRunApprovalPort;
   readonly processes?: AgentRunProcessSupervisorPort;
 }
@@ -95,6 +102,7 @@ export class AgentRunOrchestrationService {
   readonly #persistence: AgentRunPersistenceService;
   readonly #capacity: AgentRunCapacityPort;
   readonly #worktree: AgentRunWorktreePort;
+  readonly #workBinding: AgentRunWorkBindingPort | undefined;
   readonly #approvals: AgentRunApprovalPort;
   readonly #processes: AgentRunProcessSupervisorPort | undefined;
   readonly #reservations = new Map<AgentRunId, string>();
@@ -113,6 +121,7 @@ export class AgentRunOrchestrationService {
     this.#persistence = options.persistence;
     this.#capacity = options.capacity;
     this.#worktree = options.worktree;
+    this.#workBinding = options.workBinding;
     this.#approvals = options.approvals;
     this.#processes = options.processes;
     options.processes?.subscribeToProcessDeath?.((runId) => {
@@ -594,7 +603,15 @@ export class AgentRunOrchestrationService {
 
   #assertWorkspaceAllowed(workspace: AgentRun["workspaceReceipt"]): void {
     if (workspace.kind === "chat-virtual") return;
-    if (workspace.kind === "work-root") return;
+    if (workspace.kind === "work-root") {
+      if (this.#workBinding !== undefined && !this.#workBinding.isCurrent(workspace)) {
+        throw new AgentRunOrchestrationError(
+          "workspace-denied",
+          "Work AgentRun cannot escape the current Project binding.",
+        );
+      }
+      return;
+    }
     if (workspace.kind === "code-worktree") {
       if (this.#worktree.isParentCheckout(workspace)) {
         throw new AgentRunOrchestrationError(

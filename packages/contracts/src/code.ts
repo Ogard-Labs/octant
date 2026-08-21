@@ -805,6 +805,7 @@ export type CodeEventFrame = typeof CodeEventFrame.Type;
 export const decodeCodeRepositoryId = Schema.decodeUnknownSync(CodeRepositoryId);
 export const decodeCodeThreadId = Schema.decodeUnknownSync(CodeThreadId);
 export const decodeCodeCheckoutId = Schema.decodeUnknownSync(CodeCheckoutId);
+export const decodeWorktreeReceiptId = Schema.decodeUnknownSync(WorktreeReceiptId);
 export const decodeCodeTerminalId = Schema.decodeUnknownSync(CodeTerminalId);
 export const decodeCodeFileId = Schema.decodeUnknownSync(CodeFileId);
 export const decodeCodeReviewFindingId = Schema.decodeUnknownSync(CodeReviewFindingId);
