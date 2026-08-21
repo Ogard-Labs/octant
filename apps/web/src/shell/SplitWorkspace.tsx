@@ -290,7 +290,10 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       data-workspace-pane-id={pane.paneId}
       onPointerDownCapture={() => props.onActivatePane(pane.paneId)}
     >
-      <div className="workspace-pane__header">
+      {/* The header spans the window's title band, so the space the grip and
+          actions do not claim has to stay a native drag region: with the grip
+          stretched across it the window could not be moved at all. */}
+      <div className="workspace-pane__header window-drag-region">
         <span
           className="workspace-pane__grip window-no-drag"
           onPointerCancel={props.drag.onPointerCancel}

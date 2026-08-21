@@ -92,6 +92,23 @@ describe("SplitWorkspace", () => {
     expect(handlers.onActivatePane).toHaveBeenCalledWith(secondPaneId);
   });
 
+  it("leaves the pane's title band draggable as the window, and its grip draggable as the pane", () => {
+    const handlers = splitCallbacks();
+    render(
+      <SplitWorkspace
+        {...handlers}
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    const header = screen
+      .getByRole("region", { name: "Workspace pane: First" })
+      .querySelector(".workspace-pane__header")!;
+    expect(header).toHaveClass("window-drag-region");
+    expect(header.querySelector(".workspace-pane__grip")).toHaveClass("window-no-drag");
+  });
+
   it("keeps the splitter keyboard-operable inside a quiet hit target", () => {
     const handlers = splitCallbacks();
     const { container } = render(

@@ -1468,10 +1468,15 @@ button:focus-visible {
 
 /* The grip carries the pane's surface title and is its one drag handle, in
    the same quiet meta ink the header rail has always used — pointing at it
-   takes fg ink over the soft fill, exactly the dock-tab precedent. */
+   takes fg ink over the soft fill, exactly the dock-tab precedent.
+
+   It shrink-wraps its title rather than filling the row. Stretched, it read as
+   a full-width tab and, being a no-drag region, left the window with no title
+   band to be moved by. */
 .workspace-pane__grip {
   display: inline-flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  max-width: min(52ch, 60%);
   min-width: 0;
   min-height: 26px;
   align-items: center;
@@ -1604,7 +1609,10 @@ button:focus-visible {
 .workspace-pane-actions {
   position: relative;
   display: grid;
+  /* Held to the trailing edge so the run between the title and the actions
+     stays empty header — the part of the band the window is dragged by. */
   flex: 0 0 34px;
+  margin-left: auto;
   place-items: center;
 }
 
