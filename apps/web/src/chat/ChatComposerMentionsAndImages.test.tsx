@@ -178,7 +178,7 @@ describe("ChatComposer thread mentions", () => {
     await user.keyboard("{ArrowDown}");
     await user.keyboard("{Enter}");
 
-    expect(onDraftChange).toHaveBeenCalledWith("look at #[Release notes] ");
+    expect(onDraftChange).toHaveBeenCalledWith("look at #[Release notes] ", 25);
     expect(onSelectCandidate).toHaveBeenCalledWith(hit);
   });
 

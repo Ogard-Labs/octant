@@ -1087,6 +1087,32 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).not.toHaveBeenCalled();
   });
 
+  it("restores the caret once the Code composer mounts", () => {
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({
+          activeView: undefined,
+          pendingDraft: "half-written",
+          pendingDraftCaret: 4,
+          status: "loading",
+        })}
+        threadId={threadId}
+      />,
+    );
+    expect(screen.queryByLabelText("Follow-up message")).not.toBeInTheDocument();
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({ pendingDraft: "half-written", pendingDraftCaret: 4 })}
+        threadId={threadId}
+      />,
+    );
+    const message = screen.getByLabelText("Follow-up message") as HTMLTextAreaElement;
+    expect(message).toHaveValue("half-written");
+    expect(message.selectionStart).toBe(4);
+    expect(message.selectionEnd).toBe(4);
+  });
+
   it("says so when a replayed turn kept only its earliest steps", () => {
     const operationId = "70000000-0000-4000-8000-000000000052";
     render(

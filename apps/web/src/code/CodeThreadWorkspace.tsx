@@ -15,12 +15,15 @@ import {
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { ArrowUp, Bot, UserRoundCog, X } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  applyComposerCaret,
+  COMPOSER_STAGED_DROPPED_NOTE,
+} from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
-import type { CodeOverviewSurfaceKind } from "./CodeOverview";
 import type { CodeConversationMessage, CodeController } from "./useCodeController";
 import { ChatRichText } from "../chat/ChatRichText";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
@@ -181,6 +184,15 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     setDraft(props.controller.pendingDraft);
   }, [props.controller.pendingDraft, props.threadId]);
 
+  const composerReady = view !== undefined && props.controller.status !== "disconnected";
+  useLayoutEffect(() => {
+    if (!composerReady) return;
+    applyComposerCaret(
+      textareaRef.current,
+      props.controller.pendingDraftCaret ?? draft.length,
+      draft.length,
+    );
+  }, [composerReady, props.threadId]);
   useEffect(() => {
     setTurnAccessOverride(undefined);
   }, [props.threadId, view?.thread.executionPolicy]);
@@ -197,9 +209,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
     draft,
-    onDraftChange: (next) => {
+    onDraftChange: (next, caretIndex) => {
       setDraft(next);
-      props.controller.setPendingDraft?.(next);
+      props.controller.setPendingDraft?.(next, caretIndex);
     },
     textarea: () => textareaRef.current,
   });
@@ -213,9 +225,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     threadId: props.threadId,
     checkoutId: view?.checkout.id,
     draft,
-    onDraftChange: (next) => {
+    onDraftChange: (next, caretIndex) => {
       setDraft(next);
-      props.controller.setPendingDraft?.(next);
+      props.controller.setPendingDraft?.(next, caretIndex);
     },
     textarea: () => textareaRef.current,
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -230,6 +242,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
     threadId: props.attachmentClient === undefined ? undefined : props.threadId,
   });
+  const peekAbandoned = attachments.peekAbandoned;
+  const markDraftStagedDropped = props.controller.markDraftStagedDropped;
+  useEffect(() => {
+    const abandonedThreadId = String(props.threadId);
+    return () => {
+      if (peekAbandoned()) {
+        markDraftStagedDropped?.(abandonedThreadId);
+      }
+    };
+  }, [markDraftStagedDropped, peekAbandoned, props.threadId]);
 
   function syncMentions(value: string, caret: number | null) {
     mention.sync(value, caret);
@@ -998,6 +1020,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             )}
           </div>
         )}
+        {props.controller.draftStagedDropped === true ? (
+          <p className="code-thread-workspace__hint" role="status">
+            {COMPOSER_STAGED_DROPPED_NOTE}
+          </p>
+        ) : null}
+        {props.controller.draftPersistError === undefined ? null : (
+          <p className="code-thread-workspace__hint" role="status">
+            {props.controller.draftPersistError}
+          </p>
+        )}
         <label
           className="code-thread-workspace__message-field"
           htmlFor={`code-thread-composer-${String(thread.id)}`}
@@ -1020,12 +1052,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             id={`code-thread-composer-${String(thread.id)}`}
             onChange={(event) => {
               setDraft(event.currentTarget.value);
-              props.controller.setPendingDraft?.(event.currentTarget.value);
+              props.controller.setPendingDraft?.(
+                event.currentTarget.value,
+                event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+              );
               syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
             }}
-            onClick={(event) =>
-              syncMentions(event.currentTarget.value, event.currentTarget.selectionStart)
-            }
+            onClick={(event) => {
+              const caret = event.currentTarget.selectionStart;
+              if (caret !== null) {
+                props.controller.setPendingDraft?.(event.currentTarget.value, caret);
+              }
+              syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+            }}
             onDragOver={(event) => {
               if (props.attachmentClient === undefined) return;
               event.preventDefault();
@@ -1036,6 +1075,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             onKeyDown={onKeyDown}
             onKeyUp={(event) => {
               if (event.key === "Escape") return;
+              const caret = event.currentTarget.selectionStart;
+              if (caret !== null) {
+                props.controller.setPendingDraft?.(event.currentTarget.value, caret);
+              }
               syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
             }}
             onPaste={(event) => {

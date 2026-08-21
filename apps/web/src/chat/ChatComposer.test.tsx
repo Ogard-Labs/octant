@@ -71,6 +71,17 @@ describe("ChatComposer", () => {
     expect(screen.getByLabelText("Message")).toHaveValue("");
   });
 
+  it("restores the caret when returning to a thread", () => {
+    renderComposer({
+      caretIndex: 4,
+      caretRestoreKey: "thread-a",
+      draft: "half-written",
+    });
+    const message = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    expect(message.selectionStart).toBe(4);
+    expect(message.selectionEnd).toBe(4);
+  });
+
   it("sends with Enter, keeps Shift+Enter for newlines, and exposes Stop while streaming", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => true);
@@ -333,7 +344,8 @@ describe("ChatComposer", () => {
  */
 function SlashHarness(props: {
   readonly commands: ReadonlyArray<OctantCommand>;
-  readonly onDraftChange?: (draft: string) => void;
+  readonly onDraftChange?: (draft: string, caretIndex?: number) => void;
+  readonly onCaretIndexChange?: (caretIndex: number) => void;
   readonly onResolveExtensionReference?: (draft: string) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState("");
@@ -343,10 +355,13 @@ function SlashHarness(props: {
         draft={draft}
         isSending={false}
         model={{ options: [{ id: "model-a", label: "Model A" }], value: "model-a" }}
-        onDraftChange={(next) => {
+        onDraftChange={(next, caretIndex) => {
           setDraft(next);
-          props.onDraftChange?.(next);
+          props.onDraftChange?.(next, caretIndex);
         }}
+        {...(props.onCaretIndexChange === undefined
+          ? {}
+          : { onCaretIndexChange: props.onCaretIndexChange })}
         onFileSelected={vi.fn()}
         onModelChange={vi.fn()}
         onProviderChange={vi.fn()}
@@ -401,7 +416,14 @@ describe("ChatComposer slash commands", () => {
   it("filters host commands from a leading slash and runs one by keyboard alone", async () => {
     const user = userEvent.setup();
     const onDraftChange = vi.fn();
-    render(<SlashHarness commands={hostCommands()} onDraftChange={onDraftChange} />);
+    const onCaretIndexChange = vi.fn();
+    render(
+      <SlashHarness
+        commands={hostCommands()}
+        onCaretIndexChange={onCaretIndexChange}
+        onDraftChange={onDraftChange}
+      />,
+    );
 
     const draft = screen.getByLabelText("Message");
     await user.type(draft, "/new");
@@ -418,7 +440,8 @@ describe("ChatComposer slash commands", () => {
     await user.keyboard("{Enter}");
 
     expect(newChat).toHaveBeenCalledOnce();
-    expect(onDraftChange).toHaveBeenLastCalledWith("");
+    expect(onDraftChange).toHaveBeenLastCalledWith("", 0);
+    expect(onCaretIndexChange).toHaveBeenCalledWith(0);
     expect(screen.getByLabelText("Message")).toHaveValue("");
   });
 
