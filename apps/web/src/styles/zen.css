@@ -197,6 +197,17 @@
   margin: var(--oct-space-3) 0;
 }
 
+.zen-add-picker {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+}
+
+.zen-add-picker__hint {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 /* ─── floating chrome anchors ──────────────────────────────────────────
    Zen's chrome is anchored by the surface itself (window-drag regions,
    mobile repositioning), so the system bar/pill's self-anchoring is

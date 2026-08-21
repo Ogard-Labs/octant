@@ -1,11 +1,6 @@
 import type { ReactNode } from "react";
 import type { ZenLiveCardFrozenReason } from "@octant/domain";
-import type {
-  ZenSourceContext,
-  ZenThreadCatalogEntry,
-  ZenThreadCatalogRef,
-} from "@octant/contracts/zen";
-import { OctantButton } from "../ui/base/OctantButton";
+import type { ZenSourceContext, ZenThreadCatalogEntry } from "@octant/contracts/zen";
 
 /**
  * What a pinned card is doing with its thread right now.
@@ -24,7 +19,6 @@ export interface ZenThreadElementProps {
   readonly entry?: ZenThreadCatalogEntry;
   readonly live?: ZenLiveThreadCard;
   readonly sourceContext: ZenSourceContext;
-  readonly onContinue: (catalogRef: ZenThreadCatalogRef) => void;
 }
 
 export function ZenThreadElement(props: ZenThreadElementProps) {
@@ -45,22 +39,11 @@ export function ZenThreadElement(props: ZenThreadElementProps) {
       {`${entry.hostLabel} · ${capitalize(entry.mode)} · ${entry.projectLabel}`}
     </p>
   );
-  const continueButton = (
-    <OctantButton
-      aria-label={`Continue ${entry.title}`}
-      onClick={() => props.onContinue(entry.catalogRef)}
-      type="button"
-      variant="secondary"
-    >
-      Continue
-    </OctantButton>
-  );
   if (live?.status === "streaming") {
     return (
       <div className="zen-thread-element zen-thread-element--live">
         {identity}
         <div className="zen-thread-element__surface">{live.surface}</div>
-        {continueButton}
       </div>
     );
   }
@@ -75,7 +58,6 @@ export function ZenThreadElement(props: ZenThreadElementProps) {
           {pausedExplanation(live.reason)}
         </p>
       )}
-      {continueButton}
     </div>
   );
 }
