@@ -432,6 +432,16 @@ function ProvidersSection(props: {
   const discoveryController = props.discoveryController;
   const scan = discoveryController?.scan;
 
+  async function checkInstalledProviders(): Promise<void> {
+    const enabledInstanceIds = props.providerController.instances
+      .filter((instance) => instance.enabled)
+      .map((instance) => instance.id);
+    await discoveryController?.scan();
+    await Promise.all(
+      enabledInstanceIds.map((instanceId) => props.providerController.probe(instanceId)),
+    );
+  }
+
   useEffect(() => {
     if (scan === undefined) return;
     void scan();
@@ -452,10 +462,10 @@ function ProvidersSection(props: {
                 ? {}
                 : { message: discoveryController.message })}
               onConnect={discoveryController.connect}
-              onScan={async () => {
-                await discoveryController.scan();
-              }}
-              scanning={discoveryController.scanning}
+              onScan={checkInstalledProviders}
+              scanning={
+                discoveryController.scanning || props.providerController.probingIds.size > 0
+              }
               snapshot={discoveryController.snapshot}
             />
           )

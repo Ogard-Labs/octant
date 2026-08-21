@@ -369,8 +369,7 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("exposes exactly one wide utility dock toggle only when a real surface is available", async () => {
-    const user = userEvent.setup();
+  it("exposes exactly one wide utility dock toggle only when a real surface is available", () => {
     const { props, rerender } = renderChrome({
       dockAvailable: true,
     });
@@ -381,8 +380,8 @@ describe("WindowChrome", () => {
     expect(dock).toHaveAttribute("aria-controls", "right-utility-dock");
     expect(dock).toHaveAttribute("data-dock-opener", "true");
 
-    await user.click(dock);
-    expect(props.onToggleDock).toHaveBeenCalledOnce();
+    dock.click();
+    expect(props.onToggleDock).toHaveBeenCalledWith(dock);
 
     rerender(<WindowChrome {...props} dockAvailable dockExpanded />);
     expect(screen.getByRole("button", { name: "Close Project memory" })).toHaveAttribute(
@@ -410,7 +409,7 @@ describe("WindowChrome", () => {
     dock.focus();
     await user.keyboard("{Enter}");
 
-    expect(props.onToggleDock).toHaveBeenCalledOnce();
+    expect(props.onToggleDock).toHaveBeenCalledWith(overflow);
     expect(overflow).toHaveAttribute("aria-expanded", "false");
     expect(overflow).toHaveFocus();
   });
