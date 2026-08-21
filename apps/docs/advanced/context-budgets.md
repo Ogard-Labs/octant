@@ -57,8 +57,8 @@ material.
 
 A persistent status bar follows the focused pane and shows a line like
 `Context 232K/400K · Headroom 112K · Tools 8/63 · Provider healthy`.
-Thread tabs that need attention show **Watch**, **Optimizing**, **Action
-needed**, **Blocked**, or **Rate limited** badges that open the **Context
+When a thread needs attention the status bar shows **Watch**, **Optimizing**,
+**Action needed**, **Blocked**, or **Rate limited**, and opens the **Context
 inspector**.
 
 The Context inspector shows the planned and sent manifests, model limits,

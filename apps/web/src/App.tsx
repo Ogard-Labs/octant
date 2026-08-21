@@ -83,7 +83,7 @@ import {
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import type { CodeOperationId } from "@octant/contracts";
-import type { WindowId } from "@octant/contracts/shell";
+import { decodeWorkspaceTabId, type WindowId, type WorkspaceTab } from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ThemeTypography } from "@octant/contracts/theme";
@@ -130,6 +130,12 @@ import {
 } from "./shell/createHostPreference";
 import { useLaunchSession } from "./shell/useLaunchSession";
 import { WorkspaceView } from "./shell/WorkspaceView";
+import {
+  SidebarThreadDragContext,
+  useWorkspaceSurfaceDrag,
+  type SidebarThreadDragRow,
+  type SidebarThreadDragTargets,
+} from "./shell/useWorkspaceTabDrag";
 import { WorkspaceRailLayers } from "./shell/WorkspaceRailLayers";
 import { ShellDialogHost } from "./shell/ShellDialogHost";
 import { ShellSettingsSurface } from "./shell/ShellSettingsSurface";
@@ -218,7 +224,6 @@ import { ContextInspector } from "./context/ContextInspector";
 import { NavigatorPanel } from "./navigator/NavigatorPanel";
 import { useNavigatorAssistant } from "./navigator/useNavigatorAssistant";
 import { ContextStatusBar } from "./context/ContextStatusBar";
-import { ContextTabWarning } from "./context/ContextTabWarning";
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
@@ -644,27 +649,73 @@ function LaunchedShell(
     | undefined
   >(undefined);
   const activeMode = controller.workspace?.activeMode ?? "chat";
-  const activeGroupId = controller.workspace?.activeGroupIds[activeMode];
+  // The window's context — composer targets, thread controllers, and the right
+  // utility dock — resolves against the active pane's surface. Activating a
+  // pane (opening into it, clicking into it, focusing it) re-targets them all
+  // from this one read, so there is no second notion of "the current thread".
+  const activePaneId = controller.workspace?.activePaneIds[activeMode];
   const selectedProjectTabId =
-    controller.workspace === undefined || activeGroupId === undefined
+    controller.workspace === undefined || activePaneId === undefined
       ? undefined
-      : activeProjectTabId(controller.workspace.layouts[activeMode], activeGroupId);
+      : activeProjectTabId(controller.workspace.layouts[activeMode], activePaneId);
   const activeChatThreadId =
-    controller.workspace === undefined || activeGroupId === undefined || activeMode !== "chat"
+    controller.workspace === undefined || activePaneId === undefined || activeMode !== "chat"
       ? undefined
-      : activeChatThreadTabId(controller.workspace.layouts.chat, activeGroupId);
+      : activeChatThreadTabId(controller.workspace.layouts.chat, activePaneId);
   const activeCodeThreadId =
-    controller.workspace === undefined || activeGroupId === undefined || activeMode !== "code"
+    controller.workspace === undefined || activePaneId === undefined || activeMode !== "code"
       ? undefined
-      : activeCodeThreadTabId(controller.workspace.layouts.code, activeGroupId);
+      : activeCodeThreadTabId(controller.workspace.layouts.code, activePaneId);
   const activeWorkThreadId =
-    controller.workspace === undefined || activeGroupId === undefined || activeMode !== "work"
+    controller.workspace === undefined || activePaneId === undefined || activeMode !== "work"
       ? undefined
-      : activeWorkThreadTabId(controller.workspace.layouts.work, activeGroupId);
+      : activeWorkThreadTabId(controller.workspace.layouts.work, activePaneId);
   const activeDraftKey =
-    controller.workspace === undefined || activeGroupId === undefined
+    controller.workspace === undefined || activePaneId === undefined
       ? undefined
-      : activeDraftTabKey(controller.workspace.layouts[activeMode], activeGroupId);
+      : activeDraftTabKey(controller.workspace.layouts[activeMode], activePaneId);
+  // One drag pipeline for pane grips and sidebar rows. A sidebar row whose
+  // thread belongs to a different Project is rerouted through the ordinary
+  // open path on drop, so a drag cannot place a cross-Project thread without
+  // the switch-Project handling every other open gets.
+  const sidebarDragRows = useRef(new Map<string, SidebarThreadDragRow>());
+  const workspaceDrag = useWorkspaceSurfaceDrag({
+    ...(controller.workspace?.focusedPaneId === undefined
+      ? {}
+      : { focusedPaneId: controller.workspace.focusedPaneId }),
+    onDrop: (source, destination) => {
+      const row = sidebarDragRows.current.get(source.dragKey);
+      sidebarDragRows.current.delete(source.dragKey);
+      const boundProjectId = controller.workspace?.contextByMode[activeMode].projectId ?? null;
+      if (
+        row?.projectId !== undefined &&
+        boundProjectId !== null &&
+        String(boundProjectId) !== row.projectId
+      ) {
+        if (activeMode === "chat") selectChatThread(row.threadId);
+        else if (activeMode === "code") selectCodeThread(row.rowId);
+        else selectWorkThread(row.rowId);
+        return;
+      }
+      void controller.dropSurface(source.surface, destination);
+    },
+  });
+  const sidebarThreadDrag: SidebarThreadDragTargets = {
+    beginThreadDrag: (event, row) => {
+      const dragKey = `thread:${row.rowId}`;
+      sidebarDragRows.current.set(dragKey, row);
+      workspaceDrag.onPointerDown(event, {
+        dragKey,
+        surface: threadDragSurface(activeMode, row),
+        title: row.title,
+      });
+    },
+    onPointerMove: workspaceDrag.onPointerMove,
+    onPointerUp: workspaceDrag.onPointerUp,
+    onPointerCancel: workspaceDrag.onPointerCancel,
+    consumeThreadClickSuppression: (rowId) =>
+      workspaceDrag.consumeSuppressedClick(`thread:${rowId}`),
+  };
   useEffect(() => {
     if (activeDraftKey === undefined) return;
     const previous = previousActiveDraftKey.current;
@@ -1322,7 +1373,7 @@ function LaunchedShell(
     availableDockSurfaces.find(
       (surface) => surface.id === controller.settings?.lastContextSurface,
     ) ?? availableDockSurfaces[0];
-  const dockOpen = dockResolution.kind === "surface";
+  const dockOpen = dockResolution.kind !== "closed";
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
     serverUrl: props.launch.serverUrl,
@@ -1792,33 +1843,40 @@ function LaunchedShell(
     projectController.activeProject,
     projectController.status,
   ]);
+  // The mode the open dock was last describing. Comparing against it inside
+  // the follow effect distinguishes "another pane in this mode became active"
+  // (re-target the panel) from "the whole mode changed" (close the dock).
+  const dockFollowedMode = useRef(activeMode);
   useEffect(() => {
-    if (dockSurface === undefined && dockProjectId === undefined) return;
-    if (
-      dockSurface !== undefined &&
-      (dockProjectId === activeProjectId ||
-        (dockSurface === "project-memory" &&
-          dockProject !== undefined &&
-          dockProject.lifecycle === "active" &&
-          dockProject.type === activeMode))
-    ) {
+    const modeChanged = dockFollowedMode.current !== activeMode;
+    dockFollowedMode.current = activeMode;
+    if (dockSurface === undefined) {
+      if (dockProjectId !== undefined) setDockProjectId(undefined);
       return;
     }
-    dockOpener.current = undefined;
-    pendingDockFocus.current = undefined;
-    setDockProjectId(undefined);
-    setDockSurface(undefined);
+    if (modeChanged) {
+      // A mode switch replaces the whole workspace the panel was describing,
+      // so the dock closes instead of re-targeting across modes.
+      dockOpener.current = undefined;
+      pendingDockFocus.current = undefined;
+      setDockProjectId(undefined);
+      setDockSurface(undefined);
+      projectController.clearMemory();
+      return;
+    }
+    if (String(dockProjectId) === String(activeProjectId)) return;
+    // The dock answers for the active pane: activating another pane re-targets
+    // the open panel in place, keeping the panel selection. The previous
+    // target's memory is dropped first so none of its content can render
+    // against the new target while it loads.
+    setDockProjectId(activeProjectId);
     projectController.clearMemory();
-  }, [
-    activeMode,
-    activeProjectId,
-    dockProject,
-    dockProjectId,
-    dockSurface,
-    projectController.clearMemory,
-  ]);
+  }, [activeMode, activeProjectId, dockProjectId, dockSurface, projectController.clearMemory]);
   useEffect(() => {
-    if (dockSurface === undefined || dockResolution.kind === "surface") return;
+    // "unavailable" is a presentable value — the selected panel stays open and
+    // shows its empty-handed state — so only a genuinely closed resolution
+    // (disconnect, revoked presentation, malformed selection) tears down here.
+    if (dockSurface === undefined || dockResolution.kind !== "closed") return;
     dockOpener.current = undefined;
     pendingDockFocus.current = undefined;
     setDockProjectId(undefined);
@@ -1877,9 +1935,12 @@ function LaunchedShell(
     // Its own readiness — unconfigured, unavailable — is the panel's to report
     // from the host snapshot, not something to pre-empt by hiding the surface.
     if (surface === "navigator") return "available";
-    if (surface === "project-memory" || surface === "context") {
-      return projectId === undefined ? "unavailable" : "available";
-    }
+    // Whether a Project is active is the resolver's project-required question,
+    // not a presentation outage. Answering "unavailable" here used to short the
+    // resolver out before that question, which closed an open panel instead of
+    // letting it present its own empty-handed state when the active pane has
+    // no Project.
+    if (surface === "project-memory" || surface === "context") return "available";
     const availability =
       projectId === undefined ? undefined : projectController.availabilityByProject.get(projectId);
     if (availability?.status === "available") return "available";
@@ -2045,7 +2106,7 @@ function LaunchedShell(
     ? "Search threads"
     : activeSurfaceTitle(
         controller.workspace.layouts[activeMode],
-        controller.workspace.activeGroupIds[activeMode],
+        controller.workspace.activePaneIds[activeMode],
       );
   const automationCenterVisible =
     automationCenterOpen && (activeMode === "code" || activeMode === "work");
@@ -2610,9 +2671,9 @@ function LaunchedShell(
         const title = prompt.length > 60 ? `${prompt.slice(0, 57)}…` : prompt;
         const chatDraftProjectId =
           draftProjectId ??
-          (controller.workspace === undefined || activeGroupId === undefined
+          (controller.workspace === undefined || activePaneId === undefined
             ? undefined
-            : activeDraftProjectId(controller.workspace.layouts.chat, activeGroupId));
+            : activeDraftProjectId(controller.workspace.layouts.chat, activePaneId));
         const result = await chatController.execute({
           kind: "create-chat-thread",
           title,
@@ -3190,9 +3251,9 @@ function LaunchedShell(
             dockAvailable={preferredDockSurface !== undefined}
             dockExpanded={dockOpen}
             dockLabel={
-              dockResolution.kind === "surface"
-                ? dockResolution.surface.label
-                : (preferredDockSurface?.label ?? "Utility dock")
+              dockResolution.kind === "closed"
+                ? (preferredDockSurface?.label ?? "Utility dock")
+                : dockResolution.surface.label
             }
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             isNarrow={isNarrow}
@@ -3522,9 +3583,10 @@ function LaunchedShell(
                       ? {}
                       : { lastSelectedHealthyHostId })}
                     onSelectCreateHost={handleSelectCreateHost}
-                    {...(controller.workspace.focusedGroupId === undefined
+                    {...(controller.workspace.focusedPaneId === undefined
                       ? {}
-                      : { focusedGroupId: controller.workspace.focusedGroupId })}
+                      : { focusedPaneId: controller.workspace.focusedPaneId })}
+                    drag={workspaceDrag}
                     layout={controller.presentedLayout}
                     memoryRevision={projectController.memoryRevision}
                     availabilityByProject={projectController.availabilityByProject}
@@ -3536,10 +3598,10 @@ function LaunchedShell(
                     hidden={
                       railPlaceholder !== undefined || codeBoardOpen || automationCenterVisible
                     }
-                    onActivate={controller.activateTab}
+                    onActivatePane={(paneId) => void controller.activatePane(paneId)}
                     tabActivation={controller.tabActivation}
-                    onClearFocus={controller.clearFocus}
-                    onClose={controller.closeTab}
+                    onClearFocus={() => void controller.clearFocus()}
+                    onClosePane={controller.closePane}
                     onCommitResize={controller.commitSplitResize}
                     onCreateChat={createChat}
                     onCreateChatProjectThread={handleCreateChatProjectThread}
@@ -3599,8 +3661,7 @@ function LaunchedShell(
                     computerUseClient={computerUseClient}
                     onComputerUseSessionChange={onComputerUseSessionChange}
                     isNarrow={isNarrow}
-                    onFocus={controller.focusGroup}
-                    onDropTab={controller.dropTab}
+                    onFocus={(paneId) => void controller.focusPane(paneId)}
                     onCreateWorkThread={handleCreateWorkThread}
                     onOpenWorkThread={(threadId, projectId) => {
                       const thread = workNavigation.navigation.find(
@@ -3616,13 +3677,9 @@ function LaunchedShell(
                     onArchiveProject={(projectId) =>
                       void projectController.setArchived(projectId, true)
                     }
-                    onMove={controller.moveTab}
                     onOpenCodeThread={(threadId, title, projectId) =>
                       void controller.openCodeThread(threadId, title, undefined, projectId)
                     }
-                    onToggleCanvasPin={(groupId, tab) => {
-                      if (tab.kind === "canvas") void controller.toggleCanvasTabPin(groupId, tab);
-                    }}
                     onOpenCodeSurface={(kind, threadId, title, terminalId) =>
                       void controller.openCodeSurface(
                         kind === "code-terminal"
@@ -3636,41 +3693,13 @@ function LaunchedShell(
                       )
                     }
                     onPreviewResize={controller.previewSplitResize}
-                    onReorder={controller.reorderTab}
                     onRelinkProject={projectController.relink}
                     onRenameProject={projectController.rename}
-                    onSplit={controller.splitGroup}
+                    onSplitPane={(paneId, orientation, placement) =>
+                      void controller.splitPane(paneId, orientation, placement)
+                    }
                     projects={projectController.allProjects}
                     providerController={providerController}
-                    renderTabAccessory={(tab, groupId) => {
-                      if (tab.kind !== "project") return null;
-                      const snapshot = contextSnapshotsByProject.get(tab.projectId);
-                      const health = snapshot?.next.plan.health;
-                      if (health === undefined || health === "healthy") return null;
-                      return (
-                        <ContextTabWarning
-                          health={health}
-                          label={tab.title}
-                          onOpen={() => {
-                            const element = document.activeElement;
-                            if (!(element instanceof HTMLElement)) return;
-                            if (tab.projectId === activeProjectId) {
-                              openDockSurface("context", element);
-                              return;
-                            }
-                            void controller.activateTab(groupId, tab.id).then(() => {
-                              dockOpener.current = { element, logicalTarget: "dock" };
-                              setDockProjectId(tab.projectId);
-                              setDockSurface("context");
-                              projectController.clearMemory();
-                              if (controller.settings?.lastContextSurface !== "context") {
-                                void controller.updateSettings({ lastContextSurface: "context" });
-                              }
-                            });
-                          }}
-                        />
-                      );
-                    }}
                     statusBar={
                       contextController.snapshot === undefined ? null : (
                         <ContextStatusBar
@@ -3698,8 +3727,8 @@ function LaunchedShell(
                               controller.canOpenCrossContextInNewWindow,
                           },
                         })}
-                    onOpenSurface={(surface, groupId, browserContextId) =>
-                      controller.openSurface(surface, groupId, browserContextId)
+                    onOpenSurface={(surface, paneId, browserContextId) =>
+                      controller.openSurface(surface, paneId, browserContextId)
                     }
                     onDismissCrossContextOffer={controller.dismissCrossContextOffer}
                     onOpenCrossContextInNewWindow={() =>
@@ -3992,9 +4021,46 @@ function LaunchedShell(
         registry={codeThreadControllers}
         threadIds={openCodeThreadIds}
       />
-      <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
+      <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
+        <ProjectThreadsProvider value={projectThreadsAccess}>{shell}</ProjectThreadsProvider>
+      </SidebarThreadDragContext.Provider>
     </OctantCommandProvider>
   );
+}
+
+/**
+ * The surface a sidebar thread row stands for while it is being dragged. It is
+ * minted exactly like the row's click-open would mint it — same kind, same
+ * identity fields, no hostId the click path would not resolve — so the domain's
+ * visible-surface dedupe treats the drop and the click as the same thread.
+ */
+function threadDragSurface(mode: OctantMode, row: SidebarThreadDragRow): WorkspaceTab {
+  const id = decodeWorkspaceTabId(crypto.randomUUID());
+  if (mode === "chat") {
+    return {
+      kind: "chat-thread",
+      id,
+      threadId: decodeChatThreadId(row.threadId),
+      mode,
+      title: row.title,
+    };
+  }
+  if (mode === "code") {
+    return {
+      kind: "code-overview",
+      id,
+      threadId: decodeCodeThreadId(row.threadId),
+      mode,
+      title: row.title,
+    };
+  }
+  return {
+    kind: "work-thread",
+    id,
+    threadId: decodeWorkThreadId(row.threadId),
+    mode,
+    title: row.title,
+  };
 }
 
 function focusLogicalOpener(opener: InspectorOpener): void {

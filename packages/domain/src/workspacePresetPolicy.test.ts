@@ -8,7 +8,7 @@ import {
 } from "./workspacePresetPolicy";
 
 const threadId = "10000000-0000-4000-8000-000000000001" as never;
-const groupId = "20000000-0000-4000-8000-000000000001" as never;
+const paneId = "20000000-0000-4000-8000-000000000001" as never;
 
 const preset = decodeWorkspacePreset({
   id: "design-studio",
@@ -19,68 +19,74 @@ const preset = decodeWorkspacePreset({
   defaultSkills: ["frontend-design", "accessibility-review"],
 });
 
-function group(tabs: ReadonlyArray<{ id: string; kind: string }>): WorkspaceLayoutNode {
+function threadPane(id: string): WorkspaceLayoutNode {
   return {
-    kind: "group",
+    kind: "pane",
     nodeId: "30000000-0000-4000-8000-000000000001" as never,
-    groupId,
-    tabs: tabs.map((tab) => ({
+    paneId,
+    surface: {
       kind: "code-overview",
-      id: tab.id as never,
+      id: id as never,
       threadId,
       mode: "code",
       title: "Release",
-    })) as never,
-    activeTabId: (tabs[0]?.id ?? "") as never,
+    },
+  };
+}
+
+function planInput() {
+  let mintedTabs = 0;
+  let mintedPanes = 0;
+  let mintedNodes = 0;
+  return {
+    preset,
+    thread: { threadId, mentionableThreadId: threadId, title: "Release" },
+    paneId,
+    mintTabId: () => `tab-${++mintedTabs}` as never,
+    mintPaneId: () => `pane-${++mintedPanes}` as never,
+    mintNodeId: () => `node-${++mintedNodes}` as never,
   };
 }
 
 describe("planWorkspacePreset", () => {
-  it("opens every pane the preset pins and leaves the first one in front", () => {
-    let minted = 0;
-    const operations = planWorkspacePreset({
-      preset,
-      thread: { threadId, mentionableThreadId: threadId, title: "Release" },
-      groupId,
-      mintTabId: () => `tab-${++minted}` as never,
-    });
+  it("places the first surface in the thread's pane, splits off the rest, and leaves the first in front", () => {
+    const operations = planWorkspacePreset(planInput());
 
     expect(operations.map((operation) => operation.kind)).toEqual([
-      "open-tab",
-      "open-tab",
-      "open-tab",
-      "activate-tab",
+      "open-surface",
+      "split-pane",
+      "split-pane",
+      "open-surface",
     ]);
-    const opened = operations.filter(
-      (operation): operation is Extract<typeof operation, { kind: "open-tab" }> =>
-        operation.kind === "open-tab",
+    const surfaces = operations.flatMap((operation) =>
+      operation.kind === "open-surface" || operation.kind === "split-pane"
+        ? [operation.surface.kind]
+        : [],
     );
-    expect(opened.map((operation) => operation.tab.kind)).toEqual([
-      "code-overview",
-      "browser",
-      "side-chat",
-    ]);
-    const activate = operations.at(-1);
-    expect(activate?.kind === "activate-tab" ? activate.tabId : undefined).toBe("tab-1");
+    expect(surfaces).toEqual(["code-overview", "browser", "side-chat", "code-overview"]);
+    // The final open re-activates the lead surface's pane: it is already
+    // visible, so nothing new is minted and the lead ends up in front.
+    const last = operations.at(-1);
+    expect(last?.kind === "open-surface" ? last.surface.id : undefined).toBe("tab-1");
   });
 
-  it("opens every pane against the thread the preset was applied to", () => {
-    // A pane bound to some other thread would be a preset reaching past the
+  it("opens every surface against the thread the preset was applied to", () => {
+    // A surface bound to some other thread would be a preset reaching past the
     // thread it was applied to.
-    const operations = planWorkspacePreset({
-      preset,
-      thread: { threadId, mentionableThreadId: threadId, title: "Release" },
-      groupId,
-      mintTabId: () => "tab" as never,
-    });
+    const operations = planWorkspacePreset(planInput());
 
     for (const operation of operations) {
-      if (operation.kind !== "open-tab") continue;
-      const tab = operation.tab;
+      if (operation.kind !== "open-surface" && operation.kind !== "split-pane") continue;
+      const surface = operation.surface;
       const bound =
-        "threadId" in tab ? tab.threadId : "sourceThreadId" in tab ? tab.sourceThreadId : undefined;
+        "threadId" in surface
+          ? surface.threadId
+          : "sourceThreadId" in surface
+            ? surface.sourceThreadId
+            : undefined;
       expect(bound === undefined || String(bound) === String(threadId)).toBe(true);
-      expect(operation.groupId).toBe(groupId);
+      if (operation.kind === "open-surface") expect(operation.paneId).toBe(paneId);
+      else expect(operation.targetPaneId).toBe(paneId);
     }
   });
 });
@@ -120,35 +126,38 @@ describe("reportWorkspacePresetSkills", () => {
 });
 
 describe("findWorkspacePresetTarget", () => {
-  it("finds the group already showing the thread", () => {
-    expect(
-      findWorkspacePresetTarget(group([{ id: "a", kind: "code-overview" }]), threadId),
-    ).toEqual({ groupId, title: "Release" });
+  it("finds the pane already showing the thread", () => {
+    expect(findWorkspacePresetTarget(threadPane("a"), threadId)).toEqual({
+      paneId,
+      title: "Release",
+    });
   });
 
   it("finds nothing for a thread this window does not have open", () => {
     const other = "40000000-0000-4000-8000-000000000009" as never;
-    expect(findWorkspacePresetTarget(group([{ id: "a", kind: "code-overview" }]), other)).toBe(
-      undefined,
-    );
+    expect(findWorkspacePresetTarget(threadPane("a"), other)).toBe(undefined);
   });
 
-  it("looks through a split layout, not only the group in front", () => {
+  it("looks through a split layout, not only the pane in front", () => {
     const split: WorkspaceLayoutNode = {
       kind: "split",
       nodeId: "50000000-0000-4000-8000-000000000001" as never,
       orientation: "horizontal",
       ratio: 0.5 as never,
       first: {
-        kind: "group",
+        kind: "pane",
         nodeId: "60000000-0000-4000-8000-000000000001" as never,
-        groupId: "70000000-0000-4000-8000-000000000001" as never,
-        tabs: [],
-        activeTabId: "" as never,
+        paneId: "70000000-0000-4000-8000-000000000001" as never,
+        surface: {
+          kind: "welcome",
+          id: "80000000-0000-4000-8000-000000000001" as never,
+          mode: "code",
+          title: "Welcome to Code",
+        },
       },
-      second: group([{ id: "a", kind: "code-overview" }]),
+      second: threadPane("a"),
     };
 
-    expect(findWorkspacePresetTarget(split, threadId)?.groupId).toBe(groupId);
+    expect(findWorkspacePresetTarget(split, threadId)?.paneId).toBe(paneId);
   });
 });

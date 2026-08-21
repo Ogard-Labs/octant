@@ -449,7 +449,7 @@ describe("Preview routes", () => {
 });
 
 describe("resolvePreviewActiveContext", () => {
-  it("derives the active Project and Code thread from the active shell tab", () => {
+  it("derives the active Project and Code thread from the active pane's surface", () => {
     const bootstrap = decodeShellBootstrap({
       settings: {
         chatEnabled: true,
@@ -465,51 +465,42 @@ describe("resolvePreviewActiveContext", () => {
         activeMode: "code",
         layouts: {
           chat: {
-            kind: "group",
+            kind: "pane",
             nodeId: "00000000-0000-4000-8000-000000000901",
-            groupId: "00000000-0000-4000-8000-000000000902",
-            tabs: [
-              {
-                kind: "welcome",
-                id: "00000000-0000-4000-8000-000000000903",
-                mode: "chat",
-                title: "Chat",
-              },
-            ],
-            activeTabId: "00000000-0000-4000-8000-000000000903",
+            paneId: "00000000-0000-4000-8000-000000000902",
+            surface: {
+              kind: "welcome",
+              id: "00000000-0000-4000-8000-000000000903",
+              mode: "chat",
+              title: "Chat",
+            },
           },
           work: {
-            kind: "group",
+            kind: "pane",
             nodeId: "00000000-0000-4000-8000-000000000904",
-            groupId: "00000000-0000-4000-8000-000000000905",
-            tabs: [
-              {
-                kind: "welcome",
-                id: "00000000-0000-4000-8000-000000000906",
-                mode: "work",
-                title: "Work",
-              },
-            ],
-            activeTabId: "00000000-0000-4000-8000-000000000906",
+            paneId: "00000000-0000-4000-8000-000000000905",
+            surface: {
+              kind: "welcome",
+              id: "00000000-0000-4000-8000-000000000906",
+              mode: "work",
+              title: "Work",
+            },
           },
           code: {
-            kind: "group",
+            kind: "pane",
             nodeId: "00000000-0000-4000-8000-000000000907",
-            groupId: "00000000-0000-4000-8000-000000000908",
-            tabs: [
-              {
-                kind: "code-file",
-                id: "00000000-0000-4000-8000-000000000909",
-                threadId: codeThreadId,
-                mode: "code",
-                title: "Code",
-                relativePath: "notes.md",
-              },
-            ],
-            activeTabId: "00000000-0000-4000-8000-000000000909",
+            paneId: "00000000-0000-4000-8000-000000000908",
+            surface: {
+              kind: "code-file",
+              id: "00000000-0000-4000-8000-000000000909",
+              threadId: codeThreadId,
+              mode: "code",
+              title: "Code",
+              relativePath: "notes.md",
+            },
           },
         },
-        activeGroupIds: {
+        activePaneIds: {
           chat: "00000000-0000-4000-8000-000000000902",
           work: "00000000-0000-4000-8000-000000000905",
           code: "00000000-0000-4000-8000-000000000908",

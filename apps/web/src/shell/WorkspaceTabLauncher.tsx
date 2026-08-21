@@ -9,9 +9,9 @@ export interface WorkspaceTabLauncherProps {
   readonly mode: "chat" | "work" | "code";
   readonly onOpenSurface: (surface: WorkspaceSurfaceDescriptor["kind"]) => void;
   /**
-   * Opens a surface against the Code thread this group is showing. Present only
-   * while that thread is the active tab, because each of these surfaces reads
-   * one thread and means nothing without it.
+   * Opens a surface against the Code thread this pane is showing. Present only
+   * while that thread is the pane's surface, because each of these surfaces
+   * reads one thread and means nothing without it.
    */
   readonly onOpenThreadSurface?: (kind: CodeOverviewSurfaceKind) => void;
   readonly owningThreadAvailable?: boolean;
@@ -74,7 +74,7 @@ export function WorkspaceTabLauncher(props: WorkspaceTabLauncherProps) {
         className="workspace-tab-launcher__trigger"
         disabled={entries.length === 0}
         icon={Plus}
-        label="New tab"
+        label="Open surface"
         onClick={() => setOpen((current) => !current)}
         ref={trigger}
       />

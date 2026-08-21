@@ -50,7 +50,12 @@ import { ThreadWorkService } from "./chat/threadWorkService";
 import { createChatRouteHandler } from "./chatRoutes";
 import { createScaffoldRouteHandler } from "./scaffoldRoutes";
 import { filterSkillCatalogForScope } from "@octant/plugin-host";
-import { decodeMentionableThreadId, decodeWorkspaceTabId } from "@octant/contracts";
+import {
+  decodeLayoutNodeId,
+  decodeMentionableThreadId,
+  decodePaneId,
+  decodeWorkspaceTabId,
+} from "@octant/contracts";
 import { createWorkspacePresetRouteHandler } from "./workspacePresetRoutes";
 import { CURATED_WORKSPACE_PRESETS } from "./workspacePresets/curatedWorkspacePresets";
 import { createThreadCheckpointRouteHandler } from "./threadCheckpointRoutes";
@@ -3290,7 +3295,7 @@ export function startOctantServer(
       {
         presets: CURATED_WORKSPACE_PRESETS,
         windowAuthorityStore,
-        // The thread and the group both come from the window's own workspace,
+        // The thread and the pane both come from the window's own workspace,
         // never from the request, so a preset lands on a thread this window
         // already has open rather than one the caller merely named.
         resolveTarget: async (windowId, threadId) => {
@@ -3301,7 +3306,7 @@ export function startOctantServer(
           return found === undefined
             ? undefined
             : {
-                groupId: found.groupId,
+                paneId: found.paneId,
                 mentionableThreadId: decodeMentionableThreadId(String(threadId)),
                 title: found.title,
               };
@@ -3335,7 +3340,11 @@ export function startOctantServer(
           }));
         },
       },
-      () => decodeWorkspaceTabId(randomUUID()),
+      {
+        mintTabId: () => decodeWorkspaceTabId(randomUUID()),
+        mintPaneId: () => decodePaneId(randomUUID()),
+        mintNodeId: () => decodeLayoutNodeId(randomUUID()),
+      },
     );
     const workArtifactProjection = new WorkArtifactProjection();
     requireJournalHydration(
@@ -5751,10 +5760,11 @@ function layoutContainsAgentRunThread(
       layoutContainsAgentRunThread(layout.second, threadId, hostId)
     );
   }
-  return layout.tabs.some((tab) => {
-    if (!("threadId" in tab) || String(tab.threadId) !== threadId) return false;
-    return !("hostId" in tab) || tab.hostId === undefined || String(tab.hostId) === hostId;
-  });
+  const surface = layout.surface;
+  if (!("threadId" in surface) || String(surface.threadId) !== threadId) return false;
+  return (
+    !("hostId" in surface) || surface.hostId === undefined || String(surface.hostId) === hostId
+  );
 }
 
 function appleRestartContext(

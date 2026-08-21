@@ -206,7 +206,7 @@ describe("WindowChrome", () => {
     );
   });
 
-  it("keeps ordinary navigation and tab selection neutral", () => {
+  it("keeps ordinary navigation selection neutral", () => {
     // The mode switcher's active state moved to the design system sheet,
     // where .mode[aria-current="page"] uses the neutral soft fill.
     const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
@@ -217,12 +217,6 @@ describe("WindowChrome", () => {
     // carried by ink alone rather than a filled pill.
     expect(cssRule('.project-row[data-active="true"]')).toContain("color: var(--oct-fg);");
     expect(cssRule('.project-row[data-active="true"]')).not.toMatch(/accent|purple|background/i);
-    expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])')).toContain(
-      "background: var(--oct-fg-soft);",
-    );
-    expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])')).not.toMatch(
-      /accent|border-bottom-color/i,
-    );
     expect(styles).not.toMatch(/\.project-row__mark\[data-type=/);
   });
 
@@ -239,18 +233,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".new-project--subtle:hover")).toContain("color: var(--octant-text-secondary);");
   });
 
-  it("standardizes workspace tab and pane IconButton controls", () => {
-    expect(cssRule(".workspace-tab__action")).toContain("width: 26px;");
-    expect(cssRule(".workspace-tab__action")).toContain("height: 26px;");
-    expect(cssRule(".workspace-tab__action")).toContain("background: transparent;");
-    expect(cssRule(".workspace-tab__action:hover")).toContain("background: var(--oct-fg-soft);");
-    expect(cssRule('.workspace-tab__action[aria-expanded="true"]')).toContain(
-      "background: var(--oct-fg-soft);",
-    );
-    expect(cssRule(".workspace-tab__action:active")).toContain(
-      "background: var(--octant-control-pressed);",
-    );
-
+  it("standardizes workspace pane IconButton controls", () => {
     expect(cssRule(".workspace-pane-actions__trigger")).toContain("width: 26px;");
     expect(cssRule(".workspace-pane-actions__trigger")).toContain("height: 26px;");
     expect(cssRule(".workspace-pane-actions__trigger")).toContain("background: transparent;");
@@ -369,9 +352,7 @@ describe("WindowChrome", () => {
     expect(cssRule('.project-row[data-active="true"]', 1)).toContain(
       "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
     );
-    expect(cssRule('.workspace-tab-item:has(.workspace-tab[aria-selected="true"])', 1)).toContain(
-      "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
-    );
+    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".workspace-pane__header");
   });
 
   it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {

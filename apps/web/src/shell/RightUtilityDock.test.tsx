@@ -117,12 +117,34 @@ describe("RightUtilityDock", () => {
     );
   });
 
-  it("clears old content before rendering when validation closes or Project identity changes", () => {
+  it("keeps the dock open but empties it when the Project identity goes stale", () => {
     const { rerender } = render(<RightUtilityDock {...props()} />);
     expect(screen.getByText("Private Project memory")).toBeVisible();
 
     rerender(
-      <RightUtilityDock {...props({ resolution: { kind: "closed", reason: "project-stale" } })} />,
+      <RightUtilityDock
+        {...props({
+          resolution: {
+            kind: "unavailable",
+            reason: "project-stale",
+            surface: RIGHT_UTILITY_DOCK_SURFACES[1],
+          },
+        })}
+      />,
+    );
+    expect(screen.queryByText("Private Project memory")).toBeNull();
+    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Project memory has nothing to describe here" }),
+    ).toBeVisible();
+  });
+
+  it("tears the dock down entirely when the resolution is closed", () => {
+    const { rerender } = render(<RightUtilityDock {...props()} />);
+    expect(screen.getByText("Private Project memory")).toBeVisible();
+
+    rerender(
+      <RightUtilityDock {...props({ resolution: { kind: "closed", reason: "disconnected" } })} />,
     );
     expect(screen.queryByText("Private Project memory")).toBeNull();
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();

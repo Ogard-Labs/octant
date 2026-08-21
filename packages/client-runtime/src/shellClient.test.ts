@@ -23,14 +23,14 @@ const bootstrap = decodeShellBootstrap({
     windowId,
     activeMode: "code",
     layouts: {
-      chat: group("00000000-0000-4000-8000-000000000511", "chat"),
-      work: group("00000000-0000-4000-8000-000000000521", "work"),
-      code: group("00000000-0000-4000-8000-000000000531", "code"),
+      chat: pane("00000000-0000-4000-8000-000000000511", "chat"),
+      work: pane("00000000-0000-4000-8000-000000000521", "work"),
+      code: pane("00000000-0000-4000-8000-000000000531", "code"),
     },
-    activeGroupIds: {
-      chat: "00000000-0000-4000-8000-000000000511",
-      work: "00000000-0000-4000-8000-000000000521",
-      code: "00000000-0000-4000-8000-000000000531",
+    activePaneIds: {
+      chat: "00000000-0000-4000-8000-000000000512",
+      work: "00000000-0000-4000-8000-000000000522",
+      code: "00000000-0000-4000-8000-000000000532",
     },
     contextByMode: {
       chat: { host: "local", mode: "chat", projectId: null, boundRoot: null },
@@ -98,20 +98,24 @@ describe("shell client", () => {
     });
   });
 
-  it("posts one strict atomic dock-tab command without transport decomposition", async () => {
+  it("posts one strict atomic split-pane command without transport decomposition", async () => {
     const dockCommand = decodeShellCommand({
       kind: "apply-workspace-operation",
       windowId,
       expectedVersion: 0,
       operation: {
-        kind: "dock-tab",
+        kind: "split-pane",
         mode: "code",
-        fromGroupId: "00000000-0000-4000-8000-000000000531",
-        targetGroupId: "00000000-0000-4000-8000-000000000541",
-        tabId: "00000000-0000-4000-8000-000000000533",
+        targetPaneId: "00000000-0000-4000-8000-000000000541",
+        surface: {
+          kind: "welcome",
+          id: "00000000-0000-4000-8000-000000000533",
+          mode: "code",
+          title: "code welcome",
+        },
         splitNodeId: "00000000-0000-4000-8000-000000000551",
-        newGroupNodeId: "00000000-0000-4000-8000-000000000552",
-        newGroupId: "00000000-0000-4000-8000-000000000553",
+        newPaneNodeId: "00000000-0000-4000-8000-000000000552",
+        newPaneId: "00000000-0000-4000-8000-000000000553",
         orientation: "horizontal",
         placement: "after",
         ratio: 0.5,
@@ -232,19 +236,16 @@ async function rejectedFailure(request: Promise<unknown>): Promise<ShellClientFa
   throw new Error("Expected shell request to reject.");
 }
 
-function group(seed: string, mode: "chat" | "work" | "code") {
+function pane(seed: string, mode: "chat" | "work" | "code") {
   return {
-    kind: "group" as const,
+    kind: "pane" as const,
     nodeId: seed,
-    groupId: seed.replace(/.$/, "2"),
-    tabs: [
-      {
-        kind: "welcome" as const,
-        id: seed.replace(/.$/, "3"),
-        mode,
-        title: `${mode} welcome`,
-      },
-    ],
-    activeTabId: seed.replace(/.$/, "3"),
+    paneId: seed.replace(/.$/, "2"),
+    surface: {
+      kind: "welcome" as const,
+      id: seed.replace(/.$/, "3"),
+      mode,
+      title: `${mode} welcome`,
+    },
   };
 }

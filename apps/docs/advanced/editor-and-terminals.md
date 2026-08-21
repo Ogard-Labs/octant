@@ -12,13 +12,13 @@ checkout identities, never raw host paths.
 
 The Monaco editor is a full editable pane with:
 
-- File tabs and multiple editor panes in the persistent split-tree
+- Multiple editor panes in the persistent split-tree
 - Syntax highlighting and built-in services for TypeScript, JavaScript, JSON,
   CSS, and HTML
 - Find and replace, go to line, multi-cursor, undo and redo, and save
 - Diff viewing
 - Dirty-state protection and external-change detection
-- Restoration of file tabs and pane layout after restart
+- Restoration of open files and pane layout after restart
 
 Other languages get syntax highlighting and editing fundamentals only; deeper
 tooling is handled through external-editor handoff.
@@ -60,7 +60,7 @@ authenticated, and fail-closed:
 ## Terminals
 
 Terminals are server-owned PTY processes in the selected checkout, rendered by
-Xterm. They appear as movable tabs and multiple terminals can run
+Xterm. They appear as movable workspace panes and multiple terminals can run
 concurrently.
 
 - Explicit shell selection with a sanitized inherited environment and

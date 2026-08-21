@@ -303,7 +303,10 @@ describe("createPhase1RuntimeRegistries", () => {
             },
             layouts: {
               chat: { kind: "group", tabs: [] },
-              work: { kind: "group", tabs: [] },
+              work: {
+                kind: "pane",
+                surface: { kind: "preview", hostId: "local", opaqueRef: "local" },
+              },
               code: {
                 kind: "group",
                 tabs: [
@@ -325,6 +328,9 @@ describe("createPhase1RuntimeRegistries", () => {
           code: { host: stableHostId },
         },
         layouts: {
+          work: {
+            surface: { kind: "preview", hostId: stableHostId, opaqueRef: "local" },
+          },
           code: {
             tabs: [
               { kind: "preview", hostId: stableHostId, opaqueRef: "local" },
@@ -743,38 +749,28 @@ describe("createPhase1RuntimeRegistries", () => {
   it("upcasts only unsupported persisted tab kinds and preserves strict corruption checks", () => {
     const registry = createPhase1RuntimeRegistries().events;
     const payload = validWorkspacePayload();
-    const code = payload.workspace.layouts.code;
+    const tabId = "30000000-0000-4000-8000-000000000003";
     const persisted = {
       workspace: {
         ...payload.workspace,
         layouts: {
           ...payload.workspace.layouts,
-          code: {
-            ...code,
-            tabs: [
-              {
-                kind: "future-editor",
-                id: code.tabs[0]!.id,
-                title: "Future editor",
-                futureOnly: true,
-              },
-            ],
-          },
+          code: legacyCodeGroup([
+            { kind: "future-editor", id: tabId, title: "Future editor", futureOnly: true },
+          ]),
         },
       },
     };
 
+    // The unknown kind upcasts to the mode welcome surface in place; the pane
+    // keeps the group's identity and the tab's surface id.
     expect(registry.decode("workspace.layout-replaced", 1, persisted)).toMatchObject({
       workspace: {
         layouts: {
           code: {
-            tabs: [
-              {
-                kind: "unavailable",
-                id: code.tabs[0]!.id,
-                title: "Future editor",
-              },
-            ],
+            kind: "pane",
+            paneId: "30000000-0000-4000-8000-000000000002",
+            surface: { kind: "welcome", id: tabId, mode: "code" },
           },
         },
       },
@@ -785,10 +781,9 @@ describe("createPhase1RuntimeRegistries", () => {
           ...persisted.workspace,
           layouts: {
             ...persisted.workspace.layouts,
-            code: {
-              ...persisted.workspace.layouts.code,
-              tabs: [{ kind: "future-editor", id: "not-a-uuid", title: "Future editor" }],
-            },
+            code: legacyCodeGroup([
+              { kind: "future-editor", id: "not-a-uuid", title: "Future editor" },
+            ]),
           },
         },
       }),
@@ -799,10 +794,7 @@ describe("createPhase1RuntimeRegistries", () => {
           ...payload.workspace,
           layouts: {
             ...payload.workspace.layouts,
-            code: {
-              ...code,
-              tabs: [{ kind: "welcome", id: code.tabs[0]!.id, title: "Incomplete welcome" }],
-            },
+            code: legacyCodeGroup([{ kind: "welcome", id: tabId, title: "Incomplete welcome" }]),
           },
         },
       }),
@@ -814,26 +806,39 @@ describe("createPhase1RuntimeRegistries", () => {
     ["numeric", { title: 42 }],
     ["empty", { title: "" }],
     ["whitespace-padded", { title: " Future editor " }],
-  ])("rejects an unsupported persisted tab with a %s title", (_name, titleFields) => {
-    const registry = createPhase1RuntimeRegistries().events;
-    const payload = validWorkspacePayload();
-    const code = payload.workspace.layouts.code;
+  ])(
+    "recovers an unsupported persisted tab with a %s title as the mode welcome surface",
+    (_name, titleFields) => {
+      const registry = createPhase1RuntimeRegistries().events;
+      const payload = validWorkspacePayload();
 
-    expect(() =>
-      registry.decode("workspace.layout-replaced", 1, {
-        workspace: {
-          ...payload.workspace,
-          layouts: {
-            ...payload.workspace.layouts,
-            code: {
-              ...code,
-              tabs: [{ kind: "future-editor", id: code.tabs[0]!.id, ...titleFields }],
+      // The welcome surface carries canonical copy, so the garbage persisted
+      // title can never enter renderer state.
+      expect(
+        registry.decode("workspace.layout-replaced", 1, {
+          workspace: {
+            ...payload.workspace,
+            layouts: {
+              ...payload.workspace.layouts,
+              code: legacyCodeGroup([
+                {
+                  kind: "future-editor",
+                  id: "30000000-0000-4000-8000-000000000003",
+                  ...titleFields,
+                },
+              ]),
             },
           },
+        }),
+      ).toMatchObject({
+        workspace: {
+          layouts: {
+            code: { kind: "pane", surface: { kind: "welcome", title: "Welcome to Code" } },
+          },
         },
-      }),
-    ).toThrow();
-  });
+      });
+    },
+  );
 });
 
 function validSettingsPayload() {
@@ -1131,20 +1136,29 @@ function boundProject(project: {
   };
 }
 
+// The tab-group leaf a pre-pane journal persisted for the code mode; decode
+// collapses it to one pane showing its active tab.
+function legacyCodeGroup(tabs: ReadonlyArray<Record<string, unknown>>) {
+  return {
+    kind: "group",
+    nodeId: "30000000-0000-4000-8000-000000000001",
+    groupId: "30000000-0000-4000-8000-000000000002",
+    tabs,
+    activeTabId: tabs[0]?.id,
+  };
+}
+
 function validWorkspacePayload() {
-  const group = (prefix: string, mode: "chat" | "work" | "code") => ({
-    kind: "group" as const,
+  const pane = (prefix: string, mode: "chat" | "work" | "code") => ({
+    kind: "pane" as const,
     nodeId: `${prefix}0000000-0000-4000-8000-000000000001`,
-    groupId: `${prefix}0000000-0000-4000-8000-000000000002`,
-    tabs: [
-      {
-        kind: "welcome" as const,
-        id: `${prefix}0000000-0000-4000-8000-000000000003`,
-        mode,
-        title: `Welcome to ${mode}`,
-      },
-    ],
-    activeTabId: `${prefix}0000000-0000-4000-8000-000000000003`,
+    paneId: `${prefix}0000000-0000-4000-8000-000000000002`,
+    surface: {
+      kind: "welcome" as const,
+      id: `${prefix}0000000-0000-4000-8000-000000000003`,
+      mode,
+      title: `Welcome to ${mode}`,
+    },
   });
 
   return {
@@ -1152,11 +1166,11 @@ function validWorkspacePayload() {
       windowId: "10000000-0000-4000-8000-000000000001",
       activeMode: "code" as const,
       layouts: {
-        chat: group("1", "chat"),
-        work: group("2", "work"),
-        code: group("3", "code"),
+        chat: pane("1", "chat"),
+        work: pane("2", "work"),
+        code: pane("3", "code"),
       },
-      activeGroupIds: {
+      activePaneIds: {
         chat: "10000000-0000-4000-8000-000000000002",
         work: "20000000-0000-4000-8000-000000000002",
         code: "30000000-0000-4000-8000-000000000002",

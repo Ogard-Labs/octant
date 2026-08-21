@@ -1,6 +1,7 @@
 import {
   AggregateId as AggregateIdSchema,
   AggregateVersion as AggregateVersionSchema,
+  decodeWindowId,
   type AggregateVersion,
   type EnvironmentPresentationState,
   type EventEnvelope,
@@ -8,6 +9,7 @@ import {
   type WindowId,
   type WindowWorkspace,
 } from "@octant/contracts";
+import { defaultWindowWorkspace } from "@octant/domain";
 import { Schema } from "effect";
 import type { Projection } from "./projection";
 import {
@@ -256,10 +258,25 @@ export function readEnvironmentPresentation(
 
 function decodeWorkspaceRow(row: WindowWorkspaceRow): ProjectedWindowWorkspace {
   assertCurrentSchema(row.schema_version);
-  return {
-    workspace: decodePersistedWindowWorkspace(JSON.parse(row.workspace_json)),
-    aggregateVersion: decodeAggregateVersion(row.aggregate_version),
-  };
+  const parsed: unknown = JSON.parse(row.workspace_json);
+  const aggregateVersion = decodeAggregateVersion(row.aggregate_version);
+  try {
+    return { workspace: decodePersistedWindowWorkspace(parsed), aggregateVersion };
+  } catch (error) {
+    // Restore is layout-only: a persisted layout the current model cannot
+    // read restores as the default single welcome pane per mode rather than
+    // failing the whole bootstrap. The projected version is kept so the next
+    // command does not conflict against the journal.
+    const windowId =
+      typeof parsed === "object" && parsed !== null && "windowId" in parsed
+        ? parsed.windowId
+        : undefined;
+    if (typeof windowId !== "string") throw error;
+    return {
+      workspace: { ...defaultWindowWorkspace(decodeWindowId(windowId)), version: aggregateVersion },
+      aggregateVersion,
+    };
+  }
 }
 
 function assertCurrentSchema(schemaVersion: number): void {

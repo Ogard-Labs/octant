@@ -1,4 +1,3 @@
-import { orderTabsWithPinnedCanvasFirst, withCanvasTabPin } from "./canvasTabPolicy";
 import {
   DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
   LOCAL_HOST_ID,
@@ -12,7 +11,7 @@ import {
   MIN_SIDEBAR_WIDTH,
   MIN_SPLIT_RATIO,
   decodeLayoutNodeId,
-  decodeTabGroupId,
+  decodePaneId,
   decodeWorkspaceTabId,
   type EnvironmentCompactIdentity,
   type EnvironmentPresentation,
@@ -24,19 +23,19 @@ import {
   type FirstRunOnboardingStatus,
   type HostId,
   type LayoutNodeId,
+  type PaneId,
   type ShellSettings,
   type SplitRatio,
   type StowedWorkspaceLayout,
-  type TabGroupId,
   type WindowId,
   type WindowWorkspace,
   type WorkspaceContextKey,
   type WorkspaceLayoutNode,
   type WorkspaceOperation,
+  type WorkspacePane,
   type WorkspaceSurfaceCatalog,
   type WorkspaceSurfaceDescriptor,
   type WorkspaceTab,
-  type WorkspaceTabGroup,
   type WorkspaceTabId,
 } from "@octant/contracts/shell";
 import { DEFAULT_SIDEBAR_BACKGROUND } from "@octant/contracts/theme";
@@ -47,21 +46,17 @@ import type { ChatThreadId, CodeEnvironmentObservation } from "@octant/contracts
 import { resolveAvailableMode } from "./modePolicy";
 
 export const MAX_LAYOUT_DEPTH = 6;
-export const MAX_TAB_GROUPS = 8;
-export const MAX_WORKSPACE_TABS = 48;
+export const MAX_WORKSPACE_PANES = 8;
 
 export type ShellPolicyRejectionCode =
   | "cross-context"
   | "duplicate-id"
-  | "invalid-active-group"
-  | "invalid-active-tab"
+  | "invalid-active-pane"
   | "invalid-focus"
-  | "invalid-index"
   | "invalid-layout"
   | "limit-exceeded"
-  | "missing-group"
   | "missing-node"
-  | "missing-tab"
+  | "missing-pane"
   | "redundant-split";
 
 export class ShellPolicyRejected extends Error {
@@ -78,17 +73,17 @@ export class ShellPolicyRejected extends Error {
 const DEFAULT_IDS = {
   chat: {
     nodeId: decodeLayoutNodeId("01000000-0000-4000-8000-000000000001"),
-    groupId: decodeTabGroupId("01000000-0000-4000-8000-000000000002"),
+    paneId: decodePaneId("01000000-0000-4000-8000-000000000002"),
     tabId: decodeWorkspaceTabId("01000000-0000-4000-8000-000000000003"),
   },
   work: {
     nodeId: decodeLayoutNodeId("02000000-0000-4000-8000-000000000001"),
-    groupId: decodeTabGroupId("02000000-0000-4000-8000-000000000002"),
+    paneId: decodePaneId("02000000-0000-4000-8000-000000000002"),
     tabId: decodeWorkspaceTabId("02000000-0000-4000-8000-000000000003"),
   },
   code: {
     nodeId: decodeLayoutNodeId("03000000-0000-4000-8000-000000000001"),
-    groupId: decodeTabGroupId("03000000-0000-4000-8000-000000000002"),
+    paneId: decodePaneId("03000000-0000-4000-8000-000000000002"),
     tabId: decodeWorkspaceTabId("03000000-0000-4000-8000-000000000003"),
   },
 } as const;
@@ -125,15 +120,23 @@ function reject(code: ShellPolicyRejectionCode, message: string): never {
   throw new ShellPolicyRejected(code, message);
 }
 
-function defaultLayout(mode: OctantMode): WorkspaceTabGroup {
+function defaultLayout(mode: OctantMode): WorkspacePane {
   const ids = DEFAULT_IDS[mode];
   return {
-    kind: "group",
+    kind: "pane",
     nodeId: ids.nodeId,
-    groupId: ids.groupId,
-    tabs: [{ kind: "welcome", id: ids.tabId, mode, title: MODE_TITLES[mode] }],
-    activeTabId: ids.tabId,
+    paneId: ids.paneId,
+    surface: workspaceWelcomeSurface(mode, ids.tabId),
   };
+}
+
+/**
+ * The welcome surface a pane falls back to. Restore renders this in place of a
+ * surface that no longer resolves, reusing the old surface's id so the pane
+ * keeps a stable identity instead of presenting a dead view with a Retry.
+ */
+export function workspaceWelcomeSurface(mode: OctantMode, id: WorkspaceTabId): WorkspaceTab {
+  return { kind: "welcome", id, mode, title: MODE_TITLES[mode] };
 }
 
 export function defaultShellSettings(): ShellSettings {
@@ -619,10 +622,10 @@ export function defaultWindowWorkspace(windowId: WindowId): WindowWorkspace {
       work: defaultLayout("work"),
       code: defaultLayout("code"),
     },
-    activeGroupIds: {
-      chat: DEFAULT_IDS.chat.groupId,
-      work: DEFAULT_IDS.work.groupId,
-      code: DEFAULT_IDS.code.groupId,
+    activePaneIds: {
+      chat: DEFAULT_IDS.chat.paneId,
+      work: DEFAULT_IDS.work.paneId,
+      code: DEFAULT_IDS.code.paneId,
     },
     contextByMode: {
       chat: defaultContextKey("chat"),
@@ -674,9 +677,8 @@ export function replaceShellSettings(
 }
 
 interface LayoutStats {
-  readonly groups: number;
-  readonly tabs: number;
-  readonly groupIds: ReadonlySet<TabGroupId>;
+  readonly panes: number;
+  readonly paneIds: ReadonlySet<PaneId>;
 }
 
 function validateLayout(
@@ -684,7 +686,7 @@ function validateLayout(
   context: WorkspaceContextKey,
   layout: WorkspaceLayoutNode,
   seenNodeIds: Set<LayoutNodeId>,
-  seenGroupIds: Set<TabGroupId>,
+  seenPaneIds: Set<PaneId>,
   seenTabIds: Set<WorkspaceTabId>,
   depth = 1,
 ): LayoutStats {
@@ -707,7 +709,7 @@ function validateLayout(
       context,
       layout.first,
       seenNodeIds,
-      seenGroupIds,
+      seenPaneIds,
       seenTabIds,
       depth + 1,
     );
@@ -716,32 +718,26 @@ function validateLayout(
       context,
       layout.second,
       seenNodeIds,
-      seenGroupIds,
+      seenPaneIds,
       seenTabIds,
       depth + 1,
     );
     return {
-      groups: first.groups + second.groups,
-      tabs: first.tabs + second.tabs,
-      groupIds: new Set([...first.groupIds, ...second.groupIds]),
+      panes: first.panes + second.panes,
+      paneIds: new Set([...first.paneIds, ...second.paneIds]),
     };
   }
 
-  if (seenGroupIds.has(layout.groupId)) reject("duplicate-id", "tab group IDs must be unique");
-  seenGroupIds.add(layout.groupId);
-  if (layout.tabs.length === 0) reject("invalid-layout", "tab groups cannot be empty");
-  if (!layout.tabs.some((tab) => tab.id === layout.activeTabId)) {
-    reject("invalid-active-tab", "active tab must belong to its group");
+  if (seenPaneIds.has(layout.paneId)) reject("duplicate-id", "pane IDs must be unique");
+  seenPaneIds.add(layout.paneId);
+  const surface = layout.surface;
+  if ("mode" in surface && surface.mode !== mode) {
+    reject("invalid-layout", `${surface.kind} surface mode must match the ${mode} layout`);
   }
-  for (const tab of layout.tabs) {
-    if ("mode" in tab && tab.mode !== mode) {
-      reject("invalid-layout", `${tab.kind} tab mode must match the ${mode} layout`);
-    }
-    validateTabContext(tab, mode, context);
-    if (seenTabIds.has(tab.id)) reject("duplicate-id", "workspace tab IDs must be unique");
-    seenTabIds.add(tab.id);
-  }
-  return { groups: 1, tabs: layout.tabs.length, groupIds: new Set([layout.groupId]) };
+  validateTabContext(surface, mode, context);
+  if (seenTabIds.has(surface.id)) reject("duplicate-id", "workspace surface IDs must be unique");
+  seenTabIds.add(surface.id);
+  return { panes: 1, paneIds: new Set([layout.paneId]) };
 }
 
 function validateTabContext(
@@ -792,11 +788,10 @@ function validateTabContext(
 
 export function validateWorkspace(workspace: WindowWorkspace): WindowWorkspace {
   const seenNodeIds = new Set<LayoutNodeId>();
-  const seenGroupIds = new Set<TabGroupId>();
+  const seenPaneIds = new Set<PaneId>();
   const seenTabIds = new Set<WorkspaceTabId>();
-  const activeGroupIds = new Set<TabGroupId>();
-  let totalGroups = 0;
-  let totalTabs = 0;
+  const activeModePaneIds = new Set<PaneId>();
+  let totalPanes = 0;
 
   for (const mode of ["chat", "work", "code"] as const) {
     const context = workspace.contextByMode[mode];
@@ -805,34 +800,30 @@ export function validateWorkspace(workspace: WindowWorkspace): WindowWorkspace {
       context,
       workspace.layouts[mode],
       seenNodeIds,
-      seenGroupIds,
+      seenPaneIds,
       seenTabIds,
     );
-    totalGroups += stats.groups;
-    totalTabs += stats.tabs;
+    totalPanes += stats.panes;
     if (mode === workspace.activeMode) {
-      for (const groupId of stats.groupIds) activeGroupIds.add(groupId);
+      for (const paneId of stats.paneIds) activeModePaneIds.add(paneId);
     }
-    if (!stats.groupIds.has(workspace.activeGroupIds[mode])) {
-      reject("invalid-active-group", `active group must be reachable in the ${mode} layout`);
+    if (!stats.paneIds.has(workspace.activePaneIds[mode])) {
+      reject("invalid-active-pane", `active pane must be reachable in the ${mode} layout`);
     }
   }
 
-  if (totalGroups > MAX_TAB_GROUPS) {
-    reject("limit-exceeded", `workspace groups exceed ${MAX_TAB_GROUPS}`);
-  }
-  if (totalTabs > MAX_WORKSPACE_TABS) {
-    reject("limit-exceeded", `workspace tabs exceed ${MAX_WORKSPACE_TABS}`);
+  if (totalPanes > MAX_WORKSPACE_PANES) {
+    reject("limit-exceeded", `workspace panes exceed ${MAX_WORKSPACE_PANES}`);
   }
 
-  if (workspace.focusedGroupId !== undefined && !activeGroupIds.has(workspace.focusedGroupId)) {
-    reject("invalid-focus", "focused group must be reachable in the active mode");
+  if (workspace.focusedPaneId !== undefined && !activeModePaneIds.has(workspace.focusedPaneId)) {
+    reject("invalid-focus", "focused pane must be reachable in the active mode");
   }
 
   // Stowed layouts are inactive per-Project snapshots: they are validated
   // against their own recorded context with independent identity sets (their
-  // tabs are not part of the active workspace identity space), and they do not
-  // count against the active group/tab limits.
+  // surfaces are not part of the active workspace identity space), and they do
+  // not count against the active pane limit.
   if (workspace.stowedLayouts.length > MAX_STOWED_WORKSPACE_LAYOUTS) {
     reject("limit-exceeded", `stowed layouts exceed ${MAX_STOWED_WORKSPACE_LAYOUTS}`);
   }
@@ -850,11 +841,11 @@ export function validateWorkspace(workspace: WindowWorkspace): WindowWorkspace {
       stowed.context,
       stowed.layout,
       new Set<LayoutNodeId>(),
-      new Set<TabGroupId>(),
+      new Set<PaneId>(),
       new Set<WorkspaceTabId>(),
     );
-    if (findGroup(stowed.layout, stowed.activeGroupId) === undefined) {
-      reject("invalid-active-group", "stowed active group must be reachable in its layout");
+    if (findPane(stowed.layout, stowed.activePaneId) === undefined) {
+      reject("invalid-active-pane", "stowed active pane must be reachable in its layout");
     }
   }
   return workspace;
@@ -867,7 +858,7 @@ export function reconcileWorkspaceWithSettings(
   validateWorkspace(workspace);
   const activeMode = resolveAvailableMode(workspace.activeMode, settings);
   if (activeMode === workspace.activeMode) return workspace;
-  const { focusedGroupId: _focusedGroupId, ...unfocused } = workspace;
+  const { focusedPaneId: _focusedPaneId, ...unfocused } = workspace;
   return validateWorkspace({ ...unfocused, activeMode });
 }
 
@@ -897,12 +888,8 @@ function sameWorkspaceContext(left: WorkspaceContextKey, right: WorkspaceContext
   );
 }
 
-function isWelcomeOnlyLayout(layout: WorkspaceLayoutNode): layout is WorkspaceTabGroup {
-  return layout.kind === "group" && layout.tabs.length === 1 && layout.tabs[0]?.kind === "welcome";
-}
-
-function isWelcomeOnlyGroup(group: WorkspaceTabGroup): boolean {
-  return group.tabs.length === 1 && group.tabs[0]?.kind === "welcome";
+function isWelcomeOnlyLayout(layout: WorkspaceLayoutNode): layout is WorkspacePane {
+  return layout.kind === "pane" && layout.surface.kind === "welcome";
 }
 
 function stowOutgoingLayout(workspace: WindowWorkspace, mode: OctantMode): WindowWorkspace {
@@ -912,7 +899,7 @@ function stowOutgoingLayout(workspace: WindowWorkspace, mode: OctantMode): Windo
   const entry: StowedWorkspaceLayout = {
     context,
     layout,
-    activeGroupId: workspace.activeGroupIds[mode],
+    activePaneId: workspace.activePaneIds[mode],
   };
   const rest = workspace.stowedLayouts.filter(
     (stowed) => !sameWorkspaceContext(stowed.context, context),
@@ -933,19 +920,19 @@ function restoreDestinationLayout(
   );
   const stowedLayouts = workspace.stowedLayouts.filter((stowed) => stowed !== entry);
   const layout = entry === undefined ? defaultLayout(mode) : entry.layout;
-  const activeGroupId = entry === undefined ? firstGroup(layout).groupId : entry.activeGroupId;
+  const activePaneId = entry === undefined ? firstPane(layout).paneId : entry.activePaneId;
   const next: WindowWorkspace = {
     ...workspace,
     layouts: { ...workspace.layouts, [mode]: layout },
-    activeGroupIds: { ...workspace.activeGroupIds, [mode]: activeGroupId },
+    activePaneIds: { ...workspace.activePaneIds, [mode]: activePaneId },
     stowedLayouts,
   };
   if (
-    next.focusedGroupId !== undefined &&
+    next.focusedPaneId !== undefined &&
     mode === next.activeMode &&
-    findGroup(layout, next.focusedGroupId) === undefined
+    findPane(layout, next.focusedPaneId) === undefined
   ) {
-    const { focusedGroupId: _focusedGroupId, ...unfocused } = next;
+    const { focusedPaneId: _focusedPaneId, ...unfocused } = next;
     return unfocused;
   }
   return next;
@@ -956,13 +943,13 @@ export function resolveWorkspaceContext(
   operation: WorkspaceOperation,
   resolves: WorkspaceContextResolves,
 ): WindowWorkspace {
-  if (operation.kind === "switch-project-tab") {
-    const candidate = resolves.tabContext(operation.tab);
+  if (operation.kind === "switch-project-surface") {
+    const candidate = resolves.tabContext(operation.surface);
     if (
       candidate === undefined ||
       candidate.projectId === null ||
       candidate.mode !== operation.mode ||
-      ("mode" in operation.tab && operation.tab.mode !== operation.mode)
+      ("mode" in operation.surface && operation.surface.mode !== operation.mode)
     ) {
       throw new WorkspaceContextRejected(
         "The selected surface could not be resolved to an active matching Project.",
@@ -984,24 +971,19 @@ export function resolveWorkspaceContext(
       },
     };
   }
-  if (operation.kind === "activate-tab") {
-    const group = findGroup(workspace.layouts[operation.mode], operation.groupId);
-    const tab = group?.tabs.find((candidate) => candidate.id === operation.tabId);
-    if (tab === undefined) return workspace;
-    return resolveWorkspaceContext(
-      workspace,
-      {
-        kind: "open-tab",
-        mode: operation.mode,
-        groupId: operation.groupId,
-        tab,
-      },
-      resolves,
-    );
+  // Every operation that introduces a surface must resolve its context: a
+  // sidebar drag lands as split-pane or replace-pane-surface without ever
+  // passing through open-surface, and skipping resolution there would journal
+  // a surface whose Project authority was never checked.
+  if (
+    operation.kind !== "open-surface" &&
+    operation.kind !== "replace-pane-surface" &&
+    operation.kind !== "split-pane"
+  ) {
+    return workspace;
   }
-  if (operation.kind !== "open-tab") return workspace;
   const mode = operation.mode;
-  const tab = operation.tab;
+  const tab = operation.surface;
   const current = workspace.contextByMode[mode];
 
   if (tab.kind === "files") {
@@ -1182,36 +1164,32 @@ export function buildSurfaceCatalog(
   };
 }
 
-function findGroup(
-  layout: WorkspaceLayoutNode,
-  groupId: TabGroupId,
-): WorkspaceTabGroup | undefined {
-  if (layout.kind === "group") return layout.groupId === groupId ? layout : undefined;
-  return findGroup(layout.first, groupId) ?? findGroup(layout.second, groupId);
+function findPane(layout: WorkspaceLayoutNode, paneId: PaneId): WorkspacePane | undefined {
+  if (layout.kind === "pane") {
+    return String(layout.paneId) === String(paneId) ? layout : undefined;
+  }
+  return findPane(layout.first, paneId) ?? findPane(layout.second, paneId);
 }
 
-function findTab(
+function findSurfacePane(
   layout: WorkspaceLayoutNode,
-  tabId: WorkspaceTabId,
-): { readonly group: WorkspaceTabGroup; readonly tab: WorkspaceTab } | undefined {
-  if (layout.kind === "group") {
-    const tab = layout.tabs.find((candidate) => candidate.id === tabId);
-    return tab === undefined ? undefined : { group: layout, tab };
+  surface: WorkspaceTab,
+): WorkspacePane | undefined {
+  if (layout.kind === "pane") {
+    return sameWorkspaceSurface(layout.surface, surface) ? layout : undefined;
   }
-  return findTab(layout.first, tabId) ?? findTab(layout.second, tabId);
+  return findSurfacePane(layout.first, surface) ?? findSurfacePane(layout.second, surface);
 }
 
-function findTabInWorkspace(
-  workspace: WindowWorkspace,
-  tabId: WorkspaceTabId,
-):
-  | { readonly mode: OctantMode; readonly group: WorkspaceTabGroup; readonly tab: WorkspaceTab }
-  | undefined {
-  for (const mode of ["chat", "work", "code"] as const) {
-    const found = findTab(workspace.layouts[mode], tabId);
-    if (found !== undefined) return { mode, ...found };
-  }
-  return undefined;
+function hasSurfaceId(layout: WorkspaceLayoutNode, id: WorkspaceTabId): boolean {
+  if (layout.kind === "pane") return String(layout.surface.id) === String(id);
+  return hasSurfaceId(layout.first, id) || hasSurfaceId(layout.second, id);
+}
+
+function hasSurfaceIdInWorkspace(workspace: WindowWorkspace, id: WorkspaceTabId): boolean {
+  return (["chat", "work", "code"] as const).some((mode) =>
+    hasSurfaceId(workspace.layouts[mode], id),
+  );
 }
 
 function hasNodeId(layout: WorkspaceLayoutNode, nodeId: LayoutNodeId): boolean {
@@ -1227,25 +1205,25 @@ function hasNodeIdInWorkspace(workspace: WindowWorkspace, nodeId: LayoutNodeId):
   );
 }
 
-function hasGroupIdInWorkspace(workspace: WindowWorkspace, groupId: TabGroupId): boolean {
+function hasPaneIdInWorkspace(workspace: WindowWorkspace, paneId: PaneId): boolean {
   return (["chat", "work", "code"] as const).some(
-    (mode) => findGroup(workspace.layouts[mode], groupId) !== undefined,
+    (mode) => findPane(workspace.layouts[mode], paneId) !== undefined,
   );
 }
 
-function mapGroup(
+function mapPane(
   layout: WorkspaceLayoutNode,
-  groupId: TabGroupId,
-  transform: (group: WorkspaceTabGroup) => WorkspaceLayoutNode,
+  paneId: PaneId,
+  transform: (pane: WorkspacePane) => WorkspaceLayoutNode,
 ): { readonly layout: WorkspaceLayoutNode; readonly found: boolean } {
-  if (layout.kind === "group") {
-    return layout.groupId === groupId
+  if (layout.kind === "pane") {
+    return String(layout.paneId) === String(paneId)
       ? { layout: transform(layout), found: true }
       : { layout, found: false };
   }
-  const first = mapGroup(layout.first, groupId, transform);
+  const first = mapPane(layout.first, paneId, transform);
   if (first.found) return { layout: { ...layout, first: first.layout }, found: true };
-  const second = mapGroup(layout.second, groupId, transform);
+  const second = mapPane(layout.second, paneId, transform);
   return second.found
     ? { layout: { ...layout, second: second.layout }, found: true }
     : { layout, found: false };
@@ -1256,7 +1234,7 @@ function mapSplit(
   nodeId: LayoutNodeId,
   transform: (split: Extract<WorkspaceLayoutNode, { kind: "split" }>) => WorkspaceLayoutNode,
 ): { readonly layout: WorkspaceLayoutNode; readonly found: boolean } {
-  if (layout.kind === "group") return { layout, found: false };
+  if (layout.kind === "pane") return { layout, found: false };
   if (layout.nodeId === nodeId) return { layout: transform(layout), found: true };
   const first = mapSplit(layout.first, nodeId, transform);
   if (first.found) return { layout: { ...layout, first: first.layout }, found: true };
@@ -1266,46 +1244,30 @@ function mapSplit(
     : { layout, found: false };
 }
 
-function removeTab(
+function removePane(
   layout: WorkspaceLayoutNode,
-  groupId: TabGroupId,
-  tabId: WorkspaceTabId,
-): { readonly layout: WorkspaceLayoutNode | undefined; readonly tab: WorkspaceTab | undefined } {
-  if (layout.kind === "group") {
-    if (layout.groupId !== groupId) return { layout, tab: undefined };
-    const index = layout.tabs.findIndex((tab) => tab.id === tabId);
-    if (index < 0) return { layout, tab: undefined };
-    const removed = layout.tabs[index];
-    const tabs = [...layout.tabs.slice(0, index), ...layout.tabs.slice(index + 1)];
-    if (tabs.length === 0) return { layout: undefined, tab: removed };
-    return {
-      layout: {
-        ...layout,
-        tabs,
-        activeTabId:
-          layout.activeTabId === tabId
-            ? tabs[Math.min(index, tabs.length - 1)]!.id
-            : layout.activeTabId,
-      },
-      tab: removed,
-    };
+  paneId: PaneId,
+): { readonly layout: WorkspaceLayoutNode | undefined; readonly pane: WorkspacePane | undefined } {
+  if (layout.kind === "pane") {
+    return String(layout.paneId) === String(paneId)
+      ? { layout: undefined, pane: layout }
+      : { layout, pane: undefined };
   }
-
-  const first = removeTab(layout.first, groupId, tabId);
-  if (first.tab !== undefined) {
+  const first = removePane(layout.first, paneId);
+  if (first.pane !== undefined) {
     return {
       layout: first.layout === undefined ? layout.second : { ...layout, first: first.layout },
-      tab: first.tab,
+      pane: first.pane,
     };
   }
-  const second = removeTab(layout.second, groupId, tabId);
-  if (second.tab !== undefined) {
+  const second = removePane(layout.second, paneId);
+  if (second.pane !== undefined) {
     return {
       layout: second.layout === undefined ? layout.first : { ...layout, second: second.layout },
-      tab: second.tab,
+      pane: second.pane,
     };
   }
-  return { layout, tab: undefined };
+  return { layout, pane: undefined };
 }
 
 function replaceLayout(
@@ -1316,19 +1278,27 @@ function replaceLayout(
   return { ...workspace, layouts: { ...workspace.layouts, [mode]: layout } };
 }
 
-function firstGroup(layout: WorkspaceLayoutNode): WorkspaceTabGroup {
-  return layout.kind === "group" ? layout : firstGroup(layout.first);
+function firstPane(layout: WorkspaceLayoutNode): WorkspacePane {
+  return layout.kind === "pane" ? layout : firstPane(layout.first);
 }
 
-function activateGroup(
+function activatePane(
   workspace: WindowWorkspace,
   mode: OctantMode,
-  groupId: TabGroupId,
+  paneId: PaneId,
 ): WindowWorkspace {
-  return {
+  const next: WindowWorkspace = {
     ...workspace,
-    activeGroupIds: { ...workspace.activeGroupIds, [mode]: groupId },
+    activePaneIds: { ...workspace.activePaneIds, [mode]: paneId },
   };
+  // Focus mode shows exactly one pane, so an activation while focused must move
+  // the focus with it — otherwise the newly opened surface would be running
+  // behind a zoomed view of some other pane, which is the invisible-work bug
+  // the single-surface model exists to remove.
+  if (next.focusedPaneId !== undefined && mode === next.activeMode) {
+    return { ...next, focusedPaneId: paneId };
+  }
+  return next;
 }
 
 function nextVersion(workspace: WindowWorkspace): WindowWorkspace["version"] {
@@ -1336,34 +1306,114 @@ function nextVersion(workspace: WindowWorkspace): WindowWorkspace["version"] {
 }
 
 function finishOperation(workspace: WindowWorkspace): WindowWorkspace {
-  const focusedGroupId = workspace.focusedGroupId;
+  const focusedPaneId = workspace.focusedPaneId;
   const focusReachable =
-    focusedGroupId === undefined ||
-    findGroup(workspace.layouts[workspace.activeMode], focusedGroupId) !== undefined;
-  const activeGroupIds = { ...workspace.activeGroupIds };
+    focusedPaneId === undefined ||
+    findPane(workspace.layouts[workspace.activeMode], focusedPaneId) !== undefined;
+  const activePaneIds = { ...workspace.activePaneIds };
   for (const mode of ["chat", "work", "code"] as const) {
-    if (findGroup(workspace.layouts[mode], activeGroupIds[mode]) === undefined) {
-      activeGroupIds[mode] = firstGroup(workspace.layouts[mode]).groupId;
+    if (findPane(workspace.layouts[mode], activePaneIds[mode]) === undefined) {
+      activePaneIds[mode] = firstPane(workspace.layouts[mode]).paneId;
     }
   }
   return validateWorkspace({
     ...workspace,
-    activeGroupIds,
-    ...(focusReachable ? {} : { focusedGroupId: undefined }),
+    activePaneIds,
+    ...(focusReachable ? {} : { focusedPaneId: undefined }),
     version: nextVersion(workspace),
   });
 }
 
-function requireGroup(layout: WorkspaceLayoutNode, groupId: TabGroupId): WorkspaceTabGroup {
-  return (
-    findGroup(layout, groupId) ?? reject("missing-group", "operation references a missing group")
-  );
+function requirePane(layout: WorkspaceLayoutNode, paneId: PaneId): WorkspacePane {
+  return findPane(layout, paneId) ?? reject("missing-pane", "operation references a missing pane");
 }
 
-function requireIndex(index: number, maximum: number): void {
-  if (!Number.isSafeInteger(index) || index < 0 || index > maximum) {
-    reject("invalid-index", "tab index is outside the group bounds");
+/**
+ * Whether two surface values are views of the same thing, ignoring the surface
+ * id and title. This is what "already open" means: opening from the sidebar
+ * mints a fresh id every time, so identity has to live in what the surface
+ * shows, never in which gesture created it. Welcome surfaces are placeholders
+ * rather than content, so two of them are never "the same" — a split may hold
+ * several.
+ */
+export function sameWorkspaceSurface(a: WorkspaceTab, b: WorkspaceTab): boolean {
+  if (a.kind !== b.kind) return false;
+  switch (a.kind) {
+    case "welcome":
+      return false;
+    case "settings":
+      return true;
+    case "draft-thread":
+      return (
+        b.kind === "draft-thread" && a.mode === b.mode && sameOptionalId(a.projectId, b.projectId)
+      );
+    case "project":
+      return (
+        b.kind === "project" && a.mode === b.mode && String(a.projectId) === String(b.projectId)
+      );
+    case "chat-thread":
+      return b.kind === "chat-thread" && String(a.threadId) === String(b.threadId);
+    case "work-thread":
+      return (
+        b.kind === "work-thread" &&
+        String(a.threadId) === String(b.threadId) &&
+        sameOptionalId(a.hostId, b.hostId)
+      );
+    case "code-overview":
+    case "code-git":
+    case "code-pr":
+    case "code-local-review":
+      return "threadId" in b && String(a.threadId) === String(b.threadId);
+    case "code-file":
+      return (
+        b.kind === "code-file" &&
+        String(a.threadId) === String(b.threadId) &&
+        String(a.relativePath) === String(b.relativePath)
+      );
+    case "code-diff":
+      return (
+        b.kind === "code-diff" &&
+        String(a.threadId) === String(b.threadId) &&
+        sameOptionalId(a.relativePath, b.relativePath)
+      );
+    case "code-terminal":
+      return (
+        b.kind === "code-terminal" &&
+        String(a.threadId) === String(b.threadId) &&
+        sameOptionalId(a.terminalId, b.terminalId)
+      );
+    case "code-test":
+      return (
+        b.kind === "code-test" &&
+        String(a.threadId) === String(b.threadId) &&
+        sameOptionalId(a.testRunId, b.testRunId)
+      );
+    case "apple-workbench":
+      return (
+        b.kind === "apple-workbench" &&
+        String(a.threadId) === String(b.threadId) &&
+        String(a.projectPath) === String(b.projectPath)
+      );
+    case "browser":
+      return (
+        b.kind === "browser" &&
+        a.mode === b.mode &&
+        sameOptionalId(a.threadId, b.threadId) &&
+        sameOptionalId(a.contextId, b.contextId)
+      );
+    case "files":
+      return b.kind === "files" && a.mode === b.mode;
+    case "side-chat":
+      return b.kind === "side-chat" && String(a.sourceThreadId) === String(b.sourceThreadId);
+    case "preview":
+      return b.kind === "preview" && String(a.targetId) === String(b.targetId);
+    case "canvas":
+      return b.kind === "canvas" && String(a.canvasId) === String(b.canvasId);
   }
+}
+
+function sameOptionalId(a: unknown, b: unknown): boolean {
+  return a === undefined ? b === undefined : b !== undefined && String(a) === String(b);
 }
 
 export function applyWorkspaceOperation(
@@ -1375,241 +1425,143 @@ export function applyWorkspaceOperation(
   const layout = workspace.layouts[mode];
 
   switch (operation.kind) {
-    case "switch-project-tab": {
-      if (!("mode" in operation.tab) || operation.tab.mode !== mode) {
-        reject("invalid-layout", "Project switch tab mode must match the target layout");
+    case "switch-project-surface": {
+      if (!("mode" in operation.surface) || operation.surface.mode !== mode) {
+        reject("invalid-layout", "Project switch surface mode must match the target layout");
       }
       // resolveWorkspaceContext has already stowed the outgoing Project layout
-      // and restored (or reset) the destination layout, so this upserts the tab
-      // into the destination's active group instead of discarding state.
-      const activeGroupId = workspace.activeGroupIds[mode];
-      requireGroup(layout, activeGroupId);
-      const mapped = mapGroup(layout, activeGroupId, (candidate) => {
-        if (candidate.tabs.some((tab) => tab.id === operation.tab.id)) {
-          return { ...candidate, activeTabId: operation.tab.id };
+      // and restored (or reset) the destination layout, so the surface lands in
+      // the destination's active pane instead of discarding restored state.
+      const activePaneId = workspace.activePaneIds[mode];
+      requirePane(layout, activePaneId);
+      const visible = findSurfacePane(layout, operation.surface);
+      if (visible !== undefined) {
+        return finishOperation(activatePane(workspace, mode, visible.paneId));
+      }
+      if (hasSurfaceIdInWorkspace(workspace, operation.surface.id)) {
+        reject("duplicate-id", "workspace surface ID already exists");
+      }
+      const mapped = mapPane(layout, activePaneId, (pane) => ({
+        ...pane,
+        surface: operation.surface,
+      }));
+      return finishOperation(
+        activatePane(replaceLayout(workspace, mode, mapped.layout), mode, activePaneId),
+      );
+    }
+
+    case "open-surface": {
+      // Open replaces: a surface already visible in some pane gets that pane
+      // activated, and anything else replaces the named pane's content. There
+      // is no path that mints a second view of the same surface.
+      const visible = findSurfacePane(layout, operation.surface);
+      if (visible !== undefined) {
+        return finishOperation(activatePane(workspace, mode, visible.paneId));
+      }
+      requirePane(layout, operation.paneId);
+      if (hasSurfaceIdInWorkspace(workspace, operation.surface.id)) {
+        reject("duplicate-id", "workspace surface ID already exists");
+      }
+      const mapped = mapPane(layout, operation.paneId, (pane) => ({
+        ...pane,
+        surface: operation.surface,
+      }));
+      return finishOperation(
+        activatePane(replaceLayout(workspace, mode, mapped.layout), mode, operation.paneId),
+      );
+    }
+
+    case "replace-pane-surface": {
+      requirePane(layout, operation.paneId);
+      const source = findSurfacePane(layout, operation.surface);
+      if (source !== undefined) {
+        if (String(source.paneId) === String(operation.paneId)) {
+          return finishOperation(activatePane(workspace, mode, source.paneId));
         }
-        return isWelcomeOnlyGroup(candidate)
-          ? { ...candidate, tabs: [operation.tab], activeTabId: operation.tab.id }
-          : {
-              ...candidate,
-              tabs: [...candidate.tabs, operation.tab],
-              activeTabId: operation.tab.id,
-            };
-      });
-      return finishOperation(
-        activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, activeGroupId),
-      );
-    }
-
-    case "open-tab": {
-      requireGroup(layout, operation.groupId);
-      const existing = findTabInWorkspace(workspace, operation.tab.id);
-      if (existing !== undefined && existing.tab.kind !== "unavailable") {
-        reject("duplicate-id", "workspace tab ID already exists");
-      }
-
-      if (existing?.group.groupId === operation.groupId && existing.mode === mode) {
-        const recovered = mapGroup(layout, operation.groupId, (group) => ({
-          ...group,
-          tabs: group.tabs.map((tab) => (tab.id === operation.tab.id ? operation.tab : tab)),
-          activeTabId: operation.tab.id,
+        // A center drop of a surface that is already visible moves it: the
+        // source pane collapses and its surface object survives the move so
+        // per-surface state keyed by its id (environment presentation) does.
+        const removed = removePane(layout, source.paneId);
+        if (removed.pane === undefined || removed.layout === undefined) {
+          reject("missing-pane", "source pane could not be removed");
+        }
+        const mapped = mapPane(removed.layout, operation.paneId, (pane) => ({
+          ...pane,
+          surface: removed.pane!.surface,
         }));
+        if (!mapped.found) reject("missing-pane", "target pane became unreachable");
         return finishOperation(
-          activateGroup(replaceLayout(workspace, mode, recovered.layout), mode, operation.groupId),
+          activatePane(replaceLayout(workspace, mode, mapped.layout), mode, operation.paneId),
         );
       }
-
-      let next = workspace;
-      if (existing !== undefined) {
-        const removed = removeTab(
-          next.layouts[existing.mode],
-          existing.group.groupId,
-          operation.tab.id,
-        );
-        next = replaceLayout(next, existing.mode, removed.layout ?? defaultLayout(existing.mode));
+      if (hasSurfaceIdInWorkspace(workspace, operation.surface.id)) {
+        reject("duplicate-id", "workspace surface ID already exists");
       }
-      const targetLayout = next.layouts[mode];
-      const mapped = mapGroup(targetLayout, operation.groupId, (group) => ({
-        ...group,
-        tabs: [...group.tabs, operation.tab],
-        activeTabId: operation.tab.id,
+      const mapped = mapPane(layout, operation.paneId, (pane) => ({
+        ...pane,
+        surface: operation.surface,
       }));
-      if (!mapped.found) reject("missing-group", "operation target disappeared during recovery");
       return finishOperation(
-        activateGroup(replaceLayout(next, mode, mapped.layout), mode, operation.groupId),
+        activatePane(replaceLayout(workspace, mode, mapped.layout), mode, operation.paneId),
       );
     }
 
-    case "activate-tab": {
-      const group = requireGroup(layout, operation.groupId);
-      if (!group.tabs.some((tab) => tab.id === operation.tabId)) {
-        reject("missing-tab", "tab does not belong to the requested group");
+    case "split-pane": {
+      requirePane(layout, operation.targetPaneId);
+      if (hasNodeIdInWorkspace(workspace, operation.splitNodeId)) {
+        reject("duplicate-id", "split node ID already exists");
       }
-      const mapped = mapGroup(layout, operation.groupId, (candidate) => ({
-        ...candidate,
-        activeTabId: operation.tabId,
+      if (hasNodeIdInWorkspace(workspace, operation.newPaneNodeId)) {
+        reject("duplicate-id", "new pane node ID already exists");
+      }
+      if (hasPaneIdInWorkspace(workspace, operation.newPaneId)) {
+        reject("duplicate-id", "new pane ID already exists");
+      }
+      const source = findSurfacePane(layout, operation.surface);
+      let working: WorkspaceLayoutNode = layout;
+      let surface = operation.surface;
+      if (source !== undefined) {
+        if (String(source.paneId) === String(operation.targetPaneId)) {
+          reject("redundant-split", "a pane cannot be split off itself");
+        }
+        // An edge drop of a visible surface moves its pane into the split
+        // rather than duplicating the surface; the surface object survives so
+        // per-surface state keyed by its id does.
+        const removed = removePane(layout, source.paneId);
+        if (removed.pane === undefined || removed.layout === undefined) {
+          reject("missing-pane", "source pane could not be removed");
+        }
+        working = removed.layout;
+        surface = removed.pane.surface;
+      } else if (hasSurfaceIdInWorkspace(workspace, operation.surface.id)) {
+        reject("duplicate-id", "workspace surface ID already exists");
+      }
+      const newPane: WorkspacePane = {
+        kind: "pane",
+        nodeId: operation.newPaneNodeId,
+        paneId: operation.newPaneId,
+        surface,
+      };
+      const mapped = mapPane(working, operation.targetPaneId, (target) => ({
+        kind: "split",
+        nodeId: operation.splitNodeId,
+        orientation: operation.orientation,
+        ratio: clamp(operation.ratio, MIN_SPLIT_RATIO, MAX_SPLIT_RATIO) as SplitRatio,
+        first: operation.placement === "before" ? newPane : target,
+        second: operation.placement === "before" ? target : newPane,
       }));
+      if (!mapped.found) reject("missing-pane", "target pane became unreachable");
       return finishOperation(
-        activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, operation.groupId),
+        activatePane(replaceLayout(workspace, mode, mapped.layout), mode, operation.newPaneId),
       );
     }
 
-    case "close-tab": {
-      requireGroup(layout, operation.groupId);
-      const removed = removeTab(layout, operation.groupId, operation.tabId);
-      if (removed.tab === undefined)
-        reject("missing-tab", "tab does not belong to the requested group");
+    case "close-pane": {
+      const removed = removePane(layout, operation.paneId);
+      if (removed.pane === undefined) reject("missing-pane", "operation references a missing pane");
+      // Closing the last pane leaves the mode's default welcome pane rather
+      // than an empty tree: a mode always shows something.
       return finishOperation(replaceLayout(workspace, mode, removed.layout ?? defaultLayout(mode)));
-    }
-
-    case "reorder-tab": {
-      const group = requireGroup(layout, operation.groupId);
-      const fromIndex = group.tabs.findIndex((tab) => tab.id === operation.tabId);
-      if (fromIndex < 0) reject("missing-tab", "tab does not belong to the requested group");
-      requireIndex(operation.index, group.tabs.length - 1);
-      const reordered = [...group.tabs];
-      const [moved] = reordered.splice(fromIndex, 1);
-      reordered.splice(operation.index, 0, moved!);
-      const mapped = mapGroup(layout, operation.groupId, (candidate) => ({
-        ...candidate,
-        tabs: reordered,
-      }));
-      return finishOperation(
-        activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, operation.groupId),
-      );
-    }
-
-    case "split-group": {
-      const group = requireGroup(layout, operation.groupId);
-      if (group.tabs.length === 1) {
-        reject("redundant-split", "a group with one tab cannot be split");
-      }
-      if (hasNodeIdInWorkspace(workspace, operation.splitNodeId)) {
-        reject("duplicate-id", "split node ID already exists");
-      }
-      if (hasNodeIdInWorkspace(workspace, operation.newGroupNodeId)) {
-        reject("duplicate-id", "new group node ID already exists");
-      }
-      if (hasGroupIdInWorkspace(workspace, operation.newGroupId)) {
-        reject("duplicate-id", "new group ID already exists");
-      }
-      const tabIndex = group.tabs.findIndex((tab) => tab.id === operation.tabId);
-      if (tabIndex < 0) reject("missing-tab", "tab does not belong to the requested group");
-      const remainingTabs = group.tabs.filter((tab) => tab.id !== operation.tabId);
-      const remainingGroup: WorkspaceTabGroup = {
-        ...group,
-        tabs: remainingTabs,
-        activeTabId:
-          group.activeTabId === operation.tabId
-            ? remainingTabs[Math.min(tabIndex, remainingTabs.length - 1)]!.id
-            : group.activeTabId,
-      };
-      const newGroup: WorkspaceTabGroup = {
-        kind: "group",
-        nodeId: operation.newGroupNodeId,
-        groupId: operation.newGroupId,
-        tabs: [group.tabs[tabIndex]!],
-        activeTabId: operation.tabId,
-      };
-      const first = operation.placement === "before" ? newGroup : remainingGroup;
-      const second = operation.placement === "before" ? remainingGroup : newGroup;
-      const mapped = mapGroup(layout, operation.groupId, () => ({
-        kind: "split",
-        nodeId: operation.splitNodeId,
-        orientation: operation.orientation,
-        ratio: clamp(operation.ratio, MIN_SPLIT_RATIO, MAX_SPLIT_RATIO) as SplitRatio,
-        first,
-        second,
-      }));
-      return finishOperation(
-        activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, operation.newGroupId),
-      );
-    }
-
-    case "move-tab": {
-      if (operation.fromGroupId === operation.toGroupId) {
-        const group = requireGroup(layout, operation.fromGroupId);
-        const fromIndex = group.tabs.findIndex((tab) => tab.id === operation.tabId);
-        if (fromIndex < 0) reject("missing-tab", "tab does not belong to the requested group");
-        requireIndex(operation.index, group.tabs.length - 1);
-        const tabs = [...group.tabs];
-        const [moved] = tabs.splice(fromIndex, 1);
-        tabs.splice(operation.index, 0, moved!);
-        const mapped = mapGroup(layout, operation.fromGroupId, (candidate) => ({
-          ...candidate,
-          tabs,
-          activeTabId: operation.tabId,
-        }));
-        return finishOperation(
-          activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, operation.fromGroupId),
-        );
-      }
-
-      requireGroup(layout, operation.fromGroupId);
-      const target = requireGroup(layout, operation.toGroupId);
-      requireIndex(operation.index, target.tabs.length);
-      const removed = removeTab(layout, operation.fromGroupId, operation.tabId);
-      if (removed.tab === undefined)
-        reject("missing-tab", "tab does not belong to the source group");
-      if (removed.layout === undefined)
-        reject("missing-group", "move requires a destination group");
-      const mapped = mapGroup(removed.layout, operation.toGroupId, (group) => ({
-        ...group,
-        tabs: [
-          ...group.tabs.slice(0, operation.index),
-          removed.tab!,
-          ...group.tabs.slice(operation.index),
-        ],
-        activeTabId: operation.tabId,
-      }));
-      if (!mapped.found) reject("missing-group", "destination group became unreachable");
-      return finishOperation(
-        activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, operation.toGroupId),
-      );
-    }
-
-    case "dock-tab": {
-      if (operation.fromGroupId === operation.targetGroupId) {
-        reject("redundant-split", "cross-group docking requires distinct source and target groups");
-      }
-      const source = requireGroup(layout, operation.fromGroupId);
-      requireGroup(layout, operation.targetGroupId);
-      if (!source.tabs.some((tab) => tab.id === operation.tabId)) {
-        reject("missing-tab", "tab does not belong to the source group");
-      }
-      if (hasNodeIdInWorkspace(workspace, operation.splitNodeId)) {
-        reject("duplicate-id", "split node ID already exists");
-      }
-      if (hasNodeIdInWorkspace(workspace, operation.newGroupNodeId)) {
-        reject("duplicate-id", "new group node ID already exists");
-      }
-      if (hasGroupIdInWorkspace(workspace, operation.newGroupId)) {
-        reject("duplicate-id", "new group ID already exists");
-      }
-
-      const removed = removeTab(layout, operation.fromGroupId, operation.tabId);
-      if (removed.tab === undefined || removed.layout === undefined) {
-        reject("missing-tab", "tab could not be removed from the source group");
-      }
-      const newGroup: WorkspaceTabGroup = {
-        kind: "group",
-        nodeId: operation.newGroupNodeId,
-        groupId: operation.newGroupId,
-        tabs: [removed.tab],
-        activeTabId: operation.tabId,
-      };
-      const mapped = mapGroup(removed.layout, operation.targetGroupId, (target) => ({
-        kind: "split",
-        nodeId: operation.splitNodeId,
-        orientation: operation.orientation,
-        ratio: clamp(operation.ratio, MIN_SPLIT_RATIO, MAX_SPLIT_RATIO) as SplitRatio,
-        first: operation.placement === "before" ? newGroup : target,
-        second: operation.placement === "before" ? target : newGroup,
-      }));
-      if (!mapped.found) reject("missing-group", "destination group became unreachable");
-      return finishOperation(
-        activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, operation.newGroupId),
-      );
     }
 
     case "resize-split": {
@@ -1621,75 +1573,46 @@ export function applyWorkspaceOperation(
       return finishOperation(replaceLayout(workspace, mode, mapped.layout));
     }
 
-    case "focus-group": {
-      if (mode !== workspace.activeMode || findGroup(layout, operation.groupId) === undefined) {
-        reject("invalid-focus", "focused group must be reachable in the active mode");
+    case "focus-pane": {
+      if (mode !== workspace.activeMode || findPane(layout, operation.paneId) === undefined) {
+        reject("invalid-focus", "focused pane must be reachable in the active mode");
       }
       return finishOperation(
-        activateGroup({ ...workspace, focusedGroupId: operation.groupId }, mode, operation.groupId),
+        activatePane({ ...workspace, focusedPaneId: operation.paneId }, mode, operation.paneId),
       );
     }
 
-    case "unfocus-group": {
+    case "unfocus-pane": {
       if (mode !== workspace.activeMode) {
         reject("invalid-focus", "unfocus operation must target the active mode");
       }
-      const { focusedGroupId: _focusedGroupId, ...unfocused } = workspace;
+      const { focusedPaneId: _focusedPaneId, ...unfocused } = workspace;
       return finishOperation(unfocused);
     }
 
     case "reset-mode": {
       const layout = defaultLayout(mode);
       return finishOperation(
-        activateGroup(replaceLayout(workspace, mode, layout), mode, layout.groupId),
+        activatePane(replaceLayout(workspace, mode, layout), mode, layout.paneId),
       );
     }
 
     case "set-active-mode": {
-      const { focusedGroupId: _focusedGroupId, ...unfocused } = workspace;
+      const { focusedPaneId: _focusedPaneId, ...unfocused } = workspace;
       return finishOperation({ ...unfocused, activeMode: mode });
     }
 
-    case "set-canvas-tab-pin": {
-      const group = requireGroup(layout, operation.groupId);
-      const tab = group.tabs.find((candidate) => candidate.id === operation.tabId);
-      if (tab === undefined) reject("missing-tab", "tab does not belong to the requested group");
-      if (tab.kind !== "canvas") {
-        reject("invalid-layout", "only canvas tabs support presentation pin");
-      }
-      const mapped = mapGroup(layout, operation.groupId, (candidate) => {
-        const tabs = candidate.tabs.map((entry) =>
-          entry.id === operation.tabId ? withCanvasTabPin(entry, operation.pinned) : entry,
-        );
-        return {
-          ...candidate,
-          tabs: orderTabsWithPinnedCanvasFirst(tabs),
-          activeTabId: operation.tabId,
-        };
-      });
-      return finishOperation(
-        activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, operation.groupId),
-      );
-    }
-
     case "set-side-chat-sidecar": {
-      const group = requireGroup(layout, operation.groupId);
-      const tab = group.tabs.find((candidate) => candidate.id === operation.tabId);
-      if (tab === undefined) reject("missing-tab", "tab does not belong to the requested group");
-      if (tab.kind !== "side-chat") {
-        reject("invalid-layout", "only Side Chat tabs record a sidecar identity");
+      const pane = requirePane(layout, operation.paneId);
+      if (pane.surface.kind !== "side-chat") {
+        reject("invalid-layout", "only Side Chat surfaces record a sidecar identity");
       }
-      const mapped = mapGroup(layout, operation.groupId, (candidate) => ({
+      const mapped = mapPane(layout, operation.paneId, (candidate) => ({
         ...candidate,
-        tabs: candidate.tabs.map((entry) =>
-          entry.id === operation.tabId
-            ? withSideChatSidecar(entry, operation.sidecarThreadId)
-            : entry,
-        ),
-        activeTabId: operation.tabId,
+        surface: withSideChatSidecar(candidate.surface, operation.sidecarThreadId),
       }));
       return finishOperation(
-        activateGroup(replaceLayout(workspace, mode, mapped.layout), mode, operation.groupId),
+        activatePane(replaceLayout(workspace, mode, mapped.layout), mode, operation.paneId),
       );
     }
   }

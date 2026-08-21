@@ -49,13 +49,15 @@ export type RightUtilityDockClosedReason =
   | "disconnected"
   | "mode-invalid"
   | "no-surface"
-  | "project-incompatible"
-  | "project-required"
-  | "project-stale"
   | "unauthorized"
   | "unavailable"
   | "unknown"
   | "unknown-surface";
+
+export type RightUtilityDockUnavailableReason =
+  | "project-incompatible"
+  | "project-required"
+  | "project-stale";
 
 export type RightUtilityDockResolution =
   | {
@@ -67,6 +69,19 @@ export type RightUtilityDockResolution =
        * resolved.
        */
       readonly projectId?: ProjectId;
+      readonly surface: RightUtilityDockSurfaceDescriptor;
+    }
+  | {
+      /**
+       * The selected panel is known but the active pane gives it nothing
+       * truthful to describe. This is a value rather than "closed" because the
+       * user's panel selection must survive activating another pane: the dock
+       * stays open and presents this state instead of the previous target's
+       * content. Opening and restoring still require `kind: "surface"`, so
+       * this state can only be reached from a dock that was already open.
+       */
+      readonly kind: "unavailable";
+      readonly reason: RightUtilityDockUnavailableReason;
       readonly surface: RightUtilityDockSurfaceDescriptor;
     }
   | {
@@ -145,17 +160,17 @@ export function resolveRightUtilityDockSurface(
 
   const project = input.activeProject;
   if (project === undefined) {
-    return closed("project-required");
+    return { kind: "unavailable", reason: "project-required", surface };
   }
   if (
     project.lifecycle !== "active" ||
     project.type !== input.activeMode ||
     (project.type !== "chat" && !hasBinding(project.binding))
   ) {
-    return closed("project-incompatible");
+    return { kind: "unavailable", reason: "project-incompatible", surface };
   }
   if (input.surfaceProjectId === undefined || input.surfaceProjectId !== project.id) {
-    return closed("project-stale");
+    return { kind: "unavailable", reason: "project-stale", surface };
   }
 
   return { kind: "surface", projectId: project.id, surface };

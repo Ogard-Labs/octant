@@ -8,7 +8,7 @@ const capability = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 const windowId = decodeWindowId("10000000-0000-4000-8000-000000000001");
 const threadId = "20000000-0000-4000-8000-000000000001";
 const checkoutId = "30000000-0000-4000-8000-000000000001";
-const groupId = "40000000-0000-4000-8000-000000000001";
+const paneId = "40000000-0000-4000-8000-000000000001";
 
 const preset = decodeWorkspacePreset({
   id: "design-studio",
@@ -28,7 +28,7 @@ function fixture(overrides: Partial<Parameters<typeof createWorkspacePresetRoute
       presets: [preset],
       windowAuthorityStore: store,
       resolveTarget: async () => ({
-        groupId: groupId as never,
+        paneId: paneId as never,
         mentionableThreadId: threadId as never,
         title: "Release",
       }),
@@ -38,7 +38,11 @@ function fixture(overrides: Partial<Parameters<typeof createWorkspacePresetRoute
       now: () => 1,
       clock: () => "2026-08-18T09:00:00.000Z",
     },
-    () => crypto.randomUUID() as never,
+    {
+      mintTabId: () => crypto.randomUUID() as never,
+      mintPaneId: () => crypto.randomUUID() as never,
+      mintNodeId: () => crypto.randomUUID() as never,
+    },
   );
   return { applyOperations, handler };
 }
@@ -87,7 +91,7 @@ describe("workspace preset routes", () => {
         checkoutId,
         // A layout the caller tried to smuggle in. The body has no such field,
         // so the request is refused outright rather than partly honoured.
-        operations: [{ kind: "close-tab" }],
+        operations: [{ kind: "close-pane" }],
       }),
     );
 

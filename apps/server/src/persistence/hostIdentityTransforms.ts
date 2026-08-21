@@ -129,6 +129,14 @@ function migrateWorkspaceLayoutNode(value: unknown, fromHostId: string, toHostId
       second: migrateWorkspaceLayoutNode(node.second, fromHostId, toHostId),
     };
   }
+  if (node?.kind === "pane") {
+    const surface = asRecord(node.surface);
+    return surface?.kind === "preview"
+      ? { ...node, surface: replaceField(surface, "hostId", fromHostId, toHostId) }
+      : value;
+  }
+  // Journal rows written before the pane model persisted tab-group leaves;
+  // their preview tabs carry the same host identity and migrate the same way.
   if (node?.kind !== "group" || !Array.isArray(node.tabs)) return value;
   return {
     ...node,

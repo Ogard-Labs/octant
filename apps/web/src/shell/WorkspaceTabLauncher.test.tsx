@@ -27,14 +27,14 @@ describe("WorkspaceTabLauncher", () => {
   it("lists only available surfaces for the active mode and opens one on selection", () => {
     const onOpenSurface = vi.fn();
     render(<WorkspaceTabLauncher catalog={catalog} mode="work" onOpenSurface={onOpenSurface} />);
-    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open surface" }));
     const items = screen
       .getAllByRole("button")
       .filter(
         (el) =>
           el.textContent !== null &&
           el.textContent.trim() !== "" &&
-          el.textContent.trim() !== "New tab",
+          el.textContent.trim() !== "Open surface",
       );
     expect(items.map((el) => el.textContent?.trim())).toEqual(["Thread", "Side Chat", "Browser"]);
     fireEvent.click(screen.getByRole("button", { name: "Browser" }));
@@ -56,12 +56,12 @@ describe("WorkspaceTabLauncher", () => {
         ]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open surface" }));
     fireEvent.click(screen.getByRole("button", { name: "Tests" }));
     expect(onOpenThreadSurface).toHaveBeenCalledWith("code-test");
   });
 
-  it("offers no thread surfaces when the group is not showing a Code thread", () => {
+  it("offers no thread surfaces when the pane is not showing a Code thread", () => {
     render(
       <WorkspaceTabLauncher
         catalog={catalog}
@@ -70,7 +70,7 @@ describe("WorkspaceTabLauncher", () => {
         threadSurfaces={[{ kind: "code-diff", label: "Changes" }]}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open surface" }));
     expect(screen.queryByRole("button", { name: "Changes" })).not.toBeInTheDocument();
   });
 
@@ -84,7 +84,7 @@ describe("WorkspaceTabLauncher", () => {
       code: [],
     };
     render(<WorkspaceTabLauncher catalog={empty} mode="chat" onOpenSurface={onOpenSurface} />);
-    expect(screen.getByRole("button", { name: "New tab" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Open surface" })).toBeDisabled();
   });
 
   it("does not offer Browser without an exact owning thread", () => {
@@ -96,7 +96,7 @@ describe("WorkspaceTabLauncher", () => {
         owningThreadAvailable={false}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "New tab" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open surface" }));
     expect(screen.queryByRole("button", { name: "Browser" })).not.toBeInTheDocument();
   });
 });

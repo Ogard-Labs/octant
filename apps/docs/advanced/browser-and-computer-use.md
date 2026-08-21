@@ -10,7 +10,8 @@ action is re-authorized before any effect.
 
 ## Browser
 
-Browser tabs open from a Work or Code thread via **New tab → Browser**. The
+Browser surfaces open from a Work or Code thread via **Open surface →
+Browser**. The
 host requires exactly one owning thread before it can create an isolated
 context.
 
