@@ -4,7 +4,7 @@ description: Shared memory lets Projects persist decisions, facts, and context a
 
 # Shared Memory
 
-Shared memory is a Project-scoped capability that lets threads within the same Project share persistent context. Memory entries survive thread completion, restart, and replay.
+Shared memory is a Project-scoped capability that lets threads within the same Project share persistent context. Memory entries survive thread completion, restart, and replay. In the current app it is reachable from Project surfaces and from a right-dock tab. The approved later placement is Project Overview only; it is not a dock tab.
 
 ## Memory entry types
 

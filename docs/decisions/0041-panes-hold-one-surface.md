@@ -20,7 +20,8 @@ also broke the Right Utility Dock's premise: with two groups of tabs visible,
 The central workspace remains one persistent recursive split tree, but a leaf
 is now a pane holding exactly one surface — a thread, a draft, a project
 overview, a utility surface, or a mode welcome — with no tab strip and no tab
-lifecycle. The sidebar's hierarchy is the one and only switcher.
+lifecycle. Several same-authority threads may be pinned into that tree at
+once. The sidebar's hierarchy is the one and only switcher.
 
 - **Open replaces.** Activating a surface replaces the content of the active
   pane. Opening never mints a second view of a surface already visible in some
@@ -29,7 +30,8 @@ lifecycle. The sidebar's hierarchy is the one and only switcher.
   pane's edge creates a split on that edge; dropping on a pane's center
   replaces its surface. The split, resize, focus, reset, and authority rules
   of 0015 are unchanged: completed operations go through server-authoritative
-  workspace commands, and a cross-Project or cross-mode drop is still refused.
+  workspace commands, and a cross-Project, cross-mode, or cross-host drop is
+  still refused.
 - **Drafts rebind in place.** A new-thread draft occupies a pane; when the
   thread is created, the same pane rebinds to the real thread. A draft is
   never a separately persisted view.
@@ -47,10 +49,12 @@ lifecycle. The sidebar's hierarchy is the one and only switcher.
   closes only from the explicit top-right control. Project- and host-scoped
   readers keep a window fallback for panes that hold no thread. A panel the
   newly active pane gives nothing to describe presents that as an explicit
-  unavailable state — never the previous pane's content. Authority stays
-  server-side; the dock only presents.
-- **Zen and pinned environment panels are untouched.** Side Chat is a
-  thread-scoped right-dock utility, not a split-tree pane.
+  unavailable state — never the previous pane's content. Which live tools exist
+  for that subject, and which of them is selected, are owned with the subject
+  (0044). Simulator placement is 0043. Authority stays server-side; the dock
+  only presents.
+- **Zen is untouched** — it was never a split-tree tab, as 0015 already
+  records. Environment is 0042. Side chat is a dock tool under 0044.
 
 ## Consequences
 
@@ -60,14 +64,9 @@ lifecycle. The sidebar's hierarchy is the one and only switcher.
   while its authority, environment, and activity live on the server as before.
 - Per-tab accessories die with the strip. Signals that rode on background
   tabs (for example a Project's context-health warning) must reach the user
-  through the sidebar or the surface itself. The context-health warning now
-  marks its Project's sidebar row, beside that row's other marks, and opening
-  it activates that Project before showing the dock's context panel — the
-  dock names the active pane's subject, so a panel about some other Project
-  would contradict the rule above. The window plans context for the active
-  Project only, so the mark covers the Projects a session has visited; a
-  Project it has not is unmarked rather than reported healthy, until the host
-  reports health with the Project list itself.
+  through the sidebar or the surface itself. The context-health warning marks
+  its Project's sidebar row; opening it activates that Project. Context
+  composition for a turn is a composer meter (0044), not a dock tab.
 - 0015 remains Accepted. This record supersedes only its tab-group leaf —
   the strip, tab lifecycle, and per-group activation; everything else in 0015
   (mode-first shell, split tree, boards, dock region, authority) stands.
@@ -76,3 +75,6 @@ lifecycle. The sidebar's hierarchy is the one and only switcher.
 
 - 0015 defines the shell this record amends.
 - 0017 and 0003 own the authority context the pane tree binds to.
+- 0042 owns Environment presentation.
+- 0043 owns Simulator in the right sidebar.
+- 0044 owns dock tool instances and placement.
