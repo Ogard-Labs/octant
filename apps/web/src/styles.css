@@ -2327,6 +2327,71 @@ button:focus-visible {
   box-shadow: var(--oct-focus-ring);
 }
 
+/* The caption above the folder chooser. It is a paragraph rather than a label
+   because the control it names is a button, and a label element names a form
+   control; it is drawn to match the real field labels beside it. */
+.project-dialog__field-label {
+  margin: var(--oct-space-1) 0 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
+
+/* The chooser reads as a field, not as a second submit button: same height,
+   border, and radius as the name input directly above it, so the two facts the
+   dialog is about sit at the same weight. */
+.project-dialog__folder {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: var(--oct-control-height-sm);
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--oct-text-sm);
+  text-align: left;
+}
+
+.project-dialog__folder[data-chosen="false"] {
+  color: var(--oct-muted);
+}
+
+.project-dialog__folder:hover:not(:disabled) {
+  background: var(--oct-fg-soft);
+}
+
+.project-dialog__folder:focus-visible {
+  border-color: var(--oct-accent-fg);
+  outline: none;
+  box-shadow: var(--oct-focus-ring);
+}
+
+.project-dialog__folder:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.project-dialog__folder svg {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+.project-dialog__folder-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.project-dialog__folder-change {
+  flex: none;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .project-dialog__actions {
   display: flex;
   justify-content: flex-end;

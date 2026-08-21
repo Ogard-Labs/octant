@@ -2659,10 +2659,11 @@ describe("App", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: "Add folder" }));
+    await user.click(await screen.findByRole("button", { name: "Choose a folder" }));
 
     await waitFor(() => expect(hostBridge.selectProjectRoot).toHaveBeenCalledWith("code"));
     expect(projectApi.executeProject).not.toHaveBeenCalled();
-    expect(screen.getByText("Project creation cancelled.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Create Project" })).toBeDisabled();
     expect(document.body).not.toHaveTextContent("/private/unvalidated-selection");
   });
 
