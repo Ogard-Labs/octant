@@ -1,13 +1,13 @@
-import { PlanCard } from "./PlanCard";
 import { useThreadPlan } from "./ThreadPlanContext";
+import { ThreadTaskViewer } from "./ThreadTaskViewer";
 
 /**
  * The thread's plan, in the conversation it came out of.
  *
  * It shows only once there is a plan to show: a thread with none is not missing
- * anything, and an empty card between the transcript and the composer would
- * say otherwise. Writing and revising stay in the thread's plan panel; this is
- * the copy a reader approves and works through while reading the thread.
+ * anything. The compact viewer keeps progress beside the work without putting
+ * a full plan card between every transcript and composer. Writing and revising
+ * stay in the thread's Plan panel.
  */
 export function InlineThreadPlan() {
   const controller = useThreadPlan();
@@ -15,12 +15,7 @@ export function InlineThreadPlan() {
   if (controller === undefined || plan == null || plan.status === "withdrawn") return null;
   return (
     <div className="code-thread-workspace__plan">
-      <PlanCard
-        busy={controller.pending}
-        onApprove={() => void controller.approve()}
-        onSetStepStatus={(stepId, status) => void controller.setStepStatus(stepId, status)}
-        plan={plan}
-      />
+      <ThreadTaskViewer controller={controller} />
       {controller.commandMessage === undefined ? null : (
         <p className="thread-plan__command-error" role="alert">
           {controller.commandMessage}
