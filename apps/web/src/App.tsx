@@ -60,7 +60,7 @@ import {
   createAppleToolchainClient,
   type AppleToolchainClient,
 } from "@octant/client-runtime/apple-toolchain-client";
-import { decodeChatThreadId } from "@octant/contracts/chat";
+import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
   decodeCodeAttachmentId,
@@ -78,6 +78,7 @@ import {
   decodeWorkThreadId,
   decodeWorkTurnId,
   decodeWorkTurnRequestId,
+  type SideChatSidecar,
   type WorkAttachmentId,
   type WorkThreadId,
 } from "@octant/contracts";
@@ -214,6 +215,7 @@ import { ShellFrame } from "./shell/ShellFrame";
 import { RemotePairingView } from "./remote/RemotePairingView";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
 import { ThreadDockPanel } from "./shell/ThreadDockPanel";
+import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import {
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveRightUtilityDockSurface,
@@ -221,10 +223,25 @@ import {
   type RightUtilityDockSurfaceAvailability,
   type RightUtilityDockSurfaceId,
 } from "./shell/rightUtilityDockModel";
+import {
+  closeThreadUtilityTab,
+  closeUtilityTabState,
+  openThreadUtilityTab,
+  openUtilityTabState,
+  selectThreadUtilityTab,
+  selectUtilityTabState,
+  threadUtilityDockState,
+  threadUtilityDockKey,
+  type ThreadUtilityDockState,
+  type ThreadUtilityDockKey,
+  type ThreadUtilityDockStates,
+} from "./shell/rightUtilityDockSelection";
+import { RightUtilityDockSummary } from "./shell/RightUtilityDockSummary";
 import { ContextInspector } from "./context/ContextInspector";
 import { NavigatorPanel } from "./navigator/NavigatorPanel";
 import { useNavigatorAssistant } from "./navigator/useNavigatorAssistant";
 import { ContextStatusBar } from "./context/ContextStatusBar";
+import { contextStatusModel } from "./context/contextInspectorModel";
 import { useContextController } from "./context/useContextController";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { createCodeReadCursorStore, useCodeController } from "./code/useCodeController";
@@ -580,7 +597,12 @@ function LaunchedShell(
   const [chatProjectThreadListRequest, setChatProjectThreadListRequest] = useState<
     { readonly projectId: ProjectId; readonly sequence: number } | undefined
   >(undefined);
-  const [dockSurface, setDockSurface] = useState<RightUtilityDockSurfaceId>();
+  const [dockVisible, setDockVisible] = useState(false);
+  const [fallbackDockState, setFallbackDockState] = useState<ThreadUtilityDockState>({ tabs: [] });
+  const [dockStatesByThread, setDockStatesByThread] = useState<ThreadUtilityDockStates>(new Map());
+  const [dockSidecarsByThread, setDockSidecarsByThread] = useState<
+    ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>
+  >(new Map());
   const [dockProjectId, setDockProjectId] = useState<ProjectId>();
   const [previewSidebarWidth, setPreviewSidebarWidth] = useState<number>();
   // Presentation-only: whether the person hid the navigation sidebar. Kept in
@@ -642,7 +664,6 @@ function LaunchedShell(
   >(new Map());
   const dockOpener = useRef<InspectorOpener | undefined>(undefined);
   const pendingDockFocus = useRef<InspectorOpener | undefined>(undefined);
-  const initialDockRestoreAttempted = useRef(false);
   const previousActiveDraftKey = useRef<string | undefined>(undefined);
   const previousProjectLifecycle = useRef<
     | {
@@ -677,11 +698,22 @@ function LaunchedShell(
     controller.workspace === undefined || activePaneId === undefined
       ? undefined
       : activeDraftTabKey(controller.workspace.layouts[activeMode], activePaneId);
-  // The subject of the dock's thread-scoped panel. It is the same read as
-  // every other window context above, so activating a pane re-targets the
-  // panel with them; a pane holding a welcome or overview surface reports no
-  // thread rather than leaving the previous pane's thread standing.
-  const dockThreadId = activeCodeThreadId === undefined ? undefined : String(activeCodeThreadId);
+  // The active pane is the only source of truth for the dock's thread. A click
+  // or focus inside another split changes this identity before its own dock
+  // selection is read, so no utility can keep showing the previous thread.
+  const dockThreadId =
+    activeMode === "chat"
+      ? activeChatThreadId
+      : activeMode === "work"
+        ? activeWorkThreadId
+        : activeCodeThreadId;
+  const dockThreadKey =
+    dockThreadId === undefined ? undefined : threadUtilityDockKey(activeMode, String(dockThreadId));
+  const dockState =
+    dockThreadKey === undefined
+      ? fallbackDockState
+      : threadUtilityDockState(dockStatesByThread, dockThreadKey);
+  const dockSurface = dockState.active;
   // One drag pipeline for pane grips and sidebar rows. A sidebar row whose
   // thread belongs to a different Project is rerouted through the ordinary
   // open path on drop, so a drag cannot place a cross-Project thread without
@@ -1402,21 +1434,23 @@ function LaunchedShell(
     dockProjectId === undefined
       ? undefined
       : projectController.allProjects.find((project) => project.id === dockProjectId);
-  // The thread the dock's Thread panel is about, with the checkout its Files
-  // group lists. Both come from the reads the pane itself uses, so the panel
-  // and the pane cannot disagree about which checkout the thread is bound to.
   const dockThread =
-    activeCodeThreadId === undefined
+    dockThreadId === undefined
       ? undefined
       : {
-          threadId: activeCodeThreadId,
-          checkoutId:
-            codeController.activeView !== undefined &&
-            String(codeController.activeView.thread.id) === String(activeCodeThreadId)
-              ? codeController.activeView.checkout.id
-              : codeController.bootstrap?.threads.find(
-                  (thread) => String(thread.id) === String(activeCodeThreadId),
-                )?.checkoutId,
+          mode: activeMode,
+          threadId: String(dockThreadId),
+          ...(activeMode !== "code" || activeCodeThreadId === undefined
+            ? {}
+            : {
+                checkoutId:
+                  codeController.activeView !== undefined &&
+                  String(codeController.activeView.thread.id) === String(activeCodeThreadId)
+                    ? codeController.activeView.checkout.id
+                    : codeController.bootstrap?.threads.find(
+                        (thread) => String(thread.id) === String(activeCodeThreadId),
+                      )?.checkoutId,
+              }),
         };
   const dockResolution = resolveDockSurface(dockSurface, dockProjectId);
   const availableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
@@ -1424,11 +1458,14 @@ function LaunchedShell(
       resolveDockSurface(surface.id, activeProjectId, surfaceAvailability(surface.id)).kind ===
       "surface",
   );
-  const preferredDockSurface =
-    availableDockSurfaces.find(
-      (surface) => surface.id === controller.settings?.lastContextSurface,
-    ) ?? availableDockSurfaces[0];
-  const dockOpen = dockResolution.kind !== "closed";
+  const dockTabs = dockState.tabs.flatMap((surfaceId) => {
+    const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
+    return surface === undefined ? [] : [surface];
+  });
+  const launchableDockSurfaces = availableDockSurfaces.filter(
+    (surface) => surface.scope === "thread",
+  );
+  const dockOpen = dockVisible;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
     serverUrl: props.launch.serverUrl,
@@ -1835,30 +1872,111 @@ function LaunchedShell(
   const memoryTransferProjects = projectController.allProjects.filter((project) =>
     enabledProjectTypes.has(project.type),
   );
+  const contextSummaryValue =
+    contextController.snapshot === undefined
+      ? contextController.status === "not-planned"
+        ? "Not planned"
+        : contextController.status === "disconnected"
+          ? "Unavailable"
+          : "Loading"
+      : contextStatusModel(contextController.snapshot, { kind: "thread" }).usageLabel.replace(
+          /^Context\s+/,
+          "",
+        );
+  const memorySummaryValue = projectController.activeProject?.name ?? "No Project";
+  const navigatorSummaryValue =
+    navigatorAssistant.state.kind === "ready"
+      ? "Ready"
+      : navigatorAssistant.state.kind === "unconfigured"
+        ? "Choose model"
+        : navigatorAssistant.state.kind === "loading"
+          ? "Loading"
+          : "Unavailable";
 
-  function openDockSurface(
-    surface: RightUtilityDockSurfaceId,
-    opener: HTMLElement,
-    projectId = activeProjectId,
-  ) {
-    const resolution = resolveDockSurface(
-      surface,
-      projectId,
-      surfaceAvailability(surface, projectId),
+  function threadUtility(surface: RightUtilityDockSurfaceId) {
+    if (dockThread === undefined || dockThreadKey === undefined) return null;
+    const sidecarThreadId = dockSidecarsByThread.get(dockThreadKey);
+    const appleProjectPath = appleProjects[0]?.projectPath;
+    return (
+      <ThreadUtilityDockContent
+        {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
+        appleToolchainClient={appleToolchainClient}
+        {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
+        chatClient={chatClient}
+        chatReadCursorStore={chatReadCursorStore}
+        {...(dockThread.mode === "code" ? { codeController } : {})}
+        codeProviderGroups={codeProviderGroups}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        onOpenFile={(relativePath) => {
+          if (dockThread.mode !== "code") return;
+          void controller.openCodeSurface({
+            kind: "code-file",
+            threadId: decodeCodeThreadId(dockThread.threadId),
+            title: relativePath,
+            relativePath,
+          });
+        }}
+        onSidecarOpened={(sidecar: SideChatSidecar) => {
+          setDockSidecarsByThread((current) => {
+            if (current.get(dockThreadKey) === sidecar.sidecarThreadId) return current;
+            const next = new Map(current);
+            next.set(dockThreadKey, sidecar.sidecarThreadId);
+            return next;
+          });
+        }}
+        providerController={providerController}
+        serverUrl={props.launch.serverUrl}
+        {...(sidecarThreadId === undefined ? {} : { sidecarThreadId })}
+        subject={{
+          mode: dockThread.mode,
+          threadId: dockThread.threadId,
+          ...(dockThread.checkoutId === undefined ? {} : { checkoutId: dockThread.checkoutId }),
+        }}
+        surface={surface}
+        windowCapability={props.projectWindowCapability}
+      />
     );
-    if (resolution.kind !== "surface") return;
-    dockOpener.current = { element: opener, logicalTarget: "dock" };
+  }
+
+  function openDockTab(
+    surface: RightUtilityDockSurfaceId,
+    opener?: HTMLElement,
+    projectId = activeProjectId,
+    target: "active" | "fallback" = "active",
+  ) {
+    const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
+    if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    if (descriptor.scope === "thread" && (dockThreadKey === undefined || target === "fallback")) {
+      return;
+    }
+    if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
     if (surface !== "project-memory" || String(dockProjectId) !== String(projectId)) {
       projectController.clearMemory();
     }
     setDockProjectId(projectId);
-    setDockSurface(surface);
-    if (controller.settings?.lastContextSurface !== surface) {
-      void controller.updateSettings({ lastContextSurface: surface });
+    setDockVisible(true);
+    if (dockThreadKey === undefined || target === "fallback") {
+      setFallbackDockState((current) => openUtilityTabState(current, surface));
+    } else {
+      setDockStatesByThread((current) => openThreadUtilityTab(current, dockThreadKey, surface));
+    }
+  }
+  function selectDockTab(surface: RightUtilityDockSurfaceId) {
+    if (dockThreadKey === undefined) {
+      setFallbackDockState((current) => selectUtilityTabState(current, surface));
+    } else {
+      setDockStatesByThread((current) => selectThreadUtilityTab(current, dockThreadKey, surface));
+    }
+  }
+  function closeDockTab(surface: RightUtilityDockSurfaceId) {
+    if (dockThreadKey === undefined) {
+      setFallbackDockState((current) => closeUtilityTabState(current, surface));
+    } else {
+      setDockStatesByThread((current) => closeThreadUtilityTab(current, dockThreadKey, surface));
     }
   }
   function openMemoryInspector(projectId: ProjectId | undefined, opener: HTMLElement) {
-    openDockSurface("project-memory", opener, projectId);
+    openDockTab("project-memory", opener, projectId, "fallback");
   }
   /**
    * Takes the reader to the degraded Project's context, not to a panel
@@ -1875,94 +1993,28 @@ function LaunchedShell(
       if (project === undefined || project.lifecycle !== "active") return;
       await openSelectedProject(project);
     }
-    openDockSurface("context", opener, projectId);
+    openDockTab("context", opener, projectId, "fallback");
   }
   function closeDock() {
     pendingDockFocus.current = dockOpener.current;
-    setDockProjectId(undefined);
-    setDockSurface(undefined);
+    setDockVisible(false);
     projectController.clearMemory();
-    if (controller.settings?.lastContextSurface !== null) {
-      void controller.updateSettings({ lastContextSurface: null });
-    }
   }
   function toggleDock(opener: HTMLElement) {
+    dockOpener.current = { element: opener, logicalTarget: "dock" };
     if (dockOpen) {
-      dockOpener.current = { element: opener, logicalTarget: "dock" };
       closeDock();
       return;
     }
-    if (preferredDockSurface !== undefined) openDockSurface(preferredDockSurface.id, opener);
+    setDockProjectId(activeProjectId);
+    setDockVisible(true);
   }
   useEffect(() => {
-    if (initialDockRestoreAttempted.current) return;
-    const savedSurface = controller.settings?.lastContextSurface;
-    if (savedSurface === null) {
-      initialDockRestoreAttempted.current = true;
-      return;
-    }
-    if (
-      savedSurface === undefined ||
-      activeProjectId === undefined ||
-      projectController.activeProject === undefined
-    ) {
-      return;
-    }
-    const restored = resolveDockSurface(savedSurface, activeProjectId);
-    if (restored.kind !== "surface") {
-      if (restored.reason === "unknown") return;
-      initialDockRestoreAttempted.current = true;
-      return;
-    }
-    initialDockRestoreAttempted.current = true;
-    setDockProjectId(activeProjectId);
-    setDockSurface(restored.surface.id);
-  }, [
-    activeProjectId,
-    controller.settings?.lastContextSurface,
-    projectController.activeProject,
-    projectController.status,
-  ]);
-  // The mode the open dock was last describing. Comparing against it inside
-  // the follow effect distinguishes "another pane in this mode became active"
-  // (re-target the panel) from "the whole mode changed" (close the dock).
-  const dockFollowedMode = useRef(activeMode);
-  useEffect(() => {
-    const modeChanged = dockFollowedMode.current !== activeMode;
-    dockFollowedMode.current = activeMode;
-    if (dockSurface === undefined) {
-      if (dockProjectId !== undefined) setDockProjectId(undefined);
-      return;
-    }
-    if (modeChanged) {
-      // A mode switch replaces the whole workspace the panel was describing,
-      // so the dock closes instead of re-targeting across modes.
-      dockOpener.current = undefined;
-      pendingDockFocus.current = undefined;
-      setDockProjectId(undefined);
-      setDockSurface(undefined);
-      projectController.clearMemory();
-      return;
-    }
+    if (!dockVisible) return;
     if (String(dockProjectId) === String(activeProjectId)) return;
-    // The dock answers for the active pane: activating another pane re-targets
-    // the open panel in place, keeping the panel selection. The previous
-    // target's memory is dropped first so none of its content can render
-    // against the new target while it loads.
     setDockProjectId(activeProjectId);
     projectController.clearMemory();
-  }, [activeMode, activeProjectId, dockProjectId, dockSurface, projectController.clearMemory]);
-  useEffect(() => {
-    // "unavailable" is a presentable value — the selected panel stays open and
-    // shows its empty-handed state — so only a genuinely closed resolution
-    // (disconnect, revoked presentation, malformed selection) tears down here.
-    if (dockSurface === undefined || dockResolution.kind !== "closed") return;
-    dockOpener.current = undefined;
-    pendingDockFocus.current = undefined;
-    setDockProjectId(undefined);
-    setDockSurface(undefined);
-    projectController.clearMemory();
-  }, [dockResolution.kind, dockSurface, projectController.clearMemory]);
+  }, [activeProjectId, dockProjectId, dockVisible, projectController.clearMemory]);
   useEffect(() => {
     const current = projectController.activeProject;
     const previous = previousProjectLifecycle.current;
@@ -1979,18 +2031,18 @@ function LaunchedShell(
     }
     queueMicrotask(() => {
       const target = dockOpen
-        ? document.querySelector<HTMLElement>(".right-utility-dock__actions button:last-child")
+        ? document.querySelector<HTMLElement>('button[aria-label="Close right sidebar"]')
         : document.querySelector<HTMLElement>(".project-overview__memory-action");
       target?.focus();
     });
   }, [dockOpen, projectController.activeProject]);
   useEffect(() => {
-    if (dockSurface !== undefined) return;
+    if (dockVisible) return;
     const pending = pendingDockFocus.current;
     if (pending === undefined) return;
     pendingDockFocus.current = undefined;
     focusLogicalOpener(pending);
-  }, [dockSurface]);
+  }, [dockVisible]);
   useEffect(() => {
     setPreviewContextWidth(undefined);
   }, [controller.settings?.contextSidebarWidth]);
@@ -2007,17 +2059,26 @@ function LaunchedShell(
     surface: RightUtilityDockSurfaceId,
     projectId = activeProjectId,
   ): RightUtilityDockSurfaceAvailability {
-    if (projectController.status === "loading" || projectController.status === "conflict-reload") {
-      return "unknown";
-    }
-    if (projectController.status === "disconnected") return "unavailable";
     // Navigator is host-owned, so no Project decides whether it can be shown.
     // Its own readiness — unconfigured, unavailable — is the panel's to report
     // from the host snapshot, not something to pre-empt by hiding the surface.
     if (surface === "navigator") return "available";
-    // Thread is scoped to the active pane's surface, not to a Project. Whether
-    // that pane holds a thread is the resolver's thread-required question.
-    if (surface === "thread") return "available";
+    if (
+      surface === "side-chat" ||
+      surface === "browser" ||
+      surface === "files" ||
+      surface === "changes" ||
+      surface === "terminal" ||
+      surface === "tests" ||
+      surface === "ios-simulator" ||
+      surface === "thread"
+    ) {
+      return "available";
+    }
+    if (projectController.status === "loading" || projectController.status === "conflict-reload") {
+      return "unknown";
+    }
+    if (projectController.status === "disconnected") return "unavailable";
     // Whether a Project is active is the resolver's project-required question,
     // not a presentation outage. Answering "unavailable" here used to short the
     // resolver out before that question, which closed an open panel instead of
@@ -2035,7 +2096,16 @@ function LaunchedShell(
     surface: unknown,
     surfaceProjectId: ProjectId | undefined,
     availability = surfaceAvailability(
-      surface === "context" || surface === "navigator" || surface === "thread"
+      surface === "context" ||
+        surface === "navigator" ||
+        surface === "side-chat" ||
+        surface === "browser" ||
+        surface === "files" ||
+        surface === "changes" ||
+        surface === "terminal" ||
+        surface === "tests" ||
+        surface === "ios-simulator" ||
+        surface === "thread"
         ? surface
         : "project-memory",
     ),
@@ -3384,13 +3454,9 @@ function LaunchedShell(
             {...(props.developmentAuthentication === undefined
               ? {}
               : { developmentAuthentication: props.developmentAuthentication })}
-            dockAvailable={preferredDockSurface !== undefined}
+            dockAvailable
             dockExpanded={dockOpen}
-            dockLabel={
-              dockResolution.kind === "closed"
-                ? (preferredDockSurface?.label ?? "Utility dock")
-                : dockResolution.surface.label
-            }
+            dockLabel="Right sidebar"
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             isNarrow={isNarrow}
             material={material}
@@ -3862,16 +3928,13 @@ function LaunchedShell(
                           focus={{ kind: "thread" }}
                           onOpenInspector={() => {
                             const element = document.activeElement;
-                            if (element instanceof HTMLElement) openDockSurface("context", element);
+                            if (element instanceof HTMLElement) openDockTab("context", element);
                           }}
                           snapshot={contextController.snapshot}
                         />
                       )
                     }
                     workspace={controller.workspace}
-                    {...(controller.availableSurfaces === undefined
-                      ? {}
-                      : { availableSurfaces: controller.availableSurfaces })}
                     mode={controller.workspace.activeMode}
                     {...(controller.crossContextOffer === undefined
                       ? {}
@@ -3963,7 +4026,8 @@ function LaunchedShell(
               </ProjectMemoryInspectorProvider>
             </div>
             <RightUtilityDock
-              availableSurfaces={availableDockSurfaces}
+              browser={threadUtility("browser")}
+              changes={threadUtility("changes")}
               context={
                 contextController.snapshot === undefined ? (
                   // A thread nothing has planned yet is an empty panel, not a
@@ -3999,7 +4063,7 @@ function LaunchedShell(
                 ) : (
                   <ContextInspector
                     busy={contextController.status === "updating"}
-                    onClose={closeDock}
+                    onClose={() => closeDockTab("context")}
                     onRebuild={() => void contextController.rebuild()}
                     onSetExcluded={(entryId, excluded) =>
                       void contextController.setExcluded(entryId, excluded)
@@ -4012,23 +4076,26 @@ function LaunchedShell(
                 )
               }
               isNarrow={isNarrow}
+              files={threadUtility("files")}
+              iosSimulator={threadUtility("ios-simulator")}
+              launchableSurfaces={launchableDockSurfaces}
               navigator={
                 <NavigatorPanel
                   controller={navigatorAssistant}
-                  onClose={closeDock}
+                  onClose={() => closeDockTab("navigator")}
                   onOpenSettings={(target) => void controller.openSettings(target)}
                 />
               }
               onClose={closeDock}
+              onCloseTab={closeDockTab}
               onCommitWidth={(width) => {
                 setPreviewContextWidth(width);
                 void controller.updateSettings({ contextSidebarWidth: width });
               }}
               onPreviewWidth={setPreviewContextWidth}
-              onSelectSurface={(surface) => {
-                const opener = document.activeElement;
-                if (opener instanceof HTMLElement) openDockSurface(surface, opener);
-              }}
+              onOpenTab={(surface) => openDockTab(surface)}
+              onSelectSurface={selectDockTab}
+              open={dockVisible}
               projectMemory={
                 dockProject === undefined ? null : (
                   <ProjectMemoryInspector
@@ -4040,7 +4107,7 @@ function LaunchedShell(
                     {...(projectController.memory === undefined
                       ? {}
                       : { memory: projectController.memory })}
-                    onClose={closeDock}
+                    onClose={() => closeDockTab("project-memory")}
                     onCreate={projectController.createMemory}
                     onLoad={projectController.loadMemory}
                     onRetract={projectController.retractMemory}
@@ -4054,26 +4121,31 @@ function LaunchedShell(
                 )
               }
               resolution={dockResolution}
+              sideChat={threadUtility("side-chat")}
+              terminal={threadUtility("terminal")}
+              tests={threadUtility("tests")}
+              summary={
+                <RightUtilityDockSummary
+                  items={[
+                    { id: "context", label: "Context", value: contextSummaryValue },
+                    {
+                      id: "project-memory",
+                      label: "Project memory",
+                      value: memorySummaryValue,
+                    },
+                    { id: "navigator", label: "Navigator", value: navigatorSummaryValue },
+                  ]}
+                  onOpen={(surface, opener) => openDockTab(surface, opener)}
+                />
+              }
+              tabs={dockTabs}
               thread={
-                dockThread === undefined ? null : (
+                dockThread?.mode !== "code" ? null : (
                   <ThreadDockPanel
                     agentRunClient={agentRunClient}
-                    {...(dockThread.checkoutId === undefined
-                      ? {}
-                      : { checkoutId: dockThread.checkoutId })}
-                    onOpenFile={(relativePath) => {
-                      void controller.openCodeSurface({
-                        kind: "code-file",
-                        threadId: dockThread.threadId,
-                        title: relativePath,
-                        relativePath,
-                      });
-                    }}
                     planClient={planClient}
-                    serverUrl={props.launch.serverUrl}
                     shipClient={shipClient}
-                    threadId={dockThread.threadId}
-                    windowCapability={props.projectWindowCapability}
+                    threadId={decodeCodeThreadId(dockThread.threadId)}
                   />
                 )
               }

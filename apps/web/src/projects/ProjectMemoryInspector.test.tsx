@@ -132,34 +132,41 @@ function renderInspector(
 }
 
 describe("ProjectMemoryInspector", () => {
-  it("embeds under one utility dock landmark and title, with no close of its own", () => {
+  it("embeds under one utility dock landmark and selected tab, with no close of its own", () => {
     const inspector = renderInspector();
     inspector.unmount();
     render(
       <RightUtilityDock
-        availableSurfaces={[RIGHT_UTILITY_DOCK_SURFACES[1]]}
         context={null}
         isNarrow={false}
+        launchableSurfaces={[]}
         navigator={null}
         onClose={vi.fn()}
+        onCloseTab={vi.fn()}
         onCommitWidth={vi.fn()}
+        onOpenTab={vi.fn()}
         onPreviewWidth={vi.fn()}
         onSelectSurface={vi.fn()}
+        open
         projectMemory={<ProjectMemoryInspector {...inspector.props} embedded />}
-        thread={null}
         resolution={{
           kind: "surface",
           projectId: sourceProjectId,
           surface: RIGHT_UTILITY_DOCK_SURFACES[1],
         }}
+        summary={null}
+        tabs={[RIGHT_UTILITY_DOCK_SURFACES[1]]}
         width={360}
       />,
     );
 
     expect(screen.getAllByRole("complementary", { name: "Right Utility Dock" })).toHaveLength(1);
-    expect(screen.getAllByRole("heading", { name: "Project memory" })).toHaveLength(1);
-    // The window chrome's disclosure closes the docked dock; a second close in
-    // its header lands within a few pixels of that one and shares its name.
+    expect(screen.getByRole("tab", { name: "Project memory" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // The tab strip owns utility closure. The embedded inspector does not add
+    // another close control beside it.
     expect(screen.queryAllByRole("button", { name: "Close Project memory" })).toHaveLength(0);
     expect(screen.getByText("Source")).toBeVisible();
     expect(screen.getByRole("button", { name: "Add memory" })).toBeVisible();

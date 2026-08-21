@@ -52,7 +52,7 @@ A chip you can no longer open is marked unavailable and contributes no content. 
 
 ## Side Chat
 
-Side Chat is a separate Chat conversation about one source thread. Open it from a mention chip, or from the workspace launcher while that thread is focused. It can answer questions using the same bounded excerpt; it cannot approve, steer, change criteria, or write to the source thread. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation.
+Side Chat is a separate Chat conversation about one source thread. Open the right sidebar, use **Add utility tab**, and choose **Side Chat** while that thread is focused. It never replaces the source thread. Switching between visible threads restores each thread's own sidebar tabs and Side Chat conversation. Side Chat can answer questions using the same bounded excerpt; it cannot approve, steer, change criteria, or write to the source thread. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation.
 
 ## Export
 

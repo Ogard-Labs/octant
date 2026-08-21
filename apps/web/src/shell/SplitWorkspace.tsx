@@ -1,28 +1,21 @@
-import type { CodeThreadId } from "@octant/contracts/code";
 import type {
   LayoutNodeId,
   PaneId,
   WorkspaceLayoutNode,
   WorkspacePane,
-  WorkspaceSurfaceCatalog,
-  WorkspaceSurfaceDescriptor,
   WorkspaceTab,
 } from "@octant/contracts/shell";
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import { GripVertical } from "lucide-react";
 import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
-import type { CodeOverviewSurfaceKind } from "../code/CodeOverview";
-import { LAUNCHABLE_CODE_SURFACES, codeSurfaceTitle } from "../code/codeSurfaces";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import { MENU_ITEM_CLASS } from "../projects/ThreadRowMenu";
-import { WorkspaceTabLauncher } from "./WorkspaceTabLauncher";
 import { WorkspaceDragStatus, WorkspaceDropOverlay } from "./WorkspaceDropOverlay";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 
 const splitContainerStyle = { height: "100%", minHeight: 0, minWidth: 0, width: "100%" };
 
 export interface SplitWorkspaceProps {
-  readonly availableSurfaces?: WorkspaceSurfaceCatalog;
   /**
    * The shared surface-drag pipeline. Owned above the workspace so sidebar
    * rows and pane grips feed the same drag; its `rootRef` attaches here, where
@@ -38,13 +31,6 @@ export interface SplitWorkspaceProps {
   readonly onClosePane: (paneId: PaneId) => void;
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   readonly onFocus: (paneId: PaneId) => void;
-  /** Opens one of a Code thread's own surfaces in this pane. */
-  readonly onOpenCodeSurface?: (
-    kind: CodeOverviewSurfaceKind,
-    threadId: CodeThreadId,
-    title: string,
-  ) => void;
-  readonly onOpenSurface?: (surface: WorkspaceSurfaceDescriptor["kind"], paneId: PaneId) => void;
   readonly onPreviewResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   /** A keyboard path to the edge-drop gesture: split this pane, welcome in the new pane. */
   readonly onSplitPane: (
@@ -259,10 +245,6 @@ function clampSplitRatio(value: number): number {
 function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: WorkspacePane }) {
   const pane = props.pane;
   const surface = pane.surface;
-  const openCodeSurface = props.onOpenCodeSurface;
-  // A thread's own surfaces are launchable only from the pane showing that
-  // thread, so the id comes from the pane's surface rather than window state.
-  const codeThreadId = surface.kind === "code-overview" ? surface.threadId : undefined;
   const focused = String(props.focusedPaneId) === String(pane.paneId);
   const canSplit = canSplitPane(props.layout, pane.paneId, props.totalWorkspacePaneCount);
   const dragKey = `pane:${String(pane.paneId)}`;
@@ -273,6 +255,8 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       data-focused={focused ? "true" : "false"}
       data-workspace-can-split={canSplit ? "true" : "false"}
       data-workspace-pane-id={pane.paneId}
+      onBeforeInputCapture={() => props.onActivatePane(pane.paneId)}
+      onKeyDownCapture={() => props.onActivatePane(pane.paneId)}
       onPointerDownCapture={() => props.onActivatePane(pane.paneId)}
     >
       {/* The header spans the window's title band, so the space the grip and
@@ -301,24 +285,6 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
             <GripVertical aria-hidden="true" size={13} strokeWidth={1.8} />
             <span className="workspace-pane__title">{surface.title}</span>
           </span>
-          {props.availableSurfaces === undefined || props.onOpenSurface === undefined ? null : (
-            <WorkspaceTabLauncher
-              catalog={props.availableSurfaces}
-              mode={props.mode}
-              onOpenSurface={(kind) => props.onOpenSurface?.(kind, pane.paneId)}
-              {...(openCodeSurface === undefined || codeThreadId === undefined
-                ? {}
-                : {
-                    onOpenThreadSurface: (kind: CodeOverviewSurfaceKind) =>
-                      openCodeSurface(kind, codeThreadId, codeSurfaceTitle(kind)),
-                    threadSurfaces: LAUNCHABLE_CODE_SURFACES.map((kind) => ({
-                      kind,
-                      label: codeSurfaceTitle(kind),
-                    })),
-                  })}
-              owningThreadAvailable={hasBrowserOwningThread(surface)}
-            />
-          )}
         </ContextMenuPrimitive.Trigger>
         <PaneMenu
           canSplit={canSplit}
@@ -338,16 +304,6 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
         />
       )}
     </section>
-  );
-}
-
-function hasBrowserOwningThread(surface: WorkspaceTab): boolean {
-  return (
-    "mode" in surface &&
-    surface.mode !== "chat" &&
-    "threadId" in surface &&
-    typeof surface.threadId === "string" &&
-    surface.threadId.length > 0
   );
 }
 
