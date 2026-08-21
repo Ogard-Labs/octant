@@ -4,6 +4,7 @@ import { FolderOpen, Paperclip, ShieldCheck } from "lucide-react";
 import { useState, type ClipboardEvent, type FormEvent, type ReactNode } from "react";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
+import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
 import { HostSelector } from "../shell/HostSelector";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -225,38 +226,7 @@ export function WorkOverview(props: WorkOverviewProps) {
           <label className="sr-only" htmlFor="work-overview-quick-start">
             Start a new Work thread
           </label>
-          {images.staged.length === 0 && images.message === undefined ? null : (
-            <div
-              className="composer-chips work-composer-adapter__attachments"
-              aria-label="Attached images"
-            >
-              {images.staged.map((attachment) => (
-                <span className="chip work-composer-adapter__attachment" key={attachment.id}>
-                  <img
-                    alt={attachment.displayName}
-                    className="work-composer-adapter__attachment-thumb"
-                    src={attachment.previewUrl}
-                  />
-                  <span className="work-composer-adapter__attachment-name">
-                    {attachment.displayName}
-                  </span>
-                  <button
-                    aria-label={`Remove ${attachment.displayName}`}
-                    className="chip-x window-no-drag"
-                    onClick={() => images.remove(attachment.id)}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-              {images.message === undefined ? null : (
-                <span className="work-composer-adapter__hint" role="status">
-                  {images.message}
-                </span>
-              )}
-            </div>
-          )}
+          <WorkImageAttachmentChips images={images} />
           <OctantTextarea
             disabled={!createAvailable || submitting}
             id="work-overview-quick-start"

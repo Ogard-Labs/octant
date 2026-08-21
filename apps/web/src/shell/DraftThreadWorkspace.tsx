@@ -32,7 +32,7 @@ import {
   type CreateHostViewScope,
   type PickerGroup,
 } from "@octant/domain";
-import { ArrowUp, FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
+import { FolderOpen, GitBranch, ShieldCheck } from "lucide-react";
 import { useCallback, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   CodeComposerAdapter,
@@ -49,6 +49,7 @@ import {
 } from "../projects/ComposerProjectSelector";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { ThreadComposer } from "../composer/ThreadComposer";
 import { HostSelector } from "./HostSelector";
 import type { OctantHostBridge } from "./hostBridge";
 
@@ -426,33 +427,28 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               ? {}
               : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
           />
-          <div className="composer">
-            <OctantTextarea
-              aria-label="First message"
-              autoFocus
-              className="composer-input"
-              disabled={props.creating}
-              onChange={(event) => setPrompt(event.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={presentation.composerPlaceholder}
-              ref={textareaRef}
-              rows={3}
-              value={prompt}
-            />
-            <div className="composer-row">
-              <span className="composer-gap" />
-              <OctantButton
-                aria-label="Create thread"
-                disabled={!canSubmit}
-                onClick={submit}
-                size="icon"
-                type="button"
-                variant="default"
-              >
-                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-              </OctantButton>
-            </div>
-          </div>
+          <ThreadComposer
+            input={
+              <OctantTextarea
+                aria-label="First message"
+                autoFocus
+                className="composer-input"
+                disabled={props.creating}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={presentation.composerPlaceholder}
+                ref={textareaRef}
+                rows={3}
+                value={prompt}
+              />
+            }
+            row={{
+              actions: {
+                kind: "send",
+                send: { ariaLabel: "Create thread", disabled: !canSubmit, onSend: submit },
+              },
+            }}
+          />
           {props.errorMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">
               {props.errorMessage}

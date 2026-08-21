@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { ArrowUp, Globe2, Paperclip, Slash, SlidersHorizontal, Square, X } from "lucide-react";
+import { Globe2, Paperclip, Slash, SlidersHorizontal, X } from "lucide-react";
 import type { ChatAttachmentId } from "@octant/contracts/chat";
 import { clipboardHasImage, collectPastedImages } from "./composerImagePaste";
 import {
@@ -32,6 +32,7 @@ import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
+import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { useOctantCommands } from "../palette/CommandRegistry";
 import {
@@ -427,8 +428,8 @@ export function ChatComposer(props: ChatComposerProps) {
     for (const file of selection.files) props.onFileSelected(file);
   }
 
-  return (
-    <section aria-label="Chat composer" className="composer chat-composer thread-column">
+  const chips = (
+    <>
       <ThreadMentionChips
         chips={props.threadMentions?.chips ?? []}
         onRemove={(threadId) => props.threadMentions?.onRemoveChip(threadId)}
@@ -526,45 +527,50 @@ export function ChatComposer(props: ChatComposerProps) {
           ))}
         </ul>
       ) : null}
-      <label className="chat-composer__message-field">
-        <span className="chat-composer__visually-hidden">Message</span>
-        <textarea
-          aria-activedescendant={
-            activeCommand !== undefined
-              ? `${commandListId}-${activeCommand.id}`
-              : activeMention === undefined
-                ? undefined
-                : `${mentionListId}-${String(activeMention.threadId)}`
-          }
-          aria-autocomplete={
-            props.threadMentions === undefined && offeredCommands.length === 0 ? undefined : "list"
-          }
-          aria-controls={commandOpen ? commandListId : mentionOpen ? mentionListId : undefined}
-          aria-describedby={statusId}
-          aria-expanded={
-            props.threadMentions === undefined && offeredCommands.length === 0
-              ? undefined
-              : commandOpen || mentionOpen
-          }
-          className="composer-input window-no-drag"
-          onChange={(event) => {
-            props.onDraftChange(event.currentTarget.value);
-            rememberCaret(event.currentTarget.selectionStart);
-            syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
-          }}
-          onClick={(event) => {
-            rememberCaret(event.currentTarget.selectionStart);
-            syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
-          }}
-          onKeyDown={onDraftKeyDown}
-          onKeyUp={onDraftKeyUp}
-          onPaste={onDraftPaste}
-          placeholder={props.isSending ? "Queue the next message…" : "Message Octant"}
-          ref={messageRef}
-          rows={1}
-          value={props.draft}
-        />
-      </label>
+    </>
+  );
+
+  const input = (
+    <textarea
+      aria-activedescendant={
+        activeCommand !== undefined
+          ? `${commandListId}-${activeCommand.id}`
+          : activeMention === undefined
+            ? undefined
+            : `${mentionListId}-${String(activeMention.threadId)}`
+      }
+      aria-autocomplete={
+        props.threadMentions === undefined && offeredCommands.length === 0 ? undefined : "list"
+      }
+      aria-controls={commandOpen ? commandListId : mentionOpen ? mentionListId : undefined}
+      aria-describedby={statusId}
+      aria-expanded={
+        props.threadMentions === undefined && offeredCommands.length === 0
+          ? undefined
+          : commandOpen || mentionOpen
+      }
+      className="composer-input window-no-drag"
+      onChange={(event) => {
+        props.onDraftChange(event.currentTarget.value);
+        rememberCaret(event.currentTarget.selectionStart);
+        syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
+      }}
+      onClick={(event) => {
+        rememberCaret(event.currentTarget.selectionStart);
+        syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
+      }}
+      onKeyDown={onDraftKeyDown}
+      onKeyUp={onDraftKeyUp}
+      onPaste={onDraftPaste}
+      placeholder={props.isSending ? "Queue the next message…" : "Message Octant"}
+      ref={messageRef}
+      rows={1}
+      value={props.draft}
+    />
+  );
+
+  const typeahead = (
+    <>
       {commandOpen ? (
         <div className="chat-composer__command-typeahead">
           {commandMatches.length === 0 ? (
@@ -614,220 +620,231 @@ export function ChatComposer(props: ChatComposerProps) {
           onHover={mention.setActiveIndex}
         />
       ) : null}
-      <div
-        aria-label="Composer controls"
-        className="composer-row chat-composer__bar"
-        role="toolbar"
-      >
-        <div className="chat-composer__leading">
-          <label>
-            <span className="chat-composer__visually-hidden">Add attachment</span>
-            <input
-              aria-label="Choose attachment file"
-              disabled={attachment.kind === "unavailable" || props.attachmentBusy === true}
-              onChange={(event) => {
-                const file = event.currentTarget.files?.item(0);
-                if (file !== null && file !== undefined) props.onFileSelected(file);
-                event.currentTarget.value = "";
-              }}
-              type="file"
-            />
-          </label>
-          <OctantButton
-            aria-label="Add attachment"
+    </>
+  );
+
+  const rowLeading = (
+    <>
+      <div className="chat-composer__leading">
+        <label>
+          <span className="chat-composer__visually-hidden">Add attachment</span>
+          <input
+            aria-label="Choose attachment file"
             disabled={attachment.kind === "unavailable" || props.attachmentBusy === true}
-            onClick={(event) => {
-              const input =
-                event.currentTarget.parentElement?.querySelector<HTMLInputElement>(
-                  'input[type="file"]',
-                );
-              input?.click();
+            onChange={(event) => {
+              const file = event.currentTarget.files?.item(0);
+              if (file !== null && file !== undefined) props.onFileSelected(file);
+              event.currentTarget.value = "";
             }}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
-          </OctantButton>
-        </div>
-        <div className="chat-composer__selectors">
-          {props.providerGroups !== undefined && props.onSelectModel !== undefined ? (
-            <ComposerModelPicker
-              ariaLabel="Provider and model"
-              disabled={settingsLocked}
-              groups={props.providerGroups}
-              onSelect={props.onSelectModel}
-              {...(props.onOpenSettings === undefined
-                ? {}
-                : { onOpenSettings: props.onOpenSettings })}
-              {...(props.selectedModelId === undefined
-                ? {}
-                : { selectedModelId: props.selectedModelId })}
-              {...(props.selectedProviderInstanceId === undefined
-                ? {}
-                : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-            />
-          ) : (
-            <>
-              {props.provider.options.length > 1 ? (
-                <label htmlFor={providerId}>
-                  <span className="chat-composer__visually-hidden">Provider</span>
-                  <OctantSelectField
-                    disabled={settingsLocked}
-                    id={providerId}
-                    onValueChange={props.onProviderChange}
-                    options={props.provider.options}
-                    value={props.provider.value}
-                  />
-                </label>
-              ) : null}
-              <label htmlFor={modelId}>
-                <span className="chat-composer__visually-hidden">Model</span>
+            type="file"
+          />
+        </label>
+        <OctantButton
+          aria-label="Add attachment"
+          disabled={attachment.kind === "unavailable" || props.attachmentBusy === true}
+          onClick={(event) => {
+            const input =
+              event.currentTarget.parentElement?.querySelector<HTMLInputElement>(
+                'input[type="file"]',
+              );
+            input?.click();
+          }}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+        </OctantButton>
+      </div>
+      <div className="chat-composer__selectors">
+        {props.providerGroups !== undefined && props.onSelectModel !== undefined ? (
+          <ComposerModelPicker
+            ariaLabel="Provider and model"
+            disabled={settingsLocked}
+            groups={props.providerGroups}
+            onSelect={props.onSelectModel}
+            {...(props.onOpenSettings === undefined
+              ? {}
+              : { onOpenSettings: props.onOpenSettings })}
+            {...(props.selectedModelId === undefined
+              ? {}
+              : { selectedModelId: props.selectedModelId })}
+            {...(props.selectedProviderInstanceId === undefined
+              ? {}
+              : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+          />
+        ) : (
+          <>
+            {props.provider.options.length > 1 ? (
+              <label htmlFor={providerId}>
+                <span className="chat-composer__visually-hidden">Provider</span>
                 <OctantSelectField
                   disabled={settingsLocked}
-                  id={modelId}
-                  onValueChange={props.onModelChange}
-                  options={props.model.options}
-                  value={props.model.value}
+                  id={providerId}
+                  onValueChange={props.onProviderChange}
+                  options={props.provider.options}
+                  value={props.provider.value}
                 />
               </label>
-            </>
-          )}
-          {hasModelOptionControls ? (
-            <div className="chat-composer__model-options" ref={modelOptionsRef}>
-              <OctantButton
-                aria-controls={modelOptionsPanelId}
-                aria-expanded={modelOptionsOpen}
-                aria-haspopup="dialog"
-                aria-label="Model options"
-                data-customized={anyModelOptionSet || undefined}
-                disabled={settingsLocked}
-                onClick={() => setModelOptionsOpen((current) => !current)}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <SlidersHorizontal aria-hidden="true" size={15} strokeWidth={1.8} />
-                {anyModelOptionSet ? (
-                  <span aria-hidden="true" className="chat-composer__model-options-dot" />
-                ) : null}
-              </OctantButton>
-              {modelOptionsOpen ? (
-                <div
-                  aria-label="Model options"
-                  className="popover-panel chat-composer__model-options-panel"
-                  id={modelOptionsPanelId}
-                  role="dialog"
-                >
-                  {declaredModelOptions.map((option) => (
-                    <label key={option.id}>
-                      <span className="chat-composer__visually-hidden">{option.displayName}</span>
-                      <OctantSelectField
-                        disabled={settingsLocked}
-                        onValueChange={(value) =>
-                          props.onModelOptionChange?.(
-                            option.id,
-                            value === MODEL_OPTION_DEFAULT_ID ? undefined : value,
-                          )
-                        }
-                        options={[
-                          { id: MODEL_OPTION_DEFAULT_ID, label: `${option.displayName}: Default` },
-                          ...option.values.map((value) => ({
-                            id: value,
-                            label: `${option.displayName}: ${value}`,
-                          })),
-                        ]}
-                        value={
-                          option.value !== undefined && option.values.includes(option.value)
-                            ? option.value
-                            : MODEL_OPTION_DEFAULT_ID
-                        }
-                      />
-                    </label>
-                  ))}
-                  {props.poolControl}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-        <div className="chat-composer__research">
-          <OctantButton
-            aria-label={props.research.enabled ? "Disable web research" : "Enable web research"}
-            aria-pressed={props.research.enabled}
-            disabled={settingsLocked}
-            onClick={() => props.onResearchEnabledChange(!props.research.enabled)}
-            size="sm"
-            type="button"
-            variant={props.research.enabled ? "secondary" : "ghost"}
-          >
-            <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
-            <span>Web</span>
-          </OctantButton>
-          {props.research.enabled ? (
-            <label htmlFor={researchRoutingId}>
-              <span className="chat-composer__visually-hidden">Research routing</span>
+            ) : null}
+            <label htmlFor={modelId}>
+              <span className="chat-composer__visually-hidden">Model</span>
               <OctantSelectField
                 disabled={settingsLocked}
-                id={researchRoutingId}
-                onValueChange={(value) =>
-                  props.onResearchRoutingChange(value as ChatComposerResearchRouting)
-                }
-                options={[
-                  { id: "automatic", label: "Automatic" },
-                  { id: "searxng", label: "SearXNG" },
-                  { id: "provider-native", label: "Provider-native" },
-                ]}
-                value={props.research.routing}
+                id={modelId}
+                onValueChange={props.onModelChange}
+                options={props.model.options}
+                value={props.model.value}
               />
             </label>
-          ) : null}
-        </div>
-        <div className="chat-composer__actions">
-          {queued && props.onDiscardQueued !== undefined ? (
+          </>
+        )}
+        {hasModelOptionControls ? (
+          <div className="chat-composer__model-options" ref={modelOptionsRef}>
             <OctantButton
-              aria-label="Discard queued message"
-              onClick={props.onDiscardQueued}
+              aria-controls={modelOptionsPanelId}
+              aria-expanded={modelOptionsOpen}
+              aria-haspopup="dialog"
+              aria-label="Model options"
+              data-customized={anyModelOptionSet || undefined}
+              disabled={settingsLocked}
+              onClick={() => setModelOptionsOpen((current) => !current)}
               size="icon"
               type="button"
               variant="ghost"
             >
-              <X aria-hidden="true" size={14} strokeWidth={1.8} />
+              <SlidersHorizontal aria-hidden="true" size={15} strokeWidth={1.8} />
+              {anyModelOptionSet ? (
+                <span aria-hidden="true" className="chat-composer__model-options-dot" />
+              ) : null}
             </OctantButton>
-          ) : null}
-          {props.isSending ? (
-            <button
-              aria-label="Stop response"
-              className="btn-send window-no-drag"
-              disabled={stopDisabledReason !== undefined}
-              onClick={() => props.onStop?.()}
-              type="button"
-            >
-              <Square aria-hidden="true" fill="currentColor" size={10} strokeWidth={1.5} />
-            </button>
-          ) : null}
-          {queueStatus === "queued" ? null : (
-            <button
-              aria-label={props.isSending ? "Queue message" : "Send message"}
-              className="btn-send window-no-drag"
-              disabled={sendDisabledReason !== undefined}
-              onClick={send}
-              type="button"
-            >
-              <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-            </button>
-          )}
+            {modelOptionsOpen ? (
+              <div
+                aria-label="Model options"
+                className="popover-panel chat-composer__model-options-panel"
+                id={modelOptionsPanelId}
+                role="dialog"
+              >
+                {declaredModelOptions.map((option) => (
+                  <label key={option.id}>
+                    <span className="chat-composer__visually-hidden">{option.displayName}</span>
+                    <OctantSelectField
+                      disabled={settingsLocked}
+                      onValueChange={(value) =>
+                        props.onModelOptionChange?.(
+                          option.id,
+                          value === MODEL_OPTION_DEFAULT_ID ? undefined : value,
+                        )
+                      }
+                      options={[
+                        { id: MODEL_OPTION_DEFAULT_ID, label: `${option.displayName}: Default` },
+                        ...option.values.map((value) => ({
+                          id: value,
+                          label: `${option.displayName}: ${value}`,
+                        })),
+                      ]}
+                      value={
+                        option.value !== undefined && option.values.includes(option.value)
+                          ? option.value
+                          : MODEL_OPTION_DEFAULT_ID
+                      }
+                    />
+                  </label>
+                ))}
+                {props.poolControl}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      <div className="chat-composer__research">
+        <OctantButton
+          aria-label={props.research.enabled ? "Disable web research" : "Enable web research"}
+          aria-pressed={props.research.enabled}
+          disabled={settingsLocked}
+          onClick={() => props.onResearchEnabledChange(!props.research.enabled)}
+          size="sm"
+          type="button"
+          variant={props.research.enabled ? "secondary" : "ghost"}
+        >
+          <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
+          <span>Web</span>
+        </OctantButton>
+        {props.research.enabled ? (
+          <label htmlFor={researchRoutingId}>
+            <span className="chat-composer__visually-hidden">Research routing</span>
+            <OctantSelectField
+              disabled={settingsLocked}
+              id={researchRoutingId}
+              onValueChange={(value) =>
+                props.onResearchRoutingChange(value as ChatComposerResearchRouting)
+              }
+              options={[
+                { id: "automatic", label: "Automatic" },
+                { id: "searxng", label: "SearXNG" },
+                { id: "provider-native", label: "Provider-native" },
+              ]}
+              value={props.research.routing}
+            />
+          </label>
+        ) : null}
+      </div>
+    </>
+  );
+
+  return (
+    <ThreadComposer
+      ariaLabel="Chat composer"
+      chips={chips}
+      className="chat-composer thread-column"
+      footer={
+        <div
+          aria-live="polite"
+          className={`chat-composer__status${quietStatus ? " chat-composer__status--quiet" : ""}`}
+          id={statusId}
+          role="status"
+        >
+          {status.text}
         </div>
-      </div>
-      <div
-        aria-live="polite"
-        className={`chat-composer__status${quietStatus ? " chat-composer__status--quiet" : ""}`}
-        id={statusId}
-        role="status"
-      >
-        {status.text}
-      </div>
-    </section>
+      }
+      input={input}
+      label={{
+        className: "chat-composer__message-field",
+        text: "Message",
+        textClassName: "chat-composer__visually-hidden",
+      }}
+      row={{
+        ariaLabel: "Composer controls",
+        className: "chat-composer__bar",
+        toolbar: true,
+        leading: rowLeading,
+        actions: {
+          kind: "send-or-stop",
+          cellClassName: "chat-composer__actions",
+          sending: props.isSending,
+          send: {
+            ariaLabel: props.isSending ? "Queue message" : "Send message",
+            disabledReason: sendDisabledReason,
+            onSend: send,
+          },
+          stop: {
+            ariaLabel: "Stop response",
+            disabledReason: stopDisabledReason,
+            onStop: () => props.onStop?.(),
+          },
+          ...(queued && props.onDiscardQueued !== undefined
+            ? {
+                discard: {
+                  ariaLabel: "Discard queued message",
+                  onDiscard: props.onDiscardQueued,
+                },
+              }
+            : {}),
+          sendHidden: queueStatus === "queued",
+        },
+      }}
+      typeahead={typeahead}
+    />
   );
 }
 

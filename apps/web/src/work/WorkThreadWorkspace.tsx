@@ -15,7 +15,7 @@ import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-cl
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
-import { ArrowUp, Check, Globe2, Paperclip, X } from "lucide-react";
+import { Check, Globe2, Paperclip } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -37,6 +37,7 @@ import type { TurnSettlement } from "../composer/queuedSend";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { ThreadComposer } from "../composer/ThreadComposer";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
@@ -50,6 +51,7 @@ import { useThreadMentions } from "../chat/useThreadMentions";
 import { clipboardHasImage } from "../chat/composerImagePaste";
 import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
+import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
 import { useWorkFileMentions } from "./useWorkFileMentions";
 
 export interface WorkThreadWorkspaceProps {
@@ -622,189 +624,160 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           </div>
         )}
         <div className="work-thread-workspace__composer-shell">
-          <div className="composer">
-            {mention.open ? (
-              <ThreadMentionTypeahead
-                activeIndex={mention.activeIndex}
-                {...(threadMentions.composer?.busy === undefined
-                  ? {}
-                  : { busy: threadMentions.composer.busy })}
-                candidates={threadMentions.composer?.candidates ?? []}
-                listId={mentionListId}
-                onChoose={mention.choose}
-                onHover={mention.setActiveIndex}
-              />
-            ) : null}
-            {fileMentionOpen ? (
-              <PathMentionTypeahead
-                activeIndex={fileMentions.activeIndex}
-                busy={fileMentions.busy}
-                candidates={fileMentions.candidates}
-                listId={fileMentionListId}
-                onChoose={fileMentions.choose}
-                onHover={fileMentions.setActiveIndex}
-              />
-            ) : null}
-            <ThreadMentionChips
-              chips={threadMentions.chips}
-              onRemove={(mentionedThreadId) =>
-                threadMentions.composer?.onRemoveChip(mentionedThreadId)
-              }
-            />
-            {images.staged.length === 0 && images.message === undefined ? null : (
-              <div
-                className="composer-chips work-composer-adapter__attachments"
-                aria-label="Attached images"
-              >
-                {images.staged.map((attachment) => (
-                  <span className="chip work-composer-adapter__attachment" key={attachment.id}>
-                    <img
-                      alt={attachment.displayName}
-                      className="work-composer-adapter__attachment-thumb"
-                      src={attachment.previewUrl}
-                    />
-                    <span className="work-composer-adapter__attachment-name">
-                      {attachment.displayName}
-                    </span>
-                    <button
-                      aria-label={`Remove ${attachment.displayName}`}
-                      className="chip-x window-no-drag"
-                      onClick={() => images.remove(attachment.id)}
-                      type="button"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                {images.message === undefined ? null : (
-                  <span className="work-composer-adapter__hint" role="status">
-                    {images.message}
-                  </span>
-                )}
-              </div>
-            )}
-            <OctantTextarea
-              aria-label="Work prompt"
-              autoFocus
-              className="composer-input"
-              disabled={
-                creating ||
-                completionLocked ||
-                (props.mutationClient === undefined && props.turnClient === undefined)
-              }
-              onChange={(event) => {
-                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
-                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
-              }}
-              onClick={(event) => {
-                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
-                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
-              }}
-              onKeyDown={handleKeyDown}
-              onKeyUp={(event) => {
-                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
-                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
-              }}
-              onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
-                if (creating || completionLocked) return;
-                if (attachFromTransfer(event.clipboardData)) event.preventDefault();
-              }}
-              placeholder={
-                turnRunning
-                  ? "Queue the next message…"
-                  : "Describe the deliverable or paste a draft…"
-              }
-              ref={textareaRef}
-              rows={4}
-              value={prompt}
-            />
-            <div className="composer-row">
-              {props.turnClient === undefined ? null : (
-                <>
-                  <label>
-                    <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-                    <input
-                      aria-label="Choose attachment file"
-                      accept="image/png,image/jpeg,image/webp,image/gif"
-                      className="work-composer-adapter__file-input"
-                      disabled={creating || completionLocked || imageSupport === false}
-                      onChange={(event) => {
-                        const file = event.currentTarget.files?.item(0);
-                        if (file !== null && file !== undefined) {
-                          if (imageSupport === false) {
-                            images.refuse(
-                              "The selected model does not accept images. Choose an image-capable model.",
-                            );
-                          } else {
-                            images.attach([file]);
-                          }
-                        }
-                        event.currentTarget.value = "";
-                      }}
-                      type="file"
-                    />
-                  </label>
-                  <OctantButton
-                    aria-label="Add attachment"
-                    disabled={creating || completionLocked || imageSupport === false}
-                    onClick={(event) => {
-                      event.currentTarget.parentElement
-                        ?.querySelector<HTMLInputElement>('input[type="file"]')
-                        ?.click();
-                    }}
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
-                  </OctantButton>
-                </>
-              )}
-              <span className="composer-gap" />
-              {queued.state.status === "idle" ? null : (
-                <OctantButton
-                  aria-label="Discard queued message"
-                  onClick={() => {
-                    queued.discard();
-                    composerDraft.clear();
-                    threadMentions.clear();
-                    fileMentions.clear();
-                    images.clearAfterAccepted();
-                  }}
-                  size="icon"
-                  type="button"
-                  variant="ghost"
-                >
-                  <X aria-hidden="true" size={16} strokeWidth={2} />
-                </OctantButton>
-              )}
-              {queued.state.status === "queued" ? null : (
-                <OctantButton
-                  aria-label={
-                    turnRunning
-                      ? "Queue message"
-                      : queued.state.status === "held"
-                        ? "Send message"
-                        : props.turnClient === undefined
-                          ? "Create artifact"
-                          : "Send follow-up"
+          <ThreadComposer
+            chips={
+              <>
+                <ThreadMentionChips
+                  chips={threadMentions.chips}
+                  onRemove={(mentionedThreadId) =>
+                    threadMentions.composer?.onRemoveChip(mentionedThreadId)
                   }
-                  disabled={!canSubmit}
-                  onClick={() => void submit()}
-                  size="icon"
-                  type="button"
-                  variant="default"
-                >
-                  <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-                </OctantButton>
-              )}
-            </div>
-          </div>
-          {composerDraft.persistError === undefined ? null : (
-            <p className="work-thread-workspace__hint" role="status">
-              {composerDraft.persistError}
-            </p>
-          )}
+                />
+                <WorkImageAttachmentChips images={images} />
+                {composerDraft.persistError === undefined ? null : (
+                  <p className="work-thread-workspace__hint" role="status">
+                    {composerDraft.persistError}
+                  </p>
+                )}
+              </>
+            }
+            input={
+              <OctantTextarea
+                aria-label="Work prompt"
+                autoFocus
+                className="composer-input"
+                disabled={
+                  creating ||
+                  completionLocked ||
+                  (props.mutationClient === undefined && props.turnClient === undefined)
+                }
+                onChange={(event) => {
+                  rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                  syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+                }}
+                onClick={(event) => {
+                  rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                  syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+                }}
+                onKeyDown={handleKeyDown}
+                onKeyUp={(event) => {
+                  rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                  syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+                }}
+                onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+                  if (creating || completionLocked) return;
+                  if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+                }}
+                placeholder={
+                  turnRunning
+                    ? "Queue the next message…"
+                    : "Describe the deliverable or paste a draft…"
+                }
+                ref={textareaRef}
+                rows={4}
+                value={prompt}
+              />
+            }
+            typeahead={
+              <>
+                {mention.open ? (
+                  <ThreadMentionTypeahead
+                    activeIndex={mention.activeIndex}
+                    {...(threadMentions.composer?.busy === undefined
+                      ? {}
+                      : { busy: threadMentions.composer.busy })}
+                    candidates={threadMentions.composer?.candidates ?? []}
+                    listId={mentionListId}
+                    onChoose={mention.choose}
+                    onHover={mention.setActiveIndex}
+                  />
+                ) : null}
+                {fileMentionOpen ? (
+                  <PathMentionTypeahead
+                    activeIndex={fileMentions.activeIndex}
+                    busy={fileMentions.busy}
+                    candidates={fileMentions.candidates}
+                    listId={fileMentionListId}
+                    onChoose={fileMentions.choose}
+                    onHover={fileMentions.setActiveIndex}
+                  />
+                ) : null}
+              </>
+            }
+            row={{
+              leading:
+                props.turnClient === undefined ? null : (
+                  <>
+                    <label>
+                      <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                      <input
+                        aria-label="Choose attachment file"
+                        accept="image/png,image/jpeg,image/webp,image/gif"
+                        className="work-composer-adapter__file-input"
+                        disabled={creating || completionLocked || imageSupport === false}
+                        onChange={(event) => {
+                          const file = event.currentTarget.files?.item(0);
+                          if (file !== null && file !== undefined) {
+                            if (imageSupport === false) {
+                              images.refuse(
+                                "The selected model does not accept images. Choose an image-capable model.",
+                              );
+                            } else {
+                              images.attach([file]);
+                            }
+                          }
+                          event.currentTarget.value = "";
+                        }}
+                        type="file"
+                      />
+                    </label>
+                    <OctantButton
+                      aria-label="Add attachment"
+                      disabled={creating || completionLocked || imageSupport === false}
+                      onClick={(event) => {
+                        event.currentTarget.parentElement
+                          ?.querySelector<HTMLInputElement>('input[type="file"]')
+                          ?.click();
+                      }}
+                      size="icon"
+                      type="button"
+                      variant="ghost"
+                    >
+                      <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+                    </OctantButton>
+                  </>
+                ),
+              actions: {
+                kind: "send",
+                send: {
+                  ariaLabel: turnRunning
+                    ? "Queue message"
+                    : queued.state.status === "held"
+                      ? "Send message"
+                      : props.turnClient === undefined
+                        ? "Create artifact"
+                        : "Send follow-up",
+                  disabled: !canSubmit,
+                  onSend: () => void submit(),
+                },
+                ...(queued.state.status === "idle"
+                  ? {}
+                  : {
+                      discard: {
+                        ariaLabel: "Discard queued message",
+                        onDiscard: () => {
+                          queued.discard();
+                          composerDraft.clear();
+                          threadMentions.clear();
+                          fileMentions.clear();
+                          images.clearAfterAccepted();
+                        },
+                      },
+                    }),
+                sendHidden: queued.state.status === "queued",
+              },
+            }}
+          />
           {errorMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">
               {errorMessage}
