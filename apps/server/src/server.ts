@@ -245,6 +245,13 @@ import {
 } from "./agentRun/agentRunOrchestrationService";
 import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceService";
 import { createAgentRunRouteHandler } from "./agentRun/agentRunRoutes";
+import {
+  createAgentRunChildWorktreePort,
+  resolveAgentRunCodeWorkspaceContext,
+} from "./agentRun/agentRunChildWorktreePort";
+import { AgentRunWorkspaceReceiptStore } from "./agentRun/agentRunWorkspaceReceiptStore";
+import { AgentRunWorkspaceService } from "./agentRun/agentRunWorkspaceService";
+import type { AgentRunChildWorktreePort } from "./agentRun/agentRunWorkspaceService";
 import { createVerifiedAgentRunWorktreeReceiptPort } from "./agentRun/agentRunWorktreeReceiptPort";
 import { AgentRunSettingsStore } from "./agentRun/agentRunSettingsStore";
 import { createAgentRunSettingsRouteHandler } from "./agentRun/agentRunSettingsRoutes";
@@ -1307,6 +1314,25 @@ export function startOctantServer(
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
+    const agentRunWorkspaceReceipts = new AgentRunWorkspaceReceiptStore({
+      dataDirectory: persistence.dataDirectory,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    });
+    const agentRunChildWorktree: { current: AgentRunChildWorktreePort | undefined } = {
+      current: undefined,
+    };
+    const agentRunWorkspace = new AgentRunWorkspaceService({
+      receipts: agentRunWorkspaceReceipts,
+      childWorktree: {
+        prepare: (input) =>
+          agentRunChildWorktree.current?.prepare(input) ??
+          Promise.resolve({ status: "refused", reason: "unavailable" }),
+        confirm: (input) =>
+          agentRunChildWorktree.current?.confirm(input) ??
+          Promise.resolve({ status: "refused", reason: "unavailable" }),
+      },
+    });
     const capacityScheduler = makeProviderCapacityScheduler({
       now: () => Date.now(),
       random: Math.random,
@@ -1374,6 +1400,18 @@ export function startOctantServer(
           workspace.verified && workspace.worktreeRoot !== workspace.checkoutRoot,
         isParentCheckout: (workspace) => workspace.worktreeRoot === workspace.checkoutRoot,
       },
+      workBinding: {
+        isCurrent: (workspace) => {
+          const project = persistence.readProject(workspace.projectId);
+          if (project?.type !== "work" || project.lifecycle !== "active") return false;
+          const revision = project.bindingHistory.at(-1);
+          return (
+            revision !== undefined &&
+            String(revision.revisionId) === String(workspace.bindingRevisionId) &&
+            project.binding.canonicalRoot === workspace.canonicalRoot
+          );
+        },
+      },
       approvals: { isCurrent: () => true },
       processes: agentRunProcessSupervisor,
     });
@@ -1396,6 +1434,7 @@ export function startOctantServer(
       authorizeCreation: ({ parentThreadId, windowId }) =>
         authorizeAgentRunCreation({
           persistence,
+          workThreadProjection,
           parentThreadId,
           windowId,
           codeSessionAuthority,
@@ -1481,6 +1520,45 @@ export function startOctantServer(
                 },
           projectId: thread === undefined ? undefined : String(thread.projectId),
         });
+      },
+      workspace: {
+        prepare: async ({ windowId, parent, code }) =>
+          agentRunWorkspace.prepare({
+            windowId,
+            parent:
+              parent.mode === "code"
+                ? {
+                    ...parent,
+                    ...(await resolveAgentRunParentCheckout(
+                      persistence,
+                      managedWorktreeReceipts,
+                      parent.threadId,
+                    )),
+                  }
+                : parent,
+            ...(code === undefined
+              ? await resolveAgentRunPrepareCode(persistence, managedWorktreeReceipts, parent)
+              : { code: code }),
+          }),
+        confirm: ({ windowId, parent, worktreeReceiptId }) =>
+          agentRunWorkspace.confirm({ windowId, parent, worktreeReceiptId }),
+        admit: async ({ windowId, requested, role, parent }) =>
+          agentRunWorkspace.admit({
+            windowId,
+            requested,
+            role,
+            parent:
+              parent.mode === "code"
+                ? {
+                    ...parent,
+                    ...(await resolveAgentRunParentCheckout(
+                      persistence,
+                      managedWorktreeReceipts,
+                      parent.threadId,
+                    )),
+                  }
+                : parent,
+          }),
       },
       // A child that asked to be admitted with its parent's context is given
       // the parent thread's own recent conversation, read through the very
@@ -2304,6 +2382,11 @@ export function startOctantServer(
         },
       },
       now: Date.now,
+    });
+    agentRunChildWorktree.current = createAgentRunChildWorktreePort({
+      service: managedWorktreeService,
+      loadReceipt: (receiptId) => managedWorktreeReceipts.load(receiptId),
+      findActive: (lookup) => managedWorktreeReceipts.findActive(lookup),
     });
     managedWorktreeRefsList = async (input, signal) => {
       const project = persistence.readProject(input.projectId);
@@ -5674,16 +5757,82 @@ export function admittedParentChatContext(
   return blocks.slice(-MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS);
 }
 
+async function resolveAgentRunParentCheckout(
+  persistence: PersistenceService,
+  receipts: ManagedWorktreeReceiptStore,
+  parentThreadId: string,
+): Promise<{ readonly checkoutRoot: string } | Record<string, never>> {
+  try {
+    const thread = persistence.readCodeThread(decodeCodeThreadId(parentThreadId));
+    const project = thread === undefined ? undefined : persistence.readProject(thread.projectId);
+    if (thread === undefined || project?.type !== "code") return {};
+    const checkout = persistence.readCodeCheckout(thread.checkoutId);
+    const context = await resolveAgentRunCodeWorkspaceContext({
+      thread: {
+        projectId: String(thread.projectId),
+        bindingRevisionId: String(thread.bindingRevisionId),
+        repositoryId: String(thread.repositoryId),
+        checkoutId: String(thread.checkoutId),
+      },
+      repositoryRoot: project.binding.canonicalRoot,
+      checkout,
+      loadManagedReceipt: (receiptId) => receipts.load(receiptId),
+    });
+    return context === undefined ? {} : { checkoutRoot: context.parentCheckoutRoot };
+  } catch {
+    return {};
+  }
+}
+
+async function resolveAgentRunPrepareCode(
+  persistence: PersistenceService,
+  receipts: ManagedWorktreeReceiptStore,
+  parent: { readonly mode: string; readonly threadId: string },
+): Promise<
+  | { readonly code: NonNullable<Awaited<ReturnType<typeof resolveAgentRunCodeWorkspaceContext>>> }
+  | Record<string, never>
+> {
+  if (parent.mode !== "code") return {};
+  try {
+    const thread = persistence.readCodeThread(decodeCodeThreadId(parent.threadId));
+    const project = thread === undefined ? undefined : persistence.readProject(thread.projectId);
+    if (thread === undefined || project?.type !== "code") return {};
+    const checkout = persistence.readCodeCheckout(thread.checkoutId);
+    const resolved = await resolveAgentRunCodeWorkspaceContext({
+      thread: {
+        projectId: String(thread.projectId),
+        bindingRevisionId: String(thread.bindingRevisionId),
+        repositoryId: String(thread.repositoryId),
+        checkoutId: String(thread.checkoutId),
+      },
+      repositoryRoot: project.binding.canonicalRoot,
+      checkout,
+      loadManagedReceipt: (receiptId) => receipts.load(receiptId),
+    });
+    return resolved === undefined ? {} : { code: resolved };
+  } catch {
+    return {};
+  }
+}
+
 function authorizeAgentRunCreation(input: {
   readonly persistence: PersistenceService;
+  readonly workThreadProjection: WorkThreadProjection;
   readonly parentThreadId: AgentRunParentThreadId;
   readonly windowId: string;
   readonly codeSessionAuthority: CodeSessionAuthorityStore;
 }):
   | {
-      readonly parentMode: "chat" | "code";
+      readonly parentMode: "chat" | "work" | "code";
       readonly parentAuthority: ReturnType<typeof defaultAgentRunAuthorityCeilingForMode>;
       readonly liveAuthority: ReturnType<typeof defaultAgentRunAuthorityCeilingForMode>;
+      readonly workspaceParent: {
+        readonly threadId: string;
+        readonly mode: "chat" | "work" | "code";
+        readonly projectId?: string;
+        readonly bindingRevisionId?: string;
+        readonly canonicalRoot?: string;
+      };
     }
   | undefined {
   const workspace = input.persistence.readWindowWorkspace(input.windowId as WindowId)?.workspace;
@@ -5719,7 +5868,60 @@ function authorizeAgentRunCreation(input: {
       executionPolicy: "plan",
       permissionPersistence: "current-session",
     });
-    return { parentMode: "chat", parentAuthority, liveAuthority };
+    return {
+      parentMode: "chat",
+      parentAuthority,
+      liveAuthority,
+      workspaceParent: { threadId: String(input.parentThreadId), mode: "chat" },
+    };
+  }
+
+  const workContext = workspace.contextByMode.work;
+  let workThread;
+  try {
+    workThread = input.workThreadProjection.read(input.parentThreadId as never);
+  } catch {
+    workThread = undefined;
+  }
+  if (
+    workThread !== undefined &&
+    workThread.lifecycle === "active" &&
+    workContext.mode === "work" &&
+    String(workContext.projectId) === String(workThread.projectId) &&
+    layoutContainsAgentRunThread(
+      workspace.layouts.work,
+      String(workThread.id),
+      String(workContext.host),
+    )
+  ) {
+    const project = input.persistence.readProject(workThread.projectId);
+    if (project?.type !== "work" || project.lifecycle !== "active") return undefined;
+    const revision = project.bindingHistory.at(-1);
+    if (revision === undefined) return undefined;
+    const parentAuthority = defaultAgentRunAuthorityCeilingForMode("work");
+    const liveAuthority = resolveAgentRunLiveParentGrant({
+      mode: "work",
+      filesystem: true,
+      shell: false,
+      git: false,
+      network: false,
+      tools: true,
+      subagents: true,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    });
+    return {
+      parentMode: "work",
+      parentAuthority,
+      liveAuthority,
+      workspaceParent: {
+        threadId: String(input.parentThreadId),
+        mode: "work",
+        projectId: String(project.id),
+        bindingRevisionId: String(revision.revisionId),
+        canonicalRoot: project.binding.canonicalRoot,
+      },
+    };
   }
 
   const codeContext = workspace.contextByMode.code;
@@ -5757,7 +5959,17 @@ function authorizeAgentRunCreation(input: {
       executionPolicy: effectiveThread.executionPolicy,
       permissionPersistence: effectiveThread.permissionPersistence,
     });
-    return { parentMode: "code", parentAuthority, liveAuthority };
+    return {
+      parentMode: "code",
+      parentAuthority,
+      liveAuthority,
+      workspaceParent: {
+        threadId: String(input.parentThreadId),
+        mode: "code",
+        projectId: String(codeThread.projectId),
+        bindingRevisionId: String(codeThread.bindingRevisionId),
+      },
+    };
   }
 
   return undefined;

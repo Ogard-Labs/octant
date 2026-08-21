@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { decodeAgentRunCreationRequest } from "./agentRunCreationRequest";
+import {
+  decodeAgentRunCreationRequest,
+  decodeAgentRunWorkspaceConfirmationRequest,
+  decodeAgentRunWorkspaceHandle,
+  decodeAgentRunWorkspacePreparationRequest,
+  decodeAgentRunWorkspacePreparationResult,
+} from "./agentRunCreationRequest";
 
 const ids = {
   request: "22222222-2222-4222-8222-222222222222",
@@ -85,7 +91,33 @@ describe("AgentRunCreationRequest", () => {
     ).toThrow();
   });
 
-  it("rejects work workspaces until authoritative root resolution is wired", () => {
+  it("decodes a Work child request that references a server-issued workspace receipt", () => {
+    const decoded = decodeAgentRunCreationRequest({
+      ...base,
+      mode: "work",
+      role: "research",
+      requestedAuthority: {
+        filesystem: true,
+        shell: false,
+        git: false,
+        network: false,
+        tools: true,
+        subagents: false,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+      },
+      workspace: {
+        kind: "work-root",
+        mode: "work",
+        receiptId: ids.receipt,
+      },
+    });
+    expect(decoded.workspace.kind).toBe("work-root");
+    if (decoded.workspace.kind !== "work-root") return;
+    expect(decoded.workspace.receiptId).toBe(ids.receipt);
+  });
+
+  it("rejects work workspaces that claim an absolute root or project id", () => {
     expect(() =>
       decodeAgentRunCreationRequest({
         ...base,
@@ -98,6 +130,70 @@ describe("AgentRunCreationRequest", () => {
         },
       }),
     ).toThrow();
+  });
+
+  it("decodes a prepared Chat workspace handle without a filesystem path", () => {
+    const handle = decodeAgentRunWorkspaceHandle({
+      kind: "chat-virtual",
+      mode: "chat",
+      receiptId: ids.receipt,
+    });
+    expect(handle.kind).toBe("chat-virtual");
+    expect("canonicalRoot" in handle).toBe(false);
+  });
+
+  it("decodes a Work workspace handle with project and binding identity only", () => {
+    const handle = decodeAgentRunWorkspaceHandle({
+      kind: "work-root",
+      mode: "work",
+      receiptId: ids.receipt,
+      projectId: ids.project,
+      bindingRevisionId: "88888888-8888-4888-8888-888888888888",
+    });
+    expect(handle.kind).toBe("work-root");
+    if (handle.kind !== "work-root") return;
+    expect(handle.bindingRevisionId).toBe("88888888-8888-4888-8888-888888888888");
+    expect("canonicalRoot" in handle).toBe(false);
+  });
+
+  it("rejects a Code workspace handle that claims paths or verification", () => {
+    expect(() =>
+      decodeAgentRunWorkspaceHandle({
+        kind: "code-worktree",
+        mode: "code",
+        worktreeReceiptId: ids.receipt,
+        confirmation: "confirmed",
+        checkoutRoot: "/repo",
+        worktreeRoot: "/repo-worktree",
+        verified: true,
+      }),
+    ).toThrow();
+  });
+
+  it("decodes prepare and confirm requests that name only ids", () => {
+    expect(
+      decodeAgentRunWorkspacePreparationRequest({ parentThreadId: ids.thread }).parentThreadId,
+    ).toBe(ids.thread);
+    expect(
+      decodeAgentRunWorkspaceConfirmationRequest({
+        parentThreadId: ids.thread,
+        worktreeReceiptId: ids.receipt,
+      }).worktreeReceiptId,
+    ).toBe(ids.receipt);
+    expect(() =>
+      decodeAgentRunWorkspacePreparationRequest({
+        parentThreadId: ids.thread,
+        canonicalRoot: "/projects/demo",
+      }),
+    ).toThrow();
+  });
+
+  it("decodes a structured workspace refusal without a path", () => {
+    const refused = decodeAgentRunWorkspacePreparationResult({
+      status: "refused",
+      reason: "parent-checkout",
+    });
+    expect(refused).toEqual({ status: "refused", reason: "parent-checkout" });
   });
 
   it("rejects mismatched mode and workspace kinds", () => {

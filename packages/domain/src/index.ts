@@ -81,6 +81,7 @@ export * from "./usagePolicy";
 export * from "./userProfilePolicy";
 export * from "./agentProfilePolicy";
 export * from "./agentRunPolicy";
+export * from "./agentRunWorkspacePolicy";
 export * from "./agentRunAuthorityCeiling";
 export * from "./agentRunLiveGrant";
 export * from "./automationPolicy";

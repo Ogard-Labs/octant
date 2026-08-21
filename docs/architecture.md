@@ -116,6 +116,14 @@ thread, the server records a **promotion proposal**; only explicit user approval
 creates a linked Code thread, and the new thread inherits no authority from the
 Work thread.
 
+A child AgentRun receives a server-prepared workspace: Chat a research-only
+virtual workspace, Work the current confined Project root and binding revision,
+and Code an isolated managed worktree that is confirmed before admission.
+Renderers supply only receipt ids — never absolute paths or a claimed
+`verified` flag. Admission, restart, and replay refuse stale, expired,
+foreign-thread, foreign-Project, parent-checkout, unavailable, or
+wider-than-parent grants.
+
 Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
 Done); Chat has no board. A Work or Code thread is Done only when its

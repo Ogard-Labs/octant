@@ -134,7 +134,50 @@ describe("buildAgentRunRequestCommand", () => {
     expect(command.creationPosture).toBe("off");
   });
 
-  it("does not decode non-Chat/Code workspaces until their parent authority and isolation are wired", () => {
+  it("admits a Work child from a server-resolved Project binding receipt", () => {
+    const workRequest = decodeAgentRunCreationRequest({
+      ...baseRequest(),
+      mode: "work",
+      role: "research",
+      requestedAuthority: {
+        filesystem: true,
+        shell: false,
+        git: false,
+        network: false,
+        tools: true,
+        subagents: false,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+      },
+      workspace: {
+        kind: "work-root",
+        mode: "work",
+        receiptId: "66666666-6666-4666-8666-666666666666",
+      },
+    });
+    const command = buildAgentRunRequestCommand({
+      request: workRequest,
+      creationPosture: "automatic",
+      providerReadiness: readyPort,
+      uuid,
+      admittedWorkspace: {
+        kind: "work-root",
+        mode: "work",
+        projectId: "55555555-5555-4555-8555-555555555555" as never,
+        bindingRevisionId: "88888888-8888-4888-8888-888888888888" as never,
+        canonicalRoot: "/projects/demo",
+      },
+    });
+    expect(command.workspaceReceipt).toEqual({
+      kind: "work-root",
+      mode: "work",
+      projectId: "55555555-5555-4555-8555-555555555555",
+      bindingRevisionId: "88888888-8888-4888-8888-888888888888",
+      canonicalRoot: "/projects/demo",
+    });
+  });
+
+  it("rejects a Work child that claims an absolute root instead of a receipt", () => {
     expect(() =>
       decodeAgentRunCreationRequest({
         ...baseRequest(),

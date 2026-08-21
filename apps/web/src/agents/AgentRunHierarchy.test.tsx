@@ -13,6 +13,23 @@ function emptyClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
   return {
     parentSummary: vi.fn(async () => ({ parentThreadId, entries: [] })),
     acknowledge: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
+    prepareWorkspace: vi.fn(async () => ({
+      status: "prepared" as const,
+      workspace: {
+        kind: "chat-virtual" as const,
+        mode: "chat" as const,
+        receiptId: "66666666-6666-4666-8666-666666666666" as never,
+      },
+    })),
+    confirmWorkspace: vi.fn(async () => ({
+      status: "confirmed" as const,
+      workspace: {
+        kind: "code-worktree" as const,
+        mode: "code" as const,
+        worktreeReceiptId: "66666666-6666-4666-8666-666666666666" as never,
+        confirmation: "confirmed" as const,
+      },
+    })),
     requestRun: vi.fn(async () => ({ kind: "run-accepted" as const })),
     cancel: vi.fn(async () => ({ results: [] })),
     ...overrides,

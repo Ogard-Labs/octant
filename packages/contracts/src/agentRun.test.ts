@@ -81,6 +81,16 @@ describe("agentRun contracts", () => {
   it("decodes workspace and routing receipts", () => {
     const workspace = decodeAgentRunWorkspaceReceipt({ kind: "chat-virtual", mode: "chat" });
     expect(workspace.kind).toBe("chat-virtual");
+    const workRoot = decodeAgentRunWorkspaceReceipt({
+      kind: "work-root",
+      mode: "work",
+      projectId: ids.project,
+      bindingRevisionId: "88888888-8888-4888-8888-888888888888",
+      canonicalRoot: "/projects/demo",
+    });
+    expect(workRoot.kind).toBe("work-root");
+    if (workRoot.kind !== "work-root") return;
+    expect(workRoot.bindingRevisionId).toBe("88888888-8888-4888-8888-888888888888");
     const routing = decodeAgentRunRoutingReceipt(routingReceipt);
     expect(routing.selectedExecutionKind).toBe("octant-managed");
     expect(routing.attemptedExecutionKind).toBe("provider-native");

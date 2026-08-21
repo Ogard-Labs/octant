@@ -41,7 +41,7 @@ import {
 } from "./agentRunOrchestrationService";
 import { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import { AgentRunProjection } from "./agentRunProjection";
-import { createAgentRunRouteHandler } from "./agentRunRoutes";
+import { createAgentRunRouteHandler, type AgentRunRouteDependencies } from "./agentRunRoutes";
 
 const directories: string[] = [];
 const now = "2026-08-01T15:00:00.000Z";
@@ -158,7 +158,8 @@ function createHandler(
         readonly mode: string;
       }) => ReadonlyArray<{ readonly kind: string; readonly text: string }> | undefined;
     };
-    readonly parentMode?: "chat" | "code";
+    readonly parentMode?: "chat" | "work" | "code";
+    readonly workspace?: AgentRunRouteDependencies["workspace"];
   } = {},
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-routes-"));
@@ -218,20 +219,44 @@ function createHandler(
     providerReadiness: {
       isReady: ({ providerInstanceId }) => providerInstanceId === readyProviderId,
     },
-    authorizeCreation: () =>
-      options.authorizeCreation?.() === false
-        ? undefined
-        : {
-            parentMode: options.parentMode ?? "chat",
-            parentAuthority: { ...authority, subagents: true },
-            liveAuthority: { ...authority, subagents: true },
-          },
+    authorizeCreation: () => {
+      if (options.authorizeCreation?.() === false) return undefined;
+      const parentMode = options.parentMode ?? "chat";
+      const parentAuthority =
+        parentMode === "work"
+          ? {
+              ...authority,
+              filesystem: true,
+              executionPolicy: "approval-gated" as const,
+              subagents: true,
+            }
+          : parentMode === "code"
+            ? {
+                ...authority,
+                filesystem: true,
+                shell: true,
+                git: true,
+                executionPolicy: "approval-gated" as const,
+                subagents: true,
+              }
+            : { ...authority, subagents: true };
+      return {
+        parentMode,
+        parentAuthority,
+        liveAuthority: parentAuthority,
+        workspaceParent: {
+          threadId: String(ids.thread),
+          mode: parentMode,
+        },
+      };
+    },
     authorizeCancellation: ({ run }) => options.authorizeCancellation?.({ run }) ?? true,
     authorizeParentThread: (input) => options.authorizeParentThread?.(input) ?? true,
     ...(options.poolRouting === undefined ? {} : { poolRouting: options.poolRouting }),
     ...(options.parentContext === undefined
       ? {}
       : { parentContext: options.parentContext as never }),
+    ...(options.workspace === undefined ? {} : { workspace: options.workspace }),
     uuid: (() => {
       let n = 0;
       return () => {
@@ -504,8 +529,9 @@ describe("agentRunRoutes", () => {
     );
 
     expect(response?.status).toBe(400);
-    expect(await response?.json()).toMatchObject({
-      error: "AgentRun child mode must match the parent thread mode.",
+    expect(await response?.json()).toEqual({
+      status: "refused",
+      reason: "unsupported",
     });
     expect(persistence.getByRequestId(ids.request)).toBeUndefined();
   });
@@ -996,5 +1022,245 @@ describe("agentRunRoutes", () => {
       }),
     );
     expect(cancelResponse?.status).toBe(401);
+  });
+
+  const workspaceReceipt = "66666666-6666-4666-8666-666666666666";
+  const bindingRevision = "88888888-8888-4888-8888-888888888888";
+  const projectId = "77777777-7777-4777-8777-777777777777";
+
+  function workspaceStub(mode: "chat" | "work" | "code" = "chat") {
+    return {
+      prepare: async () =>
+        mode === "chat"
+          ? {
+              status: "prepared" as const,
+              workspace: {
+                kind: "chat-virtual" as const,
+                mode: "chat" as const,
+                receiptId: workspaceReceipt as never,
+              },
+            }
+          : mode === "work"
+            ? {
+                status: "prepared" as const,
+                workspace: {
+                  kind: "work-root" as const,
+                  mode: "work" as const,
+                  receiptId: workspaceReceipt as never,
+                  projectId: projectId as never,
+                  bindingRevisionId: bindingRevision as never,
+                },
+              }
+            : {
+                status: "prepared" as const,
+                workspace: {
+                  kind: "code-worktree" as const,
+                  mode: "code" as const,
+                  worktreeReceiptId: workspaceReceipt as never,
+                  confirmation: "prepared" as const,
+                },
+              },
+      confirm: async () => ({
+        status: "confirmed" as const,
+        workspace: {
+          kind: "code-worktree" as const,
+          mode: "code" as const,
+          worktreeReceiptId: workspaceReceipt as never,
+          confirmation: "confirmed" as const,
+        },
+      }),
+      admit: async () =>
+        mode === "work"
+          ? {
+              status: "admitted" as const,
+              workspace: {
+                kind: "work-root" as const,
+                mode: "work" as const,
+                projectId: projectId as never,
+                bindingRevisionId: bindingRevision as never,
+                canonicalRoot: "/projects/demo",
+              },
+            }
+          : mode === "code"
+            ? {
+                status: "admitted" as const,
+                workspace: {
+                  kind: "code-worktree" as const,
+                  mode: "code" as const,
+                  projectId: projectId as never,
+                  checkoutRoot: "/repo",
+                  worktreeRoot: "/repo/.octant/worktrees/child",
+                  verified: true,
+                },
+              }
+            : {
+                status: "admitted" as const,
+                workspace: { kind: "chat-virtual" as const, mode: "chat" as const },
+              },
+    };
+  }
+
+  it("prepares a research-only Chat virtual workspace without a filesystem path", async () => {
+    const { handler, token } = createHandler({ workspace: workspaceStub("chat") });
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/workspaces/prepare", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({ parentThreadId: ids.thread }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toEqual({
+      status: "prepared",
+      workspace: { kind: "chat-virtual", mode: "chat", receiptId: workspaceReceipt },
+    });
+  });
+
+  it("prepares a Work workspace bound to the current Project and binding revision", async () => {
+    const { handler, token } = createHandler({
+      parentMode: "work",
+      workspace: workspaceStub("work"),
+    });
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/workspaces/prepare", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({ parentThreadId: ids.thread }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    const body = (await response!.json()) as {
+      workspace: Record<string, unknown>;
+    };
+    expect(body.workspace).toEqual({
+      kind: "work-root",
+      mode: "work",
+      receiptId: workspaceReceipt,
+      projectId,
+      bindingRevisionId: bindingRevision,
+    });
+    expect(body.workspace.canonicalRoot).toBeUndefined();
+  });
+
+  it("confirms a Code child worktree receipt without returning paths", async () => {
+    const { handler, token } = createHandler({
+      parentMode: "code",
+      workspace: workspaceStub("code"),
+    });
+    const prepared = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/workspaces/prepare", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({ parentThreadId: ids.thread }),
+      }),
+    );
+    expect(prepared?.status).toBe(200);
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/workspaces/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({
+          parentThreadId: ids.thread,
+          worktreeReceiptId: workspaceReceipt,
+        }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toEqual({
+      status: "confirmed",
+      workspace: {
+        kind: "code-worktree",
+        mode: "code",
+        worktreeReceiptId: workspaceReceipt,
+        confirmation: "confirmed",
+      },
+    });
+  });
+
+  it("refuses workspace preparation when the window does not own the parent thread", async () => {
+    const { handler, token } = createHandler({
+      authorizeCreation: () => false,
+      workspace: workspaceStub("chat"),
+    });
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/workspaces/prepare", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({ parentThreadId: ids.thread }),
+      }),
+    );
+    expect(response?.status).toBe(403);
+    expect(await response!.json()).toEqual({ status: "refused", reason: "unauthorized" });
+  });
+
+  it("admits a Work child from a prepared receipt and refuses parent-checkout Code receipts", async () => {
+    const work = createHandler({ parentMode: "work", workspace: workspaceStub("work") });
+    const workResponse = await work.handler(
+      new Request("http://127.0.0.1/api/agent-runs/request", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": work.token,
+        },
+        body: JSON.stringify({
+          ...creationBody(),
+          mode: "work",
+          requestedAuthority: {
+            filesystem: true,
+            shell: false,
+            git: false,
+            network: false,
+            tools: true,
+            subagents: false,
+            executionPolicy: "approval-gated",
+            permissionPersistence: "current-session",
+          },
+          workspace: { kind: "work-root", mode: "work", receiptId: workspaceReceipt },
+        }),
+      }),
+    );
+    expect(workResponse?.status).toBe(200);
+
+    const code = createHandler({
+      parentMode: "code",
+      workspace: {
+        ...workspaceStub("code"),
+        admit: async () => ({ status: "refused" as const, reason: "parent-checkout" as const }),
+      },
+    });
+    const codeResponse = await code.handler(
+      new Request("http://127.0.0.1/api/agent-runs/request", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-octant-window-capability": code.token,
+        },
+        body: JSON.stringify({
+          ...creationBody(),
+          mode: "code",
+          role: "implementation",
+          requestedAuthority: {
+            filesystem: true,
+            shell: true,
+            git: false,
+            network: false,
+            tools: true,
+            subagents: false,
+            executionPolicy: "approval-gated",
+            permissionPersistence: "current-session",
+          },
+          workspace: {
+            kind: "code-worktree",
+            mode: "code",
+            worktreeReceiptId: workspaceReceipt,
+          },
+        }),
+      }),
+    );
+    expect(codeResponse?.status).toBe(400);
+    expect(await codeResponse!.json()).toEqual({
+      status: "refused",
+      reason: "parent-checkout",
+    });
   });
 });
