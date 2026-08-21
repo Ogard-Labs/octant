@@ -5294,15 +5294,20 @@ button:focus-visible {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
+  padding: clamp(20px, 3vh, 36px) 0 28px;
   overflow: auto;
   overscroll-behavior: contain;
 }
 
 .code-thread-workspace__transcript {
+  position: relative;
+  margin: 0 auto;
+}
+
+.code-thread-workspace__conversation:not([data-transcript-window])
+  .code-thread-workspace__transcript {
   display: grid;
   gap: 18px;
-  padding: clamp(20px, 3vh, 36px) 0 28px;
-  margin: 0 auto;
 }
 
 .code-thread-workspace__empty {
@@ -5451,14 +5456,9 @@ button:focus-visible {
   border-radius: 5px;
 }
 
-/*
- * Long-thread virtualization without a windowing library: the engine skips
- * layout and paint for rows scrolled out of view, and the reserved intrinsic
- * height keeps scrollbar position stable while they are skipped.
- */
 .code-thread-workspace__row {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 120px;
+  display: grid;
+  min-width: 0;
 }
 
 .code-transcript-row {
