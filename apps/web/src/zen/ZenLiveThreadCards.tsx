@@ -11,15 +11,20 @@ import { decodeWorkThreadId, type WorkThreadId } from "@octant/contracts/work-th
 import type { ZenSourceContext, ZenThreadCatalogEntry } from "@octant/contracts/zen";
 import { buildModelPickerGroups } from "@octant/domain";
 import type { ZenLiveCardActivity } from "@octant/domain";
-import { useCallback, useMemo, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useMemo, type ReactNode } from "react";
 import { ChatWorkspace } from "../chat/ChatWorkspace";
-import { CodeThreadWorkspace } from "../code/CodeThreadWorkspace";
 import { useChatController, type ChatReadCursorStore } from "../chat/useChatController";
 import { useCodeController, type CodeReadCursorStore } from "../code/useCodeController";
 import type { ProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import type { ZenLiveThreadCard } from "./ZenThreadElement";
+
+const ZenCodeThreadWorkspace = lazy(() =>
+  import("../code/CodeThreadWorkspace").then(({ CodeThreadWorkspace }) => ({
+    default: CodeThreadWorkspace,
+  })),
+);
 
 /**
  * The provider facts a card reads. Narrowed on purpose: a card presents the
@@ -269,17 +274,25 @@ function ZenCodeCardSurface(props: {
     );
   }
   return (
-    <CodeThreadWorkspace
-      attachmentClient={props.codeClient}
-      controller={controller}
-      nextUuid={nextUuid}
-      operationClient={props.codeClient}
-      providerGroups={providerGroups}
-      threadId={props.threadId}
-      {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-      {...(props.windowCapability === undefined
-        ? {}
-        : { windowCapability: props.windowCapability })}
-    />
+    <Suspense
+      fallback={
+        <div className="zen-thread-element__unreachable">
+          <p role="status">Opening this Code thread…</p>
+        </div>
+      }
+    >
+      <ZenCodeThreadWorkspace
+        attachmentClient={props.codeClient}
+        controller={controller}
+        nextUuid={nextUuid}
+        operationClient={props.codeClient}
+        providerGroups={providerGroups}
+        threadId={props.threadId}
+        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+        {...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability })}
+      />
+    </Suspense>
   );
 }
