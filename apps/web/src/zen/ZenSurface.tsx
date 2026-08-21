@@ -373,6 +373,12 @@ export function ZenSurface(props: ZenSurfaceProps) {
     if (element.locked) return;
     event.preventDefault();
     event.stopPropagation();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is unavailable in the DOM test environment; the
+      // surface-level pointer handlers still complete the interaction there.
+    }
     setFocusedId(element.elementId);
     const raised = bringElementToFront(props.space.elements, element.elementId).find(
       (candidate) => candidate.elementId === element.elementId,
@@ -536,21 +542,21 @@ export function ZenSurface(props: ZenSurfaceProps) {
         {sorted.map((element) => {
           const threadCard = element.kind === "thread" ? resolveThreadCard(element) : undefined;
           const title =
-            "title" in element && typeof element.title === "string"
-              ? element.title
-              : element.kind === "notes"
-                ? "Notes"
-                : element.kind === "checklist"
-                  ? "Checklist"
-                  : element.kind === "thread"
-                    ? // A card that hosts a conversation is named by that
-                      // thread; three cards all labelled "Thread" tell a
-                      // keyboard reader nothing about which one they are on.
-                      (threadCard?.entry?.title ?? "Thread")
-                    : element.kind === "timer"
-                      ? "Timer"
-                      : element.kind === "terminal"
-                        ? "Terminal"
+            element.kind === "terminal"
+              ? `Terminal · ${element.title ?? "Terminal"}`
+              : "title" in element && typeof element.title === "string"
+                ? element.title
+                : element.kind === "notes"
+                  ? "Notes"
+                  : element.kind === "checklist"
+                    ? "Checklist"
+                    : element.kind === "thread"
+                      ? // A card that hosts a conversation is named by that
+                        // thread; three cards all labelled "Thread" tell a
+                        // keyboard reader nothing about which one they are on.
+                        (threadCard?.entry?.title ?? "Thread")
+                      : element.kind === "timer"
+                        ? "Timer"
                         : element.kind === "canvas"
                           ? // A card that hosts a document is named by that
                             // document; three cards all labelled "Canvas" tell
@@ -687,6 +693,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     disabled={element.locked}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => beginElementInteraction(event, element, "resize")}
+                    style={{ zIndex: 3 }}
                     type="button"
                   />
                 </>

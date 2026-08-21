@@ -13,7 +13,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type PointerEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   makeBrowserToolAction,
@@ -36,6 +36,13 @@ export interface ZenResearchDockProps {
   readonly onUndock: () => void;
 }
 
+type ResearchDrag = {
+  readonly startX: number;
+  readonly startY: number;
+  readonly offsetX: number;
+  readonly offsetY: number;
+};
+
 /**
  * A research browser docked to the edge of a focus zone space.
  *
@@ -49,7 +56,9 @@ export interface ZenResearchDockProps {
  * share that context's session: a sign-in in one is a sign-in in the next, as
  * it is in any browser profile. Opening a tab and following a link are the
  * person's own actions and reach the page through the host's navigation
- * admission; neither adds anything the agent may act on.
+ * admission; neither adds anything the agent may act on. The dock starts on
+ * the space edge, and its header can move the renderer/native rectangle for
+ * the current Zen session without changing the thread-owned browser binding.
  */
 export function ZenResearchDock(props: ZenResearchDockProps) {
   const [address, setAddress] = useState("https://example.com");
@@ -57,6 +66,8 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
   const [message, setMessage] = useState<string>();
   const [starting, setStarting] = useState(false);
   const [nativeSupported, setNativeSupported] = useState(false);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [drag, setDrag] = useState<ResearchDrag>();
   const context = snapshot?.context;
   const active = context?.state === "active";
   const threadId = String(props.dock.sourceContext.threadId);
@@ -86,6 +97,51 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
   const tabs = state?.tabs ?? [];
   const canOpenTab =
     props.hostBridge?.tabBrowserSurface !== undefined && tabs.length < MAX_BROWSER_TABS_PER_CONTEXT;
+
+  function beginMove(event: PointerEvent<HTMLElement>): void {
+    if (event.button !== 0) return;
+    const target = event.target;
+    if (target instanceof HTMLElement && target.closest("button, input") !== null) return;
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture is unavailable in the DOM test environment; bubbling
+      // pointer events still keep the drag deterministic there.
+    }
+    setDrag({
+      startX: event.clientX,
+      startY: event.clientY,
+      offsetX: dragOffset.x,
+      offsetY: dragOffset.y,
+    });
+  }
+
+  function move(event: PointerEvent<HTMLElement>): void {
+    if (drag === undefined) return;
+    setDragOffset({
+      x: drag.offsetX + event.clientX - drag.startX,
+      y: drag.offsetY + event.clientY - drag.startY,
+    });
+  }
+
+  function finishMove(event: PointerEvent<HTMLElement>): void {
+    if (drag === undefined) return;
+    move(event);
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // See beginMove: release is best effort when pointer capture is absent.
+    }
+    setDrag(undefined);
+  }
+
+  const movementHandlers = {
+    onPointerMove: move,
+    onPointerUp: finishMove,
+    onPointerCancel: finishMove,
+  };
 
   async function open(): Promise<void> {
     if (starting) return;
@@ -167,7 +223,12 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
 
   if (props.dock.collapsed) {
     return (
-      <aside aria-label="Research browser" className="zen-research zen-research--collapsed">
+      <aside
+        aria-label="Research browser"
+        className="zen-research zen-research--collapsed"
+        style={{ transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)` }}
+        {...movementHandlers}
+      >
         <OctantButton
           aria-label="Expand research browser"
           onClick={() => props.onCollapse(false)}
@@ -184,9 +245,13 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
     <aside
       aria-label="Research browser"
       className="zen-research"
-      style={{ width: props.dock.width }}
+      style={{
+        width: props.dock.width,
+        transform: `translate(${dragOffset.x}px, ${dragOffset.y}px)`,
+      }}
+      {...movementHandlers}
     >
-      <header className="zen-research__header">
+      <header className="zen-research__header" onPointerDown={beginMove}>
         <span className="zen-research__title">Research</span>
         <button
           aria-label="Collapse research browser"

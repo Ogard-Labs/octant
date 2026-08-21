@@ -567,6 +567,12 @@
   gap: var(--oct-space-2);
   padding: var(--oct-space-2);
   border-bottom: 1px solid var(--oct-border-soft);
+  cursor: grab;
+  touch-action: none;
+}
+
+.zen-research__header:active {
+  cursor: grabbing;
 }
 
 .zen-research__title {

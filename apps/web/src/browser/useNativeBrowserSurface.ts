@@ -137,9 +137,15 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
     const resize = new ResizeObserver(() => void sync());
     const visibility = new IntersectionObserver(() => void sync());
     const overlays = new MutationObserver(() => void sync());
+    const layout = new MutationObserver(() => void sync());
     resize.observe(element);
     visibility.observe(element);
     overlays.observe(document.body, { childList: true, subtree: true });
+    layout.observe(element.parentElement ?? element, {
+      attributes: true,
+      attributeFilter: ["class", "style"],
+      subtree: true,
+    });
     window.addEventListener("resize", sync);
     void sync();
     return () => {
@@ -147,6 +153,7 @@ export function useNativeBrowserSurface(input: NativeBrowserSurfaceInput): Nativ
       resize.disconnect();
       visibility.disconnect();
       overlays.disconnect();
+      layout.disconnect();
       window.removeEventListener("resize", sync);
       if (attached) void detach({ contextId, threadId }).catch(() => undefined);
     };
