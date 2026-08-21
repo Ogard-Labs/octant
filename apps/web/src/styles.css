@@ -2566,6 +2566,15 @@ button:focus-visible {
   background: var(--octant-control-hover);
 }
 
+.folder-picker__breadcrumb--current {
+  cursor: default;
+  color: var(--octant-text-primary);
+}
+
+.folder-picker__breadcrumb--current:hover {
+  background: transparent;
+}
+
 .folder-picker__list {
   display: flex;
   min-height: 220px;
