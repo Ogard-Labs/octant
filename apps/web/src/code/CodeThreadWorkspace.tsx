@@ -14,8 +14,9 @@ import {
 } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
-import { ArrowUp, Bot, UserRoundCog, X } from "lucide-react";
+import { Bot, UserRoundCog } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { ThreadComposer } from "../composer/ThreadComposer";
 import { useQueuedSend } from "../composer/useQueuedSend";
 import type { TurnSettlement } from "../composer/queuedSend";
 import {
@@ -995,65 +996,77 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
       <InlineThreadPlan />
 
-      <div className="composer code-thread-workspace__composer thread-column">
-        {/*
-         * Side Chat has no surface in a Code tab, so the chip offers only
-         * removal here: rendering a control whose sidecar this workspace
-         * cannot open would mint a thread the user never sees.
-         */}
-        <ThreadMentionChips
-          chips={threadMentions.chips}
-          onRemove={(mentionedThreadId) => threadMentions.composer?.onRemoveChip(mentionedThreadId)}
-        />
-        {queued.statusMessage === undefined ? null : (
-          <p className="code-thread-workspace__hint" role="status">
-            {queued.statusMessage}
-          </p>
-        )}
-        {attachments.staged.length === 0 && attachments.message === undefined ? null : (
-          <div className="code-thread-workspace__attachments" aria-label="Attached images">
-            {attachments.staged.map(({ previewUrl, reference }) => (
-              <span className="chip code-thread-workspace__attachment" key={reference.attachmentId}>
-                <img
-                  alt={reference.displayName}
-                  className="code-thread-workspace__attachment-thumb"
-                  src={previewUrl}
-                />
-                <span className="code-thread-workspace__attachment-name">
-                  {reference.displayName}
-                </span>
-                <button
-                  aria-label={`Remove ${reference.displayName}`}
-                  className="chip-x window-no-drag"
-                  onClick={() => attachments.remove(reference.attachmentId)}
-                  type="button"
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-            {attachments.message === undefined ? null : (
-              <span className="code-thread-workspace__hint" role="status">
-                {attachments.message}
-              </span>
+      <ThreadComposer
+        className="code-thread-workspace__composer thread-column"
+        chips={
+          <>
+            {/*
+             * Side Chat has no surface in a Code tab, so the chip offers only
+             * removal here: rendering a control whose sidecar this workspace
+             * cannot open would mint a thread the user never sees.
+             */}
+            <ThreadMentionChips
+              chips={threadMentions.chips}
+              onRemove={(mentionedThreadId) =>
+                threadMentions.composer?.onRemoveChip(mentionedThreadId)
+              }
+            />
+            {queued.statusMessage === undefined ? null : (
+              <p className="code-thread-workspace__hint" role="status">
+                {queued.statusMessage}
+              </p>
             )}
-          </div>
-        )}
-        {props.controller.draftStagedDropped === true ? (
-          <p className="code-thread-workspace__hint" role="status">
-            {COMPOSER_STAGED_DROPPED_NOTE}
-          </p>
-        ) : null}
-        {props.controller.draftPersistError === undefined ? null : (
-          <p className="code-thread-workspace__hint" role="status">
-            {props.controller.draftPersistError}
-          </p>
-        )}
-        <label
-          className="code-thread-workspace__message-field"
-          htmlFor={`code-thread-composer-${String(thread.id)}`}
-        >
-          <span className="visually-hidden">Follow-up message</span>
+            {attachments.staged.length === 0 && attachments.message === undefined ? null : (
+              <div className="code-thread-workspace__attachments" aria-label="Attached images">
+                {attachments.staged.map(({ previewUrl, reference }) => (
+                  <span
+                    className="chip code-thread-workspace__attachment"
+                    key={reference.attachmentId}
+                  >
+                    <img
+                      alt={reference.displayName}
+                      className="code-thread-workspace__attachment-thumb"
+                      src={previewUrl}
+                    />
+                    <span className="code-thread-workspace__attachment-name">
+                      {reference.displayName}
+                    </span>
+                    <button
+                      aria-label={`Remove ${reference.displayName}`}
+                      className="chip-x window-no-drag"
+                      onClick={() => attachments.remove(reference.attachmentId)}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {attachments.message === undefined ? null : (
+                  <span className="code-thread-workspace__hint" role="status">
+                    {attachments.message}
+                  </span>
+                )}
+              </div>
+            )}
+            {props.controller.draftStagedDropped === true ? (
+              <p className="code-thread-workspace__hint" role="status">
+                {COMPOSER_STAGED_DROPPED_NOTE}
+              </p>
+            ) : null}
+            {props.controller.draftPersistError === undefined ? null : (
+              <p className="code-thread-workspace__hint" role="status">
+                {props.controller.draftPersistError}
+              </p>
+            )}
+          </>
+        }
+        label={{
+          className: "code-thread-workspace__message-field",
+          htmlFor: `code-thread-composer-${String(thread.id)}`,
+          text: "Follow-up message",
+          textClassName: "visually-hidden",
+        }}
+        input={
           <OctantTextarea
             aria-activedescendant={
               mention.activeCandidate !== undefined
@@ -1108,149 +1121,153 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             rows={2}
             value={draft}
           />
-        </label>
-        {mention.open ? (
-          <ThreadMentionTypeahead
-            activeIndex={mention.activeIndex}
-            {...(threadMentions.composer?.busy === undefined
-              ? {}
-              : { busy: threadMentions.composer.busy })}
-            candidates={threadMentions.composer?.candidates ?? []}
-            listId={mentionListId}
-            onChoose={mention.choose}
-            onHover={mention.setActiveIndex}
-          />
-        ) : null}
-        {pathMentionOpen ? (
-          <PathMentionTypeahead
-            activeIndex={pathMentions.activeIndex}
-            busy={pathMentions.busy}
-            candidates={pathMentions.candidates}
-            listId={pathMentionListId}
-            onChoose={pathMentions.choose}
-            onHover={pathMentions.setActiveIndex}
-          />
-        ) : null}
-        <div className="composer-row" aria-label="Thread context">
-          <ComposerModelPicker
-            ariaLabel="Provider and model"
-            disabled={busy || providerChanging}
-            groups={providerGroups}
-            onSelect={(selection) => void changeProvider(selection)}
-            selectedModelId={thread.modelId}
-            selectedProviderInstanceId={thread.providerInstanceId}
-          />
-          <CodeAccessPicker
-            ceiling={thread.executionPolicy}
-            disabled={accessChanging}
-            nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
-            onRaiseThread={(next) => void changeAccess(next)}
-            onSelect={setTurnAccessOverride}
-            value={nextTurnAccess}
-          />
-          {/*
+        }
+        typeahead={
+          <>
+            {mention.open ? (
+              <ThreadMentionTypeahead
+                activeIndex={mention.activeIndex}
+                {...(threadMentions.composer?.busy === undefined
+                  ? {}
+                  : { busy: threadMentions.composer.busy })}
+                candidates={threadMentions.composer?.candidates ?? []}
+                listId={mentionListId}
+                onChoose={mention.choose}
+                onHover={mention.setActiveIndex}
+              />
+            ) : null}
+            {pathMentionOpen ? (
+              <PathMentionTypeahead
+                activeIndex={pathMentions.activeIndex}
+                busy={pathMentions.busy}
+                candidates={pathMentions.candidates}
+                listId={pathMentionListId}
+                onChoose={pathMentions.choose}
+                onHover={pathMentions.setActiveIndex}
+              />
+            ) : null}
+          </>
+        }
+        row={{
+          ariaLabel: "Thread context",
+          leading: (
+            <>
+              <ComposerModelPicker
+                ariaLabel="Provider and model"
+                disabled={busy || providerChanging}
+                groups={providerGroups}
+                onSelect={(selection) => void changeProvider(selection)}
+                selectedModelId={thread.modelId}
+                selectedProviderInstanceId={thread.providerInstanceId}
+              />
+              <CodeAccessPicker
+                ceiling={thread.executionPolicy}
+                disabled={accessChanging}
+                nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
+                onRaiseThread={(next) => void changeAccess(next)}
+                onSelect={setTurnAccessOverride}
+                value={nextTurnAccess}
+              />
+              {/*
               Provenance, not a control: the profile narrowed this thread once,
               when it started, and is never consulted again. Editing the profile
               afterwards cannot change what this thread may do, so the chip says
               which working mode produced the posture and stops there.
             */}
-          {profileName === undefined ? null : (
-            <span className="code-thread-workspace__profile" title="Started under this profile">
-              <UserRoundCog aria-hidden="true" size={12} strokeWidth={1.8} />
-              <span>{profileName}</span>
+              {profileName === undefined ? null : (
+                <span className="code-thread-workspace__profile" title="Started under this profile">
+                  <UserRoundCog aria-hidden="true" size={12} strokeWidth={1.8} />
+                  <span>{profileName}</span>
+                </span>
+              )}
+            </>
+          ),
+          actions: {
+            kind: "send",
+            send: {
+              ariaLabel: busy ? "Queue follow-up" : "Send follow-up",
+              disabled: !canSend,
+              onSend: () => void submitFollowUp(),
+            },
+            ...(queued.state.status === "idle"
+              ? {}
+              : {
+                  discard: {
+                    ariaLabel: "Discard queued message",
+                    onDiscard: () => {
+                      queued.discard();
+                      setDraft("");
+                      props.controller.setPendingDraft?.("");
+                      threadMentions.clear();
+                      pathMentions.clear();
+                      setTurnAccessOverride(undefined);
+                      for (const { reference } of attachments.staged) {
+                        attachments.remove(reference.attachmentId);
+                      }
+                    },
+                  },
+                }),
+            sendHidden: queued.state.status === "queued",
+          },
+        }}
+        footer={
+          <div className="code-thread-workspace__status">
+            <span className="code-thread-workspace__hint">
+              {providerChanging
+                ? "Checking the selected provider…"
+                : queued.state.status !== "idle"
+                  ? "Enter to edit · Discard to drop the queued message"
+                  : busy
+                    ? "Waiting for the provider · Enter queues the next message"
+                    : "Enter to send · Shift+Enter for a new line"}
             </span>
-          )}
-          <span className="composer-gap" />
-          {queued.state.status === "idle" ? null : (
-            <OctantButton
-              aria-label="Discard queued message"
-              onClick={() => {
-                queued.discard();
-                setDraft("");
-                props.controller.setPendingDraft?.("");
-                threadMentions.clear();
-                pathMentions.clear();
-                setTurnAccessOverride(undefined);
-                for (const { reference } of attachments.staged) {
-                  attachments.remove(reference.attachmentId);
-                }
-              }}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <X aria-hidden="true" size={14} strokeWidth={2} />
-            </OctantButton>
-          )}
-          {queued.state.status === "queued" ? null : (
-            <OctantButton
-              aria-label={busy ? "Queue follow-up" : "Send follow-up"}
-              disabled={!canSend}
-              onClick={() => void submitFollowUp()}
-              size="icon"
-              type="button"
-              variant="default"
-            >
-              <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-            </OctantButton>
-          )}
-        </div>
-        <div className="code-thread-workspace__status">
-          <span className="code-thread-workspace__hint">
-            {providerChanging
-              ? "Checking the selected provider…"
-              : queued.state.status !== "idle"
-                ? "Enter to edit · Discard to drop the queued message"
-                : busy
-                  ? "Waiting for the provider · Enter queues the next message"
-                  : "Enter to send · Shift+Enter for a new line"}
-          </span>
-          {accessMessage === undefined ? null : (
-            <span className="code-thread-workspace__hint" role="status">
-              {accessMessage}
-            </span>
-          )}
-          {/*
+            {accessMessage === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="status">
+                {accessMessage}
+              </span>
+            )}
+            {/*
               A restore point outlives the message that announced it, so the
               offer stands on the undo point alone. Returning to the thread
               after a tab switch finds the way back still here, described
               plainly rather than as the sentence the last restore printed.
             */}
-          {restoreMessage === undefined && restoreUndo === undefined ? null : (
-            <span className="code-thread-workspace__hint" role="status">
-              {restoreMessage ?? "Files were restored to an earlier point."}
-              {restoreUndo === undefined ? null : (
-                <OctantButton
-                  disabled={restoring}
-                  onClick={() => {
-                    void undoRestore();
-                  }}
-                  size="sm"
-                  variant="ghost"
-                >
-                  Undo restore
-                </OctantButton>
-              )}
+            {restoreMessage === undefined && restoreUndo === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="status">
+                {restoreMessage ?? "Files were restored to an earlier point."}
+                {restoreUndo === undefined ? null : (
+                  <OctantButton
+                    disabled={restoring}
+                    onClick={() => {
+                      void undoRestore();
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    Undo restore
+                  </OctantButton>
+                )}
+              </span>
+            )}
+            {forkMessage === undefined ? null : (
+              <span className="code-thread-workspace__hint" role="alert">
+                {forkMessage}
+              </span>
+            )}
+            <span className="code-thread-workspace__hint" aria-label="Thread usage">
+              {threadUsageLabel(props.controller.threadUsage)}
             </span>
-          )}
-          {forkMessage === undefined ? null : (
-            <span className="code-thread-workspace__hint" role="alert">
-              {forkMessage}
-            </span>
-          )}
-          <span className="code-thread-workspace__hint" aria-label="Thread usage">
-            {threadUsageLabel(props.controller.threadUsage)}
-          </span>
-          {props.controller.threadUsage.limits.map((limit) => (
-            <span
-              className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
-              key={limit.window}
-            >
-              {providerLimitLabel(limit)}
-            </span>
-          ))}
-        </div>
-      </div>
+            {props.controller.threadUsage.limits.map((limit) => (
+              <span
+                className={`code-thread-workspace__limit code-thread-workspace__limit--${limit.status}`}
+                key={limit.window}
+              >
+                {providerLimitLabel(limit)}
+              </span>
+            ))}
+          </div>
+        }
+      />
     </section>
   );
 }

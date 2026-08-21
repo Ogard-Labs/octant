@@ -2,7 +2,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
-import { ArrowUp, FolderOpen, AlertTriangle, Paperclip } from "lucide-react";
+import { FolderOpen, AlertTriangle, Paperclip } from "lucide-react";
 import {
   useCallback,
   useRef,
@@ -16,7 +16,9 @@ import { HostSelector } from "../../shell/HostSelector";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
+import { ThreadComposer } from "../../composer/ThreadComposer";
 import { selectedModelReadsImages, useWorkComposerImages } from "./useWorkComposerImages";
+import { WorkImageAttachmentChips } from "./WorkImageAttachmentChips";
 import {
   ThreadMentionChips,
   ThreadMentionTypeahead,
@@ -155,184 +157,166 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
           {/* One card holds the prompt and everything the thread will be bound
               to. The strip used to sit outside it, which read as loose chrome
               under the composer rather than as part of what is being started. */}
-          <div className="composer work-composer-adapter__card">
-            {mention.open ? (
-              <ThreadMentionTypeahead
-                activeIndex={mention.activeIndex}
-                {...(threadMentions.composer?.busy === undefined
-                  ? {}
-                  : { busy: threadMentions.composer.busy })}
-                candidates={threadMentions.composer?.candidates ?? []}
-                listId={mentionListId}
-                onChoose={mention.choose}
-                onHover={mention.setActiveIndex}
+          <ThreadComposer
+            className="work-composer-adapter__card"
+            chips={
+              <>
+                <ThreadMentionChips
+                  chips={threadMentions.chips}
+                  onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
+                />
+                <WorkImageAttachmentChips images={images} />
+              </>
+            }
+            input={
+              <OctantTextarea
+                aria-label="First message"
+                autoFocus
+                className="composer-input"
+                disabled={props.creating}
+                onChange={(event) => {
+                  setPrompt(event.target.value);
+                  mention.sync(event.target.value, event.currentTarget.selectionStart);
+                }}
+                onClick={(event) =>
+                  mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
+                }
+                ref={textareaRef}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  if (attachFromTransfer(event.dataTransfer)) event.preventDefault();
+                }}
+                onKeyDown={handleKeyDown}
+                onPaste={onDraftPaste}
+                placeholder="Describe the work…"
+                rows={3}
+                value={prompt}
               />
-            ) : null}
-            <ThreadMentionChips
-              chips={threadMentions.chips}
-              onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
-            />
-            {images.staged.length === 0 && images.message === undefined ? null : (
-              <div
-                className="composer-chips work-composer-adapter__attachments"
-                aria-label="Attached images"
-              >
-                {images.staged.map((attachment) => (
-                  <span className="chip work-composer-adapter__attachment" key={attachment.id}>
-                    <img
-                      alt={attachment.displayName}
-                      className="work-composer-adapter__attachment-thumb"
-                      src={attachment.previewUrl}
+            }
+            typeahead={
+              mention.open ? (
+                <ThreadMentionTypeahead
+                  activeIndex={mention.activeIndex}
+                  {...(threadMentions.composer?.busy === undefined
+                    ? {}
+                    : { busy: threadMentions.composer.busy })}
+                  candidates={threadMentions.composer?.candidates ?? []}
+                  listId={mentionListId}
+                  onChoose={mention.choose}
+                  onHover={mention.setActiveIndex}
+                />
+              ) : null
+            }
+            row={{
+              className: "work-composer-adapter__composer-bar",
+              leading: (
+                <>
+                  <label>
+                    <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                    <input
+                      aria-label="Choose attachment file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="work-composer-adapter__file-input"
+                      disabled={props.creating === true || imageSupport === false}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.item(0);
+                        if (file !== null && file !== undefined) {
+                          if (imageSupport === false) {
+                            images.refuse(
+                              "The selected model does not accept images. Choose an image-capable model.",
+                            );
+                          } else {
+                            images.attach([file]);
+                          }
+                        }
+                        event.currentTarget.value = "";
+                      }}
+                      type="file"
                     />
-                    <span className="work-composer-adapter__attachment-name">
-                      {attachment.displayName}
-                    </span>
-                    <button
-                      aria-label={`Remove ${attachment.displayName}`}
-                      className="chip-x window-no-drag"
-                      onClick={() => images.remove(attachment.id)}
-                      type="button"
-                    >
-                      ×
-                    </button>
+                  </label>
+                  <OctantButton
+                    aria-label="Add attachment"
+                    disabled={props.creating === true || imageSupport === false}
+                    onClick={(event) => {
+                      event.currentTarget.parentElement
+                        ?.querySelector<HTMLInputElement>('input[type="file"]')
+                        ?.click();
+                    }}
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+                  </OctantButton>
+                  <span className="work-composer-adapter__context-picker">
+                    <ComposerModelPicker
+                      ariaLabel="Provider and model"
+                      groups={props.providerGroups}
+                      onSelect={props.onSelectProvider}
+                      {...(props.selectedModelId === undefined
+                        ? {}
+                        : { selectedModelId: props.selectedModelId })}
+                      {...(props.selectedProviderInstanceId === undefined
+                        ? {}
+                        : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                    />
                   </span>
-                ))}
-                {images.message === undefined ? null : (
-                  <span className="work-composer-adapter__hint" role="status">
-                    {images.message}
+                  {props.poolControl}
+                </>
+              ),
+              actions: {
+                kind: "send",
+                send: {
+                  ariaLabel:
+                    props.errorMessage === undefined ? "Create thread" : "Retry creating thread",
+                  disabled: !canSubmit,
+                  onSend: submit,
+                },
+              },
+            }}
+            footer={
+              <div className="work-composer-adapter__context-strip" aria-label="Thread context">
+                <HostSelector
+                  {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                  {...(props.selectedHostId === undefined
+                    ? {}
+                    : { selectedHostId: props.selectedHostId })}
+                  {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+                  {...(props.lastSelectedHealthyHostId === undefined
+                    ? {}
+                    : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                  {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+                  {...(props.onSelectHost === undefined
+                    ? {}
+                    : { onSelectHost: props.onSelectHost })}
+                  requiredCapability="work"
+                />
+                {props.folderControl}
+                {props.folderControl !== undefined ? null : hasFolder &&
+                  props.projectName !== undefined ? (
+                  <span className="work-composer-adapter__context-item" title={props.projectRoot}>
+                    <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
+                    <span>{props.projectName}</span>
+                  </span>
+                ) : (
+                  <span className="work-composer-adapter__context-item">
+                    <AlertTriangle aria-hidden="true" size={12} strokeWidth={1.8} />
+                    <span>No folder</span>
+                    {props.onAttachFolder !== undefined ? (
+                      <OctantButton
+                        className="work-composer-adapter__attach-btn"
+                        onClick={props.onAttachFolder}
+                        type="button"
+                        variant="ghost"
+                      >
+                        Attach folder
+                      </OctantButton>
+                    ) : null}
                   </span>
                 )}
               </div>
-            )}
-            <OctantTextarea
-              aria-label="First message"
-              autoFocus
-              className="composer-input"
-              disabled={props.creating}
-              onChange={(event) => {
-                setPrompt(event.target.value);
-                mention.sync(event.target.value, event.currentTarget.selectionStart);
-              }}
-              onClick={(event) =>
-                mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
-              }
-              ref={textareaRef}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                if (attachFromTransfer(event.dataTransfer)) event.preventDefault();
-              }}
-              onKeyDown={handleKeyDown}
-              onPaste={onDraftPaste}
-              placeholder="Describe the work…"
-              rows={3}
-              value={prompt}
-            />
-            <div className="composer-row work-composer-adapter__composer-bar">
-              <label>
-                <span className="work-composer-adapter__visually-hidden">Add attachment</span>
-                <input
-                  aria-label="Choose attachment file"
-                  accept="image/png,image/jpeg,image/webp,image/gif"
-                  className="work-composer-adapter__file-input"
-                  disabled={props.creating === true || imageSupport === false}
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.item(0);
-                    if (file !== null && file !== undefined) {
-                      if (imageSupport === false) {
-                        images.refuse(
-                          "The selected model does not accept images. Choose an image-capable model.",
-                        );
-                      } else {
-                        images.attach([file]);
-                      }
-                    }
-                    event.currentTarget.value = "";
-                  }}
-                  type="file"
-                />
-              </label>
-              <OctantButton
-                aria-label="Add attachment"
-                disabled={props.creating === true || imageSupport === false}
-                onClick={(event) => {
-                  event.currentTarget.parentElement
-                    ?.querySelector<HTMLInputElement>('input[type="file"]')
-                    ?.click();
-                }}
-                size="icon"
-                type="button"
-                variant="ghost"
-              >
-                <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
-              </OctantButton>
-              <span className="work-composer-adapter__context-picker">
-                <ComposerModelPicker
-                  ariaLabel="Provider and model"
-                  groups={props.providerGroups}
-                  onSelect={props.onSelectProvider}
-                  {...(props.selectedModelId === undefined
-                    ? {}
-                    : { selectedModelId: props.selectedModelId })}
-                  {...(props.selectedProviderInstanceId === undefined
-                    ? {}
-                    : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                />
-              </span>
-              {props.poolControl}
-              <span className="composer-gap" />
-              <OctantButton
-                aria-label={
-                  props.errorMessage === undefined ? "Create thread" : "Retry creating thread"
-                }
-                disabled={!canSubmit}
-                onClick={submit}
-                size="icon"
-                type="button"
-                variant="default"
-              >
-                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-              </OctantButton>
-            </div>
-
-            <div className="work-composer-adapter__context-strip" aria-label="Thread context">
-              <HostSelector
-                {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                {...(props.selectedHostId === undefined
-                  ? {}
-                  : { selectedHostId: props.selectedHostId })}
-                {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
-                {...(props.lastSelectedHealthyHostId === undefined
-                  ? {}
-                  : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-                {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-                {...(props.onSelectHost === undefined ? {} : { onSelectHost: props.onSelectHost })}
-                requiredCapability="work"
-              />
-              {props.folderControl}
-              {props.folderControl !== undefined ? null : hasFolder &&
-                props.projectName !== undefined ? (
-                <span className="work-composer-adapter__context-item" title={props.projectRoot}>
-                  <FolderOpen aria-hidden="true" size={12} strokeWidth={1.8} />
-                  <span>{props.projectName}</span>
-                </span>
-              ) : (
-                <span className="work-composer-adapter__context-item">
-                  <AlertTriangle aria-hidden="true" size={12} strokeWidth={1.8} />
-                  <span>No folder</span>
-                  {props.onAttachFolder !== undefined ? (
-                    <OctantButton
-                      className="work-composer-adapter__attach-btn"
-                      onClick={props.onAttachFolder}
-                      type="button"
-                      variant="ghost"
-                    >
-                      Attach folder
-                    </OctantButton>
-                  ) : null}
-                </span>
-              )}
-            </div>
-          </div>
+            }
+          />
 
           {props.errorMessage !== undefined ? (
             <p className="work-composer-adapter__error" role="alert">
