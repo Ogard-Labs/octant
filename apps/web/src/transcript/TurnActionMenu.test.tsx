@@ -73,6 +73,19 @@ describe("the turn action menu", () => {
     expect(onAction).toHaveBeenCalledWith("copy-references");
   });
 
+  it("dismisses the context menu on Escape without firing an action", async () => {
+    const user = userEvent.setup();
+    const onAction = menu();
+
+    fireEvent.contextMenu(screen.getByText("Please summarize this."));
+    expect(await screen.findByRole("menuitem", { name: "Branch from here" })).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() =>
+      expect(screen.queryByRole("menuitem", { name: "Branch from here" })).not.toBeInTheDocument(),
+    );
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
   it("names the More actions control for a screen reader", () => {
     menu();
     expect(screen.getByRole("button", { name: "More actions" })).toHaveAccessibleName(
@@ -91,8 +104,8 @@ describe("the turn action menu", () => {
     expect(block).toMatch(/\.turn-action-menu:focus-within \.turn-action-menu__more/);
     expect(block).toContain("opacity: 0");
     expect(block).not.toContain("display: none");
-    expect(block).toMatch(/@media \(max-width: 680px\)/);
-    expect(block).toMatch(/@media \(prefers-contrast: more\)/);
+    expect(block).toMatch(/@media \(max-width: 680px\)[\s\S]*opacity: 1/);
+    expect(block).toMatch(/@media \(prefers-contrast: more\)[\s\S]*opacity: 1/);
   });
 
   it("writes the turn's references when the host exposes a clipboard", async () => {

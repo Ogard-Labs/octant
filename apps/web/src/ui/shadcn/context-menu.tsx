@@ -28,7 +28,7 @@ export interface ShadcnContextMenuProps {
 export function ShadcnContextMenu(props: ShadcnContextMenuProps) {
   return (
     <ContextMenu>
-      <ContextMenuTrigger render={<div className={cn(props.triggerClassName, "window-no-drag")} />}>
+      <ContextMenuTrigger className={cn(props.triggerClassName, "window-no-drag")}>
         {props.children}
       </ContextMenuTrigger>
       <ContextMenuPrimitive.Portal>

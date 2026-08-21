@@ -595,25 +595,40 @@ describe("ChatTranscript", () => {
   });
 
   it("keeps the checkpoint marker visible only when a checkpoint exists", async () => {
-    const onForget = vi.fn();
     render(
       <ChatTranscript
         checkpoints={{
-          byTurnId: new Map([
-            [
-              ids.turn,
-              decodeThreadCheckpoint({
-                id: "11111111-1111-4111-8111-111111111111",
-                anchor: { mode: "chat", threadId: ids.thread, turnId: ids.turn },
-                label: "Before the rewrite",
-                lifecycle: "marked",
-                restoreCount: 0,
-                markedAt: now,
-                version: 1,
-                updatedAt: now,
-              }),
-            ],
-          ]),
+          byTurnId: new Map([[ids.turn, markedCheckpoint()]]),
+          busy: false,
+          onForget: vi.fn(),
+          onMark: vi.fn(),
+          onRestore: vi.fn(),
+        }}
+        onRetryAttempt={vi.fn()}
+        view={viewFixture()}
+      />,
+    );
+
+    expect(screen.getByText("Before the rewrite")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Checkpoint" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Forget" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry interrupted response" })).toBeVisible();
+    expect(screen.getByText("Interrupted")).toBeVisible();
+    expect(screen.getByText("Completed")).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Restore from here" })).toBeVisible();
+    expect(screen.getByRole("menuitemradio", { name: "Forget" })).toBeVisible();
+    expect(screen.queryByRole("menuitemradio", { name: "Checkpoint" })).not.toBeInTheDocument();
+  });
+
+  it("forgets a marked checkpoint from the turn's action menu", async () => {
+    const onForget = vi.fn();
+    const checkpoint = markedCheckpoint();
+    render(
+      <ChatTranscript
+        checkpoints={{
+          byTurnId: new Map([[ids.turn, checkpoint]]),
           busy: false,
           onForget,
           onMark: vi.fn(),
@@ -623,16 +638,32 @@ describe("ChatTranscript", () => {
       />,
     );
 
-    expect(screen.getByText("Before the rewrite")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Checkpoint" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Forget" })).not.toBeInTheDocument();
-    expect(screen.getByText("Interrupted")).toBeVisible();
-    expect(screen.getByText("Completed")).toBeVisible();
+    await chooseTurnAction("Forget");
+    expect(onForget).toHaveBeenCalledWith(checkpoint);
+  });
 
-    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
-    expect(await screen.findByRole("menuitemradio", { name: "Restore from here" })).toBeVisible();
-    expect(screen.getByRole("menuitemradio", { name: "Forget" })).toBeVisible();
-    expect(screen.queryByRole("menuitemradio", { name: "Checkpoint" })).not.toBeInTheDocument();
+  it("restores a checkpoint by starting a second thread rather than rewinding this one", async () => {
+    const user = userEvent.setup();
+    const onRestore = vi.fn();
+    const checkpoint = markedCheckpoint();
+    render(
+      <ChatTranscript
+        checkpoints={{
+          byTurnId: new Map([[ids.turn, checkpoint]]),
+          busy: false,
+          onForget: vi.fn(),
+          onMark: vi.fn(),
+          onRestore,
+        }}
+        view={viewFixture()}
+      />,
+    );
+
+    await chooseTurnAction("Restore from here");
+    expect(screen.getByRole("button", { name: "Start the new thread" })).toBeVisible();
+    expect(screen.getByText("Please summarize this.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Start the new thread" }));
+    expect(onRestore).toHaveBeenCalledWith(checkpoint, "Before the rewrite");
   });
 
   it("keeps the checkpoint affordance off a transcript the host serves none for", async () => {
@@ -701,6 +732,19 @@ describe("ChatTranscript", () => {
 async function chooseTurnAction(name: string) {
   await userEvent.click(screen.getByRole("button", { name: "More actions" }));
   await userEvent.click(await screen.findByRole("menuitemradio", { name }));
+}
+
+function markedCheckpoint() {
+  return decodeThreadCheckpoint({
+    id: "11111111-1111-4111-8111-111111111111",
+    anchor: { mode: "chat", threadId: ids.thread, turnId: ids.turn },
+    label: "Before the rewrite",
+    lifecycle: "marked",
+    restoreCount: 0,
+    markedAt: now,
+    version: 1,
+    updatedAt: now,
+  });
 }
 
 const poolCandidates = [

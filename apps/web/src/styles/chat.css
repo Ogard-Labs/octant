@@ -301,8 +301,8 @@
   line-height: 1.45;
 }
 
-/* A user turn carries more than the styleguide's bubble — edit and checkpoint
-   affordances follow it — so the flex row becomes a right-aligned column. */
+/* A user turn carries more than the styleguide's bubble — the editor and any
+   checkpoint marker follow it — so the flex row becomes a right-aligned column. */
 .chat-transcript .turn-user {
   flex-direction: column;
   align-items: flex-end;

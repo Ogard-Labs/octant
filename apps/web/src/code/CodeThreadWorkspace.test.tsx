@@ -412,12 +412,37 @@ describe("CodeThreadWorkspace", () => {
     );
 
     await userEvent.click(
-      within(screen.getByText("rewrite the parser").closest("article")!).getByRole("button", {
-        name: "More actions",
-      }),
+      within(turnArticle("rewrite the parser")).getByRole("button", { name: "More actions" }),
     );
     expect(
       screen.queryByRole("menuitemradio", { name: "Restore files to this point" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("names putting files back separately from restoring a checkpoint", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+          ],
+        } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation: vi.fn() } as never}
+        requestApproval={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(
+      within(turnArticle("rewrite the parser")).getByRole("button", { name: "More actions" }),
+    );
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Restore files to this point" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("menuitemradio", { name: "Restore from here" }),
     ).not.toBeInTheDocument();
   });
 
@@ -1623,13 +1648,20 @@ function textOnlyProviderGroup(): PickerGroup {
   } as never;
 }
 
+function turnArticle(text: string): HTMLElement {
+  const turn = screen.getByText(text).closest("article");
+  expect(turn).toBeInstanceOf(HTMLElement);
+  if (!(turn instanceof HTMLElement)) {
+    throw new Error("the turn is not in the document");
+  }
+  return turn;
+}
+
 async function chooseTurnAction(
   user: ReturnType<typeof userEvent.setup>,
   name: string,
   turnText: string,
 ) {
-  const turn = screen.getByText(turnText).closest("article");
-  expect(turn).not.toBeNull();
-  await user.click(within(turn!).getByRole("button", { name: "More actions" }));
+  await user.click(within(turnArticle(turnText)).getByRole("button", { name: "More actions" }));
   await user.click(await screen.findByRole("menuitemradio", { name }));
 }

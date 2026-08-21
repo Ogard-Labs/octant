@@ -183,16 +183,22 @@ html[data-octant-reduced-transparency="true"] .folder-picker {
   pointer-events: auto;
 }
 
+/* Narrow and high-contrast keep the control visible: hover is not a route
+   there, and fading the only keyboard path would make the menu mouse-only. */
 @media (max-width: 680px) {
   .turn-action-menu__more {
-    inset-inline-end: 0;
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 
 @media (prefers-contrast: more) {
-  .turn-action-menu:hover .turn-action-menu__more .btn-icon,
-  .turn-action-menu:focus-within .turn-action-menu__more .btn-icon,
-  .turn-action-menu__more:has([aria-expanded="true"]) .btn-icon {
+  .turn-action-menu__more {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .turn-action-menu__more .btn-icon {
     border-color: var(--octant-border-strong);
   }
 }
