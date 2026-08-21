@@ -20,12 +20,18 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import {
+  applyComposerCaret,
+  type ComposerThreadDraftStore,
+} from "../composer/composerThreadDraftStore";
+import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -64,6 +70,7 @@ export interface WorkThreadWorkspaceProps {
    * header so it stays visible with the rest of the thread chrome.
    */
   readonly childRunStatus?: ReactNode;
+  readonly draftStore?: ComposerThreadDraftStore;
 }
 
 function artifactNameFromPrompt(prompt: string): string {
@@ -78,7 +85,12 @@ function artifactNameFromPrompt(prompt: string): string {
 }
 
 export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
-  const [prompt, setPrompt] = useState("");
+  const composerDraft = useComposerThreadDraft({
+    mode: "work",
+    threadId: String(props.threadId),
+    ...(props.draftStore === undefined ? {} : { store: props.draftStore }),
+  });
+  const prompt = composerDraft.text;
   const [projectId, setProjectId] = useState<ProjectId | undefined>(undefined);
   const [thread, setThread] = useState<WorkThread | undefined>(undefined);
   const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState>>([]);
@@ -108,14 +120,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
     draft: prompt,
-    onDraftChange: setPrompt,
+    onDraftChange: composerDraft.setDraft,
     textarea: () => textareaRef.current,
     disabled: creating || completionLocked,
   });
   const fileMentions = useWorkFileMentions({
     threadId: props.threadId,
     draft: prompt,
-    onDraftChange: setPrompt,
+    onDraftChange: composerDraft.setDraft,
     textarea: () => textareaRef.current,
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
@@ -136,6 +148,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         if (cancelled) return;
         const thread = bootstrap.threads.find((candidate) => candidate.id === props.threadId);
         if (thread === undefined) {
+          composerDraft.purge(String(props.threadId));
           setErrorMessage("This Work thread is no longer available.");
           return;
         }
@@ -158,7 +171,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [props.requestClient, props.threadClient, props.threadId, props.turnClient]);
+  }, [
+    composerDraft.purge,
+    props.requestClient,
+    props.threadClient,
+    props.threadId,
+    props.turnClient,
+  ]);
 
   useEffect(() => {
     if (props.turnClient === undefined) return;
@@ -279,7 +298,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
           return;
         }
         images.clearAfterAccepted();
-        setPrompt("");
+        composerDraft.clear();
         threadMentions.clear();
         fileMentions.clear();
         textareaRef.current?.focus();
@@ -298,7 +317,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         setErrorMessage("The artifact could not be created.");
         return;
       }
-      setPrompt("");
+      composerDraft.clear();
       setStatus(`Created ${reply.outcome.artifact.displayName} in the bound folder.`);
       textareaRef.current?.focus();
     } catch {
@@ -312,6 +331,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     }
   }, [
     canSubmit,
+    composerDraft.clear,
     fileMentions,
     images,
     projectId,
@@ -372,6 +392,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     return images.consumePaste(items);
   }
 
+  const restoredCaret = composerDraft.caretIndex;
+  const restoredLength = prompt.length;
+  useLayoutEffect(() => {
+    applyComposerCaret(textareaRef.current, restoredCaret, restoredLength);
+    // Restore only when this thread's composer is shown, not on every keystroke.
+  }, [props.threadId]);
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (mention.handleKeyDown(event)) return;
     if (fileMentions.handleKeyDown(event)) return;
@@ -379,6 +406,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       event.preventDefault();
       void submit();
     }
+  }
+
+  function rememberDraft(text: string, caretIndex: number | null) {
+    if (caretIndex === null) composerDraft.setDraft(text);
+    else composerDraft.setDraft(text, caretIndex);
   }
 
   function syncMentions(value: string, caret: number | null) {
@@ -598,13 +630,18 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                 (props.mutationClient === undefined && props.turnClient === undefined)
               }
               onChange={(event) => {
-                setPrompt(event.target.value);
-                syncMentions(event.target.value, event.currentTarget.selectionStart);
+                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
               }}
-              onClick={(event) =>
-                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart)
-              }
+              onClick={(event) => {
+                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
               onKeyDown={handleKeyDown}
+              onKeyUp={(event) => {
+                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
               onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
                 if (creating || completionLocked) return;
                 if (attachFromTransfer(event.clipboardData)) event.preventDefault();
@@ -669,6 +706,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               </OctantButton>
             </div>
           </div>
+          {composerDraft.persistError === undefined ? null : (
+            <p className="work-thread-workspace__hint" role="status">
+              {composerDraft.persistError}
+            </p>
+          )}
           {errorMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">
               {errorMessage}

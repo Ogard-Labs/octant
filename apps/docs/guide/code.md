@@ -18,6 +18,15 @@ The server validates that the folder exists and the renderer receives an opaque 
 
 A Code Project can remember how new threads should start: in **this Project's current checkout**, or in **a managed worktree Octant creates**. The default is the current checkout, which creates no worktree the owner did not ask for. Set the habit from the Project overview; the composer still lets one thread override it without rewriting the Project. Desktop and phone both inherit that default, and the new thread shows which root it bound. A missing or unauthorized root fails closed instead of inventing a worktree.
 
+## Unsent drafts
+
+Each Code thread keeps one unsent composer draft on this client. Leaving the
+thread, switching tabs, or restarting the app restores the text and caret.
+Sending or clearing the composer removes it. Mentions that are part of the
+typed text persist; staged attachments and extra selections do not, and the
+composer says so if they were dropped. Deleting or purging the thread removes
+its draft.
+
 ## Authority modes
 
 Code threads run in one of four server-enforced authority modes:
@@ -27,7 +36,7 @@ Code threads run in one of four server-enforced authority modes:
 - **Auto-accept edits**: the same confinement as approval-gated, except file writes inside the bound root proceed without a prompt. Shell commands, network access, destructive actions, credential access, and anything outside the root still ask.
 - **Full access**: unsandboxed execution within the Project root. Starts only when explicitly selected. Use the permission-persistence control to apply to the current session or remember for the Project.
 
-Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The access control sits in the thread composer and applies from the next turn; raising a thread to Full access still needs the native confirmation.
+Code starts approval-gated unless the user explicitly remembers Full access. A Work-to-Code promotion always starts approval-gated, never inheriting Work authority. The composer shows the posture the next turn will run under, defaulting to the thread's. A turn may only narrow what the thread already grants; Plan mode stays read-only and cannot be overridden from the composer. The transcript records the posture each turn actually ran under. Raising a thread to Full access still needs the native confirmation.
 
 ## Export
 

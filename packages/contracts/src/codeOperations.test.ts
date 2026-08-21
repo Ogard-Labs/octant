@@ -409,6 +409,23 @@ describe("Code operation contracts", () => {
     });
   });
 
+  it("carries a turn's requested access posture as an intent the host clamps", () => {
+    const turn = {
+      kind: "start-provider-turn",
+      ...scope,
+      sessionId: ids.providerSession,
+      prompt: { contentId: ids.content, digest: "d".repeat(64), byteLength: 42 },
+    } as const;
+
+    expect(decodeCodeOperationCommand({ ...turn, executionPolicy: "plan" })).toMatchObject({
+      executionPolicy: "plan",
+    });
+    expect(decodeCodeOperationCommand(turn)).not.toHaveProperty("executionPolicy");
+    expect(() =>
+      decodeCodeOperationCommand({ ...turn, executionPolicy: "unrestricted" }),
+    ).toThrow();
+  });
+
   it("decodes typed results without exposing checkout paths or raw process output", () => {
     const observation = {
       kind: "git-observed",
@@ -650,9 +667,15 @@ describe("Code operation contracts", () => {
       },
     } as const;
     expect(decodeCodeOperationEventFrame(started)).toEqual(started);
+    expect(
+      decodeCodeOperationEventFrame({
+        ...started,
+        event: { ...started.event, executionPolicy: "auto-accept-edits" },
+      }).event,
+    ).toMatchObject({ executionPolicy: "auto-accept-edits" });
 
     const page = {
-      version: 2,
+      version: 3,
       threadId: ids.thread,
       turns: [
         {
@@ -671,14 +694,20 @@ describe("Code operation contracts", () => {
       hasMore: false,
     } as const;
     expect(decodeCodeConversationPage(page)).toEqual(page);
+    expect(
+      decodeCodeConversationPage({
+        ...page,
+        turns: [{ ...page.turns[0]!, executionPolicy: "plan" }],
+      }).turns[0],
+    ).toMatchObject({ executionPolicy: "plan" });
     expect(() =>
       decodeCodeConversationPage({ ...page, turns: [{ ...page.turns[0], providerPayload: {} }] }),
     ).toThrow();
-    // A page is read at exactly the version this build knows. Version 1 had no
-    // attachments, so accepting one would render a turn while dropping the
-    // images the user attached to it.
-    expect(() => decodeCodeConversationPage({ ...page, version: 1 })).toThrow();
-    expect(() => decodeCodeConversationPage({ ...page, version: 3 })).toThrow();
+    // A page is read at exactly the version this build knows. Version 2 had no
+    // turn posture, so accepting one would render a message while dropping the
+    // access the turn actually ran under.
+    expect(() => decodeCodeConversationPage({ ...page, version: 2 })).toThrow();
+    expect(() => decodeCodeConversationPage({ ...page, version: 4 })).toThrow();
   });
 
   it("owns the strict durable review-finding entity and journal event", () => {

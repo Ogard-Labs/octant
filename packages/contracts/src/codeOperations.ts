@@ -30,6 +30,7 @@ import { AggregateVersion, UtcTimestamp } from "./events";
 import { ProjectId } from "./projects";
 import {
   PermissionPersistence,
+  ProviderExecutionPolicy,
   ProviderInstanceId,
   ProviderModelId,
   ProviderSessionId,
@@ -619,6 +620,12 @@ const StartProviderTurn = Schema.Struct({
   fileMentionPaths: Schema.optional(
     Schema.Array(FileMentionPathInput).pipe(Schema.maxItems(MAX_FILE_MENTIONS_PER_TURN)),
   ),
+  /**
+   * The posture this turn asks to run under. The host clamps it to the
+   * thread's grant: a turn may only narrow, never widen. Absent means the
+   * thread's own posture.
+   */
+  executionPolicy: Schema.optional(ProviderExecutionPolicy),
 }).annotations(strict);
 const AnswerProviderInput = Schema.Struct({
   kind: Schema.Literal("answer-provider-input"),
@@ -1054,6 +1061,12 @@ const ConversationTurnStartedEvent = Schema.Struct({
    * existed.
    */
   checkpoint: Schema.optional(CodeCheckpoint),
+  /**
+   * The posture this turn actually ran under, after the host clamped any
+   * requested intent to the thread's grant. Absent on turns journaled before
+   * the host recorded it.
+   */
+  executionPolicy: Schema.optional(ProviderExecutionPolicy),
 }).annotations(strict);
 const ContentEvent = Schema.Struct({
   kind: Schema.Literal("provider-content"),
@@ -1249,6 +1262,11 @@ export const CodeConversationTurn = Schema.Struct({
   /** The checkout as it stood before this turn ran, when the host caught it. */
   checkpoint: Schema.optional(CodeCheckpoint),
   /**
+   * The posture this turn ran under. Absent on turns journaled before the
+   * host recorded it, which is not the same as the thread's current grant.
+   */
+  executionPolicy: Schema.optional(ProviderExecutionPolicy),
+  /**
    * What this turn consumed, as the provider reported it. Absent on a turn
    * whose provider reported nothing, which is not the same as zero.
    */
@@ -1272,11 +1290,12 @@ export type CodeConversationTurn = typeof CodeConversationTurn.Type;
 
 export const CodeConversationPage = Schema.Struct({
   /**
-   * Version 2 added the images a turn carried. A client that only knows
-   * version 1 refuses the page outright rather than rendering a message
-   * while silently dropping the pictures the user attached to it.
+   * Version 3 added the posture a turn ran under. A client that only knows
+   * version 2 refuses the page outright rather than rendering a message
+   * while silently dropping the access the turn actually had. Version 2
+   * added the images a turn carried.
    */
-  version: Schema.Literal(2),
+  version: Schema.Literal(3),
   threadId: CodeThreadId,
   turns: Schema.Array(CodeConversationTurn).pipe(
     Schema.filter((turns) => turns.length <= MAX_CODE_CONVERSATION_PAGE_SIZE),

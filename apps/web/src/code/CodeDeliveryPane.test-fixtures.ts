@@ -22,7 +22,7 @@ export function codeClient(options: { readonly evidence?: string } = {}): CodeCl
     bootstrap: vi.fn(),
     queryBoard: vi.fn(),
     conversation: vi.fn(async (threadId) => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId,
       turns: [],
       nextCursor: 0,

@@ -31,6 +31,13 @@ Capability-aware workspace surfaces available in Work include:
 
 Work does not expose Code Git/terminal authority. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
+## Unsent drafts
+
+Each Work thread keeps one unsent composer draft on this client. Leaving the
+thread or restarting the app restores the text and caret. Sending or clearing
+the composer removes it. Mentions that are part of the typed text persist;
+staged attachments do not. Deleting or purging the thread removes its draft.
+
 ## Export
 
 **Export thread** downloads a portable JSON cut of this Work thread: the

@@ -18,7 +18,7 @@ export interface CodePathMentionsOptions {
   readonly threadId?: CodeThreadId | undefined;
   readonly checkoutId?: CodeCheckoutId | undefined;
   readonly draft: string;
-  readonly onDraftChange: (draft: string) => void;
+  readonly onDraftChange: (draft: string, caretIndex: number) => void;
   /** The live textarea, so the caret lands after the inserted path. */
   readonly textarea: () => HTMLTextAreaElement | null;
   readonly serverUrl?: string;
@@ -103,7 +103,7 @@ export function useCodePathMentions(options: CodePathMentionsOptions): CodePathM
   function choose(candidate: PathMentionCandidate) {
     if (mention === undefined) return;
     const applied = applyPathMention(options.draft, mention, candidate);
-    options.onDraftChange(applied.draft);
+    options.onDraftChange(applied.draft, applied.caret);
     if (candidate.kind === "file") {
       setSelectedPaths((current) =>
         current.includes(candidate.path) ? current : [...current, candidate.path],

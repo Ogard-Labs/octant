@@ -18,7 +18,7 @@ export interface WorkFileMentionsOptions {
   readonly client?: FileMentionClient;
   readonly threadId?: WorkThreadId;
   readonly draft: string;
-  readonly onDraftChange: (draft: string) => void;
+  readonly onDraftChange: (draft: string, caretIndex: number) => void;
   readonly textarea: () => HTMLTextAreaElement | null;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -123,7 +123,7 @@ export function useWorkFileMentions(options: WorkFileMentionsOptions): WorkFileM
   function choose(candidate: PathMentionCandidate) {
     if (mention === undefined) return;
     const applied = applyPathMention(options.draft, mention, candidate);
-    options.onDraftChange(applied.draft);
+    options.onDraftChange(applied.draft, applied.caret);
     if (candidate.kind === "file") {
       setSelectedPaths((current) =>
         current.includes(candidate.path) ? current : [...current, candidate.path],

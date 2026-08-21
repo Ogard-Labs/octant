@@ -1,4 +1,8 @@
-import type { CodeAttachmentReference, MentionableThreadId } from "@octant/contracts";
+import type {
+  CodeAttachmentReference,
+  MentionableThreadId,
+  ProviderExecutionPolicy,
+} from "@octant/contracts";
 
 /**
  * A follow-up the user wrote while a turn was still running.
@@ -17,6 +21,8 @@ export interface QueuedCodeTurn {
   readonly attachments: ReadonlyArray<CodeAttachmentReference>;
   /** `@file` paths this follow-up names; the host re-checks each one. */
   readonly fileMentionPaths: ReadonlyArray<string>;
+  /** The posture this queued follow-up asked to run under. */
+  readonly executionPolicy?: ProviderExecutionPolicy;
 }
 
 export type CodeTurnQueues = ReadonlyMap<string, ReadonlyArray<QueuedCodeTurn>>;

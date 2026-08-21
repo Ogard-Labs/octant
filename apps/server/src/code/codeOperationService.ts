@@ -28,6 +28,7 @@ import {
 } from "@octant/contracts";
 import {
   authorizeCodeOperation,
+  clampTurnAccessPosture,
   mayWriteToRepository,
   type CodeOperation,
 } from "@octant/domain/code-policy";
@@ -850,9 +851,16 @@ export class CodeOperationService {
               "An image attached to this turn is no longer staged.",
             );
           } else {
+            const turnThread =
+              command.kind === "start-provider-turn"
+                ? threadForTurn(
+                    scope.thread,
+                    turnAccessPosture(scope.thread, command, recordedStart?.event.executionPolicy),
+                  )
+                : scope.thread;
             if (command.kind === "start-provider-turn" && recordedStart === undefined) {
               const checkpoint = await this.#checkpoint(
-                scope.thread,
+                turnThread,
                 scope.checkout.id,
                 root.checkoutRoot,
               );
@@ -866,6 +874,7 @@ export class CodeOperationService {
                   modelId: scope.thread.modelId,
                   sessionId: command.sessionId,
                   prompt: command.prompt,
+                  executionPolicy: turnThread.executionPolicy,
                   ...(starting.attachments.length === 0
                     ? {}
                     : { attachments: starting.attachments }),
@@ -878,7 +887,7 @@ export class CodeOperationService {
               result = await this.#execute(
                 command,
                 windowId,
-                scope.thread,
+                turnThread,
                 scope.checkout,
                 root,
                 starting.attachments,
@@ -942,12 +951,16 @@ export class CodeOperationService {
       );
     }
     try {
+      const frames = this.#replay(command.threadId, command.operationId, 0, 256).frames;
       const recovered = await this.#providerTurn(
         command,
         windowId,
-        thread,
+        threadForTurn(
+          thread,
+          turnAccessPosture(thread, command, recordedTurnAccessPosture(frames)),
+        ),
         root.checkoutRoot,
-        recordedTurnAttachments(this.#replay(command.threadId, command.operationId, 0, 256).frames),
+        recordedTurnAttachments(frames),
       );
       return recovered.kind === "provider-turn-state" ? recovered : cached;
     } catch {
@@ -2403,6 +2416,42 @@ function recordedTurnAttachments(
     if (frame.event.kind === "conversation-turn-started") return frame.event.attachments ?? [];
   }
   return [];
+}
+
+function recordedTurnAccessPosture(
+  frames: ReadonlyArray<CodeOperationEventFrame>,
+): CodeThread["executionPolicy"] | undefined {
+  for (const frame of frames) {
+    if (frame.event.kind === "conversation-turn-started") return frame.event.executionPolicy;
+  }
+  return undefined;
+}
+
+/**
+ * The posture this provider turn runs under. A recorded start is the requested
+ * ceiling so recovery cannot widen a turn that already ran narrower — and a
+ * later lower thread grant still clamps it, so a crashed Full-access turn
+ * cannot resume after the user has taken that grant away. Otherwise the
+ * composer intent is clamped to the thread: the host never grants more than
+ * the thread already allows.
+ */
+function turnAccessPosture(
+  thread: CodeThread,
+  command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
+  recorded?: CodeThread["executionPolicy"],
+): CodeThread["executionPolicy"] {
+  const requested = recorded ?? command.executionPolicy;
+  return clampTurnAccessPosture({
+    thread: thread.executionPolicy,
+    ...(requested === undefined ? {} : { requested }),
+  });
+}
+
+function threadForTurn(
+  thread: CodeThread,
+  executionPolicy: CodeThread["executionPolicy"],
+): CodeThread {
+  return thread.executionPolicy === executionPolicy ? thread : { ...thread, executionPolicy };
 }
 
 function sameConversationStart(
