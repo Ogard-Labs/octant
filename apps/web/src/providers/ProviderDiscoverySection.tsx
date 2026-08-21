@@ -45,7 +45,8 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
       </div>
 
       <p className="setgroup-note">
-        Octant scans installed runtimes automatically. Enable only the providers you want available.
+        Octant scans installed runtimes and checks every enabled provider. Enable only the providers
+        you want available.
       </p>
 
       {scanning && snapshot === undefined ? (
