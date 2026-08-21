@@ -2,7 +2,7 @@ import type { ThreadExportClient } from "@octant/client-runtime/thread-export-cl
 import type { ChatThreadView } from "@octant/contracts/chat";
 import { Copy, Download, Ellipsis, FileDown, PanelsTopLeft } from "lucide-react";
 import { useMemo, useState } from "react";
-import { exportThreadBundle, resolveThreadExportClient } from "../thread/ThreadExportControl";
+import { exportThreadBundle, resolveThreadExportClient } from "../thread/threadExport";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { buildChatMarkdownExport } from "./chatMarkdownExport";
 

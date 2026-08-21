@@ -6,19 +6,24 @@ import type {
   ProjectType,
 } from "@octant/contracts/projects";
 
-export type RightUtilityDockSurfaceId = "context" | "project-memory" | "navigator";
+export type RightUtilityDockSurfaceId = "context" | "project-memory" | "navigator" | "thread";
+
+/**
+ * What a panel answers for, and therefore what makes it truthful.
+ *
+ * A `project` panel is only truthful next to the Project it describes, so a
+ * missing, incompatible, or stale Project makes it unavailable. A `host` panel
+ * has no Project to be stale against — asking it for one would close it
+ * forever. A `thread` panel answers for the thread in the active pane, so a
+ * pane holding no thread is what makes it unavailable.
+ */
+export type RightUtilityDockSurfaceScope = "host" | "project" | "thread";
 
 export interface RightUtilityDockSurfaceDescriptor {
   readonly id: RightUtilityDockSurfaceId;
   readonly label: string;
   readonly modes: ReadonlyArray<OctantMode>;
-  /**
-   * Whether this surface is about one Project. A Project-required surface is
-   * only truthful next to the Project it describes, so it must close when no
-   * compatible, current Project is active. A host-owned surface has no Project
-   * to be stale against, and asking it for one would close it forever.
-   */
-  readonly projectRequired: boolean;
+  readonly scope: RightUtilityDockSurfaceScope;
 }
 
 export interface RightUtilityDockProject {
@@ -39,6 +44,12 @@ export type RightUtilityDockConnectionState = "connected" | "disconnected";
 export interface RightUtilityDockResolutionInput {
   readonly activeMode: OctantMode;
   readonly activeProject?: RightUtilityDockProject;
+  /**
+   * The thread the active pane holds, absent when it holds something else — a
+   * welcome surface, a Project overview, a utility surface. A thread-scoped
+   * panel has nothing to describe without it.
+   */
+  readonly activeThreadId?: string;
   readonly connectionState: RightUtilityDockConnectionState;
   readonly presentationAvailability: RightUtilityDockSurfaceAvailability;
   readonly savedSurface: unknown;
@@ -57,7 +68,8 @@ export type RightUtilityDockClosedReason =
 export type RightUtilityDockUnavailableReason =
   | "project-incompatible"
   | "project-required"
-  | "project-stale";
+  | "project-stale"
+  | "thread-required";
 
 export type RightUtilityDockResolution =
   | {
@@ -92,26 +104,27 @@ export type RightUtilityDockResolution =
 /*
  * What the dock holds is decided by scope, not by convenience.
  *
- * Every surface here answers for a Project or for the host. The dock is scoped
- * to the window, so with two threads open side by side it can only ever answer
- * for one of them — which makes a thread-scoped surface here a surface that
- * lies. `code-environment` was the plainest case: it rendered the very same git
- * group the thread's own panel already showed under Changes. `plan` was the
- * same mistake one step less obvious. Both now live in the thread panel that
- * sits beside the thread they describe.
+ * A thread-scoped panel used to be a panel that lies: a leaf held a strip of
+ * tabs, so with two threads visible the window-scoped dock could only ever
+ * answer for one of them, and `code-environment` and `plan` were removed for
+ * it. 0041 changed that premise — a pane holds exactly one surface and the
+ * dock follows the active pane — so the active pane now names the dock's
+ * thread unambiguously, and a thread-scoped panel can be truthful here. What
+ * is still refused is duplication: the thread panel keeps the environment's
+ * own facts, and Thread holds the thread's working surfaces.
  */
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
     id: "context",
     label: "Context",
     modes: ["chat", "work", "code"],
-    projectRequired: true,
+    scope: "project",
   },
   {
     id: "project-memory",
     label: "Project memory",
     modes: ["chat", "work", "code"],
-    projectRequired: true,
+    scope: "project",
   },
   // Host-owned: Navigator answers for the host across every mode, so it is the
   // one surface here that is not about a Project.
@@ -119,7 +132,15 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     id: "navigator",
     label: "Navigator",
     modes: ["chat", "work", "code"],
-    projectRequired: false,
+    scope: "host",
+  },
+  // Files, Plan, Publish, and Agents are all facts of one Code thread, so the
+  // panel is offered only where such a thread can be in the active pane.
+  {
+    id: "thread",
+    label: "Thread",
+    modes: ["code"],
+    scope: "thread",
   },
 ] as const satisfies ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 
@@ -128,6 +149,7 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     context: RIGHT_UTILITY_DOCK_SURFACES[0],
     "project-memory": RIGHT_UTILITY_DOCK_SURFACES[1],
     navigator: RIGHT_UTILITY_DOCK_SURFACES[2],
+    thread: RIGHT_UTILITY_DOCK_SURFACES[3],
   };
 
 export function resolveRightUtilityDockSurface(
@@ -154,8 +176,14 @@ export function resolveRightUtilityDockSurface(
   // A host-owned surface answers for the host, not for a Project, so the
   // presence, compatibility, and staleness checks below have nothing to read.
   // Running them anyway would close it permanently.
-  if (!surface.projectRequired) {
+  if (surface.scope === "host") {
     return { kind: "surface", surface };
+  }
+
+  if (surface.scope === "thread") {
+    return input.activeThreadId === undefined
+      ? { kind: "unavailable", reason: "thread-required", surface }
+      : { kind: "surface", surface };
   }
 
   const project = input.activeProject;
@@ -185,5 +213,7 @@ function hasBinding(binding: CanonicalProjectBinding | undefined): boolean {
 }
 
 function isRightUtilityDockSurfaceId(value: unknown): value is RightUtilityDockSurfaceId {
-  return value === "context" || value === "project-memory" || value === "navigator";
+  return (
+    value === "context" || value === "project-memory" || value === "navigator" || value === "thread"
+  );
 }

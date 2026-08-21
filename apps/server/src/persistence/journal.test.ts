@@ -191,7 +191,7 @@ describe("Journal", () => {
           overlayOpacity: 100,
           vibrancyMode: "off",
         },
-        environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
+        environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       },
     } as const;
 

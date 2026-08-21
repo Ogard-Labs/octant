@@ -732,6 +732,19 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("button", { name: "Canvas" })).not.toBeInTheDocument();
   });
 
+  it("leaves Agents and Export to the dock and the thread's own row menu", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        serverUrl="http://127.0.0.1:4317"
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Agents" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Export thread" })).not.toBeInTheDocument();
+  });
+
   it("keeps the transcript top-aligned like a conversation instead of bottom-anchoring it", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
     expect(styles).toMatch(/\.code-thread-workspace__transcript\s*\{[^}]*margin:\s*0 auto;/);
@@ -1474,48 +1487,6 @@ describe("CodeThreadWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Complete follow-up" }));
     expect(completeFollowUp).toHaveBeenCalledWith(threadId);
-  });
-
-  it("starts a subagent from the Agents surface under this thread's own identity", async () => {
-    // The managed child runtime is reachable only through an explicit creation
-    // request. Rendering the hierarchy read-only would leave that runtime with
-    // no production surface at all, so the Code thread — which is the parent
-    // authority the host already verifies — must offer creation here.
-    const user = userEvent.setup();
-    const requestRun = vi.fn(async (_input: unknown) => ({ kind: "run-accepted" as const }));
-    const agentRunClient = {
-      parentSummary: vi.fn(async () => ({ parentThreadId: threadId, entries: [] })),
-      acknowledge: vi.fn(),
-      cancel: vi.fn(async () => ({ results: [] })),
-      requestRun,
-    } as never;
-    render(
-      <CodeThreadWorkspace
-        agentRunClient={agentRunClient}
-        controller={controller()}
-        threadId={threadId}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Agents" }));
-    const form = await screen.findByRole("form", { name: "Create subagent" });
-    expect(form).toBeVisible();
-
-    await user.type(within(form).getByLabelText("Task"), "Summarize the failing tests.");
-    await user.type(
-      within(form).getByLabelText("Provider instance ID"),
-      "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-    );
-    await user.type(within(form).getByLabelText("Model ID"), "model-one");
-    await user.click(within(form).getByRole("button", { name: "Create subagent" }));
-
-    await waitFor(() => expect(requestRun).toHaveBeenCalledTimes(1));
-    expect(requestRun.mock.calls[0]?.[0]).toMatchObject({
-      // The parent identity is the thread this workspace is bound to; the host
-      // authorizes creation against exactly that thread.
-      parentThreadId: threadId,
-      task: "Summarize the failing tests.",
-    });
   });
 });
 

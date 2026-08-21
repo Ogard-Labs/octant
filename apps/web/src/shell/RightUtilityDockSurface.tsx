@@ -7,7 +7,20 @@ import type {
   RightUtilityDockResolution,
   RightUtilityDockSurfaceDescriptor,
   RightUtilityDockSurfaceId,
+  RightUtilityDockUnavailableReason,
 } from "./rightUtilityDockModel";
+
+/**
+ * Names what the active pane is missing, rather than one message covering
+ * every reason. A Project-scoped panel and a thread-scoped one go empty for
+ * different reasons, and telling a reader to open a Project when what they
+ * need is a thread sends them the wrong way.
+ */
+function unavailableMessage(reason: RightUtilityDockUnavailableReason): string {
+  return reason === "thread-required"
+    ? "The dock describes the active pane, and this pane holds no thread. Activate a pane with one to fill this panel again."
+    : "The dock describes the active pane, and this pane has no compatible Project. Activate a pane with one to fill this panel again.";
+}
 
 export interface RightUtilityDockSurfaceProps {
   readonly availableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
@@ -23,6 +36,7 @@ export interface RightUtilityDockSurfaceProps {
   readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
   readonly projectMemory: ReactNode;
   readonly resolution: RightUtilityDockResolution;
+  readonly thread: ReactNode;
 }
 
 export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
@@ -70,7 +84,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
             cannot describe. */}
         {props.resolution.kind === "unavailable" ? (
           <ShellState
-            message="The dock describes the active pane, and this pane has no compatible Project. Activate a pane with one to fill this panel again."
+            message={unavailableMessage(props.resolution.reason)}
             state="neutral"
             title={`${activeSurface.label} has nothing to describe here`}
           />
@@ -79,6 +93,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
             context: props.context,
             "project-memory": props.projectMemory,
             navigator: props.navigator,
+            thread: props.thread,
           }[activeSurface.id]
         )}
       </div>

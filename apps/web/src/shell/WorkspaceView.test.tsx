@@ -4,7 +4,7 @@ import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/cha
 import { defaultEnvironmentPresentationState } from "@octant/domain/shell-policy";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { WorkspaceView, type WorkspaceViewProps } from "./WorkspaceView";
 import { stubSurfaceDragHandle } from "../App.test-fixtures";
 import { createChatReadCursorStore } from "../chat/useChatController";
@@ -592,105 +592,6 @@ function localServersWiring(
   };
   return { props, browserAutomationClient, create, act, stop };
 }
-
-describe("WorkspaceView split Code file explorer", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("lists files with each pane's own thread checkout, not the focused view's", async () => {
-    const threadBId = "b0000000-0000-4000-8000-000000000002";
-    const checkoutBId = "20000000-0000-4000-8000-000000000002";
-    const tabA = codeTab("code-overview", "Thread A");
-    const tabBId = "10000000-0000-4000-8000-000000000014" as WorkspaceTab["id"];
-    const tabB = {
-      id: tabBId,
-      kind: "code-overview",
-      mode: "code",
-      threadId: threadBId,
-      title: "Thread B",
-    } as WorkspaceTab;
-    const base = propsFor(tabA);
-    const paneB = {
-      kind: "pane",
-      nodeId: "10000000-0000-4000-8000-000000000012",
-      paneId: "10000000-0000-4000-8000-000000000013",
-      surface: tabB,
-    } as const;
-    const split = {
-      kind: "split",
-      nodeId: "10000000-0000-4000-8000-000000000011",
-      orientation: "horizontal",
-      ratio: 0.5,
-      first: base.layout,
-      second: paneB,
-    } as never as WorkspaceViewProps["layout"];
-    // The focused controller view is thread A. Thread B's checkout is known
-    // only through the bootstrap thread record, exactly as at runtime.
-    const codeController = {
-      ...(base.codeController as object),
-      bootstrap: {
-        checkouts: [],
-        activity: [],
-        threads: [
-          { id: codeIds.thread, checkoutId: codeIds.checkout, title: "Thread A" },
-          { id: threadBId, checkoutId: checkoutBId, title: "Thread B" },
-        ],
-      },
-    } as never as WorkspaceViewProps["codeController"];
-    // Both panes are open, so both threads have a controller. Neither reads a
-    // checkout from the other's view: thread B's is known only through the
-    // bootstrap thread record, exactly as at runtime.
-    const codeControllers = createCodeThreadControllers();
-    codeControllers.publish(codeIds.thread as never, codeController);
-    codeControllers.publish(threadBId as never, codeController);
-    const listingRequests: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.includes("/api/code/files/listing")) listingRequests.push(url);
-        return new Response(JSON.stringify({ message: "unavailable" }), {
-          headers: { "content-type": "application/json" },
-          status: 503,
-        });
-      }),
-    );
-
-    render(
-      <WorkspaceView
-        {...base}
-        codeController={codeController}
-        codeControllers={codeControllers}
-        layout={split}
-        workspace={
-          {
-            ...base.workspace,
-            layouts: { ...base.workspace.layouts, code: split },
-          } as never
-        }
-      />,
-    );
-
-    // Files is collapsed until asked for; expand it in both panes.
-    const filesButtons = await screen.findAllByRole(
-      "button",
-      { name: "Files" },
-      { timeout: 5_000 },
-    );
-    expect(filesButtons).toHaveLength(2);
-    for (const button of filesButtons) fireEvent.click(button);
-
-    await waitFor(() => expect(listingRequests).toHaveLength(2), { timeout: 5_000 });
-    const byThread = new Map(
-      listingRequests
-        .map((request) => new URL(request))
-        .map((url) => [url.searchParams.get("threadId"), url.searchParams.get("checkoutId")]),
-    );
-    expect(byThread.get(String(codeIds.thread))).toBe(String(codeIds.checkout));
-    expect(byThread.get(threadBId)).toBe(checkoutBId);
-  });
-});
 
 describe("WorkspaceView concurrent Code threads", () => {
   it("shows each open Code thread its own composition rather than the focused one's", async () => {
@@ -1885,9 +1786,9 @@ describe("WorkspaceView Chat thread Environment", () => {
       title: "Release plan",
     } as WorkspaceTab;
     const base = propsFor(tab);
-    const pinnedChat = {
+    const floatingChat = {
       ...defaultEnvironmentPresentationState(),
-      byMode: { ...defaultEnvironmentPresentationState().byMode, chat: "pinned" as const },
+      byMode: { ...defaultEnvironmentPresentationState().byMode, chat: "floating" as const },
     };
 
     render(
@@ -1896,13 +1797,13 @@ describe("WorkspaceView Chat thread Environment", () => {
         chatClient={chatClient as never}
         chatReadCursorStore={createChatReadCursorStore()}
         canvasClient={canvasClient}
-        environmentPresentation={pinnedChat}
+        environmentPresentation={floatingChat}
         mode="chat"
         projects={[project]}
       />,
     );
 
-    expect(await screen.findByRole("region", { name: "Environment for Planning" })).toBeVisible();
+    expect(await screen.findByRole("dialog", { name: "Environment for Planning" })).toBeVisible();
     expect(screen.getByText("Virtual Project")).toBeVisible();
     expect(screen.getAllByText("Attachments").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Sources").length).toBeGreaterThan(0);

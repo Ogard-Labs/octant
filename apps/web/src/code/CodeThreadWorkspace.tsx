@@ -6,15 +6,13 @@ import {
 } from "@octant/contracts/code";
 import type { CodeCheckpoint } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
-import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   type PickerGroup,
 } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
-import { Bot, UserRoundCog } from "lucide-react";
+import { UserRoundCog } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { useQueuedSend } from "../composer/useQueuedSend";
@@ -30,7 +28,6 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController, CodeTurnStatus } from "./useCodeController";
 import { ChatRichText } from "../chat/ChatRichText";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
-import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
 import { ThreadChildRunStatusSlot } from "../agents/ThreadChildRunStatusSlot";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -56,7 +53,6 @@ import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPick
 import { CODE_ACCESS_POSTURE_LABEL, CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
-import { ThreadExportControl } from "../thread/ThreadExportControl";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -75,7 +71,6 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 
 export interface CodeThreadWorkspaceProps {
   readonly agentRunClient?: AgentRunClient;
-  readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly controller: CodeController;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly threadId: CodeThreadId;
@@ -153,7 +148,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [accessMessage, setAccessMessage] = useState<string>();
   const [turnAccessOverride, setTurnAccessOverride] = useState<ProviderExecutionPolicy>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [auxiliarySurface, setAuxiliarySurface] = useState<"agents">();
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
   const checkpoints = useThreadCheckpoints({
     threadId: String(props.threadId),
@@ -647,30 +641,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             </div>
           </div>
           {childRunStatus}
-          <div className="code-thread-workspace__toolbar" role="toolbar" aria-label="Code surfaces">
-            <ThreadExportControl
-              mode="code"
-              threadId={String(props.threadId)}
-              title={thread.title}
-              {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-              {...(props.windowCapability === undefined
-                ? {}
-                : { windowCapability: props.windowCapability })}
-            />
-            {props.agentRunClient === undefined ? null : (
-              <button
-                aria-pressed={auxiliarySurface === "agents"}
-                className="code-thread-workspace__tool window-no-drag"
-                onClick={() =>
-                  setAuxiliarySurface((current) => (current === "agents" ? undefined : "agents"))
-                }
-                type="button"
-              >
-                <Bot aria-hidden="true" size={14} strokeWidth={1.7} />
-                <span>Agents</span>
-              </button>
-            )}
-          </div>
         </div>
       </header>
 
@@ -747,24 +717,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         ),
       )}
 
-      {auxiliarySurface === "agents" && props.agentRunClient !== undefined ? (
-        <aside
-          aria-label="Agent activity"
-          className="code-thread-workspace__auxiliary thread-column"
-        >
-          <AgentRunHierarchy
-            // This thread is the parent authority the host verifies before it
-            // admits a child, so creation belongs here rather than on a surface
-            // that would have to invent one.
-            allowCreation
-            client={props.agentRunClient}
-            parentThreadId={decodeAgentRunParentThreadId(String(thread.id))}
-            {...(props.agentRunSettingsClient === undefined
-              ? {}
-              : { settingsClient: props.agentRunSettingsClient })}
-          />
-        </aside>
-      ) : null}
       {messages.length === 0 ? (
         <div className="code-thread-workspace__conversation" role="log" aria-live="polite">
           <div className="code-thread-workspace__transcript thread-column">

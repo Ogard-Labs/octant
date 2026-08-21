@@ -1151,11 +1151,10 @@ describe("ShellService", () => {
       byTab: [
         {
           tabId: "30000000-0000-4000-8000-000000000003",
-          presentation: "pinned",
-          pinnedWidth: 400,
+          presentation: "hidden",
         },
       ],
-      byMode: { chat: "hidden", work: "floating", code: "pinned" },
+      byMode: { chat: "hidden", work: "floating", code: "floating" },
     });
     const command = decodeShellCommand({
       kind: "set-environment-presentation",
@@ -1192,8 +1191,7 @@ describe("ShellService", () => {
       byTab: [
         {
           tabId: "30000000-0000-4000-8000-000000000003",
-          presentation: "pinned",
-          pinnedWidth: 400,
+          presentation: "hidden",
         },
       ],
       byMode: { chat: "floating", work: "floating", code: "floating" },
@@ -1206,7 +1204,7 @@ describe("ShellService", () => {
       lastContextSurface: null,
       sidebarMaterial: "system",
       modeSwitcherPresentation: "buttons",
-      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
+      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
     });
     const { persistence } = persistenceStub({
       workspace: {
@@ -1223,7 +1221,7 @@ describe("ShellService", () => {
     expect(bootstrapped.environmentPresentation.byMode).toEqual({
       chat: "hidden",
       work: "floating",
-      code: "pinned",
+      code: "floating",
     });
     expect(bootstrapped.environmentPresentation.byTab).toEqual(projected.byTab);
     expect(bootstrapped.presentationVersion).toBe(2);

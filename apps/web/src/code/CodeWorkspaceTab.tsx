@@ -13,7 +13,6 @@ import { nativeCodeWorkspaceApprovals } from "./codeWorkspaceApprovals";
 import { noticeTouches, useCodeFileChangeWatch } from "./useCodeFileChangeWatch";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
@@ -23,7 +22,6 @@ type CodeWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 export default function CodeWorkspaceTab(props: {
   readonly controller: CodeController;
   readonly agentRunClient?: AgentRunClient;
-  readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly tab: CodeWorkspaceTab;
   readonly hostBridge?: OctantHostBridge;
@@ -109,9 +107,6 @@ export default function CodeWorkspaceTab(props: {
     >
       <CodeWorkspace
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-        {...(props.agentRunSettingsClient === undefined
-          ? {}
-          : { agentRunSettingsClient: props.agentRunSettingsClient })}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}

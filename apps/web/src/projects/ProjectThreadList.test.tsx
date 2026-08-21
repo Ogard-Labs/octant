@@ -118,6 +118,43 @@ describe("ProjectThreadRows", () => {
     expect(onMarkThreadRead).not.toHaveBeenCalled();
   });
 
+  it("exports a thread from its own right-click menu", async () => {
+    const onExportThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onExportThread }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Export…" }));
+
+    expect(onExportThread).toHaveBeenCalledWith("thread-one", "Controller foundation");
+  });
+
+  it("offers no export when the host resolves no export client", async () => {
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+
+    expect(await screen.findByRole("menuitem", { name: "Pin" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Export…" })).toBeNull();
+  });
+
   it("leaves the rows without a menu when the host offers no thread actions", async () => {
     render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[thread]} />);
 

@@ -146,6 +146,7 @@ describe("ProjectMemoryInspector", () => {
         onPreviewWidth={vi.fn()}
         onSelectSurface={vi.fn()}
         projectMemory={<ProjectMemoryInspector {...inspector.props} embedded />}
+        thread={null}
         resolution={{
           kind: "surface",
           projectId: sourceProjectId,

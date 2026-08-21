@@ -621,7 +621,7 @@ describe("createPhase1RuntimeRegistries", () => {
           overlayOpacity: 100,
           vibrancyMode: "off",
         },
-        environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
+        environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       },
     });
     for (const [contextSidebarWidth, lastContextSurface, modeSwitcherPresentation] of [
@@ -646,7 +646,7 @@ describe("createPhase1RuntimeRegistries", () => {
             overlayOpacity: 100,
             vibrancyMode: "off",
           },
-          environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
+          environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
         },
       } as const;
       expect(registry.decode("shell.settings-replaced", 1, currentPayload)).toEqual(currentPayload);
@@ -681,7 +681,7 @@ describe("createPhase1RuntimeRegistries", () => {
           overlayOpacity: 100,
           vibrancyMode: "off",
         },
-        environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
+        environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       },
     });
   });
@@ -863,7 +863,7 @@ function validSettingsPayload() {
         overlayOpacity: 100,
         vibrancyMode: "off",
       },
-      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
+      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
     },
   } as const;
 }

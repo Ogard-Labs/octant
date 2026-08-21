@@ -15,6 +15,11 @@ export const MENU_ITEM_CLASS =
 export interface ThreadRowActions {
   /** Absent when the host cannot archive this thread. */
   readonly onArchiveThread?: (threadId: string) => void;
+  /**
+   * Absent when no export client resolves for this window, which is the same
+   * test the chat thread-actions menu applies before offering Export.
+   */
+  readonly onExportThread?: (threadId: string, title: string) => void;
   /** Absent when nothing tracks read state for this thread. */
   readonly onMarkThreadRead?: (threadId: string) => void;
   /** Absent when nothing tracks read state for this thread. */
@@ -29,6 +34,7 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
   if (actions === undefined) return true;
   return (
     actions.onArchiveThread === undefined &&
+    actions.onExportThread === undefined &&
     actions.onMarkThreadRead === undefined &&
     actions.onMarkThreadUnread === undefined &&
     actions.onPinThread === undefined &&
@@ -118,6 +124,18 @@ export function ThreadRowMenu(props: {
           >
             Copy thread ID
           </ContextMenuPrimitive.Item>
+          {props.actions.onExportThread === undefined ? null : (
+            <ContextMenuPrimitive.Item
+              className={MENU_ITEM_CLASS}
+              closeOnClick
+              label="Export…"
+              onClick={() =>
+                props.actions.onExportThread?.(String(props.thread.threadId), props.thread.title)
+              }
+            >
+              Export…
+            </ContextMenuPrimitive.Item>
+          )}
           {props.actions.onArchiveThread === undefined ? null : (
             <>
               <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
