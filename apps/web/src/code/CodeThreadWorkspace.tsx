@@ -7,11 +7,19 @@ import {
 import type { CodeCheckpoint } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
-import { decidesCodeEffectsByApproval, type PickerGroup } from "@octant/domain";
+import {
+  clampTurnAccessPosture,
+  decidesCodeEffectsByApproval,
+  type PickerGroup,
+} from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { ArrowUp, Bot, UserRoundCog, X } from "lucide-react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  applyComposerCaret,
+  COMPOSER_STAGED_DROPPED_NOTE,
+} from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -42,7 +50,7 @@ import { useScaffoldCatalog } from "../scaffolds/useScaffoldCatalog";
 import { WorkspacePresetPicker } from "../workspacePresets/WorkspacePresetPicker";
 import { useWorkspacePresets } from "../workspacePresets/useWorkspacePresets";
 import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPicker";
-import { CodeAccessPicker } from "./CodeAccessPicker";
+import { CODE_ACCESS_POSTURE_LABEL, CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
 import { ThreadExportControl } from "../thread/ThreadExportControl";
@@ -140,6 +148,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [providerChanging, setProviderChanging] = useState(false);
   const [accessChanging, setAccessChanging] = useState(false);
   const [accessMessage, setAccessMessage] = useState<string>();
+  const [turnAccessOverride, setTurnAccessOverride] = useState<ProviderExecutionPolicy>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [auxiliarySurface, setAuxiliarySurface] = useState<"agents">();
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
@@ -176,6 +185,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     setDraft(props.controller.pendingDraft);
   }, [props.controller.pendingDraft, props.threadId]);
 
+  const composerReady = view !== undefined && props.controller.status !== "disconnected";
+  useLayoutEffect(() => {
+    if (!composerReady) return;
+    applyComposerCaret(
+      textareaRef.current,
+      props.controller.pendingDraftCaret ?? draft.length,
+      draft.length,
+    );
+  }, [composerReady, props.threadId]);
+  useEffect(() => {
+    setTurnAccessOverride(undefined);
+  }, [props.threadId, view?.thread.executionPolicy]);
+
   // §8.1: `#` must open the same cross-mode picker here as in Chat. The host
   // owns which threads are mentionable and how much of each transcript rides
   // along; this composer only names them.
@@ -188,9 +210,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const mention = useThreadMentionTypeahead({
     mentions: threadMentions.composer,
     draft,
-    onDraftChange: (next) => {
+    onDraftChange: (next, caretIndex) => {
       setDraft(next);
-      props.controller.setPendingDraft?.(next);
+      props.controller.setPendingDraft?.(next, caretIndex);
     },
     textarea: () => textareaRef.current,
   });
@@ -204,9 +226,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     threadId: props.threadId,
     checkoutId: view?.checkout.id,
     draft,
-    onDraftChange: (next) => {
+    onDraftChange: (next, caretIndex) => {
       setDraft(next);
-      props.controller.setPendingDraft?.(next);
+      props.controller.setPendingDraft?.(next, caretIndex);
     },
     textarea: () => textareaRef.current,
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -221,6 +243,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
     threadId: props.attachmentClient === undefined ? undefined : props.threadId,
   });
+  const peekAbandoned = attachments.peekAbandoned;
+  const markDraftStagedDropped = props.controller.markDraftStagedDropped;
+  useEffect(() => {
+    const abandonedThreadId = String(props.threadId);
+    return () => {
+      if (peekAbandoned()) {
+        markDraftStagedDropped?.(abandonedThreadId);
+      }
+    };
+  }, [markDraftStagedDropped, peekAbandoned, props.threadId]);
 
   function syncMentions(value: string, caret: number | null) {
     mention.sync(value, caret);
@@ -281,6 +313,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }
 
   const { checkout, thread } = view;
+  const nextTurnAccess = clampTurnAccessPosture({
+    thread: thread.executionPolicy,
+    ...(turnAccessOverride === undefined ? {} : { requested: turnAccessOverride }),
+  });
   const trimmed = draft.trim();
   const busy =
     props.controller.turnStatus === "sending" || props.controller.turnStatus === "running";
@@ -319,7 +355,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     if (busy) {
       const queuedAttachments = attachments.peekForSend();
       if (
-        props.controller.queueFollowUp(trimmed, threadMentionIds, queuedAttachments) === undefined
+        props.controller.queueFollowUp(
+          trimmed,
+          threadMentionIds,
+          queuedAttachments,
+          nextTurnAccess,
+        ) === undefined
       ) {
         return;
       }
@@ -327,19 +368,28 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setDraft("");
       props.controller.setPendingDraft?.("");
       threadMentions.clear();
+      setTurnAccessOverride(undefined);
       return;
     }
+    // The one-shot override is consumed when the host accepts this start, not
+    // when the turn later finishes: a long running turn must not leave Plan
+    // selected so a queued follow-up inherits it. A refused start puts it back.
+    const override = turnAccessOverride;
+    setTurnAccessOverride(undefined);
     // The chips stay until the host accepts the turn: a refused or dropped send
     // must leave the message retryable with the same images, not just its text.
     const sent = await props.controller.sendFollowUp(
       trimmed,
       threadMentionIds,
       attachments.peekForSend(),
+      nextTurnAccess,
     );
     if (sent) {
       attachments.takeForSend();
       setDraft("");
       threadMentions.clear();
+    } else {
+      setTurnAccessOverride((current) => current ?? override);
     }
   }
 
@@ -367,15 +417,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     void submitFollowUp();
   }
 
-  /**
-   * Move the thread to another access posture mid-thread.
-   *
-   * Lowering access is the user's word alone; raising it to Full access is
-   * not. The host demands a native confirmation for that effect, so the
-   * composer collects one first and hands the receipt to the same
-   * authoritative command — it never elevates on the renderer's say-so, and a
-   * declined confirmation leaves the thread exactly where it was.
-   */
   /**
    * Put the checkout's files back the way they were just before this message
    * was sent.
@@ -824,6 +865,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   ) : (
                     <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
                   )}
+                  {message.role === "user" && message.executionPolicy !== undefined ? (
+                    <p className="code-thread-workspace__turn-access">
+                      Access · {CODE_ACCESS_POSTURE_LABEL[message.executionPolicy]}
+                    </p>
+                  ) : null}
                   {message.role === "assistant" &&
                   message.operationId !== undefined &&
                   message.status === "completed" &&
@@ -988,6 +1034,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             )}
           </div>
         )}
+        {props.controller.draftStagedDropped === true ? (
+          <p className="code-thread-workspace__hint" role="status">
+            {COMPOSER_STAGED_DROPPED_NOTE}
+          </p>
+        ) : null}
+        {props.controller.draftPersistError === undefined ? null : (
+          <p className="code-thread-workspace__hint" role="status">
+            {props.controller.draftPersistError}
+          </p>
+        )}
         <label
           className="code-thread-workspace__message-field"
           htmlFor={`code-thread-composer-${String(thread.id)}`}
@@ -1010,12 +1066,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             id={`code-thread-composer-${String(thread.id)}`}
             onChange={(event) => {
               setDraft(event.currentTarget.value);
-              props.controller.setPendingDraft?.(event.currentTarget.value);
+              props.controller.setPendingDraft?.(
+                event.currentTarget.value,
+                event.currentTarget.selectionStart ?? event.currentTarget.value.length,
+              );
               syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
             }}
-            onClick={(event) =>
-              syncMentions(event.currentTarget.value, event.currentTarget.selectionStart)
-            }
+            onClick={(event) => {
+              const caret = event.currentTarget.selectionStart;
+              if (caret !== null) {
+                props.controller.setPendingDraft?.(event.currentTarget.value, caret);
+              }
+              syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+            }}
             onDragOver={(event) => {
               if (props.attachmentClient === undefined) return;
               event.preventDefault();
@@ -1026,6 +1089,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             onKeyDown={onKeyDown}
             onKeyUp={(event) => {
               if (event.key === "Escape") return;
+              const caret = event.currentTarget.selectionStart;
+              if (caret !== null) {
+                props.controller.setPendingDraft?.(event.currentTarget.value, caret);
+              }
               syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
             }}
             onPaste={(event) => {
@@ -1069,10 +1136,12 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             selectedProviderInstanceId={thread.providerInstanceId}
           />
           <CodeAccessPicker
+            ceiling={thread.executionPolicy}
             disabled={accessChanging}
-            executionPolicy={thread.executionPolicy}
             nativeConfirmationAvailable={props.requestFullAccessApproval !== undefined}
-            onSelect={(next) => void changeAccess(next)}
+            onRaiseThread={(next) => void changeAccess(next)}
+            onSelect={setTurnAccessOverride}
+            value={nextTurnAccess}
           />
           {/*
               Provenance, not a control: the profile narrowed this thread once,

@@ -114,6 +114,11 @@ for every plugin kind, first-party or not:
   and board plugins run in the server process behind a typed port and receive
   only the ports their capabilities allow; they never receive raw filesystem,
   shell, or credential handles.
+- Credentials remain host-owned opaque references through the Keychain
+  credential broker. A plugin names a reference; it never receives, stores, or
+  refreshes raw token material, and it has no portable credential field in
+  manifest or plugin state. Settings OAuth for an integration writes access and
+  refresh tokens only to that host service.
 - Authority checks occur on the server before side effects. A plugin cannot
   widen mode, Project, thread, provider, sandbox, or approval authority;
   approvals, Plan mode read-only, and Code approval gating apply unchanged to
@@ -152,31 +157,31 @@ running executables, removes routes and renderer contributions, and marks the
 plugin's projections dormant. Data is kept, not deleted: package files,
 component choices, settings, credential references, projections, and event
 history remain so re-enabling restores the previous selection. Only uninstall
-removes files, and extension-owned credentials only after explicit
-confirmation. Turn records that referenced a now-disabled plugin are not
-rewritten.
+removes files, and only an explicit confirmation removes host-held credentials
+bound to the extension. Turn records that referenced a now-disabled plugin are
+not rewritten.
 
 ### 3. Built-in plugin candidates
 
-| Candidate                     | What it does today                                                                                         | Why separable                                                              | Coupling | Phase            |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | -------- | ---------------- |
-| Kanban / thread board         | `codeThreadBoardService` and `CodeThreadBoard` derive Ready/In progress/Waiting/Done cards; Work board too | Pure projection over thread metadata plus one sidebar destination          | low      | bundled, enabled |
-| GitHub integration            | `gh` auth, repository catalogue, clone, PR create/observe/mergeability, PR pane, PR list sidebar entry     | All behind `gh` ports and `/api/github/*`; Code works without it           | medium   | bundled, enabled |
-| Linear integration (planned)  | Not yet built; issue intake and delivery-target sync                                                       | New code, no existing coupling; first proof of the integration kind        | low      | bundled, off     |
-| Canvas artifacts              | Canvas event store, share service, skill contributions, renderer blocks and panels                         | Own contracts and store; large surface with its own skill hooks            | medium   | bundled, enabled |
-| Browser / computer use panes  | `BrowserWorkspace`, computer-use lifecycle surface, desktop runtime broker                                 | UI is separable; the capability itself stays app-managed per invariants    | high     | later            |
-| Preview viewers               | PDF, slides, table, workbook, document viewers behind `PreviewRegistry`                                    | Registry already exists; each viewer is an independent module              | low      | bundled, enabled |
-| Zen mode and backgrounds      | Zen surface, assistant, background store and routes, appearance panel                                      | Self-contained routes and store; appearance pack is the model case         | low      | bundled, enabled |
-| Theme presets / appearance    | Theme presets, sidebar backgrounds, typography bundles                                                     | Static assets plus registry entries                                        | low      | bundled, enabled |
-| Agent-run hierarchy           | Agent run creation, supervisor, projection, hierarchy panel                                                | Subagents are a core capability; only the panel and settings are separable | high     | later            |
-| Automations center            | Automation definitions, editor, notifications                                                              | Own routes and store, sidebar entry already gated                          | medium   | bundled, off     |
-| Remote pairing / mobile       | Pairing, private listener, remote gateway, mobile app                                                      | Off by default already; listener lifecycle touches host security           | high     | later            |
-| Diagnostics export            | Export CLI, routes, settings control                                                                       | Single command plus settings entry                                         | low      | bundled, enabled |
-| Usage dashboard               | Usage routes, model, dashboard view                                                                        | Projection plus settings section                                           | low      | bundled, enabled |
-| Navigator assistant           | Sidebar assistant with binding store and settings                                                          | Optional helper; own service and settings                                  | medium   | bundled, off     |
-| Apple development workbench   | Xcode discovery, simulator, validation evidence                                                            | Core Apple development is app-managed; only optional adapters plug in      | high     | later            |
-| MCP registry / marketplace UI | Catalog search, preview, install views                                                                     | Host feature; must exist to install anything else                          | high     | stays in host    |
-| Provider drivers              | Per-vendor drivers under `provider-sdk`; generic ACP stack                                                 | Driver interface exists; each vendor becomes a provider plugin             | medium   | bundled, enabled |
+| Candidate                     | What it does today                                                                                         | Why separable                                                                                                                | Coupling | Phase            |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------- |
+| Kanban / thread board         | `codeThreadBoardService` and `CodeThreadBoard` derive Ready/In progress/Waiting/Done cards; Work board too | Pure projection over thread metadata plus one sidebar destination                                                            | low      | bundled, enabled |
+| GitHub integration            | `gh` auth, repository catalogue, clone, PR create/observe/mergeability, PR pane, PR list sidebar entry     | All behind `gh` ports and `/api/github/*`; Code works without it                                                             | medium   | bundled, enabled |
+| Linear integration (planned)  | Not yet built; Settings connection, issue browse, later intake and delivery-target sync                    | New code, no existing coupling; first proof of the Integration kind. Add as a plugin; do not compile it into the host first. | low      | bundled, off     |
+| Canvas artifacts              | Canvas event store, share service, skill contributions, renderer blocks and panels                         | Own contracts and store; large surface with its own skill hooks                                                              | medium   | bundled, enabled |
+| Browser / computer use panes  | `BrowserWorkspace`, computer-use lifecycle surface, desktop runtime broker                                 | UI is separable; the capability itself stays app-managed per invariants                                                      | high     | later            |
+| Preview viewers               | PDF, slides, table, workbook, document viewers behind `PreviewRegistry`                                    | Registry already exists; each viewer is an independent module                                                                | low      | bundled, enabled |
+| Zen mode and backgrounds      | Zen surface, assistant, background store and routes, appearance panel                                      | Self-contained routes and store; appearance pack is the model case                                                           | low      | bundled, enabled |
+| Theme presets / appearance    | Theme presets, sidebar backgrounds, typography bundles                                                     | Static assets plus registry entries                                                                                          | low      | bundled, enabled |
+| Agent-run hierarchy           | Agent run creation, supervisor, projection, hierarchy panel                                                | Subagents are a core capability; only the panel and settings are separable                                                   | high     | later            |
+| Automations center            | Automation definitions, editor, notifications                                                              | Own routes and store, sidebar entry already gated                                                                            | medium   | bundled, off     |
+| Remote pairing / mobile       | Pairing, private listener, remote gateway, mobile app                                                      | Off by default already; listener lifecycle touches host security                                                             | high     | later            |
+| Diagnostics export            | Export CLI, routes, settings control                                                                       | Single command plus settings entry                                                                                           | low      | bundled, enabled |
+| Usage dashboard               | Usage routes, model, dashboard view                                                                        | Projection plus settings section                                                                                             | low      | bundled, enabled |
+| Navigator assistant           | Sidebar assistant with binding store and settings                                                          | Optional helper; own service and settings                                                                                    | medium   | bundled, off     |
+| Apple development workbench   | Xcode discovery, simulator, validation evidence                                                            | Core Apple development is app-managed; only optional adapters plug in                                                        | high     | later            |
+| MCP registry / marketplace UI | Catalog search, preview, install views                                                                     | Host feature; must exist to install anything else                                                                            | high     | stays in host    |
+| Provider drivers              | Per-vendor drivers under `provider-sdk`; generic ACP stack                                                 | Driver interface exists; each vendor becomes a provider plugin                                                               | medium   | bundled, enabled |
 
 Boards for Work and Code remain server-authoritative; Chat gets no board.
 Moving the board into a plugin does not create a general task Kanban.
@@ -207,12 +212,29 @@ not be acceptable for kinds whose contribution points do not exist yet.
    honest-capability and fail-closed rules in the host. First because adding and
    revising vendors is the repository's highest-frequency expansion, so it is
    where unbounded reach costs the most.
-4. **First integration and board plugins.** Move the thread board and the
-   GitHub integration behind the integration and board component kinds with
-   typed server ports; add Linear as the first bundled-off integration. Second
-   because external services change on their own schedule, so these surfaces are
-   revised without the change ever originating in Octant.
-5. **Appearance and preview kinds.** Package zen backgrounds and preview viewers
+4. **Integration port and plugin renderer seam.** Publish a provider-neutral
+   typed server port for the Integration kind, and open `settings.section` and
+   `sidebar.destination` so the host renders a plugin module rather than a
+   host-compiled Settings registry and two hard-coded destination ids. These
+   are host changes. They land before any Integration plugin, including Linear,
+   and before GitHub is extracted. Widening either seam for one vendor is not
+   a substitute. If Chat or Work must browse an integration, that is a separate
+   provider-neutral host mode-policy change; it is not folded into a vendor
+   plugin. The Integration kind stays Code-mode-safe, and Chat still forbids
+   the `credentials` capability, until that host change lands.
+5. **First integration and board plugins.** Move the thread board and GitHub
+   behind those ports. Add Linear as the first bundled-off integration plugin
+   through the same ports — new code, not an extraction. Do not wire Linear
+   into server internals the way GitHub is today and extract it later; that is
+   the migration risk this record warns about. Linear may land before GitHub is
+   extracted only after the shared port and renderer seam exist. Credentials
+   stay host-owned opaque references; Settings OAuth stores Linear access and
+   refresh tokens only in the host credential service, never in plugin state.
+   Linear does not widen mode policy: its executable and credentials stay in
+   Code unless the separate host mode-policy change in step 4 has already
+   landed. Second because external services change on their own schedule, so
+   these surfaces are revised without the change ever originating in Octant.
+6. **Appearance and preview kinds.** Package zen backgrounds and preview viewers
    as `@octant/*` plugins loaded from the bundled catalog and enabled by
    default. Last because they are the surfaces that change least, so moving them
    buys the least containment; they remain worth moving for the user-facing
@@ -239,12 +261,19 @@ rejected. The renderer registry
 (`apps/web/src/shell/contributionRegistry.ts`) resolves each point from a
 static first-party manifest catalog and the effective activation map; it does
 not decide availability. Bundled `@octant` appearance-pack and preview-viewer
-plugins prove the new points: the branded Octant theme preset and the
+plugins prove those two points: the branded Octant theme preset and the
 structured preview viewers come from those contributions and disappear when
-the component is not effective. Extracting the thread board, GitHub, and
-Linear remains step 4. Packaging remaining zen/appearance assets and every
-viewer as separable `@octant/*` plugins remains step 5. Marketplace/host
-stays in the host.
+the component is not effective. Settings sections still come from the
+host-compiled `octantSettingsRegistry`, and sidebar destinations other than
+`thread-board` and `pull-requests` are discarded, so plugin-provided Settings
+and navigation are not yet a published seam. Completing that seam, and
+publishing the Integration port, are step 4 and land before Linear. Extracting
+the thread board and GitHub remains step 5. Linear is not on that extraction
+list: it is added as a bundled-off plugin through the Integration kind after
+those host seams exist. Packaging remaining zen/appearance assets and every
+viewer as separable `@octant/*` plugins remains step 6. Marketplace/host stays
+in the host. Connector/OAuth marketplace stays Later; a first-party Linear
+plugin is not that marketplace.
 
 ## Consequences
 
@@ -273,14 +302,11 @@ stays in the host.
 
 1. Should first-party plugins that are bundled and enabled be uninstallable, or
    only disableable, in the first release?
-2. Do integration plugins get a portable credential field, or does the host
-   keep credentials strictly out of manifests and provide only Keychain-backed
-   references through a host port?
-3. Which contribution points are frozen for the public API in the first
+2. Which contribution points are frozen for the public API in the first
    release, and which stay first-party only until they stabilize?
-4. Does a plugin get one shared `PLUGIN_DATA` per package or one per
+3. Does a plugin get one shared `PLUGIN_DATA` per package or one per
    host/mode/Project scope, given boards and integrations project per-Project
    data?
-5. Where does the generic ACP stack live: as a host capability that provider
+4. Where does the generic ACP stack live: as a host capability that provider
    plugins configure, or as itself a plugin that other provider plugins depend
    on?

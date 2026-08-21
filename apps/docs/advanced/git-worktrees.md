@@ -4,8 +4,9 @@ description: Repository identity, managed worktrees, Git operations, authority m
 
 # Git and Worktrees
 
-Code binds one repository root per Project. Repository identity, worktrees,
-and Git operations are server-authoritative and fail closed at every boundary.
+Code binds one folder per Project. When that folder is a Git repository,
+repository identity, worktrees, and Git operations are server-authoritative
+and fail closed at every boundary.
 
 ## Repository identity
 

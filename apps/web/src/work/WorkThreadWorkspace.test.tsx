@@ -5,6 +5,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WorkThreadWorkspace } from "./WorkThreadWorkspace";
+import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 
 const threadId = decodeWorkThreadId("10000000-0000-4000-8000-000000000101");
 const providerId = "80000000-0000-4000-8000-0000000000b1" as never;
@@ -277,6 +278,108 @@ describe("WorkThreadWorkspace", () => {
       threadId,
     );
   });
+
+  it("restores a Work draft after leaving the thread and remounting", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    store.write("work", String(threadId), {
+      text: "quarterly notes",
+      caretIndex: 9,
+      stagedDropped: false,
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+
+    const first = render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue(
+      "quarterly notes",
+    );
+    first.unmount();
+
+    render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    const prompt = await screen.findByRole("textbox", { name: "Work prompt" });
+    expect(prompt).toHaveValue("quarterly notes");
+    expect((prompt as HTMLTextAreaElement).selectionStart).toBe(9);
+  });
+
+  it("clears a Work draft so it does not reappear", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    store.write("work", String(threadId), {
+      text: "artifact body",
+      caretIndex: 0,
+      stagedDropped: false,
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const { unmount } = render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue(
+      "artifact body",
+    );
+    store.clear("work", String(threadId));
+    unmount();
+
+    render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue("");
+  });
+
+  it("purges a Work draft when the thread is no longer available", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    store.write("work", String(threadId), {
+      text: "gone with thread",
+      caretIndex: 0,
+      stagedDropped: false,
+    });
+    const missing = {
+      bootstrap: vi.fn(async () => ({ threads: [] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={missing}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    expect(await screen.findByText("This Work thread is no longer available.")).toBeInTheDocument();
+    expect(store.read("work", String(threadId))).toBeUndefined();
+  });
 });
 
 function workThread(overrides: Record<string, unknown> = {}) {
@@ -310,6 +413,24 @@ function providerGroup(): PickerGroup {
       },
     ],
   } as never;
+}
+
+function memoryDraftStorage(): Storage {
+  const data = new Map<string, string>();
+  return {
+    get length() {
+      return data.size;
+    },
+    clear: () => data.clear(),
+    getItem: (key) => data.get(key) ?? null,
+    key: (index) => [...data.keys()][index] ?? null,
+    removeItem: (key) => {
+      data.delete(key);
+    },
+    setItem: (key, value) => {
+      data.set(key, value);
+    },
+  };
 }
 
 function alternateProviderGroup(): PickerGroup {

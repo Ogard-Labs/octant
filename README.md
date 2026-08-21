@@ -24,8 +24,8 @@ requires a specific vendor or an Octant-operated cloud service.
   implicit filesystem or shell authority.
 - **Work** — knowledge work confined to one user-approved folder: research
   with citations, artifacts, previews, and Goals.
-- **Code** — engineering in one Git repository with approval-gated access,
-  managed worktrees, terminals, an editor, tests, and a thread board.
+- **Code** — engineering confined to one user-approved folder: approval-gated
+  access, managed worktrees, terminals, an editor, tests, and a thread board.
 
 Modes are enforced on the server, not toggled in the renderer. Work never
 silently becomes Code; promotion to a linked Code thread requires explicit
