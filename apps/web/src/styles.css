@@ -3147,10 +3147,10 @@ button:focus-visible {
    off the transcript running underneath. */
 .thread-environment-panel--floating {
   position: absolute;
-  top: var(--oct-space-3);
-  right: var(--oct-space-3);
-  width: 320px;
-  max-height: calc(100% - var(--oct-space-3) * 2);
+  top: var(--oct-space-4);
+  right: var(--oct-space-4);
+  width: min(352px, calc(100% - var(--oct-space-4) * 2));
+  max-height: min(680px, calc(100% - var(--oct-space-4) * 2));
   z-index: 20;
   background: color-mix(in oklab, var(--oct-surface) 88%, transparent);
   border-color: color-mix(in oklab, var(--oct-border) 70%, transparent);
@@ -3179,9 +3179,22 @@ button:focus-visible {
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--oct-space-2);
-  padding: var(--oct-space-2) var(--oct-space-3);
-  background: var(--oct-surface-warm);
+  padding: var(--oct-space-3) var(--oct-space-3) var(--oct-space-2);
+  background: color-mix(in oklab, var(--oct-surface) 92%, var(--oct-fg-soft));
   border-bottom: 1px solid var(--oct-border);
+}
+
+.thread-environment-panel__heading {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.thread-environment-panel__title {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: -0.01em;
 }
 
 .thread-environment-panel__icon-button {
@@ -3327,7 +3340,127 @@ button:focus-visible {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: var(--oct-space-1) var(--oct-space-3) var(--oct-space-2);
+  padding: 0 0 var(--oct-space-2);
+}
+
+/* The floating reference uses title-case rows with generous hit areas. Keep
+   the global Environment groups compact elsewhere, but make this one panel
+   read as a small, composed card rather than a stack of form sections. */
+.thread-environment-panel .environment-group__header {
+  min-height: 36px;
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.thread-environment-panel .environment-group__header:hover,
+.thread-environment-panel .environment-group__header:focus-visible {
+  background: var(--oct-fg-soft);
+}
+
+.thread-environment-panel .environment-group__body {
+  padding: 0 var(--oct-space-3) var(--oct-space-3);
+}
+
+.thread-environment-panel .environment-git-group dl {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.thread-environment-panel .environment-git-group__row {
+  min-height: 30px;
+  padding: 0;
+}
+
+.environment-pull-requests {
+  position: relative;
+  min-width: 0;
+}
+
+.environment-pull-requests__list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.environment-pull-requests__list li + li {
+  border-top: 1px solid var(--oct-border);
+}
+
+.environment-pull-requests__row {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.environment-pull-requests__row:hover,
+.environment-pull-requests__row:focus-visible {
+  color: var(--oct-fg);
+}
+
+.environment-pull-requests__title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+
+.environment-pull-requests__title span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-pull-requests__title svg:last-child {
+  flex: 0 0 auto;
+  color: var(--oct-muted);
+}
+
+.environment-pull-requests__branches {
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.environment-pull-requests__status,
+.environment-pull-requests__stale {
+  margin: 0;
+  padding: var(--oct-space-2) 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.environment-pull-requests__stale {
+  color: var(--oct-warning-text, var(--oct-muted));
+}
+
+.environment-pull-requests__refresh {
+  position: absolute;
+  top: -34px;
+  right: 0;
+}
+
+@media (max-width: 720px) {
+  .thread-environment-panel--floating {
+    top: var(--oct-space-2);
+    right: var(--oct-space-2);
+    width: min(352px, calc(100% - var(--oct-space-2) * 2));
+    max-height: calc(100% - var(--oct-space-2) * 2);
+  }
 }
 
 /* Position and size only. The groups inside carry the system's own

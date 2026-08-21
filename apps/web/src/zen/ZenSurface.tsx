@@ -69,6 +69,12 @@ export interface ZenSurfaceProps {
   readonly message?: string;
   readonly onExit: () => void;
   readonly onAddTimer?: (durationMs: number) => void;
+  /** Adds a terminal owned by the focused Code thread to this space. */
+  readonly onAddTerminal?: (sourceContext: ZenSourceContext) => void;
+  /** Whether the focused Code thread is present in the current Code snapshot. */
+  readonly canAddTerminal?: (sourceContext: ZenSourceContext) => boolean;
+  /** Docks a research browser for the focused Work or Code thread. */
+  readonly onAddBrowser?: (sourceContext: ZenSourceContext) => void;
   readonly onExpandBar: () => void;
   readonly onHideBar: () => void;
   readonly onCreateWidget?: (kind: "notes" | "checklist") => void;
@@ -115,7 +121,6 @@ export interface ZenSurfaceProps {
   readonly onPinThread?: (catalogRef: ZenThreadCatalogRef) => void;
   readonly onCloseAssistant?: () => void;
   readonly onCloseThreadPicker?: () => void;
-  readonly onContinueThread?: (catalogRef: ZenThreadCatalogRef) => void;
   /**
    * Builds the live surface for one pinned card, or returns undefined when
    * this window hosts no live card for that source context. The focus zone holds no
@@ -295,6 +300,8 @@ export function ZenSurface(props: ZenSurfaceProps) {
   const focusedElement = props.space.elements.find(
     (element) => String(element.elementId) === focusedId,
   );
+  const focusedThreadContext =
+    focusedElement?.kind === "thread" ? focusedElement.sourceContext : undefined;
   const threadCardActivity = useMemo(() => {
     const focusedElementId = focusedElement?.elementId;
     const resolved = resolveZenLiveCardActivity({
@@ -562,10 +569,7 @@ export function ZenSurface(props: ZenSurfaceProps) {
               data-locked={element.locked ? "true" : undefined}
               data-minimized={element.minimized ? "true" : undefined}
               key={element.elementId}
-              onFocus={(event) => {
-                if (event.target !== event.currentTarget) return;
-                focusElement(element);
-              }}
+              onFocus={() => focusElement(element)}
               onKeyDown={(event) => handleElementKeyDown(event, element)}
               role="group"
               style={{
@@ -626,7 +630,6 @@ export function ZenSurface(props: ZenSurfaceProps) {
                     {element.kind === "thread" ? (
                       <ZenThreadElement
                         {...(threadCard ?? {})}
-                        onContinue={(catalogRef) => props.onContinueThread?.(catalogRef)}
                         sourceContext={element.sourceContext}
                       />
                     ) : element.kind === "notes" ? (
@@ -814,13 +817,68 @@ export function ZenSurface(props: ZenSurfaceProps) {
           ) : (
             <>
               {manualPanel === "add" ? (
-                <OctantButton
-                  onClick={() => props.onOpenThreads?.()}
-                  type="button"
-                  variant="secondary"
-                >
-                  Pin a thread
-                </OctantButton>
+                <div className="zen-add-picker">
+                  <OctantButton
+                    onClick={() => props.onOpenThreads?.()}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Pin a thread
+                  </OctantButton>
+                  <OctantButton
+                    aria-label="Add terminal"
+                    disabled={
+                      props.onAddTerminal === undefined ||
+                      focusedThreadContext?.threadKind !== "code" ||
+                      props.canAddTerminal?.(focusedThreadContext) === false
+                    }
+                    onClick={() => {
+                      if (focusedThreadContext?.threadKind !== "code") return;
+                      props.onAddTerminal?.(focusedThreadContext);
+                      setManualPanel(null);
+                    }}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Add terminal
+                  </OctantButton>
+                  <OctantButton
+                    aria-label="Add browser"
+                    disabled={
+                      props.onAddBrowser === undefined ||
+                      (focusedThreadContext?.threadKind !== "code" &&
+                        focusedThreadContext?.threadKind !== "work")
+                    }
+                    onClick={() => {
+                      if (
+                        focusedThreadContext?.threadKind !== "code" &&
+                        focusedThreadContext?.threadKind !== "work"
+                      ) {
+                        return;
+                      }
+                      props.onAddBrowser?.(focusedThreadContext);
+                      setManualPanel(null);
+                    }}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Add browser
+                  </OctantButton>
+                  {focusedThreadContext === undefined ? (
+                    <p className="zen-add-picker__hint" role="status">
+                      Focus a thread card to add its terminal or browser.
+                    </p>
+                  ) : focusedThreadContext.threadKind === "code" &&
+                    props.canAddTerminal?.(focusedThreadContext) === false ? (
+                    <p className="zen-add-picker__hint" role="status">
+                      This Code thread cannot add a terminal right now.
+                    </p>
+                  ) : focusedThreadContext.threadKind === "code" ? (
+                    <p className="zen-add-picker__hint" role="status">
+                      Add terminal pins the existing Code terminal. Start one from Code first.
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
               {manualPanel === "widgets" ? (
                 <>
