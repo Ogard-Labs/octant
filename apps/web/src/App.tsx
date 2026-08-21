@@ -4028,7 +4028,6 @@ function LaunchedShell(
                 dockThread === undefined ? null : (
                   <ThreadDockPanel
                     agentRunClient={agentRunClient}
-                    agentRunSettingsClient={agentRunSettingsClient}
                     {...(dockThread.checkoutId === undefined
                       ? {}
                       : { checkoutId: dockThread.checkoutId })}

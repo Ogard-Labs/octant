@@ -44,6 +44,7 @@ export interface AgentRunRouteDependencies {
     readonly windowId: string;
   }) =>
     | {
+        readonly parentMode: "chat" | "code";
         readonly parentAuthority: AgentRunAuthority;
         readonly liveAuthority: AgentRunAuthority;
       }
@@ -225,6 +226,9 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
       });
       if (creationAuthority === undefined) {
         return failure("AgentRun creation is unauthorized.", 403, origin);
+      }
+      if (creationRequest.mode !== creationAuthority.parentMode) {
+        return failure("AgentRun child mode must match the parent thread mode.", 400, origin);
       }
       // Return an idempotent receipt before mutable provider readiness is
       // consulted. The receipt is only reusable for the exact authorized
