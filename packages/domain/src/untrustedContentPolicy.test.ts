@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { MAX_NAMED_INGESTED_SOURCES } from "@octant/contracts";
 import {
   assertContentDoesNotAuthorize,
+  decideExternalContentIngestion,
   emptyThreadContentTaint,
   formatTaintedApprovalPrompt,
   isIrreversibleOrAuthorityBearingApprovalClass,
@@ -62,6 +64,62 @@ describe("projectThreadContentTaint", () => {
       provenance: { origin: "tool-result", sourceLabel: "browser-1" },
     });
     expect(state.ingestedSources).toEqual(["browser-1"]);
+  });
+
+  it("keeps the thread tainted after the named-source summary is full", () => {
+    let state = emptyThreadContentTaint();
+    for (let index = 0; index < MAX_NAMED_INGESTED_SOURCES + 1; index += 1) {
+      state = projectThreadContentTaint(state, {
+        kind: "content-ingested",
+        provenance: { origin: "tool-result", sourceLabel: `source-${index}` },
+      });
+    }
+    expect(state.externalContentIngested).toBe(true);
+    expect(state.ingestedSources).toHaveLength(MAX_NAMED_INGESTED_SOURCES);
+    expect(state.ingestedSources[0]).toBe("source-0");
+  });
+});
+
+describe("decideExternalContentIngestion", () => {
+  it("records tainting origins once and ignores user or provider text", () => {
+    expect(
+      decideExternalContentIngestion({
+        authorized: true,
+        origin: "tool-result",
+        alreadyRecorded: false,
+      }),
+    ).toEqual({ kind: "record" });
+    expect(
+      decideExternalContentIngestion({
+        authorized: true,
+        origin: "external-content",
+        alreadyRecorded: true,
+      }),
+    ).toEqual({ kind: "already-recorded" });
+    expect(
+      decideExternalContentIngestion({
+        authorized: true,
+        origin: "user",
+        alreadyRecorded: false,
+      }),
+    ).toEqual({ kind: "ignore", reason: "not-tainting" });
+  });
+
+  it("refuses unauthorized callers without treating them as a clean ignore", () => {
+    expect(
+      decideExternalContentIngestion({
+        authorized: false,
+        origin: "tool-result",
+        alreadyRecorded: false,
+      }),
+    ).toEqual({ kind: "refuse", reason: "unauthorized" });
+    expect(
+      decideExternalContentIngestion({
+        authorized: false,
+        origin: "user",
+        alreadyRecorded: false,
+      }),
+    ).toEqual({ kind: "refuse", reason: "unauthorized" });
   });
 });
 

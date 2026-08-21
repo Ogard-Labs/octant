@@ -74,6 +74,7 @@ function harness(
     >;
     readonly canAccess?: boolean;
     readonly cropThrows?: boolean;
+    readonly recordExternalContentIngestion?: ProductFeedbackServiceOptions["recordExternalContentIngestion"];
   } = {},
 ) {
   const stored = new Map<string, ProductFeedbackNote>(
@@ -95,6 +96,9 @@ function harness(
     readNotes: (threadId) =>
       [...stored.values()].filter((note) => String(note.threadId) === String(threadId)),
     canAccessThread: async () => options.canAccess ?? true,
+    ...(options.recordExternalContentIngestion === undefined
+      ? {}
+      : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
     uuid: () => ids.note,
     clock: () => now,
     actor: { kind: "local-user", actorId: ids.actor as never },
@@ -135,6 +139,25 @@ describe("pointing at the running product", () => {
           element: { origin: "external-content", sourceLabel: "browser-page" },
         },
       },
+    });
+  });
+
+  it("records the pointed-at page as thread-lifetime external content once", async () => {
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["browser-page"] },
+    }));
+    const { service } = harness({ recordExternalContentIngestion });
+
+    await service.execute(windowId, capture);
+
+    expect(recordExternalContentIngestion).toHaveBeenCalledTimes(1);
+    expect(recordExternalContentIngestion).toHaveBeenCalledWith({
+      threadId: ids.thread,
+      provenance: { origin: "external-content", sourceLabel: "browser-page" },
+      contentReference: ids.note,
+      correlationId: ids.note,
+      authorized: true,
     });
   });
 

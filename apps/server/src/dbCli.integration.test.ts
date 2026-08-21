@@ -212,6 +212,7 @@ describe("database CLI runtime composition", () => {
         { name: "thread-checkpoint", lastSequence: 1, lag: 0 },
         { name: "product-feedback", lastSequence: 1, lag: 0 },
         { name: "thread-retention", lastSequence: 1, lag: 0 },
+        { name: "thread-external-content-taint", lastSequence: 1, lag: 0 },
       ],
     });
 

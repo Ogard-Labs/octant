@@ -430,6 +430,8 @@ import {
   BrowserAutomationService,
   createBrowserToolCallAuthorityService,
 } from "./browser/browserAutomationService";
+import { ExternalContentIngestionStore } from "./context/externalContentIngestionStore";
+import { readThreadExternalContentTaint } from "./context/externalContentTaintProjection";
 import {
   ServerBrowserAuthorityResolver,
   deriveToolHostId,
@@ -2497,12 +2499,22 @@ export function startOctantServer(
             headless: headlessBrowserRuntime,
           }));
     yield* Effect.promise(() => browserRuntime.reconcile?.() ?? Promise.resolve());
+    const externalContentIngestionStore = new ExternalContentIngestionStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
     browserAutomationService = new BrowserAutomationService({
       runtime: browserRuntime,
       authority: browserAuthority,
-      toolCallAuthority: createBrowserToolCallAuthorityService(browserAuthority, () =>
-        new Date().toISOString(),
+      toolCallAuthority: createBrowserToolCallAuthorityService(
+        browserAuthority,
+        () => new Date().toISOString(),
+        (threadId) => readThreadExternalContentTaint(persistence.connection, threadId),
       ),
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       now: Date.now,
@@ -2552,6 +2564,7 @@ export function startOctantServer(
         if (thread === undefined) return false;
         return projectService.hasActiveProject(thread.projectId, "code");
       },
+      recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },

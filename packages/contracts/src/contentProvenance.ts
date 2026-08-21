@@ -35,8 +35,20 @@ export type ContentProvenance = typeof ContentProvenance.Type;
 
 /**
  * Journaled ingestion record: provenance + opaque content reference only.
- * Raw bodies and secrets never enter the journal payload.
+ * Raw bodies and secrets never enter the journal payload. The versioned event
+ * `thread.external-content-ingested@1` carries this payload on the
+ * `thread-external-content` aggregate (aggregate id = thread id).
  */
+export const MAX_CONTENT_SOURCE_LABEL_LENGTH = 128;
+export const MAX_CONTENT_REFERENCE_LENGTH = 512;
+export const MAX_CONTENT_INGESTED_PAYLOAD_BYTES = 2_048;
+export const MAX_NAMED_INGESTED_SOURCES = 64;
+
+export const THREAD_EXTERNAL_CONTENT_AGGREGATE = "thread-external-content";
+export const THREAD_EXTERNAL_CONTENT_EVENT_NAMES = {
+  ingested: "thread.external-content-ingested@1",
+} as const;
+
 export const ContentIngestedPayload = Schema.Struct({
   threadId: AggregateId,
   correlationId: CorrelationId,
@@ -51,7 +63,7 @@ export type ContentIngestedPayload = typeof ContentIngestedPayload.Type;
  */
 export const ThreadExternalContentTaint = Schema.Struct({
   externalContentIngested: Schema.Boolean,
-  ingestedSources: Schema.Array(opaqueLabel),
+  ingestedSources: Schema.Array(opaqueLabel).pipe(Schema.maxItems(MAX_NAMED_INGESTED_SOURCES)),
 }).annotations(strict);
 export type ThreadExternalContentTaint = typeof ThreadExternalContentTaint.Type;
 

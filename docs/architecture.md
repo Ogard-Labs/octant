@@ -213,6 +213,13 @@ flowchart LR
   transactions before the server reports ready. A changed checksum or an
   unknown newer migration fails closed; a store backup is taken before a
   migration runs. Restart integration tests prove replay per feature.
+- **Untrusted-content taint.** Browser observations, tool results, and imported
+  external content that already carry tainting provenance append
+  `thread.external-content-ingested@1` with thread identity and bounded source
+  labels. Raw bodies never enter the payload. The thread-lifetime taint
+  projection rebuilds from the journal; session, turn, and restart boundaries
+  never clear it. Irreversible or authority-bearing actions on a tainted thread
+  still require fresh confirmation after replay.
 - **Recovery.** Sequence-based reconnect replay for local and remote clients —
   a dropped stream catches up from the authoritative snapshot before it reopens,
   keeps retrying while the host is unreachable, and a remote session whose window
