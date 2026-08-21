@@ -49,7 +49,7 @@ Read the record that owns your change before editing, not all of them:
 | Remote clients and mobile                           | `docs/decisions/0013`                        |
 | Collaboration, shared host, git-mediated sharing    | `docs/decisions/0040`                        |
 | Apple build and validation                          | `docs/decisions/0014`                        |
-| Shell, navigation, workspace layout                 | `docs/decisions/0015`                        |
+| Shell, navigation, workspace layout                 | `docs/decisions/0015`, `docs/decisions/0041` |
 | Components and theme                                | `docs/decisions/0016`                        |
 
 A change that contradicts an `Accepted` record is not a code change. Supersede

@@ -1,98 +1,82 @@
+import { decodePaneId, decodeWorkspaceTabId, type WorkspaceTab } from "@octant/contracts/shell";
 import { describe, expect, it } from "vitest";
 import {
-  hasCrossedWorkspaceTabDragThreshold,
-  resolveWorkspaceTabDropDestination,
-  type WorkspaceDragGroupGeometry,
+  hasCrossedWorkspaceSurfaceDragThreshold,
+  resolveWorkspaceSurfaceDropDestination,
+  type WorkspaceDragPaneGeometry,
   type WorkspaceDragRect,
+  type WorkspaceSurfaceDragSource,
 } from "./workspaceTabDragGeometry";
 
-const sourceGroupId = "00000000-0000-4000-8000-000000001101" as never;
-const targetGroupId = "00000000-0000-4000-8000-000000001102" as never;
-const sourceTabId = "00000000-0000-4000-8000-000000001103" as never;
+const sourcePaneId = decodePaneId("00000000-0000-4000-8000-000000001101");
+const targetPaneId = decodePaneId("00000000-0000-4000-8000-000000001102");
 const workspaceRect: WorkspaceDragRect = { left: 0, top: 0, width: 800, height: 600 };
 
-function groupGeometry(
-  groupId: typeof sourceGroupId,
+const draggedSurface: WorkspaceTab = {
+  kind: "welcome",
+  id: decodeWorkspaceTabId("00000000-0000-4000-8000-000000001103"),
+  mode: "chat",
+  title: "Chat",
+};
+
+function paneGeometry(
+  paneId: typeof sourcePaneId,
   left: number,
-  tabCount = 2,
-): WorkspaceDragGroupGeometry {
+  overrides?: Partial<WorkspaceDragPaneGeometry>,
+): WorkspaceDragPaneGeometry {
+  return { paneId, rect: { left, top: 0, width: 400, height: 600 }, ...overrides };
+}
+
+function paneSource(): WorkspaceSurfaceDragSource {
   return {
-    groupId,
-    rect: { left, top: 0, width: 400, height: 600 },
-    tabCount,
-    tabStrip: {
-      rect: { left, top: 0, width: 400, height: 34 },
-      tabs: Array.from({ length: tabCount }, (_, index) => ({
-        tabId: `${groupId}-${index}` as never,
-        rect: { left: left + index * 100, top: 0, width: 100, height: 34 },
-      })),
-    },
+    dragKey: `pane:${String(sourcePaneId)}`,
+    paneId: sourcePaneId,
+    surface: draggedSurface,
+    title: draggedSurface.title,
   };
 }
 
-describe("workspace tab drag geometry", () => {
+function sidebarSource(): WorkspaceSurfaceDragSource {
+  return { dragKey: "thread:row-1", surface: draggedSurface, title: draggedSurface.title };
+}
+
+describe("workspace surface drag geometry", () => {
   it("starts only after the pointer crosses the movement threshold", () => {
-    expect(hasCrossedWorkspaceTabDragThreshold({ x: 10, y: 10 }, { x: 14, y: 13 })).toBe(false);
-    expect(hasCrossedWorkspaceTabDragThreshold({ x: 10, y: 10 }, { x: 16, y: 10 })).toBe(true);
+    expect(hasCrossedWorkspaceSurfaceDragThreshold({ x: 10, y: 10 }, { x: 14, y: 13 })).toBe(false);
+    expect(hasCrossedWorkspaceSurfaceDragThreshold({ x: 10, y: 10 }, { x: 16, y: 10 })).toBe(true);
   });
 
-  it("resolves an exact insertion index in another group's tab strip", () => {
-    const destination = resolveWorkspaceTabDropDestination({
-      groups: [groupGeometry(sourceGroupId, 0), groupGeometry(targetGroupId, 400)],
-      point: { x: 525, y: 16 },
-      source: { groupId: sourceGroupId, index: 0, tabId: sourceTabId },
+  it("resolves another pane's center as a replace destination", () => {
+    const destination = resolveWorkspaceSurfaceDropDestination({
+      panes: [paneGeometry(sourcePaneId, 0), paneGeometry(targetPaneId, 400)],
+      point: { x: 600, y: 300 },
+      source: paneSource(),
       workspaceRect,
     });
 
-    expect(destination).toEqual({
-      kind: "center",
-      sourceGroupId,
-      targetGroupId,
-      tabId: sourceTabId,
-      index: 1,
-    });
+    expect(destination).toEqual({ kind: "center", targetPaneId });
   });
 
-  it("adjusts source-strip insertion indices after removing the dragged tab", () => {
-    const destination = resolveWorkspaceTabDropDestination({
-      groups: [groupGeometry(sourceGroupId, 0)],
-      point: { x: 250, y: 16 },
-      source: { groupId: sourceGroupId, index: 0, tabId: sourceTabId },
-      workspaceRect,
-    });
-
-    expect(destination).toEqual({
-      kind: "reorder",
-      sourceGroupId,
-      targetGroupId: sourceGroupId,
-      tabId: sourceTabId,
-      index: 1,
-    });
+  it("refuses to drop a pane's surface back onto its own center", () => {
     expect(
-      resolveWorkspaceTabDropDestination({
-        groups: [groupGeometry(sourceGroupId, 0)],
-        point: { x: 25, y: 16 },
-        source: { groupId: sourceGroupId, index: 0, tabId: sourceTabId },
+      resolveWorkspaceSurfaceDropDestination({
+        panes: [paneGeometry(sourcePaneId, 0), paneGeometry(targetPaneId, 400)],
+        point: { x: 200, y: 300 },
+        source: paneSource(),
         workspaceRect,
       }),
     ).toBeNull();
   });
 
-  it("gives the center of another group precedence over directional edges", () => {
-    const destination = resolveWorkspaceTabDropDestination({
-      groups: [groupGeometry(sourceGroupId, 0), groupGeometry(targetGroupId, 400)],
-      point: { x: 600, y: 300 },
-      source: { groupId: sourceGroupId, index: 0, tabId: sourceTabId },
-      workspaceRect,
-    });
-
-    expect(destination).toEqual({
-      kind: "center",
-      sourceGroupId,
-      targetGroupId,
-      tabId: sourceTabId,
-      index: 2,
-    });
+  it("lets a sidebar row land on any pane's center, including the active one", () => {
+    expect(
+      resolveWorkspaceSurfaceDropDestination({
+        panes: [paneGeometry(sourcePaneId, 0)],
+        point: { x: 200, y: 300 },
+        source: sidebarSource(),
+        workspaceRect,
+      }),
+    ).toEqual({ kind: "center", targetPaneId: sourcePaneId });
   });
 
   it.each([
@@ -100,65 +84,76 @@ describe("workspace tab drag geometry", () => {
     ["right", { x: 790, y: 300 }],
     ["top", { x: 600, y: 40 }],
     ["bottom", { x: 600, y: 590 }],
-  ] as const)("resolves the %s directional zone", (edge, point) => {
-    const destination = resolveWorkspaceTabDropDestination({
-      groups: [groupGeometry(sourceGroupId, 0), groupGeometry(targetGroupId, 400)],
+  ] as const)("resolves the %s edge as a split destination", (edge, point) => {
+    const destination = resolveWorkspaceSurfaceDropDestination({
+      panes: [paneGeometry(sourcePaneId, 0), paneGeometry(targetPaneId, 400)],
       point,
-      source: { groupId: sourceGroupId, index: 0, tabId: sourceTabId },
+      source: paneSource(),
       workspaceRect,
     });
 
-    expect(destination).toEqual({
-      kind: "edge",
-      sourceGroupId,
-      targetGroupId,
-      tabId: sourceTabId,
-      edge,
-    });
+    expect(destination).toEqual({ kind: "edge", targetPaneId, edge });
   });
 
-  it("disables unusable, focused, and redundant split targets", () => {
-    const narrowTarget = {
-      ...groupGeometry(targetGroupId, 400),
-      rect: { left: 400, top: 0, width: 300, height: 300 },
-    };
-    const resolve = (
-      groups: ReadonlyArray<WorkspaceDragGroupGeometry>,
-      point: { readonly x: number; readonly y: number },
-      focusedGroupId?: typeof sourceGroupId,
-    ) =>
-      resolveWorkspaceTabDropDestination({
-        groups,
-        point,
-        source: { groupId: sourceGroupId, index: 0, tabId: sourceTabId },
+  it("blocks edges on the source pane, focused layouts, and panes too small to split", () => {
+    // The source pane's own edges: the split would leave the surface where it was.
+    expect(
+      resolveWorkspaceSurfaceDropDestination({
+        panes: [paneGeometry(sourcePaneId, 0), paneGeometry(targetPaneId, 400)],
+        point: { x: 10, y: 300 },
+        source: paneSource(),
         workspaceRect,
-        ...(focusedGroupId === undefined ? {} : { focusedGroupId }),
-      });
-
-    expect(resolve([narrowTarget], { x: 410, y: 150 })).toBeNull();
-    expect(
-      resolve([groupGeometry(targetGroupId, 400)], { x: 410, y: 300 }, sourceGroupId),
+      }),
     ).toBeNull();
+    // A focused pane is presented alone, so a split created now would land hidden.
     expect(
-      resolve([groupGeometry(targetGroupId, 400)], { x: 525, y: 16 }, sourceGroupId),
+      resolveWorkspaceSurfaceDropDestination({
+        focusedPaneId: targetPaneId,
+        panes: [paneGeometry(targetPaneId, 400)],
+        point: { x: 410, y: 300 },
+        source: sidebarSource(),
+        workspaceRect,
+      }),
     ).toBeNull();
-    expect(resolve([groupGeometry(sourceGroupId, 0, 1)], { x: 10, y: 300 })).toBeNull();
+    // A pane below twice the minimum docked size cannot host a new sibling.
+    expect(
+      resolveWorkspaceSurfaceDropDestination({
+        panes: [
+          paneGeometry(targetPaneId, 400, { rect: { left: 400, top: 0, width: 300, height: 300 } }),
+        ],
+        point: { x: 410, y: 150 },
+        source: paneSource(),
+        workspaceRect,
+      }),
+    ).toBeNull();
   });
 
-  it("rejects release geometry outside the central workspace and disabled groups", () => {
+  it("hides non-focused panes from a drag while the layout is focused", () => {
     expect(
-      resolveWorkspaceTabDropDestination({
-        groups: [groupGeometry(targetGroupId, 400)],
+      resolveWorkspaceSurfaceDropDestination({
+        focusedPaneId: targetPaneId,
+        panes: [paneGeometry(sourcePaneId, 0), paneGeometry(targetPaneId, 400)],
+        point: { x: 200, y: 300 },
+        source: sidebarSource(),
+        workspaceRect,
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects release geometry outside the workspace and edge drops on unsplittable panes", () => {
+    expect(
+      resolveWorkspaceSurfaceDropDestination({
+        panes: [paneGeometry(targetPaneId, 400)],
         point: { x: 810, y: 300 },
-        source: { groupId: sourceGroupId, index: 0, tabId: sourceTabId },
+        source: paneSource(),
         workspaceRect,
       }),
     ).toBeNull();
     expect(
-      resolveWorkspaceTabDropDestination({
-        groups: [{ ...groupGeometry(targetGroupId, 400), canSplit: false }],
+      resolveWorkspaceSurfaceDropDestination({
+        panes: [paneGeometry(targetPaneId, 400, { canSplit: false })],
         point: { x: 410, y: 300 },
-        source: { groupId: sourceGroupId, index: 0, tabId: sourceTabId },
+        source: paneSource(),
         workspaceRect,
       }),
     ).toBeNull();

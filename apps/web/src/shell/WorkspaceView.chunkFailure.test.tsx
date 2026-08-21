@@ -11,9 +11,10 @@ vi.mock("../code/CodeWorkspaceTab", () => ({
 
 import { WorkspaceView, type WorkspaceViewProps } from "./WorkspaceView";
 import { createCodeThreadControllers } from "../code/codeThreadControllers";
+import { stubSurfaceDragHandle } from "../App.test-fixtures";
 
 const ids = {
-  group: "20000000-0000-4000-8000-000000000001",
+  pane: "20000000-0000-4000-8000-000000000001",
   node: "20000000-0000-4000-8000-000000000002",
   tab: "20000000-0000-4000-8000-000000000003",
   thread: "20000000-0000-4000-8000-000000000004",
@@ -46,11 +47,10 @@ function props(): WorkspaceViewProps {
     title: "Overview",
   } as WorkspaceTab;
   const layout = {
-    kind: "group",
+    kind: "pane",
     nodeId: ids.node,
-    groupId: ids.group,
-    activeTabId: ids.tab,
-    tabs: [tab],
+    paneId: ids.pane,
+    surface: tab,
   } as const;
   return {
     availabilityByProject: new Map(),
@@ -70,31 +70,29 @@ function props(): WorkspaceViewProps {
       dismiss: vi.fn(async () => false),
     },
     codeProviderChoices: [],
+    drag: stubSurfaceDragHandle(),
     layout: layout as never,
     mode: "code",
-    onActivate: vi.fn(),
+    onActivatePane: vi.fn(),
     onArchiveProject: vi.fn(),
     onClearFocus: vi.fn(),
-    onClose: vi.fn(),
+    onClosePane: vi.fn(),
     onCreateChat: vi.fn(),
     onCommitResize: vi.fn(),
-    onDropTab: vi.fn(),
     onFocus: vi.fn(),
-    onMove: vi.fn(),
     onOpenCodeThread: vi.fn(),
     onOpenCodeSurface: vi.fn(),
     onPreviewResize: vi.fn(),
     onRelinkProject: vi.fn(),
     onRenameProject: vi.fn(),
-    onReorder: vi.fn(),
-    onSplit: vi.fn(),
+    onSplitPane: vi.fn(),
     projects: [],
     providerController: {} as never,
     workspace: {
       windowId: ids.window,
       activeMode: "code",
       layouts: { chat: layout, work: layout, code: layout },
-      activeGroupIds: { chat: ids.group, work: ids.group, code: ids.group },
+      activePaneIds: { chat: ids.pane, work: ids.pane, code: ids.pane },
       contextByMode: {
         chat: { host: "local", mode: "chat", projectId: null, boundRoot: null },
         work: { host: "local", mode: "work", projectId: null, boundRoot: null },

@@ -4,66 +4,59 @@ import { activeCodeThreadTabId, openLocalCodeThreadIds } from "./workspaceTabLif
 
 describe("workspace tab lifecycle", () => {
   /**
-   * Split view: focusing the Browser pane must not unload the Code thread
-   * shown in the sibling pane. A utility tab has no thread of its own, so the
-   * visible Code thread stays active; a Welcome tab still yields none.
+   * Split view: activating the Browser pane must not unload the Code thread
+   * shown in the sibling pane. A utility surface has no thread of its own, so
+   * the visible Code thread stays active; a Welcome pane still yields none.
    */
-  it("keeps the sibling pane's Code thread active while a utility tab is focused", () => {
+  it("keeps the sibling pane's Code thread active while a utility pane is active", () => {
     const threadId = "00000000-0000-4000-8000-000000000701";
-    const browserGroupId = "00000000-0000-4000-8000-000000000622";
-    const layout = (activeTabId: string) =>
+    const utilityPaneId = "00000000-0000-4000-8000-000000000622";
+    const layout = (surface: Record<string, unknown>) =>
       decodeWorkspaceLayoutNode({
         kind: "split",
         nodeId: "00000000-0000-4000-8000-000000000610",
         orientation: "horizontal",
         ratio: 0.5,
         first: {
-          kind: "group",
+          kind: "pane",
           nodeId: "00000000-0000-4000-8000-000000000611",
-          groupId: "00000000-0000-4000-8000-000000000612",
-          tabs: [
-            {
-              kind: "code-overview",
-              id: "00000000-0000-4000-8000-000000000613",
-              threadId,
-              mode: "code",
-              title: "Thread",
-            },
-          ],
-          activeTabId: "00000000-0000-4000-8000-000000000613",
+          paneId: "00000000-0000-4000-8000-000000000612",
+          surface: {
+            kind: "code-overview",
+            id: "00000000-0000-4000-8000-000000000613",
+            threadId,
+            mode: "code",
+            title: "Thread",
+          },
         },
         second: {
-          kind: "group",
+          kind: "pane",
           nodeId: "00000000-0000-4000-8000-000000000621",
-          groupId: browserGroupId,
-          tabs: [
-            {
-              kind: "browser",
-              id: "00000000-0000-4000-8000-000000000623",
-              mode: "code",
-              title: "Browser",
-            },
-            {
-              kind: "welcome",
-              id: "00000000-0000-4000-8000-000000000624",
-              mode: "code",
-              title: "Welcome",
-            },
-          ],
-          activeTabId,
+          paneId: utilityPaneId,
+          surface,
         },
       });
 
     expect(
       activeCodeThreadTabId(
-        layout("00000000-0000-4000-8000-000000000623"),
-        browserGroupId as never,
+        layout({
+          kind: "browser",
+          id: "00000000-0000-4000-8000-000000000623",
+          mode: "code",
+          title: "Browser",
+        }),
+        utilityPaneId as never,
       ),
     ).toBe(threadId);
     expect(
       activeCodeThreadTabId(
-        layout("00000000-0000-4000-8000-000000000624"),
-        browserGroupId as never,
+        layout({
+          kind: "welcome",
+          id: "00000000-0000-4000-8000-000000000624",
+          mode: "code",
+          title: "Welcome",
+        }),
+        utilityPaneId as never,
       ),
     ).toBeUndefined();
   });
@@ -71,62 +64,58 @@ describe("workspace tab lifecycle", () => {
   it("collects every open Code thread once, however many surfaces it has open", () => {
     const threadA = "00000000-0000-4000-8000-000000000631";
     const threadB = "00000000-0000-4000-8000-000000000632";
+    const pane = (ordinal: number, surface: Record<string, unknown>) => ({
+      kind: "pane",
+      nodeId: `00000000-0000-4000-8000-00000000065${ordinal}`,
+      paneId: `00000000-0000-4000-8000-00000000066${ordinal}`,
+      surface,
+    });
     const layout = {
       kind: "split",
       nodeId: "00000000-0000-4000-8000-000000000633",
       orientation: "horizontal",
       ratio: 0.5,
       first: {
-        kind: "group",
+        kind: "split",
         nodeId: "00000000-0000-4000-8000-000000000634",
-        groupId: "00000000-0000-4000-8000-000000000635",
-        activeTabId: "00000000-0000-4000-8000-000000000636",
-        tabs: [
-          {
-            kind: "code-overview",
-            id: "00000000-0000-4000-8000-000000000636",
-            threadId: threadA,
-            mode: "code",
-            title: "Overview",
-          },
-          {
-            kind: "code-terminal",
-            id: "00000000-0000-4000-8000-000000000637",
-            threadId: threadA,
-            mode: "code",
-            title: "Terminal",
-          },
-          {
-            kind: "apple-workbench",
-            id: "00000000-0000-4000-8000-000000000638",
-            threadId: threadB,
-            mode: "code",
-            title: "Apple workbench",
-            projectPath: "Fixture.xcodeproj",
-          },
-        ],
+        orientation: "vertical",
+        ratio: 0.5,
+        first: pane(1, {
+          kind: "code-overview",
+          id: "00000000-0000-4000-8000-000000000636",
+          threadId: threadA,
+          mode: "code",
+          title: "Overview",
+        }),
+        second: pane(2, {
+          kind: "code-terminal",
+          id: "00000000-0000-4000-8000-000000000637",
+          threadId: threadA,
+          mode: "code",
+          title: "Terminal",
+        }),
       },
       second: {
-        kind: "group",
+        kind: "split",
         nodeId: "00000000-0000-4000-8000-000000000639",
-        groupId: "00000000-0000-4000-8000-000000000640",
-        activeTabId: "00000000-0000-4000-8000-000000000641",
-        tabs: [
-          {
-            kind: "code-diff",
-            id: "00000000-0000-4000-8000-000000000641",
-            threadId: threadB,
-            mode: "code",
-            title: "Changes",
-            relativePath: "README.md",
-          },
-          {
-            kind: "browser",
-            id: "00000000-0000-4000-8000-000000000642",
-            mode: "code",
-            title: "Browser",
-          },
-        ],
+        orientation: "vertical",
+        ratio: 0.5,
+        first: pane(3, {
+          kind: "apple-workbench",
+          id: "00000000-0000-4000-8000-000000000638",
+          threadId: threadB,
+          mode: "code",
+          title: "Apple workbench",
+          projectPath: "Fixture.xcodeproj",
+        }),
+        second: pane(4, {
+          kind: "code-diff",
+          id: "00000000-0000-4000-8000-000000000641",
+          threadId: threadB,
+          mode: "code",
+          title: "Changes",
+          relativePath: "README.md",
+        }),
       },
     } as never;
 

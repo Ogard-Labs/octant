@@ -1,6 +1,5 @@
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
-import { decodeTabGroupId } from "@octant/contracts/shell";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -11,7 +10,6 @@ import {
 import { CanvasWorkspaceTab } from "./CanvasWorkspaceTab";
 import { canvasFixture } from "./test-fixtures";
 
-const groupId = decodeTabGroupId("66666666-6666-4666-8666-666666666666");
 const skillDigest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 const canvasTab = {
@@ -85,13 +83,7 @@ function createCanvasClient(
 
 describe("CanvasWorkspaceTab", () => {
   it("renders the authorized canvas definition when get returns ready", async () => {
-    render(
-      <CanvasWorkspaceTab
-        groupId={groupId}
-        tab={canvasTab}
-        client={createCanvasClient(readyVersion)}
-      />,
-    );
+    render(<CanvasWorkspaceTab tab={canvasTab} client={createCanvasClient(readyVersion)} />);
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Signed Q3 report" })).toBeInTheDocument();
@@ -102,7 +94,6 @@ describe("CanvasWorkspaceTab", () => {
   it("shows an unavailable placeholder when the projection row is missing", async () => {
     render(
       <CanvasWorkspaceTab
-        groupId={groupId}
         tab={canvasTab}
         client={createCanvasClient({
           kind: "unavailable",
@@ -123,30 +114,36 @@ describe("CanvasWorkspaceTab", () => {
   });
 
   it("fails closed when the host canvas client is unavailable", () => {
-    render(<CanvasWorkspaceTab groupId={groupId} tab={canvasTab} client={undefined} />);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={undefined} />);
     expect(screen.getByText("The host canvas client is unavailable.")).toBeInTheDocument();
   });
 
-  it("exposes pin and attach-context actions when handlers are provided", async () => {
-    const onTogglePin = vi.fn();
+  it("exposes focus-zone pin and attach-context actions when handlers are provided", async () => {
+    const onPinCanvasInFocusZone = vi.fn();
     const onAttachContext = vi.fn();
 
     render(
       <CanvasWorkspaceTab
-        groupId={groupId}
         tab={canvasTab}
         client={createCanvasClient(readyVersion)}
         onAttachContext={onAttachContext}
-        onTogglePin={onTogglePin}
+        onPinCanvasInFocusZone={onPinCanvasInFocusZone}
       />,
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Pin Quarterly summary/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /Pin Quarterly summary in the focus zone/i }),
+      ).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /Pin Quarterly summary/i }));
-    expect(onTogglePin).toHaveBeenCalledWith(groupId, canvasTab);
+    fireEvent.click(
+      screen.getByRole("button", { name: /Pin Quarterly summary in the focus zone/i }),
+    );
+    expect(onPinCanvasInFocusZone).toHaveBeenCalledWith({
+      canvasId: quarterlyCanvasId,
+      title: "Signed Q3 report",
+    });
 
     fireEvent.click(
       screen.getByRole("button", { name: /Attach Signed Q3 report to thread context/i }),
@@ -212,13 +209,11 @@ describe("CanvasWorkspaceTab", () => {
 
     render(
       <CanvasWorkspaceTab
-        groupId={groupId}
         tab={canvasTab}
         client={createCanvasClient(readyVersion, historyOutcome, {
           get,
         } as unknown as Partial<CanvasClient>)}
         onAttachContext={onAttachContext}
-        onTogglePin={vi.fn()}
       />,
     );
 
@@ -254,13 +249,7 @@ describe("CanvasWorkspaceTab", () => {
   });
 
   it("offers no refresh control when the host transport cannot refresh", async () => {
-    render(
-      <CanvasWorkspaceTab
-        groupId={groupId}
-        tab={canvasTab}
-        client={createCanvasClient(readyVersion)}
-      />,
-    );
+    render(<CanvasWorkspaceTab tab={canvasTab} client={createCanvasClient(readyVersion)} />);
 
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Signed Q3 report" })).toBeInTheDocument();
@@ -282,7 +271,7 @@ describe("CanvasWorkspaceTab", () => {
       { refresh } as unknown as Partial<CanvasClient>,
     );
 
-    render(<CanvasWorkspaceTab groupId={groupId} tab={canvasTab} client={client} />);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
 
     await waitFor(() => {
       expect(client.get).toHaveBeenCalled();
@@ -319,7 +308,7 @@ describe("CanvasWorkspaceTab", () => {
       refresh,
     } as unknown as Partial<CanvasClient>);
 
-    render(<CanvasWorkspaceTab groupId={groupId} tab={canvasTab} client={client} />);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Refresh canvas/i }));
 
@@ -358,7 +347,7 @@ describe("CanvasWorkspaceTab", () => {
       cancelRefresh,
     } as unknown as Partial<CanvasClient>);
 
-    render(<CanvasWorkspaceTab groupId={groupId} tab={canvasTab} client={client} />);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Refresh canvas/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Cancel refresh/i }));
@@ -397,9 +386,7 @@ describe("CanvasWorkspaceTab", () => {
       { refresh } as unknown as Partial<CanvasClient>,
     );
 
-    render(
-      <CanvasWorkspaceTab groupId={groupId} tab={{ ...canvasTab, mode: "work" }} client={client} />,
-    );
+    render(<CanvasWorkspaceTab tab={{ ...canvasTab, mode: "work" }} client={client} />);
 
     fireEvent.click(await screen.findByRole("button", { name: /Refresh canvas/i }));
 
@@ -426,7 +413,7 @@ describe("CanvasWorkspaceTab", () => {
       refresh,
     } as unknown as Partial<CanvasClient>);
 
-    render(<CanvasWorkspaceTab groupId={groupId} tab={canvasTab} client={client} />);
+    render(<CanvasWorkspaceTab tab={canvasTab} client={client} />);
 
     // The canvas still reads; only the surfaces that would send a scope close.
     await waitFor(() => {
@@ -434,24 +421,5 @@ describe("CanvasWorkspaceTab", () => {
     });
     expect(screen.queryByRole("button", { name: /Refresh canvas/i })).toBeNull();
     expect(refresh).not.toHaveBeenCalled();
-  });
-
-  it("shows pinned state when the tab carries presentation pin", async () => {
-    render(
-      <CanvasWorkspaceTab
-        groupId={groupId}
-        tab={{ ...canvasTab, pinned: true }}
-        client={createCanvasClient(readyVersion)}
-        onAttachContext={vi.fn()}
-        onTogglePin={vi.fn()}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: /Unpin Quarterly summary/i })).toHaveAttribute(
-        "aria-pressed",
-        "true",
-      );
-    });
   });
 });

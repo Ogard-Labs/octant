@@ -1,95 +1,101 @@
-import type { TabGroupId, WorkspaceTabId } from "@octant/contracts/shell";
-import type { WorkspaceDragPoint, WorkspaceTabDropDestination } from "./workspaceTabDragGeometry";
-import { hasCrossedWorkspaceTabDragThreshold } from "./workspaceTabDragGeometry";
+import type {
+  WorkspaceDragPoint,
+  WorkspaceSurfaceDragSource,
+  WorkspaceSurfaceDropDestination,
+} from "./workspaceTabDragGeometry";
+import { hasCrossedWorkspaceSurfaceDragThreshold } from "./workspaceTabDragGeometry";
 
-export interface WorkspaceTabDragSource {
-  readonly groupId: TabGroupId;
-  readonly tabId: WorkspaceTabId;
-  readonly index: number;
-  readonly title: string;
-}
-
-export type WorkspaceTabDragSnapshot =
+export type WorkspaceSurfaceDragSnapshot =
   | { readonly phase: "idle" }
   | {
       readonly phase: "pending" | "dragging";
-      readonly source: WorkspaceTabDragSource;
+      readonly source: WorkspaceSurfaceDragSource;
       readonly point: WorkspaceDragPoint;
-      readonly destination: WorkspaceTabDropDestination | null;
+      readonly destination: WorkspaceSurfaceDropDestination | null;
     };
 
-export interface WorkspaceTabDragControllerOptions {
-  readonly onDrop: (destination: WorkspaceTabDropDestination) => void;
+export interface WorkspaceSurfaceDragControllerOptions {
+  readonly onDrop: (
+    source: WorkspaceSurfaceDragSource,
+    destination: WorkspaceSurfaceDropDestination,
+  ) => void;
   readonly resolveDestination: (
     point: WorkspaceDragPoint,
-    source: WorkspaceTabDragSource,
-  ) => WorkspaceTabDropDestination | null;
-  readonly onSnapshotChange?: (snapshot: WorkspaceTabDragSnapshot) => void;
+    source: WorkspaceSurfaceDragSource,
+  ) => WorkspaceSurfaceDropDestination | null;
+  readonly onSnapshotChange?: (snapshot: WorkspaceSurfaceDragSnapshot) => void;
 }
 
-export class WorkspaceTabDragController {
-  private snapshot: WorkspaceTabDragSnapshot = { phase: "idle" };
-  private origin: WorkspaceDragPoint | null = null;
-  private pointerId: number | null = null;
-  private suppressedClickTabId: WorkspaceTabId | null = null;
+export class WorkspaceSurfaceDragController {
+  #snapshot: WorkspaceSurfaceDragSnapshot = { phase: "idle" };
+  #origin: WorkspaceDragPoint | null = null;
+  #pointerId: number | null = null;
+  #suppressedClickKey: string | null = null;
 
-  constructor(private readonly options: WorkspaceTabDragControllerOptions) {}
+  readonly #options: WorkspaceSurfaceDragControllerOptions;
 
-  getSnapshot(): WorkspaceTabDragSnapshot {
-    return this.snapshot;
+  constructor(options: WorkspaceSurfaceDragControllerOptions) {
+    this.#options = options;
   }
 
-  start(pointerId: number, source: WorkspaceTabDragSource, point: WorkspaceDragPoint): void {
-    this.pointerId = pointerId;
-    this.origin = point;
-    this.setSnapshot({ phase: "pending", source, point, destination: null });
+  getSnapshot(): WorkspaceSurfaceDragSnapshot {
+    return this.#snapshot;
+  }
+
+  start(pointerId: number, source: WorkspaceSurfaceDragSource, point: WorkspaceDragPoint): void {
+    this.#pointerId = pointerId;
+    this.#origin = point;
+    this.#setSnapshot({ phase: "pending", source, point, destination: null });
   }
 
   move(pointerId: number, point: WorkspaceDragPoint): void {
-    if (pointerId !== this.pointerId || this.snapshot.phase === "idle" || this.origin === null)
+    if (pointerId !== this.#pointerId || this.#snapshot.phase === "idle" || this.#origin === null)
       return;
     if (
-      this.snapshot.phase === "pending" &&
-      !hasCrossedWorkspaceTabDragThreshold(this.origin, point)
+      this.#snapshot.phase === "pending" &&
+      !hasCrossedWorkspaceSurfaceDragThreshold(this.#origin, point)
     ) {
       return;
     }
-    this.setSnapshot({
+    this.#setSnapshot({
       phase: "dragging",
-      source: this.snapshot.source,
+      source: this.#snapshot.source,
       point,
-      destination: this.options.resolveDestination(point, this.snapshot.source),
+      destination: this.#options.resolveDestination(point, this.#snapshot.source),
     });
   }
 
   drop(pointerId: number): void {
-    if (pointerId !== this.pointerId) return;
-    const destination = this.snapshot.phase === "dragging" ? this.snapshot.destination : null;
-    if (this.snapshot.phase === "dragging") this.suppressedClickTabId = this.snapshot.source.tabId;
-    this.reset();
-    if (destination !== null) this.options.onDrop(destination);
+    if (pointerId !== this.#pointerId) return;
+    const dropped = this.#snapshot.phase === "dragging" ? this.#snapshot : null;
+    if (dropped !== null) this.#suppressedClickKey = dropped.source.dragKey;
+    this.#reset();
+    if (dropped !== null && dropped.destination !== null) {
+      this.#options.onDrop(dropped.source, dropped.destination);
+    }
   }
 
   cancel(): void {
-    if (this.snapshot.phase === "idle") return;
-    if (this.snapshot.phase === "dragging") this.suppressedClickTabId = this.snapshot.source.tabId;
-    this.reset();
+    if (this.#snapshot.phase === "idle") return;
+    if (this.#snapshot.phase === "dragging")
+      this.#suppressedClickKey = this.#snapshot.source.dragKey;
+    this.#reset();
   }
 
-  consumeClickSuppression(tabId: WorkspaceTabId): boolean {
-    if (this.suppressedClickTabId !== tabId) return false;
-    this.suppressedClickTabId = null;
+  consumeClickSuppression(dragKey: string): boolean {
+    if (this.#suppressedClickKey !== dragKey) return false;
+    this.#suppressedClickKey = null;
     return true;
   }
 
-  private reset(): void {
-    this.pointerId = null;
-    this.origin = null;
-    this.setSnapshot({ phase: "idle" });
+  #reset(): void {
+    this.#pointerId = null;
+    this.#origin = null;
+    this.#setSnapshot({ phase: "idle" });
   }
 
-  private setSnapshot(snapshot: WorkspaceTabDragSnapshot): void {
-    this.snapshot = snapshot;
-    this.options.onSnapshotChange?.(snapshot);
+  #setSnapshot(snapshot: WorkspaceSurfaceDragSnapshot): void {
+    this.#snapshot = snapshot;
+    this.#options.onSnapshotChange?.(snapshot);
   }
 }

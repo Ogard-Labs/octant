@@ -45,8 +45,8 @@ using the ordinary save and conflict policy.
 Preview chrome shows file name, type, size, and freshness, provenance
 (Project, repo, worktree, attachment, or artifact), search, zoom, **Attach
 selection**, **Reveal in Finder**, **Open externally**, and **Close**, plus a
-read-only indicator and fidelity notice. Preview tabs are normal persistent
-workspace tabs and restore after a restart.
+read-only indicator and fidelity notice. Previews are normal persistent
+workspace surfaces and restore after a restart.
 
 When a file cannot be rendered faithfully, the preview reports an honest
 state: **Unsupported**, **Limited fidelity**, **Locked**, **Too large**,

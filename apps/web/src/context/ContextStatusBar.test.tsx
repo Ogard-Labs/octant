@@ -2,7 +2,6 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ContextStatusBar } from "./ContextStatusBar";
-import { ContextTabWarning } from "./ContextTabWarning";
 import { contextFixture } from "./contextFixtures";
 
 describe("ContextStatusBar", () => {
@@ -36,16 +35,5 @@ describe("ContextStatusBar", () => {
     expect(screen.getByText("Terminal")).toBeVisible();
     expect(screen.getByText(/Fixture thread: Blocked/)).toBeVisible();
     expect(screen.getByText(/unknown/)).toBeVisible();
-  });
-
-  it("makes non-focused warnings keyboard actionable and non-color-only", async () => {
-    const onOpen = vi.fn();
-    const user = userEvent.setup();
-    render(<ContextTabWarning health="rate-limited" label="Build thread" onOpen={onOpen} />);
-    const warning = screen.getByRole("button", { name: /Build thread.*Rate limited/ });
-    expect(warning).toHaveTextContent("Rate limited");
-    warning.focus();
-    await user.keyboard("{Enter}");
-    expect(onOpen).toHaveBeenCalledOnce();
   });
 });

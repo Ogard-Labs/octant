@@ -19,13 +19,20 @@ describe("RightUtilityDockSurface", () => {
         onClose={vi.fn()}
         onSelectSurface={vi.fn()}
         projectMemory={<ProjectMemory />}
-        resolution={{ kind: "closed", reason: "project-stale" }}
+        resolution={{
+          kind: "unavailable",
+          reason: "project-stale",
+          surface: RIGHT_UTILITY_DOCK_SURFACES[1],
+        }}
       />,
     );
 
     expect(ProjectMemory).not.toHaveBeenCalled();
     expect(HostNavigator).not.toHaveBeenCalled();
     expect(screen.queryByText(/Private Project memory|Host Navigator/)).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Project memory has nothing to describe here" }),
+    ).toBeVisible();
 
     rerender(
       <RightUtilityDockSurface

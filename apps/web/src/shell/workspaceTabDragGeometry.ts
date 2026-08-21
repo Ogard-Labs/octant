@@ -1,4 +1,4 @@
-import type { TabGroupId, WorkspaceTabId } from "@octant/contracts/shell";
+import type { PaneId, WorkspaceTab } from "@octant/contracts/shell";
 
 export interface WorkspaceDragPoint {
   readonly x: number;
@@ -12,119 +12,80 @@ export interface WorkspaceDragRect {
   readonly height: number;
 }
 
-export interface WorkspaceDragTabGeometry {
-  readonly tabId: WorkspaceTabId;
+export interface WorkspaceDragPaneGeometry {
+  readonly paneId: PaneId;
   readonly rect: WorkspaceDragRect;
-}
-
-export interface WorkspaceDragGroupGeometry {
-  readonly groupId: TabGroupId;
-  readonly rect: WorkspaceDragRect;
-  readonly tabCount: number;
-  readonly tabStrip: {
-    readonly rect: WorkspaceDragRect;
-    readonly tabs: ReadonlyArray<WorkspaceDragTabGeometry>;
-  };
   readonly canSplit?: boolean;
 }
 
-export type WorkspaceTabDropEdge = "left" | "right" | "top" | "bottom";
+export type WorkspaceSurfaceDropEdge = "left" | "right" | "top" | "bottom";
 
-interface WorkspaceTabDropBase {
-  readonly sourceGroupId: TabGroupId;
-  readonly targetGroupId: TabGroupId;
-  readonly tabId: WorkspaceTabId;
+/**
+ * Where a dragged surface lands. A center drop replaces the target pane's
+ * surface; an edge drop splits the target pane and the surface takes the new
+ * pane. The surface itself travels with the drag source, not the destination.
+ */
+export type WorkspaceSurfaceDropDestination =
+  | { readonly kind: "center"; readonly targetPaneId: PaneId }
+  | {
+      readonly kind: "edge";
+      readonly targetPaneId: PaneId;
+      readonly edge: WorkspaceSurfaceDropEdge;
+    };
+
+/**
+ * What is being dragged: a surface value, plus the pane it is leaving when the
+ * drag started on a pane grip rather than a sidebar row. `dragKey` names the
+ * originating control so its click can be suppressed after a completed drag.
+ */
+export interface WorkspaceSurfaceDragSource {
+  readonly dragKey: string;
+  readonly paneId?: PaneId;
+  readonly surface: WorkspaceTab;
+  readonly title: string;
 }
 
-export type WorkspaceTabDropDestination =
-  | (WorkspaceTabDropBase & { readonly kind: "reorder"; readonly index: number })
-  | (WorkspaceTabDropBase & { readonly kind: "center"; readonly index: number })
-  | (WorkspaceTabDropBase & { readonly kind: "edge"; readonly edge: WorkspaceTabDropEdge });
-
-export interface ResolveWorkspaceTabDropInput {
+export interface ResolveWorkspaceSurfaceDropInput {
   readonly point: WorkspaceDragPoint;
   readonly workspaceRect: WorkspaceDragRect;
-  readonly groups: ReadonlyArray<WorkspaceDragGroupGeometry>;
-  readonly source: {
-    readonly groupId: TabGroupId;
-    readonly tabId: WorkspaceTabId;
-    readonly index: number;
-  };
-  readonly focusedGroupId?: TabGroupId;
+  readonly panes: ReadonlyArray<WorkspaceDragPaneGeometry>;
+  readonly source: WorkspaceSurfaceDragSource;
+  readonly focusedPaneId?: PaneId;
 }
 
-export const WORKSPACE_TAB_DRAG_THRESHOLD = 6;
+export const WORKSPACE_SURFACE_DRAG_THRESHOLD = 6;
 export const MIN_WORKSPACE_DOCKED_PANE_WIDTH = 180;
 export const MIN_WORKSPACE_DOCKED_PANE_HEIGHT = 160;
 
-export function hasCrossedWorkspaceTabDragThreshold(
+export function hasCrossedWorkspaceSurfaceDragThreshold(
   origin: WorkspaceDragPoint,
   current: WorkspaceDragPoint,
-  threshold = WORKSPACE_TAB_DRAG_THRESHOLD,
+  threshold = WORKSPACE_SURFACE_DRAG_THRESHOLD,
 ): boolean {
   const horizontalDistance = current.x - origin.x;
   const verticalDistance = current.y - origin.y;
   return horizontalDistance ** 2 + verticalDistance ** 2 >= threshold ** 2;
 }
 
-export function resolveWorkspaceTabDropDestination(
-  input: ResolveWorkspaceTabDropInput,
-): WorkspaceTabDropDestination | null {
+export function resolveWorkspaceSurfaceDropDestination(
+  input: ResolveWorkspaceSurfaceDropInput,
+): WorkspaceSurfaceDropDestination | null {
   if (!containsPoint(input.workspaceRect, input.point)) return null;
-  const visibleGroups =
-    input.focusedGroupId === undefined
-      ? input.groups
-      : input.groups.filter((group) => group.groupId === input.focusedGroupId);
-  const stripTarget = visibleGroups.find((group) =>
-    containsPoint(group.tabStrip.rect, input.point),
-  );
-  if (stripTarget !== undefined) {
-    const rawIndex = stripTarget.tabStrip.tabs.findIndex(
-      (tab) => input.point.x < tab.rect.left + tab.rect.width / 2,
-    );
-    const insertionIndex = rawIndex < 0 ? stripTarget.tabStrip.tabs.length : rawIndex;
-    if (stripTarget.groupId === input.source.groupId) {
-      const index = insertionIndex > input.source.index ? insertionIndex - 1 : insertionIndex;
-      if (index === input.source.index) return null;
-      return {
-        kind: "reorder",
-        sourceGroupId: input.source.groupId,
-        targetGroupId: stripTarget.groupId,
-        tabId: input.source.tabId,
-        index,
-      };
-    }
-    return {
-      kind: "center",
-      sourceGroupId: input.source.groupId,
-      targetGroupId: stripTarget.groupId,
-      tabId: input.source.tabId,
-      index: insertionIndex,
-    };
+  const visiblePanes =
+    input.focusedPaneId === undefined
+      ? input.panes
+      : input.panes.filter((pane) => String(pane.paneId) === String(input.focusedPaneId));
+  const target = visiblePanes.find((pane) => containsPoint(pane.rect, input.point));
+  if (target === undefined) return null;
+  const sourcePaneId = input.source.paneId;
+  if (isCenter(target.rect, input.point)) {
+    // Dropping a pane's surface back onto its own pane changes nothing.
+    if (sourcePaneId !== undefined && String(sourcePaneId) === String(target.paneId)) return null;
+    return { kind: "center", targetPaneId: target.paneId };
   }
-
-  const groupTarget = visibleGroups.find((group) => containsPoint(group.rect, input.point));
-  if (groupTarget === undefined) return null;
-  if (isCenter(groupTarget.rect, input.point)) {
-    if (groupTarget.groupId === input.source.groupId) return null;
-    return {
-      kind: "center",
-      sourceGroupId: input.source.groupId,
-      targetGroupId: groupTarget.groupId,
-      tabId: input.source.tabId,
-      index: groupTarget.tabCount,
-    };
-  }
-
-  const edge = nearestEdge(groupTarget.rect, input.point);
-  if (!canUseEdge(groupTarget, edge, input)) return null;
-  return {
-    kind: "edge",
-    sourceGroupId: input.source.groupId,
-    targetGroupId: groupTarget.groupId,
-    tabId: input.source.tabId,
-    edge,
-  };
+  const edge = nearestEdge(target.rect, input.point);
+  if (!canUseEdge(target, edge, input)) return null;
+  return { kind: "edge", targetPaneId: target.paneId, edge };
 }
 
 function containsPoint(rect: WorkspaceDragRect, point: WorkspaceDragPoint): boolean {
@@ -145,8 +106,8 @@ function isCenter(rect: WorkspaceDragRect, point: WorkspaceDragPoint): boolean {
   );
 }
 
-function nearestEdge(rect: WorkspaceDragRect, point: WorkspaceDragPoint): WorkspaceTabDropEdge {
-  const distances: ReadonlyArray<readonly [WorkspaceTabDropEdge, number]> = [
+function nearestEdge(rect: WorkspaceDragRect, point: WorkspaceDragPoint): WorkspaceSurfaceDropEdge {
+  const distances: ReadonlyArray<readonly [WorkspaceSurfaceDropEdge, number]> = [
     ["left", (point.x - rect.left) / rect.width],
     ["right", (rect.left + rect.width - point.x) / rect.width],
     ["top", (point.y - rect.top) / rect.height],
@@ -158,12 +119,16 @@ function nearestEdge(rect: WorkspaceDragRect, point: WorkspaceDragPoint): Worksp
 }
 
 function canUseEdge(
-  target: WorkspaceDragGroupGeometry,
-  edge: WorkspaceTabDropEdge,
-  input: ResolveWorkspaceTabDropInput,
+  target: WorkspaceDragPaneGeometry,
+  edge: WorkspaceSurfaceDropEdge,
+  input: ResolveWorkspaceSurfaceDropInput,
 ): boolean {
-  if (target.canSplit === false || input.focusedGroupId !== undefined) return false;
-  if (target.groupId === input.source.groupId && target.tabCount < 2) return false;
+  // A focused pane is presented alone; a split created now would land hidden.
+  if (target.canSplit === false || input.focusedPaneId !== undefined) return false;
+  // Splitting a pane off itself would leave the same surface where it was.
+  if (input.source.paneId !== undefined && String(input.source.paneId) === String(target.paneId)) {
+    return false;
+  }
   return edge === "left" || edge === "right"
     ? target.rect.width >= MIN_WORKSPACE_DOCKED_PANE_WIDTH * 2
     : target.rect.height >= MIN_WORKSPACE_DOCKED_PANE_HEIGHT * 2;

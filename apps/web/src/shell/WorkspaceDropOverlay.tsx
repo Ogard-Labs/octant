@@ -1,15 +1,13 @@
-import type { WorkspaceTabDragState } from "./useWorkspaceTabDrag";
-import type { WorkspaceTabDropDestination } from "./workspaceTabDragGeometry";
+import type { WorkspaceSurfaceDragState } from "./useWorkspaceTabDrag";
+import type { WorkspaceSurfaceDropDestination } from "./workspaceTabDragGeometry";
 
 export function WorkspaceDropOverlay(props: {
-  readonly destination: WorkspaceTabDropDestination | null;
-  readonly targetGroupId: string;
+  readonly destination: WorkspaceSurfaceDropDestination | null;
+  readonly targetPaneId: string;
 }) {
   const destination = props.destination;
-  if (destination === null || destination.targetGroupId !== props.targetGroupId) return null;
-  if (destination.kind === "reorder") return null;
-  const label =
-    destination.kind === "edge" ? `Split ${destination.edge}` : "Move to this tab group";
+  if (destination === null || String(destination.targetPaneId) !== props.targetPaneId) return null;
+  const label = destination.kind === "edge" ? `Split ${destination.edge}` : "Open in this pane";
   return (
     <div
       aria-hidden="true"
@@ -22,16 +20,14 @@ export function WorkspaceDropOverlay(props: {
   );
 }
 
-export function WorkspaceDragStatus(props: { readonly drag: WorkspaceTabDragState }) {
+export function WorkspaceDragStatus(props: { readonly drag: WorkspaceSurfaceDragState }) {
   const destination = props.drag.destination;
   const message =
     destination === null
       ? `Dragging ${props.drag.source.title}. No drop target.`
       : destination.kind === "edge"
-        ? `Dock ${props.drag.source.title} ${destination.edge}.`
-        : destination.kind === "reorder"
-          ? `Move ${props.drag.source.title} to tab position ${destination.index + 1}.`
-          : `Move ${props.drag.source.title} to another tab group.`;
+        ? `Split ${destination.edge} and open ${props.drag.source.title}.`
+        : `Open ${props.drag.source.title} in this pane.`;
   return (
     <>
       <div aria-live="polite" className="sr-only" role="status">

@@ -31,6 +31,7 @@ import {
   reconcileWorkspaceWithSettings,
   replaceShellSettings,
   resolveWorkspaceContext,
+  workspaceWelcomeSurface,
   type WorkspaceContextResolves,
 } from "@octant/domain";
 import { Schema } from "effect";
@@ -211,58 +212,59 @@ export class ShellService implements ShellServiceApi {
         ),
         settings,
       );
-      if (
-        (command.operation.kind === "open-tab" ||
-          command.operation.kind === "switch-project-tab") &&
-        command.operation.tab.kind === "project"
-      ) {
-        const project = this.#persistence.readProject(command.operation.tab.projectId);
+      // A surface can land through open, an explicit Project switch, or a drag
+      // that resolves to a split or center drop; every one of those paths gets
+      // the same Project-authority guard so a drag cannot journal a surface an
+      // open would refuse.
+      const introduced = introducedSurface(command.operation);
+      if (introduced !== undefined && introduced.kind === "project") {
+        const project = this.#persistence.readProject(introduced.projectId);
         if (
           project === undefined ||
           project.lifecycle !== "active" ||
           project.type !== command.operation.mode ||
-          project.type !== command.operation.tab.mode
+          project.type !== introduced.mode
         ) {
           throw new ShellServiceError({
             category: "invalid",
-            message: "Project tab requires an active matching Project.",
+            message: "Project surface requires an active matching Project.",
           });
         }
       }
-      if (command.operation.kind === "open-tab" && command.operation.tab.kind === "preview") {
-        // Preview tabs carry their own opaque Project binding. Validate the
-        // Project is still active and matches the operation mode before the
-        // pure context policy enforces the one-Project invariant. The host
-        // reauthorizes the opaque target on every open/chunk/refresh after
-        // the tab is journaled.
-        const project = this.#persistence.readProject(command.operation.tab.projectId);
+      if (introduced !== undefined && introduced.kind === "preview") {
+        // Preview surfaces carry their own opaque Project binding. Validate
+        // the Project is still active and matches the operation mode before
+        // the pure context policy enforces the one-Project invariant. The
+        // host reauthorizes the opaque target on every open/chunk/refresh
+        // after the surface is journaled.
+        const project = this.#persistence.readProject(introduced.projectId);
         if (
           project === undefined ||
           project.lifecycle !== "active" ||
           project.type !== command.operation.mode ||
-          project.type !== command.operation.tab.mode
+          project.type !== introduced.mode
         ) {
           throw new ShellServiceError({
             category: "invalid",
-            message: "Preview tab requires an active matching Project.",
+            message: "Preview surface requires an active matching Project.",
           });
         }
       }
-      if (command.operation.kind === "open-tab" && command.operation.tab.kind === "canvas") {
-        const project = this.#persistence.readProject(command.operation.tab.projectId);
-        const canvas = this.#persistence.canvasProjection.getById(command.operation.tab.canvasId);
+      if (introduced !== undefined && introduced.kind === "canvas") {
+        const project = this.#persistence.readProject(introduced.projectId);
+        const canvas = this.#persistence.canvasProjection.getById(introduced.canvasId);
         if (
           project === undefined ||
           project.lifecycle !== "active" ||
           project.type !== command.operation.mode ||
-          project.type !== command.operation.tab.mode ||
+          project.type !== introduced.mode ||
           canvas === undefined ||
           String(canvas.currentVersion.definition.provenance.projectId) !==
-            String(command.operation.tab.projectId)
+            String(introduced.projectId)
         ) {
           throw new ShellServiceError({
             category: "invalid",
-            message: "Canvas tab requires an active matching Project and Canvas.",
+            message: "Canvas surface requires an active matching Project and Canvas.",
           });
         }
       }
@@ -357,6 +359,11 @@ export class ShellService implements ShellServiceApi {
   }
 }
 
+/**
+ * Restore is layout-only: a surface that no longer resolves renders the mode's
+ * welcome surface in that pane, reusing the surface id so the pane keeps its
+ * identity. A dead placeholder with a Retry would be a view of nothing.
+ */
 function reconcileProjectTabs(
   workspace: WindowWorkspace,
   persistence: PersistenceService,
@@ -368,22 +375,13 @@ function reconcileProjectTabs(
     if (layout.kind === "split") {
       return { ...layout, first: visit(layout.first, mode), second: visit(layout.second, mode) };
     }
-    return {
-      ...layout,
-      tabs: layout.tabs.map((tab) => {
-        if (tab.kind !== "project") return { ...tab };
-        const project = persistence.readProject(tab.projectId);
-        if (project !== undefined && project.type === tab.mode && project.type === mode) {
-          return { ...tab };
-        }
-        return {
-          kind: "unavailable" as const,
-          id: tab.id,
-          title: tab.title,
-          reason: "Project is unavailable. Reopen it from Projects.",
-        };
-      }),
-    };
+    const surface = layout.surface;
+    if (surface.kind !== "project") return { ...layout, surface: { ...surface } };
+    const project = persistence.readProject(surface.projectId);
+    if (project !== undefined && project.type === surface.mode && project.type === mode) {
+      return { ...layout, surface: { ...surface } };
+    }
+    return { ...layout, surface: workspaceWelcomeSurface(mode, surface.id) };
   };
   return {
     ...workspace,
@@ -396,12 +394,11 @@ function reconcileProjectTabs(
 }
 
 /**
- * Convert persisted preview tabs whose Project binding is no longer
- * authoritative into unavailable placeholders. A preview tab is restorable
- * only when the active mode context is bound to the same active Project; a
- * stale, archived, or cross-Project preview never guesses a replacement
- * file. The host still reauthorizes the opaque target on every
- * open/chunk/refresh after the tab is presented.
+ * A preview surface is restorable only when the active mode context is bound
+ * to the same active Project; a stale, archived, or cross-Project preview
+ * renders the mode's welcome surface in place rather than guessing a
+ * replacement file. The host still reauthorizes the opaque target on every
+ * open/chunk/refresh after the surface is presented.
  */
 function reconcilePreviewTabs(
   workspace: WindowWorkspace,
@@ -419,28 +416,19 @@ function reconcilePreviewTabs(
         second: visit(layout.second, mode, activeProjectId),
       };
     }
-    return {
-      ...layout,
-      tabs: layout.tabs.map((tab) => {
-        if (tab.kind !== "preview") return { ...tab };
-        const authority = classifyPreviewTabAuthority({
-          tabProjectId: tab.projectId,
-          activeProjectId,
-        });
-        if (authority === "bound") {
-          // The Project is still active and matches the mode context. The
-          // host reauthorizes the opaque target on restore; keep the tab
-          // durable so the renderer can reopen it.
-          return { ...tab };
-        }
-        return {
-          kind: "unavailable" as const,
-          id: tab.id,
-          title: tab.title,
-          reason: "Preview is unavailable. Reopen it from the Project.",
-        };
-      }),
-    };
+    const surface = layout.surface;
+    if (surface.kind !== "preview") return { ...layout, surface: { ...surface } };
+    const authority = classifyPreviewTabAuthority({
+      tabProjectId: surface.projectId,
+      activeProjectId,
+    });
+    if (authority === "bound") {
+      // The Project is still active and matches the mode context. The host
+      // reauthorizes the opaque target on restore; keep the surface durable
+      // so the renderer can reopen it.
+      return { ...layout, surface: { ...surface } };
+    }
+    return { ...layout, surface: workspaceWelcomeSurface(mode, surface.id) };
   };
   return {
     ...workspace,
@@ -468,29 +456,18 @@ function reconcileCanvasTabs(
         second: visit(layout.second, mode, activeProjectId),
       };
     }
-    return {
-      ...layout,
-      tabs: layout.tabs.map((tab) => {
-        if (tab.kind !== "canvas") return { ...tab };
-        const projection = persistence.canvasProjection.getById(tab.canvasId);
-        const canvasProjectId =
-          projection === undefined
-            ? null
-            : projection.currentVersion.definition.provenance.projectId;
-        const authority = classifyCanvasTabRestore({
-          tabProjectId: tab.projectId,
-          activeProjectId,
-          canvasProjectId,
-        });
-        if (authority === "bound") return { ...tab };
-        return {
-          kind: "unavailable" as const,
-          id: tab.id,
-          title: tab.title,
-          reason: "Canvas is unavailable. Reopen it from the Project.",
-        };
-      }),
-    };
+    const surface = layout.surface;
+    if (surface.kind !== "canvas") return { ...layout, surface: { ...surface } };
+    const projection = persistence.canvasProjection.getById(surface.canvasId);
+    const canvasProjectId =
+      projection === undefined ? null : projection.currentVersion.definition.provenance.projectId;
+    const authority = classifyCanvasTabRestore({
+      tabProjectId: surface.projectId,
+      activeProjectId,
+      canvasProjectId,
+    });
+    if (authority === "bound") return { ...layout, surface: { ...surface } };
+    return { ...layout, surface: workspaceWelcomeSurface(mode, surface.id) };
   };
   return {
     ...workspace,
@@ -509,9 +486,9 @@ function reconcileContextWithProjects(
   // Clear stale context bindings: if a bound Project is archived, deleted, or
   // no longer matches the mode, drop its projectId/boundRoot so the surface
   // catalog fails closed for root-backed surfaces until a fresh Project opens.
-  // Root-backed tabs (browser/files) whose context is being cleared are first
-  // converted to unavailable so validateTabContext does not reject the layout
-  // during reconcileWorkspaceWithSettings.
+  // Root-backed surfaces (browser/files) whose context is being cleared are
+  // first converted to the mode's welcome surface so validateTabContext does
+  // not reject the layout during reconcileWorkspaceWithSettings.
   const visit = (
     layout: WorkspaceLayoutNode,
     mode: "chat" | "work" | "code",
@@ -525,19 +502,10 @@ function reconcileContextWithProjects(
       };
     }
     if (staleProjectId === null) return layout;
-    return {
-      ...layout,
-      tabs: layout.tabs.map((tab) =>
-        tab.kind === "browser" || tab.kind === "files"
-          ? {
-              kind: "unavailable" as const,
-              id: tab.id,
-              title: tab.title,
-              reason: "Project is unavailable. Reopen it to restore this surface.",
-            }
-          : tab,
-      ),
-    };
+    const surface = layout.surface;
+    return surface.kind === "browser" || surface.kind === "files"
+      ? { ...layout, surface: workspaceWelcomeSurface(mode, surface.id) }
+      : layout;
   };
   const reconcileMode = (
     context: WorkspaceContextKey,
@@ -546,8 +514,8 @@ function reconcileContextWithProjects(
   ): { context: WorkspaceContextKey; layout: WorkspaceLayoutNode } => {
     if (context.projectId === null) return { context, layout };
     const project = persistence.readProject(context.projectId);
-    // Missing or archived Project: clear the context and convert root-backed
-    // tabs to unavailable so the layout remains restorable.
+    // Missing or archived Project: clear the context and render root-backed
+    // surfaces as welcome so the layout remains restorable.
     if (project === undefined || project.lifecycle !== "active" || project.type !== mode) {
       const cleared: WorkspaceContextKey = {
         host: context.host,
@@ -591,11 +559,11 @@ function inferContextFromProjectTabs(
 ): WindowWorkspace {
   // For workspaces upcasted before contextByMode existed, or whose context was
   // cleared after a stale Project was archived, infer the mode context from an
-  // active Project tab in that mode's layout so the launcher catalog reflects
-  // the bound Project and root-backed surfaces remain available. When multiple
-  // Project tabs exist in the same mode, only the first active matching one
-  // becomes the authority; the rest are converted to unavailable so activating
-  // them cannot bypass the open-tab context guard.
+  // active Project surface in that mode's layout so the launcher catalog
+  // reflects the bound Project and root-backed surfaces remain available. When
+  // multiple Project surfaces exist in the same mode, only the first active
+  // matching one becomes the authority; the rest render the mode's welcome
+  // surface so activating them cannot bypass the open-surface context guard.
   const quarantineExtraProjects = (
     layout: WorkspaceLayoutNode,
     mode: "chat" | "work" | "code",
@@ -609,19 +577,10 @@ function inferContextFromProjectTabs(
         second: quarantineExtraProjects(layout.second, mode, boundProjectId),
       };
     }
-    return {
-      ...layout,
-      tabs: layout.tabs.map((tab) => {
-        if (tab.kind !== "project" || tab.mode !== mode) return tab;
-        if (tab.projectId === boundProjectId) return tab;
-        return {
-          kind: "unavailable" as const,
-          id: tab.id,
-          title: tab.title,
-          reason: "Only one Project can be active per mode. Reopen this Project in a new window.",
-        };
-      }),
-    };
+    const surface = layout.surface;
+    if (surface.kind !== "project" || surface.mode !== mode) return layout;
+    if (surface.projectId === boundProjectId) return layout;
+    return { ...layout, surface: workspaceWelcomeSurface(mode, surface.id) };
   };
   const inferMode = (
     context: WorkspaceContextKey,
@@ -662,9 +621,33 @@ function firstProjectTab(
   if (layout.kind === "split") {
     return firstProjectTab(layout.first, mode) ?? firstProjectTab(layout.second, mode);
   }
-  return layout.tabs.find((tab) => tab.kind === "project" && tab.mode === mode) as
-    | { readonly projectId: ProjectId }
-    | undefined;
+  const surface = layout.surface;
+  return surface.kind === "project" && surface.mode === mode
+    ? { projectId: surface.projectId }
+    : undefined;
+}
+
+/**
+ * The surface an operation would place into a pane, when it carries one.
+ * Activation-by-identity also flows through these kinds, so the guard treats
+ * "already visible" and "new" alike — a re-open of a stale Project surface is
+ * refused the same way its first open would be.
+ */
+function introducedSurface(
+  operation: Extract<
+    ReturnType<typeof decodeShellCommand>,
+    { kind: "apply-workspace-operation" }
+  >["operation"],
+) {
+  switch (operation.kind) {
+    case "open-surface":
+    case "switch-project-surface":
+    case "replace-pane-surface":
+    case "split-pane":
+      return operation.surface;
+    default:
+      return undefined;
+  }
 }
 
 function resolveTabContext(

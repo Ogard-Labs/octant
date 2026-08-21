@@ -12,7 +12,6 @@ import {
   LOCAL_HOST_ID,
 } from "@octant/contracts";
 import {
-  applyWorkspaceOperation,
   defaultEnvironmentPresentationState,
   defaultShellSettings,
   defaultWindowWorkspace,
@@ -35,15 +34,15 @@ const now = "2026-07-13T12:00:00.000Z";
 const projectId = decodeProjectId("00000000-0000-4000-8000-000000000205");
 
 describe("ShellService", () => {
-  it("requires an active matching Project before appending a Project tab", () => {
+  it("requires an active matching Project before appending a Project surface", () => {
     const workspace = defaultWindowWorkspace(ids.window);
     const codeLayout = workspace.layouts.code;
-    if (codeLayout.kind !== "group") throw new Error("expected group");
+    if (codeLayout.kind !== "pane") throw new Error("expected pane");
     const operation = {
-      kind: "open-tab" as const,
+      kind: "open-surface" as const,
       mode: "code" as const,
-      groupId: codeLayout.groupId,
-      tab: {
+      paneId: codeLayout.paneId,
+      surface: {
         kind: "project" as const,
         id: "00000000-0000-4000-8000-000000000206" as never,
         projectId,
@@ -92,10 +91,10 @@ describe("ShellService", () => {
     ).toMatchObject({ kind: "workspace-replaced" });
   });
 
-  it("rejects opening a Project tab bound to a different context with a cross-context failure", () => {
+  it("rejects opening a Project surface bound to a different context with a cross-context failure", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;
-    if (code.kind !== "group") throw new Error("expected group");
+    if (code.kind !== "pane") throw new Error("expected pane");
     const otherProject = decodeProjectId("00000000-0000-4000-8000-000000000210");
     const anchored: WindowWorkspace = {
       ...base,
@@ -127,10 +126,10 @@ describe("ShellService", () => {
     });
     service.bootstrap(ids.window);
     const operation = {
-      kind: "open-tab" as const,
+      kind: "open-surface" as const,
       mode: "code" as const,
-      groupId: code.groupId,
-      tab: {
+      paneId: code.paneId,
+      surface: {
         kind: "project" as const,
         id: "00000000-0000-4000-8000-000000000211" as never,
         projectId,
@@ -187,9 +186,9 @@ describe("ShellService", () => {
       windowId: ids.window,
       expectedVersion: 1,
       operation: {
-        kind: "switch-project-tab",
+        kind: "switch-project-surface",
         mode: "code",
-        tab: {
+        surface: {
           kind: "project",
           id: "00000000-0000-4000-8000-000000000211" as never,
           projectId,
@@ -209,7 +208,7 @@ describe("ShellService", () => {
   it("resolves a bound Work thread to its active Project context", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "work" as const };
     const work = base.layouts.work;
-    if (work.kind !== "group") throw new Error("expected group");
+    if (work.kind !== "pane") throw new Error("expected pane");
     const threadId = decodeWorkThreadId("00000000-0000-4000-8000-000000000212");
     const thread = decodeWorkThread({
       id: threadId,
@@ -236,10 +235,10 @@ describe("ShellService", () => {
       windowId: ids.window,
       expectedVersion: 0,
       operation: {
-        kind: "open-tab",
+        kind: "open-surface",
         mode: "work",
-        groupId: work.groupId,
-        tab: {
+        paneId: work.paneId,
+        surface: {
           kind: "work-thread",
           id: "00000000-0000-4000-8000-000000000213" as never,
           threadId,
@@ -256,20 +255,23 @@ describe("ShellService", () => {
     expect(fixture.append).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps archived restored Project tabs but presents missing or mismatched tabs as unavailable", () => {
+  it("keeps archived restored Project surfaces but presents missing or mismatched ones as welcome", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;
-    if (code.kind !== "group") throw new Error("expected group");
+    if (code.kind !== "pane") throw new Error("expected pane");
     const restored = {
       ...base,
       layouts: {
         ...base.layouts,
         code: {
           ...code,
-          tabs: [
-            { kind: "project", id: code.tabs[0]!.id, projectId, mode: "code", title: "Saved" },
-          ],
-          activeTabId: code.tabs[0]!.id,
+          surface: {
+            kind: "project",
+            id: code.surface.id,
+            projectId,
+            mode: "code",
+            title: "Saved",
+          },
         },
       },
     } as never;
@@ -283,30 +285,33 @@ describe("ShellService", () => {
         uuid: uuidSequence(),
         clock: () => now,
       }).bootstrap(ids.window).workspace.layouts.code,
-    ).toMatchObject({ tabs: [{ kind: "project" }] });
+    ).toMatchObject({ surface: { kind: "project" } });
     for (const project of [undefined, projectFixture("chat")]) {
       const persistence = persistenceStub({
         workspace: { workspace: restored, aggregateVersion: 2 as never },
         project,
       });
+      // Restore is layout-only: the pane keeps its place and identity but the
+      // unresolvable Project renders the mode's welcome surface, never a dead
+      // placeholder.
       expect(
         new ShellService({
           persistence: persistence.persistence,
           uuid: uuidSequence(),
           clock: () => now,
         }).bootstrap(ids.window).workspace.layouts.code,
-      ).toMatchObject({ tabs: [{ kind: "unavailable", reason: expect.any(String) }] });
+      ).toMatchObject({ surface: { kind: "welcome", id: code.surface.id } });
       expect(persistence.append).not.toHaveBeenCalled();
     }
   });
 
-  it("keeps restored preview tabs bound to the active Project and quarantines stale ones", () => {
+  it("keeps restored preview surfaces bound to the active Project and quarantines stale ones", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "work" as const };
     const work = base.layouts.work;
-    if (work.kind !== "group") throw new Error("expected group");
-    const boundPreviewTab = {
+    if (work.kind !== "pane") throw new Error("expected pane");
+    const boundPreviewSurface = {
       kind: "preview" as const,
-      id: work.tabs[0]!.id,
+      id: work.surface.id,
       mode: "work" as const,
       title: "report.pdf",
       targetId: "11111111-2222-4333-8444-555555555555",
@@ -330,11 +335,11 @@ describe("ShellService", () => {
       },
       layouts: {
         ...base.layouts,
-        work: { ...work, tabs: [boundPreviewTab], activeTabId: boundPreviewTab.id },
+        work: { ...work, surface: boundPreviewSurface },
       },
     } as never;
-    // Active matching Project: preview tab stays durable so the renderer can
-    // reopen it through the existing preview contracts.
+    // Active matching Project: the preview surface stays durable so the
+    // renderer can reopen it through the existing preview contracts.
     const activeFixture = persistenceStub({
       workspace: { workspace: restored, aggregateVersion: 2 as never },
       project: projectFixture("work") as never,
@@ -344,14 +349,14 @@ describe("ShellService", () => {
       uuid: uuidSequence(),
       clock: () => now,
     }).bootstrap(ids.window);
-    const activeTab =
-      activeBootstrap.workspace.layouts.work.kind === "group"
-        ? activeBootstrap.workspace.layouts.work.tabs[0]
+    const activeSurface =
+      activeBootstrap.workspace.layouts.work.kind === "pane"
+        ? activeBootstrap.workspace.layouts.work.surface
         : undefined;
-    expect(activeTab?.kind).toBe("preview");
+    expect(activeSurface?.kind).toBe("preview");
     expect(activeFixture.append).not.toHaveBeenCalled();
-    // Archived/missing Project: preview tab restores as unavailable so the
-    // host never guesses a replacement file.
+    // Archived/missing Project: the pane renders the mode's welcome surface so
+    // the host never guesses a replacement file.
     for (const project of [
       undefined,
       { ...projectFixture("work"), lifecycle: "archived" as const },
@@ -365,16 +370,16 @@ describe("ShellService", () => {
         uuid: uuidSequence(),
         clock: () => now,
       }).bootstrap(ids.window);
-      const staleTab =
-        staleBootstrap.workspace.layouts.work.kind === "group"
-          ? staleBootstrap.workspace.layouts.work.tabs[0]
+      const staleSurface =
+        staleBootstrap.workspace.layouts.work.kind === "pane"
+          ? staleBootstrap.workspace.layouts.work.surface
           : undefined;
-      expect(staleTab?.kind).toBe("unavailable");
+      expect(staleSurface?.kind).toBe("welcome");
       expect(staleFixture.append).not.toHaveBeenCalled();
     }
   });
 
-  it("keeps restored canvas tabs bound and quarantines missing projection rows", () => {
+  it("keeps restored canvas surfaces bound and quarantines missing projection rows", () => {
     const projection = new CanvasProjection();
     const canvasId = "11111111-1111-4111-8111-111111111111" as never;
     projection.applyCreated({
@@ -414,10 +419,10 @@ describe("ShellService", () => {
     });
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "chat" as const };
     const chat = base.layouts.chat;
-    if (chat.kind !== "group") throw new Error("expected group");
-    const canvasTab = {
+    if (chat.kind !== "pane") throw new Error("expected pane");
+    const canvasSurface = {
       kind: "canvas" as const,
-      id: chat.tabs[0]!.id,
+      id: chat.surface.id,
       mode: "chat" as const,
       title: "Quarterly summary",
       canvasId,
@@ -437,7 +442,7 @@ describe("ShellService", () => {
       },
       layouts: {
         ...base.layouts,
-        chat: { ...chat, tabs: [canvasTab], activeTabId: canvasTab.id },
+        chat: { ...chat, surface: canvasSurface },
       },
     } as never;
     const activeFixture = persistenceStub({
@@ -450,11 +455,11 @@ describe("ShellService", () => {
       uuid: uuidSequence(),
       clock: () => now,
     }).bootstrap(ids.window);
-    const activeTab =
-      activeBootstrap.workspace.layouts.chat.kind === "group"
-        ? activeBootstrap.workspace.layouts.chat.tabs[0]
+    const activeSurface =
+      activeBootstrap.workspace.layouts.chat.kind === "pane"
+        ? activeBootstrap.workspace.layouts.chat.surface
         : undefined;
-    expect(activeTab?.kind).toBe("canvas");
+    expect(activeSurface?.kind).toBe("canvas");
     projection.clear();
     const missingFixture = persistenceStub({
       workspace: { workspace: restored, aggregateVersion: 2 as never },
@@ -466,18 +471,18 @@ describe("ShellService", () => {
       uuid: uuidSequence(),
       clock: () => now,
     }).bootstrap(ids.window);
-    const missingTab =
-      missingBootstrap.workspace.layouts.chat.kind === "group"
-        ? missingBootstrap.workspace.layouts.chat.tabs[0]
+    const missingSurface =
+      missingBootstrap.workspace.layouts.chat.kind === "pane"
+        ? missingBootstrap.workspace.layouts.chat.surface
         : undefined;
-    expect(missingTab?.kind).toBe("unavailable");
+    expect(missingSurface?.kind).toBe("welcome");
   });
 
-  it("requires an active matching Project before appending a preview tab", () => {
+  it("requires an active matching Project before appending a preview surface", () => {
     const workspace = defaultWindowWorkspace(ids.window);
     const workLayout = workspace.layouts.work;
-    if (workLayout.kind !== "group") throw new Error("expected group");
-    const previewTab = {
+    if (workLayout.kind !== "pane") throw new Error("expected pane");
+    const previewSurface = {
       kind: "preview" as const,
       id: "00000000-0000-4000-8000-000000000206" as never,
       mode: "work" as const,
@@ -507,10 +512,10 @@ describe("ShellService", () => {
           windowId: ids.window,
           expectedVersion: 1,
           operation: {
-            kind: "open-tab" as const,
+            kind: "open-surface" as const,
             mode: "work" as const,
-            groupId: workLayout.groupId,
-            tab: previewTab,
+            paneId: workLayout.paneId,
+            surface: previewSurface,
           },
         }),
       ).toThrowError(
@@ -560,7 +565,7 @@ describe("ShellService", () => {
   it("reconciles stale contexts before resolving execute operations", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;
-    if (code.kind !== "group") throw new Error("expected group");
+    if (code.kind !== "pane") throw new Error("expected pane");
     const staleWorkspace = {
       ...base,
       contextByMode: {
@@ -587,7 +592,7 @@ describe("ShellService", () => {
       clock: () => now,
     });
     service.bootstrap(ids.window);
-    const browserTab = {
+    const browserSurface = {
       kind: "browser" as const,
       id: "00000000-0000-4000-8000-000000000220" as never,
       mode: "code" as const,
@@ -599,10 +604,10 @@ describe("ShellService", () => {
         windowId: ids.window,
         expectedVersion: 3,
         operation: {
-          kind: "open-tab" as const,
+          kind: "open-surface" as const,
           mode: "code" as const,
-          groupId: code.groupId,
-          tab: browserTab,
+          paneId: code.paneId,
+          surface: browserSurface,
         },
       }),
     ).toThrowError(
@@ -617,10 +622,10 @@ describe("ShellService", () => {
     expect(fixture.append).not.toHaveBeenCalled();
   });
 
-  it("infers context from active Project tabs when upcasting a pre-contextByMode workspace", () => {
+  it("infers context from active Project surfaces when upcasting a pre-contextByMode workspace", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;
-    if (code.kind !== "group") throw new Error("expected group");
+    if (code.kind !== "pane") throw new Error("expected pane");
     const preContextWorkspace = {
       ...base,
       contextByMode: {
@@ -647,16 +652,13 @@ describe("ShellService", () => {
         ...base.layouts,
         code: {
           ...code,
-          tabs: [
-            {
-              kind: "project" as const,
-              id: code.tabs[0]!.id,
-              projectId,
-              mode: "code" as const,
-              title: "Project",
-            },
-          ],
-          activeTabId: code.tabs[0]!.id,
+          surface: {
+            kind: "project" as const,
+            id: code.surface.id,
+            projectId,
+            mode: "code" as const,
+            title: "Project",
+          },
         },
       },
     } as never;
@@ -676,11 +678,11 @@ describe("ShellService", () => {
     );
   });
 
-  it("converts root-backed tabs to unavailable when clearing stale context at bootstrap", () => {
+  it("converts root-backed surfaces to welcome when clearing stale context at bootstrap", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;
-    if (code.kind !== "group") throw new Error("expected group");
-    const withBrowserTab = {
+    if (code.kind !== "pane") throw new Error("expected pane");
+    const withBrowserSurface = {
       ...base,
       contextByMode: {
         chat: base.contextByMode.chat,
@@ -696,20 +698,17 @@ describe("ShellService", () => {
         ...base.layouts,
         code: {
           ...code,
-          tabs: [
-            {
-              kind: "browser" as const,
-              id: code.tabs[0]!.id,
-              mode: "code" as const,
-              title: "Browser",
-            },
-          ],
-          activeTabId: code.tabs[0]!.id,
+          surface: {
+            kind: "browser" as const,
+            id: code.surface.id,
+            mode: "code" as const,
+            title: "Browser",
+          },
         },
       },
     } as never;
     const fixture = persistenceStub({
-      workspace: { workspace: withBrowserTab, aggregateVersion: 2 as never },
+      workspace: { workspace: withBrowserSurface, aggregateVersion: 2 as never },
       project: undefined,
     });
     const bootstrap = new ShellService({
@@ -717,11 +716,11 @@ describe("ShellService", () => {
       uuid: uuidSequence(),
       clock: () => now,
     }).bootstrap(ids.window);
-    const restoredTab =
-      bootstrap.workspace.layouts.code.kind === "group"
-        ? bootstrap.workspace.layouts.code.tabs[0]
+    const restoredSurface =
+      bootstrap.workspace.layouts.code.kind === "pane"
+        ? bootstrap.workspace.layouts.code.surface
         : undefined;
-    expect(restoredTab?.kind).toBe("unavailable");
+    expect(restoredSurface?.kind).toBe("welcome");
     expect(bootstrap.workspace.contextByMode.code.projectId).toBeNull();
   });
 
@@ -767,10 +766,10 @@ describe("ShellService", () => {
     expect(bootstrap.workspace.contextByMode.code.boundRoot).toBe("/home/new-root");
   });
 
-  it("quarantines extra Project tabs when inferring context from a pre-contextByMode workspace", () => {
+  it("quarantines extra Project surfaces when inferring context from a pre-contextByMode workspace", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;
-    if (code.kind !== "group") throw new Error("expected group");
+    if (code.kind !== "pane") throw new Error("expected pane");
     const otherProject = decodeProjectId("00000000-0000-4000-8000-000000000230");
     const preContextWorkspace = {
       ...base,
@@ -797,24 +796,32 @@ describe("ShellService", () => {
       layouts: {
         ...base.layouts,
         code: {
-          ...code,
-          tabs: [
-            {
+          kind: "split" as const,
+          nodeId: "00000000-0000-4000-8000-000000000232",
+          orientation: "horizontal" as const,
+          ratio: 0.5,
+          first: {
+            ...code,
+            surface: {
               kind: "project" as const,
-              id: code.tabs[0]!.id,
+              id: code.surface.id,
               projectId,
               mode: "code" as const,
               title: "Project A",
             },
-            {
+          },
+          second: {
+            kind: "pane" as const,
+            nodeId: "00000000-0000-4000-8000-000000000233",
+            paneId: "00000000-0000-4000-8000-000000000234",
+            surface: {
               kind: "project" as const,
               id: "00000000-0000-4000-8000-000000000231" as never,
               projectId: otherProject,
               mode: "code" as const,
               title: "Project B",
             },
-          ],
-          activeTabId: code.tabs[0]!.id,
+          },
         },
       },
     } as never;
@@ -830,22 +837,26 @@ describe("ShellService", () => {
       uuid: uuidSequence(),
       clock: () => now,
     }).bootstrap(ids.window);
-    const tabs =
-      bootstrap.workspace.layouts.code.kind === "group"
-        ? bootstrap.workspace.layouts.code.tabs
-        : [];
-    expect(tabs.find((t) => t.kind === "project" && t.projectId === projectId)).toBeDefined();
-    const otherTab = tabs.find((t) => t.id === ("00000000-0000-4000-8000-000000000231" as never));
-    expect(otherTab?.kind).toBe("unavailable");
+    const layout = bootstrap.workspace.layouts.code;
+    if (layout.kind !== "split" || layout.first.kind !== "pane" || layout.second.kind !== "pane") {
+      throw new Error("expected a split of two panes");
+    }
+    expect(layout.first.surface).toMatchObject({ kind: "project", projectId });
+    // The second Project surface loses authority: it renders welcome in place
+    // so activating its pane cannot bypass the open-surface context guard.
+    expect(layout.second.surface).toMatchObject({
+      kind: "welcome",
+      id: "00000000-0000-4000-8000-000000000231",
+    });
   });
 
-  it("never journals a bootstrap-only unavailable presentation over its raw Project tab", () => {
+  it("never journals a bootstrap-only welcome presentation over its raw Project surface", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;
-    if (code.kind !== "group") throw new Error("expected group");
-    const rawProjectTab = {
+    if (code.kind !== "pane") throw new Error("expected pane");
+    const rawProjectSurface = {
       kind: "project" as const,
-      id: code.tabs[0]!.id,
+      id: code.surface.id,
       projectId,
       mode: "code" as const,
       title: "Recoverable Project",
@@ -854,7 +865,7 @@ describe("ShellService", () => {
       ...base,
       layouts: {
         ...base.layouts,
-        code: { ...code, tabs: [rawProjectTab], activeTabId: rawProjectTab.id },
+        code: { ...code, surface: rawProjectSurface },
       },
     };
     const fixture = persistenceStub({
@@ -868,20 +879,20 @@ describe("ShellService", () => {
     });
 
     expect(service.bootstrap(ids.window).workspace.layouts.code).toMatchObject({
-      tabs: [{ kind: "unavailable" }],
+      surface: { kind: "welcome" },
     });
-    expect(rawWorkspace.layouts.code.tabs[0]).toEqual(rawProjectTab);
+    expect(rawWorkspace.layouts.code.surface).toEqual(rawProjectSurface);
 
     const result = service.execute({
       kind: "apply-workspace-operation",
       windowId: ids.window,
       expectedVersion: 2,
-      operation: { kind: "focus-group", mode: "code", groupId: code.groupId },
+      operation: { kind: "focus-pane", mode: "code", paneId: code.paneId },
     });
 
     expect(result).toMatchObject({
       kind: "workspace-replaced",
-      workspace: { layouts: { code: { tabs: [{ kind: "unavailable" }] } } },
+      workspace: { layouts: { code: { surface: { kind: "welcome" } } } },
       version: 3,
     });
 
@@ -890,8 +901,8 @@ describe("ShellService", () => {
         {
           payload: {
             workspace: {
-              layouts: { code: { tabs: [rawProjectTab] } },
-              focusedGroupId: code.groupId,
+              layouts: { code: { surface: rawProjectSurface } },
+              focusedPaneId: code.paneId,
             },
           },
         },
@@ -907,30 +918,44 @@ describe("ShellService", () => {
     ).events[0].payload.workspace;
     expect(result.workspace).not.toBe(appendedWorkspace);
     expect(result.workspace.layouts.code).not.toBe(appendedWorkspace.layouts.code);
-    expect(result.workspace.layouts.code).toMatchObject({ tabs: [{ kind: "unavailable" }] });
-    expect(appendedWorkspace.layouts.code).toMatchObject({ tabs: [rawProjectTab] });
+    expect(result.workspace.layouts.code).toMatchObject({ surface: { kind: "welcome" } });
+    expect(appendedWorkspace.layouts.code).toMatchObject({ surface: rawProjectSurface });
     expect(service.bootstrap(ids.window).workspace.layouts.code).toMatchObject({
-      tabs: [{ kind: "unavailable" }],
+      surface: { kind: "welcome" },
     });
   });
 
-  it("closes a stale raw Project tab and returns the updated presentation", () => {
+  it("closes a stale raw Project pane and returns the updated presentation", () => {
     const base = defaultWindowWorkspace(ids.window);
     const code = base.layouts.code;
-    if (code.kind !== "group") throw new Error("expected group");
-    const stale = {
-      kind: "project" as const,
-      id: "00000000-0000-4000-8000-000000000208" as never,
-      projectId,
-      mode: "code" as const,
-      title: "Stale",
+    if (code.kind !== "pane") throw new Error("expected pane");
+    const stalePaneId = "00000000-0000-4000-8000-000000000209" as never;
+    const stalePane = {
+      kind: "pane" as const,
+      nodeId: "00000000-0000-4000-8000-000000000210" as never,
+      paneId: stalePaneId,
+      surface: {
+        kind: "project" as const,
+        id: "00000000-0000-4000-8000-000000000208" as never,
+        projectId,
+        mode: "code" as const,
+        title: "Stale",
+      },
     };
     const rawWorkspace = {
       ...base,
       layouts: {
         ...base.layouts,
-        code: { ...code, tabs: [...code.tabs, stale], activeTabId: stale.id },
+        code: {
+          kind: "split" as const,
+          nodeId: "00000000-0000-4000-8000-000000000211" as never,
+          orientation: "horizontal" as const,
+          ratio: 0.5 as never,
+          first: code,
+          second: stalePane,
+        },
       },
+      activePaneIds: { ...base.activePaneIds, code: stalePaneId },
     };
     const fixture = persistenceStub({
       workspace: { workspace: rawWorkspace, aggregateVersion: 2 as never },
@@ -947,24 +972,30 @@ describe("ShellService", () => {
         kind: "apply-workspace-operation",
         windowId: ids.window,
         expectedVersion: 2,
-        operation: { kind: "close-tab", mode: "code", groupId: code.groupId, tabId: stale.id },
+        operation: { kind: "close-pane", mode: "code", paneId: stalePaneId },
       }),
     ).toMatchObject({
       kind: "workspace-replaced",
-      workspace: { layouts: { code: { tabs: [{ kind: "welcome" }] } } },
+      workspace: { layouts: { code: { kind: "pane", surface: { kind: "welcome" } } } },
     });
     expect(fixture.append.mock.calls[0]?.[0]).toMatchObject({
-      events: [{ payload: { workspace: { layouts: { code: { tabs: [{ kind: "welcome" }] } } } } }],
+      events: [
+        {
+          payload: {
+            workspace: { layouts: { code: { kind: "pane", surface: { kind: "welcome" } } } },
+          },
+        },
+      ],
     });
   });
 
   it("reports recovery safely if post-commit presentation reconciliation fails", () => {
     const base = { ...defaultWindowWorkspace(ids.window), activeMode: "code" as const };
     const code = base.layouts.code;
-    if (code.kind !== "group") throw new Error("expected group");
-    const rawProjectTab = {
+    if (code.kind !== "pane") throw new Error("expected pane");
+    const rawProjectSurface = {
       kind: "project" as const,
-      id: code.tabs[0]!.id,
+      id: code.surface.id,
       projectId,
       mode: "code" as const,
       title: "Recoverable Project",
@@ -973,7 +1004,7 @@ describe("ShellService", () => {
       ...base,
       layouts: {
         ...base.layouts,
-        code: { ...code, tabs: [rawProjectTab], activeTabId: rawProjectTab.id },
+        code: { ...code, surface: rawProjectSurface },
       },
     };
     let reads = 0;
@@ -997,7 +1028,7 @@ describe("ShellService", () => {
         kind: "apply-workspace-operation",
         windowId: ids.window,
         expectedVersion: 2,
-        operation: { kind: "focus-group", mode: "code", groupId: code.groupId },
+        operation: { kind: "focus-pane", mode: "code", paneId: code.paneId },
       }),
     ).toThrowError(
       expect.objectContaining({
@@ -1005,7 +1036,7 @@ describe("ShellService", () => {
       }),
     );
     expect(fixture.append.mock.calls[0]?.[0]).toMatchObject({
-      events: [{ payload: { workspace: { layouts: { code: { tabs: [rawProjectTab] } } } } }],
+      events: [{ payload: { workspace: { layouts: { code: { surface: rawProjectSurface } } } } }],
     });
   });
   it("synthesizes bootstrap defaults without appending events", () => {
@@ -1267,8 +1298,6 @@ describe("ShellService", () => {
 
   it("commits workspace policy output and returns the committed version", () => {
     const current = defaultWindowWorkspace(ids.window);
-    const group = current.layouts.code;
-    if (group.kind !== "group") throw new Error("default code layout must be a group");
     const { persistence, append } = persistenceStub({
       workspace: { workspace: current, aggregateVersion: 0 as never },
     });
@@ -1304,32 +1333,13 @@ describe("ShellService", () => {
     );
   });
 
-  it("journals cross-group docking as one authoritative workspace replacement", () => {
+  it("journals an edge-drop split as one authoritative workspace replacement", () => {
     const base = defaultWindowWorkspace(ids.window);
     const code = base.layouts.code;
-    if (code.kind !== "group") throw new Error("default code layout must be a group");
-    const extraTabId = "00000000-0000-4000-8000-000000000211" as never;
-    const withTab = applyWorkspaceOperation(base, {
-      kind: "open-tab",
-      mode: "code",
-      groupId: code.groupId,
-      tab: { kind: "settings", id: extraTabId, title: "Settings" },
-    });
-    const split = applyWorkspaceOperation(withTab, {
-      kind: "split-group",
-      mode: "code",
-      groupId: code.groupId,
-      tabId: extraTabId,
-      splitNodeId: "00000000-0000-4000-8000-000000000212" as never,
-      newGroupNodeId: "00000000-0000-4000-8000-000000000213" as never,
-      newGroupId: "00000000-0000-4000-8000-000000000214" as never,
-      orientation: "horizontal",
-      placement: "after",
-      ratio: 0.5 as never,
-    });
-    const sourceGroupId = "00000000-0000-4000-8000-000000000214" as never;
+    if (code.kind !== "pane") throw new Error("default code layout must be a pane");
+    const surfaceId = "00000000-0000-4000-8000-000000000211" as never;
     const { persistence, append } = persistenceStub({
-      workspace: { workspace: split, aggregateVersion: split.version },
+      workspace: { workspace: base, aggregateVersion: base.version },
     });
     const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
     service.bootstrap(ids.window);
@@ -1337,16 +1347,15 @@ describe("ShellService", () => {
     const result = service.execute({
       kind: "apply-workspace-operation",
       windowId: ids.window,
-      expectedVersion: split.version,
+      expectedVersion: base.version,
       operation: {
-        kind: "dock-tab",
+        kind: "split-pane",
         mode: "code",
-        fromGroupId: sourceGroupId,
-        targetGroupId: code.groupId,
-        tabId: extraTabId,
+        targetPaneId: code.paneId,
+        surface: { kind: "settings", id: surfaceId, title: "Settings" },
         splitNodeId: "00000000-0000-4000-8000-000000000215",
-        newGroupNodeId: "00000000-0000-4000-8000-000000000216",
-        newGroupId: "00000000-0000-4000-8000-000000000217",
+        newPaneNodeId: "00000000-0000-4000-8000-000000000216",
+        newPaneId: "00000000-0000-4000-8000-000000000217",
         orientation: "vertical",
         placement: "before",
         ratio: 0.5,
@@ -1355,32 +1364,36 @@ describe("ShellService", () => {
 
     expect(result).toMatchObject({
       kind: "workspace-replaced",
-      version: split.version + 1,
+      version: base.version + 1,
       workspace: {
-        activeGroupIds: {
+        activePaneIds: {
           code: "00000000-0000-4000-8000-000000000217",
         },
         layouts: {
           code: {
             kind: "split",
             nodeId: "00000000-0000-4000-8000-000000000215",
-            first: { kind: "group", tabs: [{ id: extraTabId }] },
-            second: { kind: "group", groupId: code.groupId },
+            first: {
+              kind: "pane",
+              paneId: "00000000-0000-4000-8000-000000000217",
+              surface: { id: surfaceId },
+            },
+            second: { kind: "pane", paneId: code.paneId },
           },
         },
       },
     });
     expect(append).toHaveBeenCalledOnce();
     expect(append.mock.calls[0]?.[0]).toMatchObject({
-      expectedVersion: split.version,
+      expectedVersion: base.version,
       events: [{ eventName: "workspace.layout-replaced" }],
     });
   });
 
-  it("keeps unsupported tab kinds fail-closed at the command boundary", () => {
+  it("keeps unsupported surface kinds fail-closed at the command boundary", () => {
     const current = defaultWindowWorkspace(ids.window);
     const code = current.layouts.code;
-    if (code.kind !== "group") throw new Error("default code layout must be a group");
+    if (code.kind !== "pane") throw new Error("default code layout must be a pane");
     const { persistence, append } = persistenceStub({
       workspace: { workspace: current, aggregateVersion: 0 as never },
     });
@@ -1392,10 +1405,10 @@ describe("ShellService", () => {
         windowId: ids.window,
         expectedVersion: 0,
         operation: {
-          kind: "open-tab",
+          kind: "open-surface",
           mode: "code",
-          groupId: code.groupId,
-          tab: {
+          paneId: code.paneId,
+          surface: {
             kind: "future-editor",
             id: "00000000-0000-4000-8000-000000000204",
             title: "Future editor",
