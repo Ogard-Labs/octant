@@ -6,7 +6,18 @@ import type {
   ProjectType,
 } from "@octant/contracts/projects";
 
-export type RightUtilityDockSurfaceId = "context" | "project-memory" | "navigator" | "thread";
+export type RightUtilityDockSurfaceId =
+  | "context"
+  | "project-memory"
+  | "navigator"
+  | "side-chat"
+  | "browser"
+  | "files"
+  | "changes"
+  | "terminal"
+  | "tests"
+  | "ios-simulator"
+  | "thread";
 
 /**
  * What a panel answers for, and therefore what makes it truthful.
@@ -109,9 +120,10 @@ export type RightUtilityDockResolution =
  * answer for one of them, and `code-environment` and `plan` were removed for
  * it. 0041 changed that premise — a pane holds exactly one surface and the
  * dock follows the active pane — so the active pane now names the dock's
- * thread unambiguously, and a thread-scoped panel can be truthful here. What
- * is still refused is duplication: the thread panel keeps the environment's
- * own facts, and Thread holds the thread's working surfaces.
+ * thread unambiguously, and a thread-scoped panel can be truthful here. The
+ * direct utilities restore independently for each active thread; the legacy
+ * Thread panel keeps only the secondary Plan, Publish, and Agents tools that
+ * were never workspace-launcher entries.
  */
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
@@ -134,11 +146,51 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     modes: ["chat", "work", "code"],
     scope: "host",
   },
-  // Files, Plan, Publish, and Agents are all facts of one Code thread, so the
-  // panel is offered only where such a thread can be in the active pane.
+  {
+    id: "side-chat",
+    label: "Side Chat",
+    modes: ["chat", "work", "code"],
+    scope: "thread",
+  },
+  {
+    id: "browser",
+    label: "Browser",
+    modes: ["work", "code"],
+    scope: "thread",
+  },
+  {
+    id: "files",
+    label: "Files",
+    modes: ["work", "code"],
+    scope: "thread",
+  },
+  {
+    id: "changes",
+    label: "Changes",
+    modes: ["code"],
+    scope: "thread",
+  },
+  {
+    id: "terminal",
+    label: "Terminal",
+    modes: ["code"],
+    scope: "thread",
+  },
+  {
+    id: "tests",
+    label: "Tests",
+    modes: ["code"],
+    scope: "thread",
+  },
+  {
+    id: "ios-simulator",
+    label: "iOS Simulator",
+    modes: ["code"],
+    scope: "thread",
+  },
   {
     id: "thread",
-    label: "Thread",
+    label: "Thread tools",
     modes: ["code"],
     scope: "thread",
   },
@@ -149,7 +201,14 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     context: RIGHT_UTILITY_DOCK_SURFACES[0],
     "project-memory": RIGHT_UTILITY_DOCK_SURFACES[1],
     navigator: RIGHT_UTILITY_DOCK_SURFACES[2],
-    thread: RIGHT_UTILITY_DOCK_SURFACES[3],
+    "side-chat": RIGHT_UTILITY_DOCK_SURFACES[3],
+    browser: RIGHT_UTILITY_DOCK_SURFACES[4],
+    files: RIGHT_UTILITY_DOCK_SURFACES[5],
+    changes: RIGHT_UTILITY_DOCK_SURFACES[6],
+    terminal: RIGHT_UTILITY_DOCK_SURFACES[7],
+    tests: RIGHT_UTILITY_DOCK_SURFACES[8],
+    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[9],
+    thread: RIGHT_UTILITY_DOCK_SURFACES[10],
   };
 
 export function resolveRightUtilityDockSurface(
@@ -213,7 +272,17 @@ function hasBinding(binding: CanonicalProjectBinding | undefined): boolean {
 }
 
 function isRightUtilityDockSurfaceId(value: unknown): value is RightUtilityDockSurfaceId {
-  return (
-    value === "context" || value === "project-memory" || value === "navigator" || value === "thread"
-  );
+  return [
+    "context",
+    "project-memory",
+    "navigator",
+    "side-chat",
+    "browser",
+    "files",
+    "changes",
+    "terminal",
+    "tests",
+    "ios-simulator",
+    "thread",
+  ].includes(String(value));
 }

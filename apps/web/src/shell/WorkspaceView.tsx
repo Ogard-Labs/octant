@@ -5,7 +5,6 @@ import type {
   WindowWorkspace,
   WorkspaceLayoutNode,
   WorkspacePane,
-  WorkspaceSurfaceCatalog,
   WorkspaceSurfaceDescriptor,
   WorkspaceTab,
 } from "@octant/contracts/shell";
@@ -219,7 +218,6 @@ export interface WorkspaceViewProps {
     placement: "before" | "after",
   ) => void;
   readonly workspace: WindowWorkspace;
-  readonly availableSurfaces?: WorkspaceSurfaceCatalog;
   readonly crossContextOffer?: {
     readonly message: string;
     readonly canOpenInNewWindow: boolean;
@@ -425,11 +423,6 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           onPreviewResize={props.onPreviewResize}
           onSplitPane={props.onSplitPane}
           {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
-          {...(props.availableSurfaces === undefined
-            ? {}
-            : { availableSurfaces: props.availableSurfaces })}
-          {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
-          onOpenCodeSurface={props.onOpenCodeSurface}
           renderSurface={(surface, paneId) => renderTab(surface, props, paneId, canvasContext)}
           totalWorkspacePaneCount={Object.values(props.workspace.layouts).reduce(
             (count, layout) => count + countPanes(layout),
@@ -1281,14 +1274,6 @@ function renderNonCodeTab(
         : { providerMessage: props.providerBootstrapMessage })}
     />
   );
-}
-
-function isHostQualifiedThreadTab(
-  tab: WorkspaceTab,
-): tab is
-  | Extract<WorkspaceTab, { readonly kind: "work-thread" }>
-  | Extract<WorkspaceTab, { readonly mode: "code"; readonly threadId: unknown }> {
-  return (tab.kind === "work-thread" || isCodeWorkspaceTab(tab)) && tab.hostId !== undefined;
 }
 
 class CodeWorkspaceErrorBoundary extends Component<

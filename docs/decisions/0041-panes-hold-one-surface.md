@@ -37,15 +37,20 @@ lifecycle. The sidebar's hierarchy is the one and only switcher.
   surface identity. A restored surface that no longer resolves under the
   window's current authority renders that mode's welcome surface in place —
   never a dead view demanding recovery.
-- **The right utility dock follows the active pane.** One surface per pane
-  means the active pane names the dock's subject unambiguously, so its panels
-  resolve against that pane's surface, and activating another pane re-targets
-  them. Which panel is selected, and whether the dock is open, are window
-  state and survive the move. A panel the newly active pane gives nothing to
-  describe presents that as an explicit unavailable state — never the previous
-  pane's content. Authority stays server-side; the dock only presents.
-- **Side chat, Zen, and pinned environment panels are untouched** — they were
-  never split-tree tabs, as 0015 already records.
+- **The right utility dock follows the active pane and remembers per thread.**
+  One surface per pane means the active pane names the dock's subject
+  unambiguously. Pointer activity or keyboard focus activates that pane. Each
+  thread owns its open Side Chat, Browser, Files, Changes, Terminal, Tests,
+  Thread tools, and iOS Simulator tabs plus which tab is selected. Returning to
+  a visible thread restores that tab set and reconnects to the thread's
+  host-owned utility state. The whole sidebar is window state and opens or
+  closes only from the explicit top-right control. Project- and host-scoped
+  readers keep a window fallback for panes that hold no thread. A panel the
+  newly active pane gives nothing to describe presents that as an explicit
+  unavailable state — never the previous pane's content. Authority stays
+  server-side; the dock only presents.
+- **Zen and pinned environment panels are untouched.** Side Chat is a
+  thread-scoped right-dock utility, not a split-tree pane.
 
 ## Consequences
 
