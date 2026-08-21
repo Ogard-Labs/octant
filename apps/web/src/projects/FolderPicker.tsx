@@ -33,6 +33,7 @@ export function FolderPicker(props: FolderPickerProps) {
   const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const mounted = useRef(true);
+  const parentCandidateIdRef = useRef<string | undefined>(undefined);
 
   const load = useCallback(
     async (parentCandidateId?: string, search?: string) => {
@@ -48,6 +49,7 @@ export function FolderPicker(props: FolderPickerProps) {
           ...(search !== undefined && search.trim() !== "" ? { search: search.trim() } : {}),
         });
         if (!mounted.current) return;
+        parentCandidateIdRef.current = parentCandidateId;
         setResult(browseResult);
         setStatus("ready");
       } catch (error) {
@@ -82,18 +84,24 @@ export function FolderPicker(props: FolderPickerProps) {
     };
   }, []);
 
+  function clearSearchTimer() {
+    if (searchTimer.current !== undefined) clearTimeout(searchTimer.current);
+  }
+
   function handleSearchChange(value: string) {
     setSearchInput(value);
-    if (searchTimer.current !== undefined) clearTimeout(searchTimer.current);
+    clearSearchTimer();
     searchTimer.current = setTimeout(() => {
       setSearching(true);
-      void load(undefined, value).finally(() => {
+      void load(parentCandidateIdRef.current, value).finally(() => {
         if (mounted.current) setSearching(false);
       });
     }, 300);
   }
 
   function navigateInto(candidate: FolderCandidate) {
+    clearSearchTimer();
+    setSearchInput("");
     void load(candidate.candidateId);
   }
 
@@ -115,15 +123,10 @@ export function FolderPicker(props: FolderPickerProps) {
     }
   }
 
-  function navigateToBreadcrumb(index: number) {
-    if (result === null) return;
-    const crumb = result.breadcrumbs[index];
-    if (crumb === undefined) return;
-    if (crumb.candidateId !== undefined) {
-      void load(crumb.candidateId);
-    } else {
-      void load();
-    }
+  function navigateToBreadcrumb(candidateId: FolderCandidateId) {
+    clearSearchTimer();
+    setSearchInput("");
+    void load(candidateId);
   }
 
   function requestClose() {
@@ -169,19 +172,35 @@ export function FolderPicker(props: FolderPickerProps) {
       </div>
       {result !== null && result.breadcrumbs.length > 0 ? (
         <nav aria-label="Breadcrumb" className="folder-picker__breadcrumbs">
-          {result.breadcrumbs.map((crumb, i) => (
-            <span className="folder-picker__breadcrumb-wrap" key={`${crumb.label}-${i}`}>
-              {i > 0 ? <ChevronRight aria-hidden="true" size={12} strokeWidth={1.8} /> : null}
-              <button
-                className="folder-picker__breadcrumb"
-                onClick={() => navigateToBreadcrumb(i)}
-                type="button"
+          {result.breadcrumbs.map((crumb, i) => {
+            const candidateId = crumb.candidateId;
+            return (
+              <span
+                className="folder-picker__breadcrumb-wrap"
+                key={`${candidateId ?? "current"}-${crumb.label}-${i}`}
               >
-                {i === 0 ? <Home aria-hidden="true" size={12} strokeWidth={1.8} /> : null}
-                <span>{crumb.label}</span>
-              </button>
-            </span>
-          ))}
+                {i > 0 ? <ChevronRight aria-hidden="true" size={12} strokeWidth={1.8} /> : null}
+                {candidateId === undefined ? (
+                  <span
+                    aria-current="page"
+                    className="folder-picker__breadcrumb folder-picker__breadcrumb--current"
+                  >
+                    {i === 0 ? <Home aria-hidden="true" size={12} strokeWidth={1.8} /> : null}
+                    <span>{crumb.label}</span>
+                  </span>
+                ) : (
+                  <button
+                    className="folder-picker__breadcrumb"
+                    onClick={() => navigateToBreadcrumb(candidateId)}
+                    type="button"
+                  >
+                    {i === 0 ? <Home aria-hidden="true" size={12} strokeWidth={1.8} /> : null}
+                    <span>{crumb.label}</span>
+                  </button>
+                )}
+              </span>
+            );
+          })}
         </nav>
       ) : null}
       <div className="folder-picker__list" role="listbox" aria-label="Folders">
