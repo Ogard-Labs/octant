@@ -296,7 +296,7 @@ export interface WorkspaceViewProps {
     deliveryOutcome?: import("@octant/contracts/code").CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
     threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   readonly draftCodeExecute?: (
     command: import("@octant/contracts/code").CodeCommand,
     signal?: AbortSignal,
@@ -304,7 +304,7 @@ export interface WorkspaceViewProps {
   readonly onDraftCreateCodeThread?: (
     input: import("../code/composer/CodeComposerAdapter").CodeComposerSubmitInput,
     projectId?: ProjectId,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   /**
    * Records a Code Project's remembered new-thread workspace habit
    * through the journaled Project command path.
@@ -793,16 +793,15 @@ function renderNonCodeTab(
           ? {}
           : { windowCapability: props.projectWindowCapability })}
         onCreateThread={(prompt, folderSelection, deliveryOutcome, images, threadMentionIds) => {
-          if (props.onDraftCreateThread !== undefined) {
-            void props.onDraftCreateThread(
-              tab.mode,
-              prompt,
-              folderSelection,
-              deliveryOutcome,
-              images,
-              threadMentionIds,
-            );
-          }
+          if (props.onDraftCreateThread === undefined) return;
+          return props.onDraftCreateThread(
+            tab.mode,
+            prompt,
+            folderSelection,
+            deliveryOutcome,
+            images,
+            threadMentionIds,
+          );
         }}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
         onCancel={() => {
