@@ -55,7 +55,14 @@ lifecycle. The sidebar's hierarchy is the one and only switcher.
   while its authority, environment, and activity live on the server as before.
 - Per-tab accessories die with the strip. Signals that rode on background
   tabs (for example a Project's context-health warning) must reach the user
-  through the sidebar or the surface itself.
+  through the sidebar or the surface itself. The context-health warning now
+  marks its Project's sidebar row, beside that row's other marks, and opening
+  it activates that Project before showing the dock's context panel — the
+  dock names the active pane's subject, so a panel about some other Project
+  would contradict the rule above. The window plans context for the active
+  Project only, so the mark covers the Projects a session has visited; a
+  Project it has not is unmarked rather than reported healthy, until the host
+  reports health with the Project list itself.
 - 0015 remains Accepted. This record supersedes only its tab-group leaf —
   the strip, tab lifecycle, and per-group activation; everything else in 0015
   (mode-first shell, split tree, boards, dock region, authority) stands.
