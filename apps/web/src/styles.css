@@ -5099,11 +5099,19 @@ button:focus-visible {
 }
 
 /* The bar spans the surface for its rule; its content sits in the shared
-   thread column so the title starts where the transcript below it does. */
+   thread column so it starts where the transcript below it does. */
 .code-thread-workspace__header {
   flex: 0 0 auto;
   padding: 6px 0;
   border-bottom: 1px solid var(--oct-border);
+}
+
+/* Live child runs are all this band holds now, and the slot that reports them
+   renders nothing at all for a thread with no children — leaving the band's
+   padding and its rule to paint a bare line and an empty strip above every
+   ordinary transcript. It exists only when it has something to say. */
+.code-thread-workspace__header:has(> .code-thread-workspace__header-row:empty) {
+  display: none;
 }
 
 .code-thread-workspace__header-row {
@@ -5113,54 +5121,6 @@ button:focus-visible {
   justify-content: space-between;
   gap: 8px 16px;
   min-height: 44px;
-}
-
-.code-thread-workspace__identity h1 {
-  margin: 0;
-  font-size: var(--oct-text-base);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  text-wrap: balance;
-}
-
-/* Metadata line: system meta typography; the lifecycle fact wears `.badge`. */
-.code-thread-workspace__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  margin-top: 2px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.code-thread-workspace__follow-up {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-/*
- * The durable follow-up marker is distinguished by more than color: an amber
- * palette, a leading diamond glyph, and the visible "Follow-up" label with its
- * reason, so the obligation reads clearly without relying on hue alone.
- */
-.code-thread-workspace__follow-up-marker {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: min(60ch, 60vw);
-  padding: 2px 8px;
-  overflow: hidden;
-  color: var(--oct-warn-fg);
-  background: var(--oct-warn-soft);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .code-thread-workspace__tool {

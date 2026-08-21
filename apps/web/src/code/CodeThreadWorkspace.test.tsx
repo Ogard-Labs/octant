@@ -1468,6 +1468,13 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
+    // The band above the transcript is chrome for live child runs, and the slot
+    // that reports them renders nothing for a thread with none — so the band
+    // collapses rather than painting a bare rule over an empty strip.
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(styles).toMatch(
+      /\.code-thread-workspace__header:has\(> \.code-thread-workspace__header-row:empty\)\s*\{\s*display:\s*none;/,
+    );
     expect(
       screen.queryByRole("heading", { name: "find bugs in this repo" }),
     ).not.toBeInTheDocument();
