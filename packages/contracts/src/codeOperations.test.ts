@@ -394,6 +394,21 @@ describe("Code operation contracts", () => {
     ).toThrow();
   });
 
+  it("carries a Code turn's `@file` mentions as paths the host re-checks itself", () => {
+    const turn = {
+      kind: "start-provider-turn",
+      ...scope,
+      sessionId: ids.providerSession,
+      prompt: { contentId: ids.content, digest: "d".repeat(64), byteLength: 42 },
+    } as const;
+
+    expect(
+      decodeCodeOperationCommand({ ...turn, fileMentionPaths: ["src/index.ts", "../secret"] }),
+    ).toMatchObject({
+      fileMentionPaths: ["src/index.ts", "../secret"],
+    });
+  });
+
   it("carries a turn's requested access posture as an intent the host clamps", () => {
     const turn = {
       kind: "start-provider-turn",

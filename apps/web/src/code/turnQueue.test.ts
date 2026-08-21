@@ -7,8 +7,20 @@ import {
   removeQueuedCodeTurn,
 } from "./turnQueue";
 
-const first = { id: "turn-1", prompt: "Run the tests", threadMentionIds: [], attachments: [] };
-const second = { id: "turn-2", prompt: "Then open a PR", threadMentionIds: [], attachments: [] };
+const first = {
+  id: "turn-1",
+  prompt: "Run the tests",
+  threadMentionIds: [],
+  attachments: [],
+  fileMentionPaths: [],
+};
+const second = {
+  id: "turn-2",
+  prompt: "Then open a PR",
+  threadMentionIds: [],
+  attachments: [],
+  fileMentionPaths: [],
+};
 
 describe("code turn queue", () => {
   it("keeps each thread's queued follow-ups in the order they were written", () => {

@@ -19,6 +19,8 @@ export interface QueuedCodeTurn {
   readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
   /** Images already staged with the host for this turn. */
   readonly attachments: ReadonlyArray<CodeAttachmentReference>;
+  /** `@file` paths this follow-up names; the host re-checks each one. */
+  readonly fileMentionPaths: ReadonlyArray<string>;
   /** The posture this queued follow-up asked to run under. */
   readonly executionPolicy?: ProviderExecutionPolicy;
 }

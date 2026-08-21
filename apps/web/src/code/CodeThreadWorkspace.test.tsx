@@ -77,7 +77,7 @@ describe("CodeThreadWorkspace", () => {
 
     await user.type(screen.getByLabelText("Follow-up message"), "check tests too");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], [], "approval-gated");
+    expect(sendFollowUp).toHaveBeenCalledWith("check tests too", [], [], [], "approval-gated");
   });
 
   /**
@@ -472,6 +472,7 @@ describe("CodeThreadWorkspace", () => {
       "#[Release notes] does this still hold?",
       [mentionedThreadId],
       [],
+      [],
       "approval-gated",
     );
   });
@@ -518,11 +519,11 @@ describe("CodeThreadWorkspace", () => {
 
     await user.type(composer, "please");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    // The path travels as ordinary prompt text; naming a file reaches nothing.
     expect(sendFollowUp).toHaveBeenCalledWith(
       "explain @src/index.ts please",
       [],
       [],
+      ["src/index.ts"],
       "approval-gated",
     );
   });
@@ -561,6 +562,7 @@ describe("CodeThreadWorkspace", () => {
       "match this mockup",
       [],
       [reference],
+      [],
       "approval-gated",
     );
     // Sending is not a discard: the image belongs to the turn that carried it.
@@ -601,6 +603,7 @@ describe("CodeThreadWorkspace", () => {
       "match this mockup",
       [],
       [reference],
+      [],
       "approval-gated",
     );
     // The refused turn leaves both the text and its image in the composer.
@@ -667,7 +670,13 @@ describe("CodeThreadWorkspace", () => {
       expect(discardAttachment).toHaveBeenCalledWith(threadId, reference.attachmentId),
     );
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("never mind the picture", [], [], "approval-gated");
+    expect(sendFollowUp).toHaveBeenCalledWith(
+      "never mind the picture",
+      [],
+      [],
+      [],
+      "approval-gated",
+    );
   });
 
   it("leaves an `@` that matches no file in this checkout as ordinary text", async () => {
@@ -707,7 +716,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "keep this prompt");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
 
-    expect(sendFollowUp).toHaveBeenCalledWith("keep this prompt", [], [], "approval-gated");
+    expect(sendFollowUp).toHaveBeenCalledWith("keep this prompt", [], [], [], "approval-gated");
     expect(composer).toHaveValue("keep this prompt");
   });
 
@@ -778,7 +787,7 @@ describe("CodeThreadWorkspace", () => {
 
     await user.type(screen.getByLabelText("Follow-up message"), "just look");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("just look", [], [], "plan");
+    expect(sendFollowUp).toHaveBeenCalledWith("just look", [], [], [], "plan");
   });
 
   it("offers auto-accept edits on a thread that already grants it, without changing the thread", async () => {
@@ -812,7 +821,7 @@ describe("CodeThreadWorkspace", () => {
 
     await user.type(screen.getByLabelText("Follow-up message"), "ask me first");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("ask me first", [], [], "approval-gated");
+    expect(sendFollowUp).toHaveBeenCalledWith("ask me first", [], [], [], "approval-gated");
   });
 
   it("cannot run a writing one-shot on a Plan thread, but can still raise the grant", async () => {
@@ -891,7 +900,7 @@ describe("CodeThreadWorkspace", () => {
     );
     await user.type(screen.getByLabelText("Follow-up message"), "just look");
     await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(sendFollowUp).toHaveBeenCalledWith("just look", [], [], "plan");
+    expect(sendFollowUp).toHaveBeenCalledWith("just look", [], [], [], "plan");
     expect(screen.getByRole("combobox", { name: "Next turn access" })).toHaveTextContent(
       "Ask for approvals",
     );
@@ -1240,6 +1249,7 @@ describe("CodeThreadWorkspace", () => {
       prompt: "and then push",
       threadMentionIds: [],
       attachments: [],
+      fileMentionPaths: [],
     }));
     const sendFollowUp = vi.fn(async () => true);
     render(
@@ -1254,7 +1264,7 @@ describe("CodeThreadWorkspace", () => {
     await user.type(composer, "and then push");
     await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
 
-    expect(queueFollowUp).toHaveBeenCalledWith("and then push", [], [], "approval-gated");
+    expect(queueFollowUp).toHaveBeenCalledWith("and then push", [], [], [], "approval-gated");
     expect(sendFollowUp).not.toHaveBeenCalled();
     await waitFor(() => expect(composer).toHaveValue(""));
   });
@@ -1267,8 +1277,20 @@ describe("CodeThreadWorkspace", () => {
         controller={controller({
           cancelQueuedFollowUp,
           queuedFollowUps: [
-            { id: "queued-1", prompt: "run the tests", threadMentionIds: [], attachments: [] },
-            { id: "queued-2", prompt: "then open a PR", threadMentionIds: [], attachments: [] },
+            {
+              id: "queued-1",
+              prompt: "run the tests",
+              threadMentionIds: [],
+              attachments: [],
+              fileMentionPaths: [],
+            },
+            {
+              id: "queued-2",
+              prompt: "then open a PR",
+              threadMentionIds: [],
+              attachments: [],
+              fileMentionPaths: [],
+            },
           ],
           turnStatus: "running",
         })}

@@ -5,6 +5,7 @@ import type { CreateHostViewScope, PickerGroup } from "@octant/domain";
 import { ArrowUp, FolderOpen, AlertTriangle, Paperclip } from "lucide-react";
 import {
   useCallback,
+  useRef,
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
@@ -16,6 +17,13 @@ import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { clipboardHasImage } from "../../chat/composerImagePaste";
 import { selectedModelReadsImages, useWorkComposerImages } from "./useWorkComposerImages";
+import {
+  ThreadMentionChips,
+  ThreadMentionTypeahead,
+  useThreadMentionTypeahead,
+} from "../../chat/ThreadMentionPicker";
+import { useThreadMentions } from "../../chat/useThreadMentions";
+import type { MentionableThreadId } from "@octant/contracts";
 
 export interface WorkComposerAdapterProps {
   readonly projectId?: ProjectId;
@@ -34,7 +42,13 @@ export interface WorkComposerAdapterProps {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => void;
-  readonly onCreateThread: (prompt: string, images?: ReadonlyArray<File>) => void | Promise<void>;
+  readonly onCreateThread: (
+    prompt: string,
+    images?: ReadonlyArray<File>,
+    threadMentionIds?: ReadonlyArray<MentionableThreadId>,
+  ) => boolean | void | Promise<boolean | void>;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
   readonly onAttachFolder?: () => void;
   readonly folderControl?: ReactNode;
   /** Optional multi-model pool control slot rendered in the composer bar. */
@@ -48,7 +62,21 @@ export interface WorkComposerAdapterProps {
 
 export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionListId = "work-new-thread-mentions";
   const images = useWorkComposerImages();
+  const threadMentions = useThreadMentions({
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+    draft: prompt,
+  });
+  const mention = useThreadMentionTypeahead({
+    mentions: threadMentions.composer,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    textarea: () => textareaRef.current,
+    ...(props.creating === true ? { disabled: true } : {}),
+  });
   const trimmed = prompt.trim();
   const hasFolder = props.projectId !== undefined;
   const imageSupport = selectedModelReadsImages(props.providerGroups, {
@@ -60,17 +88,24 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   // A Work thread belongs to a Project (decision 0037), so the first turn
   // cannot start until one is chosen. Blocking here is what makes the
   // Project control a requirement rather than a suggestion.
-  const canSubmit = trimmed.length > 0 && !props.creating && hasFolder;
+  const [submitting, setSubmitting] = useState(false);
+  const canSubmit = trimmed.length > 0 && !props.creating && !submitting && hasFolder;
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    const staged = images.takeForSend();
-    if (staged.length === 0) {
-      void props.onCreateThread(trimmed);
-      return;
-    }
-    void props.onCreateThread(trimmed, staged);
-  }, [canSubmit, images, props, trimmed]);
+    setSubmitting(true);
+    const staged = images.filesForSend();
+    void threadMentions
+      .resolveForSend()
+      .then(async (threadMentionIds) => {
+        const created = await props.onCreateThread(trimmed, staged, threadMentionIds);
+        if (created !== false) images.clearAfterAccepted();
+        return created;
+      })
+      .finally(() => {
+        setSubmitting(false);
+      });
+  }, [canSubmit, images, props, threadMentions, trimmed]);
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (items === null) return false;
@@ -88,6 +123,7 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -120,6 +156,22 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               to. The strip used to sit outside it, which read as loose chrome
               under the composer rather than as part of what is being started. */}
           <div className="composer work-composer-adapter__card">
+            {mention.open ? (
+              <ThreadMentionTypeahead
+                activeIndex={mention.activeIndex}
+                {...(threadMentions.composer?.busy === undefined
+                  ? {}
+                  : { busy: threadMentions.composer.busy })}
+                candidates={threadMentions.composer?.candidates ?? []}
+                listId={mentionListId}
+                onChoose={mention.choose}
+                onHover={mention.setActiveIndex}
+              />
+            ) : null}
+            <ThreadMentionChips
+              chips={threadMentions.chips}
+              onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
+            />
             {images.staged.length === 0 && images.message === undefined ? null : (
               <div
                 className="composer-chips work-composer-adapter__attachments"
@@ -157,7 +209,14 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
               autoFocus
               className="composer-input"
               disabled={props.creating}
-              onChange={(event) => setPrompt(event.target.value)}
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                mention.sync(event.target.value, event.currentTarget.selectionStart);
+              }}
+              onClick={(event) =>
+                mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
+              }
+              ref={textareaRef}
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
                 if (attachFromTransfer(event.dataTransfer)) event.preventDefault();

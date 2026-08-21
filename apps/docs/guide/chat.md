@@ -46,7 +46,7 @@ Deleting or purging the thread removes its draft.
 
 ## Mentioning another thread
 
-Type `#` in the composer to pick a thread you can already open. Octant inserts a `#[Title]` chip. The mentioned thread is not interrupted: this turn receives a bounded, read-only excerpt of its title, filing, and recent messages. `@plugin` and `$skill` addressing is unchanged; an unmatched `#` or `@` stays ordinary text.
+Type `#` in the composer to pick a thread you can already open. Octant inserts a `#[Title]` chip. The mentioned thread is not interrupted: this turn receives a bounded, read-only excerpt of its title, filing, and recent messages. `@plugin` and `$skill` addressing is unchanged; an unmatched `#` or `@` stays ordinary text. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
 
 A chip you can no longer open is marked unavailable and contributes no content. Cross-mode mentions are read-only context, not mixed execution — mentioning a Work or Code thread from Chat does not grant that thread's filesystem or shell.
 
