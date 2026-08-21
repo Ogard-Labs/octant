@@ -1797,6 +1797,168 @@ describe("useShellController", () => {
     expect(result.current.announcement).toBe("First moved.");
   });
 
+  it("pins a sidebar thread into a new split pane beside the active one", async () => {
+    const server = statefulClient();
+    const firstThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000891");
+    const secondThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000892");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openCodeThread(firstThreadId, "First"));
+    const original = firstPane(result.current.workspace!.layouts.code);
+    await act(async () =>
+      result.current.pinInPane(mintedCodeThreadSurface(secondThreadId, "Second")),
+    );
+
+    expect(server.client.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        operation: expect.objectContaining({
+          kind: "split-pane",
+          targetPaneId: original.paneId,
+          orientation: "horizontal",
+          placement: "after",
+        }),
+      }),
+    );
+    const layout = result.current.workspace!.layouts.code;
+    expect(layout).toMatchObject({
+      kind: "split",
+      orientation: "horizontal",
+      first: { kind: "pane", paneId: original.paneId, surface: { threadId: firstThreadId } },
+      second: { kind: "pane", surface: { threadId: secondThreadId } },
+    });
+    const pinned = panes(layout).find(
+      (pane) => pane.surface.kind === "code-overview" && pane.surface.threadId === secondThreadId,
+    );
+    expect(String(result.current.workspace!.activePaneIds.code)).toBe(String(pinned?.paneId));
+    expect(result.current.announcement).toBe("Second pinned.");
+  });
+
+  it("activates a visible thread instead of minting a second pane when pinning it", async () => {
+    const server = statefulClient();
+    const firstThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000891");
+    const secondThreadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000892");
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => result.current.openCodeThread(firstThreadId, "First"));
+    const firstPaneId = firstPane(result.current.workspace!.layouts.code).paneId;
+    await act(async () =>
+      result.current.pinInPane(mintedCodeThreadSurface(secondThreadId, "Second")),
+    );
+    expect(panes(result.current.workspace!.layouts.code)).toHaveLength(2);
+
+    await act(async () =>
+      result.current.pinInPane(mintedCodeThreadSurface(firstThreadId, "First")),
+    );
+
+    expect(panes(result.current.workspace!.layouts.code)).toHaveLength(2);
+    expect(String(result.current.workspace!.activePaneIds.code)).toBe(String(firstPaneId));
+    expect(result.current.announcement).toBe("First selected.");
+  });
+
+  it("refuses a cross-Project pin and offers a new window instead of mixing authority", async () => {
+    const currentProjectId = decodeProjectId("00000000-0000-4000-8000-000000000898");
+    const nextProjectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
+    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000897");
+    const base = codeBootstrap();
+    const bootstrap: ShellBootstrap = {
+      ...base,
+      workspace: {
+        ...base.workspace,
+        contextByMode: {
+          ...base.workspace.contextByMode,
+          code: {
+            ...base.workspace.contextByMode.code,
+            projectId: currentProjectId,
+            boundRoot: "/current",
+          },
+        },
+      },
+    };
+    const client: ShellClient = {
+      bootstrap: vi.fn(async () => bootstrap),
+      execute: vi.fn(async () => {
+        throw new Error("cross-Project pin must not journal a layout mutation");
+      }),
+    };
+    const openInNewWindow = vi.fn(async () => undefined);
+    const { result } = renderHook(() =>
+      useShellController({
+        client,
+        nativeHost: { resetBounds: vi.fn(), openInNewWindow },
+        serverUrl: "http://127.0.0.1:13773",
+        windowId,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () =>
+      result.current.pinInPane(mintedCodeThreadSurface(threadId, "Other Project"), nextProjectId),
+    );
+
+    expect(client.execute).not.toHaveBeenCalled();
+    expect(result.current.crossContextOffer).toMatchObject({
+      newWindowProjectId: nextProjectId,
+    });
+    expect(result.current.workspace?.layouts.code.kind).toBe("pane");
+    await act(async () => result.current.openCrossContextInNewWindow());
+    expect(openInNewWindow).toHaveBeenCalledWith({
+      kind: "project-thread",
+      projectId: nextProjectId,
+      mode: "code",
+      threadId: String(threadId),
+    });
+  });
+
+  it("refuses a cross-Project drop instead of switching this window's Project", async () => {
+    const currentProjectId = decodeProjectId("00000000-0000-4000-8000-000000000898");
+    const nextProjectId = decodeProjectId("00000000-0000-4000-8000-000000000899");
+    const threadId = decodeCodeThreadId("00000000-0000-4000-8000-000000000897");
+    const base = codeBootstrap();
+    const bootstrap: ShellBootstrap = {
+      ...base,
+      workspace: {
+        ...base.workspace,
+        contextByMode: {
+          ...base.workspace.contextByMode,
+          code: {
+            ...base.workspace.contextByMode.code,
+            projectId: currentProjectId,
+            boundRoot: "/current",
+          },
+        },
+      },
+    };
+    const client: ShellClient = {
+      bootstrap: vi.fn(async () => bootstrap),
+      execute: vi.fn(async () => {
+        throw new Error("cross-Project drop must not journal a layout mutation");
+      }),
+    };
+    const { result } = renderHook(() =>
+      useShellController({ client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const targetPane = firstPane(result.current.workspace!.layouts.code);
+
+    await act(async () =>
+      result.current.dropSurface(
+        mintedCodeThreadSurface(threadId, "Other Project"),
+        { kind: "edge", targetPaneId: targetPane.paneId, edge: "right" },
+        nextProjectId,
+      ),
+    );
+
+    expect(client.execute).not.toHaveBeenCalled();
+    expect(result.current.crossContextOffer?.message).toMatch(/different Project/);
+    expect(result.current.workspace?.layouts.code.kind).toBe("pane");
+  });
+
   it("reloads authoritative state after a conflict", async () => {
     const reload = deferred<ShellBootstrap>();
     const client: ShellClient = {

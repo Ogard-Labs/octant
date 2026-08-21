@@ -726,18 +726,11 @@ function LaunchedShell(
     onDrop: (source, destination) => {
       const row = sidebarDragRows.current.get(source.dragKey);
       sidebarDragRows.current.delete(source.dragKey);
-      const boundProjectId = controller.workspace?.contextByMode[activeMode].projectId ?? null;
-      if (
-        row?.projectId !== undefined &&
-        boundProjectId !== null &&
-        String(boundProjectId) !== row.projectId
-      ) {
-        if (activeMode === "chat") selectChatThread(row.threadId);
-        else if (activeMode === "code") selectCodeThread(row.rowId);
-        else selectWorkThread(row.rowId);
-        return;
-      }
-      void controller.dropSurface(source.surface, destination);
+      void controller.dropSurface(
+        source.surface,
+        destination,
+        row?.projectId === undefined ? undefined : decodeProjectId(row.projectId),
+      );
     },
   });
   const sidebarThreadDrag: SidebarThreadDragTargets = {
@@ -2349,6 +2342,53 @@ function LaunchedShell(
   const exportChatThread = exportThreadFromRow("chat");
   const exportWorkThread = exportThreadFromRow("work");
 
+  function pinChatThreadInPane(threadId: string): void {
+    if (chatController.status !== "ready") return;
+    const thread = chatController.navigation.find((candidate) => candidate.threadId === threadId);
+    if (thread === undefined) return;
+    void controller.pinInPane(
+      threadDragSurface("chat", {
+        rowId: threadId,
+        threadId,
+        title: thread.title,
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      }),
+      thread.projectId === undefined ? undefined : decodeProjectId(thread.projectId),
+    );
+  }
+
+  function pinCodeThreadInPane(threadId: string): void {
+    const thread = codeController.navigation.find(
+      (candidate) => String(candidate.threadId) === threadId,
+    );
+    if (thread === undefined) return;
+    void controller.pinInPane(
+      threadDragSurface("code", {
+        rowId: threadId,
+        threadId,
+        title: thread.title,
+        projectId: String(thread.projectId),
+      }),
+      thread.projectId,
+    );
+  }
+
+  function pinWorkThreadInPane(threadId: string): void {
+    const thread = workNavigation.navigation.find(
+      (candidate) => String(candidate.threadId) === threadId,
+    );
+    if (thread === undefined) return;
+    void controller.pinInPane(
+      threadDragSurface("work", {
+        rowId: threadId,
+        threadId,
+        title: thread.title,
+        ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      }),
+      thread.projectId === undefined ? undefined : decodeProjectId(thread.projectId),
+    );
+  }
+
   const codeThreadRowActions: ThreadRowActions = {
     ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
@@ -2357,25 +2397,26 @@ function LaunchedShell(
     onMarkFollowUp: (threadId) => void codeController.markFollowUp(decodeCodeThreadId(threadId)),
     onMarkThreadRead: (threadId) => codeController.markThreadRead(decodeCodeThreadId(threadId)),
     onMarkThreadUnread: (threadId) => codeReadCursorStore.unmark(decodeCodeThreadId(threadId)),
+    onPinInPane: pinCodeThreadInPane,
     onPinThread: (threadId, pinned) =>
       void codeController.pinThread(decodeCodeThreadId(threadId), pinned),
   };
   const renameCodeThreadFromRow = (threadId: string, title: string): void => {
     void codeController.renameThread(decodeCodeThreadId(threadId), title);
   };
-  // What a Chat thread row offers on right-click. Chat rows carry no archive
-  // or pin authority yet, so the menu holds only the read-state pair — the
-  // shorter menu is the honest one, the same rule the Code rows follow.
+  // What a Chat thread row offers on right-click. List pin is a Code-only
+  // mark; pane placement is the window's split tree, so Chat and Work get
+  // that without a list pin they cannot honor.
   const chatThreadRowActions: ThreadRowActions = {
     ...(exportChatThread === undefined ? {} : { onExportThread: exportChatThread }),
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
+    onPinInPane: pinChatThreadInPane,
   };
-  // Work rows carry no archive, pin, or read-state authority yet, so Export is
-  // the whole menu there — and without it a Work thread would have no export
-  // path at all now that the thread header no longer carries one.
-  const workThreadRowActions: ThreadRowActions =
-    exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread };
+  const workThreadRowActions: ThreadRowActions = {
+    ...(exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread }),
+    onPinInPane: pinWorkThreadInPane,
+  };
 
   // One thread-selection handler per mode. The sidebar and every Project
   // Overview call the same one, so a row opens the same thread wherever it is

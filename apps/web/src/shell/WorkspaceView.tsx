@@ -422,6 +422,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           onFocus={props.onFocus}
           onPreviewResize={props.onPreviewResize}
           onSplitPane={props.onSplitPane}
+          activePaneId={props.workspace.activePaneIds[props.mode]}
           {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
           renderSurface={(surface, paneId) => renderTab(surface, props, paneId, canvasContext)}
           totalWorkspacePaneCount={Object.values(props.workspace.layouts).reduce(

@@ -367,7 +367,20 @@ describe("WindowChrome", () => {
     expect(cssRule('.project-row[data-active="true"]', 1)).toContain(
       "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
     );
+    expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__header')).toContain(
+      "box-shadow: inset 0 -1px 0 var(--octant-border);",
+    );
+    expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
+      "color: var(--oct-fg);",
+    );
+    expect(cssRule('.workspace-pane[data-active="true"]')).toContain(
+      "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
+    );
+    expect(cssRule('.workspace-pane[data-active="true"]')).not.toMatch(/accent|purple/i);
     expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(".workspace-pane__header");
+    expect(atRuleBlock("@media (prefers-contrast: more)")).toContain(
+      '.workspace-pane[data-active="true"]',
+    );
   });
 
   it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {

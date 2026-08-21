@@ -22,6 +22,12 @@ export interface SplitWorkspaceProps {
    * the droppable panes actually live.
    */
   readonly drag: WorkspaceSurfaceDragHandle;
+  /**
+   * The pane this window is about — dock subject, composer target, and the
+   * one visible accessible active state. Distinct from {@link focusedPaneId},
+   * which is temporary zoom of one pane.
+   */
+  readonly activePaneId?: PaneId;
   readonly focusedPaneId?: PaneId;
   readonly layout: WorkspaceLayoutNode;
   readonly mode: "chat" | "work" | "code";
@@ -245,13 +251,16 @@ function clampSplitRatio(value: number): number {
 function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: WorkspacePane }) {
   const pane = props.pane;
   const surface = pane.surface;
+  const active = String(props.activePaneId) === String(pane.paneId);
   const focused = String(props.focusedPaneId) === String(pane.paneId);
   const canSplit = canSplitPane(props.layout, pane.paneId, props.totalWorkspacePaneCount);
   const dragKey = `pane:${String(pane.paneId)}`;
   return (
     <section
+      aria-current={active ? "true" : undefined}
       aria-label={`Workspace pane: ${surface.title}`}
       className="workspace-pane"
+      data-active={active ? "true" : "false"}
       data-focused={focused ? "true" : "false"}
       data-workspace-can-split={canSplit ? "true" : "false"}
       data-workspace-pane-id={pane.paneId}

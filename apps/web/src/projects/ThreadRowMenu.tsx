@@ -32,7 +32,13 @@ export interface ThreadRowActions {
   readonly onMarkThreadRead?: (threadId: string) => void;
   /** Absent when nothing tracks read state for this thread. */
   readonly onMarkThreadUnread?: (threadId: string) => void;
-  /** Absent when the host cannot accept a pin. */
+  /**
+   * Places the thread in a new split pane of this window. Absent when the
+   * workspace cannot accept a split. Distinct from {@link onPinThread}, which
+   * only marks the thread in the list.
+   */
+  readonly onPinInPane?: (threadId: string) => void;
+  /** Absent when the host cannot accept a list pin. */
   readonly onPinThread?: (threadId: string, pinned: boolean) => void;
   /** Asks the list to open its rename field; the list owns the commit. */
   readonly onStartRenameThread?: (threadId: string) => void;
@@ -47,6 +53,7 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
     actions.onExportThread === undefined &&
     actions.onMarkThreadRead === undefined &&
     actions.onMarkThreadUnread === undefined &&
+    actions.onPinInPane === undefined &&
     actions.onPinThread === undefined &&
     actions.onStartRenameThread === undefined
   );
@@ -73,6 +80,16 @@ export function ThreadRowMenu(props: {
               {props.thread.title}
             </ContextMenuPrimitive.GroupLabel>
           </ContextMenuPrimitive.Group>
+          {props.actions.onPinInPane === undefined ? null : (
+            <ContextMenuPrimitive.Item
+              className={MENU_ITEM_CLASS}
+              closeOnClick
+              label="Pin in pane"
+              onClick={() => props.actions.onPinInPane?.(threadId)}
+            >
+              Pin in pane
+            </ContextMenuPrimitive.Item>
+          )}
           {props.actions.onPinThread === undefined ? null : (
             <ContextMenuPrimitive.Item
               className={MENU_ITEM_CLASS}
