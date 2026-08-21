@@ -57,6 +57,38 @@ export interface FileMentionIo {
   ): Promise<ReadonlyArray<FileMentionCandidate>>;
 }
 
+/**
+ * Capture the directory occupying `rootPath` so later mention IO can refuse a
+ * swap onto the same name. A symlink or non-directory is unavailable rather
+ * than followed.
+ */
+export async function pinFileMentionRoot(
+  rootPath: string,
+  directory: CodeDirectoryPort = liveCodeDirectoryPort,
+): Promise<
+  | {
+      readonly kind: "ok";
+      readonly rootPath: string;
+      readonly rootIdentity: FileMentionRootIdentity;
+    }
+  | { readonly kind: "unavailable" }
+> {
+  let metadata: CodeDirectoryStat;
+  try {
+    metadata = await directory.lstat(rootPath);
+  } catch {
+    return { kind: "unavailable" };
+  }
+  if (metadata.isSymbolicLink || !metadata.isDirectory) {
+    return { kind: "unavailable" };
+  }
+  return {
+    kind: "ok",
+    rootPath,
+    rootIdentity: { device: metadata.device, inode: metadata.inode },
+  };
+}
+
 export function createFileMentionIo(
   directory: CodeDirectoryPort = liveCodeDirectoryPort,
   files: CodeTestSourcePort = liveCodeTestSourcePort,

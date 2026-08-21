@@ -349,6 +349,7 @@ import {
 import { codeForkHandoffResolver } from "./code/codeForkHandoff";
 import { createThreadMentionRouteHandler } from "./threadMentionRoutes";
 import { createFileMentionRouteHandler } from "./fileMentionRoutes";
+import { pinFileMentionRoot } from "./fileMentionIo";
 import { FileMentionService, fileMentionContextBlocks } from "./fileMentionService";
 import { createLocalServerRouteHandler } from "./localServerRoutes";
 import { createLiveLocalListenerPort } from "./localServers/localListenerPort";
@@ -3501,7 +3502,7 @@ export function startOctantServer(
             ) {
               return { kind: "unauthorized" };
             }
-            return { kind: "ok", rootPath: project.binding.canonicalRoot };
+            return pinFileMentionRoot(project.binding.canonicalRoot);
           } catch {
             return { kind: "unavailable" };
           }

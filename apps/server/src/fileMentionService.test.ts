@@ -13,6 +13,8 @@ const threadId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const checkoutId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const rootPath = "/private/authorized-root";
 
+const rootIdentity = { device: "1", inode: "2" };
+
 function trackingIo(): FileMentionIo & {
   readonly locateCalls: unknown[];
   readonly readCalls: unknown[];
@@ -25,16 +27,16 @@ function trackingIo(): FileMentionIo & {
     locateCalls,
     readCalls,
     listCalls,
-    locate: vi.fn(async (root, relative) => {
-      locateCalls.push({ root, relative });
+    locate: vi.fn(async (root, relative, identity) => {
+      locateCalls.push({ root, relative, identity });
       return { kind: "missing" as const };
     }),
     readBytes: vi.fn(async (canonical, expected, maximumBytes) => {
       readCalls.push({ canonical, expected, maximumBytes });
       return new Uint8Array();
     }),
-    list: vi.fn(async (root) => {
-      listCalls.push(root);
+    list: vi.fn(async (root, identity) => {
+      listCalls.push({ root, identity });
       return [];
     }),
   };
@@ -42,8 +44,16 @@ function trackingIo(): FileMentionIo & {
 
 function authority(root = rootPath): FileMentionAuthority {
   return {
-    resolveCodeRoot: vi.fn(async () => ({ kind: "ok" as const, rootPath: root })),
-    resolveWorkRoot: vi.fn(async () => ({ kind: "ok" as const, rootPath: root })),
+    resolveCodeRoot: vi.fn(async () => ({
+      kind: "ok" as const,
+      rootPath: root,
+      rootIdentity,
+    })),
+    resolveWorkRoot: vi.fn(async () => ({
+      kind: "ok" as const,
+      rootPath: root,
+      rootIdentity,
+    })),
   };
 }
 
@@ -218,6 +228,24 @@ describe("FileMentionService", () => {
       unavailable: [],
     });
     expect(io.readBytes).toHaveBeenCalledOnce();
+    expect(io.locate).toHaveBeenCalledWith(rootPath, "notes.md", rootIdentity);
+  });
+
+  it("pins Work mention listing to the authorized root identity", async () => {
+    const io = trackingIo();
+    const service = new FileMentionService({ authority: authority(), io });
+
+    await service.execute(
+      {
+        kind: "complete-file-mentions",
+        requestId,
+        scope: { mode: "work", threadId },
+        query: "notes",
+      },
+      { windowId },
+    );
+
+    expect(io.list).toHaveBeenCalledWith(rootPath, rootIdentity);
   });
 
   it("returns a bounded prefix when the mentioned file is larger than the read window", async () => {

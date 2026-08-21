@@ -30,7 +30,7 @@ export type FileMentionRootResolution =
   | {
       readonly kind: "ok";
       readonly rootPath: string;
-      readonly rootIdentity?: FileMentionRootIdentity;
+      readonly rootIdentity: FileMentionRootIdentity;
     }
   | { readonly kind: "unauthorized" }
   | { readonly kind: "unavailable" }
@@ -214,14 +214,11 @@ export class FileMentionService {
   async #listCached(
     root: Extract<FileMentionRootResolution, { readonly kind: "ok" }>,
   ): ReturnType<FileMentionIo["list"]> {
-    const key = `${root.rootPath}\0${root.rootIdentity?.device ?? ""}\0${root.rootIdentity?.inode ?? ""}`;
+    const key = `${root.rootPath}\0${root.rootIdentity.device}\0${root.rootIdentity.inode}`;
     const now = Date.now();
     const cached = this.#listings.get(key);
     if (cached !== undefined && cached.expiresAt > now) return cached.promise;
-    const promise =
-      root.rootIdentity === undefined
-        ? this.#io.list(root.rootPath)
-        : this.#io.list(root.rootPath, root.rootIdentity);
+    const promise = this.#io.list(root.rootPath, root.rootIdentity);
     this.#listings.set(key, { expiresAt: now + LISTING_CACHE_MS, promise });
     try {
       return await promise;
@@ -247,7 +244,7 @@ export class FileMentionService {
         relativePath,
         rootPath: root.rootPath,
         io: this.#io,
-        ...(root.rootIdentity === undefined ? {} : { rootIdentity: root.rootIdentity }),
+        rootIdentity: root.rootIdentity,
       });
       if (resolved.kind === "unavailable") {
         unavailable.push({ path: resolved.path, reason: resolved.reason });
