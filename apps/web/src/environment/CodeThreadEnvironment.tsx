@@ -1,5 +1,6 @@
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { LocalServerClient } from "@octant/client-runtime";
+import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   CodeCommand,
   CodeCommandResult,
@@ -12,6 +13,7 @@ import { deriveCodeEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useState, type ReactNode } from "react";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 import { EnvironmentGroup } from "./EnvironmentGroup";
+import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
 import { resolveTabPresentation } from "./EnvironmentPresentationModel";
 import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
@@ -52,6 +54,8 @@ export interface CodeThreadEnvironmentProps {
   readonly onCopyLocalServerUrl?: (url: string) => void | Promise<void>;
   /** Injected in tests; otherwise built from the server URL and capability. */
   readonly localServerClient?: LocalServerClient;
+  readonly githubClient?: GithubClient;
+  readonly pullRequestRepository?: string;
 }
 
 /**
@@ -194,6 +198,15 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 })}
           />
         </EnvironmentGroup>
+        {props.githubClient === undefined || props.pullRequestRepository === undefined ? null : (
+          <EnvironmentGroup defaultOpen title="Pull requests">
+            <EnvironmentPullRequests
+              client={props.githubClient}
+              enabled={resolved !== "hidden"}
+              repository={props.pullRequestRepository}
+            />
+          </EnvironmentGroup>
+        )}
         {controller.observation?.workingDirectory === undefined ||
         controller.observation.threadVersion === undefined ||
         props.onExecute === undefined ? null : (
