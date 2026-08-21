@@ -21,6 +21,7 @@ export interface RightUtilityDockProps {
   readonly projectMemory: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
+  readonly thread: ReactNode;
   readonly width: number;
 }
 
@@ -41,6 +42,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       onSelectSurface={props.onSelectSurface}
       projectMemory={props.projectMemory}
       resolution={props.resolution}
+      thread={props.thread}
       {...dismiss}
     />
   );

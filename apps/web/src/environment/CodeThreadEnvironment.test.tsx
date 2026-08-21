@@ -88,26 +88,30 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.getByTestId("code-workspace-content")).toBeVisible();
   });
 
-  it("keeps publishing in the environment panel rather than above the thread", async () => {
+  it("holds only environment-scoped groups, leaving the thread's own surfaces to the dock", async () => {
     render(
       <CodeThreadEnvironment
         onChangePresentation={vi.fn()}
         presentation={defaultEnvironmentPresentationState()}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
-        publish={<div data-testid="publish-controls">Publish controls</div>}
         tab={codeTab()}
       >
         <div data-testid="code-workspace-content">Code surface</div>
       </CodeThreadEnvironment>,
     );
+    await act(async () => {
+      await Promise.resolve();
+    });
 
-    // Publishing acts on the checkout, so it belongs with the other groups that
-    // describe it, closed until asked for. Mounted as a sibling of the thread it
-    // took a share of the pane and split the workspace.
-    await userEvent.click(screen.getByRole("button", { name: /^Publish/ }));
-    const publish = screen.getByTestId("publish-controls");
-    expect(publish.closest(".code-thread-environment__content")).toBeNull();
+    expect(screen.getByRole("button", { name: /^Changes/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Local servers/ })).toBeVisible();
+    // Files, Plan, Publish, and Agents are thread surfaces, not environment
+    // facts; stacked here they turned a glance into a list of disclosures.
+    expect(screen.queryByRole("button", { name: /^Files/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Plan/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Publish/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Agents/ })).not.toBeInTheDocument();
   });
 
   it("projects an authoritative identity from the ready observation", async () => {
@@ -125,8 +129,8 @@ describe("CodeThreadEnvironment", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    // Code mode defaults to pinned, so the panel region is visible.
-    expect(screen.getByRole("region", { name: "Environment for Octant" })).toBeVisible();
+    // Code mode defaults to floating, so the panel is on screen.
+    expect(screen.getByRole("dialog", { name: "Environment for Octant" })).toBeVisible();
     expect(screen.getAllByText("feature/issue-204").length).toBeGreaterThan(0);
     expect(screen.getByText("available")).toBeVisible();
   });
@@ -150,28 +154,6 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.getAllByText("Branch").length).toBeGreaterThan(0);
   });
 
-  it("keeps the thread's plan beside the thread rather than in the window dock", async () => {
-    render(
-      <CodeThreadEnvironment
-        onChangePresentation={vi.fn()}
-        plan={<p>Three steps, one done</p>}
-        presentation={defaultEnvironmentPresentationState()}
-        project={codeProject()}
-        projectClient={projectClient(readyObservation())}
-        tab={codeTab()}
-      >
-        <div />
-      </CodeThreadEnvironment>,
-    );
-    await act(async () => {
-      await Promise.resolve();
-    });
-    const plan = screen.getByRole("button", { name: "Plan" });
-    expect(plan).toBeVisible();
-    await userEvent.click(plan);
-    expect(screen.getByText("Three steps, one done")).toBeVisible();
-  });
-
   it("reports an unavailable identity when no project is bound to the tab", () => {
     render(
       <CodeThreadEnvironment
@@ -185,7 +167,7 @@ describe("CodeThreadEnvironment", () => {
       </CodeThreadEnvironment>,
     );
     // No project -> effective presentation falls back to the code-mode default
-    // (pinned), and the compact identity reports the unavailable state.
+    // (floating), and the compact identity reports the unavailable state.
     expect(screen.getByText("No project")).toBeVisible();
     expect(screen.getByText("unavailable")).toBeVisible();
   });
@@ -203,10 +185,10 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    screen.getByRole("button", { name: "Float environment" }).click();
+    screen.getByRole("button", { name: "Hide environment panel" }).click();
     expect(onChange).toHaveBeenLastCalledWith({
       ...defaultEnvironmentPresentationState(),
-      byTab: [{ tabId, presentation: "floating", pinnedWidth: 360 }],
+      byTab: [{ tabId, presentation: "hidden" }],
     });
   });
 

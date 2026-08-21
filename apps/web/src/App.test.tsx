@@ -1731,7 +1731,11 @@ describe("App", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Controller foundation" }, { timeout: 5_000 }),
+      await screen.findByRole(
+        "region",
+        { name: "Workspace pane: Controller foundation" },
+        { timeout: 5_000 },
+      ),
     ).toBeVisible();
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(
@@ -2599,7 +2603,7 @@ describe("App", () => {
         shellClient={shellApi}
       />,
     );
-    await screen.findByRole("heading", { name: "Controller foundation" });
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
 
     await user.keyboard("{Control>}k{/Control}");
     await user.keyboard("Controller");
@@ -2655,10 +2659,11 @@ describe("App", () => {
     );
 
     await user.click(await screen.findByRole("button", { name: "Add folder" }));
+    await user.click(await screen.findByRole("button", { name: "Choose a folder" }));
 
     await waitFor(() => expect(hostBridge.selectProjectRoot).toHaveBeenCalledWith("code"));
     expect(projectApi.executeProject).not.toHaveBeenCalled();
-    expect(screen.getByText("Project creation cancelled.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Create Project" })).toBeDisabled();
     expect(document.body).not.toHaveTextContent("/private/unvalidated-selection");
   });
 

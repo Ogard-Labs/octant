@@ -957,8 +957,11 @@ export function canvasFetchPassthrough(url: string): Response | undefined {
 
 export async function openSidebarProject(user: ReturnType<typeof userEvent.setup>, name: string) {
   const trigger = await screen.findByRole("button", { name: `Project actions for ${name}` });
-  trigger.focus();
-  await user.keyboard("{ArrowDown}");
+  // A focus-then-ArrowDown open raced the menu's async Positioner under CI's
+  // slower layout timing, leaving findByRole's default wait to expire before
+  // the item ever mounted. A click drives the same open path without the
+  // extra keyboard round trip, so there is one fewer place for it to lag.
+  await user.click(trigger);
   await user.click(await screen.findByRole("menuitem", { name: "Open Project" }));
 }
 

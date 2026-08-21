@@ -7,7 +7,7 @@ import { RightUtilityDockSurface } from "./RightUtilityDockSurface";
 
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
 
-describe("RightUtilityDockSurface", () => {
+describe("the right utility dock panel", () => {
   it("renders no stale content until the pure model returns a validated surface", () => {
     const ProjectMemory = vi.fn(() => <p>Private Project memory</p>);
     const HostNavigator = vi.fn(() => <p>Host Navigator</p>);
@@ -19,6 +19,7 @@ describe("RightUtilityDockSurface", () => {
         onClose={vi.fn()}
         onSelectSurface={vi.fn()}
         projectMemory={<ProjectMemory />}
+        thread={<p>Thread surfaces</p>}
         resolution={{
           kind: "unavailable",
           reason: "project-stale",
@@ -42,6 +43,7 @@ describe("RightUtilityDockSurface", () => {
         onClose={vi.fn()}
         onSelectSurface={vi.fn()}
         projectMemory={<ProjectMemory />}
+        thread={<p>Thread surfaces</p>}
         resolution={{
           kind: "surface",
           projectId,
@@ -66,6 +68,7 @@ describe("RightUtilityDockSurface", () => {
         onClose={onClose}
         onSelectSurface={onSelectSurface}
         projectMemory={<p>Private Project memory</p>}
+        thread={<p>Thread surfaces</p>}
         resolution={{ kind: "surface", surface: RIGHT_UTILITY_DOCK_SURFACES[2] }}
       />,
     );
@@ -76,9 +79,11 @@ describe("RightUtilityDockSurface", () => {
     );
     expect(screen.getByRole("button", { name: "Project memory" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Context" })).toBeVisible();
-    // The thread owns its own environment and plan, so the dock offers neither.
+    expect(screen.getByRole("button", { name: "Thread" })).toBeVisible();
+    // The environment panel keeps its own facts, so the dock offers no second
+    // copy of them, and no surface the shell does not actually have.
     expect(
-      screen.queryByRole("button", { name: /Code environment|Plan|Browser|Terminal|Files|Review/ }),
+      screen.queryByRole("button", { name: /Code environment|Browser|Terminal|Review/ }),
     ).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Project memory" }));
@@ -96,6 +101,7 @@ describe("RightUtilityDockSurface", () => {
         onClose={vi.fn()}
         onSelectSurface={vi.fn()}
         projectMemory={<p>Private Project memory</p>}
+        thread={<p>Thread surfaces</p>}
         resolution={{
           kind: "surface",
           projectId,
@@ -107,5 +113,30 @@ describe("RightUtilityDockSurface", () => {
     expect(screen.getByText("Live context inspector")).toBeVisible();
     expect(screen.queryByText("Host Navigator")).toBeNull();
     expect(screen.queryByText("Private Project memory")).toBeNull();
+  });
+
+  it("says the pane holds no thread rather than showing another pane's thread surfaces", () => {
+    render(
+      <RightUtilityDockSurface
+        availableSurfaces={RIGHT_UTILITY_DOCK_SURFACES}
+        context={<p>Live context inspector</p>}
+        navigator={<p>Host Navigator</p>}
+        onClose={vi.fn()}
+        onSelectSurface={vi.fn()}
+        projectMemory={<p>Private Project memory</p>}
+        thread={<p>Thread surfaces</p>}
+        resolution={{
+          kind: "unavailable",
+          reason: "thread-required",
+          surface: RIGHT_UTILITY_DOCK_SURFACES[3],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText("Thread surfaces")).toBeNull();
+    expect(
+      screen.getByRole("heading", { name: "Thread has nothing to describe here" }),
+    ).toBeVisible();
+    expect(screen.getByText(/this pane holds no thread/)).toBeVisible();
   });
 });

@@ -5,8 +5,8 @@ import {
   type OctantMode,
   type WorkspaceTabId,
 } from "@octant/contracts";
-import { PanelRightClose, PanelRightOpen, Pin } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { GitBranch, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   clearTabPresentation,
@@ -14,8 +14,21 @@ import {
   resolveTabPresentation,
 } from "./EnvironmentPresentationModel";
 
+/**
+ * Where the environment's work happens. The branch and worktree used to be
+ * readable only by opening the Changes group, and before that from a header
+ * band on the thread itself; the panel is what answers for the checkout, so it
+ * names it without being unfolded first.
+ */
+export interface ThreadEnvironmentLocation {
+  readonly branch: string;
+  readonly worktree: string;
+}
+
 export interface ThreadEnvironmentPanelProps {
   readonly identity: EnvironmentCompactIdentity;
+  /** Absent when no checkout has been observed, which renders no location. */
+  readonly location?: ThreadEnvironmentLocation;
   readonly mode: OctantMode;
   readonly presentation: EnvironmentPresentationState;
   readonly tabId: WorkspaceTabId;
@@ -23,22 +36,28 @@ export interface ThreadEnvironmentPanelProps {
   readonly children?: ReactNode;
 }
 
+/**
+ * The thread's environment panel: it floats over the thread, or it hides
+ * behind a reveal control. There is no docked presentation — a panel in the
+ * row took width from the surface being read, and glanceable live status is
+ * what the panel is for.
+ */
 export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
-  const resolved = resolveTabPresentation(props.presentation, props.mode, props.tabId);
+  const presentation = resolveTabPresentation(props.presentation, props.mode, props.tabId);
 
   const setPresentation = useCallback(
     (next: EnvironmentPresentation) => {
-      if (next === resolved.presentation) return;
+      if (next === presentation) return;
       if (next === props.presentation.byMode[props.mode]) {
         props.onChangePresentation(clearTabPresentation(props.presentation, props.tabId));
       } else {
         props.onChangePresentation(replaceTabPresentation(props.presentation, props.tabId, next));
       }
     },
-    [props, resolved.presentation],
+    [presentation, props],
   );
 
-  if (resolved.presentation === "hidden") {
+  if (presentation === "hidden") {
     return (
       <ThreadEnvironmentReveal
         identity={props.identity}
@@ -47,45 +66,34 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
     );
   }
 
-  if (resolved.presentation === "floating") {
-    return (
-      <ThreadEnvironmentFloating
-        identity={props.identity}
-        onPin={() => setPresentation("pinned")}
-        onHide={() => setPresentation("hidden")}
-      >
-        {props.children}
-      </ThreadEnvironmentFloating>
-    );
-  }
-
   return (
-    <ThreadEnvironmentPinned
+    <ThreadEnvironmentFloating
       identity={props.identity}
-      pinnedWidth={resolved.pinnedWidth}
-      onFloat={() => setPresentation("floating")}
+      {...(props.location === undefined ? {} : { location: props.location })}
       onHide={() => setPresentation("hidden")}
-      onResize={(width) =>
-        props.onChangePresentation(
-          replaceTabPresentation(props.presentation, props.tabId, "pinned", width),
-        )
-      }
     >
       {props.children}
-    </ThreadEnvironmentPinned>
+    </ThreadEnvironmentFloating>
   );
 }
 
+/**
+ * The show half of the toggle. It collapses to an icon square in the thread's
+ * top-right corner, so its accessible name has to carry what it opens and
+ * which environment that is — the visible label is not always rendered.
+ */
 function ThreadEnvironmentReveal(props: {
   readonly identity: EnvironmentCompactIdentity;
   readonly onReveal: () => void;
 }) {
+  const name = `Show environment panel for ${props.identity.label} ${props.identity.detail}`;
   return (
     <OctantButton
       type="button"
       className="thread-environment-reveal"
       onClick={props.onReveal}
-      aria-label={`Show environment for ${props.identity.label} ${props.identity.detail}`}
+      aria-label={name}
+      title={name}
       variant="ghost"
     >
       <PanelRightOpen aria-hidden="true" size={16} strokeWidth={1.8} />
@@ -102,7 +110,7 @@ function ThreadEnvironmentReveal(props: {
 
 function ThreadEnvironmentFloating(props: {
   readonly identity: EnvironmentCompactIdentity;
-  readonly onPin: () => void;
+  readonly location?: ThreadEnvironmentLocation;
   readonly onHide: () => void;
   readonly children?: ReactNode;
 }) {
@@ -141,133 +149,67 @@ function ThreadEnvironmentFloating(props: {
       role="dialog"
       aria-label={`Environment for ${props.identity.label}`}
     >
+      {/* A plain row, not a <header>: the panel is a dialog rather than
+          sectioning content, so a <header> here would publish a second banner
+          landmark alongside the window chrome. */}
       <div className="thread-environment-panel__header">
         <CompactIdentity identity={props.identity} />
-        <div className="thread-environment-panel__actions">
-          <IconButton label="Pin environment" onClick={props.onPin}>
-            <Pin aria-hidden="true" size={14} strokeWidth={1.8} />
-          </IconButton>
-          <IconButton label="Hide environment" onClick={props.onHide}>
-            <PanelRightClose aria-hidden="true" size={14} strokeWidth={1.8} />
-          </IconButton>
-        </div>
+        <OctantButton
+          type="button"
+          className="thread-environment-panel__icon-button"
+          onClick={props.onHide}
+          aria-label="Hide environment panel"
+          title="Hide environment panel"
+          size="icon"
+          variant="ghost"
+        >
+          <PanelRightClose aria-hidden="true" size={14} strokeWidth={1.8} />
+        </OctantButton>
       </div>
+      {props.location === undefined ? null : <CompactLocation location={props.location} />}
       <div className="thread-environment-panel__body">{props.children}</div>
     </div>
   );
 }
 
-function ThreadEnvironmentPinned(props: {
-  readonly identity: EnvironmentCompactIdentity;
-  readonly pinnedWidth: number;
-  readonly onFloat: () => void;
-  readonly onHide: () => void;
-  readonly onResize: (width: number) => void;
-  readonly children?: ReactNode;
-}) {
-  const [dragging, setDragging] = useState(false);
-  const [previewWidth, setPreviewWidth] = useState<number | null>(null);
-  const dragStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const previewWidthRef = useRef<number | null>(null);
-  const onResizeRef = useRef(props.onResize);
-  onResizeRef.current = props.onResize;
-
-  // Keep the ref in sync with state so the mouseup handler reads the latest
-  // preview width without re-binding the listeners on every mousemove.
-  previewWidthRef.current = previewWidth;
-
-  useEffect(() => {
-    if (!dragging) return;
-    const handleMove = (event: MouseEvent) => {
-      const start = dragStartRef.current;
-      if (start === null) return;
-      const delta = event.clientX - start.startX;
-      setPreviewWidth(Math.round(start.startWidth - delta));
-    };
-    const handleUp = () => {
-      const width = previewWidthRef.current;
-      if (width !== null) {
-        onResizeRef.current(width);
-      }
-      dragStartRef.current = null;
-      setPreviewWidth(null);
-      setDragging(false);
-      document.body.style.cursor = "";
-    };
-    document.body.style.cursor = "col-resize";
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
-      document.body.style.cursor = "";
-    };
-  }, [dragging]);
-
-  const effectiveWidth = previewWidth ?? props.pinnedWidth;
-
+/**
+ * The branch, and the worktree it is checked out in.
+ *
+ * The worktree is shown by its own folder name with the full path as its
+ * title: a floating panel has no room for an absolute path, and the last
+ * segment is what tells two checkouts of one repository apart.
+ */
+function CompactLocation(props: { readonly location: ThreadEnvironmentLocation }) {
   return (
-    <div
-      className="thread-environment-panel thread-environment-panel--pinned"
-      style={{ width: effectiveWidth }}
-      role="region"
-      aria-label={`Environment for ${props.identity.label}`}
-    >
-      <div className="thread-environment-panel__header">
-        <CompactIdentity identity={props.identity} />
-        <div className="thread-environment-panel__actions">
-          <IconButton label="Float environment" onClick={props.onFloat}>
-            <PanelRightOpen aria-hidden="true" size={14} strokeWidth={1.8} />
-          </IconButton>
-          <IconButton label="Hide environment" onClick={props.onHide}>
-            <PanelRightClose aria-hidden="true" size={14} strokeWidth={1.8} />
-          </IconButton>
-        </div>
-      </div>
-      <div className="thread-environment-panel__body">{props.children}</div>
-      <div
-        className="thread-environment-panel__resizer"
-        role="separator"
-        aria-orientation="vertical"
-        onMouseDown={(event) => {
-          dragStartRef.current = { startX: event.clientX, startWidth: props.pinnedWidth };
-          setPreviewWidth(null);
-          setDragging(true);
-        }}
-      />
+    <div className="thread-environment-location">
+      <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />
+      <span className="thread-environment-location__branch" title={props.location.branch}>
+        {props.location.branch}
+      </span>
+      <span aria-hidden="true" className="thread-environment-location__separator">
+        ·
+      </span>
+      <span className="thread-environment-location__worktree" title={props.location.worktree}>
+        {worktreeName(props.location.worktree)}
+      </span>
     </div>
   );
+}
+
+function worktreeName(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
 function CompactIdentity(props: { readonly identity: EnvironmentCompactIdentity }) {
   return (
     <div className="thread-environment-identity">
       <span className="thread-environment-identity__label">{props.identity.label}</span>
-      <span className="thread-environment-identity__detail">{props.identity.detail}</span>
       <span
         className={`thread-environment-identity__status thread-environment-identity__status--${props.identity.status}`}
       >
         {props.identity.status}
       </span>
+      <span className="thread-environment-identity__detail">{props.identity.detail}</span>
     </div>
-  );
-}
-
-function IconButton(props: {
-  readonly label: string;
-  readonly onClick: () => void;
-  readonly children: ReactNode;
-}) {
-  return (
-    <OctantButton
-      type="button"
-      className="thread-environment-panel__icon-button"
-      onClick={props.onClick}
-      aria-label={props.label}
-      size="icon"
-      variant="ghost"
-    >
-      {props.children}
-    </OctantButton>
   );
 }

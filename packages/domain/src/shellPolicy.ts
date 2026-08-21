@@ -2,12 +2,10 @@ import {
   DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
   LOCAL_HOST_ID,
   MAX_CONTEXT_SIDEBAR_WIDTH,
-  MAX_ENVIRONMENT_PINNED_WIDTH,
   MAX_SIDEBAR_WIDTH,
   MAX_SPLIT_RATIO,
   MAX_STOWED_WORKSPACE_LAYOUTS,
   MIN_CONTEXT_SIDEBAR_WIDTH,
-  MIN_ENVIRONMENT_PINNED_WIDTH,
   MIN_SIDEBAR_WIDTH,
   MIN_SPLIT_RATIO,
   decodeLayoutNodeId,
@@ -175,20 +173,7 @@ export function resolveEffectivePresentation(
   return override?.presentation ?? state.byMode[mode];
 }
 
-export function resolveEnvironmentPinnedWidth(
-  state: EnvironmentPresentationState,
-  tabId: WorkspaceTabId,
-  override?: number,
-): number {
-  if (override !== undefined) return clampPinnedWidth(override);
-  const existing = state.byTab.find((entry) => entry.tabId === tabId);
-  if (existing === undefined) return 360;
-  return existing.pinnedWidth;
-}
-
-export type EnvironmentPresentationInput = Omit<EnvironmentTabPresentation, "pinnedWidth"> & {
-  readonly pinnedWidth?: number;
-};
+export type EnvironmentPresentationInput = EnvironmentTabPresentation;
 
 export function replaceEnvironmentPresentation(
   state: EnvironmentPresentationState,
@@ -198,7 +183,6 @@ export function replaceEnvironmentPresentation(
   const next: EnvironmentTabPresentation = {
     tabId: entry.tabId,
     presentation: entry.presentation,
-    pinnedWidth: clampPinnedWidth(entry.pinnedWidth),
   };
   return { ...state, byTab: [...without, next] };
 }
@@ -218,18 +202,9 @@ export function normalizeEnvironmentPresentationState(
   for (const entry of state.byTab) {
     if (seen.has(entry.tabId)) continue;
     seen.add(entry.tabId);
-    byTab.push({
-      tabId: entry.tabId,
-      presentation: entry.presentation,
-      pinnedWidth: clampPinnedWidth(entry.pinnedWidth),
-    });
+    byTab.push({ tabId: entry.tabId, presentation: entry.presentation });
   }
   return { byTab, byMode: state.byMode };
-}
-
-function clampPinnedWidth(value: number | undefined): number {
-  if (value === undefined) return 360;
-  return Math.min(MAX_ENVIRONMENT_PINNED_WIDTH, Math.max(MIN_ENVIRONMENT_PINNED_WIDTH, value));
 }
 
 export interface EnvironmentSectionCapabilities {

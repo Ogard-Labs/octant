@@ -735,11 +735,10 @@ describe("ShellProjection", () => {
       byTab: [
         {
           tabId: "30000000-0000-4000-8000-000000000003",
-          presentation: "pinned",
-          pinnedWidth: 360,
+          presentation: "hidden",
         },
       ],
-      byMode: { chat: "hidden", work: "floating", code: "pinned" },
+      byMode: { chat: "hidden", work: "floating", code: "floating" },
     });
 
     journal.append({
@@ -764,7 +763,7 @@ describe("ShellProjection", () => {
     const projection = new ShellProjection();
     const presentation = decodeEnvironmentPresentationState({
       byTab: [],
-      byMode: { chat: "hidden", work: "floating", code: "pinned" },
+      byMode: { chat: "hidden", work: "floating", code: "floating" },
     });
     const event = envelope({
       aggregateVersion: 2,
@@ -812,9 +811,57 @@ describe("ShellProjection", () => {
     expect(restored?.presentation.byMode).toEqual({
       chat: "hidden",
       work: "floating",
-      code: "pinned",
+      code: "floating",
     });
     expect(restored?.presentation.byTab).toEqual([]);
+    connection.close();
+  });
+
+  it("restores a pinned environment presentation as floating and drops its stored width", () => {
+    const connection = openConnection();
+    const runtime = createPhase1RuntimeRegistries();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const projection = runtime.projections.get("shell")!;
+    insertJournalEvent(
+      connection,
+      envelope({
+        aggregateVersion: 1,
+        eventName: "shell.environment-presentation-replaced",
+        payload: {
+          presentation: {
+            byTab: [
+              {
+                tabId: "30000000-0000-4000-8000-000000000003",
+                presentation: "pinned",
+                pinnedWidth: 440,
+              },
+              { tabId: "30000000-0000-4000-8000-000000000004", presentation: "hidden" },
+            ],
+            byMode: { chat: "hidden", work: "pinned", code: "pinned" },
+          },
+        },
+        aggregateType: "environment-presentation",
+        aggregateId: ids.window,
+      }),
+    );
+
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+
+    const restored = readEnvironmentPresentation(connection, ids.window);
+    expect(restored?.presentation.byMode).toEqual({
+      chat: "hidden",
+      work: "floating",
+      code: "floating",
+    });
+    expect(restored?.presentation.byTab).toEqual([
+      { tabId: "30000000-0000-4000-8000-000000000003", presentation: "floating" },
+      { tabId: "30000000-0000-4000-8000-000000000004", presentation: "hidden" },
+    ]);
     connection.close();
   });
 
@@ -903,7 +950,7 @@ describe("ShellProjection", () => {
             environmentPresentationByMode: {
               chat: "hidden",
               work: "floating",
-              code: "pinned",
+              code: "floating",
             },
           },
         },
@@ -926,7 +973,7 @@ describe("ShellProjection", () => {
         environmentPresentationByMode: {
           chat: "hidden",
           work: "floating",
-          code: "pinned",
+          code: "floating",
         },
         // A pre-onboarding store already finished its first run; the upcast
         // stamps `completed` so an upgrade never re-runs the walkthrough.
@@ -1020,7 +1067,7 @@ describe("ShellProjection", () => {
         environmentPresentationByMode: {
           chat: "hidden",
           work: "floating",
-          code: "pinned",
+          code: "floating",
         },
         // A pre-onboarding store already finished its first run; the upcast
         // stamps `completed` so an upgrade never re-runs the walkthrough.
@@ -1042,6 +1089,24 @@ describe("ShellProjection", () => {
         .prepare("SELECT settings_json FROM shell_settings_projection WHERE projection_key = ?")
         .get("shell-settings"),
     ).toEqual({ settings_json: JSON.stringify(legacy) });
+    connection.close();
+  });
+
+  it("reads a settings row that still names the retired pinned default as floating", () => {
+    const connection = openConnection();
+    appendShellEvents(connection);
+    connection.prepare("UPDATE shell_settings_projection SET settings_json = ?").run(
+      JSON.stringify({
+        ...settings,
+        environmentPresentationByMode: { chat: "hidden", work: "pinned", code: "pinned" },
+      }),
+    );
+
+    expect(readShellSettings(connection)?.settings.environmentPresentationByMode).toEqual({
+      chat: "hidden",
+      work: "floating",
+      code: "floating",
+    });
     connection.close();
   });
 

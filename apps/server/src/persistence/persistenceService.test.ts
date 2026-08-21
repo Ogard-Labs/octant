@@ -204,7 +204,7 @@ describe("PersistenceLive", () => {
         overlayOpacity: 100,
         vibrancyMode: "off",
       },
-      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
+      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
     });
     expect(result.bootstrap.settingsVersion).toBe(1);
     expect(result.event).toEqual({ payload_json: legacyPayloadJson });

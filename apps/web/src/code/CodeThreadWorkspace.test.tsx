@@ -64,13 +64,12 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "find bugs in this repo" })).toBeVisible();
     expect(screen.getByRole("log")).toHaveTextContent(
       "No messages yet. Send a prompt to start this thread.",
     );
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeVisible();
-    // The header states what the thread is; opening a surface beside it is the
-    // tab launcher's job, so no row of openers competes with the title here.
+    // Opening a surface is the tab launcher's job, so no row of openers is
+    // rendered above the conversation.
     expect(screen.queryByRole("button", { name: "Changes" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Browser" })).not.toBeInTheDocument();
@@ -730,6 +729,19 @@ describe("CodeThreadWorkspace", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Canvas" })).not.toBeInTheDocument();
+  });
+
+  it("leaves Agents and Export to the dock and the thread's own row menu", () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        serverUrl="http://127.0.0.1:4317"
+        threadId={threadId}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Agents" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Export thread" })).not.toBeInTheDocument();
   });
 
   it("keeps the transcript top-aligned like a conversation instead of bottom-anchoring it", () => {
@@ -1429,22 +1441,10 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Failed")).toBeVisible();
   });
 
-  it("marks a thread for follow-up through the controller", async () => {
-    const user = userEvent.setup();
-    const markFollowUp = vi.fn(async () => true);
-    render(<CodeThreadWorkspace controller={controller({ markFollowUp })} threadId={threadId} />);
-
-    await user.click(screen.getByRole("button", { name: "Mark for follow-up" }));
-    expect(markFollowUp).toHaveBeenCalledWith(threadId);
-  });
-
-  it("shows an open follow-up marker with its reason and completes it explicitly", async () => {
-    const user = userEvent.setup();
-    const completeFollowUp = vi.fn(async () => true);
+  it("states the thread's identity nowhere, leaving the title to the pane and follow-up to the row", () => {
     render(
       <CodeThreadWorkspace
         controller={controller({
-          completeFollowUp,
           followUps: new Map([
             [
               String(threadId),
@@ -1468,54 +1468,19 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    const marker = screen.getByRole("status", { name: "Follow-up required" });
-    expect(marker).toHaveTextContent("Approval requested: run tests");
+    // The band above the transcript is chrome for live child runs, and the slot
+    // that reports them renders nothing for a thread with none — so the band
+    // collapses rather than painting a bare rule over an empty strip.
+    const styles = readFileSync(resolve(process.cwd(), "src/styles.css"), "utf8");
+    expect(styles).toMatch(
+      /\.code-thread-workspace__header:has\(> \.code-thread-workspace__header-row:empty\)\s*\{\s*display:\s*none;/,
+    );
+    expect(
+      screen.queryByRole("heading", { name: "find bugs in this repo" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark for follow-up" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Complete follow-up" }));
-    expect(completeFollowUp).toHaveBeenCalledWith(threadId);
-  });
-
-  it("starts a subagent from the Agents surface under this thread's own identity", async () => {
-    // The managed child runtime is reachable only through an explicit creation
-    // request. Rendering the hierarchy read-only would leave that runtime with
-    // no production surface at all, so the Code thread — which is the parent
-    // authority the host already verifies — must offer creation here.
-    const user = userEvent.setup();
-    const requestRun = vi.fn(async (_input: unknown) => ({ kind: "run-accepted" as const }));
-    const agentRunClient = {
-      parentSummary: vi.fn(async () => ({ parentThreadId: threadId, entries: [] })),
-      acknowledge: vi.fn(),
-      cancel: vi.fn(async () => ({ results: [] })),
-      requestRun,
-    } as never;
-    render(
-      <CodeThreadWorkspace
-        agentRunClient={agentRunClient}
-        controller={controller()}
-        threadId={threadId}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Agents" }));
-    const form = await screen.findByRole("form", { name: "Create subagent" });
-    expect(form).toBeVisible();
-
-    await user.type(within(form).getByLabelText("Task"), "Summarize the failing tests.");
-    await user.type(
-      within(form).getByLabelText("Provider instance ID"),
-      "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-    );
-    await user.type(within(form).getByLabelText("Model ID"), "model-one");
-    await user.click(within(form).getByRole("button", { name: "Create subagent" }));
-
-    await waitFor(() => expect(requestRun).toHaveBeenCalledTimes(1));
-    expect(requestRun.mock.calls[0]?.[0]).toMatchObject({
-      // The parent identity is the thread this workspace is bound to; the host
-      // authorizes creation against exactly that thread.
-      parentThreadId: threadId,
-      task: "Summarize the failing tests.",
-    });
+    expect(screen.queryByRole("button", { name: "Complete follow-up" })).not.toBeInTheDocument();
   });
 });
 

@@ -29,28 +29,71 @@ const validInput = {
   surfaceProjectId: projectIds.current,
 } as const satisfies RightUtilityDockResolutionInput;
 
-describe("Right Utility Dock surface model", () => {
+describe("resolving what the right utility dock shows", () => {
   it("publishes only the real surfaces in stable order", () => {
     expect(RIGHT_UTILITY_DOCK_SURFACES).toEqual([
       {
         id: "context",
         label: "Context",
         modes: ["chat", "work", "code"],
-        projectRequired: true,
+        scope: "project",
       },
       {
         id: "project-memory",
         label: "Project memory",
         modes: ["chat", "work", "code"],
-        projectRequired: true,
+        scope: "project",
       },
       {
         id: "navigator",
         label: "Navigator",
         modes: ["chat", "work", "code"],
-        projectRequired: false,
+        scope: "host",
+      },
+      {
+        id: "thread",
+        label: "Thread",
+        modes: ["code"],
+        scope: "thread",
       },
     ]);
+  });
+
+  it("opens the Thread panel for the thread the active pane holds", () => {
+    expect(
+      resolveRightUtilityDockSurface({
+        activeMode: "code",
+        activeThreadId: "30000000-0000-4000-8000-000000000003",
+        connectionState: "connected",
+        presentationAvailability: "available",
+        savedSurface: "thread",
+      }),
+    ).toEqual({ kind: "surface", surface: RIGHT_UTILITY_DOCK_SURFACES[3] });
+  });
+
+  it("keeps the Thread panel selected but empty-handed when the active pane holds no thread", () => {
+    expect(
+      resolveRightUtilityDockSurface({
+        activeMode: "code",
+        activeProject: projects.code,
+        connectionState: "connected",
+        presentationAvailability: "available",
+        savedSurface: "thread",
+        surfaceProjectId: projectIds.current,
+      }),
+    ).toMatchObject({ kind: "unavailable", reason: "thread-required", surface: { id: "thread" } });
+  });
+
+  it("does not offer the Thread panel outside Code", () => {
+    expect(
+      resolveRightUtilityDockSurface({
+        activeMode: "chat",
+        activeThreadId: "30000000-0000-4000-8000-000000000003",
+        connectionState: "connected",
+        presentationAvailability: "available",
+        savedSurface: "thread",
+      }),
+    ).toEqual({ kind: "closed", reason: "mode-invalid" });
   });
 
   it.each(["chat", "work", "code"] as const)(

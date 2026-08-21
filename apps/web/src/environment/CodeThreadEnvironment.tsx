@@ -30,16 +30,6 @@ export interface CodeThreadEnvironmentProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly children: ReactNode;
-  /** Repository file explorer, mounted inside the collapsible Files group. */
-  readonly files?: ReactNode;
-  /** Publishing controls, mounted inside the collapsible Publish group. */
-  readonly publish?: ReactNode;
-  /**
-   * The thread's plan, mounted inside its own collapsible group. The plan
-   * belongs to this thread, so it lives beside the thread's other facts rather
-   * than in the Project-scoped dock.
-   */
-  readonly plan?: ReactNode;
   /** Opens the thread's Changes (diff) surface. Absent hides the control. */
   readonly onOpenChanges?: () => void;
   /**
@@ -69,8 +59,14 @@ export interface CodeThreadEnvironmentProps {
  * by the authoritative {@link CodeEnvironmentObservation} for the tab's
  * Project. The compact identity and capability-valid Code sections are derived
  * from the real observation, and the Git facts render in the panel body. The
- * panel presentation (floating/pinned/hidden) follows the per-tab shell
- * presentation state.
+ * panel presentation (floating/hidden) follows the per-tab shell presentation
+ * state.
+ *
+ * The panel holds what the *environment* answers for — what the checkout has
+ * changed, what is listening, where work happens. The thread's own working
+ * surfaces (Files, Plan, Publish, Agents) are the dock's Thread panel, which
+ * has room for them; stacked here they turned a glanceable float into a list
+ * of disclosures.
  */
 export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   const controller = useCodeEnvironmentController({
@@ -99,11 +95,24 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     !checkoutUnusable || project === undefined || onNewThreadInProject === undefined
       ? undefined
       : { label: "New thread in this Project", onClick: () => onNewThreadInProject(project.id) };
+  // Named only from a ready observation. A detached HEAD has no branch name,
+  // so it says so rather than rendering a bare abbreviated oid that reads like
+  // one.
+  const observed = controller.observation;
+  const location =
+    observed?.status === "ready"
+      ? {
+          branch:
+            observed.branch.kind === "named"
+              ? observed.branch.name
+              : `Detached ${observed.branch.oid.slice(0, 7)}`,
+          worktree: observed.worktreeRoot,
+        }
+      : undefined;
   const [localServersOpen, setLocalServersOpen] = useState(false);
   // Scan only while the section can actually be seen: a hidden panel or a
   // collapsed group must not ask the host to enumerate listeners on a timer.
-  const localServersAvailable =
-    resolved.presentation !== "hidden" && localServersSection?.available === true;
+  const localServersAvailable = resolved !== "hidden" && localServersSection?.available === true;
   const localServersVisible = localServersAvailable && localServersOpen;
   const localServers = useLocalServersController({
     enabled: localServersVisible,
@@ -115,10 +124,11 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   });
 
   return (
-    <div className={`code-thread-environment code-thread-environment--${resolved.presentation}`}>
+    <div className={`code-thread-environment code-thread-environment--${resolved}`}>
       <div className="code-thread-environment__content">{props.children}</div>
       <ThreadEnvironmentPanel
         identity={projection.identity}
+        {...(location === undefined ? {} : { location })}
         mode="code"
         presentation={props.presentation}
         tabId={props.tab.id}
@@ -156,15 +166,6 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
             </button>
           )}
         </EnvironmentGroup>
-        {props.files === undefined ? null : (
-          <EnvironmentGroup title="Files">{props.files}</EnvironmentGroup>
-        )}
-        {props.plan === undefined ? null : (
-          <EnvironmentGroup title="Plan">{props.plan}</EnvironmentGroup>
-        )}
-        {props.publish === undefined ? null : (
-          <EnvironmentGroup title="Publish">{props.publish}</EnvironmentGroup>
-        )}
         <EnvironmentGroup
           onOpenChange={setLocalServersOpen}
           {...(localServers.snapshot === undefined

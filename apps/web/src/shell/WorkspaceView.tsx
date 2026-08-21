@@ -45,7 +45,6 @@ import { ChatProjectOverview } from "../chat/ChatProjectOverview";
 import type { CodeController } from "../code/useCodeController";
 import { useCodeThreadController, type CodeThreadControllers } from "../code/codeThreadControllers";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { CodeOverview } from "../code/CodeOverview";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts/code";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
@@ -59,19 +58,15 @@ import type { WorkOverviewClient } from "@octant/client-runtime/work-overview-cl
 import type { WorkResearchClient } from "@octant/client-runtime/work-research-client";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
-import type { ShipClient } from "@octant/client-runtime/ship-client";
 import type { UsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { WorkResearchPanel } from "../work/WorkResearchPanel";
 import { ThreadGoalPanel } from "../goal/ThreadGoalPanel";
-import { ShipPanel } from "../ship/ShipPanel";
 import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
-import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { ThreadChildRunStatusSlot } from "../agents/ThreadChildRunStatusSlot";
-import { CodeFileExplorerPanel } from "../code/CodeFileExplorerPanel";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
@@ -104,7 +99,6 @@ type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 export interface WorkspaceViewProps {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly agentRunClient?: AgentRunClient;
-  readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly chatClient: ChatClient;
   readonly chatController: ChatController;
   readonly chatReadCursorStore: ChatReadCursorStore;
@@ -167,7 +161,6 @@ export interface WorkspaceViewProps {
   readonly goalClient?: GoalClient;
   readonly goalLoopClient?: GoalLoopClient;
   readonly planClient?: PlanClient;
-  readonly shipClient?: ShipClient;
   readonly usageDashboardClient?: UsageDashboardClient;
   readonly onOpenUsageDashboard?: (filter: UsageQueryFilter) => void;
   readonly workOverviewModel?: WorkOverviewModel;
@@ -548,7 +541,6 @@ function renderCodeTab(
   const project = resolveCodeTabProject(tab, props);
   const browserAutomationClient = props.browserAutomationClient;
   const onOpenSurface = props.onOpenSurface;
-  const checkoutId = resolveCodeTabCheckoutId(tab, codeController);
   const content = (
     <Suspense
       fallback={
@@ -562,9 +554,6 @@ function renderCodeTab(
     >
       <CodeWorkspaceTab
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-        {...(props.agentRunSettingsClient === undefined
-          ? {}
-          : { agentRunSettingsClient: props.agentRunSettingsClient })}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
@@ -643,20 +632,6 @@ function renderCodeTab(
       {content}
     </ThreadActivityPictureInPicture>
   );
-  const shipClient = props.shipClient;
-  const files = (
-    <CodeFileExplorerPanel
-      threadId={tab.threadId}
-      {...(checkoutId === undefined ? {} : { checkoutId })}
-      {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
-      {...(props.projectWindowCapability === undefined
-        ? {}
-        : { windowCapability: props.projectWindowCapability })}
-      onOpenFile={(entry) =>
-        props.onOpenCodeFile?.({ threadId: tab.threadId, relativePath: entry.path })
-      }
-    />
-  );
   return (
     <CodeWorkspaceErrorBoundary key={tab.id}>
       <ThreadPlanProvider
@@ -707,11 +682,6 @@ function renderCodeTab(
               })}
           tab={tab}
           onExecute={codeController.execute}
-          files={files}
-          plan={<ThreadPlanPanel />}
-          {...(shipClient === undefined
-            ? {}
-            : { publish: <ShipPanel client={shipClient} threadId={String(tab.threadId)} /> })}
           onOpenChanges={() =>
             props.onOpenCodeSurface("code-diff", tab.threadId, codeSurfaceTitle("code-diff"))
           }

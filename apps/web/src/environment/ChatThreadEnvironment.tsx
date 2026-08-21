@@ -39,9 +39,7 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
   const resolved = resolveTabPresentation(props.presentation, "chat", props.tab.id);
 
   return (
-    <div
-      className={`thread-environment-wrapper thread-environment-wrapper--${resolved.presentation}`}
-    >
+    <div className={`thread-environment-wrapper thread-environment-wrapper--${resolved}`}>
       <div className="thread-environment-wrapper__content">{props.children}</div>
       <ThreadEnvironmentPanel
         identity={projection.identity}

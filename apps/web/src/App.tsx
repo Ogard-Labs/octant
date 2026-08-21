@@ -213,6 +213,7 @@ import {
 import { ShellFrame } from "./shell/ShellFrame";
 import { RemotePairingView } from "./remote/RemotePairingView";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
+import { ThreadDockPanel } from "./shell/ThreadDockPanel";
 import {
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveRightUtilityDockSurface,
@@ -248,6 +249,7 @@ import { ExecutionProfileWorkflow } from "./agentProfile/ExecutionProfileWorkflo
 import { useExecutionProfileController } from "./agentProfile/useExecutionProfileController";
 import { useWorkThreadNavigation } from "./work/useWorkThreadNavigation";
 import type { ThreadRowActions } from "./projects/ThreadRowMenu";
+import { exportThreadBundle, resolveThreadExportClient } from "./thread/threadExport";
 import type { ChatThreadNavigationItem, ThreadProviderIdentity } from "./shell/navigationModel";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
 import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
@@ -674,6 +676,11 @@ function LaunchedShell(
     controller.workspace === undefined || activePaneId === undefined
       ? undefined
       : activeDraftTabKey(controller.workspace.layouts[activeMode], activePaneId);
+  // The subject of the dock's thread-scoped panel. It is the same read as
+  // every other window context above, so activating a pane re-targets the
+  // panel with them; a pane holding a welcome or overview surface reports no
+  // thread rather than leaving the previous pane's thread standing.
+  const dockThreadId = activeCodeThreadId === undefined ? undefined : String(activeCodeThreadId);
   // One drag pipeline for pane grips and sidebar rows. A sidebar row whose
   // thread belongs to a different Project is rerouted through the ordinary
   // open path on drop, so a drag cannot place a cross-Project thread without
@@ -890,6 +897,26 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
+  // Export is offered only where a client resolves — the same test the chat
+  // thread-actions menu applies — so a window without a server capability
+  // shows no Export item rather than one that could not carry it out.
+  const [threadExportNotice, setThreadExportNotice] = useState<string>();
+  const threadExportClient = useMemo(
+    () =>
+      resolveThreadExportClient({
+        serverUrl: props.launch.serverUrl,
+        windowCapability: props.projectWindowCapability,
+      }),
+    [props.launch.serverUrl, props.projectWindowCapability],
+  );
+  // The export receipt is a receipt, not a state the sidebar keeps: it clears
+  // itself so a "Saved …" line from ten minutes ago is not still standing over
+  // the Project list.
+  useEffect(() => {
+    if (threadExportNotice === undefined) return;
+    const timer = setTimeout(() => setThreadExportNotice(undefined), 8000);
+    return () => clearTimeout(timer);
+  }, [threadExportNotice]);
   const workMutationClient = useMemo(
     () =>
       createWorkMutationClient({
@@ -1374,6 +1401,22 @@ function LaunchedShell(
     dockProjectId === undefined
       ? undefined
       : projectController.allProjects.find((project) => project.id === dockProjectId);
+  // The thread the dock's Thread panel is about, with the checkout its Files
+  // group lists. Both come from the reads the pane itself uses, so the panel
+  // and the pane cannot disagree about which checkout the thread is bound to.
+  const dockThread =
+    activeCodeThreadId === undefined
+      ? undefined
+      : {
+          threadId: activeCodeThreadId,
+          checkoutId:
+            codeController.activeView !== undefined &&
+            String(codeController.activeView.thread.id) === String(activeCodeThreadId)
+              ? codeController.activeView.checkout.id
+              : codeController.bootstrap?.threads.find(
+                  (thread) => String(thread.id) === String(activeCodeThreadId),
+                )?.checkoutId,
+        };
   const dockResolution = resolveDockSurface(dockSurface, dockProjectId);
   const availableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
     (surface) =>
@@ -1963,6 +2006,9 @@ function LaunchedShell(
     // Its own readiness — unconfigured, unavailable — is the panel's to report
     // from the host snapshot, not something to pre-empt by hiding the surface.
     if (surface === "navigator") return "available";
+    // Thread is scoped to the active pane's surface, not to a Project. Whether
+    // that pane holds a thread is the resolver's thread-required question.
+    if (surface === "thread") return "available";
     // Whether a Project is active is the resolver's project-required question,
     // not a presentation outage. Answering "unavailable" here used to short the
     // resolver out before that question, which closed an open panel instead of
@@ -1980,7 +2026,9 @@ function LaunchedShell(
     surface: unknown,
     surfaceProjectId: ProjectId | undefined,
     availability = surfaceAvailability(
-      surface === "context" || surface === "navigator" ? surface : "project-memory",
+      surface === "context" || surface === "navigator" || surface === "thread"
+        ? surface
+        : "project-memory",
     ),
   ): RightUtilityDockResolution {
     const project =
@@ -1990,6 +2038,7 @@ function LaunchedShell(
     return resolveRightUtilityDockSurface({
       activeMode,
       ...(project === undefined ? {} : { activeProject: project }),
+      ...(dockThreadId === undefined ? {} : { activeThreadId: dockThreadId }),
       connectionState: projectController.status === "disconnected" ? "disconnected" : "connected",
       presentationAvailability: availability,
       savedSurface: surface,
@@ -2202,8 +2251,31 @@ function LaunchedShell(
   // navigation id, which for a Project-backed thread is its Code thread id;
   // the controller refuses anything its bootstrap does not hold rather than
   // guessing at a thread it cannot see.
+  /**
+   * The Export item for a thread row, or nothing when this window has no
+   * export client. The receipt is shown in the sidebar rather than swallowed:
+   * a refused export leaves no file behind, so silence would read as success.
+   */
+  function exportThreadFromRow(
+    mode: OctantMode,
+  ): ((threadId: string, title: string) => void) | undefined {
+    const client = threadExportClient;
+    if (client === undefined) return undefined;
+    return (threadId, title) => {
+      setThreadExportNotice(`Exporting ${title}…`);
+      void exportThreadBundle(client, { mode, threadId, title }).then(setThreadExportNotice);
+    };
+  }
+  const exportCodeThread = exportThreadFromRow("code");
+  const exportChatThread = exportThreadFromRow("chat");
+  const exportWorkThread = exportThreadFromRow("work");
+
   const codeThreadRowActions: ThreadRowActions = {
+    ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
+    onCompleteFollowUp: (threadId) =>
+      void codeController.completeFollowUp(decodeCodeThreadId(threadId)),
+    onMarkFollowUp: (threadId) => void codeController.markFollowUp(decodeCodeThreadId(threadId)),
     onMarkThreadRead: (threadId) => codeController.markThreadRead(decodeCodeThreadId(threadId)),
     onMarkThreadUnread: (threadId) => codeReadCursorStore.unmark(decodeCodeThreadId(threadId)),
     onPinThread: (threadId, pinned) =>
@@ -2216,9 +2288,15 @@ function LaunchedShell(
   // or pin authority yet, so the menu holds only the read-state pair — the
   // shorter menu is the honest one, the same rule the Code rows follow.
   const chatThreadRowActions: ThreadRowActions = {
+    ...(exportChatThread === undefined ? {} : { onExportThread: exportChatThread }),
     onMarkThreadRead: (threadId) => chatController.markThreadRead(decodeChatThreadId(threadId)),
     onMarkThreadUnread: (threadId) => chatReadCursorStore.unmark(decodeChatThreadId(threadId)),
   };
+  // Work rows carry no archive, pin, or read-state authority yet, so Export is
+  // the whole menu there — and without it a Work thread would have no export
+  // path at all now that the thread header no longer carries one.
+  const workThreadRowActions: ThreadRowActions =
+    exportWorkThread === undefined ? {} : { onExportThread: exportWorkThread };
 
   // One thread-selection handler per mode. The sidebar and every Project
   // Overview call the same one, so a row opens the same thread wherever it is
@@ -3380,130 +3458,148 @@ function LaunchedShell(
             resolvedSidebarBackground={resolvedSidebarBackground}
             backgroundFetcher={sidebarBackgroundFetcher}
             projectSection={
-              projectController.status === "loading" ? (
-                <p className="project-nav__status" role="status">
-                  Loading Projects…
-                </p>
-              ) : projectController.status === "disconnected" ? (
-                <div className="project-nav__status" role="alert">
-                  <span>{projectController.errorMessage}</span>
-                  <OctantButton onClick={projectController.retry} type="button" variant="secondary">
-                    Retry
-                  </OctantButton>
-                </div>
-              ) : (
-                <ProjectSidebarSection
-                  searchQuery={sidebarSearchQuery}
-                  {...(activeMode === "code"
-                    ? {
-                        projectViewsEnabled: true,
-                        projectViewSwitcherPresentation: (
-                          presentedShellSettings ?? controller.settings
-                        ).projectViewSwitcherPresentation,
-                      }
-                    : {})}
-                  activityMode={activeMode}
-                  {...(activeProjectId === undefined ? {} : { activeProjectId })}
-                  {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
-                    ? { expandProjectThreadsRequest: chatProjectThreadListRequest }
-                    : {})}
-                  {...((activeMode === "chat" &&
-                    chatController.status === "ready" &&
-                    activeChatThreadId !== undefined) ||
-                  (activeMode === "code" &&
-                    codeController.status === "ready" &&
-                    activeCodeThreadId !== undefined) ||
-                  (activeMode === "work" &&
-                    workNavigation.status === "ready" &&
-                    activeWorkThreadId !== undefined)
-                    ? {
-                        activeThreadId:
-                          activeMode === "code"
-                            ? String(activeCodeThreadId)
-                            : activeMode === "work"
-                              ? String(activeWorkThreadId)
-                              : String(activeChatThreadId),
-                      }
-                    : {})}
-                  archivedProjects={projectController.archivedProjects}
-                  availabilityByProject={projectController.availabilityByProject}
-                  contextHealthByProject={contextHealthByProject}
-                  onOpenContextHealth={(projectId, opener) =>
-                    void openProjectContextHealth(projectId, opener)
-                  }
-                  {...(activeMode === "chat"
-                    ? (chatController.navigation?.length ?? 0) > 0
+              <>
+                {threadExportNotice === undefined ? null : (
+                  <p className="project-nav__status" role="status">
+                    {threadExportNotice}
+                  </p>
+                )}
+                {projectController.status === "loading" ? (
+                  <p className="project-nav__status" role="status">
+                    Loading Projects…
+                  </p>
+                ) : projectController.status === "disconnected" ? (
+                  <div className="project-nav__status" role="alert">
+                    <span>{projectController.errorMessage}</span>
+                    <OctantButton
+                      onClick={projectController.retry}
+                      type="button"
+                      variant="secondary"
+                    >
+                      Retry
+                    </OctantButton>
+                  </div>
+                ) : (
+                  <ProjectSidebarSection
+                    searchQuery={sidebarSearchQuery}
+                    {...(activeMode === "code"
                       ? {
-                          addProjectLabel: "chat-project" as const,
-                          onAddProject: () => setCreateOpen(true),
+                          projectViewsEnabled: true,
+                          projectViewSwitcherPresentation: (
+                            presentedShellSettings ?? controller.settings
+                          ).projectViewSwitcherPresentation,
                         }
-                      : {}
-                    : {
-                        onAddProject: () => setCreateOpen(true),
-                        unfiledLabel: "Recents" as const,
-                      })}
-                  onArchive={(projectId) => void projectController.setArchived(projectId, true)}
-                  onMove={(projectId, pinned) => void projectController.move(projectId, pinned)}
-                  {...(activeMode === "chat"
-                    ? {
-                        newThreadVerb: "chat" as const,
-                        onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
-                      }
-                    : activeMode === "code"
+                      : {})}
+                    activityMode={activeMode}
+                    {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                    {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
+                      ? { expandProjectThreadsRequest: chatProjectThreadListRequest }
+                      : {})}
+                    {...((activeMode === "chat" &&
+                      chatController.status === "ready" &&
+                      activeChatThreadId !== undefined) ||
+                    (activeMode === "code" &&
+                      codeController.status === "ready" &&
+                      activeCodeThreadId !== undefined) ||
+                    (activeMode === "work" &&
+                      workNavigation.status === "ready" &&
+                      activeWorkThreadId !== undefined)
                       ? {
-                          newThreadVerb: "thread" as const,
+                          activeThreadId:
+                            activeMode === "code"
+                              ? String(activeCodeThreadId)
+                              : activeMode === "work"
+                                ? String(activeWorkThreadId)
+                                : String(activeChatThreadId),
+                        }
+                      : {})}
+                    archivedProjects={projectController.archivedProjects}
+                    availabilityByProject={projectController.availabilityByProject}
+                    contextHealthByProject={contextHealthByProject}
+                    onOpenContextHealth={(projectId, opener) =>
+                      void openProjectContextHealth(projectId, opener)
+                    }
+                    {...(activeMode === "chat"
+                      ? (chatController.navigation?.length ?? 0) > 0
+                        ? {
+                            addProjectLabel: "chat-project" as const,
+                            onAddProject: () => setCreateOpen(true),
+                          }
+                        : {}
+                      : {
+                          onAddProject: () => setCreateOpen(true),
+                          unfiledLabel: "Recents" as const,
+                        })}
+                    onArchive={(projectId) => void projectController.setArchived(projectId, true)}
+                    onMove={(projectId, pinned) => void projectController.move(projectId, pinned)}
+                    {...(activeMode === "chat"
+                      ? {
+                          newThreadVerb: "chat" as const,
                           onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
                         }
-                      : activeMode === "work"
+                      : activeMode === "code"
                         ? {
                             newThreadVerb: "thread" as const,
                             onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
                           }
-                        : {})}
-                  onReorder={(projectId, pinned, beforeProjectId, afterProjectId) =>
-                    void projectController.move(projectId, pinned, beforeProjectId, afterProjectId)
-                  }
-                  onRestore={(projectId) => void projectController.setArchived(projectId, false)}
-                  onProjectOpen={openSelectedProject}
-                  {...(activeMode === "chat" && chatController.status === "ready"
-                    ? {
-                        onSelectThread: selectChatThread,
-                        threadActions: chatThreadRowActions,
-                        threads: chatController.navigation,
-                      }
-                    : activeMode === "code"
+                        : activeMode === "work"
+                          ? {
+                              newThreadVerb: "thread" as const,
+                              onNewThreadInProject: (projectId) =>
+                                void openDraftInProject(projectId),
+                            }
+                          : {})}
+                    onReorder={(projectId, pinned, beforeProjectId, afterProjectId) =>
+                      void projectController.move(
+                        projectId,
+                        pinned,
+                        beforeProjectId,
+                        afterProjectId,
+                      )
+                    }
+                    onRestore={(projectId) => void projectController.setArchived(projectId, false)}
+                    onProjectOpen={openSelectedProject}
+                    {...(activeMode === "chat" && chatController.status === "ready"
                       ? {
-                          onSelectThread: selectCodeThread,
-                          threadActions: codeThreadRowActions,
-                          onRenameThread: renameCodeThreadFromRow,
-                          ...(markedThreadGroups === undefined
-                            ? codeController.status === "ready"
-                              ? { threads: codeProjectThreads.map(withProviderMark) }
-                              : {}
-                            : { threadGroups: markedThreadGroups }),
+                          onSelectThread: selectChatThread,
+                          threadActions: chatThreadRowActions,
+                          threads: chatController.navigation,
                         }
-                      : activeMode === "work"
+                      : activeMode === "code"
                         ? {
-                            onSelectThread: selectWorkThread,
+                            onSelectThread: selectCodeThread,
+                            threadActions: codeThreadRowActions,
+                            onRenameThread: renameCodeThreadFromRow,
                             ...(markedThreadGroups === undefined
-                              ? workNavigation.status === "ready"
-                                ? { threads: workProjectThreads.map(withProviderMark) }
+                              ? codeController.status === "ready"
+                                ? { threads: codeProjectThreads.map(withProviderMark) }
                                 : {}
                               : { threadGroups: markedThreadGroups }),
                           }
-                        : {})}
-                  {...(activeMode === "chat"
-                    ? {}
-                    : {
-                        threadStatus: projectThreadsAccess.status,
-                        ...(projectThreadsAccess.errorMessage === undefined
-                          ? {}
-                          : { threadErrorMessage: projectThreadsAccess.errorMessage }),
-                        onRetryThreads: () => projectThreadsAccess.onRetry?.(),
-                      })}
-                  projects={projectController.projects}
-                />
-              )
+                        : activeMode === "work"
+                          ? {
+                              onSelectThread: selectWorkThread,
+                              threadActions: workThreadRowActions,
+                              ...(markedThreadGroups === undefined
+                                ? workNavigation.status === "ready"
+                                  ? { threads: workProjectThreads.map(withProviderMark) }
+                                  : {}
+                                : { threadGroups: markedThreadGroups }),
+                            }
+                          : {})}
+                    {...(activeMode === "chat"
+                      ? {}
+                      : {
+                          threadStatus: projectThreadsAccess.status,
+                          ...(projectThreadsAccess.errorMessage === undefined
+                            ? {}
+                            : { threadErrorMessage: projectThreadsAccess.errorMessage }),
+                          onRetryThreads: () => projectThreadsAccess.onRetry?.(),
+                        })}
+                    projects={projectController.projects}
+                  />
+                )}
+              </>
             }
           />
         }
@@ -3586,7 +3682,6 @@ function LaunchedShell(
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
-                    agentRunSettingsClient={agentRunSettingsClient}
                     chatClient={chatClient}
                     chatController={chatController}
                     chatReadCursorStore={chatReadCursorStore}
@@ -3674,7 +3769,6 @@ function LaunchedShell(
                     workResearchClient={workResearchClient}
                     goalClient={goalClient}
                     goalLoopClient={goalLoopClient}
-                    shipClient={shipClient}
                     planClient={planClient}
                     onOpenCodeFile={({ threadId, relativePath }) => {
                       void controller.openCodeSurface({
@@ -3930,6 +4024,30 @@ function LaunchedShell(
                 )
               }
               resolution={dockResolution}
+              thread={
+                dockThread === undefined ? null : (
+                  <ThreadDockPanel
+                    agentRunClient={agentRunClient}
+                    agentRunSettingsClient={agentRunSettingsClient}
+                    {...(dockThread.checkoutId === undefined
+                      ? {}
+                      : { checkoutId: dockThread.checkoutId })}
+                    onOpenFile={(relativePath) => {
+                      void controller.openCodeSurface({
+                        kind: "code-file",
+                        threadId: dockThread.threadId,
+                        title: relativePath,
+                        relativePath,
+                      });
+                    }}
+                    planClient={planClient}
+                    serverUrl={props.launch.serverUrl}
+                    shipClient={shipClient}
+                    threadId={dockThread.threadId}
+                    windowCapability={props.projectWindowCapability}
+                  />
+                )
+              }
               width={contextSidebarWidth}
             />
           </>
