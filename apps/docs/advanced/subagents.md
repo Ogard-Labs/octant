@@ -27,6 +27,12 @@ inside the provider's own runtime.
 This page documents the designed behavior so you know where the product is
 going. Where a control is not yet available, the page says so explicitly.
 
+Compact child-run status on the parent thread is current. The read-only
+**Agents** hierarchy panel in Code is also current. The approved later
+placement keeps that compact header status and opens Agents as a right-dock
+tool only when children exist or you explicitly add an agent; it is not a
+generic Thread-tab accordion.
+
 ## Roles and execution kinds
 
 Every child is one **AgentRun** with an execution kind of `provider-native`

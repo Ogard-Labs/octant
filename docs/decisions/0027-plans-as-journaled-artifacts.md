@@ -60,3 +60,4 @@ Octant needed the plan itself to be a thing the host holds.
 - 0003 Product modes: Chat, Work, and Code authority
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0015 Workspace shell model
+- 0044 The dock hosts live thread-owned tools

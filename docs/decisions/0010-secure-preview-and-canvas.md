@@ -98,3 +98,4 @@ Canvas:
 - 0003 Product modes and authority
 - 0011 Extensions and skills activation ladder
 - 0015 Workspace shell model
+- 0044 The dock hosts live thread-owned tools

@@ -61,6 +61,11 @@ When a thread needs attention the status bar shows **Watch**, **Optimizing**,
 **Action needed**, **Blocked**, or **Rate limited**, and opens the **Context
 inspector**.
 
+That inspector is current product behavior. The approved later placement is a
+circular meter on the active thread's composer with an authoritative
+breakdown popover; context usage is not a right-dock tab. The planner,
+manifest, and limits on this page do not change with that migration.
+
 The Context inspector shows the planned and sent manifests, model limits,
 safe budget, every reserve, composition by category, health states, token
 accuracy labels, loaded-versus-available tools and MCP servers, compaction

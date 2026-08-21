@@ -105,3 +105,4 @@ calls unless a decision record and the request authorise them.
 
 - 0002 Durable event journal and rebuildable projections
 - 0015 Workspace shell model
+- 0044 The dock hosts live thread-owned tools
