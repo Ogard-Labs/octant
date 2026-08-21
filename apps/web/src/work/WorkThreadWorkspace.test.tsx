@@ -1,10 +1,11 @@
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import { decodeWorkThread, decodeWorkThreadId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WorkThreadWorkspace } from "./WorkThreadWorkspace";
+import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 
 const threadId = decodeWorkThreadId("10000000-0000-4000-8000-000000000101");
 const providerId = "80000000-0000-4000-8000-0000000000b1" as never;
@@ -277,7 +278,457 @@ describe("WorkThreadWorkspace", () => {
       threadId,
     );
   });
+
+  it("queues a follow-up while a turn is running and sends it once the turn completes", async () => {
+    const user = userEvent.setup();
+    const startFirstTurn = vi.fn(async () => ({
+      kind: "accepted" as const,
+      turn: workTurn({
+        requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        turnId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        status: "accepted",
+        prompt: "Next instruction",
+        transcript: [{ role: "user", text: "Next instruction" }],
+      }),
+    }));
+    let turns = [workTurn({ status: "running" })];
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns })),
+      startFirstTurn,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const composer = await screen.findByLabelText("Work prompt");
+    expect(composer).toBeEnabled();
+    await user.type(composer, "Next instruction");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    expect(startFirstTurn).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "This message is queued and will send when the response finishes.",
+    );
+    expect(composer).toHaveValue("Next instruction");
+
+    turns = [workTurn({ status: "completed" })];
+    await waitFor(() => expect(startFirstTurn).toHaveBeenCalledOnce(), { timeout: 2500 });
+    expect(startFirstTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-work-thread-turn",
+        threadId,
+        prompt: "Next instruction",
+      }),
+    );
+  });
+
+  it("leaves a queued follow-up unsent when the turn is cancelled, and lets the user discard it", async () => {
+    const user = userEvent.setup();
+    const startFirstTurn = vi.fn();
+    let turns = [workTurn({ status: "running" })];
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns })),
+      startFirstTurn,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await user.type(await screen.findByLabelText("Work prompt"), "Hold this");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    turns = [workTurn({ status: "cancelled" })];
+    await waitFor(
+      () =>
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "The response was cancelled. The queued message was not sent.",
+        ),
+      { timeout: 2500 },
+    );
+    expect(startFirstTurn).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
+    expect(screen.getByLabelText("Work prompt")).toHaveValue("");
+  });
+
+  it("does not send a queued Work follow-up after the user confirms the thread Done", async () => {
+    const user = userEvent.setup();
+    const startFirstTurn = vi.fn();
+    let turns = [workTurn({ status: "running" })];
+    const execute = vi.fn(async () => ({
+      kind: "thread-completion-confirmed" as const,
+      thread: workThread({ version: 2, completionConfirmed: true }),
+    }));
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute,
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns })),
+      startFirstTurn,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await user.type(await screen.findByLabelText("Work prompt"), "After done");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Mark delivery target complete" }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Delivery satisfaction evidence" }),
+      "The reviewed draft is saved in the bound folder.",
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm delivery target completion" }));
+    expect(await screen.findByText("Delivery target marked complete.")).toBeInTheDocument();
+    turns = [workTurn({ status: "completed" })];
+    await waitFor(
+      () =>
+        expect(
+          (turnClient.transcript as { mock: { calls: unknown[] } }).mock.calls.length,
+        ).toBeGreaterThan(1),
+      { timeout: 2500 },
+    );
+    expect(startFirstTurn).not.toHaveBeenCalled();
+  });
+
+  it("holds a queued Work follow-up when the turn ends as waiting", async () => {
+    const user = userEvent.setup();
+    const startFirstTurn = vi.fn();
+    let turns = [workTurn({ status: "running" })];
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns })),
+      startFirstTurn,
+    };
+
+    render(
+      <WorkThreadWorkspace
+        hostId={"local" as never}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await user.type(await screen.findByLabelText("Work prompt"), "Hold this");
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    turns = [workTurn({ status: "waiting" })];
+    await waitFor(
+      () =>
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "The response is waiting. The queued message was not sent.",
+        ),
+      { timeout: 2500 },
+    );
+    expect(startFirstTurn).not.toHaveBeenCalled();
+  });
+
+  it("refuses a follow-up when the thread has no binding authority instead of writing an artifact", async () => {
+    const user = userEvent.setup();
+    const { bindingRevisionId: _omitted, ...unbound } = workThread();
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({
+        threads: [unbound],
+      })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const mutate = vi.fn();
+    const startFirstTurn = vi.fn();
+    render(
+      <WorkThreadWorkspace
+        mutationClient={{ mutate } as never}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={
+          { startFirstTurn, transcript: vi.fn(async () => ({ threadId, turns: [] })) } as never
+        }
+      />,
+    );
+
+    await screen.findByLabelText("Bound provider and model");
+    await user.type(screen.getByRole("textbox", { name: "Work prompt" }), "Revise that");
+    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
+
+    expect(mutate).not.toHaveBeenCalled();
+    expect(startFirstTurn).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(/must be rebound before sending a follow-up/),
+    ).toBeInTheDocument();
+  });
+
+  it("offers a file picker on an existing Work thread that can send images", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[
+          {
+            ...providerGroup(),
+            sections: [
+              {
+                label: "Models",
+                models: [
+                  {
+                    model: {
+                      id: modelId,
+                      displayName: "Model One",
+                      inputModalities: ["text", "image"],
+                    },
+                  },
+                ],
+              },
+            ],
+          } as never,
+        ]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={{ transcript: vi.fn(async () => ({ threadId, turns: [] })) } as never}
+      />,
+    );
+
+    await screen.findByLabelText("Bound provider and model");
+    expect(screen.getByRole("button", { name: "Add attachment" })).toBeEnabled();
+  });
+
+  it("says a text-only model cannot take a pasted image instead of attaching it", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[
+          {
+            ...providerGroup(),
+            sections: [
+              {
+                label: "Models",
+                models: [
+                  {
+                    model: {
+                      id: modelId,
+                      displayName: "Model One",
+                      inputModalities: ["text"],
+                    },
+                  },
+                ],
+              },
+            ],
+          } as never,
+        ]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+
+    await screen.findByLabelText("Bound provider and model");
+    const file = new File([new Uint8Array([137, 80, 78])], "pasted.png", { type: "image/png" });
+    fireEvent.paste(screen.getByLabelText("Work prompt"), {
+      clipboardData: { files: [file], items: [] },
+    });
+    const attached = await screen.findByLabelText("Attached images");
+    expect(attached).toHaveTextContent(
+      "The selected model does not accept images. Choose an image-capable model.",
+    );
+    expect(screen.queryByAltText("pasted.png")).not.toBeInTheDocument();
+  });
+
+  it("does not offer @file completion until the host can list the bound root", async () => {
+    const user = userEvent.setup();
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    await screen.findByLabelText("Bound provider and model");
+    await user.type(screen.getByLabelText("Work prompt"), "look at @notes");
+    expect(
+      screen.queryByRole("listbox", { name: "Files you can mention" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("restores a Work draft after leaving the thread and remounting", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    store.write("work", String(threadId), {
+      text: "quarterly notes",
+      caretIndex: 9,
+      stagedDropped: false,
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+
+    const first = render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue(
+      "quarterly notes",
+    );
+    first.unmount();
+
+    render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    const prompt = await screen.findByRole("textbox", { name: "Work prompt" });
+    expect(prompt).toHaveValue("quarterly notes");
+    expect((prompt as HTMLTextAreaElement).selectionStart).toBe(9);
+  });
+
+  it("clears a Work draft so it does not reappear", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    store.write("work", String(threadId), {
+      text: "artifact body",
+      caretIndex: 0,
+      stagedDropped: false,
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const { unmount } = render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue(
+      "artifact body",
+    );
+    store.clear("work", String(threadId));
+    unmount();
+
+    render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    expect(await screen.findByRole("textbox", { name: "Work prompt" })).toHaveValue("");
+  });
+
+  it("purges a Work draft when the thread is no longer available", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    store.write("work", String(threadId), {
+      text: "gone with thread",
+      caretIndex: 0,
+      stagedDropped: false,
+    });
+    const missing = {
+      bootstrap: vi.fn(async () => ({ threads: [] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        draftStore={store}
+        providerGroups={[providerGroup()]}
+        threadClient={missing}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    expect(await screen.findByText("This Work thread is no longer available.")).toBeInTheDocument();
+    expect(store.read("work", String(threadId))).toBeUndefined();
+  });
 });
+
+function workTurn(overrides: Record<string, unknown> = {}) {
+  return {
+    requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    threadId,
+    turnId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    projectId: "20000000-0000-4000-8000-000000000101",
+    authority: {
+      hostId: "local",
+      projectId: "20000000-0000-4000-8000-000000000101",
+      bindingRevisionId: "30000000-0000-4000-8000-000000000101",
+      workingDirectory: "research/brief",
+      confinementPosture: "project-root-confined",
+      providerInstanceId: providerId,
+      modelId,
+    },
+    status: "completed",
+    prompt: "Summarize the brief",
+    transcript: [
+      { role: "user", text: "Summarize the brief" },
+      { role: "assistant", text: "Here is the confined summary." },
+    ],
+    capabilities: {
+      workspace: "project-backed",
+      confinement: "project-root-confined",
+      shell: "denied",
+      git: "denied",
+      worktree: "denied",
+      pullRequest: "denied",
+      code: "denied",
+    },
+    version: 2,
+    acceptedAt: "2026-08-01T20:00:00.000Z",
+    updatedAt: "2026-08-01T20:01:00.000Z",
+    ...overrides,
+  };
+}
 
 function workThread(overrides: Record<string, unknown> = {}) {
   return decodeWorkThread({
@@ -310,6 +761,24 @@ function providerGroup(): PickerGroup {
       },
     ],
   } as never;
+}
+
+function memoryDraftStorage(): Storage {
+  const data = new Map<string, string>();
+  return {
+    get length() {
+      return data.size;
+    },
+    clear: () => data.clear(),
+    getItem: (key) => data.get(key) ?? null,
+    key: (index) => [...data.keys()][index] ?? null,
+    removeItem: (key) => {
+      data.delete(key);
+    },
+    setItem: (key, value) => {
+      data.set(key, value);
+    },
+  };
 }
 
 function alternateProviderGroup(): PickerGroup {

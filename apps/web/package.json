@@ -15,6 +15,7 @@
     "@octant/domain": "workspace:*",
     "@octant/plugin-host": "workspace:*",
     "@octant/theme": "workspace:*",
+    "@tanstack/react-virtual": "3.14.10",
     "@xterm/addon-fit": "catalog:",
     "@xterm/xterm": "catalog:",
     "class-variance-authority": "0.7.1",

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { ArrowUp, Square } from "lucide-react";
+import { ArrowUp, Square, X } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
 
 /**
@@ -24,20 +24,36 @@ export interface ThreadComposerStop {
   readonly onStop: () => void;
 }
 
+export interface ThreadComposerDiscard {
+  readonly ariaLabel: string;
+  readonly onDiscard: () => void;
+}
+
 /**
  * What the row's trailing edge does. Most surfaces start or follow up with a
  * single send control pushed right by the flexible gap; Chat swaps the same
  * spot between send and stop while a response streams, in its own actions
- * cell (its bar lays cells out itself, so it carries no gap).
+ * cell (its bar lays cells out itself, so it carries no gap). A running turn
+ * also lets a follow-up be queued: `discard` drops the parked follow-up, and
+ * `sendHidden` hides send once that follow-up is already queued — Chat pairs
+ * these with `stop` in "send-or-stop"; Code and Work's plain "send" follow-up
+ * bar has no stop control, only queue/discard.
  */
 export type ThreadComposerActions =
-  | { readonly kind: "send"; readonly send: ThreadComposerSend }
+  | {
+      readonly kind: "send";
+      readonly send: ThreadComposerSend;
+      readonly discard?: ThreadComposerDiscard | undefined;
+      readonly sendHidden?: boolean | undefined;
+    }
   | {
       readonly kind: "send-or-stop";
       readonly cellClassName: string;
       readonly sending: boolean;
       readonly send: ThreadComposerSend;
       readonly stop: ThreadComposerStop;
+      readonly discard?: ThreadComposerDiscard | undefined;
+      readonly sendHidden?: boolean | undefined;
     };
 
 /**
@@ -133,26 +149,50 @@ function sendRefused(send: ThreadComposerSend): boolean {
 
 function ThreadComposerTrailing(props: { readonly actions: ThreadComposerActions }) {
   if (props.actions.kind === "send") {
-    const send = props.actions.send;
+    const { send, discard, sendHidden } = props.actions;
     return (
       <>
         <span className="composer-gap" />
-        <OctantButton
-          aria-label={send.ariaLabel}
-          disabled={sendRefused(send)}
-          {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
-          size="icon"
-          type={send.onSend === undefined ? "submit" : "button"}
-          variant="default"
-        >
-          <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-        </OctantButton>
+        {discard === undefined ? null : (
+          <OctantButton
+            aria-label={discard.ariaLabel}
+            onClick={discard.onDiscard}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <X aria-hidden="true" size={14} strokeWidth={1.8} />
+          </OctantButton>
+        )}
+        {sendHidden === true ? null : (
+          <OctantButton
+            aria-label={send.ariaLabel}
+            disabled={sendRefused(send)}
+            {...(send.onSend === undefined ? {} : { onClick: send.onSend })}
+            size="icon"
+            type={send.onSend === undefined ? "submit" : "button"}
+            variant="default"
+          >
+            <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+          </OctantButton>
+        )}
       </>
     );
   }
-  const { cellClassName, sending, send, stop } = props.actions;
+  const { cellClassName, sending, send, stop, discard, sendHidden } = props.actions;
   return (
     <div className={cellClassName}>
+      {discard === undefined ? null : (
+        <OctantButton
+          aria-label={discard.ariaLabel}
+          onClick={discard.onDiscard}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          <X aria-hidden="true" size={14} strokeWidth={1.8} />
+        </OctantButton>
+      )}
       {sending ? (
         <button
           aria-label={stop.ariaLabel}
@@ -163,7 +203,8 @@ function ThreadComposerTrailing(props: { readonly actions: ThreadComposerActions
         >
           <Square aria-hidden="true" fill="currentColor" size={10} strokeWidth={1.5} />
         </button>
-      ) : (
+      ) : null}
+      {sendHidden === true ? null : (
         <button
           aria-label={send.ariaLabel}
           className="btn-send window-no-drag"

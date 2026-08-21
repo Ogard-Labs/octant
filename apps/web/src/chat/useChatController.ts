@@ -20,6 +20,8 @@ import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { MentionableThreadId } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
+import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import { buildChatThreadNavigation, type ChatThreadNavigationItem } from "../shell/navigationModel";
 
 export type ChatControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
@@ -41,6 +43,7 @@ export interface ChatControllerOptions {
   readonly navigationRefreshMs?: number;
   readonly reconnectDelayMs?: number;
   readonly readCursorStore?: ChatReadCursorStore;
+  readonly draftStore?: ComposerThreadDraftStore;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
 }
@@ -155,7 +158,12 @@ export function useChatController(options: ChatControllerOptions) {
   const [activeView, setActiveView] = useState<ChatThreadView | undefined>(undefined);
   const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
   const [settingsMessage, setSettingsMessage] = useState<string | undefined>(undefined);
-  const [pendingDraft, setPendingDraft] = useState("");
+  const composerDraft = useComposerThreadDraft({
+    mode: "chat",
+    threadId: options.activeThreadId === undefined ? undefined : String(options.activeThreadId),
+    ...(options.draftStore === undefined ? {} : { store: options.draftStore }),
+  });
+  const pendingDraft = composerDraft.text;
   const readCursors = useSyncExternalStore(
     readCursorStore.subscribe,
     readCursorStore.getSnapshot,
@@ -174,14 +182,31 @@ export function useChatController(options: ChatControllerOptions) {
   const mounted = useRef(true);
   const activeThreadIdRef = useRef(options.activeThreadId);
   const bootstrapGeneration = useRef(0);
-  const draftRevision = useRef(0);
   const threadGeneration = useRef(0);
   const streamAbort = useRef<AbortController | undefined>(undefined);
   const bootstrapped = useRef(false);
+  const composerDraftRef = useRef(composerDraft);
+  composerDraftRef.current = composerDraft;
+  const knownDraftThreads = useRef<ReadonlySet<string> | undefined>(undefined);
 
-  const updatePendingDraft = useCallback((value: string) => {
-    draftRevision.current += 1;
-    setPendingDraft(value);
+  const reconcileDrafts = useCallback((threadIds: ReadonlyArray<string>) => {
+    if (knownDraftThreads.current === undefined) {
+      composerDraftRef.current.dropUnknown(threadIds);
+    } else {
+      for (const threadId of knownDraftThreads.current) {
+        if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+      }
+    }
+    knownDraftThreads.current = new Set(threadIds);
+  }, []);
+
+  const updatePendingDraft = useCallback((value: string, caretIndex?: number) => {
+    if (caretIndex === undefined) composerDraftRef.current.setDraft(value);
+    else composerDraftRef.current.setDraft(value, caretIndex);
+  }, []);
+
+  const setPendingDraftCaret = useCallback((caretIndex: number) => {
+    composerDraftRef.current.setCaret(caretIndex);
   }, []);
 
   const reportError = useCallback((message: string) => {
@@ -254,6 +279,7 @@ export function useChatController(options: ChatControllerOptions) {
       bootstrapped.current = true;
       settingsVersion.current = next.settings.version;
       setBootstrap(next);
+      reconcileDrafts(next.threads.map((thread) => String(thread.id)));
       setStatus("ready");
       return true;
     } catch (error) {
@@ -262,7 +288,7 @@ export function useChatController(options: ChatControllerOptions) {
       setErrorMessage(failureMessage(error));
       return false;
     }
-  }, [client]);
+  }, [client, reconcileDrafts]);
 
   const activateThread = useCallback(
     async (threadId: ChatThreadId) => {
@@ -484,6 +510,12 @@ export function useChatController(options: ChatControllerOptions) {
     try {
       const result = await client.execute(command);
       if (!mounted.current) return undefined;
+      if (
+        (result.kind === "deleted" || result.kind === "deletion-requested") &&
+        "threadId" in command
+      ) {
+        composerDraftRef.current.purge(String(command.threadId));
+      }
       if (result.kind === "follow-up-updated") {
         recordFollowUp(result.followUp.threadId, result.followUp.state === "open");
       }
@@ -567,8 +599,10 @@ export function useChatController(options: ChatControllerOptions) {
     ) {
       return false;
     }
-    updatePendingDraft("");
-    const revision = draftRevision.current;
+    const sendingThreadId = String(activeView.thread.id);
+    const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
+    composerDraftRef.current.clearFor(sendingThreadId);
+    const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
     const result = await execute({
       kind: "send-chat-turn",
       threadId: activeView.thread.id,
@@ -582,7 +616,16 @@ export function useChatController(options: ChatControllerOptions) {
         : { extensionSelections: [...extensionSelections] }),
       ...(threadMentionIds.length === 0 ? {} : { threadMentionIds: [...threadMentionIds] }),
     });
-    if (result === undefined && draftRevision.current === revision) updatePendingDraft(prompt);
+    if (
+      result === undefined &&
+      composerDraftRef.current.revisionFor(sendingThreadId) === revisionAfterClear
+    ) {
+      composerDraftRef.current.restoreFor(sendingThreadId, {
+        text: prompt,
+        caretIndex: previousDraft?.caretIndex ?? prompt.length,
+        stagedDropped: previousDraft?.stagedDropped === true,
+      });
+    }
     return result !== undefined;
   }
 
@@ -666,6 +709,11 @@ export function useChatController(options: ChatControllerOptions) {
     markThreadRead,
     navigation,
     pendingDraft,
+    pendingDraftCaret: composerDraft.caretIndex,
+    draftStagedDropped: composerDraft.stagedDropped,
+    draftPersistError: composerDraft.persistError,
+    markDraftStagedDropped: composerDraft.markStagedDropped,
+    purgeThreadDraft: composerDraft.purge,
     /**
      * Reload the authoritative thread list. For a controller instance that
      * only feeds navigation (no active thread), this is how it learns of a
@@ -682,6 +730,7 @@ export function useChatController(options: ChatControllerOptions) {
     sendTurn,
     settingsMessage,
     setPendingDraft: updatePendingDraft,
+    setPendingDraftCaret,
     status,
     updateSettings,
     upload,

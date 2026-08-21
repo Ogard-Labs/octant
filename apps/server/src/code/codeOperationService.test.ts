@@ -510,6 +510,7 @@ describe("CodeOperationService", () => {
         prompt: expect.objectContaining({
           contentId: "61616161-6161-4161-8161-616161616161",
         }),
+        executionPolicy: "approval-gated",
       },
     });
     expect(events.append).toHaveBeenCalledWith(
@@ -1288,6 +1289,138 @@ describe("CodeOperationService", () => {
       prompt: "does this still hold?",
     });
   });
+
+  it("clamps a composer posture that exceeds the thread and records the posture the turn ran under", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        executionPolicy: "full-access",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+    expect(fixture.turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thread: expect.objectContaining({ executionPolicy: "approval-gated" }),
+      }),
+    );
+    expect(fixture.events.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "conversation-turn-started",
+          executionPolicy: "approval-gated",
+        }),
+      }),
+    );
+  });
+
+  it("keeps a Plan thread read-only even when the composer asks to write", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "plan" }),
+    });
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        executionPolicy: "auto-accept-edits",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+    expect(fixture.turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thread: expect.objectContaining({ executionPolicy: "plan" }),
+      }),
+    );
+    expect(fixture.events.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "conversation-turn-started",
+          executionPolicy: "plan",
+        }),
+      }),
+    );
+  });
+
+  it("lets a full-access thread run one turn under auto-accept edits without raising the thread", async () => {
+    const fixture = providerTurnFixture();
+
+    await expect(
+      fixture.service.execute(ids.window, {
+        ...startProviderTurn,
+        executionPolicy: "auto-accept-edits",
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+    expect(fixture.turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thread: expect.objectContaining({ executionPolicy: "auto-accept-edits" }),
+      }),
+    );
+    expect(fixture.events.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          kind: "conversation-turn-started",
+          executionPolicy: "auto-accept-edits",
+        }),
+      }),
+    );
+  });
+
+  it("takes no restore point when a writing thread runs one Plan message", async () => {
+    const checkpoint = vi.fn(async () => ({ status: "captured" as const, snapshot: {} }));
+    const fixture = providerTurnFixture({ git: { checkpoint } as never });
+
+    await expect(
+      fixture.service.execute(ids.window, { ...startProviderTurn, executionPolicy: "plan" }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+
+    expect(checkpoint).not.toHaveBeenCalled();
+    expect(fixture.turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thread: expect.objectContaining({ executionPolicy: "plan" }),
+      }),
+    );
+  });
+
+  it("clamps a recorded Full-access turn to a later lower thread grant", async () => {
+    const fixture = providerTurnFixture({
+      thread: decodeCodeThread({ ...thread(), executionPolicy: "approval-gated" }),
+    });
+    fixture.events.replay.mockReturnValue({
+      status: "ok" as const,
+      frames: [
+        {
+          threadId: ids.thread,
+          operationId: startProviderTurn.operationId,
+          cursor: 1,
+          occurredAt: "2026-07-21T10:00:00.000Z",
+          event: {
+            kind: "conversation-turn-started" as const,
+            providerInstanceId: thread().providerInstanceId,
+            modelId: thread().modelId,
+            sessionId: startProviderTurn.sessionId,
+            prompt: startProviderTurn.prompt,
+            executionPolicy: "full-access" as const,
+          },
+        },
+      ],
+      nextCursor: 1,
+    } as never);
+
+    await expect(fixture.service.execute(ids.window, startProviderTurn)).resolves.toMatchObject({
+      kind: "provider-turn-state",
+      state: "running",
+    });
+
+    expect(fixture.turns.start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thread: expect.objectContaining({ executionPolicy: "approval-gated" }),
+      }),
+    );
+  });
 });
 
 const startProviderTurn = {
@@ -1318,7 +1451,7 @@ function providerTurnFixture(
       | "supportsAttachments"
       | "git"
     >
-  > & { readonly thread?: CodeThread },
+  > & { readonly thread?: CodeThread } = {},
 ) {
   const { thread: threadOverride, ...serviceOptions } = options;
   const activeThread = threadOverride ?? thread();

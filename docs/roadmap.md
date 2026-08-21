@@ -70,11 +70,18 @@ Hardening in progress for the preview:
     no sidebar entry, settings section, appearance preset, or preview viewer.
   - First bundled plugins: an appearance pack (Octant theme preset) and
     structured preview viewers, as proof those points work. Extracting the
-    thread board, GitHub, and Linear behind typed server ports remains later
-    sequenced work.
-- **Linear integration** — the first bundled-off integration plugin: issue
-  intake and delivery-target sync from a Work or Code thread, with the same
-  read/write authority model as GitHub.
+    thread board and GitHub behind typed server ports remains later sequenced
+    work. Linear is not an extraction: it is added as a bundled-off plugin
+    through the Integration kind and must not be compiled into the host first.
+    The shared integration port and a renderer seam that actually renders
+    plugin Settings sections and sidebar destinations land before Linear.
+- **Linear integration** — the first bundled-off integration plugin, after
+  those host seams: Settings connection (OAuth tokens stored only as host
+  credential-service opaque refs, never in plugin state) and read-only issue
+  browse in Code first, then issue intake and delivery-target sync, with the
+  same authority model as GitHub. Chat or Work Linear browsing is a separate
+  host mode-policy change, not a plugin side effect. Not a connector/OAuth
+  marketplace.
 - **Headless host and multi-host federation** — run the server and web client
   without Electron on macOS or Linux; pair desktop and web clients with several
   hosts, show an `All Hosts` view, and choose the destination host per new

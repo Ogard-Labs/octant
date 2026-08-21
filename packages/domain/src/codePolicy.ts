@@ -99,6 +99,64 @@ export function approvalClassForCodeOperation(
 }
 
 /**
+ * Rank of a Code access posture from least authority to most. Used everywhere
+ * a per-message intent is compared with a thread grant: a turn may only ever
+ * sit at or below the thread.
+ */
+export const ACCESS_POSTURE_RANK = {
+  plan: 0,
+  "approval-gated": 1,
+  "auto-accept-edits": 2,
+  "full-access": 3,
+} as const satisfies Record<ProviderExecutionPolicy, number>;
+
+/** Postures from least authority to most, for composer option lists. */
+export const ACCESS_POSTURES_NARROWEST_FIRST = [
+  "plan",
+  "approval-gated",
+  "auto-accept-edits",
+  "full-access",
+] as const satisfies ReadonlyArray<ProviderExecutionPolicy>;
+
+/**
+ * The posture a turn actually runs under.
+ *
+ * The composer sends an intent; the host clamps it to the thread's grant so a
+ * per-message choice can only narrow. Asking for more than the thread allows
+ * is not a refusal of the turn — the turn still runs, under the thread. Plan
+ * is the floor: a Plan thread stays read-only even when the intent names a
+ * writing posture.
+ */
+export function clampTurnAccessPosture(input: {
+  readonly requested?: ProviderExecutionPolicy;
+  readonly thread: ProviderExecutionPolicy;
+}): ProviderExecutionPolicy {
+  if (input.requested === undefined) return input.thread;
+  return ACCESS_POSTURE_RANK[input.requested] <= ACCESS_POSTURE_RANK[input.thread]
+    ? input.requested
+    : input.thread;
+}
+
+/** Postures the composer may offer for the next turn given the thread's grant. */
+export function accessPosturesAtOrBelow(
+  ceiling: ProviderExecutionPolicy,
+): ReadonlyArray<ProviderExecutionPolicy> {
+  const rank = ACCESS_POSTURE_RANK[ceiling];
+  return ACCESS_POSTURES_NARROWEST_FIRST.filter((posture) => ACCESS_POSTURE_RANK[posture] <= rank);
+}
+
+/**
+ * Postures that would widen the thread. The composer offers these as a grant
+ * raise, never as a one-shot: a turn may only sit at or below the thread.
+ */
+export function accessPosturesAbove(
+  floor: ProviderExecutionPolicy,
+): ReadonlyArray<ProviderExecutionPolicy> {
+  const rank = ACCESS_POSTURE_RANK[floor];
+  return ACCESS_POSTURES_NARROWEST_FIRST.filter((posture) => ACCESS_POSTURE_RANK[posture] > rank);
+}
+
+/**
  * Whether this posture decides gated Code effects by explicit approval.
  *
  * Auto-accept edits changes how one class is decided — project file writes —

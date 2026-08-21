@@ -607,7 +607,7 @@ describe("code client", () => {
 
   it("reads a strict paginated Code conversation projection", async () => {
     const page = {
-      version: 2,
+      version: 3,
       threadId: ids.thread,
       turns: [],
       nextCursor: 42,

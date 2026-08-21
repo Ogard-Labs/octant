@@ -111,12 +111,15 @@ export function WorkOverview(props: WorkOverviewProps) {
     if (!createAvailable || submitting || normalized === "") return;
     setSubmitting(true);
     try {
-      const staged = images.takeForSend();
+      const staged = images.filesForSend();
       const created =
         staged.length === 0
           ? await props.onCreateThread(normalized)
           : await props.onCreateThread(normalized, staged);
-      if (created) setDraft("");
+      if (created) {
+        images.clearAfterAccepted();
+        setDraft("");
+      }
     } finally {
       setSubmitting(false);
     }

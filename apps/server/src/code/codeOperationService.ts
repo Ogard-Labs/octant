@@ -28,11 +28,13 @@ import {
 } from "@octant/contracts";
 import {
   authorizeCodeOperation,
+  clampTurnAccessPosture,
   mayWriteToRepository,
   type CodeOperation,
 } from "@octant/domain/code-policy";
 import {
   decideRunMerge,
+  FILE_MENTION_UNREADABLE_CONTEXT,
   runMergeRefusalText,
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
@@ -686,6 +688,20 @@ export interface CodeOperationServiceOptions {
     readonly windowId: WindowId;
   }) => Promise<ReadonlyArray<CodeThreadMentionContext>>;
   /**
+   * Resolves the `@file` mentions a Code turn names.
+   *
+   * The command carries relative paths only. The host classifies each path
+   * against this thread's bound checkout and reads the file itself, so a
+   * renderer cannot include bytes from outside the root. Out-of-root paths
+   * are refused before any read and reported in words rather than dropped.
+   */
+  readonly resolveFileMentionContext?: (input: {
+    readonly fileMentionPaths: ReadonlyArray<string>;
+    readonly windowId: WindowId;
+    readonly threadId: CodeThreadId;
+    readonly checkoutId: CodeThread["checkoutId"];
+  }) => Promise<ReadonlyArray<ProviderContextBlock>>;
+  /**
    * Takes the notes the user pointed at the running product and hands them to
    * this turn. The port marks each note carried in the same step, so a note
    * travels exactly once; absent on a host with no browser surface, where a
@@ -835,9 +851,16 @@ export class CodeOperationService {
               "An image attached to this turn is no longer staged.",
             );
           } else {
+            const turnThread =
+              command.kind === "start-provider-turn"
+                ? threadForTurn(
+                    scope.thread,
+                    turnAccessPosture(scope.thread, command, recordedStart?.event.executionPolicy),
+                  )
+                : scope.thread;
             if (command.kind === "start-provider-turn" && recordedStart === undefined) {
               const checkpoint = await this.#checkpoint(
-                scope.thread,
+                turnThread,
                 scope.checkout.id,
                 root.checkoutRoot,
               );
@@ -851,6 +874,7 @@ export class CodeOperationService {
                   modelId: scope.thread.modelId,
                   sessionId: command.sessionId,
                   prompt: command.prompt,
+                  executionPolicy: turnThread.executionPolicy,
                   ...(starting.attachments.length === 0
                     ? {}
                     : { attachments: starting.attachments }),
@@ -863,7 +887,7 @@ export class CodeOperationService {
               result = await this.#execute(
                 command,
                 windowId,
-                scope.thread,
+                turnThread,
                 scope.checkout,
                 root,
                 starting.attachments,
@@ -927,12 +951,16 @@ export class CodeOperationService {
       );
     }
     try {
+      const frames = this.#replay(command.threadId, command.operationId, 0, 256).frames;
       const recovered = await this.#providerTurn(
         command,
         windowId,
-        thread,
+        threadForTurn(
+          thread,
+          turnAccessPosture(thread, command, recordedTurnAccessPosture(frames)),
+        ),
         root.checkoutRoot,
-        recordedTurnAttachments(this.#replay(command.threadId, command.operationId, 0, 256).frames),
+        recordedTurnAttachments(frames),
       );
       return recovered.kind === "provider-turn-state" ? recovered : cached;
     } catch {
@@ -2128,6 +2156,7 @@ export class CodeOperationService {
     const context = [
       ...(await this.#resolveForkHandoff(thread, windowId, command.operationId)),
       ...(await this.#resolveThreadMentions(command.threadMentionIds, windowId)),
+      ...(await this.#resolveFileMentions(command.fileMentionPaths, windowId, thread)),
       ...(feedback?.context === undefined || feedback.context.trim().length === 0
         ? []
         : [{ kind: "user-message", text: feedback.context } as const]),
@@ -2292,6 +2321,34 @@ export class CodeOperationService {
     });
   }
 
+  async #resolveFileMentions(
+    fileMentionPaths: ReadonlyArray<string> | undefined,
+    windowId: WindowId,
+    thread: CodeThread,
+  ): Promise<ReadonlyArray<ProviderContextBlock>> {
+    if (fileMentionPaths === undefined || fileMentionPaths.length === 0) return [];
+    const resolve = this.#options.resolveFileMentionContext;
+    if (resolve === undefined) {
+      return fileMentionPaths.map(() => ({
+        kind: "user-message" as const,
+        text: FILE_MENTION_UNREADABLE_CONTEXT,
+      }));
+    }
+    try {
+      return await resolve({
+        fileMentionPaths,
+        windowId,
+        threadId: thread.id,
+        checkoutId: thread.checkoutId,
+      });
+    } catch {
+      return fileMentionPaths.map(() => ({
+        kind: "user-message" as const,
+        text: FILE_MENTION_UNREADABLE_CONTEXT,
+      }));
+    }
+  }
+
   async #providerInput(
     command: Extract<CodeOperationCommand, { readonly kind: "answer-provider-input" }>,
     thread: CodeThread,
@@ -2359,6 +2416,42 @@ function recordedTurnAttachments(
     if (frame.event.kind === "conversation-turn-started") return frame.event.attachments ?? [];
   }
   return [];
+}
+
+function recordedTurnAccessPosture(
+  frames: ReadonlyArray<CodeOperationEventFrame>,
+): CodeThread["executionPolicy"] | undefined {
+  for (const frame of frames) {
+    if (frame.event.kind === "conversation-turn-started") return frame.event.executionPolicy;
+  }
+  return undefined;
+}
+
+/**
+ * The posture this provider turn runs under. A recorded start is the requested
+ * ceiling so recovery cannot widen a turn that already ran narrower — and a
+ * later lower thread grant still clamps it, so a crashed Full-access turn
+ * cannot resume after the user has taken that grant away. Otherwise the
+ * composer intent is clamped to the thread: the host never grants more than
+ * the thread already allows.
+ */
+function turnAccessPosture(
+  thread: CodeThread,
+  command: Extract<CodeOperationCommand, { readonly kind: "start-provider-turn" }>,
+  recorded?: CodeThread["executionPolicy"],
+): CodeThread["executionPolicy"] {
+  const requested = recorded ?? command.executionPolicy;
+  return clampTurnAccessPosture({
+    thread: thread.executionPolicy,
+    ...(requested === undefined ? {} : { requested }),
+  });
+}
+
+function threadForTurn(
+  thread: CodeThread,
+  executionPolicy: CodeThread["executionPolicy"],
+): CodeThread {
+  return thread.executionPolicy === executionPolicy ? thread : { ...thread, executionPolicy };
 }
 
 function sameConversationStart(

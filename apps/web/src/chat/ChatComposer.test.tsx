@@ -71,6 +71,17 @@ describe("ChatComposer", () => {
     expect(screen.getByLabelText("Message")).toHaveValue("");
   });
 
+  it("restores the caret when returning to a thread", () => {
+    renderComposer({
+      caretIndex: 4,
+      caretRestoreKey: "thread-a",
+      draft: "half-written",
+    });
+    const message = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    expect(message.selectionStart).toBe(4);
+    expect(message.selectionEnd).toBe(4);
+  });
+
   it("sends with Enter, keeps Shift+Enter for newlines, and exposes Stop while streaming", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn(async () => true);
@@ -89,6 +100,63 @@ describe("ChatComposer", () => {
     expect(onSend).not.toHaveBeenCalled();
     await user.keyboard("{Enter}");
     expect(onSend).toHaveBeenCalledWith("Reply");
+  });
+
+  it("lets the user type during a running turn and says the message is queued", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => true);
+    const onDraftChange = vi.fn();
+    const onDiscardQueued = vi.fn();
+    const { rerender, props } = renderComposer({
+      draft: "Next instruction",
+      isSending: true,
+      onDiscardQueued,
+      onDraftChange,
+      onSend,
+      queueStatus: "queued",
+    });
+
+    const draft = screen.getByLabelText("Message");
+    expect(draft).toBeEnabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "This message is queued and will send when the response finishes.",
+    );
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
+    expect(onDiscardQueued).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+
+    rerender(
+      <ChatComposer
+        {...props}
+        draft="Edited follow-up"
+        isSending={false}
+        onDiscardQueued={onDiscardQueued}
+        onDraftChange={onDraftChange}
+        onSend={onSend}
+        queueStatus="held"
+        statusMessage="The response was cancelled. The queued message was not sent."
+      />,
+    );
+    expect(screen.getByLabelText("Message")).toHaveValue("Edited follow-up");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "The response was cancelled. The queued message was not sent.",
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    expect(onSend).toHaveBeenCalledWith("Edited follow-up");
+  });
+
+  it("queues Enter during a running turn instead of sending immediately", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => true);
+    renderComposer({ draft: "After this", isSending: true, onSend, onStop: vi.fn() });
+
+    const draft = screen.getByLabelText("Message");
+    expect(draft).toBeEnabled();
+    await user.click(draft);
+    await user.keyboard("{Enter}");
+    expect(onSend).toHaveBeenCalledWith("After this");
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeEnabled();
   });
 
   it("passes only the chosen File to the attachment callback and explains unsupported attachments", async () => {
@@ -241,7 +309,7 @@ describe("ChatComposer", () => {
     rerender(<ChatComposer {...props} modelOptions={[]} />);
     expect(screen.queryByRole("combobox", { name: "Effort" })).toBeNull();
     rerender(<ChatComposer {...props} isSending />);
-    expect(screen.getByRole("combobox", { name: "Effort" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Model options" })).toBeDisabled();
   });
 
   it("makes disabled reasons available without relying on color", async () => {
@@ -333,7 +401,8 @@ describe("ChatComposer", () => {
  */
 function SlashHarness(props: {
   readonly commands: ReadonlyArray<OctantCommand>;
-  readonly onDraftChange?: (draft: string) => void;
+  readonly onDraftChange?: (draft: string, caretIndex?: number) => void;
+  readonly onCaretIndexChange?: (caretIndex: number) => void;
   readonly onResolveExtensionReference?: (draft: string) => Promise<boolean>;
 }) {
   const [draft, setDraft] = useState("");
@@ -343,10 +412,13 @@ function SlashHarness(props: {
         draft={draft}
         isSending={false}
         model={{ options: [{ id: "model-a", label: "Model A" }], value: "model-a" }}
-        onDraftChange={(next) => {
+        onDraftChange={(next, caretIndex) => {
           setDraft(next);
-          props.onDraftChange?.(next);
+          props.onDraftChange?.(next, caretIndex);
         }}
+        {...(props.onCaretIndexChange === undefined
+          ? {}
+          : { onCaretIndexChange: props.onCaretIndexChange })}
         onFileSelected={vi.fn()}
         onModelChange={vi.fn()}
         onProviderChange={vi.fn()}
@@ -401,7 +473,14 @@ describe("ChatComposer slash commands", () => {
   it("filters host commands from a leading slash and runs one by keyboard alone", async () => {
     const user = userEvent.setup();
     const onDraftChange = vi.fn();
-    render(<SlashHarness commands={hostCommands()} onDraftChange={onDraftChange} />);
+    const onCaretIndexChange = vi.fn();
+    render(
+      <SlashHarness
+        commands={hostCommands()}
+        onCaretIndexChange={onCaretIndexChange}
+        onDraftChange={onDraftChange}
+      />,
+    );
 
     const draft = screen.getByLabelText("Message");
     await user.type(draft, "/new");
@@ -418,7 +497,8 @@ describe("ChatComposer slash commands", () => {
     await user.keyboard("{Enter}");
 
     expect(newChat).toHaveBeenCalledOnce();
-    expect(onDraftChange).toHaveBeenLastCalledWith("");
+    expect(onDraftChange).toHaveBeenLastCalledWith("", 0);
+    expect(onCaretIndexChange).toHaveBeenCalledWith(0);
     expect(screen.getByLabelText("Message")).toHaveValue("");
   });
 
