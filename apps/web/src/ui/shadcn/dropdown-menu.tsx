@@ -40,6 +40,7 @@ export function DropdownMenuPopup({
 
 export interface ShadcnMenuItem {
   readonly description?: string;
+  readonly disabled?: boolean;
   readonly icon?: ReactNode;
   readonly label: string;
   readonly value: string;
@@ -80,7 +81,10 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
           <DropdownMenuPopup className="window-no-drag" finalFocus={triggerRef}>
             <MenuPrimitive.RadioGroup
               onValueChange={(value) => {
-                if (typeof value === "string" && props.items.some((item) => item.value === value)) {
+                if (
+                  typeof value === "string" &&
+                  props.items.some((item) => item.value === value && item.disabled !== true)
+                ) {
                   props.onValueChange(value);
                 }
               }}
@@ -94,6 +98,7 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                   closeOnClick
                   key={item.value}
                   label={item.label}
+                  {...(item.disabled === true ? { disabled: true } : {})}
                   onKeyDown={(event) => {
                     if (event.key === " ") {
                       event.preventDefault();

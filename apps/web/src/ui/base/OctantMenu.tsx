@@ -3,6 +3,7 @@ import { ShadcnDropdownMenu } from "../shadcn/dropdown-menu";
 
 export interface OctantMenuItem {
   readonly description?: string;
+  readonly disabled?: boolean;
   readonly icon?: ReactNode;
   readonly label: string;
   readonly value: string;

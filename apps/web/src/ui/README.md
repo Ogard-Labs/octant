@@ -14,6 +14,7 @@ them inside feature stylesheets.
 | `OctantCheckbox`, `OctantSwitch`, `OctantSlider` | Toggles and ranges                                  |
 | `OctantTabs`                                     | Tab strips                                          |
 | `OctantMenu`                                     | Menus and disclosure popovers (glass)               |
+| `OctantContextMenu`                              | Right-click menus mirroring the same items          |
 | `OctantDialog`                                   | Modal dialogs (glass)                               |
 | `OctantTooltip`                                  | Tooltips (opaque for legibility)                    |
 
