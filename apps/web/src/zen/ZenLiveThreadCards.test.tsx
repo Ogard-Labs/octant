@@ -151,7 +151,7 @@ describe("resolveZenLiveThreadCard", () => {
     expect(requested).toEqual([]);
   });
 
-  it("offers no live card for a mode this window cannot host in the focus zone", () => {
+  it("renders a live Code card when the Code client is available", () => {
     const context = sourceContext("code", String(cardThreadId));
 
     expect(
@@ -160,9 +160,21 @@ describe("resolveZenLiveThreadCard", () => {
         entry: catalogEntry(context),
         activity: live,
         clients: {
-          chatClient: chatClient([]),
-          chatReadCursorStore: createChatReadCursorStore(),
+          codeClient: {} as never,
         },
+      })?.status,
+    ).toBe("streaming");
+  });
+
+  it("keeps a Code card metadata-only when its live clients are unavailable", () => {
+    const context = sourceContext("code", String(cardThreadId));
+
+    expect(
+      resolveZenLiveThreadCard({
+        sourceContext: context,
+        entry: catalogEntry(context),
+        activity: live,
+        clients: {},
       }),
     ).toBeUndefined();
   });
