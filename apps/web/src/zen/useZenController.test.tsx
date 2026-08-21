@@ -163,6 +163,35 @@ describe("useZenController", () => {
     );
   });
 
+  it("keeps Zen open when the server committed presentation before the response failed", async () => {
+    const initial = makeSpace();
+    const committed = makeSpace({ version: 2 as AggregateVersion, active: true });
+    const bootstrap = vi
+      .fn()
+      .mockResolvedValueOnce({ space: initial, focusZone: makeZone(initial), windowId })
+      .mockResolvedValueOnce({ space: committed, focusZone: makeZone(committed), windowId });
+    const client = createClient({
+      bootstrap,
+      command: vi.fn(async () => {
+        throw new Error("The committed response was lost.");
+      }),
+    });
+    const { result } = renderHook(() =>
+      useZenController({ client, windowId, storage: window.sessionStorage }),
+    );
+
+    await act(async () => {
+      await result.current.enterZen();
+    });
+
+    expect(bootstrap).toHaveBeenCalledTimes(2);
+    expect(result.current.active).toBe(true);
+    expect(result.current.space).toEqual(committed);
+    expect(window.sessionStorage.getItem(`${ZEN_PRESENTATION_STORAGE_PREFIX}${windowId}`)).toBe(
+      "active",
+    );
+  });
+
   it("creates and controls timers only through authoritative commands", async () => {
     const timerId = "00000000-0000-4000-8000-000000000904" as ZenElementId;
     const idleTimer = {

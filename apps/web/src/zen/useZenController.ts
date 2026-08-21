@@ -251,11 +251,32 @@ export function useZenController(options: UseZenControllerOptions) {
           } else if (exitGate) {
             failExit(error instanceof Error ? error.message : "The server rejected the exit.");
           } else {
+            const detail =
+              error instanceof Error ? error.message : "Zen presentation update failed.";
+            try {
+              const refreshed = await client.bootstrap();
+              if (!mounted.current) return;
+              setFocusZone(refreshed.focusZone);
+              if (refreshed.space !== null && refreshed.space.version >= optimistic.version) {
+                setSpace(refreshed.space);
+                markActive(refreshed.space.active);
+                setBarCollapsedState(refreshed.space.barCollapsed);
+                presentationSpace.current = refreshed.space;
+                const presentationMatches =
+                  (next.active === undefined || refreshed.space.active === next.active) &&
+                  (next.barCollapsed === undefined ||
+                    refreshed.space.barCollapsed === next.barCollapsed);
+                setMessage(presentationMatches ? undefined : detail);
+                return;
+              }
+            } catch {
+              // The original command failure remains the useful message.
+            }
             setSpace(previousSpace);
             markActive(previousSpace.active);
             setBarCollapsedState(previousBarCollapsed);
             presentationSpace.current = previousSpace;
-            setMessage(error instanceof Error ? error.message : "Zen presentation update failed.");
+            setMessage(detail);
           }
         }
       }

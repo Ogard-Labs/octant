@@ -237,6 +237,46 @@ describe("SettingsView", () => {
     await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledTimes(1));
   });
 
+  it("checks every enabled installed provider when discovery is checked again", async () => {
+    const user = userEvent.setup();
+    const enabledId = "70000000-0000-4000-8000-000000000091" as never;
+    const disabledId = "70000000-0000-4000-8000-000000000092" as never;
+    const probe = vi.fn(async () => true);
+    const providerController = {
+      ...providerControllerFixture(),
+      instances: [
+        {
+          id: enabledId,
+          displayName: "Enabled Codex",
+          driverKind: "codex",
+          enabled: true,
+          configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
+          version: 1,
+        },
+        {
+          id: disabledId,
+          displayName: "Disabled OpenCode",
+          driverKind: "opencode",
+          enabled: false,
+          configuration: { kind: "opencode-cli", binaryPath: "/usr/local/bin/opencode" },
+          version: 1,
+        },
+      ],
+      probe,
+    } as unknown as ProviderController;
+    const discoveryController = discoveryControllerFixture();
+    renderSettings({ providerController, discoveryController });
+    navigateTo("Providers & Models");
+    await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole("button", { name: "Check again" }));
+
+    expect(discoveryController.scan).toHaveBeenCalledTimes(2);
+    expect(probe).toHaveBeenCalledOnce();
+    expect(probe).toHaveBeenCalledWith(enabledId);
+    expect(probe).not.toHaveBeenCalledWith(disabledId);
+  });
+
   it("integrates authoritative Chat defaults as a searchable section", () => {
     const chatController = {
       ...chatControllerFixture(),
