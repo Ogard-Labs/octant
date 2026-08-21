@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
-import { basename, join, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { execFile as nodeExecFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
   decodeFolderBrowseRequest,
+  decodeFolderCandidateId,
   decodeFolderSelectionRequest,
   type FolderBrowseFailure,
   type FolderBrowseRequest,
@@ -22,6 +23,7 @@ import { childProcessEnvironment } from "./childProcessEnvironment";
 const MAX_CANDIDATES = 200;
 const MAX_DEPTH = 20;
 const HIDDEN_PREFIX = ".";
+const CANDIDATE_TTL_MS = 120_000;
 
 const execFileAsync = promisify(nodeExecFile);
 
@@ -79,27 +81,23 @@ export class FolderBrowseService {
 
     this.#purgeExpired();
 
-    const parentPath =
-      request.parentCandidateId !== undefined
-        ? this.#resolveCandidatePath(request.parentCandidateId, authenticatedWindowId, request.mode)
-        : this.#homeDir;
+    const parentRecord =
+      request.parentCandidateId === undefined
+        ? undefined
+        : this.#requireRecord(request.parentCandidateId, authenticatedWindowId, request.mode);
 
-    if (parentPath === undefined) {
-      throw new FolderBrowseServiceError({
-        category: "not-found",
-        message: "Parent folder candidate has expired or is invalid.",
-      });
-    }
+    const canonicalRoot = await this.#canonicalDirectory(
+      this.#homeDir,
+      "Authorized folder root is not accessible.",
+    );
 
-    let canonicalParent: string;
-    try {
-      canonicalParent = await realpath(parentPath);
-    } catch {
-      throw new FolderBrowseServiceError({
-        category: "unavailable",
-        message: "Parent folder is not accessible.",
-      });
-    }
+    const parentPath = parentRecord === undefined ? canonicalRoot : parentRecord.canonicalPath;
+
+    const canonicalParent = await this.#canonicalDirectory(
+      parentPath,
+      "Parent folder is not accessible.",
+    );
+    this.#assertWithinRoot(canonicalRoot, canonicalParent);
 
     let entries: string[];
     try {
@@ -113,11 +111,17 @@ export class FolderBrowseService {
 
     const candidates: FolderCandidate[] = [];
     const now = this.#now();
-    const expiresAt = now + 120_000;
+    const expiresAt = now + CANDIDATE_TTL_MS;
+    const search = request.search?.toLocaleLowerCase();
+    let truncated = false;
 
     for (const entry of entries) {
-      if (candidates.length >= MAX_CANDIDATES) break;
+      if (candidates.length >= MAX_CANDIDATES) {
+        truncated = true;
+        break;
+      }
       if (entry.startsWith(HIDDEN_PREFIX)) continue;
+      if (search !== undefined && !entry.toLocaleLowerCase().includes(search)) continue;
 
       const fullPath = join(canonicalParent, entry);
       let entryStat;
@@ -134,12 +138,10 @@ export class FolderBrowseService {
       } catch {
         continue;
       }
+      if (!isWithinAuthorizedRoot(canonicalRoot, canonicalEntry)) continue;
 
       const isGitRepo = await this.#checkGitRepository(canonicalEntry);
-      const candidateId = randomUUID() as FolderCandidateId;
-
-      this.#candidates.set(candidateId, {
-        candidateId,
+      const candidateId = this.#issueCandidate({
         canonicalPath: canonicalEntry,
         displayName: entry,
         isGitRepository: isGitRepo,
@@ -159,12 +161,18 @@ export class FolderBrowseService {
 
     candidates.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-    const breadcrumbs = this.#buildBreadcrumbs(canonicalParent);
+    const breadcrumbs = this.#buildBreadcrumbs({
+      canonicalParent,
+      canonicalRoot,
+      windowId: authenticatedWindowId,
+      mode: request.mode,
+      expiresAt,
+    });
 
     return {
       candidates,
       breadcrumbs,
-      hasMore: entries.length > MAX_CANDIDATES,
+      hasMore: truncated,
       browsedAt: this.#clock() as FolderBrowseResult["browsedAt"],
     };
   }
@@ -182,27 +190,24 @@ export class FolderBrowseService {
 
     this.#purgeExpired();
 
-    const record = this.#candidates.get(request.candidateId);
-    if (record === undefined) {
-      throw new FolderBrowseServiceError({
-        category: "not-found",
-        message: "Folder candidate has expired or is invalid.",
-      });
-    }
-    if (record.windowId !== authenticatedWindowId) {
-      throw new FolderBrowseServiceError({
-        category: "unauthorized",
-        message: "Folder candidate belongs to a different window.",
-      });
-    }
-    if (record.mode !== request.mode) {
-      throw new FolderBrowseServiceError({
-        category: "invalid",
-        message: "Folder candidate mode does not match selection mode.",
-      });
-    }
+    const record = this.#requireRecord(request.candidateId, authenticatedWindowId, request.mode);
 
-    const canonicalBinding = await this.#roots.validate(request.mode, record.canonicalPath);
+    const canonicalRoot = await this.#canonicalDirectory(
+      this.#homeDir,
+      "Authorized folder root is not accessible.",
+    );
+    let canonicalPath: string;
+    try {
+      canonicalPath = await realpath(record.canonicalPath);
+    } catch {
+      throw new FolderBrowseServiceError({
+        category: "unavailable",
+        message: "Folder candidate is not accessible.",
+      });
+    }
+    this.#assertWithinRoot(canonicalRoot, canonicalPath);
+
+    const canonicalBinding = await this.#roots.validate(request.mode, canonicalPath);
 
     const receipt = this.#receipts.issue({
       windowId: authenticatedWindowId,
@@ -220,20 +225,60 @@ export class FolderBrowseService {
     };
   }
 
-  #resolveCandidatePath(
+  #requireRecord(
     candidateId: FolderCandidateId,
     windowId: WindowId,
     mode: "work" | "code",
-  ): string | undefined {
+  ): CandidateRecord {
     const record = this.#candidates.get(candidateId);
-    if (record === undefined) return undefined;
-    if (record.windowId !== windowId) return undefined;
-    if (record.mode !== mode) return undefined;
-    if (this.#now() >= record.expiresAt) {
-      this.#candidates.delete(candidateId);
-      return undefined;
+    if (record === undefined || this.#now() >= record.expiresAt) {
+      if (record !== undefined) this.#candidates.delete(candidateId);
+      throw new FolderBrowseServiceError({
+        category: "not-found",
+        message: "Folder candidate has expired or is invalid.",
+      });
     }
-    return record.canonicalPath;
+    if (String(record.windowId) !== String(windowId)) {
+      throw new FolderBrowseServiceError({
+        category: "unauthorized",
+        message: "Folder candidate belongs to a different window.",
+      });
+    }
+    if (record.mode !== mode) {
+      throw new FolderBrowseServiceError({
+        category: "invalid",
+        message: "Folder candidate mode does not match selection mode.",
+      });
+    }
+    return record;
+  }
+
+  #assertWithinRoot(canonicalRoot: string, canonicalPath: string): void {
+    if (isWithinAuthorizedRoot(canonicalRoot, canonicalPath)) return;
+    throw new FolderBrowseServiceError({
+      category: "unauthorized",
+      message: "Folder candidate is outside the authorized root.",
+    });
+  }
+
+  async #canonicalDirectory(path: string, unavailableMessage: string): Promise<string> {
+    try {
+      const canonical = await realpath(path);
+      const details = await stat(canonical);
+      if (!details.isDirectory()) {
+        throw new FolderBrowseServiceError({
+          category: "unavailable",
+          message: unavailableMessage,
+        });
+      }
+      return canonical;
+    } catch (error) {
+      if (error instanceof FolderBrowseServiceError) throw error;
+      throw new FolderBrowseServiceError({
+        category: "unavailable",
+        message: unavailableMessage,
+      });
+    }
   }
 
   async #checkGitRepository(path: string): Promise<boolean> {
@@ -259,28 +304,84 @@ export class FolderBrowseService {
     }
   }
 
-  #buildBreadcrumbs(canonicalPath: string): FolderBrowseResult["breadcrumbs"] {
-    const parts = canonicalPath.split(sep).filter(Boolean);
-    const crumbs: Array<{
-      label: string;
-      candidateId?: import("@octant/contracts/folder-browse").FolderCandidateId;
-    }> = [{ label: sep === "/" ? "/" : (parts[0] ?? "Home") }];
-    let accumulated = "";
-    for (let i = 0; i < parts.length; i++) {
-      accumulated = join(accumulated, parts[i]!);
-      const label = parts[i]!;
-      const candidateId = this.#findCandidateByPath(accumulated);
-      crumbs.push({
-        label,
-        ...(candidateId !== undefined ? { candidateId } : {}),
-      });
+  #buildBreadcrumbs(input: {
+    readonly canonicalParent: string;
+    readonly canonicalRoot: string;
+    readonly windowId: WindowId;
+    readonly mode: "work" | "code";
+    readonly expiresAt: number;
+  }): FolderBrowseResult["breadcrumbs"] {
+    const ancestors: string[] = [];
+    let cursor = input.canonicalParent;
+    for (let depth = 0; depth < MAX_DEPTH; depth++) {
+      ancestors.unshift(cursor);
+      if (cursor === input.canonicalRoot) break;
+      const parent = dirname(cursor);
+      if (parent === cursor) break;
+      if (!isWithinAuthorizedRoot(input.canonicalRoot, parent)) break;
+      cursor = parent;
     }
-    return crumbs;
+
+    return ancestors.map((path, index) => {
+      const label = folderLabel(path);
+      const isCurrent = index === ancestors.length - 1;
+      if (isCurrent) return { label };
+      return {
+        label,
+        candidateId: this.#issueCandidate({
+          canonicalPath: path,
+          displayName: label,
+          isGitRepository: false,
+          expiresAt: input.expiresAt,
+          windowId: input.windowId,
+          mode: input.mode,
+        }),
+      };
+    });
   }
 
-  #findCandidateByPath(path: string): FolderCandidateId | undefined {
+  #issueCandidate(input: {
+    readonly canonicalPath: string;
+    readonly displayName: string;
+    readonly isGitRepository: boolean;
+    readonly expiresAt: number;
+    readonly windowId: WindowId;
+    readonly mode: "work" | "code";
+  }): FolderCandidateId {
+    const existing = this.#findLiveCandidate(input.canonicalPath, input.windowId, input.mode);
+    if (existing !== undefined) {
+      this.#candidates.set(existing.candidateId, {
+        ...existing,
+        displayName: input.displayName,
+        isGitRepository: input.isGitRepository,
+        expiresAt: input.expiresAt,
+      });
+      return existing.candidateId;
+    }
+    const candidateId = decodeFolderCandidateId(randomUUID());
+    this.#candidates.set(candidateId, {
+      candidateId,
+      canonicalPath: input.canonicalPath,
+      displayName: input.displayName,
+      isGitRepository: input.isGitRepository,
+      expiresAt: input.expiresAt,
+      windowId: input.windowId,
+      mode: input.mode,
+    });
+    return candidateId;
+  }
+
+  #findLiveCandidate(
+    canonicalPath: string,
+    windowId: WindowId,
+    mode: "work" | "code",
+  ): CandidateRecord | undefined {
     for (const record of this.#candidates.values()) {
-      if (record.canonicalPath === path) return record.candidateId;
+      if (record.canonicalPath !== canonicalPath) continue;
+      if (String(record.windowId) !== String(windowId)) continue;
+      if (record.mode !== mode) continue;
+      if (this.#now() >= record.expiresAt) continue;
+      return record;
     }
     return undefined;
   }
@@ -291,4 +392,14 @@ export class FolderBrowseService {
       if (now >= record.expiresAt) this.#candidates.delete(id);
     }
   }
+}
+
+function isWithinAuthorizedRoot(root: string, candidate: string): boolean {
+  const pathFromRoot = relative(root, candidate);
+  return pathFromRoot === "" || (pathFromRoot !== ".." && !pathFromRoot.startsWith(`..${sep}`));
+}
+
+function folderLabel(canonicalPath: string): string {
+  const label = basename(canonicalPath);
+  return label === "" ? canonicalPath : label;
 }
