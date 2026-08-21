@@ -31,6 +31,13 @@ Capability-aware workspace surfaces available in Work include:
 
 Work does not expose Code Git/terminal authority. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
+## Unsent drafts
+
+Each Work thread keeps one unsent composer draft on this client. Leaving the
+thread or restarting the app restores the text and caret. Sending or clearing
+the composer removes it. Mentions that are part of the typed text persist;
+staged attachments do not. Deleting or purging the thread removes its draft.
+
 ## Export
 
 **Export thread** downloads a portable JSON cut of this Work thread: the
@@ -48,9 +55,11 @@ Work threads can create, edit, and preview artifacts within the bound root. Prev
 
 ## Attaching images
 
-Paste or attach a PNG, JPEG, WebP, or GIF in the Work composer to send it with the first provider turn. The image uploads to the host after the thread is created, and the turn names only the identifier the host answered with, so the provider receives bytes the host itself accepted.
+Paste or attach a PNG, JPEG, WebP, or GIF in the Work composer to send it with a provider turn. The image uploads to the host, and the turn names only the identifier the host answered with, so the provider receives bytes the host itself accepted.
 
 A turn carries at most eight images, each up to 10 MB, alongside a written message. If the selected model does not read images, the composer says so at the paste instead of taking the file. The host checks the thread's own model again at send, so a turn never reaches a model with its pictures quietly dropped. Removing a chip before sending keeps that image off the turn.
+
+Type `#` in the composer to mention another thread as read-only context, the same bounded excerpt Chat uses. Type `@` to complete a path inside this Project's bound folder; the host refuses a path outside that root before reading it. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
 
 ## Next steps
 

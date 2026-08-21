@@ -51,7 +51,7 @@ export type CodeOverviewProps =
       readonly onCreateThread?: (
         input: CodeComposerSubmitInput,
         projectId: ProjectId,
-      ) => void | Promise<void>;
+      ) => boolean | void | Promise<boolean | void>;
       /**
        * The Project's remembered habit for how new threads start,
        * exactly as the server projection reports it.
@@ -772,7 +772,7 @@ function CodeProjectQuickStart(props: {
   readonly onCreateThread?: (
     input: CodeComposerSubmitInput,
     projectId: ProjectId,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   readonly newThreadWorkspace?: CodeNewThreadWorkspace;
   readonly onChangeNewThreadWorkspace?: (
     projectId: ProjectId,

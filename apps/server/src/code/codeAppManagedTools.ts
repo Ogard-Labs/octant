@@ -20,6 +20,7 @@ import type {
   AppleRuntimeSnapshot,
   ApplePlatform,
 } from "@octant/contracts";
+import { clampTurnAccessPosture } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { AppleDiscoveryResult } from "../apple/appleToolchainService";
 import type { CodeOperationTerminalSnapshot } from "./codeOperationService";
@@ -891,7 +892,11 @@ function currentAuthorityFailure(options: CodeAppManagedToolsOptions): string | 
   ) {
     return "tool-authority-stale";
   }
-  return current.executionPolicy === "full-access" ? undefined : "full-access-required";
+  const posture = clampTurnAccessPosture({
+    requested: options.thread.executionPolicy,
+    thread: current.executionPolicy,
+  });
+  return posture === "full-access" ? undefined : "full-access-required";
 }
 
 function boundedUtf8(value: string, maxBytes: number): string {

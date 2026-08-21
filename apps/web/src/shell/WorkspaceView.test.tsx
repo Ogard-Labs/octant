@@ -1988,9 +1988,7 @@ function propsFor(tab: WorkspaceTab): WorkspaceViewProps {
       conversation: [],
       providerRequests: [],
       answerProviderRequest: vi.fn(async () => true),
-      cancelQueuedFollowUp: vi.fn(),
-      queueFollowUp: vi.fn(),
-      queuedFollowUps: [],
+
       turnActivity: new Map(),
       followUps: new Map(),
       pendingDraft: "",

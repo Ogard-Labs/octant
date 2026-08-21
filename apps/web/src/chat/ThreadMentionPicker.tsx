@@ -66,7 +66,7 @@ export interface ThreadMentionTypeaheadController {
 export function useThreadMentionTypeahead(input: {
   readonly mentions: ThreadMentions | undefined;
   readonly draft: string;
-  readonly onDraftChange: (draft: string) => void;
+  readonly onDraftChange: (draft: string, caretIndex: number) => void;
   /** The live textarea, so the caret lands after an inserted chip. */
   readonly textarea: () => HTMLTextAreaElement | null;
   /** Keeps the typeahead shut while the composer cannot accept a selection. */
@@ -90,7 +90,7 @@ export function useThreadMentionTypeahead(input: {
   function choose(candidate: ThreadMentionCandidate) {
     if (mentions === undefined || token === undefined) return;
     const applied = applyThreadMentionChip(input.draft, token, candidate.title);
-    input.onDraftChange(applied.draft);
+    input.onDraftChange(applied.draft, applied.caretIndex);
     mentions.onSelectCandidate(candidate);
     setToken(undefined);
     setActiveIndex(0);

@@ -24,13 +24,14 @@ import {
   suggestCodeDeliveryOutcome,
 } from "@octant/domain/delivery-target-policy";
 import type { CodeDeliveryOutcomeKind } from "@octant/contracts/code";
-import { ArrowUp, ShieldCheck, ChevronDown, ChevronUp, FolderOpen } from "lucide-react";
+import { ArrowUp, ShieldCheck, ChevronDown, ChevronUp, FolderOpen, Paperclip } from "lucide-react";
 import {
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -43,6 +44,18 @@ import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import { CodeBranchSelector } from "./CodeBranchSelector";
 import { CodeWorktreeSourceControl } from "./CodeWorktreeSourceControl";
 import { useCodeWorktreeSourcePreview } from "./useCodeWorktreeSourcePreview";
+import { clipboardHasImage } from "../../chat/composerImagePaste";
+import {
+  selectedModelReadsImages,
+  useWorkComposerImages,
+} from "../../work/composer/useWorkComposerImages";
+import {
+  ThreadMentionChips,
+  ThreadMentionTypeahead,
+  useThreadMentionTypeahead,
+} from "../../chat/ThreadMentionPicker";
+import { useThreadMentions } from "../../chat/useThreadMentions";
+import type { MentionableThreadId } from "@octant/contracts";
 import type { CodeCommand, CodeCommandResult, CodeWorktreeRef } from "@octant/contracts/code";
 
 export const CODE_DELIVERY_OUTCOME_LABELS: Record<CodeDeliveryOutcomeKind, string> = {
@@ -77,7 +90,9 @@ export interface CodeComposerAdapterProps {
     readonly providerInstanceId: ProviderInstanceId;
     readonly modelId: ProviderModelId;
   }) => void;
-  readonly onCreateThread: (input: CodeComposerSubmitInput) => void | Promise<void>;
+  readonly onCreateThread: (
+    input: CodeComposerSubmitInput,
+  ) => boolean | void | Promise<boolean | void>;
   readonly onCancel: () => void;
   readonly creating?: boolean;
   readonly errorMessage?: string;
@@ -110,6 +125,8 @@ export interface CodeComposerAdapterProps {
     command: CodeCommand,
     signal?: AbortSignal,
   ) => Promise<CodeCommandResult | undefined>;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
 }
 
 export interface CodeComposerSubmitInput {
@@ -129,10 +146,33 @@ export interface CodeComposerSubmitInput {
     readonly startFromOrigin: boolean;
     readonly remoteName: string;
   };
+  readonly images?: ReadonlyArray<File>;
+  readonly threadMentionIds?: ReadonlyArray<MentionableThreadId>;
 }
 
 export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const [prompt, setPrompt] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentionListId = "code-new-thread-mentions";
+  const images = useWorkComposerImages();
+  const imageSupport = selectedModelReadsImages(props.providerGroups, {
+    ...(props.selectedProviderInstanceId === undefined
+      ? {}
+      : { providerInstanceId: props.selectedProviderInstanceId }),
+    ...(props.selectedModelId === undefined ? {} : { modelId: props.selectedModelId }),
+  });
+  const threadMentions = useThreadMentions({
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+    draft: prompt,
+  });
+  const mention = useThreadMentionTypeahead({
+    mentions: threadMentions.composer,
+    draft: prompt,
+    onDraftChange: setPrompt,
+    textarea: () => textareaRef.current,
+    ...(props.creating === true ? { disabled: true } : {}),
+  });
   const [executionPolicy, setExecutionPolicy] = useState(props.defaultExecutionPolicy);
   const [permissionPersistence, setPermissionPersistence] = useState(
     props.defaultPermissionPersistence,
@@ -203,7 +243,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   const trimmed = prompt.trim();
   // A Code thread belongs to a Project (decision 0037), so the first turn
   // cannot start until one is chosen.
-  const canSubmit = trimmed.length > 0 && !props.creating && props.projectId !== undefined;
+  const [submitting, setSubmitting] = useState(false);
+  const canSubmit =
+    trimmed.length > 0 && !props.creating && !submitting && props.projectId !== undefined;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -251,27 +293,40 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
 
   const submit = useCallback(() => {
     if (!canSubmit) return;
-    void props.onCreateThread({
-      prompt: trimmed,
-      executionPolicy,
-      permissionPersistence,
-      deliveryTarget: {
-        branchIntent: branchIntent.trim() || defaultDeliveryBranchIntent(baseBranch, shortId),
-        remoteName: remoteName.trim() || "origin",
-        proposedBaseRepository:
-          baseRepository.trim() ||
-          (props.projectName === undefined || props.projectName.trim() === ""
-            ? "local/repository"
-            : `local/${props.projectName}`),
-        proposedBaseBranch: baseBranch.trim() || "development",
-        outcomeKind,
-      },
-      workspace,
-      worktreeSource: {
-        startFromOrigin,
-        remoteName: resolvedWorktreeRemote,
-      },
-    });
+    setSubmitting(true);
+    const staged = images.filesForSend();
+    void threadMentions
+      .resolveForSend()
+      .then(async (threadMentionIds) => {
+        const created = await props.onCreateThread({
+          prompt: trimmed,
+          executionPolicy,
+          permissionPersistence,
+          deliveryTarget: {
+            branchIntent: branchIntent.trim() || defaultDeliveryBranchIntent(baseBranch, shortId),
+            remoteName: remoteName.trim() || "origin",
+            proposedBaseRepository:
+              baseRepository.trim() ||
+              (props.projectName === undefined || props.projectName.trim() === ""
+                ? "local/repository"
+                : `local/${props.projectName}`),
+            proposedBaseBranch: baseBranch.trim() || "development",
+            outcomeKind,
+          },
+          workspace,
+          worktreeSource: {
+            startFromOrigin,
+            remoteName: resolvedWorktreeRemote,
+          },
+          ...(staged.length === 0 ? {} : { images: staged }),
+          ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
+        });
+        if (created !== false) images.clearAfterAccepted();
+        return created;
+      })
+      .finally(() => {
+        setSubmitting(false);
+      });
   }, [
     canSubmit,
     trimmed,
@@ -287,10 +342,23 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     startFromOrigin,
     preferredRemote,
     resolvedWorktreeRemote,
+    images,
+    threadMentions,
     props,
   ]);
 
+  function attachFromTransfer(items: DataTransfer | null): boolean {
+    if (items === null) return false;
+    if (!clipboardHasImage(items)) return false;
+    if (imageSupport === false) {
+      images.refuse("The selected model does not accept images. Choose an image-capable model.");
+      return true;
+    }
+    return images.consumePaste(items);
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (mention.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       submit();
@@ -323,18 +391,114 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               to. The strip used to sit outside it, which read as loose chrome
               under the composer rather than as part of what is being started. */}
           <div className="composer code-composer-adapter__card">
+            {mention.open ? (
+              <ThreadMentionTypeahead
+                activeIndex={mention.activeIndex}
+                {...(threadMentions.composer?.busy === undefined
+                  ? {}
+                  : { busy: threadMentions.composer.busy })}
+                candidates={threadMentions.composer?.candidates ?? []}
+                listId={mentionListId}
+                onChoose={mention.choose}
+                onHover={mention.setActiveIndex}
+              />
+            ) : null}
+            <ThreadMentionChips
+              chips={threadMentions.chips}
+              onRemove={(threadId) => threadMentions.composer?.onRemoveChip(threadId)}
+            />
+            {images.staged.length === 0 && images.message === undefined ? null : (
+              <div
+                className="composer-chips work-composer-adapter__attachments"
+                aria-label="Attached images"
+              >
+                {images.staged.map((attachment) => (
+                  <span className="chip work-composer-adapter__attachment" key={attachment.id}>
+                    <img
+                      alt={attachment.displayName}
+                      className="work-composer-adapter__attachment-thumb"
+                      src={attachment.previewUrl}
+                    />
+                    <span className="work-composer-adapter__attachment-name">
+                      {attachment.displayName}
+                    </span>
+                    <button
+                      aria-label={`Remove ${attachment.displayName}`}
+                      className="chip-x window-no-drag"
+                      onClick={() => images.remove(attachment.id)}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {images.message === undefined ? null : (
+                  <span className="work-composer-adapter__hint" role="status">
+                    {images.message}
+                  </span>
+                )}
+              </div>
+            )}
             <OctantTextarea
               aria-label="First message"
               autoFocus
               className="composer-input"
               disabled={props.creating}
-              onChange={(event) => setPrompt(event.target.value)}
+              onChange={(event) => {
+                setPrompt(event.target.value);
+                mention.sync(event.target.value, event.currentTarget.selectionStart);
+              }}
+              onClick={(event) =>
+                mention.sync(event.currentTarget.value, event.currentTarget.selectionStart)
+              }
               onKeyDown={handleKeyDown}
+              onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+                if (props.creating === true) return;
+                if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+              }}
               placeholder="Describe the change…"
+              ref={textareaRef}
               rows={3}
               value={prompt}
             />
             <div className="composer-row code-composer-adapter__composer-bar">
+              <label>
+                <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                <input
+                  aria-label="Choose attachment file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="work-composer-adapter__file-input"
+                  disabled={props.creating === true || imageSupport === false}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.item(0);
+                    if (file !== null && file !== undefined) {
+                      if (imageSupport === false) {
+                        images.refuse(
+                          "The selected model does not accept images. Choose an image-capable model.",
+                        );
+                      } else {
+                        images.attach([file]);
+                      }
+                    }
+                    event.currentTarget.value = "";
+                  }}
+                  type="file"
+                />
+              </label>
+              <OctantButton
+                aria-label="Add attachment"
+                disabled={props.creating === true || imageSupport === false}
+                onClick={(event) => {
+                  event.currentTarget.parentElement
+                    ?.querySelector<HTMLInputElement>('input[type="file"]')
+                    ?.click();
+                }}
+                size="icon"
+                type="button"
+                variant="ghost"
+              >
+                <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+              </OctantButton>
               <span className="code-composer-adapter__context-picker">
                 <ComposerModelPicker
                   ariaLabel="Provider and model"

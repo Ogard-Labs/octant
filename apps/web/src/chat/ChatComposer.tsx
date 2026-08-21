@@ -29,6 +29,7 @@ import type {
 import type { ExtensionSelection } from "@octant/contracts/extensions";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
+import { applyComposerCaret } from "../composer/composerThreadDraftStore";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
@@ -90,9 +91,14 @@ const MODEL_OPTION_DEFAULT_ID = "(provider default)";
 export interface ChatComposerProps {
   /** Caller-owned pending text. The component never persists or clears this value itself. */
   readonly draft: string;
+  /** Restored caret for this thread. Applied when `caretRestoreKey` changes. */
+  readonly caretIndex?: number;
+  /** Identity of the thread whose caret should be restored, typically its id. */
+  readonly caretRestoreKey?: string;
+  readonly onCaretIndexChange?: (caretIndex: number) => void;
   readonly isSending: boolean;
   readonly model: ChatComposerSelection;
-  readonly onDraftChange: (draft: string) => void;
+  readonly onDraftChange: (draft: string, caretIndex?: number) => void;
   /** Receives the browser-selected File only; file paths are not accepted or exposed. */
   readonly onFileSelected: (file: File) => void;
   readonly onModelChange: (modelId: string) => void;
@@ -102,6 +108,13 @@ export interface ChatComposerProps {
   /** Returns true only when the caller's authoritative send operation succeeded. */
   readonly onSend: (draft: string) => Promise<boolean> | boolean;
   readonly onStop?: () => void;
+  /**
+   * A follow-up parked in this composer while a turn is running. The draft
+   * stays here so it can be edited or discarded; the caller sends it through
+   * the ordinary path when the turn completes.
+   */
+  readonly queueStatus?: "idle" | "queued" | "held";
+  readonly onDiscardQueued?: () => void;
   readonly provider: ChatComposerSelection;
   readonly research: ChatComposerResearch;
   /**
@@ -187,7 +200,7 @@ export function ChatComposer(props: ChatComposerProps) {
     draft: props.draft,
     onDraftChange: props.onDraftChange,
     textarea: () => messageRef.current,
-    disabled: props.isSending,
+    disabled: false,
   });
   const mentionOpen = mention.open;
   const activeMention = mention.activeCandidate;
@@ -202,18 +215,22 @@ export function ChatComposer(props: ChatComposerProps) {
   const [activeCommandIndex, setActiveCommandIndex] = useState(0);
   const commandMatches =
     commandToken === undefined ? [] : filterOctantCommands(offeredCommands, commandToken.query);
-  const commandOpen = offeredCommands.length > 0 && commandToken !== undefined && !props.isSending;
+  const commandOpen = offeredCommands.length > 0 && commandToken !== undefined;
   const activeCommand = commandOpen ? commandMatches[activeCommandIndex] : undefined;
   const trimmedDraft = props.draft.trim();
+  const queueStatus = props.queueStatus ?? "idle";
+  const queued = queueStatus === "queued" || queueStatus === "held";
   const sendDisabledReason =
     props.sendDisabledReason ??
-    (trimmedDraft.length === 0 ? "Enter a message before sending." : undefined);
+    (trimmedDraft.length === 0 && !queued ? "Enter a message before sending." : undefined);
   const stopDisabledReason =
     props.stopDisabledReason ??
     (props.isSending && props.onStop === undefined
       ? "Stopping is unavailable for this response."
       : undefined);
-  const controlDisabled = props.isSending;
+  // Settings belong to the running turn; the draft, attachments, and mentions
+  // belong to the next message and stay editable so they can be queued.
+  const settingsLocked = props.isSending;
   const modelOptionsPanelId = useId();
   const [modelOptionsOpen, setModelOptionsOpen] = useState(false);
   const modelOptionsRef = useRef<HTMLDivElement>(null);
@@ -264,6 +281,7 @@ export function ChatComposer(props: ChatComposerProps) {
     statusMessage: props.statusMessage,
     stopDisabledReason,
     isSending: props.isSending,
+    queueStatus,
     ...(props.threadMentions?.statusMessage === undefined
       ? {}
       : { mentionMessage: props.threadMentions.statusMessage }),
@@ -285,8 +303,19 @@ export function ChatComposer(props: ChatComposerProps) {
     message.style.height = `${Math.min(Math.max(message.scrollHeight, 60), 240)}px`;
   }, [props.draft]);
 
+  useLayoutEffect(() => {
+    if (props.caretRestoreKey === undefined || props.caretIndex === undefined) return;
+    applyComposerCaret(messageRef.current, props.caretIndex, props.draft.length);
+  }, [props.caretRestoreKey]);
+
+  function rememberCaret(caretIndex: number | null) {
+    if (caretIndex === null) return;
+    props.onCaretIndexChange?.(caretIndex);
+  }
+
   function send() {
-    if (props.isSending || sendDisabledReason !== undefined) return;
+    if (sendDisabledReason !== undefined) return;
+    if (queueStatus === "queued") return;
     void props.onSend(props.draft);
   }
 
@@ -319,7 +348,8 @@ export function ChatComposer(props: ChatComposerProps) {
   function chooseCommand(command: OctantCommand) {
     if (commandToken === undefined) return;
     const applied = applySlashCommandToken(props.draft, commandToken);
-    props.onDraftChange(applied.draft);
+    props.onDraftChange(applied.draft, applied.caretIndex);
+    rememberCaret(applied.caretIndex);
     setCommandToken(undefined);
     setActiveCommandIndex(0);
     queueMicrotask(() => {
@@ -327,6 +357,7 @@ export function ChatComposer(props: ChatComposerProps) {
       if (message === null) return;
       message.focus();
       message.setSelectionRange(applied.caretIndex, applied.caretIndex);
+      rememberCaret(applied.caretIndex);
     });
     if (command.action.kind === "run") {
       command.action.run();
@@ -337,6 +368,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   function onDraftKeyUp(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Escape") return;
+    rememberCaret(event.currentTarget.selectionStart);
     syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
   }
 
@@ -379,14 +411,13 @@ export function ChatComposer(props: ChatComposerProps) {
    * is never consumed, so ordinary text paste keeps working.
    */
   function onDraftPaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    if (controlDisabled) return;
+    if (props.attachmentBusy === true) return;
     if (!clipboardHasImage(event.clipboardData)) return;
     if (imageAttachment.kind === "unavailable") {
       event.preventDefault();
       props.onImagePasteRejected?.(imageAttachment.reason);
       return;
     }
-    if (props.attachmentBusy === true) return;
     const selection = collectPastedImages(event.clipboardData);
     if (selection.files.length === 0 && selection.rejected.length === 0) return;
     event.preventDefault();
@@ -400,7 +431,6 @@ export function ChatComposer(props: ChatComposerProps) {
     <section aria-label="Chat composer" className="composer chat-composer thread-column">
       <ThreadMentionChips
         chips={props.threadMentions?.chips ?? []}
-        disabled={controlDisabled}
         onRemove={(threadId) => props.threadMentions?.onRemoveChip(threadId)}
         {...(props.threadMentions?.onOpenSideChat === undefined
           ? {}
@@ -415,7 +445,6 @@ export function ChatComposer(props: ChatComposerProps) {
                 <button
                   aria-label={`Remove ${attachmentSelection.displayName} attachment`}
                   className="chip-x window-no-drag"
-                  disabled={controlDisabled}
                   onClick={() => props.onRemoveAttachment?.(attachmentSelection.id)}
                   type="button"
                 >
@@ -437,7 +466,6 @@ export function ChatComposer(props: ChatComposerProps) {
               {props.onRemovePreviewSelection === undefined ? null : (
                 <OctantButton
                   aria-label={`Remove ${selection.displayName} selection`}
-                  disabled={controlDisabled}
                   onClick={() => props.onRemovePreviewSelection?.(selection.id)}
                   size="sm"
                   type="button"
@@ -461,7 +489,6 @@ export function ChatComposer(props: ChatComposerProps) {
               {props.onRemoveCanvasSelection === undefined ? null : (
                 <OctantButton
                   aria-label={`Remove ${selection.displayName} canvas selection`}
-                  disabled={controlDisabled}
                   onClick={() => props.onRemoveCanvasSelection?.(selection.id)}
                   size="sm"
                   type="button"
@@ -487,7 +514,6 @@ export function ChatComposer(props: ChatComposerProps) {
               {props.onRemoveExtensionSelection === undefined ? null : (
                 <OctantButton
                   aria-label={`Remove ${item.label} extension`}
-                  disabled={controlDisabled}
                   onClick={() => props.onRemoveExtensionSelection?.(item.reference)}
                   size="sm"
                   type="button"
@@ -521,18 +547,19 @@ export function ChatComposer(props: ChatComposerProps) {
               : commandOpen || mentionOpen
           }
           className="composer-input window-no-drag"
-          disabled={controlDisabled}
           onChange={(event) => {
             props.onDraftChange(event.currentTarget.value);
+            rememberCaret(event.currentTarget.selectionStart);
             syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
           }}
-          onClick={(event) =>
-            syncTokens(event.currentTarget.value, event.currentTarget.selectionStart)
-          }
+          onClick={(event) => {
+            rememberCaret(event.currentTarget.selectionStart);
+            syncTokens(event.currentTarget.value, event.currentTarget.selectionStart);
+          }}
           onKeyDown={onDraftKeyDown}
           onKeyUp={onDraftKeyUp}
           onPaste={onDraftPaste}
-          placeholder="Message Octant"
+          placeholder={props.isSending ? "Queue the next message…" : "Message Octant"}
           ref={messageRef}
           rows={1}
           value={props.draft}
@@ -597,11 +624,7 @@ export function ChatComposer(props: ChatComposerProps) {
             <span className="chat-composer__visually-hidden">Add attachment</span>
             <input
               aria-label="Choose attachment file"
-              disabled={
-                attachment.kind === "unavailable" ||
-                props.attachmentBusy === true ||
-                controlDisabled
-              }
+              disabled={attachment.kind === "unavailable" || props.attachmentBusy === true}
               onChange={(event) => {
                 const file = event.currentTarget.files?.item(0);
                 if (file !== null && file !== undefined) props.onFileSelected(file);
@@ -612,9 +635,7 @@ export function ChatComposer(props: ChatComposerProps) {
           </label>
           <OctantButton
             aria-label="Add attachment"
-            disabled={
-              attachment.kind === "unavailable" || props.attachmentBusy === true || controlDisabled
-            }
+            disabled={attachment.kind === "unavailable" || props.attachmentBusy === true}
             onClick={(event) => {
               const input =
                 event.currentTarget.parentElement?.querySelector<HTMLInputElement>(
@@ -633,7 +654,7 @@ export function ChatComposer(props: ChatComposerProps) {
           {props.providerGroups !== undefined && props.onSelectModel !== undefined ? (
             <ComposerModelPicker
               ariaLabel="Provider and model"
-              disabled={controlDisabled}
+              disabled={settingsLocked}
               groups={props.providerGroups}
               onSelect={props.onSelectModel}
               {...(props.onOpenSettings === undefined
@@ -652,7 +673,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 <label htmlFor={providerId}>
                   <span className="chat-composer__visually-hidden">Provider</span>
                   <OctantSelectField
-                    disabled={controlDisabled}
+                    disabled={settingsLocked}
                     id={providerId}
                     onValueChange={props.onProviderChange}
                     options={props.provider.options}
@@ -663,7 +684,7 @@ export function ChatComposer(props: ChatComposerProps) {
               <label htmlFor={modelId}>
                 <span className="chat-composer__visually-hidden">Model</span>
                 <OctantSelectField
-                  disabled={controlDisabled}
+                  disabled={settingsLocked}
                   id={modelId}
                   onValueChange={props.onModelChange}
                   options={props.model.options}
@@ -680,7 +701,7 @@ export function ChatComposer(props: ChatComposerProps) {
                 aria-haspopup="dialog"
                 aria-label="Model options"
                 data-customized={anyModelOptionSet || undefined}
-                disabled={controlDisabled}
+                disabled={settingsLocked}
                 onClick={() => setModelOptionsOpen((current) => !current)}
                 size="icon"
                 type="button"
@@ -702,7 +723,7 @@ export function ChatComposer(props: ChatComposerProps) {
                     <label key={option.id}>
                       <span className="chat-composer__visually-hidden">{option.displayName}</span>
                       <OctantSelectField
-                        disabled={controlDisabled}
+                        disabled={settingsLocked}
                         onValueChange={(value) =>
                           props.onModelOptionChange?.(
                             option.id,
@@ -734,7 +755,7 @@ export function ChatComposer(props: ChatComposerProps) {
           <OctantButton
             aria-label={props.research.enabled ? "Disable web research" : "Enable web research"}
             aria-pressed={props.research.enabled}
-            disabled={controlDisabled}
+            disabled={settingsLocked}
             onClick={() => props.onResearchEnabledChange(!props.research.enabled)}
             size="sm"
             type="button"
@@ -747,7 +768,7 @@ export function ChatComposer(props: ChatComposerProps) {
             <label htmlFor={researchRoutingId}>
               <span className="chat-composer__visually-hidden">Research routing</span>
               <OctantSelectField
-                disabled={controlDisabled}
+                disabled={settingsLocked}
                 id={researchRoutingId}
                 onValueChange={(value) =>
                   props.onResearchRoutingChange(value as ChatComposerResearchRouting)
@@ -763,6 +784,17 @@ export function ChatComposer(props: ChatComposerProps) {
           ) : null}
         </div>
         <div className="chat-composer__actions">
+          {queued && props.onDiscardQueued !== undefined ? (
+            <OctantButton
+              aria-label="Discard queued message"
+              onClick={props.onDiscardQueued}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <X aria-hidden="true" size={14} strokeWidth={1.8} />
+            </OctantButton>
+          ) : null}
           {props.isSending ? (
             <button
               aria-label="Stop response"
@@ -773,9 +805,10 @@ export function ChatComposer(props: ChatComposerProps) {
             >
               <Square aria-hidden="true" fill="currentColor" size={10} strokeWidth={1.5} />
             </button>
-          ) : (
+          ) : null}
+          {queueStatus === "queued" ? null : (
             <button
-              aria-label="Send message"
+              aria-label={props.isSending ? "Queue message" : "Send message"}
               className="btn-send window-no-drag"
               disabled={sendDisabledReason !== undefined}
               onClick={send}
@@ -803,6 +836,7 @@ function composeStatus(input: {
   readonly imageAttachment?: ChatComposerAttachmentCapability;
   readonly isSending: boolean;
   readonly mentionMessage?: string | undefined;
+  readonly queueStatus: "idle" | "queued" | "held";
   readonly research: ChatComposerResearchBackend;
   readonly sendDisabledReason?: string | undefined;
   readonly statusMessage?: string | undefined;
@@ -827,11 +861,16 @@ function composeStatus(input: {
     );
   }
   if (input.statusMessage !== undefined) loud.push(input.statusMessage);
+  if (input.queueStatus === "queued") {
+    loud.push("This message is queued and will send when the response finishes.");
+  } else if (input.queueStatus === "held" && input.statusMessage === undefined) {
+    loud.push("The queued message was not sent.");
+  }
   if (input.isSending && input.stopDisabledReason !== undefined) {
     loud.push(input.stopDisabledReason);
-  } else if (input.isSending) {
-    loud.push("Response is streaming. You can stop it.");
-  } else if (input.sendDisabledReason !== undefined) {
+  } else if (input.isSending && input.queueStatus === "idle") {
+    loud.push("Response is streaming. You can type the next message.");
+  } else if (input.sendDisabledReason !== undefined && input.queueStatus === "idle") {
     quiet.push(input.sendDisabledReason);
   }
   const messages = [...quiet, ...loud];

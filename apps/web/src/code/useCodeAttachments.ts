@@ -29,6 +29,11 @@ export interface CodeAttachments {
   readonly remove: (attachmentId: CodeAttachmentId) => void;
   /** The references a send would carry right now, without clearing the chips. */
   readonly peekForSend: () => ReadonlyArray<CodeAttachmentReference>;
+  /**
+   * Whether this composer is still holding, or still uploading, images that
+   * would be lost if the thread were left now.
+   */
+  readonly peekAbandoned: () => boolean;
   /** Hand this turn's images over and clear the chips. */
   readonly takeForSend: () => ReadonlyArray<CodeAttachmentReference>;
 }
@@ -61,6 +66,7 @@ export function useCodeAttachments(input: {
   // Uploads land one after another, so the list has to be readable between
   // awaits — not only at the next render.
   const current = useRef<ReadonlyArray<StagedCodeAttachment>>([]);
+  const inFlight = useRef(0);
 
   const apply = useCallback(
     (next: (list: ReadonlyArray<StagedCodeAttachment>) => ReadonlyArray<StagedCodeAttachment>) => {
@@ -102,6 +108,7 @@ export function useCodeAttachments(input: {
         return;
       }
       setBusy(true);
+      inFlight.current += 1;
       try {
         for (const file of images) {
           const mediaType = supportedMediaType(file);
@@ -132,6 +139,7 @@ export function useCodeAttachments(input: {
       } catch {
         setMessage("The image could not be attached.");
       } finally {
+        inFlight.current = Math.max(0, inFlight.current - 1);
         setBusy(false);
       }
     },
@@ -159,6 +167,11 @@ export function useCodeAttachments(input: {
     [],
   );
 
+  const peekAbandoned = useCallback(
+    (): boolean => current.current.length > 0 || inFlight.current > 0,
+    [],
+  );
+
   const takeForSend = useCallback((): ReadonlyArray<CodeAttachmentReference> => {
     const taken = current.current.map((entry) => entry.reference);
     apply((list) => {
@@ -169,5 +182,15 @@ export function useCodeAttachments(input: {
     return taken;
   }, [apply, forget]);
 
-  return { staged, message, busy, attach, refuse: setMessage, remove, peekForSend, takeForSend };
+  return {
+    staged,
+    message,
+    busy,
+    attach,
+    refuse: setMessage,
+    remove,
+    peekForSend,
+    peekAbandoned,
+    takeForSend,
+  };
 }

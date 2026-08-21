@@ -288,7 +288,8 @@ export interface WorkspaceViewProps {
     draftProjectId?: ProjectId,
     deliveryOutcome?: import("@octant/contracts/code").CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
-  ) => void | Promise<void>;
+    threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
+  ) => boolean | void | Promise<boolean | void>;
   readonly draftCodeExecute?: (
     command: import("@octant/contracts/code").CodeCommand,
     signal?: AbortSignal,
@@ -296,7 +297,7 @@ export interface WorkspaceViewProps {
   readonly onDraftCreateCodeThread?: (
     input: import("../code/composer/CodeComposerAdapter").CodeComposerSubmitInput,
     projectId?: ProjectId,
-  ) => void | Promise<void>;
+  ) => boolean | void | Promise<boolean | void>;
   /**
    * Records a Code Project's remembered new-thread workspace habit
    * through the journaled Project command path.
@@ -790,16 +791,20 @@ function renderNonCodeTab(
         {...(props.onDraftCreateCodeThread === undefined
           ? {}
           : { onCreateCodeThread: props.onDraftCreateCodeThread })}
-        onCreateThread={(prompt, folderSelection, deliveryOutcome, images) => {
-          if (props.onDraftCreateThread !== undefined) {
-            void props.onDraftCreateThread(
-              tab.mode,
-              prompt,
-              folderSelection,
-              deliveryOutcome,
-              ...(images === undefined ? [] : [images]),
-            );
-          }
+        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+        {...(props.projectWindowCapability === undefined
+          ? {}
+          : { windowCapability: props.projectWindowCapability })}
+        onCreateThread={(prompt, folderSelection, deliveryOutcome, images, threadMentionIds) => {
+          if (props.onDraftCreateThread === undefined) return;
+          return props.onDraftCreateThread(
+            tab.mode,
+            prompt,
+            folderSelection,
+            deliveryOutcome,
+            images,
+            threadMentionIds,
+          );
         }}
         {...(props.onCreateProject === undefined ? {} : { onCreateProject: props.onCreateProject })}
         onCancel={() => {

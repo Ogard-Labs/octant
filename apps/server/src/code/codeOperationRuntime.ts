@@ -42,7 +42,7 @@ import {
 } from "./gitObservationPort";
 import { GitService } from "./gitService";
 import { CodeOperationEventStore } from "./codeOperationEventStore";
-import { decidesCodeEffectsByApproval } from "@octant/domain";
+import { clampTurnAccessPosture, decidesCodeEffectsByApproval } from "@octant/domain";
 import {
   approvalContextDigest,
   CodeOperationApprovalStore,
@@ -170,6 +170,8 @@ export interface CodeOperationRuntimeOptions {
   }) => AppManagedToolSet | undefined;
   /** Reads the `#thread` mentions a turn names, on that turn's own principal. */
   readonly resolveThreadMentionContext?: CodeOperationServiceOptions["resolveThreadMentionContext"];
+  /** Reads the `@file` mentions a turn names against this thread's bound root. */
+  readonly resolveFileMentionContext?: CodeOperationServiceOptions["resolveFileMentionContext"];
   /** Takes the notes the user pointed at the running product into the next turn. */
   readonly takeProductFeedbackForTurn?: CodeOperationServiceOptions["takeProductFeedbackForTurn"];
   /**
@@ -381,8 +383,15 @@ export function createCodeOperationRuntime(
     clock: options.clock,
   });
   const turns = new RuntimeTurnController({ options, events, roots, gitService });
+  const authorityForTurn: CodeOperationAuthorityPort = {
+    ...authority,
+    effectiveThread: (windowId, thread) => {
+      const session = authority.effectiveThread?.(windowId, thread) ?? thread;
+      return turns.threadWithActiveTurnPosture(session);
+    },
+  };
   const service = new CodeOperationService({
-    authority,
+    authority: authorityForTurn,
     ...(approvalValidator === undefined ? {} : { approvals: approvalValidator }),
     terminals: terminal,
     repositoryTests,
@@ -407,6 +416,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveThreadMentionContext === undefined
       ? {}
       : { resolveThreadMentionContext: options.resolveThreadMentionContext }),
+    ...(options.resolveFileMentionContext === undefined
+      ? {}
+      : { resolveFileMentionContext: options.resolveFileMentionContext }),
     ...(options.takeProductFeedbackForTurn === undefined
       ? {}
       : { takeProductFeedbackForTurn: options.takeProductFeedbackForTurn }),
@@ -928,12 +940,18 @@ class RuntimeTurnController implements CodeOperationTurnPort {
   async answerApproval(input: Parameters<CodeOperationTurnPort["answerApproval"]>[0]) {
     const active = this.#owned(input.thread, input.checkoutRoot);
     const providerRequestId = active?.approvals.get(input.approvalId);
+    const turnPosture =
+      active === undefined
+        ? undefined
+        : clampTurnAccessPosture({
+            requested: active.thread.executionPolicy,
+            thread: input.thread.executionPolicy,
+          });
     if (
       active === undefined ||
       active.connection === undefined ||
       providerRequestId === undefined ||
-      active.thread.executionPolicy === "plan" ||
-      active.thread.executionPolicy !== input.thread.executionPolicy ||
+      turnPosture === "plan" ||
       active.thread.permissionPersistence !== input.thread.permissionPersistence
     )
       return turnState("failed");
@@ -1115,11 +1133,26 @@ class RuntimeTurnController implements CodeOperationTurnPort {
       });
   }
 
+  /**
+   * The durable thread as this running turn may use it. A one-shot overlay is
+   * the requested ceiling and the current grant still clamps it, so app-managed
+   * tools cannot exceed either the turn or a later lower grant.
+   */
+  threadWithActiveTurnPosture(thread: CodeThread): CodeThread {
+    const active = this.#active.get(String(thread.id));
+    if (active === undefined) return thread;
+    const executionPolicy = clampTurnAccessPosture({
+      requested: active.thread.executionPolicy,
+      thread: thread.executionPolicy,
+    });
+    return executionPolicy === thread.executionPolicy ? thread : { ...thread, executionPolicy };
+  }
+
   #effectiveThread(windowId: WindowId, threadId: CodeThreadId): CodeThread | undefined {
     const stored = this.#options.persistence.readCodeThread(threadId);
-    return stored === undefined
-      ? undefined
-      : (this.#options.sessionAuthority?.effectiveThread(windowId, stored) ?? stored);
+    if (stored === undefined) return undefined;
+    const session = this.#options.sessionAuthority?.effectiveThread(windowId, stored) ?? stored;
+    return this.threadWithActiveTurnPosture(session);
   }
 
   #persistNormalized(active: ActiveTurn, event: CodeTurnEvent): void {

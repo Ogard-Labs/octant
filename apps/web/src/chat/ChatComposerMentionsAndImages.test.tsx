@@ -178,7 +178,7 @@ describe("ChatComposer thread mentions", () => {
     await user.keyboard("{ArrowDown}");
     await user.keyboard("{Enter}");
 
-    expect(onDraftChange).toHaveBeenCalledWith("look at #[Release notes] ");
+    expect(onDraftChange).toHaveBeenCalledWith("look at #[Release notes] ", 25);
     expect(onSelectCandidate).toHaveBeenCalledWith(hit);
   });
 
@@ -290,6 +290,21 @@ describe("ChatComposer thread mentions", () => {
   });
 });
 
+describe("ChatComposer @file absence", () => {
+  it("does not offer a file mention picker, because Chat has no filesystem authority", async () => {
+    const user = userEvent.setup();
+    renderControlled();
+
+    const message = screen.getByLabelText("Message");
+    await user.click(message);
+    await user.type(message, "look at @src");
+
+    expect(
+      screen.queryByRole("listbox", { name: "Files you can mention" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("ChatComposer image paste", () => {
   it("turns a pasted PNG into a pending attachment through the ordinary file path", () => {
     const onFileSelected = vi.fn();
@@ -373,12 +388,12 @@ describe("ChatComposer image paste", () => {
     );
   });
 
-  it("does not paste while a response is streaming", () => {
+  it("pastes an image onto a message queued while a response is streaming", () => {
     const onFileSelected = vi.fn();
     renderComposer({ onFileSelected, imageAttachment: { kind: "supported" }, isSending: true });
 
     pasteImage(screen.getByLabelText("Message"), [imageFile()]);
 
-    expect(onFileSelected).not.toHaveBeenCalled();
+    expect(onFileSelected).toHaveBeenCalledOnce();
   });
 });

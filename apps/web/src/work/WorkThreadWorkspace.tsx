@@ -1,5 +1,9 @@
 import {
+  decodeWorkAttachmentId,
+  decodeWorkAttachmentMediaType,
   decodeWorkMutationRequestId,
+  decodeWorkTurnId,
+  decodeWorkTurnRequestId,
   type WorkRequest,
   type WorkThread,
   type WorkThreadId,
@@ -11,22 +15,42 @@ import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-cl
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
-import { ArrowUp, Check, Globe2 } from "lucide-react";
+import { ArrowUp, Check, Globe2, Paperclip, X } from "lucide-react";
 import {
   useCallback,
   useEffect,
+  useId,
+  useLayoutEffect,
   useRef,
   useState,
+  type ClipboardEvent,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import {
+  applyComposerCaret,
+  type ComposerThreadDraftStore,
+} from "../composer/composerThreadDraftStore";
+import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
+import { useQueuedSend } from "../composer/useQueuedSend";
+import type { TurnSettlement } from "../composer/queuedSend";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
-import type { HostId } from "@octant/contracts/host";
+import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import { ThreadExportControl } from "../thread/ThreadExportControl";
+import {
+  ThreadMentionChips,
+  ThreadMentionTypeahead,
+  useThreadMentionTypeahead,
+} from "../chat/ThreadMentionPicker";
+import { useThreadMentions } from "../chat/useThreadMentions";
+import { clipboardHasImage } from "../chat/composerImagePaste";
+import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
+import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
+import { useWorkFileMentions } from "./useWorkFileMentions";
 
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
@@ -48,6 +72,7 @@ export interface WorkThreadWorkspaceProps {
    * header so it stays visible with the rest of the thread chrome.
    */
   readonly childRunStatus?: ReactNode;
+  readonly draftStore?: ComposerThreadDraftStore;
 }
 
 function artifactNameFromPrompt(prompt: string): string {
@@ -62,7 +87,12 @@ function artifactNameFromPrompt(prompt: string): string {
 }
 
 export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
-  const [prompt, setPrompt] = useState("");
+  const composerDraft = useComposerThreadDraft({
+    mode: "work",
+    threadId: String(props.threadId),
+    ...(props.draftStore === undefined ? {} : { store: props.draftStore }),
+  });
+  const prompt = composerDraft.text;
   const [projectId, setProjectId] = useState<ProjectId | undefined>(undefined);
   const [thread, setThread] = useState<WorkThread | undefined>(undefined);
   const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState>>([]);
@@ -75,14 +105,54 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [completionFormOpen, setCompletionFormOpen] = useState(false);
   const [completionEvidence, setCompletionEvidence] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sendQueuedRef = useRef<() => Promise<boolean>>(async () => false);
+  const mentionListId = useId();
+  const fileMentionListId = useId();
   const trimmed = prompt.trim();
   const completionLocked = thread?.completionConfirmed === true;
+  const queued = useQueuedSend({
+    threadKey: String(props.threadId),
+    settlement: workTurnSettlement(turns),
+    ready: !providerChanging && !creating && !completionLocked,
+    send: () => sendQueuedRef.current(),
+  });
+  const turnRunning = workTurnSettlement(turns) === "running";
+  const images = useWorkComposerImages();
+  const imageSupport = selectedModelReadsImages(props.providerGroups ?? [], {
+    ...(thread === undefined ? {} : { providerInstanceId: thread.providerInstanceId }),
+    ...(thread === undefined ? {} : { modelId: thread.modelId }),
+  });
+  const threadMentions = useThreadMentions({
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+    draft: prompt,
+  });
+  const mention = useThreadMentionTypeahead({
+    mentions: threadMentions.composer,
+    draft: prompt,
+    onDraftChange: composerDraft.setDraft,
+    textarea: () => textareaRef.current,
+    disabled: creating || completionLocked,
+  });
+  const fileMentions = useWorkFileMentions({
+    threadId: props.threadId,
+    draft: prompt,
+    onDraftChange: composerDraft.setDraft,
+    textarea: () => textareaRef.current,
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const fileMentionOpen = fileMentions.open && !mention.open;
   const canSubmit =
     trimmed.length > 0 &&
     !creating &&
     !completionLocked &&
-    props.mutationClient !== undefined &&
-    projectId !== undefined;
+    projectId !== undefined &&
+    (props.turnClient !== undefined || props.mutationClient !== undefined);
+
+  useEffect(() => {
+    if (completionLocked) queued.discard();
+  }, [completionLocked, queued.discard]);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,6 +162,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         if (cancelled) return;
         const thread = bootstrap.threads.find((candidate) => candidate.id === props.threadId);
         if (thread === undefined) {
+          composerDraft.purge(String(props.threadId));
           setErrorMessage("This Work thread is no longer available.");
           return;
         }
@@ -114,7 +185,13 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [props.requestClient, props.threadClient, props.threadId, props.turnClient]);
+  }, [
+    composerDraft.purge,
+    props.requestClient,
+    props.threadClient,
+    props.threadId,
+    props.turnClient,
+  ]);
 
   useEffect(() => {
     if (props.turnClient === undefined) return;
@@ -180,10 +257,120 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     [props.threadClient, providerChanging, thread],
   );
 
+  const sendWorkTurn = useCallback(async (): Promise<boolean> => {
+    if (
+      thread !== undefined &&
+      thread.bindingRevisionId === undefined &&
+      props.turnClient !== undefined
+    ) {
+      setErrorMessage(
+        "This Work thread must be rebound before sending a follow-up. The Project folder is no longer authorized for this thread.",
+      );
+      return false;
+    }
+    if (
+      thread === undefined ||
+      thread.completionConfirmed === true ||
+      providerChanging ||
+      props.turnClient === undefined ||
+      thread.bindingRevisionId === undefined ||
+      projectId === undefined
+    ) {
+      return false;
+    }
+    const promptText = composerDraft.text.trim();
+    if (promptText.length === 0) return false;
+    const sendingThreadId = String(thread.id);
+    setCreating(true);
+    setErrorMessage(undefined);
+    setStatus(undefined);
+    try {
+      if (String(props.threadId) !== sendingThreadId) return false;
+      const threadMentionIds = await threadMentions.resolveForSend();
+      const staged = images.filesForSend();
+      const attachmentIds = [];
+      for (const file of staged) {
+        const attachmentId = decodeWorkAttachmentId(globalThis.crypto.randomUUID());
+        await props.turnClient.putAttachment({
+          threadId: props.threadId,
+          attachmentId,
+          displayName: file.name.trim() === "" ? "Pasted image" : file.name,
+          mediaType: decodeWorkAttachmentMediaType(file.type),
+          bytes: new Uint8Array(await file.arrayBuffer()),
+        });
+        attachmentIds.push(attachmentId);
+      }
+      const started = await props.turnClient.startFirstTurn({
+        kind: "start-work-thread-turn",
+        requestId: decodeWorkTurnRequestId(globalThis.crypto.randomUUID()),
+        threadId: props.threadId,
+        turnId: decodeWorkTurnId(globalThis.crypto.randomUUID()),
+        prompt: promptText,
+        authority: {
+          hostId: props.hostId ?? LOCAL_HOST_ID,
+          projectId,
+          bindingRevisionId: thread.bindingRevisionId,
+          workingDirectory: thread.workingDirectory ?? ("." as never),
+          confinementPosture: "project-root-confined",
+          providerInstanceId: thread.providerInstanceId,
+          modelId: thread.modelId,
+        },
+        ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+        ...(threadMentionIds.length === 0 ? {} : { threadMentionIds }),
+        ...(fileMentions.selectedPaths.length === 0
+          ? {}
+          : { fileMentionPaths: [...fileMentions.selectedPaths] }),
+      });
+      if (started.kind !== "accepted") {
+        setErrorMessage("The Work turn could not be started.");
+        return false;
+      }
+      images.clearAfterAccepted();
+      composerDraft.clear();
+      threadMentions.clear();
+      fileMentions.clear();
+      setTurns((current) => [...current, started.turn]);
+      textareaRef.current?.focus();
+      return true;
+    } catch {
+      setErrorMessage("The Work turn could not be started.");
+      return false;
+    } finally {
+      setCreating(false);
+    }
+  }, [
+    composerDraft,
+    fileMentions,
+    images,
+    projectId,
+    props.hostId,
+    props.threadId,
+    props.turnClient,
+    providerChanging,
+    thread,
+    threadMentions,
+  ]);
+  sendQueuedRef.current = sendWorkTurn;
+
   const submit = useCallback(async () => {
-    if (!canSubmit || props.mutationClient === undefined || projectId === undefined) {
+    if (turnRunning) {
+      queued.enqueue();
       return;
     }
+    if (queued.state.status === "held") {
+      const sent = await sendWorkTurn();
+      if (sent) queued.discard();
+      return;
+    }
+    if (!canSubmit || projectId === undefined) {
+      return;
+    }
+    if (props.turnClient !== undefined) {
+      const sent = await sendWorkTurn();
+      if (sent) queued.discard();
+      return;
+    }
+    if (props.mutationClient === undefined) return;
     setCreating(true);
     setErrorMessage(undefined);
     setStatus(undefined);
@@ -200,7 +387,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         setErrorMessage("The artifact could not be created.");
         return;
       }
-      setPrompt("");
+      composerDraft.clear();
       setStatus(`Created ${reply.outcome.artifact.displayName} in the bound folder.`);
       textareaRef.current?.focus();
     } catch {
@@ -208,7 +395,17 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     } finally {
       setCreating(false);
     }
-  }, [canSubmit, projectId, props.mutationClient, thread?.completionConfirmed, trimmed]);
+  }, [
+    canSubmit,
+    composerDraft,
+    projectId,
+    props.mutationClient,
+    props.turnClient,
+    queued,
+    sendWorkTurn,
+    trimmed,
+    turnRunning,
+  ]);
 
   const confirmCompletion = useCallback(async () => {
     const evidence = completionEvidence.trim();
@@ -248,11 +445,40 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     }
   }, [completing, completionEvidence, props.threadClient, thread]);
 
+  function attachFromTransfer(items: DataTransfer | null): boolean {
+    if (items === null) return false;
+    if (!clipboardHasImage(items)) return false;
+    if (imageSupport === false) {
+      images.refuse("The selected model does not accept images. Choose an image-capable model.");
+      return true;
+    }
+    return images.consumePaste(items);
+  }
+
+  const restoredCaret = composerDraft.caretIndex;
+  const restoredLength = prompt.length;
+  useLayoutEffect(() => {
+    applyComposerCaret(textareaRef.current, restoredCaret, restoredLength);
+    // Restore only when this thread's composer is shown, not on every keystroke.
+  }, [props.threadId]);
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (mention.handleKeyDown(event)) return;
+    if (fileMentions.handleKeyDown(event)) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void submit();
     }
+  }
+
+  function rememberDraft(text: string, caretIndex: number | null) {
+    if (caretIndex === null) composerDraft.setDraft(text);
+    else composerDraft.setDraft(text, caretIndex);
+  }
+
+  function syncMentions(value: string, caret: number | null) {
+    mention.sync(value, caret);
+    fileMentions.sync(value, caret);
   }
 
   return (
@@ -397,46 +623,229 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         )}
         <div className="work-thread-workspace__composer-shell">
           <div className="composer">
+            {mention.open ? (
+              <ThreadMentionTypeahead
+                activeIndex={mention.activeIndex}
+                {...(threadMentions.composer?.busy === undefined
+                  ? {}
+                  : { busy: threadMentions.composer.busy })}
+                candidates={threadMentions.composer?.candidates ?? []}
+                listId={mentionListId}
+                onChoose={mention.choose}
+                onHover={mention.setActiveIndex}
+              />
+            ) : null}
+            {fileMentionOpen ? (
+              <PathMentionTypeahead
+                activeIndex={fileMentions.activeIndex}
+                busy={fileMentions.busy}
+                candidates={fileMentions.candidates}
+                listId={fileMentionListId}
+                onChoose={fileMentions.choose}
+                onHover={fileMentions.setActiveIndex}
+              />
+            ) : null}
+            <ThreadMentionChips
+              chips={threadMentions.chips}
+              onRemove={(mentionedThreadId) =>
+                threadMentions.composer?.onRemoveChip(mentionedThreadId)
+              }
+            />
+            {images.staged.length === 0 && images.message === undefined ? null : (
+              <div
+                className="composer-chips work-composer-adapter__attachments"
+                aria-label="Attached images"
+              >
+                {images.staged.map((attachment) => (
+                  <span className="chip work-composer-adapter__attachment" key={attachment.id}>
+                    <img
+                      alt={attachment.displayName}
+                      className="work-composer-adapter__attachment-thumb"
+                      src={attachment.previewUrl}
+                    />
+                    <span className="work-composer-adapter__attachment-name">
+                      {attachment.displayName}
+                    </span>
+                    <button
+                      aria-label={`Remove ${attachment.displayName}`}
+                      className="chip-x window-no-drag"
+                      onClick={() => images.remove(attachment.id)}
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                {images.message === undefined ? null : (
+                  <span className="work-composer-adapter__hint" role="status">
+                    {images.message}
+                  </span>
+                )}
+              </div>
+            )}
             <OctantTextarea
               aria-label="Work prompt"
               autoFocus
               className="composer-input"
-              disabled={creating || completionLocked || props.mutationClient === undefined}
-              onChange={(event) => setPrompt(event.target.value)}
+              disabled={
+                creating ||
+                completionLocked ||
+                (props.mutationClient === undefined && props.turnClient === undefined)
+              }
+              onChange={(event) => {
+                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
+              onClick={(event) => {
+                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
               onKeyDown={handleKeyDown}
-              placeholder="Describe the deliverable or paste a draft…"
+              onKeyUp={(event) => {
+                rememberDraft(event.currentTarget.value, event.currentTarget.selectionStart);
+                syncMentions(event.currentTarget.value, event.currentTarget.selectionStart);
+              }}
+              onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+                if (creating || completionLocked) return;
+                if (attachFromTransfer(event.clipboardData)) event.preventDefault();
+              }}
+              placeholder={
+                turnRunning
+                  ? "Queue the next message…"
+                  : "Describe the deliverable or paste a draft…"
+              }
               ref={textareaRef}
               rows={4}
               value={prompt}
             />
             <div className="composer-row">
+              {props.turnClient === undefined ? null : (
+                <>
+                  <label>
+                    <span className="work-composer-adapter__visually-hidden">Add attachment</span>
+                    <input
+                      aria-label="Choose attachment file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      className="work-composer-adapter__file-input"
+                      disabled={creating || completionLocked || imageSupport === false}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.item(0);
+                        if (file !== null && file !== undefined) {
+                          if (imageSupport === false) {
+                            images.refuse(
+                              "The selected model does not accept images. Choose an image-capable model.",
+                            );
+                          } else {
+                            images.attach([file]);
+                          }
+                        }
+                        event.currentTarget.value = "";
+                      }}
+                      type="file"
+                    />
+                  </label>
+                  <OctantButton
+                    aria-label="Add attachment"
+                    disabled={creating || completionLocked || imageSupport === false}
+                    onClick={(event) => {
+                      event.currentTarget.parentElement
+                        ?.querySelector<HTMLInputElement>('input[type="file"]')
+                        ?.click();
+                    }}
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Paperclip aria-hidden="true" size={15} strokeWidth={1.8} />
+                  </OctantButton>
+                </>
+              )}
               <span className="composer-gap" />
-              <OctantButton
-                aria-label="Create artifact"
-                disabled={!canSubmit}
-                onClick={() => void submit()}
-                size="icon"
-                type="button"
-                variant="default"
-              >
-                <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-              </OctantButton>
+              {queued.state.status === "idle" ? null : (
+                <OctantButton
+                  aria-label="Discard queued message"
+                  onClick={() => {
+                    queued.discard();
+                    composerDraft.clear();
+                    threadMentions.clear();
+                    fileMentions.clear();
+                    images.clearAfterAccepted();
+                  }}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <X aria-hidden="true" size={16} strokeWidth={2} />
+                </OctantButton>
+              )}
+              {queued.state.status === "queued" ? null : (
+                <OctantButton
+                  aria-label={
+                    turnRunning
+                      ? "Queue message"
+                      : queued.state.status === "held"
+                        ? "Send message"
+                        : props.turnClient === undefined
+                          ? "Create artifact"
+                          : "Send follow-up"
+                  }
+                  disabled={!canSubmit}
+                  onClick={() => void submit()}
+                  size="icon"
+                  type="button"
+                  variant="default"
+                >
+                  <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+                </OctantButton>
+              )}
             </div>
           </div>
+          {composerDraft.persistError === undefined ? null : (
+            <p className="work-thread-workspace__hint" role="status">
+              {composerDraft.persistError}
+            </p>
+          )}
           {errorMessage === undefined ? null : (
             <p className="draft-thread__error" role="alert">
               {errorMessage}
             </p>
           )}
+          {queued.statusMessage === undefined ? null : (
+            <p className="draft-thread__hint" role="status">
+              {queued.statusMessage}
+            </p>
+          )}
           <p className="draft-thread__hint">
             {completionLocked
               ? "Reactivate this Work thread before creating another artifact or changing its provider."
-              : "Press Enter to save a markdown artifact · Shift+Enter for a new line"}
+              : turnRunning
+                ? "Press Enter to queue the next message · Shift+Enter for a new line"
+                : props.turnClient === undefined
+                  ? "Press Enter to save a markdown artifact · Shift+Enter for a new line"
+                  : "Press Enter to send · Shift+Enter for a new line · Type # to mention a thread, @ to mention a file"}
           </p>
         </div>
       </div>
     </section>
   );
+}
+
+function workTurnSettlement(turns: ReadonlyArray<WorkTurnState>): TurnSettlement | "idle" {
+  const latest = turns.at(-1);
+  if (latest === undefined) return "idle";
+  switch (latest.status) {
+    case "accepted":
+    case "running":
+      return "running";
+    case "waiting":
+      return "waiting";
+    case "completed":
+      return "completed";
+    case "cancelled":
+      return "cancelled";
+    case "failed":
+      return "failed";
+  }
 }
 
 function boundProviderModelLabel(

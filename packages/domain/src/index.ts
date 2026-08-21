@@ -76,6 +76,7 @@ export * from "./scaffoldPolicy";
 export * from "./threadCheckpointPolicy";
 export * from "./threadWorkPolicy";
 export * from "./threadMentionPolicy";
+export * from "./fileMentionPolicy";
 export * from "./usagePolicy";
 export * from "./userProfilePolicy";
 export * from "./agentProfilePolicy";

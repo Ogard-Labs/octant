@@ -401,7 +401,7 @@ export function codes(): CodeClient {
       async () => ({ version: 1, query: { version: 1 }, cards: [], generatedAt: now }) as never,
     ),
     conversation: vi.fn(async (threadId) => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId,
       turns: [],
       nextCursor: 0,

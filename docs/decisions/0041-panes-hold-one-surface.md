@@ -1,4 +1,4 @@
-# 0040. Panes hold one surface; the sidebar is the only switcher
+# 0041. Panes hold one surface; the sidebar is the only switcher
 
 **Status:** Proposed
 

@@ -124,11 +124,14 @@ resolves to Waiting.
 
 A `#thread` mention points at another thread the sender can already Open. The
 host resolves a bounded, read-only title, status, and transcript window at send
-time; the mentioned thread is not interrupted, steered, or mutated. Unknown `@`
-text stays ordinary text; `@plugin` / `$skill` addressing is unchanged. Side
-Chat is a Chat-mode sidecar about exactly one source thread: ordinary Chat with
-that thread's bounded context, no inherited Work or Code authority, and no path
-that approves, steers, or appends to the source. Unavailable, unauthorized, or
+time; the mentioned thread is not interrupted, steered, or mutated. In Work and
+Code, an `@file` mention completes a path inside the thread's bound root; the
+host refuses a path outside that root before reading it. Chat Projects have no
+filesystem authority, so `@file` is absent there. Unknown `@` text stays
+ordinary text; `@plugin` / `$skill` addressing is unchanged. Side Chat is a
+Chat-mode sidecar about exactly one source thread: ordinary Chat with that
+thread's bounded context, no inherited Work or Code authority, and no path that
+approves, steers, or appends to the source. Unavailable, unauthorized, or
 deleted targets fail closed.
 
 ## Persistence
@@ -190,6 +193,14 @@ flowchart LR
   instant it was taken. Secrets, raw provider payloads, and filesystem
   paths never appear; attachment bytes and other bulk content outside the
   journal are listed as omissions. See `docs/decisions/0036`.
+- **Unsent composer drafts.** Each Chat, Work, and Code thread keeps one unsent
+  composer draft in ordinary renderer storage on the client that typed it.
+  Drafts are not journaled, not included in diagnostics, and not sent to a
+  provider until the user sends the message. Mentions that live in the typed
+  text persist with the draft; staged attachments and extra composer
+  selections do not, and the composer says so when a restored draft dropped
+  them. Sending or clearing removes the draft; deleting or purging the thread
+  removes it too.
 
 ## Providers
 
@@ -223,9 +234,12 @@ modelId }`, and the model picker is provider-first. Discovery can find
   `sandbox-exec` fails closed as incompatible.
 - **Credentials.** API keys live in the macOS Keychain and are reached only
   through the desktop's loopback credential broker by opaque UUID reference.
-  OAuth and subscription login are delegated to the provider's own runtime;
-  Octant never stores, refreshes, or journals those tokens. Broker URLs and
-  tokens are stripped from every child environment.
+  Provider OAuth and subscription login are delegated to the provider's own
+  runtime; Octant never stores, refreshes, or journals those tokens. Secrets
+  Octant holds for an integration use the same Keychain path: the host keeps
+  an opaque reference; plugins, the renderer, the journal, and diagnostics
+  never receive raw token material. Broker URLs and tokens are stripped from
+  every child environment.
 
 ## Extensions and skills
 
@@ -287,7 +301,9 @@ mechanisms are:
   actions, credential access, access outside the bound root, privilege or
   sandbox changes. Grants are scoped and journaled. Code starts approval-gated;
   Plan mode is read-only; auto-accept-edits waives only project file writes;
-  Full access is a remembered, per-Project decision.
+  Full access is a remembered, per-Project decision. A composer turn may
+  request a narrower posture; the server clamps it to the thread's grant
+  and records the posture the turn ran under.
 - **Sandbox.** Provider CLIs, Git, terminals, test runners, and extension
   executables launch under `sandbox-exec` with deny-default Seatbelt profiles
   scoped to the bound root, allowlisted environments, and no broker

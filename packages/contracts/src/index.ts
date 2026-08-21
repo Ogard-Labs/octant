@@ -62,6 +62,7 @@ export * from "./providerDiscovery";
 export * from "./shell";
 export * from "./threadDraft";
 export * from "./threadMention";
+export * from "./fileMention";
 export * from "./theme";
 export * from "./contentProvenance";
 export * from "./toolActions";

@@ -1,7 +1,8 @@
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import type { CodeCheckoutId, CodeThreadId } from "@octant/contracts";
+import { reconcileFileMentionPaths } from "@octant/domain";
 import { File, Folder } from "lucide-react";
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   applyPathMention,
@@ -17,7 +18,7 @@ export interface CodePathMentionsOptions {
   readonly threadId?: CodeThreadId | undefined;
   readonly checkoutId?: CodeCheckoutId | undefined;
   readonly draft: string;
-  readonly onDraftChange: (draft: string) => void;
+  readonly onDraftChange: (draft: string, caretIndex: number) => void;
   /** The live textarea, so the caret lands after the inserted path. */
   readonly textarea: () => HTMLTextAreaElement | null;
   readonly serverUrl?: string;
@@ -30,12 +31,15 @@ export interface CodePathMentionsController {
   readonly activeIndex: number;
   readonly candidates: ReadonlyArray<PathMentionCandidate>;
   readonly activeCandidate: PathMentionCandidate | undefined;
+  /** Paths chosen for this turn; the host re-checks each one at send. */
+  readonly selectedPaths: ReadonlyArray<string>;
   readonly setActiveIndex: (index: number) => void;
   /** Recompute the token after every edit or caret move. */
   readonly sync: (draft: string, caretIndex: number | null) => void;
   /** Returns `true` when the typeahead consumed the key. */
   readonly handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => boolean;
   readonly choose: (candidate: PathMentionCandidate) => void;
+  readonly clear: () => void;
 }
 
 /**
@@ -50,6 +54,7 @@ export interface CodePathMentionsController {
 export function useCodePathMentions(options: CodePathMentionsOptions): CodePathMentionsController {
   const [mention, setMention] = useState<PathMentionQuery | undefined>(undefined);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [selectedPaths, setSelectedPaths] = useState<ReadonlyArray<string>>([]);
   // Latched rather than tracking `mention`, so closing and reopening the
   // typeahead reads the listing already loaded instead of walking again.
   const [requested, setRequested] = useState(false);
@@ -81,6 +86,13 @@ export function useCodePathMentions(options: CodePathMentionsOptions): CodePathM
   const open = mention !== undefined;
   const activeCandidate = open ? candidates[activeIndex] : undefined;
 
+  useEffect(() => {
+    setSelectedPaths((current) => {
+      const kept = reconcileFileMentionPaths(options.draft, current);
+      return kept.length === current.length ? current : kept;
+    });
+  }, [options.draft]);
+
   function sync(draft: string, caretIndex: number | null) {
     const next = caretIndex === null ? undefined : readPathMentionQuery(draft, caretIndex);
     if (next !== undefined) setRequested(true);
@@ -91,7 +103,12 @@ export function useCodePathMentions(options: CodePathMentionsOptions): CodePathM
   function choose(candidate: PathMentionCandidate) {
     if (mention === undefined) return;
     const applied = applyPathMention(options.draft, mention, candidate);
-    options.onDraftChange(applied.draft);
+    options.onDraftChange(applied.draft, applied.caret);
+    if (candidate.kind === "file") {
+      setSelectedPaths((current) =>
+        current.includes(candidate.path) ? current : [...current, candidate.path],
+      );
+    }
     // A directory keeps the typeahead open on its own contents; a file is done.
     setMention(
       candidate.kind === "directory"
@@ -139,10 +156,12 @@ export function useCodePathMentions(options: CodePathMentionsOptions): CodePathM
     activeIndex,
     candidates,
     activeCandidate,
+    selectedPaths,
     setActiveIndex,
     sync,
     handleKeyDown,
     choose,
+    clear: () => setSelectedPaths([]),
   };
 }
 

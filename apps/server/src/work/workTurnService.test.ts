@@ -18,7 +18,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { WorkAttachmentStore } from "./workAttachmentStore";
 import { WorkTurnProjection } from "./workTurnProjection";
-import { WorkTurnService, WorkTurnServiceError } from "./workTurnService";
+import {
+  WorkTurnService,
+  WorkTurnServiceError,
+  type WorkTurnServiceDependencies,
+} from "./workTurnService";
 import type { WorkTurnRuntimePort } from "./workTurnRuntime";
 
 const attachmentRoots: string[] = [];
@@ -52,6 +56,7 @@ describe("WorkTurnService", () => {
       role: "user",
       text: "Summarize the brief",
     });
+    await fixture.waitForIdle();
     expect(fixture.acquireInputs[0]).toMatchObject({
       mode: "work",
       workRequest: {
@@ -59,7 +64,6 @@ describe("WorkTurnService", () => {
         threadId: ids.thread,
       },
     });
-    await fixture.waitForIdle();
     const lookup = await fixture.service.lookupFirstTurn(ids.window, ids.request);
     expect(lookup).toMatchObject({
       kind: "accepted",
@@ -215,6 +219,54 @@ describe("WorkTurnService", () => {
     );
   });
 
+  it("carries the prior transcript on a follow-up turn", async () => {
+    const sent: Array<ReadonlyArray<{ readonly kind: string; readonly text: string }>> = [];
+    const fixture = serviceFixture({
+      turnRuntime: {
+        run: async (input) => {
+          sent.push(input.context ?? []);
+          return { kind: "completed", response: "Revised summary" };
+        },
+      },
+    });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+    const followUp = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId: decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac"),
+      turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc"),
+      prompt: "Revise that",
+    });
+    expect(followUp.kind).toBe("accepted");
+    await fixture.waitForIdle(decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaac"));
+    expect(sent[1]).toEqual([
+      { kind: "user-message", text: "Summarize the brief" },
+      { kind: "assistant-message", text: "Revised summary" },
+    ]);
+  });
+
+  it("refuses a turn whose mentioned files cannot fit the context budget", async () => {
+    const fixture = serviceFixture({
+      safeInputBudgetTokens: 50,
+      resolveFileMentionContext: async () => [
+        { kind: "user-message" as const, text: "a".repeat(8_000) },
+      ],
+    });
+    await expect(
+      fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        fileMentionPaths: ["notes.md"],
+      }),
+    ).rejects.toEqual(
+      new WorkTurnServiceError({
+        category: "invalid",
+        message:
+          "Mentioned files and prior Work context exceed the model's input budget. Remove a file mention or start a new thread.",
+      }),
+    );
+    expect(fixture.persistence.journal.append).not.toHaveBeenCalled();
+  });
+
   it("resumes durable transcript after reconnect through lookup and thread bootstrap", async () => {
     const fixture = serviceFixture();
     await fixture.service.startFirstTurn(ids.window, startCommand());
@@ -227,6 +279,34 @@ describe("WorkTurnService", () => {
       { role: "user", text: "Summarize the brief" },
       { role: "assistant", text: "Provider reply", status: "completed" },
     ]);
+  });
+
+  it("hands a follow-up turn the prior transcript as provider context", async () => {
+    const run = vi.fn();
+    run.mockImplementationOnce(async () => ({
+      kind: "completed" as const,
+      response: "Provider reply",
+    }));
+    run.mockImplementation(async () => ({ kind: "completed" as const, response: "Shorter." }));
+    const fixture = serviceFixture({ turnRuntime: { run } });
+    await fixture.service.startFirstTurn(ids.window, startCommand());
+    await fixture.waitForIdle();
+
+    const followUp = await fixture.service.startFirstTurn(ids.window, {
+      ...startCommand(),
+      requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+      turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+      prompt: "Make that summary shorter",
+    });
+    expect(followUp.kind).toBe("accepted");
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1]?.[0]).toMatchObject({
+      command: expect.objectContaining({ prompt: "Make that summary shorter" }),
+      context: [
+        { kind: "user-message", text: "Summarize the brief" },
+        { kind: "assistant-message", text: "Provider reply" },
+      ],
+    });
   });
 });
 
@@ -261,6 +341,8 @@ function serviceFixture(
     readonly turnRuntime?: WorkTurnRuntimePort;
     readonly attachments?: WorkAttachmentStore;
     readonly supportsAttachments?: () => boolean;
+    readonly safeInputBudgetTokens?: number;
+    readonly resolveFileMentionContext?: WorkTurnServiceDependencies["resolveFileMentionContext"];
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -376,6 +458,12 @@ function serviceFixture(
       ? {}
       : { supportsAttachments: options.supportsAttachments }),
     turnRuntime: options.turnRuntime ?? defaultRuntime,
+    ...(options.safeInputBudgetTokens === undefined
+      ? {}
+      : { safeInputBudgetTokens: options.safeInputBudgetTokens }),
+    ...(options.resolveFileMentionContext === undefined
+      ? {}
+      : { resolveFileMentionContext: options.resolveFileMentionContext }),
     uuid: (() => {
       let n = 0;
       return () => {
@@ -386,9 +474,9 @@ function serviceFixture(
     clock: () => now,
   });
 
-  const waitForIdle = async () => {
+  const waitForIdle = async (requestId = ids.request) => {
     for (let attempt = 0; attempt < 50; attempt += 1) {
-      const turn = projection.lookup(ids.request);
+      const turn = projection.lookup(requestId);
       if (
         turn !== undefined &&
         (turn.status === "completed" ||
