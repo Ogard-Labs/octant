@@ -118,6 +118,52 @@ describe("ProjectThreadRows", () => {
     expect(onMarkThreadRead).not.toHaveBeenCalled();
   });
 
+  it("marks a thread for follow-up from its right-click menu, never completing one it lacks", async () => {
+    const onCompleteFollowUp = vi.fn();
+    const onMarkFollowUp = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onCompleteFollowUp, onMarkFollowUp }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+
+    expect(screen.queryByRole("menuitem", { name: "Complete follow-up" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Mark for follow-up" }));
+
+    expect(onMarkFollowUp).toHaveBeenCalledWith("thread-one");
+    expect(onCompleteFollowUp).not.toHaveBeenCalled();
+  });
+
+  it("completes an open follow-up from its right-click menu, never marking a second one", async () => {
+    const onCompleteFollowUp = vi.fn();
+    const onMarkFollowUp = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onCompleteFollowUp, onMarkFollowUp }}
+        onSelectThread={vi.fn()}
+        threads={[{ ...thread, followUp: true }]}
+      />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+
+    expect(screen.queryByRole("menuitem", { name: "Mark for follow-up" })).toBeNull();
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Complete follow-up" }));
+
+    expect(onCompleteFollowUp).toHaveBeenCalledWith("thread-one");
+    expect(onMarkFollowUp).not.toHaveBeenCalled();
+  });
+
   it("exports a thread from its own right-click menu", async () => {
     const onExportThread = vi.fn();
     render(

@@ -1731,7 +1731,11 @@ describe("App", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: "Controller foundation" }, { timeout: 5_000 }),
+      await screen.findByRole(
+        "region",
+        { name: "Workspace pane: Controller foundation" },
+        { timeout: 5_000 },
+      ),
     ).toBeVisible();
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(
@@ -2599,7 +2603,7 @@ describe("App", () => {
         shellClient={shellApi}
       />,
     );
-    await screen.findByRole("heading", { name: "Controller foundation" });
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
 
     await user.keyboard("{Control>}k{/Control}");
     await user.keyboard("Controller");

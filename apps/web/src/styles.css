@@ -3053,7 +3053,12 @@ button:focus-visible {
   max-width: 160px;
 }
 
-.thread-environment-reveal__status {
+/* One status pill, worn by both presentations. The reveal button and the
+   floating panel report the same environment state, so a state that reads as a
+   tinted pill collapsed and as plain grey text expanded would be two answers
+   to one question. */
+.thread-environment-reveal__status,
+.thread-environment-identity__status {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 9px;
@@ -3063,19 +3068,24 @@ button:focus-visible {
   color: var(--octant-text-muted);
 }
 
-.thread-environment-reveal__status--available {
+.thread-environment-reveal__status--available,
+.thread-environment-identity__status--available {
   color: var(--octant-success-text);
   background: var(--octant-success-surface);
 }
 
 .thread-environment-reveal__status--unavailable,
-.thread-environment-reveal__status--disconnected {
+.thread-environment-reveal__status--disconnected,
+.thread-environment-identity__status--unavailable,
+.thread-environment-identity__status--disconnected {
   color: var(--octant-warning-text);
   background: var(--octant-warning-surface);
 }
 
 .thread-environment-reveal__status--stale,
-.thread-environment-reveal__status--recovery {
+.thread-environment-reveal__status--recovery,
+.thread-environment-identity__status--stale,
+.thread-environment-identity__status--recovery {
   color: var(--octant-text-muted);
   background: var(--octant-surface-raised);
 }
@@ -3092,16 +3102,33 @@ button:focus-visible {
   border: 1px solid var(--oct-border);
 }
 
+/* It has to read as something floating over the thread rather than as a card
+   welded into the corner: the surface is translucent and blurred the way the
+   platform's own floating panels are, and the shadow is deep enough to lift it
+   off the transcript running underneath. */
 .thread-environment-panel--floating {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: var(--oct-space-3);
+  right: var(--oct-space-3);
   width: 320px;
-  max-height: calc(100% - 16px);
+  max-height: calc(100% - var(--oct-space-3) * 2);
   z-index: 20;
-  border-radius: var(--oct-radius-md);
-  box-shadow: var(--oct-elev-raised);
+  background: color-mix(in oklab, var(--oct-surface) 88%, transparent);
+  border-color: color-mix(in oklab, var(--oct-border) 70%, transparent);
+  border-radius: var(--oct-radius-lg);
+  box-shadow:
+    0 1px 1px light-dark(rgb(0 0 0 / 6%), rgb(0 0 0 / 30%)),
+    0 12px 32px -8px light-dark(rgb(0 0 0 / 18%), rgb(0 0 0 / 55%));
   overflow: hidden;
+  backdrop-filter: blur(20px) saturate(160%);
+}
+
+/* Without a backdrop filter the translucency has nothing to blur, so the panel
+   goes fully opaque rather than letting the transcript show through it. */
+@supports not (backdrop-filter: blur(1px)) {
+  .thread-environment-panel--floating {
+    background: var(--oct-surface);
+  }
 }
 
 /* The identity reads as the panel's header rather than as its first row: it
@@ -3167,12 +3194,49 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-.thread-environment-identity__status {
+/* Where the checkout is, directly under the panel's name. A mono line so a
+   branch and a folder name line up with the identity above them, and quiet
+   enough that it reads as the panel's subtitle rather than as its first fact. */
+.thread-environment-location {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
   color: var(--oct-muted);
+  background: var(--oct-surface-warm);
+  border-bottom: 1px solid var(--oct-border);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+}
+
+.thread-environment-location svg {
+  flex: 0 0 auto;
+}
+
+/* The branch gives up its width first: a worktree folder name is short and
+   fixed, and a long branch name would otherwise push it out of the panel. */
+.thread-environment-location__branch {
+  overflow: hidden;
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--oct-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-environment-location__separator {
+  flex: 0 0 auto;
+  opacity: 0.6;
+}
+
+.thread-environment-location__worktree {
+  overflow: hidden;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The thread content owns the whole column. The panel is positioned against

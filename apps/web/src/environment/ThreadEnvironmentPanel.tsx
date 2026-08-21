@@ -5,7 +5,7 @@ import {
   type OctantMode,
   type WorkspaceTabId,
 } from "@octant/contracts";
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { GitBranch, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -14,8 +14,21 @@ import {
   resolveTabPresentation,
 } from "./EnvironmentPresentationModel";
 
+/**
+ * Where the environment's work happens. The branch and worktree used to be
+ * readable only by opening the Changes group, and before that from a header
+ * band on the thread itself; the panel is what answers for the checkout, so it
+ * names it without being unfolded first.
+ */
+export interface ThreadEnvironmentLocation {
+  readonly branch: string;
+  readonly worktree: string;
+}
+
 export interface ThreadEnvironmentPanelProps {
   readonly identity: EnvironmentCompactIdentity;
+  /** Absent when no checkout has been observed, which renders no location. */
+  readonly location?: ThreadEnvironmentLocation;
   readonly mode: OctantMode;
   readonly presentation: EnvironmentPresentationState;
   readonly tabId: WorkspaceTabId;
@@ -54,7 +67,11 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   }
 
   return (
-    <ThreadEnvironmentFloating identity={props.identity} onHide={() => setPresentation("hidden")}>
+    <ThreadEnvironmentFloating
+      identity={props.identity}
+      {...(props.location === undefined ? {} : { location: props.location })}
+      onHide={() => setPresentation("hidden")}
+    >
       {props.children}
     </ThreadEnvironmentFloating>
   );
@@ -93,6 +110,7 @@ function ThreadEnvironmentReveal(props: {
 
 function ThreadEnvironmentFloating(props: {
   readonly identity: EnvironmentCompactIdentity;
+  readonly location?: ThreadEnvironmentLocation;
   readonly onHide: () => void;
   readonly children?: ReactNode;
 }) {
@@ -148,9 +166,38 @@ function ThreadEnvironmentFloating(props: {
           <PanelRightClose aria-hidden="true" size={14} strokeWidth={1.8} />
         </OctantButton>
       </div>
+      {props.location === undefined ? null : <CompactLocation location={props.location} />}
       <div className="thread-environment-panel__body">{props.children}</div>
     </div>
   );
+}
+
+/**
+ * The branch, and the worktree it is checked out in.
+ *
+ * The worktree is shown by its own folder name with the full path as its
+ * title: a floating panel has no room for an absolute path, and the last
+ * segment is what tells two checkouts of one repository apart.
+ */
+function CompactLocation(props: { readonly location: ThreadEnvironmentLocation }) {
+  return (
+    <div className="thread-environment-location">
+      <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />
+      <span className="thread-environment-location__branch" title={props.location.branch}>
+        {props.location.branch}
+      </span>
+      <span aria-hidden="true" className="thread-environment-location__separator">
+        ·
+      </span>
+      <span className="thread-environment-location__worktree" title={props.location.worktree}>
+        {worktreeName(props.location.worktree)}
+      </span>
+    </div>
+  );
+}
+
+function worktreeName(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
 function CompactIdentity(props: { readonly identity: EnvironmentCompactIdentity }) {

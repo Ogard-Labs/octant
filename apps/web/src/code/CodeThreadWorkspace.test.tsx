@@ -64,13 +64,12 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "find bugs in this repo" })).toBeVisible();
     expect(screen.getByRole("log")).toHaveTextContent(
       "No messages yet. Send a prompt to start this thread.",
     );
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeVisible();
-    // The header states what the thread is; opening a surface beside it is the
-    // tab launcher's job, so no row of openers competes with the title here.
+    // Opening a surface is the tab launcher's job, so no row of openers is
+    // rendered above the conversation.
     expect(screen.queryByRole("button", { name: "Changes" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Browser" })).not.toBeInTheDocument();
@@ -1442,22 +1441,10 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.getByText("Failed")).toBeVisible();
   });
 
-  it("marks a thread for follow-up through the controller", async () => {
-    const user = userEvent.setup();
-    const markFollowUp = vi.fn(async () => true);
-    render(<CodeThreadWorkspace controller={controller({ markFollowUp })} threadId={threadId} />);
-
-    await user.click(screen.getByRole("button", { name: "Mark for follow-up" }));
-    expect(markFollowUp).toHaveBeenCalledWith(threadId);
-  });
-
-  it("shows an open follow-up marker with its reason and completes it explicitly", async () => {
-    const user = userEvent.setup();
-    const completeFollowUp = vi.fn(async () => true);
+  it("states the thread's identity nowhere, leaving the title to the pane and follow-up to the row", () => {
     render(
       <CodeThreadWorkspace
         controller={controller({
-          completeFollowUp,
           followUps: new Map([
             [
               String(threadId),
@@ -1481,12 +1468,12 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    const marker = screen.getByRole("status", { name: "Follow-up required" });
-    expect(marker).toHaveTextContent("Approval requested: run tests");
+    expect(
+      screen.queryByRole("heading", { name: "find bugs in this repo" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark for follow-up" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Complete follow-up" }));
-    expect(completeFollowUp).toHaveBeenCalledWith(threadId);
+    expect(screen.queryByRole("button", { name: "Complete follow-up" })).not.toBeInTheDocument();
   });
 });
 

@@ -2273,6 +2273,9 @@ function LaunchedShell(
   const codeThreadRowActions: ThreadRowActions = {
     ...(exportCodeThread === undefined ? {} : { onExportThread: exportCodeThread }),
     onArchiveThread: (threadId) => void codeController.archiveThread(decodeCodeThreadId(threadId)),
+    onCompleteFollowUp: (threadId) =>
+      void codeController.completeFollowUp(decodeCodeThreadId(threadId)),
+    onMarkFollowUp: (threadId) => void codeController.markFollowUp(decodeCodeThreadId(threadId)),
     onMarkThreadRead: (threadId) => codeController.markThreadRead(decodeCodeThreadId(threadId)),
     onMarkThreadUnread: (threadId) => codeReadCursorStore.unmark(decodeCodeThreadId(threadId)),
     onPinThread: (threadId, pinned) =>

@@ -342,9 +342,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.operationClient !== undefined &&
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
-  const followUp = props.controller.followUps.get(String(thread.id))?.followUp;
-  const followUpOpen = followUp?.state === "open";
-
   async function submitFollowUp() {
     if (!canSend) return;
     // A `#thread` chip names a thread; it never carries one. The turn sends
@@ -594,55 +591,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   return (
     <section aria-label="Code thread" className="code-thread-workspace">
-      <header className="code-thread-workspace__header">
-        <div className="code-thread-workspace__header-row thread-column">
-          <div className="code-thread-workspace__identity">
-            <h1>{thread.title}</h1>
-            <div className="code-thread-workspace__meta">
-              <span className="badge code-thread-workspace__lifecycle">
-                {lifecycleLabel(thread.lifecycle)}
-              </span>
-              <span>{headLabel(checkout.head)}</span>
-            </div>
-            <div
-              aria-label="Follow-up"
-              className="code-thread-workspace__follow-up"
-              data-follow-up={followUpOpen ? "true" : "false"}
-            >
-              {followUpOpen ? (
-                <span
-                  aria-label="Follow-up required"
-                  className="code-thread-workspace__follow-up-marker"
-                  role="status"
-                  title={followUp?.reason}
-                >
-                  <span aria-hidden="true">◆</span> Follow-up: {followUp?.reason}
-                </span>
-              ) : null}
-              {followUpOpen ? (
-                <OctantButton
-                  onClick={() => void props.controller.completeFollowUp(thread.id)}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Complete follow-up
-                </OctantButton>
-              ) : (
-                <OctantButton
-                  onClick={() => void props.controller.markFollowUp(thread.id)}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Mark for follow-up
-                </OctantButton>
-              )}
-            </div>
-          </div>
-          {childRunStatus}
-        </div>
-      </header>
+      {/* No identity header. The title repeated the pane's own grip, the
+          lifecycle badge said "Active" on nearly every thread, the branch is
+          the environment panel's fact, and follow-up is the thread row's
+          right-click menu — leaving a band that cost height and said nothing.
+          Live child runs are the one thing here that has no other home. */}
+      {childRunStatus === undefined ? null : (
+        <header className="code-thread-workspace__header">
+          <div className="code-thread-workspace__header-row thread-column">{childRunStatus}</div>
+        </header>
+      )}
 
       {props.controller.errorMessage === undefined ? null : (
         <div
@@ -1344,31 +1302,6 @@ function boundModelReadsImages(
     .find((candidate) => String(candidate.model.id) === String(thread.modelId));
   const modalities = model?.model.inputModalities;
   return modalities === undefined ? undefined : modalities.includes("image");
-}
-
-function headLabel(head: { readonly kind: string; readonly name?: string; readonly oid?: string }) {
-  if (head.kind === "branch" && head.name !== undefined) return head.name;
-  if (head.oid !== undefined) return head.oid.slice(0, 7);
-  return "Checkout";
-}
-
-function lifecycleLabel(lifecycle: string): string {
-  switch (lifecycle) {
-    case "active":
-      return "Active";
-    case "waiting":
-      return "Waiting";
-    case "interrupted":
-      return "Interrupted";
-    case "failed":
-      return "Failed";
-    case "done":
-      return "Done";
-    case "archived":
-      return "Archived";
-    default:
-      return lifecycle;
-  }
 }
 
 function turnStatusLabel(status: "waiting" | "interrupted" | "failed" | "incomplete"): string {

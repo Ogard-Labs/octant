@@ -26,30 +26,56 @@ const ids = {
   window: "10000000-0000-4000-8000-000000000006",
 } as const;
 
+/*
+ * Each row names what proves the surface itself rendered inside the boundary.
+ * Most surfaces state themselves with a heading; a Code thread does not — it is
+ * named by the pane that holds it, so the region it publishes is what says the
+ * thread and not a fallback is on screen.
+ */
 const codeTabs: ReadonlyArray<
-  readonly [WorkspaceTab["kind"], string, "monaco" | "xterm" | undefined, string]
+  readonly [
+    WorkspaceTab["kind"],
+    string,
+    "monaco" | "xterm" | undefined,
+    { readonly role: string; readonly name: string },
+  ]
 > = [
-  ["code-overview", "Overview", undefined, "Composition"],
-  ["code-diff", "README.md changes", "monaco", "Checkout changes"],
-  ["code-terminal", "Terminal", "xterm", "No terminal attached"],
-  ["code-test", "Tests", undefined, "Repository test approval unavailable"],
-  ["code-git", "Git", undefined, "Git mutation approval unavailable"],
-  ["code-pr", "Pull request", undefined, "Pull request approval unavailable"],
-  ["code-local-review", "Review findings", undefined, "Local review unavailable"],
+  ["code-overview", "Overview", undefined, { role: "region", name: "Code thread" }],
+  ["code-diff", "README.md changes", "monaco", { role: "heading", name: "Checkout changes" }],
+  ["code-terminal", "Terminal", "xterm", { role: "heading", name: "No terminal attached" }],
+  [
+    "code-test",
+    "Tests",
+    undefined,
+    { role: "heading", name: "Repository test approval unavailable" },
+  ],
+  ["code-git", "Git", undefined, { role: "heading", name: "Git mutation approval unavailable" }],
+  [
+    "code-pr",
+    "Pull request",
+    undefined,
+    { role: "heading", name: "Pull request approval unavailable" },
+  ],
+  [
+    "code-local-review",
+    "Review findings",
+    undefined,
+    { role: "heading", name: "Local review unavailable" },
+  ],
 ];
 
 describe("WorkspaceView Code tab registration", () => {
   it.each(codeTabs)(
     "routes %s through an explicit Code pane boundary",
-    async (kind, title, deferredAdapter, expectedHeading) => {
+    async (kind, title, deferredAdapter, expected) => {
       const { container } = render(<WorkspaceView {...propsFor(codeTab(kind, title))} />);
 
       // The Code pane boundary is intentionally lazy (React.lazy + Suspense), so
-      // the pane heading appears only after the deferred chunk resolves. Keep a
+      // the surface appears only after the deferred chunk resolves. Keep a
       // generous wait budget for loaded CI runners; the assertion itself is
-      // unchanged — the exact heading must render and be visible.
+      // unchanged — the exact surface must render and be visible.
       expect(
-        await screen.findByRole("heading", { name: expectedHeading }, { timeout: 5_000 }),
+        await screen.findByRole(expected.role, { name: expected.name }, { timeout: 5_000 }),
       ).toBeVisible();
       expect(
         screen.queryByRole("heading", { name: "No Code Project open" }),
@@ -114,7 +140,7 @@ describe("WorkspaceView Code tab registration", () => {
         onOpenSurface={vi.fn()}
       />,
     );
-    await screen.findByRole("heading", { name: "Composition" });
+    await screen.findByRole("region", { name: "Code thread" });
 
     fireEvent.click(screen.getByRole("button", { name: "Open surface" }));
     fireEvent.click(screen.getByRole("button", { name: "Terminal" }));
@@ -637,6 +663,10 @@ describe("WorkspaceView concurrent Code threads", () => {
             id: threadBId,
             checkoutId: checkoutBId,
             title: "Second composition",
+            // The two panes are told apart by a state only this thread is in.
+            // The title cannot do it any more: a thread is named by the pane
+            // that holds it, and both panes are titled from their own tab.
+            lifecycle: "waiting",
           },
         },
       } as never,
@@ -653,12 +683,21 @@ describe("WorkspaceView concurrent Code threads", () => {
       />,
     );
 
-    expect(
-      await screen.findByRole("heading", { name: "Composition" }, { timeout: 5_000 }),
-    ).toBeVisible();
-    expect(
-      await screen.findByRole("heading", { name: "Second composition" }, { timeout: 5_000 }),
-    ).toBeVisible();
+    const paneA = await screen.findByRole(
+      "region",
+      { name: "Workspace pane: Thread A" },
+      { timeout: 5_000 },
+    );
+    const paneB = await screen.findByRole(
+      "region",
+      { name: "Workspace pane: Thread B" },
+      { timeout: 5_000 },
+    );
+    const waitingNotice = "This thread is waiting for authoritative recovery or user input.";
+    await waitFor(() => expect(within(paneB).getByText(waitingNotice)).toBeVisible(), {
+      timeout: 5_000,
+    });
+    expect(within(paneA).queryByText(waitingNotice)).toBeNull();
   });
 
   it("waits for a Code thread's own controller instead of borrowing another thread's", async () => {
@@ -673,7 +712,7 @@ describe("WorkspaceView concurrent Code threads", () => {
         { timeout: 5_000 },
       ),
     ).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Composition" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Code thread" })).not.toBeInTheDocument();
   });
 });
 

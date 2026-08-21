@@ -441,9 +441,19 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   background: var(--oct-fg-soft);
 }
 
+/* The open thread reads louder than a hovered one.
+   Both states shared `--oct-fg-soft` alone, so the row the workspace was
+   actually showing was indistinguishable from the row under the pointer — and
+   this row is the only place that answers "which thread am I in" now that the
+   thread carries no identity header of its own. The fill stays the system's
+   neutral one, because ordinary navigation selection is not accent-filled; the
+   marker rail and the heavier ink are what separate open from hovered. The
+   rail is an inset shadow rather than a border, which would move the title. */
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
+  box-shadow: inset 2px 0 0 var(--oct-accent);
+  font-weight: 500;
 }
 
 .sidebar-navigation__thread-copy {

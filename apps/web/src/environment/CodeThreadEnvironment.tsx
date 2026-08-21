@@ -95,6 +95,20 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     !checkoutUnusable || project === undefined || onNewThreadInProject === undefined
       ? undefined
       : { label: "New thread in this Project", onClick: () => onNewThreadInProject(project.id) };
+  // Named only from a ready observation. A detached HEAD has no branch name,
+  // so it says so rather than rendering a bare abbreviated oid that reads like
+  // one.
+  const observed = controller.observation;
+  const location =
+    observed?.status === "ready"
+      ? {
+          branch:
+            observed.branch.kind === "named"
+              ? observed.branch.name
+              : `Detached ${observed.branch.oid.slice(0, 7)}`,
+          worktree: observed.worktreeRoot,
+        }
+      : undefined;
   const [localServersOpen, setLocalServersOpen] = useState(false);
   // Scan only while the section can actually be seen: a hidden panel or a
   // collapsed group must not ask the host to enumerate listeners on a timer.
@@ -114,6 +128,7 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
       <div className="code-thread-environment__content">{props.children}</div>
       <ThreadEnvironmentPanel
         identity={projection.identity}
+        {...(location === undefined ? {} : { location })}
         mode="code"
         presentation={props.presentation}
         tabId={props.tab.id}
