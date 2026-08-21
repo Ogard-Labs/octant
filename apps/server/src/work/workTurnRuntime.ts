@@ -1,12 +1,15 @@
 import {
+  MAX_PROVIDER_CONTEXT_BLOCKS,
   MAX_WORK_TURN_RESPONSE_BYTES,
-  type WorkTurnFailure,
   type ProviderAttachmentInput,
   type ProviderContextBlock,
   type ProviderFailure,
   type ProviderRuntimeEvent,
   type ProviderSessionId,
   type StartWorkThreadTurnCommand,
+  type WorkTurnFailure,
+  type WorkTurnRequestId,
+  type WorkTurnState,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Scope, Stream } from "effect";
@@ -315,4 +318,27 @@ function truncateMessage(message: string): string {
   const bytes = textEncoder.encode(message);
   if (bytes.byteLength <= 8_192) return message;
   return new TextDecoder().decode(bytes.slice(0, 8_192));
+}
+
+/**
+ * Prior Work turns on the same thread, as provider context for a follow-up.
+ * The current request is omitted so the new prompt is not duplicated.
+ */
+export function workTurnFollowUpContext(
+  turns: ReadonlyArray<WorkTurnState>,
+  currentRequestId: WorkTurnRequestId,
+): ReadonlyArray<ProviderContextBlock> {
+  const blocks: ProviderContextBlock[] = [];
+  for (const turn of turns) {
+    if (String(turn.requestId) === String(currentRequestId)) continue;
+    for (const entry of turn.transcript) {
+      if (entry.text.trim() === "") continue;
+      blocks.push({
+        kind: entry.role === "user" ? "user-message" : "assistant-message",
+        text: entry.text,
+      });
+      if (blocks.length >= MAX_PROVIDER_CONTEXT_BLOCKS) return blocks;
+    }
+  }
+  return blocks;
 }

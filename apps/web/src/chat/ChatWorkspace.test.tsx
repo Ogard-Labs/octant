@@ -109,8 +109,9 @@ function controllerFixture(
   } as ChatController;
 }
 
-/** A view with one turn whose only attempt failed, so it can be edited or retried. */
-function viewWithFailedAttempt() {
+function viewWithAttempt(
+  outcome: "streaming" | "completed" | "failed" | "cancelled" | "interrupted" | "waiting",
+) {
   return decodeChatThreadView({
     ...controllerFixture().activeView!,
     turns: [
@@ -129,7 +130,7 @@ function viewWithFailedAttempt() {
             providerSessionId: "20000000-0000-4000-8000-000000000001",
             modelId: "model-a",
             contextManifestId: "30000000-0000-4000-8000-000000000001",
-            outcome: "failed",
+            outcome,
             responseRefs: [],
             citationIds: [],
             createdAt: now,
@@ -149,6 +150,11 @@ function viewWithFailedAttempt() {
       },
     ],
   });
+}
+
+/** A view with one turn whose only attempt failed, so it can be edited or retried. */
+function viewWithFailedAttempt() {
+  return viewWithAttempt("failed");
 }
 
 /** Paste clipboard images into the composer the way the OS delivers them. */
@@ -371,6 +377,210 @@ function extensionClient(): ExtensionClient {
 }
 
 describe("ChatWorkspace", () => {
+  it("queues a follow-up while a turn is running and sends it once on completion", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    function Harness() {
+      const [draft, setDraft] = useState("Next step");
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+            })}
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setView(viewWithAttempt("completed"))} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+
+    expect(screen.getByLabelText("Message")).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    expect(sendTurn).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("This message is queued and will send when the response finishes."),
+    ).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    expect(sendTurn).toHaveBeenCalledWith("Next step", [], [], [], [], []);
+  });
+
+  it("leaves a queued follow-up unsent when the turn is cancelled or fails", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    function Harness() {
+      const [draft, setDraft] = useState("Hold this");
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+            })}
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setView(viewWithAttempt("cancelled"))} type="button">
+            Cancel turn
+          </button>
+          <button onClick={() => setView(viewWithAttempt("failed"))} type="button">
+            Fail turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Cancel turn" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("The response was cancelled. The queued message was not sent."),
+      ).toBeVisible(),
+    );
+    expect(sendTurn).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Message")).toHaveValue("Hold this");
+  });
+
+  it("lets the user discard a queued follow-up before it fires", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    function Harness() {
+      const [draft, setDraft] = useState("Drop this");
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+            })}
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setView(viewWithAttempt("completed"))} type="button">
+            Complete turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Discard queued message" }));
+    expect(screen.getByLabelText("Message")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Complete turn" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send message" })).toBeVisible());
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("does not send a queued follow-up after the composer unmounts", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    function Harness({ open }: { readonly open: boolean }) {
+      const [draft, setDraft] = useState("Do not send this");
+      return open ? (
+        <ChatWorkspace
+          controller={controllerFixture({
+            activeView: viewWithAttempt("streaming"),
+            pendingDraft: draft,
+            sendTurn,
+            setPendingDraft: setDraft,
+          })}
+          providerSnapshot={providerSnapshot()}
+        />
+      ) : null;
+    }
+    const { rerender } = render(<Harness open />);
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    rerender(<Harness open={false} />);
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("holds a queued follow-up when the running attempt ends as waiting", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    function Harness() {
+      const [draft, setDraft] = useState("Hold this");
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+            })}
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setView(viewWithAttempt("waiting"))} type="button">
+            Wait
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Wait" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("The response is waiting. The queued message was not sent."),
+      ).toBeVisible(),
+    );
+    expect(sendTurn).not.toHaveBeenCalled();
+  });
+
+  it("clears a held queue after a successful manual send", async () => {
+    const user = userEvent.setup();
+    const sendTurn = vi.fn(async () => true);
+    function Harness() {
+      const [draft, setDraft] = useState("Hold this");
+      const [view, setView] = useState(viewWithAttempt("streaming"));
+      return (
+        <>
+          <ChatWorkspace
+            controller={controllerFixture({
+              activeView: view,
+              pendingDraft: draft,
+              sendTurn,
+              setPendingDraft: setDraft,
+            })}
+            providerSnapshot={providerSnapshot()}
+          />
+          <button onClick={() => setView(viewWithAttempt("cancelled"))} type="button">
+            Cancel turn
+          </button>
+        </>
+      );
+    }
+    render(<Harness />);
+    await user.click(screen.getByRole("button", { name: "Queue message" }));
+    await user.click(screen.getByRole("button", { name: "Cancel turn" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText("The response was cancelled. The queued message was not sent."),
+      ).toBeVisible(),
+    );
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(sendTurn).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(
+        screen.queryByText("The response was cancelled. The queued message was not sent."),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
   it("shows and decides one-time MCP tool approvals for the active thread", async () => {
     const user = userEvent.setup();
     const client = extensionClient();

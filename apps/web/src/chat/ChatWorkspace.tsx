@@ -23,6 +23,8 @@ import { decodeProviderModelId } from "@octant/contracts/providers";
 import type { PickerGroup } from "@octant/domain";
 import { buildComposerPoolModel } from "@octant/domain/composer-pool-policy";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useQueuedSend } from "../composer/useQueuedSend";
+import type { TurnSettlement } from "../composer/queuedSend";
 import { ComposerPoolControl } from "../providers/ComposerPoolControl";
 import {
   ChatComposer,
@@ -143,12 +145,20 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   >([]);
   const activeThread = view?.thread;
   const activeThreadId = activeThread?.id;
+  const submitTurnRef = useRef<(draft: string) => Promise<boolean>>(async () => false);
+  const queued = useQueuedSend({
+    threadKey: activeThreadId === undefined ? undefined : String(activeThreadId),
+    settlement: chatTurnSettlement(view),
+    ready: uploadingAttachments.length === 0 && attachmentStatus.kind !== "removing",
+    send: async () => submitTurnRef.current(props.controller.pendingDraft),
+  });
   const checkpoints = useThreadCheckpoints({
     threadId: String(activeThreadId ?? ""),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
   const pendingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
+  const cancelledUploadsRef = useRef(new Set<string>());
   const uploadingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
   const pendingExtensionRef = useRef<ReadonlyArray<ChatComposerExtensionSelection>>([]);
   const pendingCanvasRef = useRef<ReadonlyArray<CanvasContextSelection>>([]);
@@ -463,6 +473,88 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     }).catch(() => undefined);
   }
 
+  const submitTurn = async (draft: string): Promise<boolean> => {
+    const claimedAttachments = pendingAttachmentsRef.current;
+    pendingAttachmentsRef.current = [];
+    // A `#thread` chip names a thread; it never carries one. The turn
+    // sends chip ids and the host resolves each one as the turn runs,
+    // re-checking that the sender may still open it, so the message
+    // stays exactly what the user typed and no later turn replays a
+    // thread they pointed at once. This check is the composer's own
+    // report: a chip the host refuses is shown as unavailable rather
+    // than silently dropped.
+    const sendingThreadId = String(view.thread.id);
+    const threadMentionIds = await threadMentions.resolveForSend();
+    if (activeThreadIdRef.current !== sendingThreadId) return false;
+    let sent = false;
+    try {
+      // Behind the same queue as a model or option change: a turn sent
+      // in the same breath as one of those must run the settings the
+      // person just chose, not the ones the composer last rendered. The
+      // version the earlier command reached travels with the send, since
+      // this closure still holds the view from the render that made it.
+      // The turn moves the version itself, so it carries no base forward.
+      sent = await enqueueThreadCommand(async (previous) => ({
+        value: await props.controller.sendTurn(
+          draft,
+          claimedAttachments.map((attachment) => attachment.id),
+          pendingPreviewSelections,
+          pendingCanvasSelections,
+          pendingExtensionSelections.flatMap((item) =>
+            item.selection === undefined ? [] : [item.selection],
+          ),
+          threadMentionIds,
+          // Only a send that follows one of this composer's own commands
+          // knows a newer version; every other send leaves the
+          // controller's own rendered version alone.
+          ...(previous !== undefined && previous.threadId === String(thread.id)
+            ? ([previous.version] as const)
+            : ([] as const)),
+        ),
+      }));
+    } catch (error) {
+      recoverClaimedAttachments(
+        claimedAttachments,
+        mountedRef.current,
+        view.thread.id,
+        pendingAttachmentsRef,
+        discardAttachmentRef,
+      );
+      throw error;
+    }
+    if (sent) {
+      // Remove exactly what this send claimed, and keep the claim ledger
+      // (the ref) in step with the visible chips: an upload that settled
+      // during the send's await window has already re-entered both, and
+      // clearing state alone would leave the ref holding a sent
+      // attachment plus an invisible new one for the next send to claim.
+      setPendingAttachments((current) => {
+        const claimed = new Set(claimedAttachments.map((attachment) => String(attachment.id)));
+        const next = current.filter((attachment) => !claimed.has(String(attachment.id)));
+        pendingAttachmentsRef.current = next;
+        return next;
+      });
+      setPendingPreviewSelections([]);
+      if (props.pendingCanvasSelections === undefined) {
+        setLocalCanvasSelections([]);
+      } else {
+        props.onClearCanvasSelections?.();
+      }
+      if (props.pendingExtensionSelections === undefined) extensionDraft.clear();
+      threadMentions.clear();
+    } else {
+      recoverClaimedAttachments(
+        claimedAttachments,
+        mountedRef.current,
+        view.thread.id,
+        pendingAttachmentsRef,
+        discardAttachmentRef,
+      );
+    }
+    return sent;
+  };
+  submitTurnRef.current = submitTurn;
+
   return (
     <section aria-label="Chat workspace" className="chat-workspace">
       {props.controller.errorMessage === undefined ? null : (
@@ -667,6 +759,51 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           ? {}
           : { onCaretIndexChange: props.controller.setPendingDraftCaret })}
         isSending={isSending}
+        queueStatus={queued.state.status}
+        onDiscardQueued={() => {
+          queued.discard();
+          props.controller.setPendingDraft("");
+          threadMentions.clear();
+          setPendingPreviewSelections([]);
+          if (props.pendingCanvasSelections === undefined) {
+            setLocalCanvasSelections([]);
+          } else {
+            props.onClearCanvasSelections?.();
+          }
+          if (props.pendingExtensionSelections === undefined) extensionDraft.clear();
+          for (const upload of uploadingAttachments) {
+            cancelledUploadsRef.current.add(String(upload.id));
+          }
+          setUploadingAttachments([]);
+          const claimed = pendingAttachmentsRef.current;
+          void (async () => {
+            const kept: PendingAttachment[] = [];
+            for (const attachment of claimed) {
+              try {
+                await discardAttachmentRef.current({
+                  threadId: view.thread.id,
+                  attachmentId: attachment.id,
+                });
+              } catch {
+                kept.push(attachment);
+              }
+            }
+            if (!mountedRef.current || activeThreadIdRef.current !== String(view.thread.id)) {
+              return;
+            }
+            pendingAttachmentsRef.current = kept;
+            setPendingAttachments(kept);
+            if (kept[0] !== undefined) {
+              setAttachmentStatus({
+                kind: "failed",
+                message: `${kept[0].displayName} could not be removed. Try again.`,
+              });
+            }
+          })();
+        }}
+        {...(queued.state.status === "held" && queued.statusMessage !== undefined
+          ? { statusMessage: queued.statusMessage }
+          : {})}
         model={{ options: providerState.modelOptions, value: view.thread.modelId }}
         onDraftChange={props.controller.setPendingDraft}
         imageAttachment={imageAttachmentCapability}
@@ -698,8 +835,16 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           void (async () => {
             try {
               const buffer = await file.arrayBuffer();
-              if (!mountedRef.current || activeThreadIdRef.current !== String(view.thread.id)) {
+              if (
+                !mountedRef.current ||
+                activeThreadIdRef.current !== String(view.thread.id) ||
+                cancelledUploadsRef.current.has(String(attachmentId))
+              ) {
+                cancelledUploadsRef.current.delete(String(attachmentId));
                 settleUpload();
+                await discardAttachmentRef
+                  .current({ threadId: view.thread.id, attachmentId })
+                  .catch(() => undefined);
                 return;
               }
               await props.controller.upload({
@@ -709,7 +854,12 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                 mediaType: file.type,
                 bytes: new Uint8Array(buffer),
               });
-              if (!mountedRef.current || activeThreadIdRef.current !== String(view.thread.id)) {
+              if (
+                !mountedRef.current ||
+                activeThreadIdRef.current !== String(view.thread.id) ||
+                cancelledUploadsRef.current.has(String(attachmentId))
+              ) {
+                cancelledUploadsRef.current.delete(String(attachmentId));
                 settleUpload();
                 await discardAttachmentRef
                   .current({ threadId: view.thread.id, attachmentId })
@@ -776,83 +926,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           void changeResearch({ enabled: view.thread.researchEnabled, routing })
         }
         onSend={async (draft) => {
-          const claimedAttachments = pendingAttachmentsRef.current;
-          pendingAttachmentsRef.current = [];
-          // A `#thread` chip names a thread; it never carries one. The turn
-          // sends chip ids and the host resolves each one as the turn runs,
-          // re-checking that the sender may still open it, so the message
-          // stays exactly what the user typed and no later turn replays a
-          // thread they pointed at once. This check is the composer's own
-          // report: a chip the host refuses is shown as unavailable rather
-          // than silently dropped.
-          const threadMentionIds = await threadMentions.resolveForSend();
-          let sent = false;
-          try {
-            // Behind the same queue as a model or option change: a turn sent
-            // in the same breath as one of those must run the settings the
-            // person just chose, not the ones the composer last rendered. The
-            // version the earlier command reached travels with the send, since
-            // this closure still holds the view from the render that made it.
-            // The turn moves the version itself, so it carries no base forward.
-            sent = await enqueueThreadCommand(async (previous) => ({
-              value: await props.controller.sendTurn(
-                draft,
-                claimedAttachments.map((attachment) => attachment.id),
-                pendingPreviewSelections,
-                pendingCanvasSelections,
-                pendingExtensionSelections.flatMap((item) =>
-                  item.selection === undefined ? [] : [item.selection],
-                ),
-                threadMentionIds,
-                // Only a send that follows one of this composer's own commands
-                // knows a newer version; every other send leaves the
-                // controller's own rendered version alone.
-                ...(previous !== undefined && previous.threadId === String(thread.id)
-                  ? ([previous.version] as const)
-                  : ([] as const)),
-              ),
-            }));
-          } catch (error) {
-            recoverClaimedAttachments(
-              claimedAttachments,
-              mountedRef.current,
-              view.thread.id,
-              pendingAttachmentsRef,
-              discardAttachmentRef,
-            );
-            throw error;
-          }
-          if (sent) {
-            // Remove exactly what this send claimed, and keep the claim ledger
-            // (the ref) in step with the visible chips: an upload that settled
-            // during the send's await window has already re-entered both, and
-            // clearing state alone would leave the ref holding a sent
-            // attachment plus an invisible new one for the next send to claim.
-            setPendingAttachments((current) => {
-              const claimed = new Set(
-                claimedAttachments.map((attachment) => String(attachment.id)),
-              );
-              const next = current.filter((attachment) => !claimed.has(String(attachment.id)));
-              pendingAttachmentsRef.current = next;
-              return next;
-            });
-            setPendingPreviewSelections([]);
-            if (props.pendingCanvasSelections === undefined) {
-              setLocalCanvasSelections([]);
-            } else {
-              props.onClearCanvasSelections?.();
-            }
-            if (props.pendingExtensionSelections === undefined) extensionDraft.clear();
-            threadMentions.clear();
-          } else {
-            recoverClaimedAttachments(
-              claimedAttachments,
-              mountedRef.current,
-              view.thread.id,
-              pendingAttachmentsRef,
-              discardAttachmentRef,
-            );
-          }
+          if (isSending) return queued.enqueue();
+          const sent = await submitTurn(draft);
+          if (sent) queued.discard();
           return sent;
         }}
         pendingCanvasSelections={pendingCanvasSelections}
@@ -1042,6 +1118,37 @@ function latestActiveAttempt(view: ChatThreadView): ChatAttempt | undefined {
     }
   }
   return undefined;
+}
+
+function latestAttempt(view: ChatThreadView): ChatAttempt | undefined {
+  for (let turnIndex = view.turns.length - 1; turnIndex >= 0; turnIndex -= 1) {
+    const attempts = view.turns[turnIndex]!.attempts;
+    const attempt = attempts[attempts.length - 1];
+    if (attempt !== undefined) return attempt;
+  }
+  return undefined;
+}
+
+function chatTurnSettlement(view: ChatThreadView | undefined): TurnSettlement | "idle" {
+  if (view === undefined) return "idle";
+  const active = latestActiveAttempt(view);
+  if (active !== undefined) return "running";
+  const latest = latestAttempt(view);
+  if (latest === undefined) return "idle";
+  switch (latest.outcome) {
+    case "queued":
+    case "streaming":
+      return "running";
+    case "waiting":
+      return "waiting";
+    case "completed":
+      return "completed";
+    case "cancelled":
+    case "interrupted":
+      return "cancelled";
+    case "failed":
+      return "failed";
+  }
 }
 
 function providerPresentation(

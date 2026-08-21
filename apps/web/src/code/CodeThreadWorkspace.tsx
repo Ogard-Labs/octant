@@ -16,6 +16,8 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import { ArrowUp, Bot, UserRoundCog, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useQueuedSend } from "../composer/useQueuedSend";
+import type { TurnSettlement } from "../composer/queuedSend";
 import {
   applyComposerCaret,
   COMPOSER_STAGED_DROPPED_NOTE,
@@ -24,7 +26,7 @@ import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
-import type { CodeConversationMessage, CodeController } from "./useCodeController";
+import type { CodeConversationMessage, CodeController, CodeTurnStatus } from "./useCodeController";
 import { ChatRichText } from "../chat/ChatRichText";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
 import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
@@ -184,6 +186,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   useEffect(() => {
     setDraft(props.controller.pendingDraft);
   }, [props.controller.pendingDraft, props.threadId]);
+  const sendQueuedRef = useRef<() => Promise<boolean>>(async () => false);
+  // Pasting or dropping a picture uploads it now and keeps only its id. The
+  // turn names ids, so the host sends the provider bytes it accepted itself.
+  const attachments = useCodeAttachments({
+    client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
+    threadId: props.attachmentClient === undefined ? undefined : props.threadId,
+  });
+  const queued = useQueuedSend({
+    threadKey: String(props.threadId),
+    settlement: codeTurnSettlement(props.controller.turnStatus),
+    ready: !attachments.busy,
+    send: () => sendQueuedRef.current(),
+  });
 
   const composerReady = view !== undefined && props.controller.status !== "disconnected";
   useLayoutEffect(() => {
@@ -236,13 +251,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   });
   const pathMentionListId = `code-path-mentions-${String(props.threadId)}`;
   const pathMentionOpen = pathMentions.open && !mention.open;
-
-  // Pasting or dropping a picture uploads it now and keeps only its id. The
-  // turn names ids, so the host sends the provider bytes it accepted itself.
-  const attachments = useCodeAttachments({
-    client: props.attachmentClient ?? UNAVAILABLE_ATTACHMENT_CLIENT,
-    threadId: props.attachmentClient === undefined ? undefined : props.threadId,
-  });
   const peekAbandoned = attachments.peekAbandoned;
   const markDraftStagedDropped = props.controller.markDraftStagedDropped;
   useEffect(() => {
@@ -323,7 +331,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   // A running turn queues rather than blocks: the host admits one turn per
   // thread, so the composer parks the next one instead of making the user wait.
   const canSend = trimmed.length > 0 && !attachments.busy;
-  const queued = props.controller.queuedFollowUps;
   const providerGroups = props.providerGroups ?? [];
   const messages = props.controller.conversation;
   // An unreachable history is not an empty thread. Treating it as one puts the
@@ -354,24 +361,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const threadMentionIds = await threadMentions.resolveForSend();
     const fileMentionPaths = pathMentions.selectedPaths;
     if (busy) {
-      const queuedAttachments = attachments.peekForSend();
-      if (
-        props.controller.queueFollowUp(
-          trimmed,
-          threadMentionIds,
-          queuedAttachments,
-          fileMentionPaths,
-          nextTurnAccess,
-        ) === undefined
-      ) {
-        return;
-      }
-      attachments.takeForSend();
-      setDraft("");
-      props.controller.setPendingDraft?.("");
-      threadMentions.clear();
-      pathMentions.clear();
-      setTurnAccessOverride(undefined);
+      queued.enqueue();
       return;
     }
     // The one-shot override is consumed when the host accepts this start, not
@@ -393,10 +383,34 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       setDraft("");
       threadMentions.clear();
       pathMentions.clear();
+      queued.discard();
     } else {
       setTurnAccessOverride((current) => current ?? override);
     }
   }
+  sendQueuedRef.current = async () => {
+    const threadKey = String(props.threadId);
+    const prompt = draft.trim();
+    if (prompt.length === 0) return false;
+    const attachmentSnapshot = attachments.peekForSend();
+    const fileMentionPaths = pathMentions.selectedPaths;
+    const access = nextTurnAccess;
+    attachments.takeForSend();
+    setDraft("");
+    props.controller.setPendingDraft?.("");
+    const threadMentionIds = await threadMentions.resolveForSend();
+    threadMentions.clear();
+    pathMentions.clear();
+    setTurnAccessOverride(undefined);
+    if (String(props.threadId) !== threadKey) return false;
+    return await props.controller.sendFollowUp(
+      prompt,
+      threadMentionIds,
+      attachmentSnapshot,
+      fileMentionPaths,
+      access,
+    );
+  };
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
     if (props.attachmentClient === undefined || items === null) return false;
@@ -991,24 +1005,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           chips={threadMentions.chips}
           onRemove={(mentionedThreadId) => threadMentions.composer?.onRemoveChip(mentionedThreadId)}
         />
-        {queued.length === 0 ? null : (
-          <ul aria-label="Queued follow-ups" className="code-thread-workspace__queue">
-            {queued.map((turn, index) => (
-              <li className="code-thread-workspace__queue-chip" key={turn.id}>
-                <span className="code-thread-workspace__queue-position">{index + 1}</span>
-                <span className="code-thread-workspace__queue-prompt">{turn.prompt}</span>
-                <OctantButton
-                  aria-label={`Cancel queued follow-up ${String(index + 1)}`}
-                  onClick={() => props.controller.cancelQueuedFollowUp(turn.id)}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                >
-                  <X aria-hidden="true" size={14} strokeWidth={2} />
-                </OctantButton>
-              </li>
-            ))}
-          </ul>
+        {queued.statusMessage === undefined ? null : (
+          <p className="code-thread-workspace__hint" role="status">
+            {queued.statusMessage}
+          </p>
         )}
         {attachments.staged.length === 0 && attachments.message === undefined ? null : (
           <div className="code-thread-workspace__attachments" aria-label="Attached images">
@@ -1161,24 +1161,49 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             </span>
           )}
           <span className="composer-gap" />
-          <OctantButton
-            aria-label={busy ? "Queue follow-up" : "Send follow-up"}
-            disabled={!canSend}
-            onClick={() => void submitFollowUp()}
-            size="icon"
-            type="button"
-            variant="default"
-          >
-            <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
-          </OctantButton>
+          {queued.state.status === "idle" ? null : (
+            <OctantButton
+              aria-label="Discard queued message"
+              onClick={() => {
+                queued.discard();
+                setDraft("");
+                props.controller.setPendingDraft?.("");
+                threadMentions.clear();
+                pathMentions.clear();
+                setTurnAccessOverride(undefined);
+                for (const { reference } of attachments.staged) {
+                  attachments.remove(reference.attachmentId);
+                }
+              }}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <X aria-hidden="true" size={14} strokeWidth={2} />
+            </OctantButton>
+          )}
+          {queued.state.status === "queued" ? null : (
+            <OctantButton
+              aria-label={busy ? "Queue follow-up" : "Send follow-up"}
+              disabled={!canSend}
+              onClick={() => void submitFollowUp()}
+              size="icon"
+              type="button"
+              variant="default"
+            >
+              <ArrowUp aria-hidden="true" size={16} strokeWidth={2} />
+            </OctantButton>
+          )}
         </div>
         <div className="code-thread-workspace__status">
           <span className="code-thread-workspace__hint">
             {providerChanging
               ? "Checking the selected provider…"
-              : busy
-                ? "Waiting for the provider · Enter queues the next message"
-                : "Enter to send · Shift+Enter for a new line"}
+              : queued.state.status !== "idle"
+                ? "Enter to edit · Discard to drop the queued message"
+                : busy
+                  ? "Waiting for the provider · Enter queues the next message"
+                  : "Enter to send · Shift+Enter for a new line"}
           </span>
           {accessMessage === undefined ? null : (
             <span className="code-thread-workspace__hint" role="status">
@@ -1292,6 +1317,12 @@ function compactTokens(tokens: number): string {
 
 function formatUsd(cost: number): string {
   return cost < 0.01 && cost > 0 ? "<$0.01" : `$${cost.toFixed(2)}`;
+}
+
+function codeTurnSettlement(status: CodeTurnStatus): TurnSettlement | "idle" {
+  if (status === "sending" || status === "running") return "running";
+  if (status === "failed") return "failed";
+  return "completed";
 }
 
 function providerIdentityChanged(
