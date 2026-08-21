@@ -71,7 +71,7 @@ import {
   type CodeDeliveryOutcomeKind,
 } from "@octant/contracts/code";
 import type { CodeComposerSubmitInput } from "./code/composer/CodeComposerAdapter";
-import { decodeContextSubjectRef } from "@octant/contracts/context";
+import { decodeContextSubjectRef, type ContextHealth } from "@octant/contracts/context";
 import {
   decodeWorkAttachmentId,
   decodeWorkAttachmentMediaType,
@@ -1345,6 +1345,17 @@ function LaunchedShell(
       });
     }
   }, [codeController.bootstrap, controller, pendingCodeDeepLink, projectController.allProjects]);
+  // What the sidebar marks. The window plans context for the active Project
+  // only, so this covers the Projects it has actually visited; a Project it has
+  // not is absent rather than reported healthy. Full coverage would need the
+  // host to report health with the Project list itself.
+  const contextHealthByProject = useMemo(() => {
+    const next = new Map<ProjectId, ContextHealth>();
+    for (const [projectId, snapshot] of contextSnapshotsByProject) {
+      next.set(projectId, snapshot.next.plan.health);
+    }
+    return next;
+  }, [contextSnapshotsByProject]);
   useEffect(() => {
     const snapshot = contextController.snapshot;
     if (snapshot === undefined || snapshot.subject.aggregateType !== "project") return;
@@ -1794,6 +1805,23 @@ function LaunchedShell(
   }
   function openMemoryInspector(projectId: ProjectId | undefined, opener: HTMLElement) {
     openDockSurface("project-memory", opener, projectId);
+  }
+  /**
+   * Takes the reader to the degraded Project's context, not to a panel
+   * describing someone else's. The dock follows the active pane, so a Project
+   * that is not the pane's subject has to be opened before its context can
+   * honestly be shown.
+   */
+  async function openProjectContextHealth(projectId: ProjectId, opener: HTMLElement) {
+    if (String(activeProjectId) !== String(projectId)) {
+      const project = projectController.allProjects.find((candidate) => candidate.id === projectId);
+      // openSelectedProject refuses anything but an active Project, and a dock
+      // panel about a Project the panes did not move to is the stale-subject
+      // reading this whole path exists to avoid.
+      if (project === undefined || project.lifecycle !== "active") return;
+      await openSelectedProject(project);
+    }
+    openDockSurface("context", opener, projectId);
   }
   function closeDock() {
     pendingDockFocus.current = dockOpener.current;
@@ -3399,6 +3427,10 @@ function LaunchedShell(
                     : {})}
                   archivedProjects={projectController.archivedProjects}
                   availabilityByProject={projectController.availabilityByProject}
+                  contextHealthByProject={contextHealthByProject}
+                  onOpenContextHealth={(projectId, opener) =>
+                    void openProjectContextHealth(projectId, opener)
+                  }
                   {...(activeMode === "chat"
                     ? (chatController.navigation?.length ?? 0) > 0
                       ? {
