@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { splitCallbacks, splitLayout } from "../App.test-fixtures";
-import { SplitWorkspace, type SplitWorkspaceProps } from "./SplitWorkspace";
+import { SplitWorkspace } from "./SplitWorkspace";
 import { useWorkspaceSurfaceDrag, type WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
 import type {
   WorkspaceSurfaceDragSource,
@@ -86,6 +86,20 @@ describe("SplitWorkspace", () => {
       .getByRole("region", { name: "Workspace pane: Second" })
       .querySelector(".workspace-pane__panel")!;
     fireEvent.pointerDown(secondPanel);
+    expect(handlers.onActivatePane).toHaveBeenCalledWith(secondPaneId);
+  });
+
+  it("activates whichever pane receives keyboard input", () => {
+    const handlers = splitCallbacks();
+    render(
+      <SplitWorkspace
+        {...handlers}
+        layout={splitLayout()}
+        renderSurface={(surface) => <button type="button">Write in {surface.title}</button>}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Write in Second" }), { key: "a" });
     expect(handlers.onActivatePane).toHaveBeenCalledWith(secondPaneId);
   });
 

@@ -51,47 +51,93 @@ describe("resolving what the right utility dock shows", () => {
         scope: "host",
       },
       {
+        id: "side-chat",
+        label: "Side Chat",
+        modes: ["chat", "work", "code"],
+        scope: "thread",
+      },
+      {
+        id: "browser",
+        label: "Browser",
+        modes: ["work", "code"],
+        scope: "thread",
+      },
+      {
+        id: "files",
+        label: "Files",
+        modes: ["work", "code"],
+        scope: "thread",
+      },
+      {
+        id: "changes",
+        label: "Changes",
+        modes: ["code"],
+        scope: "thread",
+      },
+      {
+        id: "terminal",
+        label: "Terminal",
+        modes: ["code"],
+        scope: "thread",
+      },
+      {
+        id: "tests",
+        label: "Tests",
+        modes: ["code"],
+        scope: "thread",
+      },
+      {
+        id: "ios-simulator",
+        label: "iOS Simulator",
+        modes: ["code"],
+        scope: "thread",
+      },
+      {
         id: "thread",
-        label: "Thread",
+        label: "Thread tools",
         modes: ["code"],
         scope: "thread",
       },
     ]);
   });
 
-  it("opens the Thread panel for the thread the active pane holds", () => {
+  it("opens a utility for the thread the active pane holds", () => {
     expect(
       resolveRightUtilityDockSurface({
         activeMode: "code",
         activeThreadId: "30000000-0000-4000-8000-000000000003",
         connectionState: "connected",
         presentationAvailability: "available",
-        savedSurface: "thread",
+        savedSurface: "browser",
       }),
-    ).toEqual({ kind: "surface", surface: RIGHT_UTILITY_DOCK_SURFACES[3] });
+    ).toEqual({ kind: "surface", surface: RIGHT_UTILITY_DOCK_SURFACES[4] });
   });
 
-  it("keeps the Thread panel selected but empty-handed when the active pane holds no thread", () => {
+  it("keeps a thread utility selected but empty-handed when the active pane holds no thread", () => {
     expect(
       resolveRightUtilityDockSurface({
         activeMode: "code",
         activeProject: projects.code,
         connectionState: "connected",
         presentationAvailability: "available",
-        savedSurface: "thread",
+        savedSurface: "terminal",
         surfaceProjectId: projectIds.current,
       }),
-    ).toMatchObject({ kind: "unavailable", reason: "thread-required", surface: { id: "thread" } });
+    ).toMatchObject({
+      kind: "unavailable",
+      reason: "thread-required",
+      surface: { id: "terminal" },
+    });
   });
 
-  it("does not offer the Thread panel outside Code", () => {
+  it("does not offer a mode-incompatible utility", () => {
     expect(
       resolveRightUtilityDockSurface({
         activeMode: "chat",
         activeThreadId: "30000000-0000-4000-8000-000000000003",
         connectionState: "connected",
         presentationAvailability: "available",
-        savedSurface: "thread",
+        savedSurface: "browser",
       }),
     ).toEqual({ kind: "closed", reason: "mode-invalid" });
   });
@@ -207,8 +253,6 @@ describe("resolving what the right utility dock shows", () => {
     [null, "no-surface"],
     [undefined, "no-surface"],
     ["", "unknown-surface"],
-    ["browser", "unknown-surface"],
-    ["terminal", "unknown-surface"],
     [{ id: "project-memory" }, "unknown-surface"],
     [1, "unknown-surface"],
   ] as const)("fails closed for malformed persisted surface %j", (savedSurface, reason) => {

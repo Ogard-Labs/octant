@@ -42,8 +42,8 @@
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr);
-  overflow: hidden;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: visible;
   background: var(--oct-bg);
 }
 
@@ -77,26 +77,119 @@
   flex: 1 1 auto;
   min-width: 0;
   gap: 2px;
+}
+
+.right-utility-dock__tab-scroll {
+  display: flex;
+  flex: 0 1 auto;
+  max-width: calc(100% - 30px);
+  min-width: 0;
+  gap: 2px;
   overflow-x: auto;
   scrollbar-width: thin;
 }
 
-/* Ghost recipe buttons at the chrome's 26px metric: the .btn base height
-   would overflow the .dock-head rail. */
-.right-utility-dock__tabs button {
-  min-height: 26px;
-  padding: 0 8px;
+.right-utility-dock__tab {
+  display: inline-flex;
+  flex: none;
+  min-width: 0;
+  align-items: center;
+  overflow: hidden;
   color: var(--oct-meta);
-  border-radius: 6px;
+  border-radius: var(--oct-radius-sm);
+}
+
+.right-utility-dock__tab:has(.right-utility-dock__tab-select[aria-selected="true"]),
+.right-utility-dock__tab:hover {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
+.right-utility-dock__tab-select {
+  min-width: 0;
+  min-height: 26px;
+  padding: 0 4px 0 8px;
+  overflow: hidden;
+  color: inherit;
+  background: transparent;
+  border: 0;
   cursor: pointer;
   font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.right-utility-dock__tabs button:hover,
-.right-utility-dock__tabs button[aria-pressed="true"] {
+.right-utility-dock__tab-close {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  opacity: 0.55;
+}
+
+.right-utility-dock__tab:hover .right-utility-dock__tab-close,
+.right-utility-dock__tab:focus-within .right-utility-dock__tab-close {
+  opacity: 1;
+}
+
+.dock-utility-launcher {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.dock-utility-launcher__disclosure {
+  top: calc(100% + 4px);
+  right: auto;
+  left: 0;
+  min-width: 176px;
+}
+
+.right-utility-dock__summary {
+  min-width: 0;
+  padding: var(--oct-space-2) var(--oct-space-3) 0;
+}
+
+.right-utility-dock-summary {
+  display: grid;
+  overflow: hidden;
+  background: var(--oct-surface);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.right-utility-dock-summary__item {
+  display: grid;
+  min-width: 0;
+  min-height: 32px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--oct-space-3);
+  align-items: center;
+  padding: 0 var(--oct-space-3);
   color: var(--oct-fg);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--octant-border);
+  cursor: pointer;
+  font-size: var(--oct-text-xs);
+}
+
+.right-utility-dock-summary__item:last-child {
+  border-bottom: 0;
+}
+
+.right-utility-dock-summary__item:hover,
+.right-utility-dock-summary__item:focus-visible {
   background: var(--oct-fg-soft);
+}
+
+.right-utility-dock-summary__item > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Scroll and padding come from .dock-body. */
@@ -107,6 +200,17 @@
 }
 
 .right-utility-dock__content:has(.project-memory-inspector) {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* Thread utilities are complete work surfaces rather than cards inside the
+   dock body. They own their scrolling and need the full measured rectangle —
+   especially Browser, whose native view is positioned from this geometry. */
+.right-utility-dock__content:has(.browser-workspace),
+.right-utility-dock__content:has(.side-chat),
+.right-utility-dock__content:has(.code-file-explorer-panel),
+.right-utility-dock__content:has([data-code-tab-kind]) {
   padding: 0;
   overflow: hidden;
 }
