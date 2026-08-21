@@ -165,12 +165,14 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           displayName: selectedProject?.name ?? selectedProjectLabel ?? "Selected Project",
         };
   const projectEntries: ReadonlyArray<ComposerProjectEntry> = [
-    ...compatibleProjects.map((project): ComposerProjectEntry => ({
-      kind: "saved-project",
-      projectId: project.id,
-      displayName: project.name,
-      rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
-    })),
+    ...compatibleProjects.map(
+      (project): ComposerProjectEntry => ({
+        kind: "saved-project",
+        projectId: project.id,
+        displayName: project.name,
+        rootPath: project.type === "chat" ? "" : project.binding.canonicalRoot,
+      }),
+    ),
     { kind: "add-folder" },
   ];
   const folderControl =
