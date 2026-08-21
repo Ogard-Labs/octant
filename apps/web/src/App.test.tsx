@@ -1172,12 +1172,14 @@ describe("App", () => {
         expect.any(AbortSignal),
       ),
     );
-    expect(
-      screen.getByRole("button", { name: /Open context inspector for Octant/i }),
-    ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    const contextWindow = screen.getByRole("button", {
+      name: /Show context window for Octant/i,
+    });
+    expect(contextWindow).toBeVisible();
+    await user.click(contextWindow);
+    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Open full context inspector" }));
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await user.click(within(dock).getByRole("button", { name: /^Context/ }));
     expect(within(dock).getByRole("heading", { name: "Context inspector" })).toBeVisible();
     expect(within(dock).getByText("Safe input budget")).toBeVisible();
     expect(within(dock).getByText("Provider capacity")).toBeVisible();
