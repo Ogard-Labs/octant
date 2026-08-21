@@ -153,7 +153,10 @@ function ThreadEnvironmentFloating(props: {
           sectioning content, so a <header> here would publish a second banner
           landmark alongside the window chrome. */}
       <div className="thread-environment-panel__header">
-        <CompactIdentity identity={props.identity} />
+        <div className="thread-environment-panel__heading">
+          <span className="thread-environment-panel__title">Environment</span>
+          <CompactIdentity identity={props.identity} />
+        </div>
         <OctantButton
           type="button"
           className="thread-environment-panel__icon-button"

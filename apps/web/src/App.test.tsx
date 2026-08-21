@@ -2425,7 +2425,11 @@ describe("App", () => {
       codeBootstrap.resolve(readyCodeBootstrap);
       codeThread.resolve(readyCodeThread);
     });
-    expect(await screen.findByRole("button", { name: /Pull requests/i })).toBeVisible();
+    expect(
+      await within(screen.getByRole("complementary")).findByRole("button", {
+        name: "Pull requests",
+      }),
+    ).toBeVisible();
     expect(await screen.findByRole("button", { name: "New thread" })).toBeVisible();
     expect(
       await screen.findByPlaceholderText("Ask for follow-up changes…", {}, { timeout: 5_000 }),

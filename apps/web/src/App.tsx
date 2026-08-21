@@ -259,6 +259,7 @@ import { ZenResearchDock } from "./zen/ZenResearchDock";
 import { ZenTerminalCard } from "./zen/ZenTerminalCard";
 import { useZenController } from "./zen/useZenController";
 import { resolveZenLiveThreadCard, type ZenLiveThreadClients } from "./zen/ZenLiveThreadCards";
+import { resolveZenTerminalPinTarget } from "./zen/zenThreadActions";
 import { useAppleProjects } from "./apple/useAppleProjects";
 import { useThemeController } from "./theme/useThemeController";
 import { AgentProfileNamesProvider } from "./agentProfile/AgentProfileNames";
@@ -1481,7 +1482,13 @@ function LaunchedShell(
     () => ({
       chatClient,
       chatReadCursorStore,
+      codeClient,
+      codeReadCursorStore,
       providerController,
+      serverUrl: props.launch.serverUrl,
+      ...(props.projectWindowCapability === undefined
+        ? {}
+        : { windowCapability: props.projectWindowCapability }),
       workMutationClient,
       workRequestClient,
       workThreadClient,
@@ -1490,7 +1497,11 @@ function LaunchedShell(
     [
       chatClient,
       chatReadCursorStore,
+      codeClient,
+      codeReadCursorStore,
       providerController,
+      props.launch.serverUrl,
+      props.projectWindowCapability,
       workMutationClient,
       workRequestClient,
       workThreadClient,
@@ -3094,29 +3105,46 @@ function LaunchedShell(
     }
   }
 
-  async function continueZenThread(catalogRef: import("@octant/contracts").ZenThreadCatalogRef) {
-    const target = await zen.continueThread(catalogRef);
-    if (target === undefined) return;
-    const { entry } = target;
-    zen.exitZen();
-    if (entry.projectId !== null) {
-      await controller.openProject(entry.projectId, entry.mode, entry.projectLabel);
-    }
-    if (entry.mode === "chat") {
-      await controller.openChatThread(decodeChatThreadId(entry.threadId), entry.title);
-    } else if (entry.mode === "work") {
-      await controller.openWorkThread(decodeWorkThreadId(entry.threadId), entry.title);
-    } else {
-      await controller.openCodeThread(decodeCodeThreadId(entry.threadId), entry.title);
-    }
-  }
-
   function openCommandProject(target: CommandProject): void {
     const project = projectController.allProjects.find(
       (candidate) => String(candidate.id) === target.projectId,
     );
     if (project === undefined) return;
     void openSelectedProject(project);
+  }
+
+  /** Pin the Code thread's existing default terminal without starting one. */
+  async function addZenTerminal(
+    sourceContext: import("@octant/contracts/zen").ZenSourceContext,
+  ): Promise<void> {
+    const target = resolveZenTerminalPinTarget(
+      sourceContext,
+      codeController.bootstrap?.threads ?? [],
+    );
+    if (target === undefined) return;
+    await zen.pinTerminal(target);
+  }
+
+  function canAddZenTerminal(
+    sourceContext: import("@octant/contracts/zen").ZenSourceContext,
+  ): boolean {
+    return (
+      resolveZenTerminalPinTarget(sourceContext, codeController.bootstrap?.threads ?? []) !==
+      undefined
+    );
+  }
+
+  function addZenBrowser(sourceContext: import("@octant/contracts/zen").ZenSourceContext): void {
+    if (sourceContext.threadKind === "chat") return;
+    void zen.dockResearch({
+      thread: {
+        mode: sourceContext.threadKind,
+        threadId:
+          sourceContext.threadKind === "code"
+            ? decodeCodeThreadId(String(sourceContext.threadId))
+            : decodeWorkThreadId(String(sourceContext.threadId)),
+      },
+    });
   }
 
   /**
@@ -3365,10 +3393,14 @@ function LaunchedShell(
             threadPickerOpen={zen.threadPickerOpen}
             threadQuery={zen.threadQuery}
             onAddTimer={(durationMs) => void zen.addTimer(durationMs)}
+            onAddBrowser={addZenBrowser}
+            onAddTerminal={(sourceContext) => {
+              void addZenTerminal(sourceContext);
+            }}
+            canAddTerminal={canAddZenTerminal}
             onPinThread={(catalogRef) => void zen.pinThread(catalogRef)}
             onCloseAssistant={() => zen.setAssistantOpen(false)}
             onCloseThreadPicker={() => zen.setThreadPickerOpen(false)}
-            onContinueThread={(catalogRef) => void continueZenThread(catalogRef)}
             renderLiveThread={(input) =>
               resolveZenLiveThreadCard({ ...input, clients: zenLiveThreadClients })
             }
@@ -4111,7 +4143,6 @@ function LaunchedShell(
                 dockThread?.mode !== "code" ? null : (
                   <ThreadDockPanel
                     agentRunClient={agentRunClient}
-                    agentRunSettingsClient={agentRunSettingsClient}
                     planClient={planClient}
                     shipClient={shipClient}
                     threadId={decodeCodeThreadId(dockThread.threadId)}

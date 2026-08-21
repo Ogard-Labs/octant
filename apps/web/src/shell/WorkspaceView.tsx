@@ -534,6 +534,13 @@ function renderCodeTab(
   const project = resolveCodeTabProject(tab, props);
   const browserAutomationClient = props.browserAutomationClient;
   const onOpenSurface = props.onOpenSurface;
+  const pullRequestRepository =
+    codeController.activeView !== undefined &&
+    String(codeController.activeView.thread.id) === String(tab.threadId)
+      ? codeController.activeView.thread.deliveryTarget.proposedBaseRepository
+      : codeController.bootstrap?.threads.find(
+          (thread) => String(thread.id) === String(tab.threadId),
+        )?.deliveryTarget.proposedBaseRepository;
   const content = (
     <Suspense
       fallback={
@@ -646,6 +653,8 @@ function renderCodeTab(
           {...(props.localServerClient === undefined
             ? {}
             : { localServerClient: props.localServerClient })}
+          {...(props.githubClient === undefined ? {} : { githubClient: props.githubClient })}
+          {...(pullRequestRepository === undefined ? {} : { pullRequestRepository })}
           {...(browserAutomationClient === undefined || onOpenSurface === undefined
             ? {}
             : {

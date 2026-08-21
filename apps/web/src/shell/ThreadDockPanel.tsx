@@ -1,5 +1,4 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { PlanClient } from "@octant/client-runtime/plan-client";
 import type { ShipClient } from "@octant/client-runtime/ship-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
@@ -15,13 +14,14 @@ export interface ThreadDockPanelProps {
   readonly planClient?: PlanClient;
   readonly shipClient?: ShipClient;
   readonly agentRunClient?: AgentRunClient;
-  readonly agentRunSettingsClient?: AgentRunSettingsClient;
 }
 
 /**
  * The dock's secondary Code-thread tools. Plan, Publish, and Agents remain
  * grouped here because they were never workspace-launcher entries and must
- * keep their existing production route.
+ * keep their existing production route. Code child creation stays absent until
+ * this surface can supply the verified isolated worktree the host requires; a
+ * Chat-scoped fallback would misrepresent the parent and its authority.
  */
 export function ThreadDockPanel(props: ThreadDockPanelProps) {
   return (
@@ -42,12 +42,8 @@ export function ThreadDockPanel(props: ThreadDockPanelProps) {
       {props.agentRunClient === undefined ? null : (
         <EnvironmentGroup title="Agents">
           <AgentRunHierarchy
-            allowCreation
             client={props.agentRunClient}
             parentThreadId={decodeAgentRunParentThreadId(String(props.threadId))}
-            {...(props.agentRunSettingsClient === undefined
-              ? {}
-              : { settingsClient: props.agentRunSettingsClient })}
           />
         </EnvironmentGroup>
       )}
