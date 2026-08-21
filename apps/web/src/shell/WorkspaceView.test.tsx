@@ -188,10 +188,13 @@ describe("WorkspaceView Code tab registration", () => {
   });
 });
 
-/** Closes a pane the way a person does: through its own actions disclosure. */
+/** Closes a pane the way a person does: right-click over its own header. */
 async function closePaneShowing(title: string): Promise<void> {
-  fireEvent.click(await screen.findByRole("button", { name: `Pane actions for ${title}` }));
-  fireEvent.click(screen.getByRole("button", { name: "Close pane" }));
+  const header = (
+    await screen.findByRole("region", { name: `Workspace pane: ${title}` })
+  ).querySelector<HTMLElement>(".workspace-pane__header")!;
+  await userEvent.pointer({ target: header, keys: "[MouseRight]" });
+  await userEvent.click(await screen.findByRole("menuitem", { name: "Close pane" }));
 }
 
 async function expandLocalServers(): Promise<void> {

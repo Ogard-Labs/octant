@@ -1606,41 +1606,6 @@ button:focus-visible {
   background: var(--octant-control-hover);
 }
 
-.workspace-pane-actions {
-  position: relative;
-  display: grid;
-  /* Held to the trailing edge so the run between the title and the actions
-     stays empty header — the part of the band the window is dragged by. */
-  flex: 0 0 34px;
-  margin-left: auto;
-  place-items: center;
-}
-
-.workspace-pane-actions__trigger {
-  width: 26px;
-  height: 26px;
-  color: var(--octant-text-muted);
-  background: transparent;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.workspace-pane-actions__trigger:hover,
-.workspace-pane-actions__trigger[aria-expanded="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.workspace-pane-actions__trigger:active {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-pressed);
-}
-
-.workspace-pane-actions__disclosure {
-  top: calc(100% + 4px);
-  right: 4px;
-}
-
 .workspace-pane__panel {
   display: grid;
   min-width: 0;

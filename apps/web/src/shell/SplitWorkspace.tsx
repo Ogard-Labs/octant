@@ -8,28 +8,13 @@ import type {
   WorkspaceSurfaceDescriptor,
   WorkspaceTab,
 } from "@octant/contracts/shell";
-import {
-  GripVertical,
-  Maximize2,
-  MoreHorizontal,
-  PanelsTopLeft,
-  SplitSquareHorizontal,
-  SplitSquareVertical,
-  X,
-} from "lucide-react";
-import {
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-  type ReactNode,
-  type Ref,
-} from "react";
+import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
+import { GripVertical } from "lucide-react";
+import { useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import type { CodeOverviewSurfaceKind } from "../code/CodeOverview";
 import { LAUNCHABLE_CODE_SURFACES, codeSurfaceTitle } from "../code/codeSurfaces";
 import { OctantSlider } from "../ui/base/OctantSlider";
-import { IconButton } from "./IconButton";
+import { MENU_ITEM_CLASS } from "../projects/ThreadRowMenu";
 import { WorkspaceTabLauncher } from "./WorkspaceTabLauncher";
 import { WorkspaceDragStatus, WorkspaceDropOverlay } from "./WorkspaceDropOverlay";
 import type { WorkspaceSurfaceDragHandle } from "./useWorkspaceTabDrag";
@@ -291,46 +276,51 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
       onPointerDownCapture={() => props.onActivatePane(pane.paneId)}
     >
       {/* The header spans the window's title band, so the space the grip and
-          actions do not claim has to stay a native drag region: with the grip
-          stretched across it the window could not be moved at all. */}
-      <div className="workspace-pane__header window-drag-region">
-        <span
-          className="workspace-pane__grip window-no-drag"
-          onPointerCancel={props.drag.onPointerCancel}
-          onPointerDown={(event) =>
-            props.drag.onPointerDown(event, {
-              dragKey,
-              paneId: pane.paneId,
-              surface,
-              title: surface.title,
-            })
-          }
-          onPointerMove={props.drag.onPointerMove}
-          onPointerUp={props.drag.onPointerUp}
-          title="Drag to move or split"
+          the launcher do not claim has to stay a native drag region: with the
+          grip stretched across it the window could not be moved at all. */}
+      <ContextMenuPrimitive.Root>
+        <ContextMenuPrimitive.Trigger
+          className="workspace-pane__header window-drag-region"
+          render={<div />}
         >
-          <GripVertical aria-hidden="true" size={13} strokeWidth={1.8} />
-          <span className="workspace-pane__title">{surface.title}</span>
-        </span>
-        {props.availableSurfaces === undefined || props.onOpenSurface === undefined ? null : (
-          <WorkspaceTabLauncher
-            catalog={props.availableSurfaces}
-            mode={props.mode}
-            onOpenSurface={(kind) => props.onOpenSurface?.(kind, pane.paneId)}
-            {...(openCodeSurface === undefined || codeThreadId === undefined
-              ? {}
-              : {
-                  onOpenThreadSurface: (kind: CodeOverviewSurfaceKind) =>
-                    openCodeSurface(kind, codeThreadId, codeSurfaceTitle(kind)),
-                  threadSurfaces: LAUNCHABLE_CODE_SURFACES.map((kind) => ({
-                    kind,
-                    label: codeSurfaceTitle(kind),
-                  })),
-                })}
-            owningThreadAvailable={hasBrowserOwningThread(surface)}
-          />
-        )}
-        <PaneActions
+          <span
+            className="workspace-pane__grip window-no-drag"
+            onPointerCancel={props.drag.onPointerCancel}
+            onPointerDown={(event) =>
+              props.drag.onPointerDown(event, {
+                dragKey,
+                paneId: pane.paneId,
+                surface,
+                title: surface.title,
+              })
+            }
+            onPointerMove={props.drag.onPointerMove}
+            onPointerUp={props.drag.onPointerUp}
+            title="Drag to move or split"
+          >
+            <GripVertical aria-hidden="true" size={13} strokeWidth={1.8} />
+            <span className="workspace-pane__title">{surface.title}</span>
+          </span>
+          {props.availableSurfaces === undefined || props.onOpenSurface === undefined ? null : (
+            <WorkspaceTabLauncher
+              catalog={props.availableSurfaces}
+              mode={props.mode}
+              onOpenSurface={(kind) => props.onOpenSurface?.(kind, pane.paneId)}
+              {...(openCodeSurface === undefined || codeThreadId === undefined
+                ? {}
+                : {
+                    onOpenThreadSurface: (kind: CodeOverviewSurfaceKind) =>
+                      openCodeSurface(kind, codeThreadId, codeSurfaceTitle(kind)),
+                    threadSurfaces: LAUNCHABLE_CODE_SURFACES.map((kind) => ({
+                      kind,
+                      label: codeSurfaceTitle(kind),
+                    })),
+                  })}
+              owningThreadAvailable={hasBrowserOwningThread(surface)}
+            />
+          )}
+        </ContextMenuPrimitive.Trigger>
+        <PaneMenu
           canSplit={canSplit}
           focused={focused}
           onClearFocus={props.onClearFocus}
@@ -339,7 +329,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
           onSplit={(orientation) => props.onSplitPane(pane.paneId, orientation, "after")}
           surface={surface}
         />
-      </div>
+      </ContextMenuPrimitive.Root>
       <div className="workspace-pane__panel">{props.renderSurface(surface, pane.paneId)}</div>
       {props.drag.active === null ? null : (
         <WorkspaceDropOverlay
@@ -361,7 +351,16 @@ function hasBrowserOwningThread(surface: WorkspaceTab): boolean {
   );
 }
 
-function PaneActions(props: {
+/**
+ * The pane's own actions, on right-click over its header.
+ *
+ * They used to sit behind a "…" button parked in every pane's title band. The
+ * band is scarce — it is also the window's drag handle — and the button was
+ * present on every pane at all times for actions taken rarely. Right-click is
+ * where this window already puts a row's own actions, and it keeps focus,
+ * split, and close reachable without a keyboard user losing them.
+ */
+function PaneMenu(props: {
   readonly canSplit: boolean;
   readonly focused: boolean;
   readonly onClearFocus: () => void;
@@ -370,91 +369,58 @@ function PaneActions(props: {
   readonly onSplit: (orientation: "horizontal" | "vertical") => void;
   readonly surface: WorkspaceTab;
 }) {
-  const [open, setOpen] = useState(false);
-  const disclosureId = useId();
-  const trigger = useRef<HTMLButtonElement>(null);
-  const firstAction = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    if (open) firstAction.current?.focus();
-  }, [open]);
-
-  function close(): void {
-    setOpen(false);
-    queueMicrotask(() => trigger.current?.focus());
-  }
-
-  function select(action: () => void): void {
-    action();
-    close();
-  }
-
+  const focusLabel = props.focused ? "Show all panes" : "Focus this pane";
   return (
-    <div className="workspace-pane-actions window-no-drag">
-      <IconButton
-        aria-controls={disclosureId}
-        aria-expanded={open}
-        className="workspace-pane-actions__trigger"
-        icon={MoreHorizontal}
-        label={`Pane actions for ${props.surface.title}`}
-        onClick={() => setOpen((current) => !current)}
-        ref={trigger}
-      />
-      {open ? (
-        <div
-          className="workspace-disclosure workspace-pane-actions__disclosure"
-          id={disclosureId}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            event.stopPropagation();
-            close();
-          }}
-        >
-          <PaneAction
-            buttonRef={firstAction}
-            icon={props.focused ? PanelsTopLeft : Maximize2}
-            label={props.focused ? "Show all panes" : "Focus this pane"}
-            onClick={() => select(props.focused ? props.onClearFocus : props.onFocus)}
-          />
+    <ContextMenuPrimitive.Portal>
+      <ContextMenuPrimitive.Positioner className="z-50 window-no-drag">
+        <ContextMenuPrimitive.Popup className="window-no-drag z-50 min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none">
+          <ContextMenuPrimitive.Group>
+            <ContextMenuPrimitive.GroupLabel className="truncate px-2 py-1.5 text-xs text-muted-foreground">
+              {props.surface.title}
+            </ContextMenuPrimitive.GroupLabel>
+          </ContextMenuPrimitive.Group>
+          <ContextMenuPrimitive.Item
+            className={MENU_ITEM_CLASS}
+            closeOnClick
+            label={focusLabel}
+            onClick={() => (props.focused ? props.onClearFocus() : props.onFocus())}
+          >
+            {focusLabel}
+          </ContextMenuPrimitive.Item>
+          {/* A focused pane is presented alone, so a split made now would land
+              where nobody can see it. The same rule the edge-drop follows. */}
           {props.canSplit && !props.focused ? (
             <>
-              <PaneAction
-                icon={SplitSquareHorizontal}
+              <ContextMenuPrimitive.Item
+                className={MENU_ITEM_CLASS}
+                closeOnClick
                 label="Split right"
-                onClick={() => select(() => props.onSplit("horizontal"))}
-              />
-              <PaneAction
-                icon={SplitSquareVertical}
+                onClick={() => props.onSplit("horizontal")}
+              >
+                Split right
+              </ContextMenuPrimitive.Item>
+              <ContextMenuPrimitive.Item
+                className={MENU_ITEM_CLASS}
+                closeOnClick
                 label="Split down"
-                onClick={() => select(() => props.onSplit("vertical"))}
-              />
+                onClick={() => props.onSplit("vertical")}
+              >
+                Split down
+              </ContextMenuPrimitive.Item>
             </>
           ) : null}
-          <PaneAction icon={X} label="Close pane" onClick={() => select(props.onClose)} />
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PaneAction(props: {
-  readonly buttonRef?: Ref<HTMLButtonElement>;
-  readonly icon: typeof Maximize2;
-  readonly label: string;
-  readonly onClick: () => void;
-}) {
-  const Icon = props.icon;
-  return (
-    <button
-      className="workspace-disclosure__action window-no-drag"
-      onClick={props.onClick}
-      ref={props.buttonRef}
-      type="button"
-    >
-      <Icon aria-hidden="true" size={14} strokeWidth={1.8} />
-      <span>{props.label}</span>
-    </button>
+          <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
+          <ContextMenuPrimitive.Item
+            className={MENU_ITEM_CLASS}
+            closeOnClick
+            label="Close pane"
+            onClick={props.onClose}
+          >
+            Close pane
+          </ContextMenuPrimitive.Item>
+        </ContextMenuPrimitive.Popup>
+      </ContextMenuPrimitive.Positioner>
+    </ContextMenuPrimitive.Portal>
   );
 }
 

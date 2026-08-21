@@ -35,19 +35,16 @@ describe("SplitWorkspace", () => {
       "data-focused",
       "false",
     );
-    expect(screen.queryByRole("button", { name: "Show all panes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Show all panes" })).not.toBeInTheDocument();
 
-    const paneActions = screen.getByRole("button", { name: "Pane actions for First" });
-    await user.click(paneActions);
-    expect(screen.getByRole("button", { name: "Show all panes" })).toHaveFocus();
+    await openPaneMenu(user, "First");
     // A focused pane is presented alone, so splitting it now would land hidden.
-    expect(screen.queryByRole("button", { name: "Split right" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Show all panes" }));
+    expect(screen.queryByRole("menuitem", { name: "Split right" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("menuitem", { name: "Show all panes" }));
     expect(handlers.onClearFocus).toHaveBeenCalledOnce();
-    expect(paneActions).toHaveFocus();
   });
 
-  it("offers split and close from a pane's own actions", async () => {
+  it("offers focus, split, and close from a right-click over the pane's header", async () => {
     const user = userEvent.setup();
     const handlers = splitCallbacks();
     render(
@@ -58,20 +55,20 @@ describe("SplitWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Pane actions for Second" }));
-    await user.click(screen.getByRole("button", { name: "Focus this pane" }));
+    await openPaneMenu(user, "Second");
+    await user.click(await screen.findByRole("menuitem", { name: "Focus this pane" }));
     expect(handlers.onFocus).toHaveBeenCalledWith(secondPaneId);
 
-    await user.click(screen.getByRole("button", { name: "Pane actions for Second" }));
-    await user.click(screen.getByRole("button", { name: "Split down" }));
+    await openPaneMenu(user, "Second");
+    await user.click(await screen.findByRole("menuitem", { name: "Split down" }));
     expect(handlers.onSplitPane).toHaveBeenCalledWith(secondPaneId, "vertical", "after");
 
-    await user.click(screen.getByRole("button", { name: "Pane actions for Second" }));
-    await user.click(screen.getByRole("button", { name: "Split right" }));
+    await openPaneMenu(user, "Second");
+    await user.click(await screen.findByRole("menuitem", { name: "Split right" }));
     expect(handlers.onSplitPane).toHaveBeenCalledWith(secondPaneId, "horizontal", "after");
 
-    await user.click(screen.getByRole("button", { name: "Pane actions for Second" }));
-    await user.click(screen.getByRole("button", { name: "Close pane" }));
+    await openPaneMenu(user, "Second");
+    await user.click(await screen.findByRole("menuitem", { name: "Close pane" }));
     expect(handlers.onClosePane).toHaveBeenCalledWith(secondPaneId);
   });
 
@@ -333,4 +330,15 @@ function rect(left: number, top: number, width: number, height: number): DOMRect
     y: top,
     toJSON: () => ({}),
   };
+}
+
+/** Right-clicks a pane's header, which is where its own actions live. */
+async function openPaneMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+): Promise<void> {
+  const header = screen
+    .getByRole("region", { name: `Workspace pane: ${title}` })
+    .querySelector<HTMLElement>(".workspace-pane__header")!;
+  await user.pointer({ target: header, keys: "[MouseRight]" });
 }
