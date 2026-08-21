@@ -81,3 +81,4 @@ scheduled.
 - 0005 Provider SDK contract
 - 0007 Direct API providers and the native agent harness
 - 0012 Mixed-provider subagents
+- 0044 The dock hosts live thread-owned tools

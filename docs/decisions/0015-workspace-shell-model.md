@@ -160,6 +160,13 @@ redesigns.
 
 ## Related
 
+The approved migration of pane, dock, Environment, and tool placement is 0041,
+0042, and 0044. This record remains the implemented shell until that
+migration is accepted.
+
 - 0003 Product modes and authority
 - 0010 Secure file preview and canvas artifacts
 - 0016 Component foundation and theme
+- 0041 Panes hold one surface; the sidebar is the only switcher
+- 0042 Environment is a transient disclosure
+- 0044 The dock hosts live thread-owned tools

@@ -134,14 +134,51 @@ thread's bounded context, no inherited Work or Code authority, and no path that
 approves, steers, or appends to the source. Unavailable, unauthorized, or
 deleted targets fail closed.
 
-Thread utilities live in the Right Utility Dock outside the split tree. The
-top-right control reveals the dock; its compact summary reports Context,
-Project memory, and Navigator state before any tool is opened. **Add utility
-tab** opens Side Chat, Browser, Files, Changes, Terminal, Tests, Thread tools,
-or iOS Simulator without replacing the active pane. Pointer activity and
+## Workspace shell
+
+The window is mode-first: a persistent left sidebar with the Chat, Work, and
+Code selector, mode-aware destinations, Projects and threads, and settings; an
+integrated borderless top chrome; a central workspace; and an optional right
+dock. Mode changes alter content, authority, default composition, and density,
+never the navigation grammar. See [decisions/0015-workspace-shell-model.md](decisions/0015-workspace-shell-model.md).
+
+**Current shipped behavior.** The central workspace is one persistent recursive
+split tree. A leaf holds exactly one surface — a thread, a draft, a Project
+overview, a utility surface, or a mode welcome — with no tab strip; the sidebar
+is the switcher. Completed layout operations go through server-authoritative
+workspace commands. One visible tree belongs to one authority context (host,
+mode, Project, and bound root); a cross-Project, cross-mode, or cross-host drop
+is refused. Thread utilities live in the Right Utility Dock outside the split
+tree. The top-right control reveals the dock; its compact summary reports
+Context, Project memory, and Navigator state before any tool is opened. Add
+utility tab opens Side Chat, Browser, Files, Changes, Terminal, Tests, Thread
+tools, or iOS Simulator without replacing the active pane. Pointer activity and
 keyboard input decide the active pane. Each thread keeps its own open tabs and
 selected tab, and switching visible threads restores the matching host-owned
-utility state.
+utility state. At narrow widths the dock becomes an overlay drawer. Environment
+belongs to a thread and currently persists floating or hidden presentation.
+Work and Code have server-authoritative thread boards (Ready / In progress /
+Waiting / Done) that cannot be dragged between columns; Chat has no board.
+Context usage is exposed from the focused pane's status bar and Context
+inspector. Zen is a separate presentation aggregate inside the same window, not
+a split-tree tab and not a fourth authority mode.
+
+**Approved migration, not yet the renderer.** Proposed records
+[0041](decisions/0041-panes-hold-one-surface.md),
+[0042](decisions/0042-environment-is-a-transient-disclosure.md), and
+[0044](decisions/0044-the-dock-hosts-live-thread-owned-tools.md) are the agreed
+interaction model for later renderer work. Several same-authority threads may
+be pinned into the existing split tree; the right dock follows the active pane
+and never leaves another thread's content visible. Environment becomes a
+compact header summary with a transient disclosure whose open state is not
+persisted. The dock hosts live thread-owned tool instances — Review, Files,
+Browser, Terminal, Canvas, Side chat, artifact-gated Plan, conditional
+Delivery, and conditional Agents — rather than generic category tabs. Context
+usage is a circular composer meter with an authoritative popover. Project
+memory belongs in Project Overview. Navigator is one host-wide chat popover
+from the bottom-left profile and Settings control. Simulator placement is
+already [0043](decisions/0043-simulator-follows-the-active-thread.md). 0015
+remains the Accepted implemented shell until that migration is accepted.
 
 ## Persistence
 
