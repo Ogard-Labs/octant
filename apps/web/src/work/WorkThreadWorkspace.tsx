@@ -41,7 +41,6 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
-import { ThreadExportControl } from "../thread/ThreadExportControl";
 import {
   ThreadMentionChips,
   ThreadMentionTypeahead,
@@ -503,15 +502,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               <span>Browser</span>
             </button>
           )}
-          <ThreadExportControl
-            mode="work"
-            threadId={String(props.threadId)}
-            title={props.title}
-            {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-            {...(props.windowCapability === undefined
-              ? {}
-              : { windowCapability: props.windowCapability })}
-          />
           {thread?.lifecycle === "active" && thread.completionConfirmed !== true ? (
             <OctantButton
               aria-label="Mark delivery target complete"

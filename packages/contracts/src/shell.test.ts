@@ -59,7 +59,7 @@ const settings = {
     overlayOpacity: 100,
     vibrancyMode: "off",
   },
-  environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
+  environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
   firstRunOnboarding: "pending",
   automaticUpdateChecks: true,
   navigatorAssistant: {},
@@ -122,8 +122,8 @@ const workspace = {
 } as const;
 
 const presentationState = {
-  byTab: [{ tabId: ids.codeTabA, presentation: "pinned", pinnedWidth: 360 }],
-  byMode: { chat: "hidden", work: "floating", code: "pinned" },
+  byTab: [{ tabId: ids.codeTabA, presentation: "hidden" }],
+  byMode: { chat: "hidden", work: "floating", code: "floating" },
 } as const;
 
 describe("shell bootstrap contracts", () => {
@@ -282,7 +282,7 @@ describe("shell bootstrap contracts", () => {
 
     expect(bootstrap.workspace.layouts.code.kind).toBe("split");
     expect(bootstrap.settings.sidebarWidth).toBe(280);
-    expect(bootstrap.environmentPresentation.byMode.code).toBe("pinned");
+    expect(bootstrap.environmentPresentation.byMode.code).toBe("floating");
   });
 
   it("rejects invalid UUIDs and excess properties", () => {
@@ -830,10 +830,10 @@ describe("environment presentation contracts", () => {
     expect(() =>
       decodeEnvironmentPresentationState({
         byTab: [
-          { tabId: ids.codeTabA, presentation: "pinned", pinnedWidth: 360 },
+          { tabId: ids.codeTabA, presentation: "hidden" },
           { tabId: ids.codeTabA, presentation: "floating" },
         ],
-        byMode: { chat: "hidden", work: "floating", code: "pinned" },
+        byMode: { chat: "hidden", work: "floating", code: "floating" },
       }),
     ).toThrow();
   });
@@ -847,19 +847,21 @@ describe("environment presentation contracts", () => {
     ).toThrow();
   });
 
-  it("rejects an out-of-range pinned width", () => {
+  it("rejects the retired pinned presentation", () => {
     expect(() =>
       decodeEnvironmentTabPresentation({
         tabId: ids.codeTabA,
         presentation: "pinned",
-        pinnedWidth: 100,
       }),
     ).toThrow();
+  });
+
+  it("rejects a tab override carrying the retired pinned width", () => {
     expect(() =>
       decodeEnvironmentTabPresentation({
         tabId: ids.codeTabA,
-        presentation: "pinned",
-        pinnedWidth: 999,
+        presentation: "floating",
+        pinnedWidth: 360,
       }),
     ).toThrow();
   });
@@ -896,11 +898,11 @@ describe("environment presentation contracts", () => {
   it("decodes shell settings with explicit environment presentation defaults", () => {
     const explicit = {
       ...settings,
-      environmentPresentationByMode: { chat: "floating", work: "pinned", code: "hidden" },
+      environmentPresentationByMode: { chat: "floating", work: "floating", code: "hidden" },
     };
     expect(decodeShellSettings(explicit).environmentPresentationByMode).toEqual({
       chat: "floating",
-      work: "pinned",
+      work: "floating",
       code: "hidden",
     });
   });
@@ -911,7 +913,7 @@ describe("environment presentation contracts", () => {
     expect(decoded.environmentPresentationByMode).toEqual({
       chat: "hidden",
       work: "floating",
-      code: "pinned",
+      code: "floating",
     });
     // The re-encoded struct includes the default, so the shapes differ; verify
     // only the presentation default rather than full equality.

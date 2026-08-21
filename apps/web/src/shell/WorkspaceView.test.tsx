@@ -4,7 +4,7 @@ import { decodeChatBootstrap, decodeChatThreadView } from "@octant/contracts/cha
 import { defaultEnvironmentPresentationState } from "@octant/domain/shell-policy";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { WorkspaceView, type WorkspaceViewProps } from "./WorkspaceView";
 import { stubSurfaceDragHandle } from "../App.test-fixtures";
 import { createChatReadCursorStore } from "../chat/useChatController";
@@ -26,30 +26,56 @@ const ids = {
   window: "10000000-0000-4000-8000-000000000006",
 } as const;
 
+/*
+ * Each row names what proves the surface itself rendered inside the boundary.
+ * Most surfaces state themselves with a heading; a Code thread does not — it is
+ * named by the pane that holds it, so the region it publishes is what says the
+ * thread and not a fallback is on screen.
+ */
 const codeTabs: ReadonlyArray<
-  readonly [WorkspaceTab["kind"], string, "monaco" | "xterm" | undefined, string]
+  readonly [
+    WorkspaceTab["kind"],
+    string,
+    "monaco" | "xterm" | undefined,
+    { readonly role: string; readonly name: string },
+  ]
 > = [
-  ["code-overview", "Overview", undefined, "Composition"],
-  ["code-diff", "README.md changes", "monaco", "Checkout changes"],
-  ["code-terminal", "Terminal", "xterm", "No terminal attached"],
-  ["code-test", "Tests", undefined, "Repository test approval unavailable"],
-  ["code-git", "Git", undefined, "Git mutation approval unavailable"],
-  ["code-pr", "Pull request", undefined, "Pull request approval unavailable"],
-  ["code-local-review", "Review findings", undefined, "Local review unavailable"],
+  ["code-overview", "Overview", undefined, { role: "region", name: "Code thread" }],
+  ["code-diff", "README.md changes", "monaco", { role: "heading", name: "Checkout changes" }],
+  ["code-terminal", "Terminal", "xterm", { role: "heading", name: "No terminal attached" }],
+  [
+    "code-test",
+    "Tests",
+    undefined,
+    { role: "heading", name: "Repository test approval unavailable" },
+  ],
+  ["code-git", "Git", undefined, { role: "heading", name: "Git mutation approval unavailable" }],
+  [
+    "code-pr",
+    "Pull request",
+    undefined,
+    { role: "heading", name: "Pull request approval unavailable" },
+  ],
+  [
+    "code-local-review",
+    "Review findings",
+    undefined,
+    { role: "heading", name: "Local review unavailable" },
+  ],
 ];
 
 describe("WorkspaceView Code tab registration", () => {
   it.each(codeTabs)(
     "routes %s through an explicit Code pane boundary",
-    async (kind, title, deferredAdapter, expectedHeading) => {
+    async (kind, title, deferredAdapter, expected) => {
       const { container } = render(<WorkspaceView {...propsFor(codeTab(kind, title))} />);
 
       // The Code pane boundary is intentionally lazy (React.lazy + Suspense), so
-      // the pane heading appears only after the deferred chunk resolves. Keep a
+      // the surface appears only after the deferred chunk resolves. Keep a
       // generous wait budget for loaded CI runners; the assertion itself is
-      // unchanged — the exact heading must render and be visible.
+      // unchanged — the exact surface must render and be visible.
       expect(
-        await screen.findByRole("heading", { name: expectedHeading }, { timeout: 5_000 }),
+        await screen.findByRole(expected.role, { name: expected.name }, { timeout: 5_000 }),
       ).toBeVisible();
       expect(
         screen.queryByRole("heading", { name: "No Code Project open" }),
@@ -114,7 +140,7 @@ describe("WorkspaceView Code tab registration", () => {
         onOpenSurface={vi.fn()}
       />,
     );
-    await screen.findByRole("heading", { name: "Composition" });
+    await screen.findByRole("region", { name: "Code thread" });
 
     fireEvent.click(screen.getByRole("button", { name: "Open surface" }));
     fireEvent.click(screen.getByRole("button", { name: "Terminal" }));
@@ -162,10 +188,13 @@ describe("WorkspaceView Code tab registration", () => {
   });
 });
 
-/** Closes a pane the way a person does: through its own actions disclosure. */
+/** Closes a pane the way a person does: right-click over its own header. */
 async function closePaneShowing(title: string): Promise<void> {
-  fireEvent.click(await screen.findByRole("button", { name: `Pane actions for ${title}` }));
-  fireEvent.click(screen.getByRole("button", { name: "Close pane" }));
+  const header = (
+    await screen.findByRole("region", { name: `Workspace pane: ${title}` })
+  ).querySelector<HTMLElement>(".workspace-pane__header")!;
+  await userEvent.pointer({ target: header, keys: "[MouseRight]" });
+  await userEvent.click(await screen.findByRole("menuitem", { name: "Close pane" }));
 }
 
 async function expandLocalServers(): Promise<void> {
@@ -593,105 +622,6 @@ function localServersWiring(
   return { props, browserAutomationClient, create, act, stop };
 }
 
-describe("WorkspaceView split Code file explorer", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("lists files with each pane's own thread checkout, not the focused view's", async () => {
-    const threadBId = "b0000000-0000-4000-8000-000000000002";
-    const checkoutBId = "20000000-0000-4000-8000-000000000002";
-    const tabA = codeTab("code-overview", "Thread A");
-    const tabBId = "10000000-0000-4000-8000-000000000014" as WorkspaceTab["id"];
-    const tabB = {
-      id: tabBId,
-      kind: "code-overview",
-      mode: "code",
-      threadId: threadBId,
-      title: "Thread B",
-    } as WorkspaceTab;
-    const base = propsFor(tabA);
-    const paneB = {
-      kind: "pane",
-      nodeId: "10000000-0000-4000-8000-000000000012",
-      paneId: "10000000-0000-4000-8000-000000000013",
-      surface: tabB,
-    } as const;
-    const split = {
-      kind: "split",
-      nodeId: "10000000-0000-4000-8000-000000000011",
-      orientation: "horizontal",
-      ratio: 0.5,
-      first: base.layout,
-      second: paneB,
-    } as never as WorkspaceViewProps["layout"];
-    // The focused controller view is thread A. Thread B's checkout is known
-    // only through the bootstrap thread record, exactly as at runtime.
-    const codeController = {
-      ...(base.codeController as object),
-      bootstrap: {
-        checkouts: [],
-        activity: [],
-        threads: [
-          { id: codeIds.thread, checkoutId: codeIds.checkout, title: "Thread A" },
-          { id: threadBId, checkoutId: checkoutBId, title: "Thread B" },
-        ],
-      },
-    } as never as WorkspaceViewProps["codeController"];
-    // Both panes are open, so both threads have a controller. Neither reads a
-    // checkout from the other's view: thread B's is known only through the
-    // bootstrap thread record, exactly as at runtime.
-    const codeControllers = createCodeThreadControllers();
-    codeControllers.publish(codeIds.thread as never, codeController);
-    codeControllers.publish(threadBId as never, codeController);
-    const listingRequests: string[] = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input);
-        if (url.includes("/api/code/files/listing")) listingRequests.push(url);
-        return new Response(JSON.stringify({ message: "unavailable" }), {
-          headers: { "content-type": "application/json" },
-          status: 503,
-        });
-      }),
-    );
-
-    render(
-      <WorkspaceView
-        {...base}
-        codeController={codeController}
-        codeControllers={codeControllers}
-        layout={split}
-        workspace={
-          {
-            ...base.workspace,
-            layouts: { ...base.workspace.layouts, code: split },
-          } as never
-        }
-      />,
-    );
-
-    // Files is collapsed until asked for; expand it in both panes.
-    const filesButtons = await screen.findAllByRole(
-      "button",
-      { name: "Files" },
-      { timeout: 5_000 },
-    );
-    expect(filesButtons).toHaveLength(2);
-    for (const button of filesButtons) fireEvent.click(button);
-
-    await waitFor(() => expect(listingRequests).toHaveLength(2), { timeout: 5_000 });
-    const byThread = new Map(
-      listingRequests
-        .map((request) => new URL(request))
-        .map((url) => [url.searchParams.get("threadId"), url.searchParams.get("checkoutId")]),
-    );
-    expect(byThread.get(String(codeIds.thread))).toBe(String(codeIds.checkout));
-    expect(byThread.get(threadBId)).toBe(checkoutBId);
-  });
-});
-
 describe("WorkspaceView concurrent Code threads", () => {
   it("shows each open Code thread its own composition rather than the focused one's", async () => {
     const threadBId = "b0000000-0000-4000-8000-000000000002";
@@ -736,6 +666,10 @@ describe("WorkspaceView concurrent Code threads", () => {
             id: threadBId,
             checkoutId: checkoutBId,
             title: "Second composition",
+            // The two panes are told apart by a state only this thread is in.
+            // The title cannot do it any more: a thread is named by the pane
+            // that holds it, and both panes are titled from their own tab.
+            lifecycle: "waiting",
           },
         },
       } as never,
@@ -752,12 +686,21 @@ describe("WorkspaceView concurrent Code threads", () => {
       />,
     );
 
-    expect(
-      await screen.findByRole("heading", { name: "Composition" }, { timeout: 5_000 }),
-    ).toBeVisible();
-    expect(
-      await screen.findByRole("heading", { name: "Second composition" }, { timeout: 5_000 }),
-    ).toBeVisible();
+    const paneA = await screen.findByRole(
+      "region",
+      { name: "Workspace pane: Thread A" },
+      { timeout: 5_000 },
+    );
+    const paneB = await screen.findByRole(
+      "region",
+      { name: "Workspace pane: Thread B" },
+      { timeout: 5_000 },
+    );
+    const waitingNotice = "This thread is waiting for authoritative recovery or user input.";
+    await waitFor(() => expect(within(paneB).getByText(waitingNotice)).toBeVisible(), {
+      timeout: 5_000,
+    });
+    expect(within(paneA).queryByText(waitingNotice)).toBeNull();
   });
 
   it("waits for a Code thread's own controller instead of borrowing another thread's", async () => {
@@ -772,7 +715,7 @@ describe("WorkspaceView concurrent Code threads", () => {
         { timeout: 5_000 },
       ),
     ).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Composition" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Code thread" })).not.toBeInTheDocument();
   });
 });
 
@@ -1885,9 +1828,9 @@ describe("WorkspaceView Chat thread Environment", () => {
       title: "Release plan",
     } as WorkspaceTab;
     const base = propsFor(tab);
-    const pinnedChat = {
+    const floatingChat = {
       ...defaultEnvironmentPresentationState(),
-      byMode: { ...defaultEnvironmentPresentationState().byMode, chat: "pinned" as const },
+      byMode: { ...defaultEnvironmentPresentationState().byMode, chat: "floating" as const },
     };
 
     render(
@@ -1896,13 +1839,13 @@ describe("WorkspaceView Chat thread Environment", () => {
         chatClient={chatClient as never}
         chatReadCursorStore={createChatReadCursorStore()}
         canvasClient={canvasClient}
-        environmentPresentation={pinnedChat}
+        environmentPresentation={floatingChat}
         mode="chat"
         projects={[project]}
       />,
     );
 
-    expect(await screen.findByRole("region", { name: "Environment for Planning" })).toBeVisible();
+    expect(await screen.findByRole("dialog", { name: "Environment for Planning" })).toBeVisible();
     expect(screen.getByText("Virtual Project")).toBeVisible();
     expect(screen.getAllByText("Attachments").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Sources").length).toBeGreaterThan(0);

@@ -39,7 +39,6 @@ import {
   replaceShellSettings,
   resolveFirstRunOnboarding,
   resolveEffectivePresentation,
-  resolveEnvironmentPinnedWidth,
   resolveSurfaceDescriptors,
   resolveWorkspaceContext,
   sameWorkspaceSurface,
@@ -167,7 +166,7 @@ describe("shell settings policy", () => {
         overlayOpacity: 100,
         vibrancyMode: "subtle",
       },
-      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
+      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
       firstRunOnboarding: "pending",
       automaticUpdateChecks: true,
       // Navigator starts honestly unconfigured: no default model, no reviewer.
@@ -180,7 +179,7 @@ describe("shell settings policy", () => {
       ...replacement,
       sidebarWidth: 420,
       contextSidebarWidth: 640,
-      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "pinned" },
+      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
     });
     expect(current.chatEnabled).toBe(true);
     expect(replaceShellSettings(current, { ...replacement, sidebarWidth: 1 }).sidebarWidth).toBe(
@@ -1672,15 +1671,15 @@ function baseHost() {
 }
 
 describe("environment presentation policy", () => {
-  it("defaults to hidden chat, floating work, and pinned code", () => {
+  it("defaults to hidden chat and floating work and code", () => {
     const state = defaultEnvironmentPresentationState();
-    expect(state.byMode).toEqual({ chat: "hidden", work: "floating", code: "pinned" });
+    expect(state.byMode).toEqual({ chat: "hidden", work: "floating", code: "floating" });
     expect(state.byTab).toEqual([]);
   });
 
   it("resolves the per-mode default when no tab override exists", () => {
     const state = defaultEnvironmentPresentationState();
-    expect(resolveEffectivePresentation(state, "code", ids.tabA)).toBe("pinned");
+    expect(resolveEffectivePresentation(state, "code", ids.tabA)).toBe("floating");
     expect(resolveEffectivePresentation(state, "chat", ids.tabA)).toBe("hidden");
     expect(resolveEffectivePresentation(state, "work", ids.tabA)).toBe("floating");
   });
@@ -1688,9 +1687,9 @@ describe("environment presentation policy", () => {
   it("resolves a tab override over the mode default", () => {
     const state = replaceEnvironmentPresentation(defaultEnvironmentPresentationState(), {
       tabId: ids.tabA,
-      presentation: "floating",
+      presentation: "hidden",
     });
-    expect(resolveEffectivePresentation(state, "code", ids.tabA)).toBe("floating");
+    expect(resolveEffectivePresentation(state, "code", ids.tabA)).toBe("hidden");
   });
 
   it("replaces an existing tab override instead of duplicating", () => {
@@ -1706,51 +1705,36 @@ describe("environment presentation policy", () => {
     expect(resolveEffectivePresentation(updated, "code", ids.tabA)).toBe("hidden");
   });
 
-  it("clamps pinned width to the supported range", () => {
-    const tooSmall = replaceEnvironmentPresentation(defaultEnvironmentPresentationState(), {
-      tabId: ids.tabA,
-      presentation: "pinned",
-      pinnedWidth: 100,
-    });
-    expect(resolveEnvironmentPinnedWidth(tooSmall, ids.tabA)).toBe(240);
-    const tooLarge = replaceEnvironmentPresentation(defaultEnvironmentPresentationState(), {
-      tabId: ids.tabA,
-      presentation: "pinned",
-      pinnedWidth: 999,
-    });
-    expect(resolveEnvironmentPinnedWidth(tooLarge, ids.tabA)).toBe(640);
-  });
-
   it("removes a tab override so the mode default applies again", () => {
     const withOverride = replaceEnvironmentPresentation(defaultEnvironmentPresentationState(), {
       tabId: ids.tabA,
       presentation: "floating",
     });
     const removed = removeEnvironmentPresentation(withOverride, ids.tabA);
-    expect(resolveEffectivePresentation(removed, "code", ids.tabA)).toBe("pinned");
+    expect(resolveEffectivePresentation(removed, "code", ids.tabA)).toBe("floating");
   });
 
-  it("normalizes a full presentation state by clamping widths and deduplicating tabs", () => {
+  it("normalizes a full presentation state by keeping the first entry per tab", () => {
     const normalized = normalizeEnvironmentPresentationState({
       byTab: [
-        { tabId: ids.tabA, presentation: "pinned", pinnedWidth: 100 },
-        { tabId: ids.tabA, presentation: "hidden", pinnedWidth: 999 },
-        { tabId: ids.tabB, presentation: "pinned", pinnedWidth: 999 },
+        { tabId: ids.tabA, presentation: "floating" },
+        { tabId: ids.tabA, presentation: "hidden" },
+        { tabId: ids.tabB, presentation: "hidden" },
       ],
-      byMode: { chat: "hidden", work: "floating", code: "pinned" },
+      byMode: { chat: "hidden", work: "floating", code: "floating" },
     });
     expect(normalized.byTab).toEqual([
-      { tabId: ids.tabA, presentation: "pinned", pinnedWidth: 240 },
-      { tabId: ids.tabB, presentation: "pinned", pinnedWidth: 640 },
+      { tabId: ids.tabA, presentation: "floating" },
+      { tabId: ids.tabB, presentation: "hidden" },
     ]);
-    expect(normalized.byMode).toEqual({ chat: "hidden", work: "floating", code: "pinned" });
+    expect(normalized.byMode).toEqual({ chat: "hidden", work: "floating", code: "floating" });
   });
 
   it("includes environment presentation defaults in default shell settings", () => {
     expect(defaultShellSettings().environmentPresentationByMode).toEqual({
       chat: "hidden",
       work: "floating",
-      code: "pinned",
+      code: "floating",
     });
   });
 });

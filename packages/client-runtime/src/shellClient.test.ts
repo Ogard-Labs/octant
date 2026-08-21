@@ -56,7 +56,7 @@ const bootstrap = decodeShellBootstrap({
   connectionStatus: "connected",
   environmentPresentation: {
     byTab: [],
-    byMode: { chat: "hidden", work: "floating", code: "pinned" },
+    byMode: { chat: "hidden", work: "floating", code: "floating" },
   },
   settingsVersion: 0,
   workspaceVersion: 0,

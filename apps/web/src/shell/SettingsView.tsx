@@ -984,7 +984,6 @@ const ENVIRONMENT_PRESENTATION_OPTIONS: ReadonlyArray<{
   readonly label: string;
 }> = [
   { value: "floating", label: "Floating" },
-  { value: "pinned", label: "Pinned" },
   { value: "hidden", label: "Hidden" },
 ];
 

@@ -105,17 +105,21 @@ describe("ProjectCreateDialog web folder parity", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Choose a folder" }));
     expect(await screen.findByText("Choose an accessible directory.")).toBeVisible();
-    expect(screen.getByRole("dialog", { name: "Add folder" })).toHaveClass(
+    expect(screen.getByRole("dialog", { name: "Create Project" })).toHaveClass(
       "octant-dialog__popup",
       "project-dialog",
     );
     expect(screen.queryByText("CODE")).toBeNull();
-    expect(screen.getByRole("button", { name: "Choose folder" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Choose a folder" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
 
-    await user.click(screen.getByRole("button", { name: "Choose folder" }));
-    await screen.findByText("Project creation cancelled.");
+    // Backing out of the chooser leaves the dialog as it was: no folder, no
+    // complaint. Cancelling a file dialog is not an error to report.
+    await user.click(screen.getByRole("button", { name: "Choose a folder" }));
+    await waitFor(() => expect(selectProjectRoot).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "Choose a folder" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onClose).toHaveBeenCalledOnce();
   });

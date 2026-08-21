@@ -6,15 +6,13 @@ import {
 } from "@octant/contracts/code";
 import type { CodeCheckpoint } from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts";
-import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import {
   clampTurnAccessPosture,
   decidesCodeEffectsByApproval,
   type PickerGroup,
 } from "@octant/domain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
-import { Bot, UserRoundCog } from "lucide-react";
+import { UserRoundCog } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { useQueuedSend } from "../composer/useQueuedSend";
@@ -30,7 +28,6 @@ import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController, CodeTurnStatus } from "./useCodeController";
 import { ChatRichText } from "../chat/ChatRichText";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
-import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
 import { ThreadChildRunStatusSlot } from "../agents/ThreadChildRunStatusSlot";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
@@ -56,7 +53,6 @@ import { PathMentionTypeahead, useCodePathMentions } from "./CodePathMentionPick
 import { CODE_ACCESS_POSTURE_LABEL, CodeAccessPicker } from "./CodeAccessPicker";
 import type { CodeFileListingClient } from "@octant/client-runtime";
 import { useAgentProfileName } from "../agentProfile/AgentProfileNames";
-import { ThreadExportControl } from "../thread/ThreadExportControl";
 
 export type CodeAttachmentClient = Pick<
   CodeClient,
@@ -75,7 +71,6 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 
 export interface CodeThreadWorkspaceProps {
   readonly agentRunClient?: AgentRunClient;
-  readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly controller: CodeController;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly threadId: CodeThreadId;
@@ -153,7 +148,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [accessMessage, setAccessMessage] = useState<string>();
   const [turnAccessOverride, setTurnAccessOverride] = useState<ProviderExecutionPolicy>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [auxiliarySurface, setAuxiliarySurface] = useState<"agents">();
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
   const checkpoints = useThreadCheckpoints({
     threadId: String(props.threadId),
@@ -348,9 +342,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.operationClient !== undefined &&
     props.nextUuid !== undefined &&
     (!decidesCodeEffectsByApproval(thread.executionPolicy) || props.requestApproval !== undefined);
-  const followUp = props.controller.followUps.get(String(thread.id))?.followUp;
-  const followUpOpen = followUp?.state === "open";
-
   async function submitFollowUp() {
     if (!canSend) return;
     // A `#thread` chip names a thread; it never carries one. The turn sends
@@ -600,79 +591,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   return (
     <section aria-label="Code thread" className="code-thread-workspace">
-      <header className="code-thread-workspace__header">
-        <div className="code-thread-workspace__header-row thread-column">
-          <div className="code-thread-workspace__identity">
-            <h1>{thread.title}</h1>
-            <div className="code-thread-workspace__meta">
-              <span className="badge code-thread-workspace__lifecycle">
-                {lifecycleLabel(thread.lifecycle)}
-              </span>
-              <span>{headLabel(checkout.head)}</span>
-            </div>
-            <div
-              aria-label="Follow-up"
-              className="code-thread-workspace__follow-up"
-              data-follow-up={followUpOpen ? "true" : "false"}
-            >
-              {followUpOpen ? (
-                <span
-                  aria-label="Follow-up required"
-                  className="code-thread-workspace__follow-up-marker"
-                  role="status"
-                  title={followUp?.reason}
-                >
-                  <span aria-hidden="true">◆</span> Follow-up: {followUp?.reason}
-                </span>
-              ) : null}
-              {followUpOpen ? (
-                <OctantButton
-                  onClick={() => void props.controller.completeFollowUp(thread.id)}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Complete follow-up
-                </OctantButton>
-              ) : (
-                <OctantButton
-                  onClick={() => void props.controller.markFollowUp(thread.id)}
-                  size="sm"
-                  type="button"
-                  variant="secondary"
-                >
-                  Mark for follow-up
-                </OctantButton>
-              )}
-            </div>
-          </div>
-          {childRunStatus}
-          <div className="code-thread-workspace__toolbar" role="toolbar" aria-label="Code surfaces">
-            <ThreadExportControl
-              mode="code"
-              threadId={String(props.threadId)}
-              title={thread.title}
-              {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-              {...(props.windowCapability === undefined
-                ? {}
-                : { windowCapability: props.windowCapability })}
-            />
-            {props.agentRunClient === undefined ? null : (
-              <button
-                aria-pressed={auxiliarySurface === "agents"}
-                className="code-thread-workspace__tool window-no-drag"
-                onClick={() =>
-                  setAuxiliarySurface((current) => (current === "agents" ? undefined : "agents"))
-                }
-                type="button"
-              >
-                <Bot aria-hidden="true" size={14} strokeWidth={1.7} />
-                <span>Agents</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
+      {/* No identity header. The title repeated the pane's own grip, the
+          lifecycle badge said "Active" on nearly every thread, the branch is
+          the environment panel's fact, and follow-up is the thread row's
+          right-click menu — leaving a band that cost height and said nothing.
+          Live child runs are the one thing here that has no other home. */}
+      {childRunStatus === undefined ? null : (
+        <header className="code-thread-workspace__header">
+          <div className="code-thread-workspace__header-row thread-column">{childRunStatus}</div>
+        </header>
+      )}
 
       {props.controller.errorMessage === undefined ? null : (
         <div
@@ -747,24 +675,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         ),
       )}
 
-      {auxiliarySurface === "agents" && props.agentRunClient !== undefined ? (
-        <aside
-          aria-label="Agent activity"
-          className="code-thread-workspace__auxiliary thread-column"
-        >
-          <AgentRunHierarchy
-            // This thread is the parent authority the host verifies before it
-            // admits a child, so creation belongs here rather than on a surface
-            // that would have to invent one.
-            allowCreation
-            client={props.agentRunClient}
-            parentThreadId={decodeAgentRunParentThreadId(String(thread.id))}
-            {...(props.agentRunSettingsClient === undefined
-              ? {}
-              : { settingsClient: props.agentRunSettingsClient })}
-          />
-        </aside>
-      ) : null}
       {messages.length === 0 ? (
         <div className="code-thread-workspace__conversation" role="log" aria-live="polite">
           <div className="code-thread-workspace__transcript thread-column">
@@ -1392,31 +1302,6 @@ function boundModelReadsImages(
     .find((candidate) => String(candidate.model.id) === String(thread.modelId));
   const modalities = model?.model.inputModalities;
   return modalities === undefined ? undefined : modalities.includes("image");
-}
-
-function headLabel(head: { readonly kind: string; readonly name?: string; readonly oid?: string }) {
-  if (head.kind === "branch" && head.name !== undefined) return head.name;
-  if (head.oid !== undefined) return head.oid.slice(0, 7);
-  return "Checkout";
-}
-
-function lifecycleLabel(lifecycle: string): string {
-  switch (lifecycle) {
-    case "active":
-      return "Active";
-    case "waiting":
-      return "Waiting";
-    case "interrupted":
-      return "Interrupted";
-    case "failed":
-      return "Failed";
-    case "done":
-      return "Done";
-    case "archived":
-      return "Archived";
-    default:
-      return lifecycle;
-  }
 }
 
 function turnStatusLabel(status: "waiting" | "interrupted" | "failed" | "incomplete"): string {

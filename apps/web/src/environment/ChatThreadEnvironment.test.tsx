@@ -107,13 +107,13 @@ function controller(): ChatController {
   } as unknown as ChatController;
 }
 
-describe("ChatThreadEnvironment", () => {
+describe("the Chat thread environment panel", () => {
   it("shares thread facts while retaining independent presentation for two tab views", () => {
     const presentation = {
       ...defaultEnvironmentPresentationState(),
       byTab: [
-        { tabId: tabA.id, presentation: "pinned" as const, pinnedWidth: 360 },
-        { tabId: tabB.id, presentation: "floating" as const, pinnedWidth: 360 },
+        { tabId: tabA.id, presentation: "hidden" as const },
+        { tabId: tabB.id, presentation: "floating" as const },
       ],
     };
     const authoritative = controller();
@@ -141,9 +141,11 @@ describe("ChatThreadEnvironment", () => {
       </>,
     );
 
-    expect(screen.getByRole("region", { name: "Environment for Planning" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /Show environment panel for Planning/ }),
+    ).toBeVisible();
     expect(screen.getByRole("dialog", { name: "Environment for Planning" })).toBeVisible();
-    expect(screen.getAllByText("1 attachment")).toHaveLength(2);
+    expect(screen.getAllByText("1 attachment")).toHaveLength(1);
     expect(screen.getByText("First view")).toBeVisible();
     expect(screen.getByText("Second view")).toBeVisible();
   });
@@ -155,7 +157,7 @@ describe("ChatThreadEnvironment", () => {
         onChangePresentation={vi.fn()}
         presentation={{
           ...defaultEnvironmentPresentationState(),
-          byMode: { ...defaultEnvironmentPresentationState().byMode, chat: "pinned" },
+          byMode: { ...defaultEnvironmentPresentationState().byMode, chat: "floating" },
         }}
         projects={[]}
         tab={tabA}
@@ -164,7 +166,7 @@ describe("ChatThreadEnvironment", () => {
       </ChatThreadEnvironment>,
     );
 
-    expect(screen.getByRole("region", { name: "Environment for Chat" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Environment for Chat" })).toBeVisible();
     expect(screen.getByText("Project unavailable")).toBeVisible();
     expect(screen.getByText("Authoritative Chat context is unavailable.")).toBeVisible();
     expect(screen.queryByText("Unavailable for unfiled Chat")).not.toBeInTheDocument();

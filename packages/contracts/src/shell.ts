@@ -85,12 +85,18 @@ export const SidebarWidth = Schema.Number.pipe(
 );
 export type SidebarWidth = typeof SidebarWidth.Type;
 
+/**
+ * A panel the right utility dock can remember as the last one shown. Retired
+ * ids stay in the literal so a stored preference still decodes; the renderer
+ * refuses one it no longer offers and simply opens nothing.
+ */
 export const ContextSurfaceId = Schema.Literal(
   "context",
   "project-memory",
   "code-environment",
   "navigator",
   "plan",
+  "thread",
 );
 export type ContextSurfaceId = typeof ContextSurfaceId.Type;
 
@@ -113,22 +119,18 @@ export type ModeSwitcherPresentation = typeof ModeSwitcherPresentation.Type;
 export const ProjectViewSwitcherPresentation = Schema.Literal("dropdown", "inline");
 export type ProjectViewSwitcherPresentation = typeof ProjectViewSwitcherPresentation.Type;
 
-export const EnvironmentPresentation = Schema.Literal("floating", "pinned", "hidden");
+/**
+ * How a thread tab presents its environment panel. The panel floats over the
+ * thread or is hidden behind a reveal control; it never docks into the row.
+ * A docked panel took width from the surface being read and presented live
+ * status as shell chrome, which is not what the panel is for.
+ */
+export const EnvironmentPresentation = Schema.Literal("floating", "hidden");
 export type EnvironmentPresentation = typeof EnvironmentPresentation.Type;
-
-export const MIN_ENVIRONMENT_PINNED_WIDTH = 240;
-export const MAX_ENVIRONMENT_PINNED_WIDTH = 640;
-
-export const EnvironmentPinnedWidth = Schema.Number.pipe(
-  Schema.greaterThanOrEqualTo(MIN_ENVIRONMENT_PINNED_WIDTH),
-  Schema.lessThanOrEqualTo(MAX_ENVIRONMENT_PINNED_WIDTH),
-);
-export type EnvironmentPinnedWidth = typeof EnvironmentPinnedWidth.Type;
 
 export const EnvironmentTabPresentation = Schema.Struct({
   tabId: WorkspaceTabId,
   presentation: EnvironmentPresentation,
-  pinnedWidth: Schema.optionalWith(EnvironmentPinnedWidth, { default: () => 360 }),
 }).annotations(strict);
 export type EnvironmentTabPresentation = typeof EnvironmentTabPresentation.Type;
 
@@ -154,7 +156,7 @@ export type EnvironmentPresentationState = typeof EnvironmentPresentationState.T
 export const DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE: EnvironmentPresentationByMode = {
   chat: "hidden",
   work: "floating",
-  code: "pinned",
+  code: "floating",
 };
 
 export const EnvironmentCompactStatus = Schema.Literal(
@@ -766,7 +768,6 @@ export const decodeShellFailure = Schema.decodeUnknownSync(ShellFailure);
 export const decodeShellSettingsReplaced = Schema.decodeUnknownSync(ShellSettingsReplaced);
 export const decodeWorkspaceLayoutReplaced = Schema.decodeUnknownSync(WorkspaceLayoutReplaced);
 export const decodeEnvironmentPresentation = Schema.decodeUnknownSync(EnvironmentPresentation);
-export const decodeEnvironmentPinnedWidth = Schema.decodeUnknownSync(EnvironmentPinnedWidth);
 export const decodeEnvironmentTabPresentation = Schema.decodeUnknownSync(
   EnvironmentTabPresentation,
 );

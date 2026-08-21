@@ -1468,10 +1468,15 @@ button:focus-visible {
 
 /* The grip carries the pane's surface title and is its one drag handle, in
    the same quiet meta ink the header rail has always used — pointing at it
-   takes fg ink over the soft fill, exactly the dock-tab precedent. */
+   takes fg ink over the soft fill, exactly the dock-tab precedent.
+
+   It shrink-wraps its title rather than filling the row. Stretched, it read as
+   a full-width tab and, being a no-drag region, left the window with no title
+   band to be moved by. */
 .workspace-pane__grip {
   display: inline-flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
+  max-width: min(52ch, 60%);
   min-width: 0;
   min-height: 26px;
   align-items: center;
@@ -1599,38 +1604,6 @@ button:focus-visible {
 .workspace-disclosure__action:focus-visible {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
-}
-
-.workspace-pane-actions {
-  position: relative;
-  display: grid;
-  flex: 0 0 34px;
-  place-items: center;
-}
-
-.workspace-pane-actions__trigger {
-  width: 26px;
-  height: 26px;
-  color: var(--octant-text-muted);
-  background: transparent;
-  border-radius: 5px;
-  cursor: pointer;
-}
-
-.workspace-pane-actions__trigger:hover,
-.workspace-pane-actions__trigger[aria-expanded="true"] {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-}
-
-.workspace-pane-actions__trigger:active {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-pressed);
-}
-
-.workspace-pane-actions__disclosure {
-  top: calc(100% + 4px);
-  right: 4px;
 }
 
 .workspace-pane__panel {
@@ -2354,6 +2327,71 @@ button:focus-visible {
   box-shadow: var(--oct-focus-ring);
 }
 
+/* The caption above the folder chooser. It is a paragraph rather than a label
+   because the control it names is a button, and a label element names a form
+   control; it is drawn to match the real field labels beside it. */
+.project-dialog__field-label {
+  margin: var(--oct-space-1) 0 0;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
+
+/* The chooser reads as a field, not as a second submit button: same height,
+   border, and radius as the name input directly above it, so the two facts the
+   dialog is about sit at the same weight. */
+.project-dialog__folder {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-height: var(--oct-control-height-sm);
+  padding: 0 var(--oct-space-3);
+  color: var(--oct-fg);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-sm);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--oct-text-sm);
+  text-align: left;
+}
+
+.project-dialog__folder[data-chosen="false"] {
+  color: var(--oct-muted);
+}
+
+.project-dialog__folder:hover:not(:disabled) {
+  background: var(--oct-fg-soft);
+}
+
+.project-dialog__folder:focus-visible {
+  border-color: var(--oct-accent-fg);
+  outline: none;
+  box-shadow: var(--oct-focus-ring);
+}
+
+.project-dialog__folder:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.project-dialog__folder svg {
+  flex: none;
+  color: var(--oct-muted);
+}
+
+.project-dialog__folder-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.project-dialog__folder-change {
+  flex: none;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .project-dialog__actions {
   display: flex;
   justify-content: flex-end;
@@ -3045,7 +3083,12 @@ button:focus-visible {
   max-width: 160px;
 }
 
-.thread-environment-reveal__status {
+/* One status pill, worn by both presentations. The reveal button and the
+   floating panel report the same environment state, so a state that reads as a
+   tinted pill collapsed and as plain grey text expanded would be two answers
+   to one question. */
+.thread-environment-reveal__status,
+.thread-environment-identity__status {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 9px;
@@ -3055,120 +3098,184 @@ button:focus-visible {
   color: var(--octant-text-muted);
 }
 
-.thread-environment-reveal__status--available {
+.thread-environment-reveal__status--available,
+.thread-environment-identity__status--available {
   color: var(--octant-success-text);
   background: var(--octant-success-surface);
 }
 
 .thread-environment-reveal__status--unavailable,
-.thread-environment-reveal__status--disconnected {
+.thread-environment-reveal__status--disconnected,
+.thread-environment-identity__status--unavailable,
+.thread-environment-identity__status--disconnected {
   color: var(--octant-warning-text);
   background: var(--octant-warning-surface);
 }
 
 .thread-environment-reveal__status--stale,
-.thread-environment-reveal__status--recovery {
+.thread-environment-reveal__status--recovery,
+.thread-environment-identity__status--stale,
+.thread-environment-identity__status--recovery {
   color: var(--octant-text-muted);
   background: var(--octant-surface-raised);
 }
 
+/* One elevation: the panel is the raised thing, and everything inside it is
+   drawn flat. A bordered card nested inside a bordered panel read as two
+   surfaces stacked rather than one composed panel. */
 .thread-environment-panel {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  background: var(--octant-surface-raised);
-  border: 1px solid var(--octant-border);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-border);
 }
 
+/* It has to read as something floating over the thread rather than as a card
+   welded into the corner: the surface is translucent and blurred the way the
+   platform's own floating panels are, and the shadow is deep enough to lift it
+   off the transcript running underneath. */
 .thread-environment-panel--floating {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: var(--oct-space-3);
+  right: var(--oct-space-3);
   width: 320px;
-  max-height: calc(100% - 16px);
+  max-height: calc(100% - var(--oct-space-3) * 2);
   z-index: 20;
-  border-radius: 8px;
-  box-shadow: var(--octant-shadow-overlay);
+  background: color-mix(in oklab, var(--oct-surface) 88%, transparent);
+  border-color: color-mix(in oklab, var(--oct-border) 70%, transparent);
+  border-radius: var(--oct-radius-lg);
+  box-shadow:
+    0 1px 1px light-dark(rgb(0 0 0 / 6%), rgb(0 0 0 / 30%)),
+    0 12px 32px -8px light-dark(rgb(0 0 0 / 18%), rgb(0 0 0 / 55%));
   overflow: hidden;
+  backdrop-filter: blur(20px) saturate(160%);
 }
 
-/* flex-basis auto keeps the user's stored width, but the panel may shrink:
-   with flex-shrink 0 a wide dock plus this panel crushed the thread pane
-   instead, and the pane is the surface the user is reading. */
-.thread-environment-panel--pinned {
-  position: relative;
-  flex: 0 1 auto;
-  border-radius: 0;
-  border-top: none;
-  border-bottom: none;
-  border-right: none;
+/* Without a backdrop filter the translucency has nothing to blur, so the panel
+   goes fully opaque rather than letting the transcript show through it. */
+@supports not (backdrop-filter: blur(1px)) {
+  .thread-environment-panel--floating {
+    background: var(--oct-surface);
+  }
 }
 
+/* The identity reads as the panel's header rather than as its first row: it
+   sits on the warm surface the system's dock head uses, and the checkout
+   detail runs under the name instead of competing with it on one line. */
 .thread-environment-panel__header {
   display: flex;
-  align-items: center;
+  flex: 0 0 auto;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--octant-border);
-}
-
-.thread-environment-panel__actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  gap: var(--oct-space-2);
+  padding: var(--oct-space-2) var(--oct-space-3);
+  background: var(--oct-surface-warm);
+  border-bottom: 1px solid var(--oct-border);
 }
 
 .thread-environment-panel__icon-button {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--oct-radius-sm);
   background: transparent;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   cursor: pointer;
 }
 
-.thread-environment-panel__icon-button:hover {
-  background: var(--octant-surface-raised);
-  color: var(--octant-text);
+.thread-environment-panel__icon-button:hover,
+.thread-environment-panel__icon-button:focus-visible {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
 }
 
 .thread-environment-identity {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, auto) auto;
+  align-items: baseline;
+  gap: 0 var(--oct-space-2);
   min-width: 0;
 }
 
 .thread-environment-identity__label {
-  font-weight: 600;
-  font-size: 11px;
-  color: var(--octant-text);
-}
-
-.thread-environment-identity__detail {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 10px;
-  color: var(--octant-text-muted);
   overflow: hidden;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.thread-environment-identity__status {
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 9px;
-  color: var(--octant-text-muted);
+.thread-environment-identity__detail {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* Where the checkout is, directly under the panel's name. A mono line so a
+   branch and a folder name line up with the identity above them, and quiet
+   enough that it reads as the panel's subtitle rather than as its first fact. */
+.thread-environment-location {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  color: var(--oct-muted);
+  background: var(--oct-surface-warm);
+  border-bottom: 1px solid var(--oct-border);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+}
+
+.thread-environment-location svg {
+  flex: 0 0 auto;
+}
+
+/* The branch gives up its width first: a worktree folder name is short and
+   fixed, and a long branch name would otherwise push it out of the panel. */
+.thread-environment-location__branch {
+  overflow: hidden;
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--oct-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-environment-location__separator {
+  flex: 0 0 auto;
+  opacity: 0.6;
+}
+
+.thread-environment-location__worktree {
+  overflow: hidden;
+  flex: 0 1 auto;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The thread content owns the whole column. The panel is positioned against
+   this box rather than laid out beside it — a docked panel used to take the
+   row's width from the surface being read. */
 .code-thread-environment {
   position: relative;
   display: flex;
+  flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
@@ -3211,7 +3318,14 @@ button:focus-visible {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 8px 10px;
+  padding: var(--oct-space-1) var(--oct-space-3) var(--oct-space-2);
+}
+
+/* Position and size only. The groups inside carry the system's own
+   treatment; this rail just gives them the dock's measure. */
+.thread-dock-panel {
+  display: grid;
+  align-content: start;
 }
 
 .working-directory-control {
@@ -3287,36 +3401,44 @@ button:focus-visible {
   font-size: 11px;
 }
 
-/* Collapsible groups of the thread Environment rail. Only the open group
-   mounts its body, so collapsed groups cost nothing. */
+/* Collapsible groups of the thread Environment panel and the dock's Thread
+   panel. One definition serves both, so a group looks the same wherever it is
+   mounted. Only the open group mounts its body, so collapsed groups cost
+   nothing.
+
+   Every group title wears the system's section-label type — mono, uppercase,
+   tracked — so a stack of groups reads as labelled sections rather than as a
+   list of buttons in body text. */
 .environment-group + .environment-group {
-  border-top: 1px solid var(--octant-border);
+  border-top: 1px solid var(--oct-border);
 }
 
 .environment-group__header {
   display: flex;
   width: 100%;
-  min-height: 30px;
+  min-height: var(--oct-control-height-sm);
   align-items: center;
-  gap: 6px;
+  gap: var(--oct-space-2);
   padding: 0 2px;
   border: none;
   background: transparent;
-  color: var(--octant-text-secondary);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 600;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
   text-align: left;
+  text-transform: uppercase;
   cursor: pointer;
 }
 
-.environment-group__header:hover {
-  color: var(--octant-text-primary);
+.environment-group__header:hover,
+.environment-group__header:focus-visible {
+  color: var(--oct-fg);
 }
 
 .environment-group__chevron {
   flex: 0 0 auto;
-  color: var(--octant-text-muted);
+  color: var(--oct-muted);
   transition: transform 120ms ease;
 }
 
@@ -3331,15 +3453,15 @@ button:focus-visible {
 
 .environment-group__summary {
   flex: 0 0 auto;
-  color: var(--octant-text-muted);
-  font-size: 10px;
-  font-weight: 500;
+  color: var(--oct-muted);
+  letter-spacing: normal;
+  text-transform: none;
 }
 
 .environment-group__body {
   display: grid;
-  gap: 8px;
-  padding: 2px 0 10px;
+  gap: var(--oct-space-2);
+  padding: 0 0 var(--oct-space-3);
 }
 
 .environment-group__action {
@@ -3347,9 +3469,9 @@ button:focus-visible {
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--octant-accent);
+  color: var(--oct-accent-fg);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--oct-text-xs);
   cursor: pointer;
 }
 
@@ -3357,12 +3479,11 @@ button:focus-visible {
   text-decoration: underline;
 }
 
+/* Size and clip only: the panel already carries the elevation, so the tree
+   inside it draws no border or fill of its own. */
 .environment-group .code-file-explorer {
   max-height: 46vh;
-  border: 1px solid var(--octant-border);
-  border-radius: 8px;
   overflow: hidden;
-  background: var(--octant-control);
 }
 
 .environment-group .code-file-explorer__search {
@@ -3488,25 +3609,10 @@ button:focus-visible {
   color: var(--octant-text-secondary);
 }
 
-.thread-environment-panel__resizer {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 4px;
-  height: 100%;
-  margin-left: -2px;
-  cursor: col-resize;
-  background: transparent;
-}
-
-.thread-environment-panel__resizer:hover {
-  background: var(--octant-border);
-}
-
 .thread-environment-wrapper {
   position: relative;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
   width: 100%;
@@ -3517,17 +3623,6 @@ button:focus-visible {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-}
-
-/* A wide right dock plus a pinned environment panel crushed the flexible
-   thread pane to ~146px (observed at a 1440px viewport with a 640px stored
-   dock width and a 360px pinned panel). The pane keeps the shell's readable
-   primary floor and the pinned panel yields instead. min(…, 100%) stands
-   down on panes narrower than the floor — below 680px the pinned panel
-   already overlays rather than sharing the row. */
-.thread-environment-wrapper--pinned .thread-environment-wrapper__content,
-.code-thread-environment--pinned .code-thread-environment__content {
-  min-width: min(var(--octant-wide-primary-min), 100%);
 }
 
 .project-memory-scroll {
@@ -4442,24 +4537,6 @@ button:focus-visible {
 }
 
 @media (max-width: 680px) {
-  .thread-environment-wrapper--pinned .thread-environment-panel--pinned,
-  .code-thread-environment--pinned .thread-environment-panel--pinned {
-    position: absolute;
-    inset: 8px;
-    z-index: 20;
-    width: auto !important;
-    max-width: none;
-    overflow: hidden;
-    border: 1px solid var(--octant-border);
-    border-radius: 8px;
-    box-shadow: var(--octant-shadow-overlay);
-  }
-
-  .thread-environment-wrapper--pinned .thread-environment-panel__resizer,
-  .code-thread-environment--pinned .thread-environment-panel__resizer {
-    display: none;
-  }
-
   .brand {
     margin-bottom: 14px;
   }
@@ -5022,11 +5099,19 @@ button:focus-visible {
 }
 
 /* The bar spans the surface for its rule; its content sits in the shared
-   thread column so the title starts where the transcript below it does. */
+   thread column so it starts where the transcript below it does. */
 .code-thread-workspace__header {
   flex: 0 0 auto;
   padding: 6px 0;
   border-bottom: 1px solid var(--oct-border);
+}
+
+/* Live child runs are all this band holds now, and the slot that reports them
+   renders nothing at all for a thread with no children — leaving the band's
+   padding and its rule to paint a bare line and an empty strip above every
+   ordinary transcript. It exists only when it has something to say. */
+.code-thread-workspace__header:has(> .code-thread-workspace__header-row:empty) {
+  display: none;
 }
 
 .code-thread-workspace__header-row {
@@ -5036,60 +5121,6 @@ button:focus-visible {
   justify-content: space-between;
   gap: 8px 16px;
   min-height: 44px;
-}
-
-.code-thread-workspace__identity h1 {
-  margin: 0;
-  font-size: var(--oct-text-base);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  text-wrap: balance;
-}
-
-/* Metadata line: system meta typography; the lifecycle fact wears `.badge`. */
-.code-thread-workspace__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  margin-top: 2px;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.code-thread-workspace__follow-up {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-/*
- * The durable follow-up marker is distinguished by more than color: an amber
- * palette, a leading diamond glyph, and the visible "Follow-up" label with its
- * reason, so the obligation reads clearly without relying on hue alone.
- */
-.code-thread-workspace__follow-up-marker {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: min(60ch, 60vw);
-  padding: 2px 8px;
-  overflow: hidden;
-  color: var(--oct-warn-fg);
-  background: var(--oct-warn-soft);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.code-thread-workspace__toolbar {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 .code-thread-workspace__tool {
@@ -5111,24 +5142,6 @@ button:focus-visible {
 .code-thread-workspace__tool:focus-visible {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
-}
-
-.code-thread-workspace__tool[aria-pressed="true"] {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-  border-color: var(--oct-border);
-}
-
-.code-thread-workspace__auxiliary {
-  display: grid;
-  max-height: min(42vh, 360px);
-  gap: 10px;
-  padding: var(--oct-space-3);
-  margin: 12px auto 0;
-  overflow: auto;
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
 }
 
 /* Kept for AgentRunHierarchy, which still reports its errors under this

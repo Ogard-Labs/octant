@@ -28,7 +28,6 @@ import type {
   ApplePlatform,
 } from "@octant/contracts/apple-toolchain";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { HostId } from "@octant/contracts/host";
@@ -81,7 +80,6 @@ export interface CodeWorkspaceApprovals {
 export interface CodeWorkspaceProps {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly agentRunClient?: AgentRunClient;
-  readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly approvals?: CodeWorkspaceApprovals;
   readonly client: CodeClient;
   readonly controller: CodeController;
@@ -149,9 +147,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     return (
       <CodeThreadWorkspace
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
-        {...(props.agentRunSettingsClient === undefined
-          ? {}
-          : { agentRunSettingsClient: props.agentRunSettingsClient })}
         controller={props.controller}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}

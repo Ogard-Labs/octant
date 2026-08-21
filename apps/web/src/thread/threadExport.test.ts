@@ -1,7 +1,6 @@
 import { THREAD_EXPORT_FORMAT, type ThreadExportOutcome } from "@octant/contracts/thread-export";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ThreadExportControl } from "./ThreadExportControl";
+import { exportThreadBundle, resolveThreadExportClient } from "./threadExport";
 
 const threadId = "00000000-0000-4000-8000-000000000901";
 
@@ -35,7 +34,7 @@ function exported(): ThreadExportOutcome {
   };
 }
 
-describe("ThreadExportControl", () => {
+describe("exporting a thread", () => {
   it("asks the host for the cut and downloads it", async () => {
     const exportThread = vi.fn(async () => exported());
     const createObjectURL = vi.fn(() => "blob:thread-export");
@@ -46,18 +45,13 @@ describe("ThreadExportControl", () => {
     });
     const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
     try {
-      render(
-        <ThreadExportControl
-          client={{ exportThread }}
-          mode="chat"
-          threadId={threadId}
-          title="Launch plan"
-        />,
+      const message = await exportThreadBundle(
+        { exportThread },
+        { mode: "chat", threadId, title: "Launch plan" },
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "Export thread" }));
-      await waitFor(() => expect(exportThread).toHaveBeenCalledWith({ mode: "chat", threadId }));
-      expect(await screen.findByText(/Saved launch-plan\.octant-thread\.json/)).toBeInTheDocument();
+      expect(exportThread).toHaveBeenCalledWith({ mode: "chat", threadId });
+      expect(message).toBe("Saved launch-plan.octant-thread.json.");
       expect(click).toHaveBeenCalled();
     } finally {
       click.mockRestore();
@@ -73,15 +67,13 @@ describe("ThreadExportControl", () => {
       kind: "refused" as const,
       reason: "not-found" as const,
     }));
-    render(
-      <ThreadExportControl
-        client={{ exportThread }}
-        mode="work"
-        threadId={threadId}
-        title="Brief"
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Export thread" }));
-    expect(await screen.findByText("This thread could not be exported.")).toBeInTheDocument();
+    await expect(
+      exportThreadBundle({ exportThread }, { mode: "work", threadId, title: "Brief" }),
+    ).resolves.toBe("This thread could not be exported.");
+  });
+
+  it("resolves no export client for a window with no server capability", () => {
+    expect(resolveThreadExportClient({ serverUrl: "http://127.0.0.1:1" })).toBeUndefined();
+    expect(resolveThreadExportClient({})).toBeUndefined();
   });
 });

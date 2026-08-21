@@ -26,6 +26,14 @@ describe("ProjectCreateDialog renderer flows", () => {
     };
   }
 
+  function selectsDocuments() {
+    return vi.fn(async () => ({
+      kind: "selected" as const,
+      receiptId: bindingReceipt,
+      displayName: "Documents",
+    }));
+  }
+
   it("creates Chat directly without invoking the native picker", async () => {
     const user = userEvent.setup();
     const bridge = hostBridge(vi.fn());
@@ -49,14 +57,26 @@ describe("ProjectCreateDialog renderer flows", () => {
     expect(onCreated).toHaveBeenCalledWith(projectId, "chat", "Research");
   });
 
-  it("creates Work with only the native opaque receipt", async () => {
-    const bridge = hostBridge(
-      vi.fn(async () => ({
-        kind: "selected" as const,
-        receiptId: bindingReceipt,
-        displayName: "Documents",
-      })),
+  it("waits for the person to ask before opening the folder chooser", () => {
+    const bridge = hostBridge(selectsDocuments());
+    render(
+      <ProjectCreateDialog
+        hostBridge={bridge}
+        mode="work"
+        onClose={vi.fn()}
+        onCreate={vi.fn()}
+        onCreated={vi.fn()}
+      />,
     );
+
+    expect(bridge.selectProjectRoot).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Choose a folder" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Create Project" })).toBeDisabled();
+  });
+
+  it("creates Work with only the native opaque receipt", async () => {
+    const user = userEvent.setup();
+    const bridge = hostBridge(selectsDocuments());
     const onCreate = vi.fn(async () => projectId);
     render(
       <ProjectCreateDialog
@@ -68,13 +88,40 @@ describe("ProjectCreateDialog renderer flows", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Choose a folder" }));
     await waitFor(() => expect(bridge.selectProjectRoot).toHaveBeenCalledWith("work"));
+    expect(screen.getByLabelText("Project name")).toHaveValue("Documents");
+    await user.click(screen.getByRole("button", { name: "Create Project" }));
+
     await waitFor(() => expect(onCreate).toHaveBeenCalledWith("work", "Documents", bindingReceipt));
-    expect(screen.queryByLabelText("Project name")).toBeNull();
     expect(JSON.stringify(onCreate.mock.calls)).not.toContain("canonicalRoot");
   });
 
+  it("keeps a name the person typed when they pick a folder afterwards", async () => {
+    const user = userEvent.setup();
+    const bridge = hostBridge(selectsDocuments());
+    const onCreate = vi.fn(async () => projectId);
+    render(
+      <ProjectCreateDialog
+        hostBridge={bridge}
+        mode="code"
+        onClose={vi.fn()}
+        onCreate={onCreate}
+        onCreated={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("Project name"), "Ledger");
+    await user.click(screen.getByRole("button", { name: "Choose a folder" }));
+    await screen.findByRole("button", { name: /Documents/ });
+    expect(screen.getByLabelText("Project name")).toHaveValue("Ledger");
+
+    await user.click(screen.getByRole("button", { name: "Create Project" }));
+    await waitFor(() => expect(onCreate).toHaveBeenCalledWith("code", "Ledger", bindingReceipt));
+  });
+
   it("redacts native picker rejection details", async () => {
+    const user = userEvent.setup();
     const bridge = hostBridge(
       vi.fn(async () => {
         throw new Error("/private/secret/path desktop-token");
@@ -91,6 +138,7 @@ describe("ProjectCreateDialog renderer flows", () => {
       />,
     );
 
+    await user.click(screen.getByRole("button", { name: "Choose a folder" }));
     await waitFor(() =>
       expect(screen.getByText("Project creation could not be completed.")).toBeVisible(),
     );
@@ -100,6 +148,7 @@ describe("ProjectCreateDialog renderer flows", () => {
   });
 
   it("does not submit or open after unmount while the native picker is pending", async () => {
+    const user = userEvent.setup();
     const selection = deferred<{
       readonly kind: "selected";
       readonly receiptId: string;
@@ -117,6 +166,7 @@ describe("ProjectCreateDialog renderer flows", () => {
         onCreated={onCreated}
       />,
     );
+    await user.click(screen.getByRole("button", { name: "Choose a folder" }));
     await waitFor(() => expect(bridge.selectProjectRoot).toHaveBeenCalled());
     view.unmount();
 
@@ -128,14 +178,9 @@ describe("ProjectCreateDialog renderer flows", () => {
   });
 
   it("keeps Cancel usable while creation is in flight and ignores the late result", async () => {
+    const user = userEvent.setup();
     const command = deferred<typeof projectId>();
-    const bridge = hostBridge(
-      vi.fn(async () => ({
-        kind: "selected" as const,
-        receiptId: bindingReceipt,
-        displayName: "Documents",
-      })),
-    );
+    const bridge = hostBridge(selectsDocuments());
     const onClose = vi.fn();
     const onCreated = vi.fn();
     const view = render(
@@ -147,7 +192,10 @@ describe("ProjectCreateDialog renderer flows", () => {
         onCreated={onCreated}
       />,
     );
-    await waitFor(() => expect(bridge.selectProjectRoot).toHaveBeenCalled());
+    await user.click(screen.getByRole("button", { name: "Choose a folder" }));
+    await screen.findByRole("button", { name: /Documents/ });
+    await user.click(screen.getByRole("button", { name: "Create Project" }));
+
     const cancel = screen.getByRole("button", { name: "Cancel" });
     expect(cancel).toBeEnabled();
     expect(screen.getByRole("button", { name: "Close new Project" })).toBeEnabled();

@@ -233,19 +233,11 @@ describe("WindowChrome", () => {
     expect(cssRule(".new-project--subtle:hover")).toContain("color: var(--octant-text-secondary);");
   });
 
-  it("standardizes workspace pane IconButton controls", () => {
-    expect(cssRule(".workspace-pane-actions__trigger")).toContain("width: 26px;");
-    expect(cssRule(".workspace-pane-actions__trigger")).toContain("height: 26px;");
-    expect(cssRule(".workspace-pane-actions__trigger")).toContain("background: transparent;");
-    expect(cssRule(".workspace-pane-actions__trigger:hover")).toContain(
-      "background: var(--octant-control-hover);",
-    );
-    expect(cssRule('.workspace-pane-actions__trigger[aria-expanded="true"]')).toContain(
-      "background: var(--octant-control-hover);",
-    );
-    expect(cssRule(".workspace-pane-actions__trigger:active")).toContain(
-      "background: var(--octant-control-pressed);",
-    );
+  it("keeps the pane's title band free of a parked actions button", () => {
+    // A pane's actions moved to right-click over its header. The band is also
+    // the window's drag handle, and a button parked in every pane at all times
+    // spent that scarce width on actions taken rarely.
+    expect(styles).not.toMatch(/\.workspace-pane-actions/);
   });
 
   it("keeps reduced transparency independent from increased contrast", () => {

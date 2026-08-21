@@ -5,45 +5,23 @@ import {
   type OctantMode,
   type WorkspaceTabId,
 } from "@octant/contracts";
-import {
-  resolveEffectivePresentation,
-  resolveEnvironmentPinnedWidth,
-} from "@octant/domain/shell-policy";
-
-export interface EnvironmentPresentationModel {
-  readonly presentation: EnvironmentPresentation;
-  readonly pinnedWidth: number;
-}
+import { resolveEffectivePresentation } from "@octant/domain/shell-policy";
 
 export function resolveTabPresentation(
   state: EnvironmentPresentationState,
   mode: OctantMode,
   tabId: WorkspaceTabId,
-): EnvironmentPresentationModel {
-  return {
-    presentation: resolveEffectivePresentation(state, mode, tabId),
-    pinnedWidth: resolveEnvironmentPinnedWidth(state, tabId),
-  };
+): EnvironmentPresentation {
+  return resolveEffectivePresentation(state, mode, tabId);
 }
 
 export function replaceTabPresentation(
   state: EnvironmentPresentationState,
   tabId: WorkspaceTabId,
   presentation: EnvironmentPresentation,
-  pinnedWidth?: number,
 ): EnvironmentPresentationState {
-  const existing = state.byTab.find((entry) => entry.tabId === tabId);
   const without = state.byTab.filter((entry) => entry.tabId !== tabId);
-  const resolvedWidth = pinnedWidth ?? (existing !== undefined ? existing.pinnedWidth : undefined);
-  const next: EnvironmentTabPresentation = {
-    tabId,
-    presentation,
-    pinnedWidth: resolveEnvironmentPinnedWidth(
-      { ...state, byTab: [...without] },
-      tabId,
-      resolvedWidth,
-    ),
-  };
+  const next: EnvironmentTabPresentation = { tabId, presentation };
   return { ...state, byTab: [...without, next] };
 }
 

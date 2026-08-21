@@ -63,7 +63,7 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
   const resolved = resolveTabPresentation(props.presentation, "work", props.tab.id);
 
   return (
-    <div className={`code-thread-environment code-thread-environment--${resolved.presentation}`}>
+    <div className={`code-thread-environment code-thread-environment--${resolved}`}>
       <div className="code-thread-environment__content">{props.children}</div>
       <ThreadEnvironmentPanel
         identity={projection.identity}

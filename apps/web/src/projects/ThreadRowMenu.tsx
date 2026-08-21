@@ -15,6 +15,19 @@ export const MENU_ITEM_CLASS =
 export interface ThreadRowActions {
   /** Absent when the host cannot archive this thread. */
   readonly onArchiveThread?: (threadId: string) => void;
+  /**
+   * Clears the thread's open follow-up. Paired with {@link onMarkFollowUp}: a
+   * host that can set the mark can clear it, so the menu offers whichever of
+   * the two would change the thread.
+   */
+  readonly onCompleteFollowUp?: (threadId: string) => void;
+  /** Absent when the host cannot record a follow-up on this thread. */
+  readonly onMarkFollowUp?: (threadId: string) => void;
+  /**
+   * Absent when no export client resolves for this window, which is the same
+   * test the chat thread-actions menu applies before offering Export.
+   */
+  readonly onExportThread?: (threadId: string, title: string) => void;
   /** Absent when nothing tracks read state for this thread. */
   readonly onMarkThreadRead?: (threadId: string) => void;
   /** Absent when nothing tracks read state for this thread. */
@@ -29,6 +42,9 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
   if (actions === undefined) return true;
   return (
     actions.onArchiveThread === undefined &&
+    actions.onCompleteFollowUp === undefined &&
+    actions.onMarkFollowUp === undefined &&
+    actions.onExportThread === undefined &&
     actions.onMarkThreadRead === undefined &&
     actions.onMarkThreadUnread === undefined &&
     actions.onPinThread === undefined &&
@@ -101,6 +117,31 @@ export function ThreadRowMenu(props: {
               Mark as unread
             </ContextMenuPrimitive.Item>
           )}
+          {/* The row offers the follow-up action that would change the thread,
+              the same rule the read-state pair above follows. This is the only
+              place the mark can be set now that the thread carries no header
+              band of its own. */}
+          {props.thread.followUp === true ? (
+            props.actions.onCompleteFollowUp === undefined ? null : (
+              <ContextMenuPrimitive.Item
+                className={MENU_ITEM_CLASS}
+                closeOnClick
+                label="Complete follow-up"
+                onClick={() => props.actions.onCompleteFollowUp?.(threadId)}
+              >
+                Complete follow-up
+              </ContextMenuPrimitive.Item>
+            )
+          ) : props.actions.onMarkFollowUp === undefined ? null : (
+            <ContextMenuPrimitive.Item
+              className={MENU_ITEM_CLASS}
+              closeOnClick
+              label="Mark for follow-up"
+              onClick={() => props.actions.onMarkFollowUp?.(threadId)}
+            >
+              Mark for follow-up
+            </ContextMenuPrimitive.Item>
+          )}
           <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
           <ContextMenuPrimitive.Item
             className={MENU_ITEM_CLASS}
@@ -118,6 +159,18 @@ export function ThreadRowMenu(props: {
           >
             Copy thread ID
           </ContextMenuPrimitive.Item>
+          {props.actions.onExportThread === undefined ? null : (
+            <ContextMenuPrimitive.Item
+              className={MENU_ITEM_CLASS}
+              closeOnClick
+              label="Export…"
+              onClick={() =>
+                props.actions.onExportThread?.(String(props.thread.threadId), props.thread.title)
+              }
+            >
+              Export…
+            </ContextMenuPrimitive.Item>
+          )}
           {props.actions.onArchiveThread === undefined ? null : (
             <>
               <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
