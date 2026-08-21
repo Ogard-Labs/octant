@@ -88,3 +88,4 @@ in the repository compose into it later rather than being widened for it.
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0011 Extensions and skills: the activation ladder
 - 0023 Bringing a run home
+- 0044 The dock hosts live thread-owned tools

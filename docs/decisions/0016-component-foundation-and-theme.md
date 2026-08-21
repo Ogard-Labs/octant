@@ -83,3 +83,4 @@ resulting stack and the theme rules that make it Octant-owned.
 
 - 0004 Monorepo layering and dependency direction
 - 0015 Workspace shell model
+- 0044 The dock hosts live thread-owned tools

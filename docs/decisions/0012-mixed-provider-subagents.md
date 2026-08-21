@@ -88,3 +88,4 @@ authority than their parent.
 - 0007 Direct API providers and the native agent harness
 - 0008 Context budget and capacity scheduling
 - 0009 Sandbox confinement, approvals, and Plan mode
+- 0044 The dock hosts live thread-owned tools

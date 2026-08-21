@@ -84,3 +84,4 @@ users start quickly without a setup modal.
 - 0002 Durable event journal
 - 0009 Sandbox confinement, approvals, and Plan mode
 - 0012 Mixed-provider subagents
+- 0044 The dock hosts live thread-owned tools

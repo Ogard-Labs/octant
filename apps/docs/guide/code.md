@@ -52,6 +52,11 @@ transcript. Write one in the thread's **Plan** panel — one step per line, with
 an optional reason after an em dash — and press **Propose plan**. It appears
 beside the transcript as well, so it stays in view while you read the thread.
 
+That panel, including the empty Propose plan form, is current product
+behavior. The approved later placement is a right-dock Plan tool that appears
+only when the thread already has a real plan artifact; proposal stays the
+thread's planning workflow, not an empty dock form.
+
 A plan starts **Proposed · not approved**. Nothing about it is work yet: the
 host refuses to start, finish, or drop a step until the plan is approved.
 **Approve plan** is that gesture and the only one — changing a thread's
