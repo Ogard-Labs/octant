@@ -443,6 +443,42 @@ describe("ZenSurface", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/cannot add a terminal/i);
   });
 
+  it("labels a pinned terminal separately from the thread that owns it", () => {
+    const terminal = {
+      elementId,
+      kind: "terminal" as const,
+      sourceContext: {
+        hostId: "local-host",
+        mode: "code" as const,
+        projectId: null,
+        threadKind: "code" as const,
+        threadId: "00000000-0000-4000-8000-000000000914",
+      },
+      checkoutId: "00000000-0000-4000-8000-000000000915",
+      terminalId: "00000000-0000-4000-8000-000000000916",
+      geometry: { x: 40, y: 40, width: 360, height: 220 },
+      zIndex: 1,
+      minimized: false,
+      locked: false,
+      title: "HEI",
+    } as never;
+
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        renderTerminal={() => <div role="region" aria-label="Terminal pane" />}
+        space={makeSpace([terminal])}
+      />,
+    );
+
+    expect(screen.getByRole("group", { name: "Terminal · HEI" })).toBeInTheDocument();
+  });
+
   it("announces explicit completion without implying task or thread completion", () => {
     render(
       <ZenSurface
@@ -1141,6 +1177,32 @@ describe("ZenSurface live thread cards", () => {
       sourceContext: element.sourceContext,
     } as never;
   }
+
+  it("keeps a live thread's resize grip above its composer", () => {
+    const element = threadElement(1, "code");
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        renderLiveThread={({ entry }) => ({
+          status: "streaming",
+          surface: (
+            <div className="code-thread-workspace__composer" style={{ zIndex: 2 }}>
+              {entry.title}
+            </div>
+          ),
+        })}
+        space={makeSpace([element])}
+        threadEntries={[catalogEntry(element)]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Resize Thread 1" })).toHaveStyle({ zIndex: "3" });
+  });
 
   it("streams each card's own thread and holds the rest at the live-card budget", () => {
     const elements = [1, 2, 3, 4].map((suffix) => threadElement(suffix));
