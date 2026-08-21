@@ -2,14 +2,22 @@ import {
   decodeAgentRunCreationRequest,
   decodeAgentRunId,
   decodeAgentRunParentThreadId,
+  decodeAgentRunWorkspaceConfirmationRequest,
+  decodeAgentRunWorkspacePreparationRequest,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunCreationRequest,
   type AgentRunId,
   type AgentRunParentThreadId,
   type AgentRunPolicySettings,
+  type AgentRunWorkspaceConfirmationResult,
+  type AgentRunWorkspacePreparationResult,
+  type AgentRunWorkspaceReceipt,
+  type AgentRunWorkspaceRefusalReason,
   type MultiModelPool,
 } from "@octant/contracts";
+import type { AgentRunWorkspaceParentFacts } from "@octant/domain/agent-run-workspace-policy";
+import type { AgentRunCodeWorkspaceContext } from "./agentRunWorkspaceService";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -44,9 +52,11 @@ export interface AgentRunRouteDependencies {
     readonly windowId: string;
   }) =>
     | {
-        readonly parentMode: "chat" | "code";
+        readonly parentMode: "chat" | "work" | "code";
         readonly parentAuthority: AgentRunAuthority;
         readonly liveAuthority: AgentRunAuthority;
+        readonly workspaceParent: AgentRunWorkspaceParentFacts;
+        readonly codeWorkspace?: AgentRunCodeWorkspaceContext;
       }
     | undefined;
   readonly authorizeCancellation: (input: {
@@ -84,6 +94,32 @@ export interface AgentRunRouteDependencies {
     readonly request: AgentRunCreationRequest;
   }) => AgentRunWorktreeReceiptPort | undefined | Promise<AgentRunWorktreeReceiptPort | undefined>;
   /**
+   * Server-owned child workspace prepare/confirm/admit. Absent means this
+   * host cannot issue mode-correct workspace grants, so Work/Code children
+   * and explicit Chat receipts fail closed.
+   */
+  readonly workspace?: {
+    readonly prepare: (input: {
+      readonly windowId: string;
+      readonly parent: AgentRunWorkspaceParentFacts;
+      readonly code?: AgentRunCodeWorkspaceContext;
+    }) => Promise<AgentRunWorkspacePreparationResult>;
+    readonly confirm: (input: {
+      readonly windowId: string;
+      readonly parent: AgentRunWorkspaceParentFacts;
+      readonly worktreeReceiptId: string;
+    }) => Promise<AgentRunWorkspaceConfirmationResult>;
+    readonly admit: (input: {
+      readonly windowId: string;
+      readonly requested: AgentRunCreationRequest["workspace"];
+      readonly role: AgentRunCreationRequest["role"];
+      readonly parent: AgentRunWorkspaceParentFacts;
+    }) => Promise<
+      | { readonly status: "admitted"; readonly workspace: AgentRunWorkspaceReceipt }
+      | { readonly status: "refused"; readonly reason: AgentRunWorkspaceRefusalReason }
+    >;
+  };
+  /**
    * Reads the parent thread's own conversation for a child that asked to be
    * admitted with it. Consulted only after `authorizeCreation` proved this
    * window may create children from that parent thread, so a child can never
@@ -112,6 +148,14 @@ function json(data: unknown, status: number, origin: string | null): Response {
 
 function failure(message: string, status: number, origin: string | null): Response {
   return json({ error: message }, status, origin);
+}
+
+function refused(
+  reason: AgentRunWorkspaceRefusalReason,
+  origin: string | null,
+  status = 400,
+): Response {
+  return json({ status: "refused", reason }, status, origin);
 }
 
 /**
@@ -206,6 +250,70 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
       return json(result, result.kind === "run-updated" ? 200 : 409, origin);
     }
 
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/workspaces/prepare") {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return failure("AgentRun workspace prepare body is invalid.", 400, origin);
+      }
+      let prepareRequest: ReturnType<typeof decodeAgentRunWorkspacePreparationRequest>;
+      try {
+        prepareRequest = decodeAgentRunWorkspacePreparationRequest(body);
+      } catch {
+        return failure("AgentRun workspace prepare request is invalid.", 400, origin);
+      }
+      const creationAuthority = dependencies.authorizeCreation({
+        parentThreadId: prepareRequest.parentThreadId,
+        windowId: authenticatedWindowId,
+      });
+      if (creationAuthority === undefined) {
+        return refused("unauthorized", origin, 403);
+      }
+      if (dependencies.workspace === undefined) {
+        return refused("unavailable", origin);
+      }
+      const prepared = await dependencies.workspace.prepare({
+        windowId: authenticatedWindowId,
+        parent: creationAuthority.workspaceParent,
+        ...(creationAuthority.codeWorkspace === undefined
+          ? {}
+          : { code: creationAuthority.codeWorkspace }),
+      });
+      return json(prepared, prepared.status === "refused" ? 400 : 200, origin);
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/workspaces/confirm") {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return failure("AgentRun workspace confirm body is invalid.", 400, origin);
+      }
+      let confirmRequest: ReturnType<typeof decodeAgentRunWorkspaceConfirmationRequest>;
+      try {
+        confirmRequest = decodeAgentRunWorkspaceConfirmationRequest(body);
+      } catch {
+        return failure("AgentRun workspace confirm request is invalid.", 400, origin);
+      }
+      const creationAuthority = dependencies.authorizeCreation({
+        parentThreadId: confirmRequest.parentThreadId,
+        windowId: authenticatedWindowId,
+      });
+      if (creationAuthority === undefined) {
+        return refused("unauthorized", origin, 403);
+      }
+      if (dependencies.workspace === undefined) {
+        return refused("unavailable", origin);
+      }
+      const confirmed = await dependencies.workspace.confirm({
+        windowId: authenticatedWindowId,
+        parent: creationAuthority.workspaceParent,
+        worktreeReceiptId: String(confirmRequest.worktreeReceiptId),
+      });
+      return json(confirmed, confirmed.status === "refused" ? 400 : 200, origin);
+    }
+
     if (request.method === "POST" && url.pathname === "/api/agent-runs/request") {
       let body: unknown;
       try {
@@ -225,10 +333,10 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
         windowId: authenticatedWindowId,
       });
       if (creationAuthority === undefined) {
-        return failure("AgentRun creation is unauthorized.", 403, origin);
+        return refused("unauthorized", origin, 403);
       }
       if (creationRequest.mode !== creationAuthority.parentMode) {
-        return failure("AgentRun child mode must match the parent thread mode.", 400, origin);
+        return refused("unsupported", origin);
       }
       // Return an idempotent receipt before mutable provider readiness is
       // consulted. The receipt is only reusable for the exact authorized
@@ -258,6 +366,21 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
         creationRequest.workspace.kind === "code-worktree"
           ? await dependencies.resolveCodeWorktreeReceipt?.({ request: creationRequest })
           : undefined;
+      let admittedWorkspace: AgentRunWorkspaceReceipt | undefined;
+      if (dependencies.workspace !== undefined) {
+        const admitted = await dependencies.workspace.admit({
+          windowId: authenticatedWindowId,
+          requested: creationRequest.workspace,
+          role: creationRequest.role,
+          parent: creationAuthority.workspaceParent,
+        });
+        if (admitted.status === "refused") {
+          return refused(admitted.reason, origin);
+        }
+        admittedWorkspace = admitted.workspace;
+      } else if (creationRequest.mode === "work") {
+        return refused("unavailable", origin);
+      }
       let command: ReturnType<typeof buildAgentRunRequestCommand>;
       try {
         command = buildAgentRunRequestCommand({
@@ -267,12 +390,16 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
           uuid: dependencies.uuid,
           ...(poolRoutingContext === undefined ? {} : { poolRouting: poolRoutingContext }),
           ...(worktreeReceipts === undefined ? {} : { worktreeReceipts }),
+          ...(admittedWorkspace === undefined ? {} : { admittedWorkspace }),
           ...(dependencies.parentContext === undefined
             ? {}
             : { parentContext: dependencies.parentContext }),
         });
       } catch (error) {
         if (error instanceof AgentRunCreationRejected) {
+          if (isWorkspaceRefusal(error.reason)) {
+            return refused(error.reason, origin);
+          }
           return failure(error.message, 400, origin);
         }
         throw error;
@@ -297,6 +424,16 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
         );
       } catch (error) {
         if (error instanceof AgentRunOrchestrationError) {
+          if (error.reason === "workspace-denied") {
+            return refused(
+              error.message.includes("parent checkout")
+                ? "parent-checkout"
+                : error.message.includes("binding")
+                  ? "stale"
+                  : "unavailable",
+              origin,
+            );
+          }
           return failure(error.message, 400, origin);
         }
         throw error;
@@ -468,4 +605,19 @@ function serializeEntries(entries: ReadonlyArray<AgentRunParentSummaryEntry>) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isWorkspaceRefusal(reason: string): reason is AgentRunWorkspaceRefusalReason {
+  return (
+    reason === "unauthorized" ||
+    reason === "unavailable" ||
+    reason === "stale" ||
+    reason === "expired" ||
+    reason === "foreign-thread" ||
+    reason === "foreign-project" ||
+    reason === "parent-checkout" ||
+    reason === "wider-than-parent" ||
+    reason === "unconfirmed" ||
+    reason === "unsupported"
+  );
 }

@@ -77,6 +77,39 @@ describe("agentRunClient", () => {
     ).rejects.toBeInstanceOf(AgentRunClientFailure);
   });
 
+  it("prepares a child workspace through the server-owned route", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toContain("/api/agent-runs/workspaces/prepare");
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String(init?.body))).toEqual({ parentThreadId });
+      return new Response(
+        JSON.stringify({
+          status: "prepared",
+          workspace: {
+            kind: "chat-virtual",
+            mode: "chat",
+            receiptId: "66666666-6666-4666-8666-666666666666",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const client = createAgentRunClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "cap",
+    });
+    const prepared = await client.prepareWorkspace({ parentThreadId: parentThreadId as never });
+    expect(prepared).toEqual({
+      status: "prepared",
+      workspace: {
+        kind: "chat-virtual",
+        mode: "chat",
+        receiptId: "66666666-6666-4666-8666-666666666666",
+      },
+    });
+  });
+
   it("requests a new child run through the explicit creation route", async () => {
     const creationRequest = {
       requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",

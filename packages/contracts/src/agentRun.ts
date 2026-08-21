@@ -2,7 +2,7 @@ import { Schema } from "effect";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { MultiModelRouteDecisionReceipt } from "./multiModelPool";
-import { ProjectId } from "./projects";
+import { BindingRevisionId, ProjectId } from "./projects";
 import {
   PermissionPersistence,
   ProviderContextBlock,
@@ -27,6 +27,16 @@ export type AgentRunParentThreadId = typeof AgentRunParentThreadId.Type;
 
 export const AgentRunContextSnapshotId = brandedUuid("AgentRunContextSnapshotId");
 export type AgentRunContextSnapshotId = typeof AgentRunContextSnapshotId.Type;
+
+/**
+ * Server-issued handle for a prepared Chat or Work child workspace.
+ *
+ * Code children keep using `WorktreeReceiptId` from the managed worktree
+ * store. This id never carries a filesystem path; the server resolves the
+ * bound root at admission.
+ */
+export const AgentRunWorkspaceReceiptId = brandedUuid("AgentRunWorkspaceReceiptId");
+export type AgentRunWorkspaceReceiptId = typeof AgentRunWorkspaceReceiptId.Type;
 
 /**
  * Maximum context blocks one child may be admitted with.
@@ -118,6 +128,7 @@ export const AgentRunWorkspaceReceipt = Schema.Union(
     kind: Schema.Literal("work-root"),
     mode: Schema.Literal("work"),
     projectId: ProjectId,
+    bindingRevisionId: BindingRevisionId,
     canonicalRoot: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(4096)),
   }).annotations(strict),
   Schema.Struct({
@@ -130,6 +141,26 @@ export const AgentRunWorkspaceReceipt = Schema.Union(
   }).annotations(strict),
 );
 export type AgentRunWorkspaceReceipt = typeof AgentRunWorkspaceReceipt.Type;
+
+/**
+ * Why a child workspace prepare, confirm, or admission step refused.
+ *
+ * These are expected failures a caller must handle. They never include
+ * filesystem paths: the renderer only learns that the receipt is unusable.
+ */
+export const AgentRunWorkspaceRefusalReason = Schema.Literal(
+  "unauthorized",
+  "unavailable",
+  "stale",
+  "expired",
+  "foreign-thread",
+  "foreign-project",
+  "parent-checkout",
+  "wider-than-parent",
+  "unconfirmed",
+  "unsupported",
+);
+export type AgentRunWorkspaceRefusalReason = typeof AgentRunWorkspaceRefusalReason.Type;
 
 /**
  * Immutable pool-derived route for one accepted child AgentRun.
@@ -433,6 +464,12 @@ export const decodeAgentRunId = Schema.decodeUnknownSync(AgentRunId);
 export const decodeAgentRunRequestId = Schema.decodeUnknownSync(AgentRunRequestId);
 export const decodeAgentRunParentThreadId = Schema.decodeUnknownSync(AgentRunParentThreadId);
 export const decodeAgentRunContextSnapshotId = Schema.decodeUnknownSync(AgentRunContextSnapshotId);
+export const decodeAgentRunWorkspaceReceiptId = Schema.decodeUnknownSync(
+  AgentRunWorkspaceReceiptId,
+);
+export const decodeAgentRunWorkspaceRefusalReason = Schema.decodeUnknownSync(
+  AgentRunWorkspaceRefusalReason,
+);
 export const decodeAgentRunRole = Schema.decodeUnknownSync(AgentRunRole);
 export const decodeAgentRunCreationPosture = Schema.decodeUnknownSync(AgentRunCreationPosture);
 export const decodeAgentRunExecutionKind = Schema.decodeUnknownSync(AgentRunExecutionKind);

@@ -5,10 +5,13 @@ import {
   AgentRunParentThreadId,
   AgentRunRequestId,
   AgentRunRole,
+  AgentRunWorkspaceReceiptId,
+  AgentRunWorkspaceRefusalReason,
 } from "./agentRun";
 import { WorktreeReceiptId } from "./code";
 import { OctantMode } from "./modes";
 import { MultiModelPool } from "./multiModelPool";
+import { BindingRevisionId, ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -16,17 +19,22 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 /**
  * Workspace target for an explicit one-off child creation request.
  *
- * - Chat virtual scratch is accepted as a client-declared kind (no filesystem).
- * - Code children supply only a managed worktree receipt id; the server
- *   resolves and verifies isolation before admission. Clients cannot claim
- *   `verified: true` or absolute worktree paths.
- * - Work Project/root children remain a follow-up (authoritative root
- *   resolution is not accepted from a client proposal).
+ * Clients name a server-issued receipt only. They never supply absolute
+ * paths or claim `verified: true`. Chat may omit a receipt when the host
+ * synthesizes the research-only virtual workspace from the parent thread;
+ * Work and Code always present the id returned by prepare (and, for Code,
+ * confirm).
  */
 export const AgentRunCreationWorkspace = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("chat-virtual"),
     mode: Schema.Literal("chat"),
+    receiptId: Schema.optional(AgentRunWorkspaceReceiptId),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("work-root"),
+    mode: Schema.Literal("work"),
+    receiptId: AgentRunWorkspaceReceiptId,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("code-worktree"),
@@ -35,6 +43,68 @@ export const AgentRunCreationWorkspace = Schema.Union(
   }).annotations(strict),
 );
 export type AgentRunCreationWorkspace = typeof AgentRunCreationWorkspace.Type;
+
+/**
+ * Renderer-facing handle for a prepared child workspace. Paths and
+ * client-claimed verification are forbidden here; the server resolves them
+ * at confirmation and admission.
+ */
+export const AgentRunWorkspaceHandle = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("chat-virtual"),
+    mode: Schema.Literal("chat"),
+    receiptId: AgentRunWorkspaceReceiptId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("work-root"),
+    mode: Schema.Literal("work"),
+    receiptId: AgentRunWorkspaceReceiptId,
+    projectId: ProjectId,
+    bindingRevisionId: BindingRevisionId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("code-worktree"),
+    mode: Schema.Literal("code"),
+    worktreeReceiptId: WorktreeReceiptId,
+    confirmation: Schema.Literal("prepared", "confirmed"),
+  }).annotations(strict),
+);
+export type AgentRunWorkspaceHandle = typeof AgentRunWorkspaceHandle.Type;
+
+export const AgentRunWorkspacePreparationRequest = Schema.Struct({
+  parentThreadId: AgentRunParentThreadId,
+}).annotations(strict);
+export type AgentRunWorkspacePreparationRequest = typeof AgentRunWorkspacePreparationRequest.Type;
+
+export const AgentRunWorkspaceConfirmationRequest = Schema.Struct({
+  parentThreadId: AgentRunParentThreadId,
+  worktreeReceiptId: WorktreeReceiptId,
+}).annotations(strict);
+export type AgentRunWorkspaceConfirmationRequest = typeof AgentRunWorkspaceConfirmationRequest.Type;
+
+export const AgentRunWorkspaceRefused = Schema.Struct({
+  status: Schema.Literal("refused"),
+  reason: AgentRunWorkspaceRefusalReason,
+}).annotations(strict);
+export type AgentRunWorkspaceRefused = typeof AgentRunWorkspaceRefused.Type;
+
+export const AgentRunWorkspacePreparationResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("prepared"),
+    workspace: AgentRunWorkspaceHandle,
+  }).annotations(strict),
+  AgentRunWorkspaceRefused,
+);
+export type AgentRunWorkspacePreparationResult = typeof AgentRunWorkspacePreparationResult.Type;
+
+export const AgentRunWorkspaceConfirmationResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("confirmed"),
+    workspace: AgentRunWorkspaceHandle,
+  }).annotations(strict),
+  AgentRunWorkspaceRefused,
+);
+export type AgentRunWorkspaceConfirmationResult = typeof AgentRunWorkspaceConfirmationResult.Type;
 
 /**
  * Client-supplied facts for proposing a bounded child run. The server never
@@ -83,13 +153,25 @@ export const AgentRunCreationRequest = Schema.Struct({
       if (request.mode === "chat") {
         return request.workspace.kind === "chat-virtual" && request.workspace.mode === "chat";
       }
-      if (request.mode === "code") {
-        return request.workspace.kind === "code-worktree" && request.workspace.mode === "code";
+      if (request.mode === "work") {
+        return request.workspace.kind === "work-root" && request.workspace.mode === "work";
       }
-      // Work child creation is not admitted in this slice.
-      return false;
+      return request.workspace.kind === "code-worktree" && request.workspace.mode === "code";
     }),
   );
 export type AgentRunCreationRequest = typeof AgentRunCreationRequest.Type;
 
 export const decodeAgentRunCreationRequest = Schema.decodeUnknownSync(AgentRunCreationRequest);
+export const decodeAgentRunWorkspaceHandle = Schema.decodeUnknownSync(AgentRunWorkspaceHandle);
+export const decodeAgentRunWorkspacePreparationRequest = Schema.decodeUnknownSync(
+  AgentRunWorkspacePreparationRequest,
+);
+export const decodeAgentRunWorkspaceConfirmationRequest = Schema.decodeUnknownSync(
+  AgentRunWorkspaceConfirmationRequest,
+);
+export const decodeAgentRunWorkspacePreparationResult = Schema.decodeUnknownSync(
+  AgentRunWorkspacePreparationResult,
+);
+export const decodeAgentRunWorkspaceConfirmationResult = Schema.decodeUnknownSync(
+  AgentRunWorkspaceConfirmationResult,
+);

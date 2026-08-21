@@ -121,6 +121,13 @@ const routingReceipt: AgentRunRoutingReceipt = {
 };
 
 const workspaceReceipt: AgentRunWorkspaceReceipt = { kind: "chat-virtual", mode: "chat" };
+const workWorkspaceReceipt: AgentRunWorkspaceReceipt = {
+  kind: "work-root",
+  mode: "work",
+  projectId: "55555555-5555-4555-8555-555555555555" as never,
+  bindingRevisionId: "88888888-8888-4888-8888-888888888888" as never,
+  canonicalRoot: "/projects/demo",
+};
 
 const poolRequested = { hostId: "local", providerInstanceId: ids.provider, modelId: "gpt-4o" };
 const poolFallbackCandidate = {
@@ -263,6 +270,39 @@ describe("AgentRunPersistenceService", () => {
     const summary = service.parentSummary(ids.thread);
     expect(summary).toHaveLength(1);
     expect(summary[0]?.runId).toBe(ids.run);
+  });
+
+  it("journals a Work binding receipt and rebuilds it on replay", () => {
+    const first = createHarness();
+    const workRouting = { ...routingReceipt, mode: "work" as const };
+    const accepted = first.service.requestRun({
+      command: {
+        ...requestCommand(),
+        requestedAuthority: {
+          ...requestedAuthority,
+          filesystem: true,
+          network: false,
+          executionPolicy: "approval-gated",
+        },
+        routingReceipt: workRouting,
+        workspaceReceipt: workWorkspaceReceipt,
+      },
+      parentAuthority: {
+        ...parentAuthority,
+        network: false,
+        executionPolicy: "approval-gated",
+        permissionPersistence: "current-session",
+      },
+      confirmed: true,
+    });
+    expect(accepted.kind).toBe("run-accepted");
+    if (accepted.kind !== "run-accepted") return;
+    expect(accepted.run.workspaceReceipt).toEqual(workWorkspaceReceipt);
+
+    const replayed = createHarness(first.connection);
+    replayed.service.rebuildFromJournal();
+    const restored = replayed.service.getById(accepted.run.id);
+    expect(restored?.workspaceReceipt).toEqual(workWorkspaceReceipt);
   });
 
   it("is request-id idempotent on retry and does not create a second run", () => {

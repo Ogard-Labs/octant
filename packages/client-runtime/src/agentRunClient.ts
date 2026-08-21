@@ -2,10 +2,18 @@ import {
   decodeAgentRunCommandResult,
   decodeAgentRunCreationRequest,
   decodeAgentRunParentThreadId,
+  decodeAgentRunWorkspaceConfirmationRequest,
+  decodeAgentRunWorkspaceConfirmationResult,
+  decodeAgentRunWorkspacePreparationRequest,
+  decodeAgentRunWorkspacePreparationResult,
   type AgentRunCommandResult,
   type AgentRunCreationRequest,
   type AgentRunId,
   type AgentRunParentThreadId,
+  type AgentRunWorkspaceConfirmationRequest,
+  type AgentRunWorkspaceConfirmationResult,
+  type AgentRunWorkspacePreparationRequest,
+  type AgentRunWorkspacePreparationResult,
 } from "@octant/contracts";
 
 /**
@@ -91,6 +99,14 @@ export interface AgentRunClient {
     readonly runId: AgentRunId;
     readonly expectedVersion: number;
   }): Promise<AgentRunCommandResult>;
+  /** Server-owned child workspace prepare. Never sends or returns absolute paths. */
+  prepareWorkspace(
+    input: AgentRunWorkspacePreparationRequest,
+  ): Promise<AgentRunWorkspacePreparationResult>;
+  /** Confirms a prepared Code child worktree receipt. */
+  confirmWorkspace(
+    input: AgentRunWorkspaceConfirmationRequest,
+  ): Promise<AgentRunWorkspaceConfirmationResult>;
   /** Proposes and creates a bounded child run. */
   requestRun(input: AgentRunCreationRequest): Promise<AgentRunClientCommandResult>;
   /** Cancels a run, its subtree, or its whole hierarchy leaf-first. */
@@ -149,6 +165,58 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
         );
       }
     },
+    async prepareWorkspace(input) {
+      let validated: AgentRunWorkspacePreparationRequest;
+      try {
+        validated = decodeAgentRunWorkspacePreparationRequest(input);
+      } catch {
+        throw new AgentRunClientFailure(
+          "invalid",
+          "AgentRun workspace prepare request is invalid.",
+        );
+      }
+      const body = await requestJson(
+        options.fetch,
+        new URL("/api/agent-runs/workspaces/prepare", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        { structuredWorkspaceResult: true },
+      );
+      try {
+        return decodeAgentRunWorkspacePreparationResult(body);
+      } catch {
+        throw new AgentRunClientFailure("unavailable", "AgentRun workspace prepare is malformed.");
+      }
+    },
+    async confirmWorkspace(input) {
+      let validated: AgentRunWorkspaceConfirmationRequest;
+      try {
+        validated = decodeAgentRunWorkspaceConfirmationRequest(input);
+      } catch {
+        throw new AgentRunClientFailure(
+          "invalid",
+          "AgentRun workspace confirm request is invalid.",
+        );
+      }
+      const body = await requestJson(
+        options.fetch,
+        new URL("/api/agent-runs/workspaces/confirm", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        { structuredWorkspaceResult: true },
+      );
+      try {
+        return decodeAgentRunWorkspaceConfirmationResult(body);
+      } catch {
+        throw new AgentRunClientFailure("unavailable", "AgentRun workspace confirm is malformed.");
+      }
+    },
     async requestRun(input) {
       let validated: AgentRunCreationRequest;
       try {
@@ -194,7 +262,10 @@ async function requestJson(
   fetchImpl: typeof globalThis.fetch,
   url: string,
   init: RequestInit,
-  options: { readonly structuredCommandResult?: boolean } = {},
+  options: {
+    readonly structuredCommandResult?: boolean;
+    readonly structuredWorkspaceResult?: boolean;
+  } = {},
 ): Promise<unknown> {
   let response: Response;
   try {
@@ -217,6 +288,12 @@ async function requestJson(
   // generic thrown failure that would lose the reason (e.g. "posture-rejected"
   // vs. "limit-reached" vs. a stale-version race).
   if (options.structuredCommandResult && response.status === 409) {
+    return body;
+  }
+  if (
+    options.structuredWorkspaceResult &&
+    (response.status === 200 || response.status === 400 || response.status === 403)
+  ) {
     return body;
   }
   if (response.status === 409) {
