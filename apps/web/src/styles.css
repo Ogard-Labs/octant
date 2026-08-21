@@ -3314,36 +3314,6 @@ button:focus-visible {
   display: none;
 }
 
-.thread-environment-panel__sections {
-  margin: 0;
-  padding: 6px 10px;
-  list-style: none;
-  border-bottom: 1px solid var(--octant-border);
-  max-height: 120px;
-  overflow-y: auto;
-}
-
-.thread-environment-panel__section {
-  display: flex;
-  flex-direction: column;
-  padding: 4px 0;
-  font-size: 11px;
-  color: var(--octant-text-secondary);
-}
-
-.thread-environment-panel__section + .thread-environment-panel__section {
-  border-top: 1px solid var(--octant-border);
-}
-
-.thread-environment-panel__section--unavailable span {
-  color: var(--octant-text-muted);
-}
-
-.thread-environment-panel__section--unavailable small {
-  font-size: 9px;
-  color: var(--octant-text-muted);
-}
-
 .thread-environment-panel__body {
   flex: 1 1 auto;
   min-height: 0;
