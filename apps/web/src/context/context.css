@@ -1,4 +1,5 @@
 .context-status-bar {
+  position: relative;
   min-width: 0;
   color: var(--octant-text-secondary);
   background: var(--octant-chrome);
@@ -35,6 +36,14 @@
   white-space: nowrap;
 }
 
+.context-status-bar__window-label {
+  color: var(--octant-text-primary);
+}
+
+.context-status-bar__usage {
+  font-variant-numeric: tabular-nums;
+}
+
 .context-status-bar__health,
 .context-status-bar__attention {
   display: inline-flex;
@@ -45,6 +54,164 @@
 
 .context-status-bar__attention {
   margin-left: auto;
+}
+
+.context-status-bar__chevron {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.context-status-bar__attention + .context-status-bar__chevron {
+  margin-left: 0;
+}
+
+.context-window-popover {
+  right: 10px;
+  bottom: calc(100% + 8px);
+  width: min(420px, calc(100vw - 24px));
+  padding: 12px;
+  color: var(--octant-text-primary);
+}
+
+.context-window-popover__header,
+.context-window-popover__breakdown > div,
+.context-window-popover__capabilities p,
+.context-window-popover__limits p {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.context-window-popover__header {
+  font-size: 12px;
+}
+
+.context-window-popover__header strong,
+.context-window-popover__breakdown dd {
+  font-variant-numeric: tabular-nums;
+}
+
+.context-window-popover__source {
+  margin: 3px 0 10px;
+  color: var(--octant-text-secondary);
+  font-size: 10px;
+}
+
+.context-window-popover__meter {
+  display: flex;
+  width: 100%;
+  height: 5px;
+  gap: 2px;
+  overflow: hidden;
+  background: var(--octant-border);
+  border-radius: var(--oct-radius-pill);
+}
+
+.context-window-popover__meter > span {
+  min-width: 2px;
+  height: 100%;
+  background: var(--context-window-tone);
+}
+
+.context-window-popover [data-tone="1"] {
+  --context-window-tone: var(--oct-series-6);
+}
+
+.context-window-popover [data-tone="2"] {
+  --context-window-tone: var(--oct-series-2);
+}
+
+.context-window-popover [data-tone="3"] {
+  --context-window-tone: var(--oct-series-1);
+}
+
+.context-window-popover [data-tone="4"] {
+  --context-window-tone: var(--oct-series-3);
+}
+
+.context-window-popover [data-tone="5"] {
+  --context-window-tone: var(--oct-series-5);
+}
+
+.context-window-popover [data-tone="6"] {
+  --context-window-tone: var(--oct-series-4);
+}
+
+.context-window-popover [data-tone="7"] {
+  --context-window-tone: var(--octant-border-strong);
+}
+
+.context-window-popover [data-tone="8"] {
+  --context-window-tone: var(--octant-control);
+}
+
+.context-window-popover__breakdown {
+  display: grid;
+  gap: 5px;
+  margin: 10px 0 0;
+}
+
+.context-window-popover__breakdown dt,
+.context-window-popover__breakdown dd {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 10px;
+}
+
+.context-window-popover__breakdown dt > span {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  background: var(--context-window-tone);
+  border-radius: 2px;
+}
+
+.context-window-popover__breakdown dd > span {
+  width: 42px;
+  justify-content: flex-end;
+  color: var(--octant-text-secondary);
+}
+
+.context-window-popover__capabilities,
+.context-window-popover__limits {
+  padding-top: 9px;
+  margin-top: 9px;
+  border-top: 1px solid var(--octant-border);
+}
+
+.context-window-popover__capabilities p,
+.context-window-popover__limits p {
+  margin: 4px 0 0;
+  color: var(--octant-text-secondary);
+  font-size: 10px;
+}
+
+.context-window-popover__capabilities p > span:first-child,
+.context-window-popover__limits p > span:first-child {
+  margin-right: auto;
+  color: var(--octant-text-primary);
+}
+
+.context-window-popover__limits h3 {
+  margin: 0 0 5px;
+  color: var(--octant-text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.context-window-popover__limits p[data-state="unavailable"] > span:last-child {
+  color: var(--octant-text-secondary);
+}
+
+.context-window-popover__inspect {
+  width: 100%;
+  justify-content: space-between;
+  margin-top: 10px;
+  color: var(--octant-text-secondary);
 }
 
 .context-health-warning {
@@ -239,6 +406,11 @@
   .context-status-bar__attention {
     width: 100%;
     margin-left: 0;
+  }
+
+  .context-window-popover {
+    right: 6px;
+    width: calc(100vw - 12px);
   }
 
   .context-inspector__header {
