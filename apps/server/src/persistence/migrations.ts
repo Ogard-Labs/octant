@@ -364,6 +364,25 @@ CREATE INDEX product_feedback_thread_idx
   ON product_feedback_projection (thread_id, lifecycle, last_sequence);
 `;
 
+const THREAD_EXTERNAL_CONTENT_TAINT_PROJECTION_SQL = `
+CREATE TABLE thread_external_content_taint_projection (
+  thread_id TEXT PRIMARY KEY CHECK(length(trim(thread_id)) > 0),
+  external_content_ingested INTEGER NOT NULL CHECK(external_content_ingested IN (0, 1)),
+  ingested_sources_json TEXT NOT NULL CHECK(json_valid(ingested_sources_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+) STRICT;
+
+CREATE TABLE thread_external_content_ingestion_projection (
+  thread_id TEXT NOT NULL CHECK(length(trim(thread_id)) > 0),
+  content_reference TEXT NOT NULL CHECK(length(trim(content_reference)) > 0),
+  source_label TEXT NOT NULL CHECK(length(trim(source_label)) > 0),
+  origin TEXT NOT NULL CHECK(origin IN ('tool-result', 'external-content', 'user', 'provider-text')),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+  PRIMARY KEY (thread_id, content_reference)
+) STRICT;
+`;
+
 const USAGE_PROJECTION_SQL = `
 CREATE TABLE usage_record_projection (
   reconciliation_id TEXT PRIMARY KEY CHECK(length(trim(reconciliation_id)) > 0),
@@ -1539,6 +1558,11 @@ ALTER TABLE code_runtime_projection
     version: 52,
     name: "repair_agent_profile_scopes",
     sql: REPAIR_AGENT_PROFILE_SCOPES_SQL,
+  },
+  {
+    version: 53,
+    name: "create_thread_external_content_taint_projection",
+    sql: THREAD_EXTERNAL_CONTENT_TAINT_PROJECTION_SQL,
   },
 ];
 

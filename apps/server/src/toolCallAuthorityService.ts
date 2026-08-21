@@ -29,8 +29,7 @@ export type ToolCallLiveFacts = {
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly approvalSatisfied: boolean;
   /**
-   * Hook for the thread-lifetime external-content taint projection (untrusted
-   * content provenance). Callers should plumb the live projection once it lands.
+   * Thread-lifetime taint rebuilt from `thread.external-content-ingested@1`.
    */
   readonly externalContentIngested: boolean;
   readonly declaredCapabilities?: ReadonlyArray<ExtensionCapability>;

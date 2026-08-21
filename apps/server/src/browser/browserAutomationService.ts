@@ -8,6 +8,7 @@ import type {
   BrowserObservation,
   BrowserThreadId,
   BrowserWorkspaceStatus,
+  ThreadExternalContentTaint,
   ToolActionAuthority,
   ToolActionCancellation,
   ToolActionRequest,
@@ -21,12 +22,17 @@ import {
   evaluateBrowserAction,
   evaluateProfileMode,
 } from "@octant/domain";
+import { emptyThreadContentTaint } from "@octant/domain/untrusted-content-policy";
+import type {
+  ExternalContentIngestionResult,
+  RecordExternalContentIngestionInput,
+} from "../context/externalContentIngestionStore";
+import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import {
   BrowserNavigationBlockedError,
   type BrowserPointObservation,
   type BrowserRuntimePort,
 } from "./browserRuntimePort";
-import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 
 export interface BrowserAuthorityResolver {
   resolve(threadId: BrowserThreadId, mode: "work" | "code"): ToolActionAuthority | undefined;
@@ -37,6 +43,9 @@ export interface BrowserAutomationServiceOptions {
   readonly authority: BrowserAuthorityResolver;
   /** Optional override; when omitted, a choke-point service wraps `authority`. */
   readonly toolCallAuthority?: ToolCallAuthorityService;
+  readonly recordExternalContentIngestion?: (
+    input: RecordExternalContentIngestionInput,
+  ) => ExternalContentIngestionResult;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly now: () => number;
@@ -80,6 +89,9 @@ export class BrowserAutomationService {
   readonly #runtime: BrowserRuntimePort;
   readonly #authority: BrowserAuthorityResolver;
   readonly #toolCalls: ToolCallAuthorityService;
+  readonly #recordExternalContentIngestion:
+    | ((input: RecordExternalContentIngestionInput) => ExternalContentIngestionResult)
+    | undefined;
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #now: () => number;
@@ -93,6 +105,7 @@ export class BrowserAutomationService {
     this.#toolCalls =
       options.toolCallAuthority ??
       createBrowserToolCallAuthorityService(options.authority, options.clock);
+    this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#now = options.now;
@@ -401,6 +414,20 @@ export class BrowserAutomationService {
         reference: `browser-observation-${this.#uuid()}`,
         origin: "tool-result",
       };
+      const ingested = this.#recordExternalContentIngestion?.({
+        threadId: owned.threadId,
+        provenance: { origin: "tool-result", sourceLabel: "browser-observation" },
+        contentReference: evidence.reference,
+        correlationId: owned.action.correlationId,
+        authorized: true,
+      });
+      if (ingested?.kind === "refused") {
+        return this.#failure(
+          owned,
+          { category: "failed", message: "The browser action failed." },
+          "failed",
+        );
+      }
       owned.observation = observation;
       owned.evidence.push(evidence);
       if (owned.evidence.length > MAX_RETAINED_BROWSER_EVIDENCE) {
@@ -777,21 +804,21 @@ function onlyLoopbackHttpsOrigins(origins: ReadonlyArray<string>): boolean {
 export function createBrowserToolCallAuthorityService(
   authority: BrowserAuthorityResolver,
   clock?: () => string,
+  readThreadTaint?: (threadId: string) => ThreadExternalContentTaint,
 ): ToolCallAuthorityService {
   return new ToolCallAuthorityService({
     resolveGrantedAuthority: (threadId, mode) => {
       if (mode !== "work" && mode !== "code") return undefined;
       return authority.resolve(threadId as BrowserThreadId, mode);
     },
-    resolveLiveFacts: ({ request }) => ({
+    resolveLiveFacts: ({ threadId, request }) => ({
       providerAppManagedTools: "supported",
       host: { computerUseEnabled: true },
       executionPolicy: "approval-gated",
       approvalSatisfied:
         request.approval.kind === "not-required" || request.approval.kind === "approved",
-      // Untrusted-content provenance is not yet tracked; wire the thread-lifetime
-      // taint projection here when it exists.
-      externalContentIngested: false,
+      externalContentIngested: (readThreadTaint?.(threadId) ?? emptyThreadContentTaint())
+        .externalContentIngested,
     }),
     ...(clock === undefined ? {} : { clock }),
   });
