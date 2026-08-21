@@ -1,21 +1,30 @@
 import type { ChatClient } from "@octant/client-runtime/chat-client";
+import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import type { WorkRequestClient } from "@octant/client-runtime/work-request-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import { decodeChatThreadId, type ChatThreadId } from "@octant/contracts/chat";
+import { decodeCodeThreadId, type CodeThreadId } from "@octant/contracts/code";
 import type { HostId } from "@octant/contracts/host";
 import { decodeWorkThreadId, type WorkThreadId } from "@octant/contracts/work-threads";
 import type { ZenSourceContext, ZenThreadCatalogEntry } from "@octant/contracts/zen";
 import { buildModelPickerGroups } from "@octant/domain";
 import type { ZenLiveCardActivity } from "@octant/domain";
-import { useMemo, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useMemo, type ReactNode } from "react";
 import { ChatWorkspace } from "../chat/ChatWorkspace";
 import { useChatController, type ChatReadCursorStore } from "../chat/useChatController";
+import { useCodeController, type CodeReadCursorStore } from "../code/useCodeController";
 import type { ProviderController } from "../providers/useProviderController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import type { ZenLiveThreadCard } from "./ZenThreadElement";
+
+const ZenCodeThreadWorkspace = lazy(() =>
+  import("../code/CodeThreadWorkspace").then(({ CodeThreadWorkspace }) => ({
+    default: CodeThreadWorkspace,
+  })),
+);
 
 /**
  * The provider facts a card reads. Narrowed on purpose: a card presents the
@@ -37,7 +46,11 @@ export type ZenCardProviderView = Pick<
 export interface ZenLiveThreadClients {
   readonly chatClient?: ChatClient;
   readonly chatReadCursorStore?: ChatReadCursorStore;
+  readonly codeClient?: CodeClient;
+  readonly codeReadCursorStore?: CodeReadCursorStore;
   readonly providerController?: ZenCardProviderView;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
   readonly workThreadClient?: WorkThreadClient;
   readonly workTurnClient?: WorkTurnClient;
   readonly workRequestClient?: WorkRequestClient;
@@ -112,10 +125,24 @@ function buildCardSurface(
       />
     );
   }
-  // Code cards keep their metadata reading. A Code thread's surface is still
-  // bound to one controller for the whole window, so a second Code surface
-  // would show the workspace's active thread instead of this card's.
-  return undefined;
+  const { codeClient } = clients;
+  if (codeClient === undefined) return undefined;
+  return (
+    <ZenCodeCardSurface
+      codeClient={codeClient}
+      {...(clients.codeReadCursorStore === undefined
+        ? {}
+        : { readCursorStore: clients.codeReadCursorStore })}
+      threadId={decodeCodeThreadId(String(sourceContext.threadId))}
+      {...(clients.providerController === undefined
+        ? {}
+        : { providerController: clients.providerController })}
+      {...(clients.serverUrl === undefined ? {} : { serverUrl: clients.serverUrl })}
+      {...(clients.windowCapability === undefined
+        ? {}
+        : { windowCapability: clients.windowCapability })}
+    />
+  );
 }
 
 /**
@@ -207,5 +234,65 @@ function ZenWorkCardSurface(props: {
       title={props.title}
       {...(props.turnClient === undefined ? {} : { turnClient: props.turnClient })}
     />
+  );
+}
+
+/** One Code thread, live inside its card, bound to the card's controller. */
+function ZenCodeCardSurface(props: {
+  readonly codeClient: CodeClient;
+  readonly providerController?: ZenCardProviderView;
+  readonly readCursorStore?: CodeReadCursorStore;
+  readonly serverUrl?: string;
+  readonly threadId: CodeThreadId;
+  readonly windowCapability?: string;
+}) {
+  const controller = useCodeController({
+    activeThreadId: props.threadId,
+    client: props.codeClient,
+    navigationRefreshMs: 0,
+    ...(props.readCursorStore === undefined ? {} : { readCursorStore: props.readCursorStore }),
+  });
+  const providerController = props.providerController;
+  const providerGroups = useMemo(
+    () =>
+      providerController === undefined
+        ? []
+        : buildModelPickerGroups({
+            instances: providerController.instances ?? [],
+            observedByInstance: providerController.observedByInstance ?? new Map(),
+            providerOrder: providerController.defaults?.providerOrder ?? [],
+            mode: "code",
+          }),
+    [providerController],
+  );
+  const nextUuid = useCallback(() => globalThis.crypto.randomUUID(), []);
+  if (controller === undefined) {
+    return (
+      <div className="zen-thread-element__unreachable">
+        <p role="status">Opening this Code thread…</p>
+      </div>
+    );
+  }
+  return (
+    <Suspense
+      fallback={
+        <div className="zen-thread-element__unreachable">
+          <p role="status">Opening this Code thread…</p>
+        </div>
+      }
+    >
+      <ZenCodeThreadWorkspace
+        attachmentClient={props.codeClient}
+        controller={controller}
+        nextUuid={nextUuid}
+        operationClient={props.codeClient}
+        providerGroups={providerGroups}
+        threadId={props.threadId}
+        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+        {...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability })}
+      />
+    </Suspense>
   );
 }
