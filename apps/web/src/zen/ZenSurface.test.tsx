@@ -360,6 +360,89 @@ describe("ZenSurface", () => {
     expect(onAddTimer).toHaveBeenCalledWith(40 * 60 * 1000);
   });
 
+  it("adds a terminal or browser for the focused thread without leaving Zen", () => {
+    const sourceContext = {
+      hostId: "local-host",
+      mode: "code" as const,
+      projectId: null,
+      threadKind: "code" as const,
+      threadId: "00000000-0000-4000-8000-000000000914",
+    } as never;
+    const onAddTerminal = vi.fn();
+    const onAddBrowser = vi.fn();
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onAddBrowser={onAddBrowser}
+        onAddTerminal={onAddTerminal}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace([
+          {
+            elementId,
+            kind: "thread",
+            sourceContext,
+            geometry: { x: 40, y: 40, width: 360, height: 220 },
+            zIndex: 1,
+            minimized: false,
+            locked: false,
+          },
+        ])}
+      />,
+    );
+
+    fireEvent.focus(screen.getByRole("group", { name: "Thread" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add terminal" }));
+    expect(onAddTerminal).toHaveBeenCalledWith(sourceContext);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add browser" }));
+    expect(onAddBrowser).toHaveBeenCalledWith(sourceContext);
+  });
+
+  it("keeps the terminal action disabled when Code says the thread cannot add one", () => {
+    const sourceContext = {
+      hostId: "local-host",
+      mode: "code" as const,
+      projectId: null,
+      threadKind: "code" as const,
+      threadId: "00000000-0000-4000-8000-000000000914",
+    } as never;
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        canAddTerminal={() => false}
+        onAddTerminal={vi.fn()}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace([
+          {
+            elementId,
+            kind: "thread",
+            sourceContext,
+            geometry: { x: 40, y: 40, width: 360, height: 220 },
+            zIndex: 1,
+            minimized: false,
+            locked: false,
+          },
+        ])}
+      />,
+    );
+
+    fireEvent.focus(screen.getByRole("group", { name: "Thread" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(screen.getByRole("button", { name: "Add terminal" })).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(/cannot add a terminal/i);
+  });
+
   it("announces explicit completion without implying task or thread completion", () => {
     render(
       <ZenSurface
@@ -1016,20 +1099,23 @@ describe("ZenSurface", () => {
 });
 
 describe("ZenSurface live thread cards", () => {
-  const sourceContext = (threadId: string) =>
+  const sourceContext = (threadId: string, kind: "chat" | "work" | "code" = "chat") =>
     ({
       hostId: "local-host",
-      mode: "chat",
+      mode: kind,
       projectId: null,
-      threadKind: "chat",
+      threadKind: kind,
       threadId,
     }) as never;
 
-  function threadElement(suffix: number): ZenElementPayload {
+  function threadElement(
+    suffix: number,
+    kind: "chat" | "work" | "code" = "chat",
+  ): Extract<ZenElementPayload, { readonly kind: "thread" }> {
     return {
       elementId: `00000000-0000-4000-8000-00000000092${suffix}` as ZenElementId,
       kind: "thread",
-      sourceContext: sourceContext(`00000000-0000-4000-8000-00000000093${suffix}`),
+      sourceContext: sourceContext(`00000000-0000-4000-8000-00000000093${suffix}`, kind),
       geometry: { x: 40, y: 40, width: 360, height: 220 },
       zIndex: suffix,
       minimized: false,
@@ -1040,10 +1126,10 @@ describe("ZenSurface live thread cards", () => {
   function catalogEntry(element: ZenElementPayload) {
     if (element.kind !== "thread") throw new Error("not a thread element");
     return {
-      catalogRef: `chat:${element.sourceContext.threadId}`,
+      catalogRef: `${element.sourceContext.mode}:${element.sourceContext.threadId}`,
       hostId: "local-host",
       hostLabel: "This Mac",
-      mode: "chat",
+      mode: element.sourceContext.mode,
       projectId: null,
       projectLabel: "Unfiled",
       threadId: element.sourceContext.threadId,
@@ -1057,7 +1143,7 @@ describe("ZenSurface live thread cards", () => {
   }
 
   it("streams each card's own thread and holds the rest at the live-card budget", () => {
-    const elements = [1, 2, 3, 4].map(threadElement);
+    const elements = [1, 2, 3, 4].map((suffix) => threadElement(suffix));
     render(
       <ZenSurface
         barCollapsed={false}
@@ -1101,8 +1187,38 @@ describe("ZenSurface live thread cards", () => {
 
     expect(screen.getByRole("group", { name: "Thread 1" })).toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continue Thread 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Continue Thread 1/i })).not.toBeInTheDocument();
   });
+
+  it("targets the thread whose live composer receives focus", () => {
+    const first = threadElement(1, "work");
+    const second = threadElement(2, "work");
+    const onAddBrowser = vi.fn();
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onAddBrowser={onAddBrowser}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        renderLiveThread={({ entry }) => ({
+          status: "streaming",
+          surface: <input aria-label={`Composer ${entry.title}`} />,
+        })}
+        space={makeSpace([first, second])}
+        threadEntries={[catalogEntry(first), catalogEntry(second)]}
+      />,
+    );
+
+    fireEvent.focus(screen.getByRole("textbox", { name: "Composer Thread 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add browser" }));
+
+    expect(onAddBrowser).toHaveBeenCalledWith(second.sourceContext);
+  });
+
   it("streams the cards of the space in front, and drops them on the way to another", () => {
     const inFront = threadElement(1);
     const elsewhere = threadElement(2);
