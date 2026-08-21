@@ -1,5 +1,7 @@
 import type { ProjectClient } from "@octant/client-runtime/project-client";
+import type { GithubClient } from "@octant/client-runtime/github-client";
 import {
+  decodeGithubCatalogueReadResponse,
   decodeCodeThreadId,
   decodeProjectId,
   decodeWorkspaceTab,
@@ -112,6 +114,55 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.queryByRole("button", { name: /^Plan/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Publish/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Agents/ })).not.toBeInTheDocument();
+  });
+
+  it("lists open pull requests beneath the environment facts", async () => {
+    const githubClient = {
+      readCatalogue: vi.fn(async () =>
+        decodeGithubCatalogueReadResponse({
+          kind: "pull-requests",
+          page: {
+            rows: [
+              {
+                number: 42,
+                title: "Keep the environment useful",
+                state: "open",
+                author: "henrikogaard",
+                updatedAt: "2026-08-21T12:00:00Z",
+                url: "https://github.com/acme/repo/pull/42",
+                baseBranch: "main",
+                headBranch: "feature/environment",
+              },
+            ],
+            sort: "updated-desc",
+            hasNextPage: false,
+            freshness: { status: "fresh" },
+          },
+        }),
+      ),
+    } as unknown as GithubClient;
+    render(
+      <CodeThreadEnvironment
+        githubClient={githubClient}
+        onChangePresentation={vi.fn()}
+        presentation={defaultEnvironmentPresentationState()}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        pullRequestRepository="acme/repo"
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+
+    expect(await screen.findByText("#42 Keep the environment useful")).toBeVisible();
+    expect(githubClient.readCatalogue).toHaveBeenCalledWith({
+      kind: "pull-requests",
+      owner: "acme",
+      name: "repo",
+      pageSize: 20,
+      state: "open",
+    });
   });
 
   it("projects an authoritative identity from the ready observation", async () => {
