@@ -98,6 +98,28 @@ function hostBridge(overrides: Partial<OctantHostBridge> = {}): OctantHostBridge
 }
 
 describe("ZenResearchDock", () => {
+  it("moves the browser surface when its header is dragged", () => {
+    render(
+      <ZenResearchDock
+        client={client()}
+        dock={dock}
+        hostBridge={hostBridge()}
+        onCollapse={vi.fn()}
+        onUndock={vi.fn()}
+      />,
+    );
+
+    const browser = screen.getByRole("complementary", { name: "Research browser" });
+    const header = screen.getByText("Research").closest("header");
+    if (header === null) throw new Error("Research browser header was not rendered.");
+
+    fireEvent.pointerDown(header, { clientX: 100, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(header, { clientX: 140, clientY: 140, pointerId: 1 });
+    fireEvent.pointerUp(header, { clientX: 140, clientY: 140, pointerId: 1 });
+
+    expect(browser).toHaveStyle({ transform: "translate(40px, 40px)" });
+  });
+
   it("lists the pages the host has open rather than tabs of its own making", async () => {
     const tabBrowserSurface = vi.fn(async () => twoTabs);
     render(

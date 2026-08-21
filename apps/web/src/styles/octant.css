@@ -5274,7 +5274,9 @@ input.switch:checked::after {
   bottom: 0;
   width: 14px;
   height: 14px;
+  z-index: 3;
   cursor: nwse-resize;
+  touch-action: none;
   background: linear-gradient(135deg, transparent 50%, var(--oct-border) 50%);
 }
 
