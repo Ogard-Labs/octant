@@ -178,7 +178,7 @@ describe("ChatComposer thread mentions", () => {
     await user.keyboard("{ArrowDown}");
     await user.keyboard("{Enter}");
 
-    expect(onDraftChange).toHaveBeenCalledWith("look at #[Release notes] ");
+    expect(onDraftChange).toHaveBeenCalledWith("look at #[Release notes] ", 25);
     expect(onSelectCandidate).toHaveBeenCalledWith(hit);
   });
 
@@ -287,6 +287,21 @@ describe("ChatComposer thread mentions", () => {
     expect(
       screen.getByRole("button", { name: "Open Side Chat about Release notes" }),
     ).toHaveTextContent("Reopen Side Chat");
+  });
+});
+
+describe("ChatComposer @file absence", () => {
+  it("does not offer a file mention picker, because Chat has no filesystem authority", async () => {
+    const user = userEvent.setup();
+    renderControlled();
+
+    const message = screen.getByLabelText("Message");
+    await user.click(message);
+    await user.type(message, "look at @src");
+
+    expect(
+      screen.queryByRole("listbox", { name: "Files you can mention" }),
+    ).not.toBeInTheDocument();
   });
 });
 

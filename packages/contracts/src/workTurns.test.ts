@@ -61,6 +61,34 @@ describe("work turn contracts", () => {
     expect(command.attachmentIds).toEqual(["22222222-2222-4222-8222-222222222222"]);
   });
 
+  it("carries a Work turn's `#thread` mentions as ids the host resolves itself", () => {
+    const command = decodeStartWorkThreadTurnCommand({
+      kind: "start-work-thread-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      prompt: "Does this still hold?",
+      authority,
+      threadMentionIds: [ids.thread],
+    });
+    expect(command.threadMentionIds).toEqual([ids.thread]);
+  });
+
+  it("carries a Work turn's `@file` mentions as paths the host re-checks itself", () => {
+    const command = decodeStartWorkThreadTurnCommand({
+      kind: "start-work-thread-turn",
+      requestId: ids.request,
+      threadId: ids.thread,
+      turnId: ids.turn,
+      prompt: "Summarize @notes.md",
+      authority,
+      fileMentionPaths: ["notes.md", "../secret"],
+    });
+    // The contract accepts the raw string so the host can refuse out-of-root
+    // itself rather than failing decode and looking like a malformed command.
+    expect(command.fileMentionPaths).toEqual(["notes.md", "../secret"]);
+  });
+
   it("rejects a start-turn command that names more images than a turn may carry", () => {
     expect(() =>
       decodeStartWorkThreadTurnCommand({

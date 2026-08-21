@@ -1,11 +1,10 @@
 /**
- * `@path` mentions in the Code composer.
+ * `@file` mentions in the Code and Work composers.
  *
- * A path mention is plain text: the user is naming a file or folder inside the
- * checkout the thread is already bound to, and the completed path travels to
- * the provider as part of the prompt. Nothing here grants access — the host
- * decides what the turn may read — so the picker only offers what the host's
- * own listing already returned for this checkout.
+ * Completing a path writes it into the draft as `@path` text. The turn also
+ * names the selected paths so the host can re-check the bound root and read
+ * the file itself. The picker only offers what a confined listing already
+ * returned; it grants nothing by naming a file.
  */
 
 export interface PathMentionCandidate {

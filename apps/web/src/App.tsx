@@ -63,6 +63,8 @@ import {
 import { decodeChatThreadId } from "@octant/contracts/chat";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import {
+  decodeCodeAttachmentId,
+  decodeCodeAttachmentMediaType,
   decodeCodeThread,
   decodeCodeRelativePath,
   decodeCodeThreadId,
@@ -2298,6 +2300,7 @@ function LaunchedShell(
     projectId: ProjectId,
     prompt: string,
     images?: ReadonlyArray<File>,
+    threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
   ): Promise<boolean> {
     const project = projectController.allProjects.find(
       (
@@ -2356,6 +2359,9 @@ function LaunchedShell(
           modelId,
         },
         ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+        ...(threadMentionIds === undefined || threadMentionIds.length === 0
+          ? {}
+          : { threadMentionIds }),
       });
       if (started.kind !== "accepted") return false;
       return true;
@@ -2446,7 +2452,7 @@ function LaunchedShell(
   async function handleDraftCreateCodeThread(
     input: CodeComposerSubmitInput,
     draftProjectId?: ProjectId,
-  ): Promise<void> {
+  ): Promise<boolean> {
     setDraftCreating(true);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
@@ -2459,12 +2465,12 @@ function LaunchedShell(
       });
       if (resolution.kind === "unresolved-selection") {
         setDraftError(UNRESOLVED_DRAFT_PROJECT_MESSAGE);
-        return;
+        return false;
       }
       const project = resolution.project;
       if (project?.type !== "code" || codeController.bootstrap === undefined) {
         setDraftError("No active Code Project is available.");
-        return;
+        return false;
       }
       const prepared = await codeController.execute({
         kind: "prepare-code-project-checkout",
@@ -2472,7 +2478,7 @@ function LaunchedShell(
       });
       if (prepared?.kind !== "checkout-prepared") {
         setDraftError(checkoutNotPreparedMessage(project.name));
-        return;
+        return false;
       }
       const codeSelection = resolveDraftProviderSelection(
         draftProviderGroups,
@@ -2487,7 +2493,7 @@ function LaunchedShell(
         setDraftError(
           "No provider is available. Configure a provider before starting a Code thread.",
         );
-        return;
+        return false;
       }
       // Profiles are read from the launch host, so an identifier from here
       // means nothing on another host — it would be refused as missing, or
@@ -2502,7 +2508,7 @@ function LaunchedShell(
         setDraftError(
           "Profiles belong to this host. Clear the selected profile to start this thread on another host.",
         );
-        return;
+        return false;
       }
       const timestamp = new Date().toISOString();
       const title = input.prompt.length > 60 ? `${input.prompt.slice(0, 57)}…` : input.prompt;
@@ -2526,7 +2532,7 @@ function LaunchedShell(
       });
       if (plan.kind === "rejected") {
         setDraftError(plan.message);
-        return;
+        return false;
       }
       const created = await codeController.execute(plan.command);
       if (created?.kind !== "managed-thread-created" && created?.kind !== "thread-created") {
@@ -2534,31 +2540,51 @@ function LaunchedShell(
           codeController.lastExecuteError.current?.message ??
             "The Code thread could not be created.",
         );
-        return;
+        return false;
       }
-      const firstTurnStarted = await codeController.startThreadTurn({
-        threadId: created.thread.id,
-        checkoutId:
-          created.kind === "managed-thread-created"
-            ? created.checkout.id
-            : created.thread.checkoutId,
-        prompt: input.prompt,
-      });
-      if (!firstTurnStarted) {
-        setDraftError("The thread was created, but its first provider turn could not be started.");
-      }
+      // Open the durable thread before staging images so an upload failure
+      // retries on this thread instead of creating another.
       await controller.openCodeThread(
         created.thread.id,
         created.thread.title,
         undefined,
         created.thread.projectId,
       );
+      const checkoutId =
+        created.kind === "managed-thread-created" ? created.checkout.id : created.thread.checkoutId;
+      const attachmentIds: import("@octant/contracts").CodeAttachmentId[] = [];
+      for (const file of input.images ?? []) {
+        const attachmentId = decodeCodeAttachmentId(globalThis.crypto.randomUUID());
+        await codeClient.putAttachment({
+          threadId: created.thread.id,
+          attachmentId,
+          displayName: pastedImageName(file),
+          mediaType: decodeCodeAttachmentMediaType(file.type),
+          bytes: new Uint8Array(await file.arrayBuffer()),
+        });
+        attachmentIds.push(attachmentId);
+      }
+      const firstTurnStarted = await codeController.startThreadTurn({
+        threadId: created.thread.id,
+        checkoutId,
+        prompt: input.prompt,
+        ...(input.threadMentionIds === undefined || input.threadMentionIds.length === 0
+          ? {}
+          : { threadMentionIds: input.threadMentionIds }),
+        ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+      });
+      if (!firstTurnStarted) {
+        setDraftError("The thread was created, but its first provider turn could not be started.");
+        return false;
+      }
+      return true;
     } catch (error) {
       setDraftError(
         error instanceof Error && error.message !== ""
           ? error.message
           : "The Code thread could not be created.",
       );
+      return false;
     } finally {
       setDraftCreating(false);
     }
@@ -2573,7 +2599,8 @@ function LaunchedShell(
     // or auto-confirms a heuristic suggestion of its own.
     deliveryOutcome?: CodeDeliveryOutcomeKind,
     images?: ReadonlyArray<File>,
-  ): Promise<void> {
+    threadMentionIds?: ReadonlyArray<import("@octant/contracts").MentionableThreadId>,
+  ): Promise<boolean | void> {
     setDraftCreating(true);
     setDraftError(undefined);
     setDraftPendingMessage(undefined);
@@ -2752,12 +2779,12 @@ function LaunchedShell(
         });
         if (resolution.kind === "unresolved-selection") {
           setDraftError(UNRESOLVED_DRAFT_PROJECT_MESSAGE);
-          return;
+          return false;
         }
         const project = resolution.project;
         if (project === undefined || project.type !== "work") {
           setDraftError("No active Work Project is available.");
-          return;
+          return false;
         }
         const providerInstanceId = workProviderChoice?.instanceId;
         const modelId = workProviderChoice?.modelId;
@@ -2765,7 +2792,7 @@ function LaunchedShell(
           setDraftError(
             "No provider is available. Configure a provider before starting a Work thread.",
           );
-          return;
+          return false;
         }
         const bindingRevisionId = project.bindingRevisionId;
         const created = await workThreadClient.execute({
@@ -2781,7 +2808,7 @@ function LaunchedShell(
         });
         if (!("kind" in created) || created.kind !== "thread-created") {
           setDraftError("The Work thread could not be created.");
-          return;
+          return false;
         }
         await controller.openWorkThread(
           created.thread.id,
@@ -2807,19 +2834,25 @@ function LaunchedShell(
             modelId,
           },
           ...(attachmentIds.length === 0 ? {} : { attachmentIds }),
+          ...(threadMentionIds === undefined || threadMentionIds.length === 0
+            ? {}
+            : { threadMentionIds }),
         });
         if (started.kind !== "accepted") {
           setDraftError(
             "The thread was created, but its first provider turn could not be started.",
           );
+          return false;
         }
       }
+      return true;
     } catch (error) {
       const detail =
         error instanceof Error && error.message.trim() !== ""
           ? error.message
           : "Review the provider and project status.";
       setDraftError(`The thread could not be created. ${detail}`);
+      return false;
     } finally {
       setDraftCreating(false);
       setDraftPendingMessage(undefined);

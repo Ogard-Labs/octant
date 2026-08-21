@@ -35,9 +35,18 @@ A Chat thread not assigned to a Project uses an explicit unfiled Chat context. I
 
 When you drag or drop a Chat thread into another workspace, the server resolves the action against the context key (host, mode, Project, bound root). A cross-Project drop does not silently change authority; it offers to open the thread in a new window instead.
 
+## Unsent drafts
+
+Each Chat thread keeps one unsent composer draft on this client. Leaving the
+thread, switching tabs, closing the window, or restarting the app restores the
+text and caret. Sending or clearing the composer removes it. Mentions that
+are part of the typed text come back with the draft; staged attachments and
+extra selections do not, and the composer says so if they were dropped.
+Deleting or purging the thread removes its draft.
+
 ## Mentioning another thread
 
-Type `#` in the composer to pick a thread you can already open. Octant inserts a `#[Title]` chip. The mentioned thread is not interrupted: this turn receives a bounded, read-only excerpt of its title, filing, and recent messages. `@plugin` and `$skill` addressing is unchanged; an unmatched `#` or `@` stays ordinary text.
+Type `#` in the composer to pick a thread you can already open. Octant inserts a `#[Title]` chip. The mentioned thread is not interrupted: this turn receives a bounded, read-only excerpt of its title, filing, and recent messages. `@plugin` and `$skill` addressing is unchanged; an unmatched `#` or `@` stays ordinary text. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
 
 A chip you can no longer open is marked unavailable and contributes no content. Cross-mode mentions are read-only context, not mixed execution — mentioning a Work or Code thread from Chat does not grant that thread's filesystem or shell.
 

@@ -13,6 +13,7 @@ import {
   decodeWorkTurnRequestId,
   decodeWorkTurnState,
   decodeStartWorkThreadTurnCommand,
+  type MentionableThreadId,
   type WorkAttachmentId,
   type WorkAttachmentMediaType,
   type WorkAttachmentReference,
@@ -32,7 +33,16 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
-import { decideWorkTurnAuthority } from "@octant/domain";
+import {
+  decideWorkTurnAuthority,
+  FILE_MENTION_UNREADABLE_CONTEXT,
+  THREAD_MENTION_UNREADABLE_CONTEXT,
+} from "@octant/domain";
+import {
+  planWorkTurnContext,
+  WORK_TURN_SAFE_INPUT_TOKENS,
+  type WorkTurnContextContribution,
+} from "./workTurnContext";
 import { Schema } from "effect";
 import { ConcurrencyConflict, JournalWriteFailed } from "../persistence/journalErrors";
 import { ProjectionApplicationFailed } from "../persistence/projection";
@@ -45,7 +55,6 @@ import {
 import type { WorkTurnProjection } from "./workTurnProjection";
 import {
   WorkTurnRuntime,
-  workTurnFollowUpContext,
   type WorkTurnRuntimeOutcome,
   type WorkTurnRuntimePort,
 } from "./workTurnRuntime";
@@ -136,9 +145,33 @@ export interface WorkTurnServiceDependencies {
     readonly modelId: WorkThread["modelId"];
   }) => boolean;
   readonly turnRuntime?: WorkTurnRuntimePort;
+  /**
+   * Resolves the `#thread` mentions a Work turn names. Absent on a host that
+   * cannot re-derive Open authority, which reports every mention unread rather
+   * than inventing transcript.
+   */
+  readonly resolveThreadMentionContext?: (input: {
+    readonly threadMentionIds: ReadonlyArray<MentionableThreadId>;
+    readonly windowId: WindowId;
+  }) => Promise<ReadonlyArray<ProviderContextBlock>>;
+  /**
+   * Resolves the `@file` mentions a Work turn names against the bound Project
+   * root. Out-of-root paths are refused before any read.
+   */
+  readonly resolveFileMentionContext?: (input: {
+    readonly fileMentionPaths: ReadonlyArray<string>;
+    readonly windowId: WindowId;
+    readonly threadId: WorkThreadId;
+  }) => Promise<ReadonlyArray<ProviderContextBlock>>;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly expectedHostId?: string;
+  /**
+   * Token budget the Work turn planner uses. Tests inject a tight budget to
+   * prove oversized file mentions refuse; production uses the conservative
+   * default until this thread's model reports a window.
+   */
+  readonly safeInputBudgetTokens?: number;
 }
 
 export class WorkTurnService {
@@ -151,9 +184,12 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #turnRuntime: WorkTurnRuntimePort;
+  readonly #resolveThreadMentionContext: WorkTurnServiceDependencies["resolveThreadMentionContext"];
+  readonly #resolveFileMentionContext: WorkTurnServiceDependencies["resolveFileMentionContext"];
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #expectedHostId: string;
+  readonly #safeInputBudgetTokens: number;
   readonly #controllers = new Map<string, AbortController>();
   readonly #inflight = new Map<string, Promise<void>>();
   readonly #liveResponses = new Map<string, string>();
@@ -168,9 +204,12 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
+    this.#resolveThreadMentionContext = dependencies.resolveThreadMentionContext;
+    this.#resolveFileMentionContext = dependencies.resolveFileMentionContext;
     this.#uuid = dependencies.uuid;
     this.#clock = dependencies.clock;
     this.#expectedHostId = dependencies.expectedHostId ?? "local";
+    this.#safeInputBudgetTokens = dependencies.safeInputBudgetTokens ?? WORK_TURN_SAFE_INPUT_TOKENS;
   }
 
   async startFirstTurn(
@@ -273,6 +312,38 @@ export class WorkTurnService {
 
     const acceptedAt = decodeTimestamp(this.#clock());
     const providerSessionId = decodeProviderSessionId(this.#uuid());
+    const planned = planWorkTurnContext({
+      threadId: command.threadId,
+      providerInstanceId: command.authority.providerInstanceId,
+      modelId: command.authority.modelId,
+      uuid: this.#uuid,
+      createdAt: this.#clock(),
+      safeInputBudget: this.#safeInputBudgetTokens,
+      contributions: [
+        ...this.#priorTranscriptContributions(command.threadId),
+        ...(await this.#threadMentionContributions(
+          command.threadMentionIds,
+          authenticatedWindowId,
+        )),
+        ...(await this.#fileMentionContributions(
+          command.fileMentionPaths,
+          authenticatedWindowId,
+          command.threadId,
+        )),
+        {
+          text: command.prompt,
+          sourceKind: "message",
+          referenceId: `prompt:${command.turnId}`,
+          category: "current-request",
+          posture: "required",
+          block: { kind: "user-message", text: command.prompt },
+        },
+      ],
+    });
+    if (planned.kind === "blocked") {
+      throw this.#failure("invalid", planned.message);
+    }
+
     try {
       this.#append(command.requestId, 0, "work.turn-accepted@1", {
         kind: "turn-accepted",
@@ -315,10 +386,7 @@ export class WorkTurnService {
       projectRoot,
       driver,
       attachments: attachmentInputs,
-      context: workTurnFollowUpContext(
-        this.#projection.listForThread(command.threadId),
-        command.requestId,
-      ),
+      context: planned.context,
       signal: controller.signal,
     }).finally(() => {
       this.#controllers.delete(String(command.requestId));
@@ -451,6 +519,92 @@ export class WorkTurnService {
       live === undefined ? latest : decodeWorkTurnState({ ...latest, response: live }),
       outcome,
     );
+  }
+
+  #priorTranscriptContributions(
+    threadId: WorkThreadId,
+  ): ReadonlyArray<WorkTurnContextContribution> {
+    const contributions: WorkTurnContextContribution[] = [];
+    for (const turn of this.#projection.listForThread(threadId)) {
+      for (const [index, entry] of turn.transcript.entries()) {
+        if (entry.text.trim() === "") continue;
+        contributions.push({
+          text: entry.text,
+          sourceKind: "message",
+          referenceId: `${String(turn.requestId)}:${entry.role}:${String(index)}`,
+          category: "conversation",
+          posture: "compressible",
+          block: {
+            kind: entry.role === "assistant" ? "assistant-message" : "user-message",
+            text: entry.text,
+          },
+        });
+      }
+    }
+    return contributions;
+  }
+
+  async #threadMentionContributions(
+    threadMentionIds: ReadonlyArray<MentionableThreadId> | undefined,
+    windowId: WindowId,
+  ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
+    if (threadMentionIds === undefined || threadMentionIds.length === 0) return [];
+    const unreadable = (): ReadonlyArray<WorkTurnContextContribution> =>
+      threadMentionIds.map((threadId, index) => ({
+        text: THREAD_MENTION_UNREADABLE_CONTEXT,
+        sourceKind: "message",
+        referenceId: `thread-mention-unread:${String(threadId)}:${String(index)}`,
+        category: "workspace-context",
+        posture: "compressible",
+        block: { kind: "user-message", text: THREAD_MENTION_UNREADABLE_CONTEXT },
+      }));
+    const resolve = this.#resolveThreadMentionContext;
+    if (resolve === undefined) return unreadable();
+    try {
+      const blocks = await resolve({ threadMentionIds, windowId });
+      return blocks.map((block, index) => ({
+        text: block.text,
+        sourceKind: "message",
+        referenceId: `thread-mention:${String(threadMentionIds[index] ?? index)}`,
+        category: "workspace-context",
+        posture: "compressible",
+        block,
+      }));
+    } catch {
+      return unreadable();
+    }
+  }
+
+  async #fileMentionContributions(
+    fileMentionPaths: ReadonlyArray<string> | undefined,
+    windowId: WindowId,
+    threadId: WorkThreadId,
+  ): Promise<ReadonlyArray<WorkTurnContextContribution>> {
+    if (fileMentionPaths === undefined || fileMentionPaths.length === 0) return [];
+    const unreadable = (): ReadonlyArray<WorkTurnContextContribution> =>
+      fileMentionPaths.map((path, index) => ({
+        text: FILE_MENTION_UNREADABLE_CONTEXT,
+        sourceKind: "file",
+        referenceId: `file-mention-unread:${path}:${String(index)}`,
+        category: "workspace-context",
+        posture: "required",
+        block: { kind: "user-message", text: FILE_MENTION_UNREADABLE_CONTEXT },
+      }));
+    const resolve = this.#resolveFileMentionContext;
+    if (resolve === undefined) return unreadable();
+    try {
+      const blocks = await resolve({ fileMentionPaths, windowId, threadId });
+      return blocks.map((block, index) => ({
+        text: block.text,
+        sourceKind: "file",
+        referenceId: `file-mention:${fileMentionPaths[index] ?? String(index)}`,
+        category: "workspace-context",
+        posture: "required",
+        block,
+      }));
+    } catch {
+      return unreadable();
+    }
   }
 
   #persistOutcome(turn: WorkTurnState, outcome: WorkTurnRuntimeOutcome): void {

@@ -475,7 +475,7 @@ describe("DraftThreadWorkspace", () => {
     await user.click(screen.getByRole("option", { name: /Knowledge/ }));
     await user.click(screen.getByRole("button", { name: "Create thread" }));
 
-    expect(onCreateThread).toHaveBeenCalledWith("Draft brief", workProjectId);
+    expect(onCreateThread).toHaveBeenCalledWith("Draft brief", workProjectId, undefined, [], []);
   });
 
   it("returns from authenticated-web Add folder to the unchanged Code draft and settings", async () => {

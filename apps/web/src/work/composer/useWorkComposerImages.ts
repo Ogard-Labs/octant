@@ -47,6 +47,8 @@ export interface WorkComposerImages {
   readonly refuse: (message: string) => void;
   readonly remove: (id: string) => void;
   readonly takeForSend: () => ReadonlyArray<File>;
+  readonly filesForSend: () => ReadonlyArray<File>;
+  readonly clearAfterAccepted: () => void;
   readonly consumePaste: (clipboard: DataTransfer | null) => boolean;
 }
 
@@ -58,7 +60,8 @@ const SUPPORTED = new Set<string>(WORK_ATTACHMENT_MEDIA_TYPES);
  * The host stores attachments against a thread id, so a new-thread composer
  * cannot upload until create succeeds. Files stay local; takeForSend hands
  * them to the create path, which stages them on the host before the first
- * turn names their ids.
+ * turn names their ids. filesForSend leaves the chips in place until
+ * clearAfterAccepted, so a failed create or turn can retry the same images.
  */
 export function useWorkComposerImages(): WorkComposerImages {
   const [staged, setStaged] = useState<ReadonlyArray<StagedWorkImage>>([]);
@@ -132,15 +135,23 @@ export function useWorkComposerImages(): WorkComposerImages {
     [apply, forget],
   );
 
-  const takeForSend = useCallback((): ReadonlyArray<File> => {
-    const taken = current.current.map((entry) => entry.file);
+  const filesForSend = useCallback((): ReadonlyArray<File> => {
+    return current.current.map((entry) => entry.file);
+  }, []);
+
+  const clearAfterAccepted = useCallback(() => {
     apply((list) => {
       for (const attachment of list) forget(attachment.previewUrl);
       return [];
     });
     setMessage(undefined);
-    return taken;
   }, [apply, forget]);
+
+  const takeForSend = useCallback((): ReadonlyArray<File> => {
+    const taken = filesForSend();
+    clearAfterAccepted();
+    return taken;
+  }, [clearAfterAccepted, filesForSend]);
 
   const consumePaste = useCallback(
     (clipboard: DataTransfer | null): boolean => {
@@ -159,5 +170,15 @@ export function useWorkComposerImages(): WorkComposerImages {
     [attach],
   );
 
-  return { staged, message, attach, refuse: setMessage, remove, takeForSend, consumePaste };
+  return {
+    staged,
+    message,
+    attach,
+    refuse: setMessage,
+    remove,
+    takeForSend,
+    filesForSend,
+    clearAfterAccepted,
+    consumePaste,
+  };
 }

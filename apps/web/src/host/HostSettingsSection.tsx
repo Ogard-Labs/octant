@@ -13,6 +13,7 @@ import type {
   SetThreadRetentionOutcome,
   ThreadRetentionState,
 } from "@octant/contracts/thread-retention";
+import { purgeComposerThreadDrafts } from "../composer/composerThreadDraftStore";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -411,8 +412,9 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
       <p className="host-settings__note">
         A retention window never deletes on its own. A confirmed purge removes the named thread — or
         expired threads in a Project or on this host — from ordinary reads, including derived
-        projections and that thread's own journal events. Other threads, Projects, usage, and
-        credentials stay. SQLite free pages may keep bytes until the next store rebuild.
+        projections and that thread's own journal events. Unsent composer drafts for those threads
+        are removed from this client. Other threads, Projects, usage, and credentials stay. SQLite
+        free pages may keep bytes until the next store rebuild.
       </p>
       <p className="host-settings__note">Host default: {formatRetentionWindow(state)}.</p>
       <div className="host-settings__field">
@@ -515,6 +517,12 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
               .purgeThreads({ scope: next, confirm: true })
               .then(async (result) => {
                 setOutcome(result);
+                if (!("kind" in result)) {
+                  purgeComposerThreadDrafts([
+                    ...result.purged.map((thread) => String(thread.threadId)),
+                    ...result.alreadyPurged.map((thread) => String(thread.threadId)),
+                  ]);
+                }
                 await load();
               })
               .finally(() => {

@@ -13,6 +13,7 @@ import { decodeProjectId } from "@octant/contracts/projects";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createCodeReadCursorStore, useCodeController } from "./useCodeController";
+import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 
 const now = "2026-07-21T12:00:00.000Z";
 const ids = {
@@ -573,6 +574,103 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("restores a Code draft after the controller remounts", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const client = fakeClient();
+    const first = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(first.result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => first.result.current.setPendingDraft("fix the flaky test", 8));
+    first.unmount();
+
+    const second = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(second.result.current.pendingDraft).toBe("fix the flaky test"));
+    expect(second.result.current.pendingDraftCaret).toBe(8);
+    second.unmount();
+  });
+
+  it("does not restore a Code draft after it is cleared", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const client = fakeClient();
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => result.current.setPendingDraft("follow-up"));
+    act(() => result.current.setPendingDraft(""));
+    expect(result.current.pendingDraft).toBe("");
+    unmount();
+
+    const remounted = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    expect(remounted.result.current.pendingDraft).toBe("");
+    remounted.unmount();
+  });
+
+  it("purges a Code draft with its thread", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const client = fakeClient();
+    const { result } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => result.current.setPendingDraft("do not keep"));
+    act(() => result.current.purgeThreadDraft(String(ids.thread)));
+    expect(result.current.pendingDraft).toBe("");
+    expect(store.read("code", String(ids.thread))).toBeUndefined();
+  });
+
+  it("purges a Code draft when bootstrap no longer lists the thread", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    store.write("code", String(ids.thread), {
+      text: "do not keep",
+      caretIndex: 0,
+      stagedDropped: false,
+    });
+    const client = fakeClient({
+      bootstrap: vi.fn(async () => ({ ...bootstrap(), threads: [] })),
+    });
+    const { result } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(store.read("code", String(ids.thread))).toBeUndefined();
+  });
+
   it("stages prompt evidence and starts a provider turn for follow-ups", async () => {
     const operationId = "70000000-0000-4000-8000-000000000001";
     const contentId = "60000000-0000-4000-8000-000000000001";
@@ -675,6 +773,46 @@ describe("useCodeController", () => {
     ]);
     expect(subscribeOperation).toHaveBeenCalledTimes(2);
     expect(result.current.turnStatus).toBe("idle");
+  });
+
+  it("sends the requested turn posture as an intent the host clamps", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000009";
+    const executeOperation = vi.fn(async () => ({
+      kind: "provider-turn-state",
+      operationId,
+      state: "running",
+    }));
+    async function* completedFrames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "completed" },
+      };
+    }
+    const client = fakeClient({
+      executeOperation: executeOperation as never,
+      subscribeOperation: vi.fn(() => completedFrames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    await act(async () => {
+      await result.current.sendFollowUp("check tests", [], [], [], "plan");
+    });
+
+    expect(executeOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "start-provider-turn",
+        executionPolicy: "plan",
+      }),
+    );
+    expect(result.current.conversation[0]).toEqual(
+      expect.objectContaining({ role: "user", executionPolicy: "plan" }),
+    );
   });
 
   it("names a follow-up's mentioned threads on the turn without staging them as the message", async () => {
@@ -957,6 +1095,49 @@ describe("useCodeController", () => {
     expect(result.current.pendingDraft).toBe("approve this turn");
   });
 
+  it("keeps the dropped-context warning when a running Code turn fails", async () => {
+    const store = createComposerThreadDraftStore(memoryDraftStorage());
+    const operationId = "70000000-0000-4000-8000-000000000032";
+    async function* waitingFrames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: { kind: "operation-state", state: "waiting" },
+      };
+    }
+    const client = fakeClient({
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId,
+        state: "running",
+      })) as never,
+      subscribeOperation: vi.fn(() => waitingFrames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        draftStore: store,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    act(() => {
+      result.current.setPendingDraft("approve this turn");
+      result.current.markDraftStagedDropped();
+    });
+    expect(result.current.draftStagedDropped).toBe(true);
+
+    await act(async () => {
+      await result.current.sendFollowUp("approve this turn");
+    });
+
+    expect(result.current.pendingDraft).toBe("approve this turn");
+    expect(result.current.draftStagedDropped).toBe(true);
+  });
+
   it("keeps a prompt editable when the provider turn cannot start", async () => {
     const client = fakeClient({
       executeOperation: vi.fn(async () => ({
@@ -1098,7 +1279,7 @@ describe("useCodeController", () => {
     const replyId = "60000000-0000-4000-8000-000000000011";
     const operationId = "70000000-0000-4000-8000-000000000010";
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1147,7 +1328,7 @@ describe("useCodeController", () => {
     const reasoningId = "60000000-0000-4000-8000-000000000014";
     const operationId = "70000000-0000-4000-8000-000000000012";
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1214,7 +1395,7 @@ describe("useCodeController", () => {
     const conversation = vi
       .fn()
       .mockResolvedValueOnce({
-        version: 2,
+        version: 3,
         threadId: ids.thread,
         turns: [
           {
@@ -1233,7 +1414,7 @@ describe("useCodeController", () => {
         hasMore: false,
       })
       .mockResolvedValueOnce({
-        version: 2,
+        version: 3,
         threadId: ids.thread,
         turns: [
           {
@@ -1252,7 +1433,7 @@ describe("useCodeController", () => {
         hasMore: false,
       })
       .mockResolvedValue({
-        version: 2,
+        version: 3,
         threadId: ids.thread,
         turns: [
           {
@@ -1313,7 +1494,7 @@ describe("useCodeController", () => {
     const liveId = "60000000-0000-4000-8000-000000000031";
     const operationId = "70000000-0000-4000-8000-000000000030";
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1392,7 +1573,7 @@ describe("useCodeController", () => {
   it("re-hydrates a failed transcript when the user retries from the thread view", async () => {
     const conversation = vi
       .fn(async () => ({
-        version: 2 as const,
+        version: 3 as const,
         threadId: ids.thread,
         turns: [],
         nextCursor: 0,
@@ -1493,7 +1674,7 @@ describe("useCodeController", () => {
     let status: "incomplete" | "completed" = "incomplete";
     const bootstrapRead = vi.fn(async () => bootstrap(1, activitySequence));
     const conversation = vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [
         {
@@ -1697,7 +1878,7 @@ function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
     bootstrap: vi.fn(async () => bootstrap()),
     queryBoard: vi.fn(),
     conversation: vi.fn(async () => ({
-      version: 2 as const,
+      version: 3 as const,
       threadId: ids.thread,
       turns: [],
       nextCursor: 0,
@@ -1831,4 +2012,22 @@ function deferred<T>() {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+function memoryDraftStorage(): Storage {
+  const data = new Map<string, string>();
+  return {
+    get length() {
+      return data.size;
+    },
+    clear: () => data.clear(),
+    getItem: (key) => data.get(key) ?? null,
+    key: (index) => [...data.keys()][index] ?? null,
+    removeItem: (key) => {
+      data.delete(key);
+    },
+    setItem: (key, value) => {
+      data.set(key, value);
+    },
+  };
 }

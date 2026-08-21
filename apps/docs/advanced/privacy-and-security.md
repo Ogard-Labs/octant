@@ -28,6 +28,11 @@ and derived projections so a rebuild cannot resurrect the transcript. See
 [Recovery and troubleshooting](/advanced/recovery) for how the journal backs
 recovery.
 
+An unsent composer draft is ordinary local client storage on the machine
+where it was typed. It never enters the journal, diagnostics, or a provider
+request until you send it. Deleting or purging the thread removes that
+client's draft as well.
+
 **Export thread** is a host-authoritative read of one thread you can already
 open. The JSON bundle carries transcript, evidence, and provenance, and
 names the instant it was cut. Credentials, OAuth tokens, raw provider
@@ -41,9 +46,13 @@ thread it can already read. This is not a host-wide dump.
 Provider credentials are write-only and stored as **indirect references in
 the macOS Keychain** — never returned to the interface, never journaled,
 never placed in process arguments, never exported, and never included in
-diagnostics. OAuth tokens are never stored, rendered, exported, or
-journaled. Remote keys, session secrets, and raw headers never enter the
-database, URLs, logs, exports, screenshots, or diagnostics.
+diagnostics. Provider OAuth and subscription login are delegated to the
+provider's own runtime; those tokens are never stored, rendered, exported,
+or journaled. Secrets Octant holds for an integration follow the same
+Keychain path: the host keeps an opaque reference, plugins and the
+interface never receive the raw token, and nothing is journaled, exported,
+or included in diagnostics. Remote keys, session secrets, and raw headers
+never enter the database, URLs, logs, exports, screenshots, or diagnostics.
 
 The one deliberate exception is the **pairing bootstrap**: a short-lived
 pairing link or QR carries a single-use 128-bit secret in the **URL
@@ -74,8 +83,10 @@ native receipts; desktop admin routes are loopback-only.
 ## Confinement
 
 - **Work** uses OS-enforced macOS project confinement for one bound root.
-- **Code** starts approval-gated; Plan mode is strictly read-only, and Full
-  access must be explicitly selected. Full access is still confined to the
+- **Code** starts approval-gated; Plan mode is strictly read-only, auto-accept
+  edits waives only in-root file writes, and Full access must be explicitly
+  selected. A per-message posture may only narrow the thread's grant; the
+  server clamps composer intent. Full access is still confined to the
   bound folder for user work; merge authority is never granted.
 - Provider execution and app-managed filesystem and shell tools cross an
   Octant-owned sandbox boundary; path checks alone are insufficient.

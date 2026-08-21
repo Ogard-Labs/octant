@@ -615,56 +615,77 @@ describe("ChatWorkspace", () => {
     });
   });
 
-  it("follows new transcript events only while the reader remains near the bottom", async () => {
-    const initial = controllerFixture();
-    const rendered = render(
-      <ChatWorkspace controller={initial} providerSnapshot={providerSnapshot()} />,
-    );
-    const conversation = rendered.container.querySelector<HTMLDivElement>(
-      ".chat-workspace__conversation",
-    )!;
-    Object.defineProperties(conversation, {
-      scrollHeight: { configurable: true, value: 1_000 },
-      clientHeight: { configurable: true, value: 300 },
-      scrollTop: { configurable: true, value: 0, writable: true },
+  it("windows the conversation so a long thread mounts a bounded number of turns", () => {
+    const count = 1000;
+    const turns = Array.from({ length: count }, (_, index) => {
+      const n = String(index + 1).padStart(12, "0");
+      return {
+        id: `00000000-0000-4000-8000-${n}`,
+        threadId,
+        sequence: index + 1,
+        userMessageRef: {
+          contentId: `10000000-0000-4000-8000-${n}`,
+          digest: "a".repeat(64),
+          byteLength: 12,
+        },
+        attachmentIds: [],
+        attempts: [
+          {
+            id: `30000000-0000-4000-8000-${n}`,
+            turnId: `00000000-0000-4000-8000-${n}`,
+            threadId,
+            providerInstanceId: providerId,
+            providerSessionId: "20000000-0000-4000-8000-000000000001",
+            modelId: "model-a",
+            contextManifestId: "30000000-0000-4000-8000-000000000001",
+            outcome: "completed" as const,
+            responseRefs: [
+              {
+                contentId: `20000000-0000-4000-8000-${n}`,
+                digest: "b".repeat(64),
+                byteLength: 12,
+              },
+            ],
+            citationIds: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        createdAt: now,
+      };
     });
-
-    rendered.rerender(
+    const contents = turns.flatMap((turn, index) => [
+      {
+        contentId: String(turn.userMessageRef.contentId),
+        role: "user" as const,
+        body: `User turn ${String(index)}`,
+        digest: "a".repeat(64),
+        byteLength: 12,
+      },
+      {
+        contentId: String(turn.attempts[0]!.responseRefs[0]!.contentId),
+        role: "assistant" as const,
+        body: `Assistant turn ${String(index)}`,
+        digest: "b".repeat(64),
+        byteLength: 16,
+      },
+    ]);
+    const view = decodeChatThreadView({
+      ...controllerFixture().activeView!,
+      lastSequence: count,
+      turns,
+      contents,
+    });
+    render(
       <ChatWorkspace
-        controller={{
-          ...initial,
-          activeView: { ...initial.activeView!, lastSequence: 5 as never },
-        }}
+        controller={controllerFixture({ activeView: view })}
         providerSnapshot={providerSnapshot()}
       />,
     );
-    await waitFor(() => expect(conversation.scrollTop).toBe(1_000));
 
-    conversation.scrollTop = 200;
-    fireEvent.scroll(conversation);
-    rendered.rerender(
-      <ChatWorkspace
-        controller={{
-          ...initial,
-          activeView: { ...initial.activeView!, lastSequence: 6 as never },
-        }}
-        providerSnapshot={providerSnapshot()}
-      />,
-    );
-    expect(conversation.scrollTop).toBe(200);
-
-    conversation.scrollTop = 700;
-    fireEvent.scroll(conversation);
-    rendered.rerender(
-      <ChatWorkspace
-        controller={{
-          ...initial,
-          activeView: { ...initial.activeView!, lastSequence: 7 as never },
-        }}
-        providerSnapshot={providerSnapshot()}
-      />,
-    );
-    await waitFor(() => expect(conversation.scrollTop).toBe(1_000));
+    expect(document.querySelectorAll("[data-transcript-row]").length).toBeLessThan(80);
+    expect(screen.getByText("User turn 0")).toBeVisible();
+    expect(screen.queryByText("User turn 999")).not.toBeInTheDocument();
   });
 
   it("consumes an internal live extension selection after one successful send", async () => {
