@@ -406,6 +406,7 @@ describe("Project restart recovery", () => {
       { projection_name: "shell", reason: "unknown-event-name" },
       { projection_name: "theme", reason: "unknown-event-name" },
       { projection_name: "thread-checkpoint", reason: "unknown-event-name" },
+      { projection_name: "thread-external-content-taint", reason: "unknown-event-name" },
       { projection_name: "thread-retention", reason: "unknown-event-name" },
       { projection_name: "usage", reason: "unknown-event-name" },
       { projection_name: "validation-evidence", reason: "unknown-event-name" },

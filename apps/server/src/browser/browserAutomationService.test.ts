@@ -60,7 +60,13 @@ function request(overrides: Partial<BrowserActionRequest> = {}): BrowserActionRe
   };
 }
 
-function harness() {
+function harness(
+  options: {
+    readonly recordExternalContentIngestion?: ConstructorParameters<
+      typeof BrowserAutomationService
+    >[0]["recordExternalContentIngestion"];
+  } = {},
+) {
   const contexts = new Set<BrowserContextId>();
   const revokedThreads = new Set<BrowserThreadId>();
   let processExit: (() => void) | undefined;
@@ -100,6 +106,9 @@ function harness() {
               ? authorityTwo
               : undefined,
     },
+    ...(options.recordExternalContentIngestion === undefined
+      ? {}
+      : { recordExternalContentIngestion: options.recordExternalContentIngestion }),
     uuid: () => ids.shift() ?? crypto.randomUUID(),
     clock: () => "2026-07-27T20:00:00.000Z",
     now: () => now,
@@ -458,6 +467,26 @@ describe("BrowserAutomationService", () => {
     expect(() => service.inspect(windowId, threadOne, contextOne)).toThrow(
       "Browser context is stale or unknown.",
     );
+  });
+
+  it("journals browser observations as tainting tool results once", async () => {
+    const recordExternalContentIngestion = vi.fn(() => ({
+      kind: "recorded" as const,
+      taint: { externalContentIngested: true, ingestedSources: ["browser-observation"] },
+    }));
+    const { service } = harness({ recordExternalContentIngestion });
+    await service.create({ windowId, threadId: threadOne, action: action(), policy });
+    const completed = await service.act({ windowId, request: request() });
+
+    expect(completed.evidence).toHaveLength(1);
+    expect(recordExternalContentIngestion).toHaveBeenCalledTimes(1);
+    expect(recordExternalContentIngestion).toHaveBeenCalledWith({
+      threadId: threadOne,
+      provenance: { origin: "tool-result", sourceLabel: "browser-observation" },
+      contentReference: completed.evidence[0]?.reference,
+      correlationId: action().correlationId,
+      authorized: true,
+    });
   });
 
   it("records correlated evidence and marks process death stale", async () => {

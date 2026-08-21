@@ -20,6 +20,10 @@ import {
 import type { WindowId } from "@octant/contracts/shell";
 import { productFeedbackProvenance } from "@octant/domain";
 import { Schema } from "effect";
+import type {
+  ExternalContentIngestionResult,
+  RecordExternalContentIngestionInput,
+} from "../context/externalContentIngestionStore";
 import type { Journal } from "../persistence/journal";
 import type { BrowserPointObservation } from "./browserRuntimePort";
 
@@ -66,6 +70,9 @@ export interface ProductFeedbackServiceOptions {
   readonly readNotes: (threadId: string) => ReadonlyArray<ProductFeedbackNote>;
   /** Whether this window may see the thread the note is being left on. */
   readonly canAccessThread: (windowId: WindowId, threadId: string) => Promise<boolean>;
+  readonly recordExternalContentIngestion?: (
+    input: RecordExternalContentIngestionInput,
+  ) => ExternalContentIngestionResult;
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly actor: EventActorValue;
@@ -185,6 +192,16 @@ export class ProductFeedbackService {
       version: 1,
       updatedAt: timestamp,
     });
+    const ingested = this.#options.recordExternalContentIngestion?.({
+      threadId: command.threadId,
+      provenance: note.provenance.element,
+      contentReference: String(note.id),
+      correlationId: this.#options.uuid(),
+      authorized: true,
+    });
+    if (ingested?.kind === "refused") {
+      throw new ProductFeedbackError("invalid", "Product feedback capture is invalid.");
+    }
     this.#append(note, 0, "feedback.note-captured@1", { kind: "feedback-captured", note });
     return { kind: "feedback-captured", note };
   }

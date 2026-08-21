@@ -84,10 +84,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/security/escapeSuite/evaluateEscapeSuite.ts",
     "Evaluator for the security escape suite, driven by escapeSuite.server.test.ts as its runner.",
   ],
-  [
-    "apps/server/src/context/externalContentTaintProjection.ts",
-    "Security-relevant. Live enforcement runs through externalContentFraming and toolCallAuthorityService; removing a taint projection needs a security review.",
-  ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
     "packages/provider-sdk/src/childAgentConformance.ts",

@@ -1,7 +1,8 @@
-import type {
-  ContentOrigin,
-  ContentProvenance,
-  ThreadExternalContentTaint,
+import {
+  MAX_NAMED_INGESTED_SOURCES,
+  type ContentOrigin,
+  type ContentProvenance,
+  type ThreadExternalContentTaint,
 } from "@octant/contracts";
 
 /**
@@ -55,6 +56,12 @@ export type ContentAuthorityEffect =
   | "trust-change"
   | "authority-transition";
 
+export type ExternalContentIngestionDecision =
+  | { readonly kind: "record" }
+  | { readonly kind: "already-recorded" }
+  | { readonly kind: "ignore"; readonly reason: "not-tainting" }
+  | { readonly kind: "refuse"; readonly reason: "unauthorized" };
+
 export function emptyThreadContentTaint(): ThreadExternalContentTaint {
   return { externalContentIngested: false, ingestedSources: [] };
 }
@@ -82,10 +89,35 @@ export function projectThreadContentTaint(
   if (state.ingestedSources.includes(sourceLabel)) {
     return { externalContentIngested: true, ingestedSources: state.ingestedSources };
   }
+  if (state.ingestedSources.length >= MAX_NAMED_INGESTED_SOURCES) {
+    return { externalContentIngested: true, ingestedSources: state.ingestedSources };
+  }
   return {
     externalContentIngested: true,
     ingestedSources: [...state.ingestedSources, sourceLabel],
   };
+}
+
+/**
+ * Whether a tainting ingestion should append a journal event.
+ * Unauthorized callers are refused before origin is considered, so a denied
+ * caller cannot distinguish a tainting payload from a clean one.
+ */
+export function decideExternalContentIngestion(input: {
+  readonly authorized: boolean;
+  readonly origin: ContentOrigin;
+  readonly alreadyRecorded: boolean;
+}): ExternalContentIngestionDecision {
+  if (!input.authorized) {
+    return { kind: "refuse", reason: "unauthorized" };
+  }
+  if (!originTaintsThread(input.origin)) {
+    return { kind: "ignore", reason: "not-tainting" };
+  }
+  if (input.alreadyRecorded) {
+    return { kind: "already-recorded" };
+  }
+  return { kind: "record" };
 }
 
 export function isIrreversibleOrAuthorityBearingApprovalClass(

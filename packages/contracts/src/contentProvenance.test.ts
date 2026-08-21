@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_CONTENT_INGESTED_PAYLOAD_BYTES,
+  MAX_CONTENT_REFERENCE_LENGTH,
+  MAX_CONTENT_SOURCE_LABEL_LENGTH,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
+  THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
   decodeContentIngestedPayload,
   decodeContentOrigin,
   decodeContentProvenance,
@@ -55,6 +60,8 @@ describe("ContentIngestedPayload", () => {
       contentReference: "content-ref-1",
     } as const;
     expect(decodeContentIngestedPayload(payload)).toEqual(payload);
+    expect(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested).toBe("thread.external-content-ingested@1");
+    expect(THREAD_EXTERNAL_CONTENT_AGGREGATE).toBe("thread-external-content");
     expect(() =>
       decodeContentIngestedPayload({
         ...payload,
@@ -67,6 +74,22 @@ describe("ContentIngestedPayload", () => {
         contentReference: "../etc/passwd",
       }),
     ).toThrow();
+    expect(() =>
+      decodeContentIngestedPayload({
+        ...payload,
+        provenance: {
+          origin: "tool-result",
+          sourceLabel: "x".repeat(MAX_CONTENT_SOURCE_LABEL_LENGTH + 1),
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeContentIngestedPayload({
+        ...payload,
+        contentReference: "r".repeat(MAX_CONTENT_REFERENCE_LENGTH + 1),
+      }),
+    ).toThrow();
+    expect(JSON.stringify(payload).length).toBeLessThan(MAX_CONTENT_INGESTED_PAYLOAD_BYTES);
   });
 });
 

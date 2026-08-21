@@ -103,6 +103,8 @@ import {
   THREAD_RETENTION_EVENT_NAMES,
   ThreadRetentionThreadPurged,
   ThreadRetentionWindowSet,
+  ContentIngestedPayload,
+  THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
 } from "@octant/contracts";
 import {
   REMOTE_ACCESS_EVENT_NAMES,
@@ -146,6 +148,7 @@ import {
   ProductFeedbackProjection,
 } from "./productFeedbackProjection";
 import { ThreadRetentionProjection } from "./threadRetentionProjection";
+import { ExternalContentTaintProjection } from "../context/externalContentTaintProjection";
 import {
   THREAD_CHECKPOINT_FORGOTTEN,
   THREAD_CHECKPOINT_MARKED,
@@ -324,7 +327,8 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(GITHUB_CLONE_REQUESTED, 1, GithubCloneRequested)
     .register(GITHUB_CLONE_TRANSITIONED, 1, GithubCloneTransitioned)
     .register(THREAD_RETENTION_EVENT_NAMES.windowSet, 1, ThreadRetentionWindowSet)
-    .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged);
+    .register(THREAD_RETENTION_EVENT_NAMES.threadPurged, 1, ThreadRetentionThreadPurged)
+    .register(THREAD_EXTERNAL_CONTENT_EVENT_NAMES.ingested, 1, ContentIngestedPayload);
   for (const eventName of RETIRED_EVENT_NAMES) {
     events.register(eventName, 1, RetiredEventPayload);
   }
@@ -369,6 +373,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())
       .register(new ProductFeedbackProjection())
-      .register(new ThreadRetentionProjection()),
+      .register(new ThreadRetentionProjection())
+      .register(new ExternalContentTaintProjection()),
   };
 }
