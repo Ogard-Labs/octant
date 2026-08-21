@@ -5668,6 +5668,7 @@ function authorizeAgentRunCreation(input: {
   readonly codeSessionAuthority: CodeSessionAuthorityStore;
 }):
   | {
+      readonly parentMode: "chat" | "code";
       readonly parentAuthority: ReturnType<typeof defaultAgentRunAuthorityCeilingForMode>;
       readonly liveAuthority: ReturnType<typeof defaultAgentRunAuthorityCeilingForMode>;
     }
@@ -5705,7 +5706,7 @@ function authorizeAgentRunCreation(input: {
       executionPolicy: "plan",
       permissionPersistence: "current-session",
     });
-    return { parentAuthority, liveAuthority };
+    return { parentMode: "chat", parentAuthority, liveAuthority };
   }
 
   const codeContext = workspace.contextByMode.code;
@@ -5743,7 +5744,7 @@ function authorizeAgentRunCreation(input: {
       executionPolicy: effectiveThread.executionPolicy,
       permissionPersistence: effectiveThread.permissionPersistence,
     });
-    return { parentAuthority, liveAuthority };
+    return { parentMode: "code", parentAuthority, liveAuthority };
   }
 
   return undefined;
