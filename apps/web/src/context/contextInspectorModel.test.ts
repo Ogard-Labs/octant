@@ -4,6 +4,7 @@ import {
   contextCompositionEntries,
   contextEntryControls,
   contextStatusModel,
+  contextWindowModel,
   serviceLimitLabel,
   tokenMeasurementLabel,
 } from "./contextInspectorModel";
@@ -72,5 +73,39 @@ describe("context inspector presentation model", () => {
       },
     });
     expect(optional.manifestState).toBe("included");
+  });
+
+  it("keeps omitted plan entries out of the visible context composition", () => {
+    const fixture = contextFixture();
+    const latestSent = fixture.latestSent;
+    const latestUsage = fixture.latestUsage;
+    if (latestSent === undefined || latestUsage === undefined)
+      throw new Error("Fixture is incomplete");
+    const optional = latestSent.plan.entries[1];
+    const required = latestSent.plan.entries[0];
+    if (required === undefined || optional === undefined) {
+      throw new Error("Fixture is missing a planned entry");
+    }
+    const omitted = {
+      ...fixture,
+      latestSent: {
+        ...latestSent,
+        plan: {
+          ...latestSent.plan,
+          plannedInputTokens: 42,
+          entries: [
+            required,
+            { ...optional, state: "omitted" as const, reason: "omitted-to-fit" as const },
+          ],
+        },
+      },
+      latestUsage: { ...latestUsage, actualInputTokens: 42, varianceTokens: 0 },
+    };
+
+    const model = contextWindowModel(omitted);
+    expect(model.segments.find((segment) => segment.label === "Current request")).toMatchObject({
+      tokens: 42,
+    });
+    expect(model.segments.some((segment) => segment.label === "Octant tools")).toBe(false);
   });
 });

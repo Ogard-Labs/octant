@@ -28,6 +28,31 @@ export interface ContextCompositionEntry extends ContextEntry {
   readonly planReason: ContextInspectorSnapshot["next"]["plan"]["entries"][number]["reason"];
 }
 
+export interface ContextWindowSegment {
+  readonly key: string;
+  readonly kind: "content" | "overhead" | "reserved" | "free";
+  readonly label: string;
+  readonly percent: number;
+  readonly tokens?: number;
+  readonly tone: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+}
+
+export interface ContextWindowModel {
+  readonly capabilities: ReadonlyArray<{
+    readonly key: "tools" | "mcp";
+    readonly label: string;
+    readonly loaded: number;
+    readonly deferred: number;
+  }>;
+  readonly hasUnknown: boolean;
+  readonly percent: number;
+  readonly segments: ReadonlyArray<ContextWindowSegment>;
+  readonly sourceLabel: "Last sent" | "Next turn";
+  readonly totalTokens: number;
+  readonly usageLabel: string;
+  readonly usedTokens: number;
+}
+
 const healthLabels: Readonly<Record<ContextHealth, string>> = {
   healthy: "Healthy",
   watch: "Watch",
@@ -81,6 +106,109 @@ export function contextStatusModel(
     ...(focus.kind === "pane" && plan.health !== "healthy"
       ? { attentionLabel: `${snapshot.displayLabel}: ${healthLabel}` }
       : {}),
+  };
+}
+
+/**
+ * The compact window uses the last provider-reconciled turn when one exists.
+ * Before the first turn it shows the next server-evaluated plan instead. The
+ * visible categories are the same attributed manifest entries the full
+ * inspector manages, never a second estimate assembled in the renderer.
+ */
+export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextWindowModel {
+  const planSnapshot = snapshot.latestSent ?? snapshot.next;
+  const sourceLabel = snapshot.latestSent === undefined ? "Next turn" : "Last sent";
+  const usedTokens =
+    snapshot.latestSent === undefined || snapshot.latestUsage === undefined
+      ? planSnapshot.plan.plannedInputTokens
+      : snapshot.latestUsage.actualInputTokens;
+  const totalTokens = snapshot.modelLimits.contextWindow;
+  const byCategory = new Map<
+    ContextEntryCategory,
+    { readonly key: string; readonly label: string; tokens: number; unknown: boolean }
+  >();
+
+  for (const entry of contextCompositionEntries(snapshot, planSnapshot)) {
+    if (entry.plannedState === "omitted") continue;
+    const retained = byCategory.get(entry.category) ?? {
+      key: entry.category,
+      label: contextCategoryLabel(entry.category),
+      tokens: 0,
+      unknown: false,
+    };
+    if (entry.plannedTokens.kind === "unknown") retained.unknown = true;
+    else retained.tokens += entry.plannedTokens.tokens;
+    byCategory.set(entry.category, retained);
+  }
+
+  const content = [...byCategory.values()];
+  const knownContentTokens = content.reduce((sum, entry) => sum + entry.tokens, 0);
+  const hasUnknown = content.some((entry) => entry.unknown);
+  const overheadTokens = hasUnknown ? 0 : Math.max(0, usedTokens - knownContentTokens);
+  const reservedTokens = Object.values(planSnapshot.plan.reserves).reduce(
+    (sum, tokens) => sum + tokens,
+    0,
+  );
+  const freeTokens = Math.max(0, totalTokens - usedTokens - reservedTokens);
+  const segments: Array<ContextWindowSegment> = content.map((entry, index) => ({
+    key: entry.key,
+    kind: "content",
+    label: entry.label,
+    percent: percentOf(entry.tokens, totalTokens),
+    ...(entry.unknown ? {} : { tokens: entry.tokens }),
+    tone: toneAt(index),
+  }));
+  if (overheadTokens > 0) {
+    segments.push({
+      key: "observed-overhead",
+      kind: "overhead",
+      label: "Observed overhead",
+      percent: percentOf(overheadTokens, totalTokens),
+      tokens: overheadTokens,
+      tone: 6,
+    });
+  }
+  segments.push(
+    {
+      key: "reserved",
+      kind: "reserved",
+      label: "Reserved",
+      percent: percentOf(reservedTokens, totalTokens),
+      tokens: reservedTokens,
+      tone: 7,
+    },
+    {
+      key: "free",
+      kind: "free",
+      label: "Free space",
+      percent: percentOf(freeTokens, totalTokens),
+      tokens: freeTokens,
+      tone: 8,
+    },
+  );
+
+  return {
+    sourceLabel,
+    usedTokens,
+    totalTokens,
+    percent: percentOf(usedTokens, totalTokens),
+    usageLabel: `${compact(usedTokens)} / ${compact(totalTokens)}`,
+    hasUnknown,
+    segments,
+    capabilities: [
+      {
+        key: "tools",
+        label: "Tools",
+        loaded: snapshot.capabilities.loadedTools,
+        deferred: snapshot.capabilities.availableTools - snapshot.capabilities.loadedTools,
+      },
+      {
+        key: "mcp",
+        label: "MCP",
+        loaded: snapshot.capabilities.loadedMcp,
+        deferred: snapshot.capabilities.availableMcp - snapshot.capabilities.loadedMcp,
+      },
+    ],
   };
 }
 
@@ -158,4 +286,13 @@ function compact(value: number): string {
   if (value < 1_000) return String(value);
   if (value < 1_000_000) return `${Number((value / 1_000).toFixed(value >= 100_000 ? 0 : 1))}K`;
   return `${Number((value / 1_000_000).toFixed(1))}M`;
+}
+
+function percentOf(value: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((value / total) * 1000) / 10));
+}
+
+function toneAt(index: number): ContextWindowSegment["tone"] {
+  return ((index % 6) + 1) as ContextWindowSegment["tone"];
 }
