@@ -127,29 +127,14 @@ describe("WorkspaceView Code tab registration", () => {
     expect(container.querySelector('[data-code-tab-kind="apple-workbench"]')).toBeVisible();
   });
 
-  it("opens Code tools with concise surface titles instead of duplicating the thread title", async () => {
+  it("keeps utility launching out of the main thread pane", async () => {
     const base = propsFor(codeTab("code-overview", "A very long Code thread title"));
-    render(
-      <WorkspaceView
-        {...base}
-        availableSurfaces={{
-          chat: [],
-          work: [],
-          code: [{ kind: "thread", label: "Thread", available: true }],
-        }}
-        onOpenSurface={vi.fn()}
-      />,
-    );
+    render(<WorkspaceView {...base} />);
     await screen.findByRole("region", { name: "Code thread" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Open surface" }));
-    fireEvent.click(screen.getByRole("button", { name: "Terminal" }));
-
-    expect(base.onOpenCodeSurface).toHaveBeenCalledWith(
-      "code-terminal",
-      codeIds.thread,
-      "Terminal",
-    );
+    expect(screen.queryByRole("button", { name: "Open utility" })).toBeNull();
+    expect(
+      screen.getByRole("region", { name: "Workspace pane: A very long Code thread title" }),
+    ).toBeVisible();
   });
 
   it("mounts the exact-thread Browser activity preview over an active Code conversation", async () => {

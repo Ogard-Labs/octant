@@ -134,6 +134,15 @@ thread's bounded context, no inherited Work or Code authority, and no path that
 approves, steers, or appends to the source. Unavailable, unauthorized, or
 deleted targets fail closed.
 
+Thread utilities live in the Right Utility Dock outside the split tree. The
+top-right control reveals the dock; its compact summary reports Context,
+Project memory, and Navigator state before any tool is opened. **Add utility
+tab** opens Side Chat, Browser, Files, Changes, Terminal, Tests, Thread tools,
+or iOS Simulator without replacing the active pane. Pointer activity and
+keyboard input decide the active pane. Each thread keeps its own open tabs and
+selected tab, and switching visible threads restores the matching host-owned
+utility state.
+
 ## Persistence
 
 ```mermaid

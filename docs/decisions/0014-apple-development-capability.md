@@ -1,6 +1,6 @@
 # 0014. Apple development and validation as an app-managed capability
 
-**Status:** Accepted
+**Status:** Superseded by 0043
 
 ## Context
 

@@ -792,8 +792,10 @@ describe("CodeThreadWorkspace", () => {
     );
     await user.click(screen.getByRole("combobox", { name: "Next turn access" }));
     expect(screen.queryByRole("option", { name: "Auto-accept edits" })).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Raise thread · Auto-accept edits" })).toBeVisible();
-    expect(screen.getByRole("option", { name: "Raise thread · Full access" })).toBeVisible();
+    expect(
+      await screen.findByRole("option", { name: "Raise thread · Auto-accept edits" }),
+    ).toBeVisible();
+    expect(await screen.findByRole("option", { name: "Raise thread · Full access" })).toBeVisible();
     await user.click(await screen.findByRole("option", { name: "Plan · read-only" }));
     expect(execute).not.toHaveBeenCalled();
 

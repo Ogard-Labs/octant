@@ -11,21 +11,28 @@ const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
 
 function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDockProps {
   return {
-    availableSurfaces: RIGHT_UTILITY_DOCK_SURFACES,
     context: <p>Live context inspector</p>,
     isNarrow: false,
+    launchableSurfaces: RIGHT_UTILITY_DOCK_SURFACES.filter(
+      (surface) => surface.id === "browser" || surface.id === "terminal",
+    ),
     navigator: <p>Host Navigator</p>,
     onClose: vi.fn(),
+    onCloseTab: vi.fn(),
     onCommitWidth: vi.fn(),
+    onOpenTab: vi.fn(),
     onPreviewWidth: vi.fn(),
     onSelectSurface: vi.fn(),
+    open: true,
     projectMemory: <p>Private Project memory</p>,
-    thread: <p>Thread surfaces</p>,
+    sideChat: <p>Thread side chat</p>,
     resolution: {
       kind: "surface",
       projectId,
       surface: RIGHT_UTILITY_DOCK_SURFACES[1],
     },
+    summary: <p>Thread context summary</p>,
+    tabs: [RIGHT_UTILITY_DOCK_SURFACES[1]],
     width: 360,
     ...overrides,
   };
@@ -93,7 +100,7 @@ describe("RightUtilityDock", () => {
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     expect(screen.queryByRole("separator", { name: "Resize utility dock" })).toBeNull();
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Close Project memory" })).toHaveFocus(),
+      expect(screen.getByRole("button", { name: "Close right sidebar" })).toHaveFocus(),
     );
 
     await user.keyboard("{Escape}");
@@ -107,6 +114,7 @@ describe("RightUtilityDock", () => {
           {...props({
             isNarrow: true,
             onClose,
+            open: false,
             resolution: { kind: "closed", reason: "no-surface" },
             restoreFocus: opener,
           })}
@@ -140,13 +148,11 @@ describe("RightUtilityDock", () => {
     ).toBeVisible();
   });
 
-  it("tears the dock down entirely when the resolution is closed", () => {
+  it("tears the dock down entirely only when the sidebar toggle closes", () => {
     const { rerender } = render(<RightUtilityDock {...props()} />);
     expect(screen.getByText("Private Project memory")).toBeVisible();
 
-    rerender(
-      <RightUtilityDock {...props({ resolution: { kind: "closed", reason: "disconnected" } })} />,
-    );
+    rerender(<RightUtilityDock {...props({ open: false })} />);
     expect(screen.queryByText("Private Project memory")).toBeNull();
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
   });

@@ -10,25 +10,37 @@ import type {
 } from "./rightUtilityDockModel";
 
 export interface RightUtilityDockProps {
-  readonly availableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+  readonly browser?: ReactNode;
+  readonly changes?: ReactNode;
   readonly context: ReactNode;
+  readonly files?: ReactNode;
+  readonly iosSimulator?: ReactNode;
   readonly isNarrow: boolean;
+  readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly navigator: ReactNode;
   readonly onClose: () => void;
+  readonly onCloseTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly onCommitWidth: (width: number) => void;
+  readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly onPreviewWidth: (width: number) => void;
   readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
+  readonly open: boolean;
   readonly projectMemory: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
-  readonly thread: ReactNode;
+  readonly sideChat?: ReactNode;
+  readonly summary: ReactNode;
+  readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+  readonly terminal?: ReactNode;
+  readonly tests?: ReactNode;
+  readonly thread?: ReactNode;
   readonly width: number;
 }
 
 export function RightUtilityDock(props: RightUtilityDockProps) {
   const closeButton = useRef<HTMLButtonElement>(null);
 
-  if (props.resolution.kind === "closed") return null;
+  if (!props.open) return null;
 
   // Only the narrow dock is a modal that nothing else can dismiss. Docked, the
   // window chrome's disclosure closes it, so the header carries no second
@@ -36,13 +48,24 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   const dismiss = props.isNarrow ? { closeButtonRef: closeButton, onClose: props.onClose } : {};
   const surface = (
     <RightUtilityDockSurface
-      availableSurfaces={props.availableSurfaces}
+      {...(props.browser === undefined ? {} : { browser: props.browser })}
+      {...(props.changes === undefined ? {} : { changes: props.changes })}
       context={props.context}
+      {...(props.files === undefined ? {} : { files: props.files })}
+      {...(props.iosSimulator === undefined ? {} : { iosSimulator: props.iosSimulator })}
+      launchableSurfaces={props.launchableSurfaces}
       navigator={props.navigator}
+      onCloseTab={props.onCloseTab}
+      onOpenTab={props.onOpenTab}
       onSelectSurface={props.onSelectSurface}
       projectMemory={props.projectMemory}
       resolution={props.resolution}
-      thread={props.thread}
+      {...(props.sideChat === undefined ? {} : { sideChat: props.sideChat })}
+      summary={props.summary}
+      tabs={props.tabs}
+      {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
+      {...(props.tests === undefined ? {} : { tests: props.tests })}
+      {...(props.thread === undefined ? {} : { thread: props.thread })}
       {...dismiss}
     />
   );
@@ -51,7 +74,9 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
     return (
       <OctantDialog
         initialFocus={closeButton}
-        label={props.resolution.surface.label}
+        label={
+          props.resolution.kind === "closed" ? "Right sidebar" : props.resolution.surface.label
+        }
         onClose={props.onClose}
         open
         popupId="right-utility-dock"
