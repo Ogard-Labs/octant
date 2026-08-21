@@ -14,6 +14,7 @@ import {
   supportsAttachmentFile,
 } from "./composerAttachmentCapability";
 import { pastedImageName } from "./composerImagePaste";
+import { COMPOSER_STAGED_DROPPED_NOTE } from "../composer/composerThreadDraftStore";
 import { useThreadMentions } from "./useThreadMentions";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
@@ -151,6 +152,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
   const followsConversationRef = useRef(true);
   const followedThreadRef = useRef<string | undefined>(undefined);
   const pendingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
+  const uploadingAttachmentsRef = useRef<ReadonlyArray<PendingAttachment>>([]);
+  const pendingExtensionRef = useRef<ReadonlyArray<ChatComposerExtensionSelection>>([]);
+  const pendingCanvasRef = useRef<ReadonlyArray<CanvasContextSelection>>([]);
+  const pendingPreviewRef = useRef<ReadonlyArray<PreviewContextSelection>>([]);
   // Every composer command that carries the thread's expected version shares
   // one queue. Two of them dispatched before the first round trip returns
   // would otherwise both send the rendered version, so the second is rejected
@@ -160,11 +165,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     Promise.resolve(undefined),
   );
   const discardAttachmentRef = useRef(props.controller.discard);
+  const markDraftStagedDroppedRef = useRef(props.controller.markDraftStagedDropped);
   const mountedRef = useRef(true);
   const activeThreadIdRef = useRef<string | undefined>(
     activeThread === undefined ? undefined : String(activeThread.id),
   );
   discardAttachmentRef.current = props.controller.discard;
+  markDraftStagedDroppedRef.current = props.controller.markDraftStagedDropped;
   activeThreadIdRef.current = activeThread === undefined ? undefined : String(activeThread.id);
   useEffect(() => {
     mountedRef.current = true;
@@ -181,6 +188,15 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       // Keep the visible chips in step with the cleared ledger; on unmount
       // this is a no-op, on a thread change it drops the old thread's chips.
       setPendingAttachments([]);
+      const droppedStagedContext =
+        abandoned.length > 0 ||
+        uploadingAttachmentsRef.current.length > 0 ||
+        pendingExtensionRef.current.length > 0 ||
+        pendingCanvasRef.current.length > 0 ||
+        pendingPreviewRef.current.length > 0;
+      if (droppedStagedContext) {
+        markDraftStagedDroppedRef.current?.(String(threadId));
+      }
       for (const attachment of abandoned) {
         void discardAttachmentRef
           .current({ threadId, attachmentId: attachment.id })
@@ -250,6 +266,10 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
     ...(activeThread === undefined ? {} : { thread: activeThread }),
   });
+  uploadingAttachmentsRef.current = uploadingAttachments;
+  pendingCanvasRef.current = pendingCanvasSelections;
+  pendingPreviewRef.current = pendingPreviewSelections;
+  pendingExtensionRef.current = props.pendingExtensionSelections ?? extensionDraft.receipts;
   if (view === undefined) {
     return (
       <section aria-label="Chat workspace" className="chat-workspace">
@@ -660,6 +680,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         attachmentBusy={uploadingMessage !== undefined || attachmentStatus.kind === "removing"}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
         draft={props.controller.pendingDraft}
+        caretRestoreKey={String(thread.id)}
+        {...(props.controller.pendingDraftCaret === undefined
+          ? {}
+          : { caretIndex: props.controller.pendingDraftCaret })}
+        {...(props.controller.setPendingDraftCaret === undefined
+          ? {}
+          : { onCaretIndexChange: props.controller.setPendingDraftCaret })}
         isSending={isSending}
         model={{ options: providerState.modelOptions, value: view.thread.modelId }}
         onDraftChange={props.controller.setPendingDraft}
@@ -947,8 +974,17 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
             : attachmentStatus.kind === "removing"
               ? { sendDisabledReason: `Removing ${attachmentStatus.fileName}.` }
               : attachmentStatus.kind === "failed"
-                ? { statusMessage: attachmentStatus.message }
-                : {}
+                ? {
+                    statusMessage: composeComposerNotice(
+                      attachmentStatus.message,
+                      props.controller.draftStagedDropped,
+                      props.controller.draftPersistError,
+                    ),
+                  }
+                : composerNoticeProps(
+                    props.controller.draftStagedDropped,
+                    props.controller.draftPersistError,
+                  )
           : { sendDisabledReason: "Choose an available provider and model before sending." })}
       />
       <LinkedThreadParallelReviewFlow
@@ -960,6 +996,26 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
       />
     </section>
   );
+}
+
+function composeComposerNotice(
+  message: string | undefined,
+  stagedDropped: boolean | undefined,
+  persistError: string | undefined,
+): string {
+  const parts: string[] = [];
+  if (stagedDropped === true) parts.push(COMPOSER_STAGED_DROPPED_NOTE);
+  if (persistError !== undefined) parts.push(persistError);
+  if (message !== undefined && message.trim() !== "") parts.push(message);
+  return parts.join(" ");
+}
+
+function composerNoticeProps(
+  stagedDropped: boolean | undefined,
+  persistError: string | undefined,
+): { readonly statusMessage?: string } {
+  const statusMessage = composeComposerNotice(undefined, stagedDropped, persistError);
+  return statusMessage.length === 0 ? {} : { statusMessage };
 }
 
 function recoverClaimedAttachments(

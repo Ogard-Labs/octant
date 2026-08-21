@@ -29,6 +29,8 @@ import {
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useComposerThreadDraft } from "../composer/useComposerThreadDraft";
+import type { ComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
 import {
   EMPTY_TURN_ACTIVITY,
   appendReasoning,
@@ -287,6 +289,7 @@ function totalTurnUsage(byOperation: ReadonlyMap<string, CodeTurnUsage>): {
 export interface CodeControllerOptions {
   readonly activeThreadId?: CodeThreadId;
   readonly client?: CodeClient;
+  readonly draftStore?: ComposerThreadDraftStore;
   readonly readCursorStore?: CodeReadCursorStore;
   /**
    * How often the sidebar re-reads the thread list. Only the thread in view
@@ -331,7 +334,25 @@ export function useCodeController(options: CodeControllerOptions) {
   const [activeView, setActiveView] = useState<CodeThreadView>();
   const [errorCategory, setErrorCategory] = useState<CodeFailure["category"]>();
   const [errorMessage, setErrorMessage] = useState<string>();
-  const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const composerDraft = useComposerThreadDraft({
+    mode: "code",
+    threadId: options.activeThreadId === undefined ? undefined : String(options.activeThreadId),
+    ...(options.draftStore === undefined ? {} : { store: options.draftStore }),
+  });
+  const composerDraftRef = useRef(composerDraft);
+  composerDraftRef.current = composerDraft;
+  const knownDraftThreads = useRef<ReadonlySet<string> | undefined>(undefined);
+
+  const reconcileDrafts = useCallback((threadIds: ReadonlyArray<string>) => {
+    if (knownDraftThreads.current === undefined) {
+      composerDraftRef.current.dropUnknown(threadIds);
+    } else {
+      for (const threadId of knownDraftThreads.current) {
+        if (!threadIds.includes(threadId)) composerDraftRef.current.purge(threadId);
+      }
+    }
+    knownDraftThreads.current = new Set(threadIds);
+  }, []);
   const [conversation, setConversation] = useState<ReadonlyArray<CodeConversationMessage>>([]);
   /*
    * Whether the empty transcript means "nothing has been said yet" or "we could
@@ -451,16 +472,13 @@ export function useCodeController(options: CodeControllerOptions) {
   // typed and never carries one thread's prompt into another's composer. A
   // draft is renderer-local by design: it is not a message until the user
   // sends it, so the journal records nothing here.
-  const pendingDraft = drafts.get(draftKey(options.activeThreadId)) ?? "";
-  const setPendingDraft = useCallback((value: string) => {
-    const key = draftKey(activeThreadId.current);
-    setDrafts((current) => {
-      if ((current.get(key) ?? "") === value) return current;
-      const next = new Map(current);
-      if (value === "") next.delete(key);
-      else next.set(key, value);
-      return next;
-    });
+  const pendingDraft = composerDraft.text;
+  const setPendingDraft = useCallback((value: string, caretIndex?: number) => {
+    if (caretIndex === undefined) composerDraftRef.current.setDraft(value);
+    else composerDraftRef.current.setDraft(value, caretIndex);
+  }, []);
+  const setPendingDraftCaret = useCallback((caretIndex: number) => {
+    composerDraftRef.current.setCaret(caretIndex);
   }, []);
 
   const clearFailure = useCallback(() => {
@@ -510,6 +528,7 @@ export function useCodeController(options: CodeControllerOptions) {
           const next = await client.bootstrap();
           if (!mounted.current || request !== bootstrapGeneration.current) return false;
           setBootstrap(next);
+          reconcileDrafts(next.threads.map((thread) => String(thread.id)));
           clearFailure();
           setStatus("ready");
           return true;
@@ -534,7 +553,7 @@ export function useCodeController(options: CodeControllerOptions) {
         }
       }
     },
-    [clearFailure, client, fail],
+    [clearFailure, client, fail, reconcileDrafts],
   );
 
   // How far each thread's journaled activity had reached the last time the host
@@ -557,11 +576,17 @@ export function useCodeController(options: CodeControllerOptions) {
     [readCursorStore],
   );
 
-  const applyNavigationRefresh = useCallback((next: CodeBootstrap) => {
-    setBootstrap((current) =>
-      current === undefined ? next : { ...current, threads: next.threads, activity: next.activity },
-    );
-  }, []);
+  const applyNavigationRefresh = useCallback(
+    (next: CodeBootstrap) => {
+      setBootstrap((current) =>
+        current === undefined
+          ? next
+          : { ...current, threads: next.threads, activity: next.activity },
+      );
+      reconcileDrafts(next.threads.map((thread) => String(thread.id)));
+    },
+    [reconcileDrafts],
+  );
 
   /**
    * Read the host's own activity sequence for a thread and record it as seen.
@@ -1620,6 +1645,15 @@ export function useCodeController(options: CodeControllerOptions) {
       clearFailure();
       setTurnError(undefined);
       setTurnStatus("sending");
+      const sendingThreadId = String(view.thread.id);
+      const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
+      const restoreFailedPrompt = () => {
+        composerDraftRef.current.restoreFor(sendingThreadId, {
+          text: trimmed,
+          caretIndex: previousDraft?.caretIndex ?? trimmed.length,
+          stagedDropped: previousDraft?.stagedDropped === true,
+        });
+      };
       const userMessage: CodeConversationMessage = {
         id: globalThis.crypto.randomUUID(),
         role: "user",
@@ -1649,17 +1683,17 @@ export function useCodeController(options: CodeControllerOptions) {
         if (started.kind === "operation-failed") {
           setTurnStatus("failed");
           setTurnError(started.failure.message);
-          setPendingDraft(trimmed);
+          restoreFailedPrompt();
           return false;
         }
         if (started.kind !== "provider-turn-state" || started.state !== "running") {
           setTurnStatus("failed");
           setTurnError("The provider turn could not be started.");
-          setPendingDraft(trimmed);
+          restoreFailedPrompt();
           return false;
         }
         setTurnStatus("running");
-        setPendingDraft("");
+        composerDraftRef.current.clearFor(sendingThreadId);
         setConversation((current) => [
           ...current,
           { ...userMessage, operationId },
@@ -1683,7 +1717,7 @@ export function useCodeController(options: CodeControllerOptions) {
         const failActiveTurn = (status: "waiting" | "interrupted" | "failed", message: string) => {
           setTurnStatus("failed");
           setTurnError(message);
-          setPendingDraft(trimmed);
+          restoreFailedPrompt();
           setConversation((current) =>
             current.map((entry) =>
               entry.id === assistantId
@@ -1819,7 +1853,7 @@ export function useCodeController(options: CodeControllerOptions) {
         const failure = codeFailure(error);
         setTurnStatus("failed");
         setTurnError(failure.message);
-        setPendingDraft(trimmed);
+        restoreFailedPrompt();
         fail(error);
         return false;
       }
@@ -1963,6 +1997,11 @@ export function useCodeController(options: CodeControllerOptions) {
     markThreadRead,
     navigation,
     pendingDraft,
+    pendingDraftCaret: composerDraft.caretIndex,
+    draftStagedDropped: composerDraft.stagedDropped,
+    draftPersistError: composerDraft.persistError,
+    markDraftStagedDropped: composerDraft.markStagedDropped,
+    purgeThreadDraft: composerDraft.purge,
     pinThread,
     renameThread,
     providerRequests,
@@ -1984,6 +2023,7 @@ export function useCodeController(options: CodeControllerOptions) {
     conversationHistory,
     sendFollowUp,
     setPendingDraft,
+    setPendingDraftCaret,
     startThreadTurn,
     status,
     threadUsage,
@@ -2012,11 +2052,6 @@ function conversationFallback(
 }
 
 export type CodeController = ReturnType<typeof useCodeController>;
-
-/** Draft bucket for one thread, or for the composer before a thread exists. */
-function draftKey(threadId: CodeThreadId | undefined): string {
-  return threadId === undefined ? "" : String(threadId);
-}
 
 function required(value: string | undefined): string {
   if (value === undefined) throw new Error("Code controller requires launch authority.");

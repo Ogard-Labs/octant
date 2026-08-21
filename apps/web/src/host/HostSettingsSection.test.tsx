@@ -8,8 +8,10 @@ import type {
   HostLifecycleOutcome,
   HostRestoreOutcome,
 } from "@octant/contracts/host-control";
+import type { PurgeThreadsOutcome } from "@octant/contracts/thread-retention";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import { HostSettingsSection } from "./HostSettingsSection";
+import { composerThreadDrafts } from "../composer/composerThreadDraftStore";
 
 const serviceStatus: HostControlStatus = {
   identity: { hostId: "host-1", instanceId: "instance-1", serviceMode: "service" },
@@ -51,6 +53,7 @@ interface ClientOverrides {
   readonly lifecycle?: (action: HostLifecycleAction) => Promise<HostLifecycleOutcome>;
   readonly backup?: (label?: string) => Promise<HostBackupOutcome>;
   readonly restore?: () => Promise<HostRestoreOutcome>;
+  readonly purgeThreads?: () => Promise<PurgeThreadsOutcome>;
 }
 
 function makeClient(overrides: ClientOverrides = {}): HostControlClient {
@@ -76,15 +79,17 @@ function makeClient(overrides: ClientOverrides = {}): HostControlClient {
       })),
     readThreadRetention: async () => ({ windows: [], tombstones: [] }),
     setThreadRetention: async () => ({ windows: [], tombstones: [] }),
-    purgeThreads: async () => ({
-      operation: "purge-threads",
-      scope: { kind: "host" },
-      purged: [],
-      alreadyPurged: [],
-      retained: [],
-      deleted: [],
-      occurredAt: "2026-08-19T12:00:00.000Z" as never,
-    }),
+    purgeThreads:
+      overrides.purgeThreads ??
+      (async () => ({
+        operation: "purge-threads",
+        scope: { kind: "host" },
+        purged: [],
+        alreadyPurged: [],
+        retained: [],
+        deleted: [],
+        occurredAt: "2026-08-19T12:00:00.000Z" as never,
+      })),
   };
 }
 
@@ -323,5 +328,35 @@ describe("HostSettingsSection", () => {
       expect(control).not.toHaveAttribute("tabindex", "-1");
     }
     expect(screen.getByLabelText("Backup label").tagName).toBe("INPUT");
+  });
+
+  it("removes this client's unsent composer draft when a thread purge succeeds", async () => {
+    const user = userEvent.setup();
+    const threadId = "00000000-0000-4000-8000-000000000901";
+    composerThreadDrafts.write("chat", threadId, {
+      text: "do not keep",
+      caretIndex: 0,
+      stagedDropped: false,
+    });
+    render(
+      <HostSettingsSection
+        client={makeClient({
+          purgeThreads: async () => ({
+            operation: "purge-threads",
+            scope: { kind: "thread", mode: "chat", threadId: threadId as never },
+            purged: [{ mode: "chat", threadId: threadId as never }],
+            alreadyPurged: [],
+            retained: ["other-threads"],
+            deleted: ["thread-journal"],
+            occurredAt: "2026-08-19T12:00:00.000Z" as never,
+          }),
+        })}
+      />,
+    );
+    await screen.findByText("Thread retention");
+    await user.click(screen.getByRole("checkbox", { name: /permanently erases/i }));
+    await user.click(screen.getByRole("button", { name: "Purge" }));
+    expect(await screen.findByText(/Purged 1 thread/)).toBeInTheDocument();
+    expect(composerThreadDrafts.read("chat", threadId)).toBeUndefined();
   });
 });
