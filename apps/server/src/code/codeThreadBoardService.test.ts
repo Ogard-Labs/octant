@@ -432,6 +432,8 @@ describe("CodeThreadBoardService derivation", () => {
             number: 12,
             title: "Board pull request",
             draft: false,
+            state: "open",
+            mergeability: "mergeable",
             author: "octocat",
             baseBranch: "main",
             headBranch: "feature/x",

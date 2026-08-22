@@ -14,11 +14,64 @@ import {
 import { describe, expect, it, vi } from "vitest";
 import {
   CodeThreadMetadataService,
+  MAX_CODE_THREAD_KNOWN_PULL_REQUESTS,
+  pullRequestIdentitiesFromHistory,
   type CodeGitWorktreeObservation,
   type CodeGithubMetadataObservation,
   type CodeThreadMetadataInput,
   type CodeThreadOperationHistory,
 } from "./codeThreadMetadataService";
+
+describe("Code thread known pull-request identities", () => {
+  it("recovers, deduplicates, and bounds exact identities from journal history", () => {
+    const frames = Array.from({ length: MAX_CODE_THREAD_KNOWN_PULL_REQUESTS + 2 }, (_, index) =>
+      frame(
+        {
+          kind: "operation-result",
+          result: {
+            kind: "pull-request-state",
+            operationId: ids.operation,
+            state: "existing",
+            number: index + 1,
+            url: `https://github.com/acme/repo/pull/${index + 1}`,
+            headRepository: "acme/repo",
+            headBranch: `feature/${index + 1}`,
+            baseRepository: "acme/repo",
+            baseBranch: "development",
+          },
+        } as never,
+        `2026-07-20T${String(index).padStart(2, "0")}:00:00.000Z`,
+        index + 1,
+      ),
+    );
+    frames.push(
+      frame(
+        {
+          kind: "operation-result",
+          result: {
+            kind: "pull-request-state",
+            operationId: ids.operation,
+            state: "merged",
+            number: 1,
+            url: "https://github.com/acme/repo/pull/1",
+            headRepository: "acme/repo",
+            headBranch: "feature/1",
+            baseRepository: "acme/repo",
+            baseBranch: "development",
+          },
+        } as never,
+        "2026-07-21T23:00:00.000Z",
+        frames.length + 1,
+      ),
+    );
+
+    const identities = pullRequestIdentitiesFromHistory({ status: "ok", frames });
+    expect(identities).toHaveLength(MAX_CODE_THREAD_KNOWN_PULL_REQUESTS);
+    expect(identities[0]).toEqual({ number: 1, observedAt: "2026-07-21T23:00:00.000Z" });
+    expect(new Set(identities.map((identity) => identity.number)).size).toBe(identities.length);
+    expect(pullRequestIdentitiesFromHistory({ status: "rebuild-required" })).toEqual([]);
+  });
+});
 
 const now = "2026-07-20T23:00:00.000Z";
 const later = "2026-07-20T23:30:00.000Z";

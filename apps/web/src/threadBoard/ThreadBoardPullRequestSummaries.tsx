@@ -11,6 +11,8 @@ export interface ThreadBoardPullRequestSummariesProps {
 
 function stateLabel(state: ThreadBoardPullRequestSummaryList["items"][number]["state"]): string {
   switch (state) {
+    case "unknown":
+      return "Status unknown";
     case "draft":
       return "Draft";
     case "open":
@@ -40,6 +42,14 @@ function reviewLabel(
   return `Review ${review}`;
 }
 
+function mergeabilityLabel(
+  mergeability: ThreadBoardPullRequestSummaryList["items"][number]["mergeability"],
+): string | undefined {
+  if (mergeability === "conflicting") return "Merge conflicts";
+  if (mergeability === "unknown") return "Mergeability unknown";
+  return undefined;
+}
+
 function relationshipLabel(
   relationship: ThreadBoardPullRequestSummaryList["items"][number]["relationship"],
 ): string | undefined {
@@ -57,6 +67,7 @@ export function ThreadBoardPullRequestSummaries(props: ThreadBoardPullRequestSum
           stateLabel(summary.state),
           checksLabel(summary.checks),
           reviewLabel(summary.review),
+          mergeabilityLabel(summary.mergeability),
           summary.freshness === "stale" ? "Stale snapshot" : undefined,
           summary.readyToMerge ? "Ready to merge" : undefined,
           relationshipLabel(summary.relationship),

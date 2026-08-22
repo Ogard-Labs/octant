@@ -100,10 +100,17 @@ The list is a cached read of a temporary in-memory snapshot. Opening the
 workspace, switching Projects, and ordinary board queries do not call GitHub.
 Refresh all and per-Project refresh are explicit; repositories are read
 sequentially through the installed authenticated `gh` CLI. The preview bounds
-the refresh to 25 repositories and 100 pull requests. Disconnect, timeout,
+the refresh to 25 repositories and 100 pull requests. The workspace continues
+to show only active open and draft rows, while Code board cards may use the same
+explicit refresh to show exact linked PRs as Open, Draft, Merged, or Closed.
+Merge readiness also requires fresh mergeability, passing checks, and an
+approved review; conflicts and unknown mergeability never appear ready.
+Disconnect, timeout,
 malformed output, and rate limits keep the last authorized snapshot and label
 it stale. Logging out of GitHub or losing Project authority drops private
-actionable data. The journal never stores the list.
+actionable data. The journal never stores the list or detail cache. It retains
+only exact PR identities produced by Code operations, so after restart a Code
+card can show an identity as **Unknown** and stale until a user refreshes.
 
 Thread-scoped create and observe remain on the thread. This workspace does
 not merge, approve, comment, close, or force-push.

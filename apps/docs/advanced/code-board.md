@@ -25,9 +25,10 @@ projection over one ordered card set.
 **Done** is a first-class visible status in both groupings, with no implicit
 completed-item suppression. Ambiguous evidence becomes **Waiting**, never
 **Done**. Unread is a client overlay and is not part of the server card.
-Board queries never call GitHub; they may show already-cached PR evidence
-with freshness. Refresh re-queries local authoritative state and keeps the
-last useful view while refreshing or on failure.
+Board queries never call GitHub; they may show manually refreshed PR evidence
+with freshness. Exact PR identities produced by a Code thread survive restart
+without making cached GitHub status authoritative: before the next manual PR
+refresh, the board labels their status **Unknown** and stale.
 
 ## Grouping
 
@@ -52,7 +53,9 @@ Cards carry thread and Project identity, derived status and reason, delivery
 target and evidence state, provider and model with live activity, active
 child-agent summary, checkout or worktree and branch, changed-file state,
 linked PR and checks, review state, blocking or recovery reason, follow-up
-state, and last meaningful activity. Opening a card activates that exact
+state, and last meaningful activity. Linked PR summaries show Open, Draft,
+Merged, Closed, or Unknown; **Ready to merge** requires fresh mergeability,
+passing checks, and an approved review. Opening a card activates that exact
 Project and thread.
 
 ## Delivery targets

@@ -7,7 +7,6 @@ import {
   deriveConservativeReadyToMerge,
   deriveThreadBoardPullRequestState,
   matchPullRequestRowsToCodeThread,
-  matchPullRequestRowsToWorkThread,
 } from "./threadBoardPullRequestPolicy";
 
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
@@ -18,6 +17,8 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 function row(overrides: {
   readonly number?: number;
   readonly draft?: boolean;
+  readonly state?: "unknown" | "open" | "merged" | "closed";
+  readonly mergeability?: "mergeable" | "conflicting" | "unknown";
   readonly checks?: "unknown" | "pending" | "passing" | "failing";
   readonly review?: "unknown" | "none" | "pending" | "approved" | "changes-requested";
   readonly linkedThreadIds?: ReadonlyArray<string>;
@@ -31,6 +32,8 @@ function row(overrides: {
     number: overrides.number ?? 12,
     title: "Board pull request",
     draft: overrides.draft ?? false,
+    state: overrides.state ?? "open",
+    mergeability: overrides.mergeability ?? "mergeable",
     author: "octocat",
     baseBranch: "main",
     headBranch: "feature/board",
@@ -45,9 +48,12 @@ function row(overrides: {
 }
 
 describe("thread board pull-request policy", () => {
-  it("derives draft and open states from the active pull-request row", () => {
-    expect(deriveThreadBoardPullRequestState({ draft: true })).toBe("draft");
-    expect(deriveThreadBoardPullRequestState({ draft: false })).toBe("open");
+  it("derives draft, open, merged, and closed states from the pull-request row", () => {
+    expect(deriveThreadBoardPullRequestState({ state: "open", draft: true })).toBe("draft");
+    expect(deriveThreadBoardPullRequestState({ state: "open", draft: false })).toBe("open");
+    expect(deriveThreadBoardPullRequestState({ state: "merged", draft: false })).toBe("merged");
+    expect(deriveThreadBoardPullRequestState({ state: "closed", draft: false })).toBe("closed");
+    expect(deriveThreadBoardPullRequestState({ state: "unknown", draft: false })).toBe("unknown");
   });
 
   it("requires complete fresh evidence before reporting ready to merge", () => {
@@ -56,6 +62,7 @@ describe("thread board pull-request policy", () => {
         state: "open",
         checks: "passing",
         review: "approved",
+        mergeability: "mergeable",
         freshness: "fresh",
       }),
     ).toBe(true);
@@ -64,6 +71,7 @@ describe("thread board pull-request policy", () => {
         state: "draft",
         checks: "passing",
         review: "approved",
+        mergeability: "mergeable",
         freshness: "fresh",
       }),
     ).toBe(false);
@@ -72,6 +80,7 @@ describe("thread board pull-request policy", () => {
         state: "open",
         checks: "pending",
         review: "approved",
+        mergeability: "mergeable",
         freshness: "fresh",
       }),
     ).toBe(false);
@@ -80,7 +89,26 @@ describe("thread board pull-request policy", () => {
         state: "open",
         checks: "passing",
         review: "approved",
+        mergeability: "mergeable",
         freshness: "stale",
+      }),
+    ).toBe(false);
+    expect(
+      deriveConservativeReadyToMerge({
+        state: "open",
+        checks: "passing",
+        review: "approved",
+        mergeability: "conflicting",
+        freshness: "fresh",
+      }),
+    ).toBe(false);
+    expect(
+      deriveConservativeReadyToMerge({
+        state: "open",
+        checks: "passing",
+        review: "approved",
+        mergeability: "unknown",
+        freshness: "fresh",
       }),
     ).toBe(false);
   });
@@ -95,21 +123,6 @@ describe("thread board pull-request policy", () => {
     });
     expect(matches).toHaveLength(1);
     expect(matches[0]?.row.number).toBe(12);
-  });
-
-  it("labels Work board matches as promoted or linked through their Code thread", () => {
-    const matches = matchPullRequestRowsToWorkThread({
-      rows: [
-        row({ number: 12, linkedThreadIds: [String(threadId)] }),
-        row({ number: 13, linkedThreadIds: [String(otherThreadId)] }),
-      ],
-      promotedCodeThreadIds: new Set([String(threadId)]),
-      linkedCodeThreadIds: new Set([String(otherThreadId)]),
-    });
-    expect(matches).toEqual([
-      { row: expect.objectContaining({ number: 12 }), relationship: "promoted" },
-      { row: expect.objectContaining({ number: 13 }), relationship: "linked" },
-    ]);
   });
 
   it("bounds board summaries and reports hidden overflow", () => {
@@ -131,6 +144,23 @@ describe("thread board pull-request policy", () => {
     expect(summaries.items).toHaveLength(3);
     expect(summaries.hiddenCount).toBe(2);
     expect(summaries.items[0]?.readyToMerge).toBe(true);
+  });
+
+  it("preserves a restart-recovered identity as unknown and stale", () => {
+    const unknown = row({ state: "unknown", mergeability: "unknown" });
+    const summaries = composeThreadBoardPullRequestSummaries({
+      rows: [unknown],
+      snapshotFreshness: { status: "stale" },
+      githubRevoked: false,
+      matches: [{ row: unknown }],
+    });
+
+    expect(summaries.items[0]).toMatchObject({
+      state: "unknown",
+      freshness: "stale",
+      mergeability: "unknown",
+      readyToMerge: false,
+    });
   });
 
   it("drops private pull-request evidence when GitHub is revoked", () => {

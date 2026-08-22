@@ -300,6 +300,7 @@ describe("GhPullRequestPort.observeReview", () => {
         headRepository: "octocat",
         headBranch: "feature/phase-7",
         author: "octocat",
+        mergeability: "mergeable",
         matchesDeliveryBranch: true,
       },
       description: "Verified implementation.",
@@ -423,6 +424,7 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
         headRepository: "",
         headBranch: "feature/phase-7",
         author: "octocat",
+        mergeability: "mergeable",
         matchesDeliveryBranch: false,
       },
       description: "Verified implementation.",
@@ -468,9 +470,11 @@ describe("GhPullRequestPort active list", () => {
     headRefName: "feature/manual-refresh",
     statusCheckRollup: [{ name: "ci", conclusion: "SUCCESS", status: "COMPLETED" }],
     reviewDecision: "APPROVED",
+    state: "OPEN",
+    mergeable: "MERGEABLE",
   };
 
-  it("lists open and draft pull requests for a server-resolved repository without mutating GitHub", async () => {
+  it("lists bounded pull-request history with mergeability without mutating GitHub", async () => {
     const { command, port } = fixture([
       {
         exitCode: 0,
@@ -490,6 +494,8 @@ describe("GhPullRequestPort active list", () => {
           number: 12,
           title: "List active pull requests",
           draft: false,
+          state: "open",
+          mergeability: "mergeable",
           author: "octocat",
           baseBranch: "development",
           headBranch: "feature/manual-refresh",
@@ -502,6 +508,8 @@ describe("GhPullRequestPort active list", () => {
           number: 13,
           title: "List active pull requests",
           draft: true,
+          state: "open",
+          mergeability: "mergeable",
           author: "octocat",
           baseBranch: "development",
           headBranch: "feature/manual-refresh",
@@ -518,13 +526,37 @@ describe("GhPullRequestPort active list", () => {
       "--repo",
       "octant/octant",
       "--state",
-      "open",
+      "all",
       "--limit",
       "100",
       "--json",
-      "number,title,isDraft,author,updatedAt,url,baseRefName,headRefName,statusCheckRollup,reviewDecision",
+      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,statusCheckRollup,reviewDecision",
     ]);
     expect(vi.mocked(command.run).mock.calls.some(([args]) => args.includes("merge"))).toBe(false);
+  });
+
+  it("normalizes merged and closed history", async () => {
+    const { port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([
+          { ...activeRow, state: "MERGED", mergeable: "UNKNOWN" },
+          { ...activeRow, number: 13, state: "CLOSED", mergeable: "CONFLICTING" },
+        ]),
+      },
+    ]);
+
+    const result = await port.listActive(
+      { owner: "octant", name: "octant", limit: 100 },
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({
+      status: "ok",
+      rows: [
+        { state: "merged", mergeability: "unknown" },
+        { state: "closed", mergeability: "conflicting" },
+      ],
+    });
   });
 
   it("classifies rate-limit, timeout, malformed output, and disconnect without inventing rows", async () => {

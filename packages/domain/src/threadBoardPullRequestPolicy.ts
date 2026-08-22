@@ -26,8 +26,10 @@ function summaryFreshness(
 }
 
 export function deriveThreadBoardPullRequestState(input: {
+  readonly state: CodeProjectPullRequestRow["state"];
   readonly draft: boolean;
 }): ThreadBoardPullRequestState {
+  if (input.state !== "open") return input.state;
   return input.draft ? "draft" : "open";
 }
 
@@ -40,12 +42,14 @@ export function deriveConservativeReadyToMerge(input: {
   readonly state: ThreadBoardPullRequestState;
   readonly checks: CodeProjectPullRequestRow["checks"];
   readonly review: CodeProjectPullRequestRow["review"];
+  readonly mergeability: CodeProjectPullRequestRow["mergeability"];
   readonly freshness: ThreadBoardPullRequestFreshness;
 }): boolean {
   if (input.freshness !== "fresh") return false;
   if (input.state !== "open") return false;
   if (input.checks !== "passing") return false;
   if (input.review !== "approved") return false;
+  if (input.mergeability !== "mergeable") return false;
   return true;
 }
 
@@ -57,31 +61,6 @@ export function matchPullRequestRowsToCodeThread(input: {
   for (const row of input.rows) {
     if (!row.linkedThreads.some((thread) => String(thread.threadId) === input.threadId)) continue;
     matches.push({ row });
-  }
-  return matches;
-}
-
-export function matchPullRequestRowsToWorkThread(input: {
-  readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
-  readonly promotedCodeThreadIds: ReadonlySet<string>;
-  readonly linkedCodeThreadIds: ReadonlySet<string>;
-}): ReadonlyArray<ThreadBoardPullRequestJoinRow> {
-  const matches: ThreadBoardPullRequestJoinRow[] = [];
-  const seen = new Set<string>();
-  for (const row of input.rows) {
-    for (const linked of row.linkedThreads) {
-      const threadKey = `${String(row.projectId)}:${String(linked.threadId)}:${row.number}`;
-      if (seen.has(threadKey)) continue;
-      const threadId = String(linked.threadId);
-      const relationship = input.promotedCodeThreadIds.has(threadId)
-        ? "promoted"
-        : input.linkedCodeThreadIds.has(threadId)
-          ? "linked"
-          : undefined;
-      if (relationship === undefined) continue;
-      seen.add(threadKey);
-      matches.push({ row, relationship });
-    }
   }
   return matches;
 }
@@ -102,7 +81,7 @@ export function composeThreadBoardPullRequestSummaries(
   const items = sorted
     .slice(0, MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY)
     .map(({ row, relationship }) => {
-      const state = deriveThreadBoardPullRequestState({ draft: row.draft });
+      const state = deriveThreadBoardPullRequestState({ state: row.state, draft: row.draft });
       return {
         identity: {
           projectId: row.projectId,
@@ -114,11 +93,13 @@ export function composeThreadBoardPullRequestSummaries(
         state,
         checks: row.checks,
         review: row.review,
+        mergeability: row.mergeability,
         freshness,
         readyToMerge: deriveConservativeReadyToMerge({
           state,
           checks: row.checks,
           review: row.review,
+          mergeability: row.mergeability,
           freshness,
         }),
         ...(relationship === undefined ? {} : { relationship }),

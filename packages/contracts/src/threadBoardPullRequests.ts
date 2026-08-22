@@ -23,11 +23,24 @@ export const ThreadBoardPullRequestIdentity = Schema.Struct({
 }).annotations(strict);
 export type ThreadBoardPullRequestIdentity = typeof ThreadBoardPullRequestIdentity.Type;
 
-export const ThreadBoardPullRequestState = Schema.Literal("draft", "open", "merged", "closed");
+export const ThreadBoardPullRequestState = Schema.Literal(
+  "unknown",
+  "draft",
+  "open",
+  "merged",
+  "closed",
+);
 export type ThreadBoardPullRequestState = typeof ThreadBoardPullRequestState.Type;
 
 export const ThreadBoardPullRequestFreshness = Schema.Literal("fresh", "stale");
 export type ThreadBoardPullRequestFreshness = typeof ThreadBoardPullRequestFreshness.Type;
+
+export const ThreadBoardPullRequestMergeability = Schema.Literal(
+  "mergeable",
+  "conflicting",
+  "unknown",
+);
+export type ThreadBoardPullRequestMergeability = typeof ThreadBoardPullRequestMergeability.Type;
 
 export const ThreadBoardPullRequestChecksSummary = Schema.Literal(
   "unknown",
@@ -65,6 +78,7 @@ export const ThreadBoardPullRequestSummary = Schema.Struct({
   state: ThreadBoardPullRequestState,
   checks: ThreadBoardPullRequestChecksSummary,
   review: ThreadBoardPullRequestReviewSummary,
+  mergeability: ThreadBoardPullRequestMergeability,
   freshness: ThreadBoardPullRequestFreshness,
   readyToMerge: Schema.Boolean,
   relationship: Schema.optional(ThreadBoardPullRequestRelationship),

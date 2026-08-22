@@ -165,7 +165,10 @@ import {
 } from "./code/codeService";
 import { createCodeOperationRuntime, type CodeOperationRuntime } from "./code/codeOperationRuntime";
 import { CodeOperationEventStore } from "./code/codeOperationEventStore";
-import { CodeThreadMetadataService } from "./code/codeThreadMetadataService";
+import {
+  CodeThreadMetadataService,
+  pullRequestIdentitiesFromHistory,
+} from "./code/codeThreadMetadataService";
 import {
   boardRuntimeActivityFromWorks,
   CodeThreadBoardService,
@@ -2199,6 +2202,12 @@ export function startOctantServer(
       });
     // Revocation is wired at construction, before any window can hold a watch.
     activeCodeService = codeService;
+    const codeBoardEventStore = new CodeOperationEventStore({
+      journal: persistence.journal,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
     const projectPullRequestPorts = createProjectPullRequestPorts(options.ghExecutable);
     const projectPullRequestService = new CodeProjectPullRequestService({
       projects: projectService,
@@ -2215,9 +2224,14 @@ export function startOctantServer(
           const bootstrap = await codeService.bootstrap(windowId);
           const facts: Array<{
             readonly threadId: string;
+            readonly projectId: string;
             readonly title: string;
             readonly repository: { readonly owner: string; readonly name: string };
             readonly deliveryBranch: string;
+            readonly pullRequestNumbers: ReadonlyArray<{
+              readonly number: number;
+              readonly observedAt: string;
+            }>;
           }> = [];
           for (const thread of bootstrap.threads) {
             const repository = thread.deliveryTarget.proposedBaseRepository;
@@ -2228,9 +2242,13 @@ export function startOctantServer(
             if (owner === undefined || name === undefined) continue;
             facts.push({
               threadId: String(thread.id),
+              projectId: String(thread.projectId),
               title: thread.title,
               repository: { owner, name },
               deliveryBranch: thread.deliveryTarget.branchIntent,
+              pullRequestNumbers: pullRequestIdentitiesFromHistory(
+                codeBoardEventStore.historyForThread(thread.id),
+              ),
             });
           }
           return facts;
@@ -2973,12 +2991,6 @@ export function startOctantServer(
     // be observed; GitHub is never called. Cached PR evidence comes from the
     // operation journal, labeled with freshness, and cannot independently
     // satisfy a delivery target when stale.
-    const codeBoardEventStore = new CodeOperationEventStore({
-      journal: persistence.journal,
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
-    });
     const codeThreadMetadataService = new CodeThreadMetadataService({
       git: { observe: () => ({ status: "unavailable" }) },
       history: {
@@ -5284,20 +5296,6 @@ export function startOctantServer(
                     decodeAgentRunParentThreadId(String(entry.thread.id)),
                   ),
                 }),
-            },
-            pullRequests: {
-              snapshot: () => projectPullRequestService.boardSnapshot(windowId),
-            },
-            promotions: {
-              snapshot: () => workPromotionProjection.snapshot(),
-            },
-            codeThreads: {
-              list: async () => {
-                const codeBootstrap = await baseRouteCodeService.bootstrap(windowId);
-                return codeBootstrap.threads
-                  .filter((thread) => thread.lifecycle !== "archived")
-                  .map((thread) => ({ id: thread.id, projectId: thread.projectId }));
-              },
             },
             runtime: {
               observe: (threadId) => {

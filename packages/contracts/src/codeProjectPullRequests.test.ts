@@ -38,6 +38,8 @@ const connectedView = {
       number: 12,
       title: "List active pull requests",
       draft: false,
+      state: "open",
+      mergeability: "mergeable",
       author: "octocat",
       baseBranch: "development",
       headBranch: "feature/manual-refresh",
@@ -101,6 +103,8 @@ describe("Code Project pull-request contracts", () => {
         {
           number: 12,
           draft: false,
+          state: "open",
+          mergeability: "mergeable",
           checks: "passing",
           review: "approved",
           linkedThreads: [{ threadId }],

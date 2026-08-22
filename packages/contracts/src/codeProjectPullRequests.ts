@@ -64,7 +64,7 @@ export const MAX_CODE_PROJECT_PULL_REQUEST_PROJECTS = 1_000;
 export const MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS = 32;
 
 /**
- * Cached read of the in-memory Project-scoped active pull-request snapshot.
+ * Cached read of the in-memory Project-scoped active pull-request projection.
  * There is no refresh flag: GitHub is reached only by an explicit refresh
  * command.
  */
@@ -134,6 +134,16 @@ export const CodeProjectPullRequestReviewSummary = Schema.Literal(
 );
 export type CodeProjectPullRequestReviewSummary = typeof CodeProjectPullRequestReviewSummary.Type;
 
+export const CodeProjectPullRequestState = Schema.Literal("unknown", "open", "merged", "closed");
+export type CodeProjectPullRequestState = typeof CodeProjectPullRequestState.Type;
+
+export const CodeProjectPullRequestMergeability = Schema.Literal(
+  "mergeable",
+  "conflicting",
+  "unknown",
+);
+export type CodeProjectPullRequestMergeability = typeof CodeProjectPullRequestMergeability.Type;
+
 export const CodeProjectPullRequestLinkedThread = Schema.Struct({
   threadId: CodeThreadId,
   title: boundedNonEmptyText(512),
@@ -148,6 +158,8 @@ export const CodeProjectPullRequestRow = Schema.Struct({
   number: Schema.Int.pipe(Schema.positive()),
   title: boundedNonEmptyText(256),
   draft: Schema.Boolean,
+  state: CodeProjectPullRequestState,
+  mergeability: CodeProjectPullRequestMergeability,
   author: boundedNonEmptyText(128),
   baseBranch: branchName,
   headBranch: branchName,
@@ -161,7 +173,8 @@ export const CodeProjectPullRequestRow = Schema.Struct({
 export type CodeProjectPullRequestRow = typeof CodeProjectPullRequestRow.Type;
 
 /**
- * Current authorized snapshot. Process-local only: never journaled.
+ * Current authorized active-row projection. The internal process-local cache
+ * may also contain bounded merged and closed rows for board summaries.
  */
 export const CodeProjectPullRequestView = Schema.Struct({
   version: Schema.Literal(1),
