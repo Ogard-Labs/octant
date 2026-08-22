@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { isAbsolute } from "node:path";
 import { decodeWindowId, type WindowId } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   attachOrCreateHost,
+  createDefaultServicePolicyStore,
   resolveDefaultServerRoot,
   type HostLauncherDependencies,
   type HostLauncherResult,
@@ -11,6 +13,12 @@ import {
 it("resolves the source server root as a filesystem path", () => {
   expect(resolveDefaultServerRoot()).not.toMatch(/^file:/);
   expect(resolveDefaultServerRoot()).toMatch(/\/apps\/server$/);
+});
+
+it("constructs the persisted owner-only service policy store", () => {
+  const store = createDefaultServicePolicyStore();
+  expect(store.path.endsWith("service-policy.json")).toBe(true);
+  expect(isAbsolute(store.path)).toBe(true);
 });
 
 const bridgeSecret = `${"S".repeat(42)}A`;

@@ -64,8 +64,7 @@ export interface AutomationCodeDispatchPort {
 
 /**
  * Work adapter behind the ordinary create-thread / first-turn path.
- * Production wiring uses {@link createAutomationWorkDispatchPort}; tests and
- * negative paths may still inject {@link unavailableAutomationWorkDispatchPort}.
+ * Production wiring uses {@link createAutomationWorkDispatchPort}.
  */
 export interface AutomationWorkDispatchPort {
   readonly available: boolean;
@@ -83,30 +82,6 @@ export interface AutomationWorkDispatchPort {
     readonly promptDigest: AutomationDigest;
     readonly windowId: WindowId;
   }) => Promise<AutomationFirstTurnLaunchOutcome>;
-}
-
-/**
- * Test/fallback Work gate that fails closed. Production hosts wire
- * {@link createAutomationWorkDispatchPort} instead once the provider-backed
- * first-turn runtime is available.
- */
-export function unavailableAutomationWorkDispatchPort(
-  reason = "Work first-turn runtime is unavailable for Automation dispatch.",
-): AutomationWorkDispatchPort {
-  return {
-    available: false,
-    unavailableReason: reason,
-    createThread: async () => ({
-      kind: "failed",
-      reason: "unavailable",
-      message: reason,
-    }),
-    startOrRecoverFirstTurn: async () => ({
-      kind: "failed",
-      reason: "provider-launch-failed",
-      message: reason,
-    }),
-  };
 }
 
 export interface AutomationDispatchWindowPort {

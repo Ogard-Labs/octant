@@ -31,12 +31,12 @@ import type {
   AutomationWorkDispatchPort,
   AutomationDispatchWindowPort,
 } from "./automationModeDispatchPorts";
-import { unavailableAutomationWorkDispatchPort } from "./automationModeDispatchPorts";
 import {
   AUTOMATION_TEST_IDS,
   automationDefinitionFixture,
   automationLocalWindowPrincipal,
   automationRunForDefinition,
+  unavailableAutomationWorkDispatchPort,
 } from "./automationTestFixtures";
 import { buildAutomationAuthorityFactsFromHost } from "./automationDispatchService";
 

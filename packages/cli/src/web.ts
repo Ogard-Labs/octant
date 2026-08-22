@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import {
   attachOrCreateHost,
   buildWebClientUrl,
+  createDefaultServicePolicyStore,
   createLaunchSession,
   type HostLauncherResult,
   type HostServicePolicyReader,
@@ -75,9 +76,7 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
         : { url: new URL(winner.url), instanceId: winner.instanceId };
     },
     ...(options.dev === true ? { developmentWebBootstrap: true as const } : {}),
-    ...(options.servicePolicyStore === undefined
-      ? {}
-      : { policyStore: options.servicePolicyStore }),
+    policyStore: options.servicePolicyStore ?? createDefaultServicePolicyStore(),
   });
   if (host.kind === "disabled") {
     stderr.write(`${host.reason}\n`);

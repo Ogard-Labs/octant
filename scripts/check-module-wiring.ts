@@ -78,41 +78,28 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   // ── Remaining ──
   [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",
-    "Browser-realm bundle entry built by remoteExitEvidenceA.smoke.test.ts via `bun build`; excluded from the server tsconfig on purpose.",
+    "Browser-realm bundle entry built by remoteExitEvidenceA.smoke.test.ts via `bun build`; excluded from the server tsconfig on purpose. Remove once that evidence is served by a product caller or the smoke is retired.",
   ],
   [
     "apps/server/src/security/escapeSuite/evaluateEscapeSuite.ts",
-    "Evaluator for the security escape suite, driven by escapeSuite.server.test.ts as its runner.",
+    "Evaluator for the security escape suite, driven by escapeSuite.server.test.ts as its runner. Remove once a product runner imports it or the suite is retired.",
   ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
     "packages/provider-sdk/src/childAgentConformance.ts",
-    "Conformance kit for child-agent adapters, driven only by childAgentConformance.test.ts as its runner (like the other provider-sdk conformance kits).",
+    "Conformance kit for child-agent adapters, driven only by childAgentConformance.test.ts as its runner (like the other provider-sdk conformance kits). Remove once a product adapter runner imports it or the last driver test that uses the kit is retired.",
   ],
   [
     "packages/domain/src/cursorAcpRuntimePolicy.ts",
-    "Cursor is deferred pending an ACP compatibility GO. Honest to keep until that provider lands.",
+    "Cursor is deferred pending an ACP compatibility GO. Remove once Cursor ACP is admitted as a supported provider or the deferred policy is deleted with that deferral.",
   ],
   [
     "packages/domain/src/cursorAcpSettingsPolicy.ts",
-    "Cursor is deferred pending an ACP compatibility GO. Honest to keep until that provider lands.",
-  ],
-  [
-    "packages/domain/src/canvasShareAccessLogPolicy.ts",
-    "Canvas sharing is being wired now; remove this entry once the share surface records access through it.",
+    "Cursor is deferred pending an ACP compatibility GO. Remove once Cursor ACP is admitted as a supported provider or the deferred policy is deleted with that deferral.",
   ],
   [
     "packages/provider-sdk/src/contextFactsConformance.ts",
-    "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state.",
-  ],
-  // ── Rule E: imported, but only by statements the compiler erases ──
-  [
-    "apps/server/src/automation/automationDispatchPort.ts",
-    "The `AutomationDispatchPort`/`AutomationDispatchOffer` types are a live seam between the A3 scheduler and the A4 dispatcher, but the module's only runtime export, `unavailableAutomationDispatchPort()`, has no reference anywhere — not even a test. Deleting that fallback clears this entry; it belongs to the in-flight automation dispatch work rather than a wiring pass.",
-  ],
-  [
-    "apps/server/src/automation/automationModeDispatchPorts.ts",
-    "`unavailableAutomationWorkDispatchPort()` is a test-only fallback: automationDispatchService, automationCodeDispatchPort, and automationWorkDispatchPort import this module for its types alone, and both callers of the function are tests. As with contextFactsConformance above, reachable only from tests may be its correct state — in which case the fallback belongs in test scaffolding. Owned by the in-flight automation dispatch work.",
+    "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
 ]);
 

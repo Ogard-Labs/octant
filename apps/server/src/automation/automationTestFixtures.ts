@@ -7,6 +7,7 @@ import {
   type AutomationDefinitionDraft,
   type AutomationRun,
 } from "@octant/contracts";
+import type { AutomationWorkDispatchPort } from "./automationModeDispatchPorts";
 
 /**
  * Deterministic Automation fixtures shared by the event store, projection,
@@ -230,4 +231,28 @@ export function automationRunFixture(overrides: Partial<AutomationRun> = {}): Au
     updatedAt: AUTOMATION_TEST_NOW,
     ...overrides,
   });
+}
+
+/**
+ * Closed Work gate for tests that exercise Code dispatch or an unavailable
+ * first-turn runtime. Production hosts wire createAutomationWorkDispatchPort
+ * instead.
+ */
+export function unavailableAutomationWorkDispatchPort(
+  reason = "Work first-turn runtime is unavailable for Automation dispatch.",
+): AutomationWorkDispatchPort {
+  return {
+    available: false,
+    unavailableReason: reason,
+    createThread: async () => ({
+      kind: "failed",
+      reason: "unavailable",
+      message: reason,
+    }),
+    startOrRecoverFirstTurn: async () => ({
+      kind: "failed",
+      reason: "provider-launch-failed",
+      message: reason,
+    }),
+  };
 }
