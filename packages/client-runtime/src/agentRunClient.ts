@@ -3,6 +3,7 @@ import {
   decodeAgentRunControlPreviewRequest,
   decodeAgentRunControlPreviewResult,
   decodeAgentRunControlRequest,
+  decodeAgentRunCenterResponse,
   decodeAgentRunParentThreadId,
   decodeAgentRunResumeRequest,
   decodeAgentRunRetryRequest,
@@ -11,6 +12,8 @@ import {
   decodeAgentRunWorkspaceConfirmationResult,
   decodeAgentRunWorkspacePreparationRequest,
   decodeAgentRunWorkspacePreparationResult,
+  type AgentRunCenterQuery,
+  type AgentRunCenterResponse,
   type AgentRunCommandResult,
   type AgentRunControlPreviewRequest,
   type AgentRunControlPreviewResult,
@@ -103,7 +106,19 @@ export interface AgentRunParentSummaryClientEntry {
   readonly updatedAt: string;
 }
 
+export interface AgentRunCenterQueryInput {
+  readonly status?: AgentRunCenterQuery["status"];
+  readonly mode?: AgentRunCenterQuery["mode"];
+  readonly projectId?: string;
+  readonly providerInstanceId?: string;
+  readonly parentThreadId?: AgentRunParentThreadId;
+  readonly search?: string;
+  readonly limit?: number;
+  readonly cursor?: string;
+}
+
 export interface AgentRunClient {
+  center(input?: AgentRunCenterQueryInput): Promise<AgentRunCenterResponse>;
   parentSummary(parentThreadId: AgentRunParentThreadId): Promise<AgentRunParentSummaryResponse>;
   acknowledge(input: {
     readonly runId: AgentRunId;
@@ -145,6 +160,29 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
   validateLoopbackBaseUrl(options.baseUrl);
   const headers = { "x-octant-window-capability": options.windowCapability };
   return {
+    async center(input = {}) {
+      const url = new URL("/api/agent-runs/center", options.baseUrl);
+      url.searchParams.set("status", input.status ?? "all");
+      url.searchParams.set("mode", input.mode ?? "all");
+      if (input.projectId !== undefined) url.searchParams.set("projectId", input.projectId);
+      if (input.providerInstanceId !== undefined) {
+        url.searchParams.set("providerInstanceId", input.providerInstanceId);
+      }
+      if (input.parentThreadId !== undefined) {
+        url.searchParams.set("parentThreadId", String(input.parentThreadId));
+      }
+      if (input.search !== undefined && input.search.trim().length > 0) {
+        url.searchParams.set("search", input.search.trim());
+      }
+      if (input.limit !== undefined) url.searchParams.set("limit", String(input.limit));
+      if (input.cursor !== undefined) url.searchParams.set("cursor", input.cursor);
+      const body = await requestJson(options.fetch, url.toString(), { method: "GET", headers });
+      try {
+        return decodeAgentRunCenterResponse(body);
+      } catch {
+        throw new AgentRunClientFailure("unavailable", "AgentRun center response is malformed.");
+      }
+    },
     async parentSummary(parentThreadId) {
       const validated = decodeAgentRunParentThreadId(parentThreadId);
       const url = new URL("/api/agent-runs/parent-summary", options.baseUrl);

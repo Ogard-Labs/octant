@@ -1,4 +1,5 @@
 import type { AutomationClient } from "@octant/client-runtime";
+import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { CodeProjectPullRequestRow } from "@octant/contracts";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -7,6 +8,8 @@ import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
 import type { OctantMode } from "@octant/contracts/modes";
 import { ArtifactLibrarySurface } from "../artifacts/ArtifactLibrarySurface";
 import { AutomationCenter } from "../automation/AutomationCenter";
+import { AgentsCenter } from "../agents/AgentsCenter";
+import type { AgentsCenterThreadTarget } from "../agents/agentsCenterModel";
 import type {
   AutomationEditorCatalog,
   AutomationThreadTarget,
@@ -54,6 +57,13 @@ export interface WorkspaceRailLayersProps {
   readonly onCloseAutomationCenter: () => void;
   readonly onOpenAutomationThread: (
     target: AutomationThreadTarget & { readonly title: string },
+  ) => void;
+  readonly agentsCenterVisible: boolean;
+  readonly agentRunClient: AgentRunClient;
+  readonly projectNames: ReadonlyMap<string, string>;
+  readonly onCloseAgentsCenter: () => void;
+  readonly onOpenAgentsThread: (
+    target: AgentsCenterThreadTarget & { readonly title: string },
   ) => void;
 }
 
@@ -152,6 +162,20 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
             notificationClient={props.notificationClient}
             onClose={props.onCloseAutomationCenter}
             onOpenThread={props.onOpenAutomationThread}
+          />
+        </div>
+      ) : null}
+      {props.agentsCenterVisible ? (
+        <div className="agents-center-layer">
+          <AgentsCenter
+            client={props.agentRunClient}
+            narrow={props.isNarrow}
+            onClose={props.onCloseAgentsCenter}
+            onOpenThread={props.onOpenAgentsThread}
+            projectNames={props.projectNames}
+            {...(props.providerLabels === undefined
+              ? {}
+              : { providerLabels: props.providerLabels })}
           />
         </div>
       ) : null}

@@ -583,6 +583,7 @@ function LaunchedShell(
   >();
   const [workBoardOpen, setWorkBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
+  const [agentsCenterOpen, setAgentsCenterOpen] = useState(false);
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] =
     useState<import("@octant/contracts/providers").ProviderInstanceId>();
@@ -2257,6 +2258,7 @@ function LaunchedShell(
       );
   const automationCenterVisible =
     automationCenterOpen && (activeMode === "code" || activeMode === "work");
+  const agentsCenterVisible = agentsCenterOpen;
   const visibleComputerUseSessions =
     controller.settingsOpen ||
     zen.active ||
@@ -2264,7 +2266,8 @@ function LaunchedShell(
     codeBoardOpen ||
     codePullRequestsOpen ||
     workBoardOpen ||
-    automationCenterVisible
+    automationCenterVisible ||
+    agentsCenterVisible
       ? new Map<string, ReadonlySet<string>>()
       : representedComputerUseSessions;
   const contextSidebarWidth = previewContextWidth ?? controller.settings.contextSidebarWidth;
@@ -2550,7 +2553,18 @@ function LaunchedShell(
     setCodePullRequestsOpen(false);
     setWorkBoardOpen(false);
     setArtifactLibraryOpen(false);
+    setAgentsCenterOpen(false);
     setAutomationCenterOpen(true);
+  }
+
+  function openAgentsCenter() {
+    setRailPlaceholder(undefined);
+    setCodeBoardOpen(false);
+    setCodePullRequestsOpen(false);
+    setWorkBoardOpen(false);
+    setArtifactLibraryOpen(false);
+    setAutomationCenterOpen(false);
+    setAgentsCenterOpen(true);
   }
 
   // The library gathers artifacts from every mode, so unlike the Automation
@@ -2562,6 +2576,7 @@ function LaunchedShell(
     setCodePullRequestsOpen(false);
     setWorkBoardOpen(false);
     setAutomationCenterOpen(false);
+    setAgentsCenterOpen(false);
     setArtifactLibraryOpen(true);
   }
 
@@ -3536,6 +3551,7 @@ function LaunchedShell(
                   chatNavigation: {
                     actions: {
                       "new-chat": createChat,
+                      agents: openAgentsCenter,
                       "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
                     },
@@ -3547,12 +3563,14 @@ function LaunchedShell(
                   codeNavigation: {
                     actions: {
                       "new-code-thread": () => openDraftInActiveProject("code"),
+                      agents: openAgentsCenter,
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
                       "thread-board": () => {
                         setRailPlaceholder(undefined);
                         setAutomationCenterOpen(false);
+                        setAgentsCenterOpen(false);
                         setArtifactLibraryOpen(false);
                         setWorkBoardOpen(false);
                         setCodePullRequestsOpen(false);
@@ -3561,6 +3579,7 @@ function LaunchedShell(
                       "pull-requests": () => {
                         setRailPlaceholder(undefined);
                         setAutomationCenterOpen(false);
+                        setAgentsCenterOpen(false);
                         setArtifactLibraryOpen(false);
                         setWorkBoardOpen(false);
                         setCodeBoardOpen(false);
@@ -3575,12 +3594,14 @@ function LaunchedShell(
                   workNavigation: {
                     actions: {
                       "new-work-thread": () => openDraftInActiveProject("work"),
+                      agents: openAgentsCenter,
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
                       "thread-board": () => {
                         setRailPlaceholder(undefined);
                         setAutomationCenterOpen(false);
+                        setAgentsCenterOpen(false);
                         setArtifactLibraryOpen(false);
                         setCodeBoardOpen(false);
                         setCodePullRequestsOpen(false);
@@ -3867,6 +3888,32 @@ function LaunchedShell(
                     );
                   }
                 }}
+                agentsCenterVisible={agentsCenterVisible}
+                agentRunClient={agentRunClient}
+                projectNames={
+                  new Map(
+                    projectController.projects.map((project) => [String(project.id), project.name]),
+                  )
+                }
+                onCloseAgentsCenter={() => setAgentsCenterOpen(false)}
+                onOpenAgentsThread={(target) => {
+                  setAgentsCenterOpen(false);
+                  if (target.mode === "chat") {
+                    void controller.openChatThread(
+                      decodeChatThreadId(target.threadId),
+                      target.title,
+                    );
+                    return;
+                  }
+                  if (target.mode === "code") {
+                    void controller.openCodeThread(
+                      decodeCodeThreadId(target.childThreadId ?? target.threadId),
+                      target.title,
+                    );
+                    return;
+                  }
+                  void controller.openWorkThread(decodeWorkThreadId(target.threadId), target.title);
+                }}
               />
               <AgentProfileNamesProvider profiles={executionProfileController.profiles}>
                 <ComposerContextMeterProvider
@@ -3940,7 +3987,8 @@ function LaunchedShell(
                       codeBoardOpen ||
                       codePullRequestsOpen ||
                       workBoardOpen ||
-                      automationCenterVisible
+                      automationCenterVisible ||
+                      agentsCenterVisible
                     }
                     onActivatePane={(paneId) => void controller.activatePane(paneId)}
                     tabActivation={controller.tabActivation}

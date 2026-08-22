@@ -5,6 +5,64 @@ const parentThreadId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const runId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 describe("agentRunClient", () => {
+  it("loads the Agents Center through the authenticated route", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      expect(url).toContain("/api/agent-runs/center");
+      expect(url).toContain("status=active");
+      expect(url).toContain("mode=chat");
+      return new Response(
+        JSON.stringify({
+          items: [
+            {
+              runId,
+              requestId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+              parentThreadId,
+              parentThreadTitle: "Design chat",
+              role: "research",
+              task: "Summarize",
+              lifecycleStatus: "running",
+              executionKind: "octant-managed",
+              mode: "chat",
+              authority: {
+                filesystem: false,
+                shell: false,
+                git: false,
+                network: true,
+                tools: true,
+                subagents: false,
+                executionPolicy: "plan",
+                permissionPersistence: "current-session",
+              },
+              workspaceKind: "chat-virtual",
+              usageQuality: "provider-reported",
+              route: {
+                requestedProviderInstanceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                requestedModelId: "gpt-4o",
+                executionProviderInstanceId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+                executionModelId: "gpt-4o",
+                poolDerived: false,
+              },
+              resultAcknowledgement: { required: false, acknowledged: false },
+              version: 2,
+              createdAt: "2026-08-01T15:00:00.000Z",
+              updatedAt: "2026-08-01T15:01:00.000Z",
+            },
+          ],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const client = createAgentRunClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "cap",
+    });
+    const response = await client.center({ status: "active", mode: "chat" });
+    expect(response.items).toHaveLength(1);
+    expect(response.items[0]?.parentThreadTitle).toBe("Design chat");
+  });
+
   it("loads parent summary through the authenticated route", async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
