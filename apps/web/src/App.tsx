@@ -571,6 +571,7 @@ function LaunchedShell(
     readonly message: string;
   }>();
   const [codeBoardOpen, setCodeBoardOpen] = useState(false);
+  const [codePullRequestsOpen, setCodePullRequestsOpen] = useState(false);
   const [workBoardOpen, setWorkBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
@@ -2219,6 +2220,7 @@ function LaunchedShell(
     zen.active ||
     railPlaceholder !== undefined ||
     codeBoardOpen ||
+    codePullRequestsOpen ||
     workBoardOpen ||
     automationCenterVisible
       ? new Map<string, ReadonlySet<string>>()
@@ -2503,6 +2505,7 @@ function LaunchedShell(
   function openAutomationCenter() {
     setRailPlaceholder(undefined);
     setCodeBoardOpen(false);
+    setCodePullRequestsOpen(false);
     setWorkBoardOpen(false);
     setArtifactLibraryOpen(false);
     setAutomationCenterOpen(true);
@@ -2514,6 +2517,7 @@ function LaunchedShell(
   function openArtifactLibrary() {
     setRailPlaceholder(undefined);
     setCodeBoardOpen(false);
+    setCodePullRequestsOpen(false);
     setWorkBoardOpen(false);
     setAutomationCenterOpen(false);
     setArtifactLibraryOpen(true);
@@ -2523,6 +2527,7 @@ function LaunchedShell(
     setRailPlaceholder(undefined);
     controller.setMode(mode);
     if (mode !== "code") setCodeBoardOpen(false);
+    if (mode !== "code") setCodePullRequestsOpen(false);
     if (mode !== "work") setWorkBoardOpen(false);
     // The Automation Center is one shared Work/Code surface; leaving both
     // work modes dismisses it.
@@ -3508,7 +3513,16 @@ function LaunchedShell(
                         setAutomationCenterOpen(false);
                         setArtifactLibraryOpen(false);
                         setWorkBoardOpen(false);
+                        setCodePullRequestsOpen(false);
                         setCodeBoardOpen(true);
+                      },
+                      "pull-requests": () => {
+                        setRailPlaceholder(undefined);
+                        setAutomationCenterOpen(false);
+                        setArtifactLibraryOpen(false);
+                        setWorkBoardOpen(false);
+                        setCodeBoardOpen(false);
+                        setCodePullRequestsOpen(true);
                       },
                     },
                   },
@@ -3527,6 +3541,7 @@ function LaunchedShell(
                         setAutomationCenterOpen(false);
                         setArtifactLibraryOpen(false);
                         setCodeBoardOpen(false);
+                        setCodePullRequestsOpen(false);
                         setWorkBoardOpen(true);
                       },
                     },
@@ -3706,6 +3721,7 @@ function LaunchedShell(
                 {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
                 onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
                 codeBoardOpen={codeBoardOpen}
+                codePullRequestsOpen={codePullRequestsOpen}
                 workBoardOpen={workBoardOpen}
                 activeMode={activeMode}
                 codeClient={codeClient}
@@ -3713,6 +3729,7 @@ function LaunchedShell(
                 codeBoardProjects={codeBoardProjects}
                 workBoardProjects={workBoardProjects}
                 onCloseCodeBoard={() => setCodeBoardOpen(false)}
+                onCloseCodePullRequests={() => setCodePullRequestsOpen(false)}
                 onCloseWorkBoard={() => setWorkBoardOpen(false)}
                 unreadThreadIds={
                   new Set(
@@ -3733,6 +3750,7 @@ function LaunchedShell(
                     (candidate) => String(candidate.id) === String(target.threadId),
                   );
                   setCodeBoardOpen(false);
+                  setCodePullRequestsOpen(false);
                   void controller.openCodeThread(
                     target.threadId,
                     thread?.title ?? "Code thread",
@@ -3869,6 +3887,7 @@ function LaunchedShell(
                     hidden={
                       railPlaceholder !== undefined ||
                       codeBoardOpen ||
+                      codePullRequestsOpen ||
                       workBoardOpen ||
                       automationCenterVisible
                     }

@@ -305,6 +305,8 @@ function client(
   return {
     bootstrap: vi.fn(),
     queryBoard: vi.fn(),
+    queryProjectPullRequests: vi.fn(),
+    refreshProjectPullRequests: vi.fn(),
     conversation: vi.fn(async (threadId) => ({
       version: 3 as const,
       threadId,

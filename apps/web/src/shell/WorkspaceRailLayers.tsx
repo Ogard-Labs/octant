@@ -10,6 +10,7 @@ import type {
   AutomationEditorCatalog,
   AutomationThreadTarget,
 } from "../automation/automationCenterModel";
+import { CodeProjectPullRequests } from "../code/CodeProjectPullRequests";
 import { CodeThreadBoard, type CodeThreadOpenTarget } from "../code/CodeThreadBoard";
 import type { CodeBoardProjectRef } from "../code/codeBoardGrouping";
 import type { ThreadBoardProjectRef } from "../threadBoard/threadBoardGrouping";
@@ -20,6 +21,7 @@ export interface WorkspaceRailLayersProps {
   readonly railPlaceholder?: { readonly title: string; readonly message: string };
   readonly onDismissRailPlaceholder: () => void;
   readonly codeBoardOpen: boolean;
+  readonly codePullRequestsOpen: boolean;
   readonly workBoardOpen: boolean;
   readonly activeMode: OctantMode;
   readonly codeClient: CodeClient;
@@ -27,6 +29,7 @@ export interface WorkspaceRailLayersProps {
   readonly codeBoardProjects: ReadonlyArray<CodeBoardProjectRef>;
   readonly workBoardProjects: ReadonlyArray<ThreadBoardProjectRef>;
   readonly onCloseCodeBoard: () => void;
+  readonly onCloseCodePullRequests: () => void;
   readonly onCloseWorkBoard: () => void;
   readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
   readonly onOpenWorkBoardThread: (target: WorkThreadOpenTarget) => void;
@@ -68,6 +71,16 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
           />
         </div>
       )}
+      {props.codePullRequestsOpen && props.activeMode === "code" ? (
+        <div className="code-board-layer">
+          <CodeProjectPullRequests
+            isNarrow={props.isNarrow}
+            load={(query) => props.codeClient.queryProjectPullRequests(query)}
+            onClose={props.onCloseCodePullRequests}
+            refresh={(command) => props.codeClient.refreshProjectPullRequests(command)}
+          />
+        </div>
+      ) : null}
       {props.codeBoardOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
           <CodeThreadBoard

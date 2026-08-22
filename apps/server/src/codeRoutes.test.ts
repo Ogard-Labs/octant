@@ -788,6 +788,122 @@ describe("Code board route", () => {
   });
 });
 
+describe("Code project pull-request routes", () => {
+  const view = {
+    version: 1 as const,
+    query: { version: 1 as const },
+    projects: [],
+    rows: [],
+    repositoriesTruncated: false,
+    pullRequestsTruncated: false,
+    freshness: { status: "empty" as const },
+    generatedAt: now,
+  };
+
+  it("queries the cached snapshot without invoking a refresh", async () => {
+    const queryProjectPullRequests = vi.fn(() => view);
+    const refreshProjectPullRequests = vi.fn(() => view);
+    const route = routeFixture({ queryProjectPullRequests, refreshProjectPullRequests });
+
+    const response = await route(
+      request("/api/code/project-pull-requests", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1 }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toEqual(view);
+    expect(queryProjectPullRequests).toHaveBeenCalledWith(windowId, { version: 1 });
+    expect(refreshProjectPullRequests).not.toHaveBeenCalled();
+  });
+
+  it("refreshes all connected projects or one Project through the explicit refresh route", async () => {
+    const queryProjectPullRequests = vi.fn(() => view);
+    const refreshProjectPullRequests = vi.fn(() => view);
+    const route = routeFixture({ queryProjectPullRequests, refreshProjectPullRequests });
+    const projectId = "10000000-0000-4000-8000-000000000001";
+
+    const all = await route(
+      request("/api/code/project-pull-requests/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "refresh-all" }),
+      }),
+    );
+    const one = await route(
+      request("/api/code/project-pull-requests/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "refresh-project", projectId }),
+      }),
+    );
+
+    expect(all?.status).toBe(200);
+    expect(one?.status).toBe(200);
+    expect(refreshProjectPullRequests).toHaveBeenNthCalledWith(
+      1,
+      windowId,
+      { kind: "refresh-all" },
+      expect.any(AbortSignal),
+    );
+    expect(refreshProjectPullRequests).toHaveBeenNthCalledWith(
+      2,
+      windowId,
+      { kind: "refresh-project", projectId },
+      expect.any(AbortSignal),
+    );
+    expect(queryProjectPullRequests).not.toHaveBeenCalled();
+  });
+
+  it("refuses renderer-authored window, owner, repository, root, or credentials", async () => {
+    const queryProjectPullRequests = vi.fn(() => view);
+    const refreshProjectPullRequests = vi.fn(() => view);
+    const route = routeFixture({ queryProjectPullRequests, refreshProjectPullRequests });
+
+    const bodies = [
+      { version: 1, windowId },
+      { version: 1, owner: "octant", name: "octant" },
+      { kind: "refresh-all", owner: "octant" },
+      { kind: "refresh-all", credentials: "secret" },
+      { kind: "refresh-project", projectId: "10000000-0000-4000-8000-000000000001", root: "/tmp" },
+    ];
+    for (const body of bodies) {
+      const path =
+        "kind" in body
+          ? "/api/code/project-pull-requests/refresh"
+          : "/api/code/project-pull-requests";
+      const response = await route(
+        request(path, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+      expect(response?.status).toBe(400);
+    }
+    expect(queryProjectPullRequests).not.toHaveBeenCalled();
+    expect(refreshProjectPullRequests).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unauthorized window", async () => {
+    const queryProjectPullRequests = vi.fn(() => view);
+    const route = routeFixture({ queryProjectPullRequests });
+
+    const response = await route(
+      new Request("http://127.0.0.1/api/code/project-pull-requests", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1 }),
+      }),
+    );
+
+    expect(response?.status).toBe(401);
+    expect(queryProjectPullRequests).not.toHaveBeenCalled();
+  });
+});
+
 function settings() {
   return {
     defaultExecutionPolicy: "approval-gated" as const,

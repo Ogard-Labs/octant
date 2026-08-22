@@ -3,6 +3,9 @@ import {
   decodeCodeCheckoutIdentity,
   decodeCodeBoardQuery,
   decodeCodeBoardView,
+  decodeCodeProjectPullRequestQuery,
+  decodeCodeProjectPullRequestRefreshCommand,
+  decodeCodeProjectPullRequestView,
   decodeCodeCommand,
   decodeCodeCommandResult,
   decodeCodeEvidenceContentId,
@@ -35,6 +38,9 @@ import {
   type CodeAttachmentReference,
   type CodeBoardQuery,
   type CodeBoardView,
+  type CodeProjectPullRequestQuery,
+  type CodeProjectPullRequestRefreshCommand,
+  type CodeProjectPullRequestView,
   type CodeBootstrap,
   type CodeCheckoutId,
   type CodeCommand,
@@ -114,6 +120,10 @@ export interface CodeClient {
     limit: number,
   ): Promise<CodeConversationPage>;
   queryBoard(query: CodeBoardQuery): Promise<CodeBoardView>;
+  queryProjectPullRequests(query: CodeProjectPullRequestQuery): Promise<CodeProjectPullRequestView>;
+  refreshProjectPullRequests(
+    command: CodeProjectPullRequestRefreshCommand,
+  ): Promise<CodeProjectPullRequestView>;
   readFollowUp(threadId: CodeThreadId): Promise<CodeThreadFollowUpView>;
   executeFollowUp(command: CodeFollowUpCommand): Promise<CodeThreadFollowUpUpdated>;
   putEvidence(threadId: CodeThreadId, text: string): Promise<CodeEvidenceReference>;
@@ -299,6 +309,42 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           body: JSON.stringify(validated),
         },
         decodeCodeBoardView,
+      );
+    },
+    async queryProjectPullRequests(query) {
+      let validated: CodeProjectPullRequestQuery;
+      try {
+        validated = decodeCodeProjectPullRequestQuery(query);
+      } catch {
+        throw invalidProjectPullRequestQuery();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeCodeProjectPullRequestView,
+      );
+    },
+    async refreshProjectPullRequests(command) {
+      let validated: CodeProjectPullRequestRefreshCommand;
+      try {
+        validated = decodeCodeProjectPullRequestRefreshCommand(command);
+      } catch {
+        throw invalidProjectPullRequestRefresh();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests/refresh", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeCodeProjectPullRequestView,
       );
     },
     readFollowUp(threadId) {
@@ -995,6 +1041,20 @@ function invalidCommand(): CodeClientFailure {
 
 function invalidBoardQuery(): CodeClientFailure {
   return new CodeClientFailure({ category: "invalid", message: "Code board query is invalid." });
+}
+
+function invalidProjectPullRequestQuery(): CodeClientFailure {
+  return new CodeClientFailure({
+    category: "invalid",
+    message: "Code project pull-request query is invalid.",
+  });
+}
+
+function invalidProjectPullRequestRefresh(): CodeClientFailure {
+  return new CodeClientFailure({
+    category: "invalid",
+    message: "Code project pull-request refresh is invalid.",
+  });
 }
 
 function invalidSave(): CodeClientFailure {

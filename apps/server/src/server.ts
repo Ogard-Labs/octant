@@ -171,6 +171,11 @@ import {
   type CodeBoardThread,
 } from "./code/codeThreadBoardService";
 import { CodeFollowUpService } from "./code/codeFollowUpService";
+import {
+  CodeProjectPullRequestService,
+  type CodeProjectPullRequestListPort,
+} from "./code/codeProjectPullRequestService";
+import { createGhCommandPort, GhPullRequestPort } from "./code/ghPullRequestPort";
 import { RepositoryTestProcessPort } from "./code/repositoryTestProcessPort";
 import { TerminalProcessPort } from "./code/terminalProcessPort";
 import { CodeOperationApprovalStore } from "./code/codeOperationApprovalStore";
@@ -1157,6 +1162,25 @@ function withCodeOperationRuntime(
   };
 }
 
+function createProjectPullRequestListPort(
+  ghExecutable: string | undefined,
+): CodeProjectPullRequestListPort {
+  if (ghExecutable === undefined) {
+    return { listActive: async () => ({ status: "disconnected" }) };
+  }
+  try {
+    const port = new GhPullRequestPort({
+      command: createGhCommandPort({ ghPath: ghExecutable }),
+      resolveTarget: async () => undefined,
+    });
+    return {
+      listActive: (request, signal) => port.listActive(request, signal),
+    };
+  } catch {
+    return { listActive: async () => ({ status: "disconnected" }) };
+  }
+}
+
 function withCodeBoard(
   service: CodeRouteService,
   queryBoard: NonNullable<CodeRouteService["queryBoard"]>,
@@ -1638,8 +1662,15 @@ export function startOctantServer(
     const githubCataloguePort = new GhRepositoryCataloguePort(
       options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable },
     );
+    let revokeProjectPullRequests: (() => void) | undefined;
     const githubCapabilityService = new GithubCapabilityService(githubAuthenticationPort, {
       probes: githubCataloguePort,
+      onAuthenticationChanged: (snapshot) => {
+        const readable = snapshot.capabilities.some(
+          (capability) => capability.kind === "pull-requests-read" && capability.available,
+        );
+        if (!readable) revokeProjectPullRequests?.();
+      },
     });
     const githubCatalogueService = new GithubCatalogueService({
       port: githubCataloguePort,
@@ -2146,6 +2177,43 @@ export function startOctantServer(
       });
     // Revocation is wired at construction, before any window can hold a watch.
     activeCodeService = codeService;
+    const projectPullRequestService = new CodeProjectPullRequestService({
+      projects: projectService,
+      remotes: {
+        remotes: async (root) => {
+          const observed = await gitObservationPort.observe(root);
+          return observed.status === "ready" ? observed.remotes : undefined;
+        },
+      },
+      list: createProjectPullRequestListPort(options.ghExecutable),
+      threads: {
+        list: async (windowId) => {
+          const bootstrap = await codeService.bootstrap(windowId);
+          const facts: Array<{
+            readonly threadId: string;
+            readonly title: string;
+            readonly repository: { readonly owner: string; readonly name: string };
+            readonly deliveryBranch: string;
+          }> = [];
+          for (const thread of bootstrap.threads) {
+            const repository = thread.deliveryTarget.proposedBaseRepository;
+            const slash = repository.indexOf("/");
+            if (slash <= 0 || repository.includes("/", slash + 1)) continue;
+            const owner = repository.slice(0, slash);
+            const name = repository.slice(slash + 1);
+            if (owner === undefined || name === undefined) continue;
+            facts.push({
+              threadId: String(thread.id),
+              title: thread.title,
+              repository: { owner, name },
+              deliveryBranch: thread.deliveryTarget.branchIntent,
+            });
+          }
+          return facts;
+        },
+      },
+    });
+    revokeProjectPullRequests = () => projectPullRequestService.revokeGithub();
     let codeOperationRuntime = options.codeOperationRuntime;
     const providerDataDirectory = persistence.dataDirectory;
     const providerRuntimeRegistry =
@@ -2946,6 +3014,14 @@ export function startOctantServer(
       ...boardRouteCodeService,
       readFollowUp: (_windowId, threadId) => codeFollowUpService.read(threadId),
       executeFollowUp: (_windowId, command) => codeFollowUpService.execute(command),
+      queryProjectPullRequests: (windowId, query) =>
+        projectPullRequestService.query(windowId, query),
+      refreshProjectPullRequests: (windowId, command, signal) =>
+        projectPullRequestService.refresh(
+          windowId,
+          command,
+          signal ?? new AbortController().signal,
+        ),
     };
     const appleRuntimeStore = new AppleRuntimeStore(join(providerDataDirectory, "apple-runtime"));
     const appleProcess = new RepositoryTestProcessPort({
