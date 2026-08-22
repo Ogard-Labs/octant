@@ -369,12 +369,12 @@ describe("App", () => {
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: /Older chat/ }));
+    await user.click(await screen.findByRole("button", { name: "Older chat" }));
     expect(await screen.findByRole("region", { name: "Workspace pane: Older chat" })).toBeVisible();
     expect(screen.queryByRole("region", { name: "Workspace pane: Exact created chat" })).toBeNull();
 
     await user.pointer({
-      target: screen.getByRole("button", { name: /Exact created chat/ }),
+      target: screen.getByRole("button", { name: "Exact created chat" }),
       keys: "[MouseRight]",
     });
     await user.click(await screen.findByRole("menuitem", { name: "Pin in pane" }));
