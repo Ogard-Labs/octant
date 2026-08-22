@@ -574,6 +574,60 @@ describe("ShellProjection", () => {
     connection.close();
   });
 
+  it("restores a same-authority split of two thread panes after replay", () => {
+    const connection = openConnection();
+    const projection = new ShellProjection();
+    const splitWorkspace = decodeWindowWorkspace({
+      ...workspace,
+      activeMode: "chat",
+      layouts: {
+        ...workspace.layouts,
+        chat: {
+          kind: "split",
+          nodeId: "10000000-0000-4000-8000-000000000010",
+          orientation: "horizontal",
+          ratio: 0.5,
+          first: {
+            kind: "pane",
+            nodeId: "10000000-0000-4000-8000-000000000011",
+            paneId: "10000000-0000-4000-8000-000000000012",
+            surface: {
+              kind: "chat-thread",
+              id: "10000000-0000-4000-8000-000000000013",
+              threadId: "10000000-0000-4000-8000-000000000014",
+              mode: "chat",
+              title: "First",
+            },
+          },
+          second: {
+            kind: "pane",
+            nodeId: "10000000-0000-4000-8000-000000000015",
+            paneId: "10000000-0000-4000-8000-000000000016",
+            surface: {
+              kind: "chat-thread",
+              id: "10000000-0000-4000-8000-000000000017",
+              threadId: "10000000-0000-4000-8000-000000000018",
+              mode: "chat",
+              title: "Second",
+            },
+          },
+        },
+      },
+      activePaneIds: {
+        ...workspace.activePaneIds,
+        chat: "10000000-0000-4000-8000-000000000016",
+      },
+      version: 1,
+    });
+    projection.apply(connection, workspaceEnvelope({ payload: { workspace: splitWorkspace } }));
+
+    expect(readWindowWorkspace(connection, ids.window)).toEqual({
+      workspace: splitWorkspace,
+      aggregateVersion: 1,
+    });
+    connection.close();
+  });
+
   it("stores schema-versioned JSON and aggregate versions for both shell events", () => {
     const connection = openConnection();
 

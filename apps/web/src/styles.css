@@ -1463,6 +1463,14 @@ button:focus-visible {
   background: var(--octant-workspace);
 }
 
+.workspace-pane[data-active="true"] .workspace-pane__header {
+  box-shadow: inset 0 -1px 0 var(--octant-border);
+}
+
+.workspace-pane[data-active="true"] .workspace-pane__grip {
+  color: var(--oct-fg);
+}
+
 .workspace-pane__header {
   position: relative;
   z-index: 3;
@@ -4809,7 +4817,8 @@ button:focus-visible {
     border-color: var(--octant-border-strong);
   }
 
-  .project-row[data-active="true"] {
+  .project-row[data-active="true"],
+  .workspace-pane[data-active="true"] {
     box-shadow: inset 0 0 0 1px var(--octant-border-strong);
   }
 

@@ -32,17 +32,18 @@ Welcome to the Octant guide. Use these pages to install the app, configure provi
 The window is mode-first: Chat, Work, and Code in the sidebar, a central
 workspace, and an optional right dock. A workspace pane holds one surface —
 the thread you are reading, a Project overview, a board, or a welcome — and
-the sidebar is how you switch. Work and Code have server-derived thread
-boards; Chat has no board.
+the sidebar is how you switch. Same-authority threads can be pinned or dropped
+into split panes; the active pane is marked, and the right dock follows that
+pane's thread and Project. Work and Code have server-derived thread boards;
+Chat has no board.
 
-That is current product behavior. An approved later interaction model is
-recorded in the architecture decision records and is **not** what the app
-renders today: the right dock will follow the active pane and host live
-thread-owned tools; Environment will be a compact header disclosure rather
-than a persisted panel; context usage will be a composer meter; Project
-memory will live in Project Overview; Navigator will open as a host-wide
-popover from the profile control. Until that migration lands, the pages in
-this guide describe the surfaces that are actually on screen.
+An approved later interaction model is recorded in the architecture decision
+records and is **not** what the app renders today for remaining dock
+placement: Environment will be a compact header disclosure rather than a
+persisted panel; context usage will be a composer meter; Project memory will
+live in Project Overview; Navigator will open as a host-wide popover from the
+profile control. Until that migration lands, the pages in this guide describe
+the surfaces that are actually on screen.
 
 ## Current boundary
 
