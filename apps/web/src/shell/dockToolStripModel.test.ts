@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { partitionDockTools } from "./dockToolStrip";
+import { partitionDockTools } from "./dockToolStripModel";
 
 const tools = [{ id: "files" }, { id: "browser" }, { id: "terminal" }, { id: "canvas" }] as const;
 

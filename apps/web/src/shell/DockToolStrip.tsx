@@ -1,7 +1,7 @@
 import { MoreHorizontal, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { DockToolIcon } from "./dockToolIcons";
-import { partitionDockTools } from "./dockToolStrip";
+import { partitionDockTools } from "./dockToolStripModel";
 import { IconButton } from "./IconButton";
 import type {
   RightUtilityDockSurfaceDescriptor,
