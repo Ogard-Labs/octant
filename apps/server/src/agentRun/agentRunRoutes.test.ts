@@ -280,6 +280,9 @@ function createHandler(
     },
     authorizeCancellation: ({ run }) => options.authorizeCancellation?.({ run }) ?? true,
     authorizeParentThread: (input) => options.authorizeParentThread?.(input) ?? true,
+    resolveCenterContext: ({ parentThreadId }) => ({
+      parentThreadTitle: `Thread ${String(parentThreadId).slice(0, 8)}`,
+    }),
     ...(options.poolRouting === undefined ? {} : { poolRouting: options.poolRouting }),
     ...(options.parentContext === undefined
       ? {}
@@ -337,6 +340,67 @@ describe("agentRunRoutes", () => {
     const body = (await response!.json()) as { entries: Array<{ runId: string; task: string }> };
     expect(body.entries).toHaveLength(1);
     expect(body.entries[0]?.task).toBe("Summarize");
+  });
+
+  it("returns authorized center rows with enriched parent titles", async () => {
+    const { handler, persistence, token } = createHandler();
+    persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Summarize",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/center?status=all&mode=all&limit=50", {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(response?.status).toBe(200);
+    const body = (await response!.json()) as {
+      items: Array<{ task: string; parentThreadTitle: string; mode: string }>;
+    };
+    expect(body.items).toHaveLength(1);
+    expect(body.items[0]?.task).toBe("Summarize");
+    expect(body.items[0]?.parentThreadTitle).toContain("Thread");
+    expect(body.items[0]?.mode).toBe("chat");
+  });
+
+  it("omits center rows the window is not authorized to read", async () => {
+    const authorizeParentThread = vi.fn(() => false);
+    const { handler, persistence, token } = createHandler({ authorizeParentThread });
+    persistence.requestRun({
+      command: {
+        kind: "request-agent-run",
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Hidden",
+        creationPosture: "automatic",
+        requestedAuthority: authority,
+        routingReceipt: routing,
+        workspaceReceipt: { kind: "chat-virtual", mode: "chat" },
+      },
+      parentAuthority: { ...authority, subagents: true },
+      confirmed: true,
+    });
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/center?status=all&mode=all&limit=50", {
+        headers: { "x-octant-window-capability": token },
+      }),
+    );
+    expect(response?.status).toBe(200);
+    const body = (await response!.json()) as { items: unknown[] };
+    expect(body.items).toEqual([]);
+    expect(authorizeParentThread).toHaveBeenCalled();
   });
 
   it("refuses the parent summary before any read when the window may not see the thread", async () => {

@@ -37,6 +37,7 @@ import {
   type CodeOperationId,
   type CodeThreadForkOrigin,
   type CodeThreadId,
+  type OctantMode,
   type WorkThreadId,
 } from "@octant/contracts";
 import type { ExtensionProviderFamily, StandaloneSkillScope } from "@octant/contracts/extensions";
@@ -261,6 +262,7 @@ import { AgentRunPersistenceService } from "./agentRun/agentRunPersistenceServic
 import { createAgentRunRouteHandler } from "./agentRun/agentRunRoutes";
 import {
   createAgentRunChildWorktreePort,
+  deriveAgentRunChildWorktreeThreadId,
   resolveAgentRunCodeWorkspaceContext,
 } from "./agentRun/agentRunChildWorktreePort";
 import { AgentRunWorkspaceReceiptStore } from "./agentRun/agentRunWorkspaceReceiptStore";
@@ -1518,6 +1520,13 @@ export function startOctantServer(
           workThreadProjection,
           parentThreadId,
           windowId,
+        }),
+      resolveCenterContext: ({ parentThreadId, mode }) =>
+        resolveAgentRunCenterContext({
+          persistence,
+          workThreadProjection,
+          parentThreadId,
+          mode,
         }),
       poolRouting: ({ request }) => {
         if (request.pool === undefined) return undefined;
@@ -5893,6 +5902,50 @@ function authorizeAgentRunParentThread(input: {
     String(codeContext.projectId) === String(codeThread.projectId) &&
     layoutContainsAgentRunThread(workspace.layouts.code, threadId, String(codeContext.host))
   );
+}
+
+function resolveAgentRunCenterContext(input: {
+  readonly persistence: PersistenceService;
+  readonly workThreadProjection: WorkThreadProjection;
+  readonly parentThreadId: AgentRunParentThreadId;
+  readonly mode: OctantMode;
+}): { readonly parentThreadTitle: string; readonly childThreadId?: CodeThreadId } {
+  const threadId = String(input.parentThreadId);
+  const title = resolveAgentRunParentThreadTitle(input);
+  return {
+    parentThreadTitle: title ?? "Thread",
+    ...(input.mode === "code"
+      ? { childThreadId: decodeCodeThreadId(deriveAgentRunChildWorktreeThreadId(threadId)) }
+      : {}),
+  };
+}
+
+function resolveAgentRunParentThreadTitle(input: {
+  readonly persistence: PersistenceService;
+  readonly workThreadProjection: WorkThreadProjection;
+  readonly parentThreadId: AgentRunParentThreadId;
+  readonly mode: OctantMode;
+}): string | undefined {
+  const threadId = String(input.parentThreadId);
+  if (input.mode === "chat") {
+    try {
+      return input.persistence.readChatThread(decodeChatThreadId(threadId))?.title;
+    } catch {
+      return undefined;
+    }
+  }
+  if (input.mode === "work") {
+    try {
+      return input.workThreadProjection.read(threadId as never)?.title;
+    } catch {
+      return undefined;
+    }
+  }
+  try {
+    return input.persistence.readCodeThread(decodeCodeThreadId(threadId))?.title;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

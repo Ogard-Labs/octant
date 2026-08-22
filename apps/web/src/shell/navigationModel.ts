@@ -16,6 +16,7 @@ export type SidebarNavigationDescriptorId =
   | "new-chat"
   | "new-work-thread"
   | "new-code-thread"
+  | "agents"
   | "automations"
   | "artifact-library"
   | "plugins"
@@ -36,6 +37,7 @@ export interface SidebarNavigationInput {
   readonly pullRequests: NavigationAvailability;
   readonly plugins: NavigationAvailability;
   readonly automationsEnabled: boolean;
+  readonly agentsCenterEnabled: boolean;
   readonly artifactLibrary: NavigationAvailability;
 }
 
@@ -109,6 +111,7 @@ const descriptors = {
   "new-work-thread": { id: "new-work-thread", label: "New thread" },
   "new-code-thread": { id: "new-code-thread", label: "New thread" },
   automations: { id: "automations", label: "Automations" },
+  agents: { id: "agents", label: "Agents" },
   "artifact-library": { id: "artifact-library", label: "Artifacts" },
   plugins: { id: "plugins", label: "Plugins" },
   "thread-board": { id: "thread-board", label: "Thread board" },
@@ -120,6 +123,7 @@ export function buildSidebarNavigation(
   input: SidebarNavigationInput,
 ): ReadonlyArray<SidebarNavigationDescriptor> {
   const automations = input.automationsEnabled ? [descriptors.automations] : [];
+  const agents = input.agentsCenterEnabled ? [descriptors.agents] : [];
   // Skills and plugins are installed once and apply wherever the active mode
   // allows them, so the destination belongs in every mode rather than only the
   // two work modes.
@@ -133,6 +137,7 @@ export function buildSidebarNavigation(
     case "chat":
       return [
         ...(input.createThread === "available" ? [descriptors["new-chat"]] : []),
+        ...agents,
         ...artifacts,
         ...plugins,
         ...(input.projects === "available" ? [descriptors.projects] : []),
@@ -140,6 +145,7 @@ export function buildSidebarNavigation(
     case "work":
       return [
         ...(input.createThread === "available" ? [descriptors["new-work-thread"]] : []),
+        ...agents,
         ...automations,
         ...artifacts,
         ...plugins,
@@ -149,6 +155,7 @@ export function buildSidebarNavigation(
     case "code":
       return [
         ...(input.createThread === "available" ? [descriptors["new-code-thread"]] : []),
+        ...agents,
         ...automations,
         ...artifacts,
         ...plugins,

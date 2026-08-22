@@ -10,6 +10,7 @@ import type { ResolvedSidebarBackground } from "@octant/theme/backgrounds";
 import { PanelLeftClose, Search } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AUTOMATION_CENTER_NAVIGATION_ENABLED } from "../automation/automationCenterGate";
+import { AGENTS_CENTER_NAVIGATION_ENABLED } from "../agents/agentsCenterGate";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { FIRST_PARTY_PLUGINS_EFFECTIVE, resolveSidebarContributions } from "./contributionRegistry";
@@ -30,6 +31,7 @@ export interface ShellSidebarProps {
    * Defaults to {@link AUTOMATION_CENTER_NAVIGATION_ENABLED}.
    */
   readonly automationsEnabled?: boolean;
+  readonly agentsCenterEnabled?: boolean;
   /** Absent on a host that serves no library, which keeps the row off entirely. */
   readonly artifactLibraryAvailable?: boolean;
   /**
@@ -186,6 +188,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
             artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
             // Gated by A3/A4 integration: never expose a dead Automations destination.
             automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
+            agentsCenterEnabled: props.agentsCenterEnabled ?? AGENTS_CENTER_NAVIGATION_ENABLED,
             createThread:
               chatReady ||
               codeActions["new-code-thread"] !== undefined ||

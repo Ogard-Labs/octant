@@ -15,6 +15,7 @@ const unavailableCapabilities = {
   pullRequests: "unavailable",
   plugins: "unavailable",
   automationsEnabled: false,
+  agentsCenterEnabled: false,
   artifactLibrary: "unavailable" as const,
 } as const;
 
@@ -31,6 +32,16 @@ describe("buildSidebarNavigation", () => {
     ["code", ["new-code-thread", "projects"]],
   ] as const)("returns the approved stable ordering for %s", (activeMode, expectedIds) => {
     expect(descriptorIds({ activeMode, ...availableBaseCapabilities })).toEqual(expectedIds);
+  });
+
+  it("adds Agents Center to every mode when enabled", () => {
+    expect(
+      descriptorIds({
+        activeMode: "chat",
+        ...availableBaseCapabilities,
+        agentsCenterEnabled: true,
+      }),
+    ).toEqual(["new-chat", "agents", "projects"]);
   });
 
   it("adds only the destinations supported by each mode", () => {
@@ -78,6 +89,7 @@ describe("buildSidebarNavigation", () => {
           pullRequests: availability,
           plugins: availability,
           automationsEnabled: false,
+          agentsCenterEnabled: false,
           artifactLibrary: "unavailable" as const,
         }),
       ).toEqual([]);
@@ -235,9 +247,10 @@ describe("buildSidebarNavigation", () => {
       "unauthorized",
     ];
     const allowedByMode: Record<OctantMode, ReadonlySet<SidebarNavigationDescriptorId>> = {
-      chat: new Set(["new-chat", "artifact-library", "plugins", "projects"]),
+      chat: new Set(["new-chat", "agents", "artifact-library", "plugins", "projects"]),
       work: new Set([
         "new-work-thread",
+        "agents",
         "thread-board",
         "projects",
         "automations",
@@ -246,6 +259,7 @@ describe("buildSidebarNavigation", () => {
       ]),
       code: new Set([
         "new-code-thread",
+        "agents",
         "thread-board",
         "pull-requests",
         "projects",
@@ -261,21 +275,25 @@ describe("buildSidebarNavigation", () => {
           for (const plugins of availability) {
             for (const artifactLibrary of availability) {
               for (const automationsEnabled of [false, true]) {
-                const ids = descriptorIds({
-                  activeMode,
-                  createThread: "available",
-                  projects: "available",
-                  threadBoard,
-                  pullRequests,
-                  plugins,
-                  artifactLibrary,
-                  automationsEnabled,
-                });
-                expect(new Set(ids).size).toBe(ids.length);
-                for (const id of ids) {
-                  expect(allowedByMode[activeMode].has(id)).toBe(true);
+                for (const agentsCenterEnabled of [false, true]) {
+                  const ids = descriptorIds({
+                    activeMode,
+                    createThread: "available",
+                    projects: "available",
+                    threadBoard,
+                    pullRequests,
+                    plugins,
+                    artifactLibrary,
+                    automationsEnabled,
+                    agentsCenterEnabled,
+                  });
+                  expect(new Set(ids).size).toBe(ids.length);
+                  for (const id of ids) {
+                    expect(allowedByMode[activeMode].has(id)).toBe(true);
+                  }
+                  expect(ids.includes("artifact-library")).toBe(artifactLibrary === "available");
+                  expect(ids.includes("agents")).toBe(agentsCenterEnabled);
                 }
-                expect(ids.includes("artifact-library")).toBe(artifactLibrary === "available");
               }
             }
           }

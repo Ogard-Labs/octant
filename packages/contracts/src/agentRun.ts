@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { CodeThreadId } from "./code";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
 import { MultiModelRouteDecisionReceipt } from "./multiModelPool";
@@ -463,6 +464,85 @@ export const AgentRunResultAcknowledged = Schema.Struct({
 }).annotations(strict);
 export type AgentRunResultAcknowledged = typeof AgentRunResultAcknowledged.Type;
 
+/** Maximum rows one Agents Center query may return in a single page. */
+export const MAX_AGENT_RUN_CENTER_QUERY_LIMIT = 100;
+
+export const MAX_AGENT_RUN_CENTER_QUERY_CURSOR_LENGTH = 256;
+
+export const AgentRunCenterStatusFilter = Schema.Literal("all", "active", "history");
+export type AgentRunCenterStatusFilter = typeof AgentRunCenterStatusFilter.Type;
+
+export const AgentRunCenterWorkspaceKind = Schema.Literal(
+  "chat-virtual",
+  "work-root",
+  "code-worktree",
+);
+export type AgentRunCenterWorkspaceKind = typeof AgentRunCenterWorkspaceKind.Type;
+
+export const AgentRunCenterRoute = Schema.Struct({
+  requestedProviderInstanceId: ProviderInstanceId,
+  requestedModelId: ProviderModelId,
+  executionProviderInstanceId: ProviderInstanceId,
+  executionModelId: ProviderModelId,
+  poolDerived: Schema.Boolean,
+  selectionKind: Schema.optional(Schema.Literal("requested", "fallback")),
+  routingReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+}).annotations(strict);
+export type AgentRunCenterRoute = typeof AgentRunCenterRoute.Type;
+
+export const AgentRunCenterSummary = Schema.Struct({
+  runId: AgentRunId,
+  requestId: AgentRunRequestId,
+  parentThreadId: AgentRunParentThreadId,
+  parentThreadTitle: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  parentRunId: Schema.optional(AgentRunId),
+  /** Present for Code child runs that occupy an isolated worktree thread. */
+  childThreadId: Schema.optional(CodeThreadId),
+  mode: OctantMode,
+  projectId: Schema.optional(ProjectId),
+  role: AgentRunRole,
+  task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
+  lifecycleStatus: AgentRunLifecycleStatus,
+  executionKind: AgentRunExecutionKind,
+  authority: AgentRunAuthority,
+  workspaceKind: AgentRunCenterWorkspaceKind,
+  usageQuality: AgentRunUsageQuality,
+  route: AgentRunCenterRoute,
+  resultAcknowledgement: AgentRunResultAcknowledgement,
+  recoveryReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  version: AggregateVersion,
+  createdAt: UtcTimestamp,
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+export type AgentRunCenterSummary = typeof AgentRunCenterSummary.Type;
+
+export const AgentRunCenterQuery = Schema.Struct({
+  status: AgentRunCenterStatusFilter,
+  mode: Schema.Literal("all", "chat", "work", "code"),
+  projectId: Schema.optional(ProjectId),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+  parentThreadId: Schema.optional(AgentRunParentThreadId),
+  search: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  limit: Schema.Int.pipe(
+    Schema.greaterThanOrEqualTo(1),
+    Schema.lessThanOrEqualTo(MAX_AGENT_RUN_CENTER_QUERY_LIMIT),
+  ),
+  cursor: Schema.optional(
+    Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CENTER_QUERY_CURSOR_LENGTH)),
+  ),
+}).annotations(strict);
+export type AgentRunCenterQuery = typeof AgentRunCenterQuery.Type;
+
+export const AgentRunCenterResponse = Schema.Struct({
+  items: Schema.Array(AgentRunCenterSummary).pipe(
+    Schema.maxItems(MAX_AGENT_RUN_CENTER_QUERY_LIMIT),
+  ),
+  nextCursor: Schema.optional(
+    Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CENTER_QUERY_CURSOR_LENGTH)),
+  ),
+}).annotations(strict);
+export type AgentRunCenterResponse = typeof AgentRunCenterResponse.Type;
+
 export const AGENT_RUN_EVENT_NAMES = [
   "agent.run-requested@1",
   "agent.run-status-changed@1",
@@ -502,3 +582,13 @@ export const decodeAgentRunStatusChanged = Schema.decodeUnknownSync(AgentRunStat
 export const decodeAgentRunResultAcknowledged = Schema.decodeUnknownSync(
   AgentRunResultAcknowledged,
 );
+export const decodeAgentRunCenterStatusFilter = Schema.decodeUnknownSync(
+  AgentRunCenterStatusFilter,
+);
+export const decodeAgentRunCenterWorkspaceKind = Schema.decodeUnknownSync(
+  AgentRunCenterWorkspaceKind,
+);
+export const decodeAgentRunCenterRoute = Schema.decodeUnknownSync(AgentRunCenterRoute);
+export const decodeAgentRunCenterSummary = Schema.decodeUnknownSync(AgentRunCenterSummary);
+export const decodeAgentRunCenterQuery = Schema.decodeUnknownSync(AgentRunCenterQuery);
+export const decodeAgentRunCenterResponse = Schema.decodeUnknownSync(AgentRunCenterResponse);
