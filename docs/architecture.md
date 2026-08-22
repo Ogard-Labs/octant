@@ -162,7 +162,7 @@ cross-mode, or cross-host placement is refused or offered in a new window.
 Thread utilities live in the Right Utility Dock outside the split tree. The
 top-right control reveals the dock. An empty dock shows a compact launcher; an
 open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
-Canvas, artifact-gated Plan, conditional Delivery, Changes, Terminal, Tests,
+Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal, Tests,
 and iOS Simulator, as mode and capability allow. The dock follows the active
 pane's thread and Project, restores that subject's open tools, and presents an
 explicit unavailable state when the newly active pane cannot describe the
@@ -189,9 +189,10 @@ interaction model for remaining renderer work. Environment is already a compact
 header summary with a transient disclosure whose open state is not persisted
 ([0042](decisions/0042-environment-is-a-transient-disclosure.md)).
 The dock already hosts live thread-owned tool instances — Files, Browser,
-Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery, and
-thread-level Agents — rather than a generic Thread accordion. Review remains a
-later tool. Context usage already lives on the composer meter. Project memory
+Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery,
+thread-level Agents, and Review — rather than a generic Thread accordion.
+Local checkout changes open in Review beside the thread; the full-window Code
+diff is gone. Context usage already lives on the composer meter. Project memory
 already lives in Project Overview. Navigator is already one host-wide chat
 popover from the bottom-left profile and Settings control. Simulator placement
 is already [0043](decisions/0043-simulator-follows-the-active-thread.md). 0015

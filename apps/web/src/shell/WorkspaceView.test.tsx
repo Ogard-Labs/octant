@@ -41,7 +41,6 @@ const codeTabs: ReadonlyArray<
   ]
 > = [
   ["code-overview", "Overview", undefined, { role: "region", name: "Code thread" }],
-  ["code-diff", "README.md changes", "monaco", { role: "heading", name: "Checkout changes" }],
   ["code-terminal", "Terminal", "xterm", { role: "heading", name: "No terminal attached" }],
   [
     "code-test",
@@ -1853,7 +1852,6 @@ function codeTab(kind: WorkspaceTab["kind"], title: string): WorkspaceTab {
     title,
   };
   if (kind === "code-file") return { ...base, kind, relativePath: "README.md" } as WorkspaceTab;
-  if (kind === "code-diff") return { ...base, kind, relativePath: "README.md" } as WorkspaceTab;
   if (kind === "apple-workbench") {
     return { ...base, kind, projectPath: "Fixture.xcodeproj" } as WorkspaceTab;
   }

@@ -65,7 +65,7 @@ export function activeCodeThreadTabId(
 /**
  * Every local Code thread this window has open, in any pane of the Code tree.
  *
- * Keyed on the thread, not the surface: a thread's overview, diff, terminal,
+ * Keyed on the thread, not the surface: a thread's overview, terminal,
  * and workbench are several views of one conversation, and giving each its own
  * controller would open the same thread's stream several times over.
  */
@@ -104,7 +104,6 @@ function localCodeThreadTabId(surface: WorkspaceTab | undefined): CodeThreadId |
   switch (surface?.kind) {
     case "code-overview":
     case "code-file":
-    case "code-diff":
     case "code-terminal":
     case "code-test":
     case "code-git":

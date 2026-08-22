@@ -1,7 +1,6 @@
 import type { CodeOverviewSurfaceKind } from "./CodeOverview";
 
 const TITLES: Readonly<Record<CodeOverviewSurfaceKind, string>> = {
-  "code-diff": "Changes",
   "code-terminal": "Terminal",
   "code-test": "Tests",
   "code-git": "Git",
@@ -21,7 +20,6 @@ export function codeSurfaceTitle(kind: CodeOverviewSurfaceKind): string {
  * is its group's active tab.
  */
 export const LAUNCHABLE_CODE_SURFACES = [
-  "code-diff",
   "code-terminal",
   "code-test",
 ] as const satisfies ReadonlyArray<CodeOverviewSurfaceKind>;

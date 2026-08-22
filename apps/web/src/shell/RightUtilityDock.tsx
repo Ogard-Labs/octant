@@ -13,7 +13,7 @@ export interface RightUtilityDockProps {
   readonly agents?: ReactNode;
   readonly browser?: ReactNode;
   readonly canvas?: ReactNode;
-  readonly changes?: ReactNode;
+  readonly review?: ReactNode;
   readonly delivery?: ReactNode;
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
@@ -50,7 +50,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.agents === undefined ? {} : { agents: props.agents })}
       {...(props.browser === undefined ? {} : { browser: props.browser })}
       {...(props.canvas === undefined ? {} : { canvas: props.canvas })}
-      {...(props.changes === undefined ? {} : { changes: props.changes })}
+      {...(props.review === undefined ? {} : { review: props.review })}
       {...(props.delivery === undefined ? {} : { delivery: props.delivery })}
       {...(props.files === undefined ? {} : { files: props.files })}
       {...(props.iosSimulator === undefined ? {} : { iosSimulator: props.iosSimulator })}

@@ -30,7 +30,7 @@ export interface CodeThreadEnvironmentProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly children: ReactNode;
-  /** Opens the thread's Changes (diff) surface. Absent hides the control. */
+  /** Opens Review beside this thread. Absent hides the control. */
   readonly onOpenChanges?: () => void;
   /**
    * Starts a fresh thread in this Project. Offered only when the checkout is
@@ -138,10 +138,13 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
         {props.onOpenChanges === undefined || readyObservation === undefined ? null : (
           <button
             className="environment-group__action window-no-drag"
-            onClick={props.onOpenChanges}
+            onClick={() => {
+              setDisclosureOpen(false);
+              props.onOpenChanges?.();
+            }}
             type="button"
           >
-            View diff
+            View changes
           </button>
         )}
         <EnvironmentGroup

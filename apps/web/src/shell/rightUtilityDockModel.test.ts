@@ -67,8 +67,8 @@ describe("resolving what the right utility dock shows", () => {
         scope: "thread",
       },
       {
-        id: "changes",
-        label: "Changes",
+        id: "review",
+        label: "Review",
         modes: ["code"],
         scope: "thread",
       },
@@ -125,6 +125,18 @@ describe("resolving what the right utility dock shows", () => {
         savedSurface: "browser",
       }),
     ).toEqual({ kind: "closed", reason: "mode-invalid" });
+  });
+
+  it("opens Review for a dock that still names the retired Changes id", () => {
+    expect(
+      resolveRightUtilityDockSurface({
+        ...validInput,
+        savedSurface: "changes",
+      }),
+    ).toEqual({
+      kind: "surface",
+      surface: surface("review"),
+    });
   });
 
   it.each(["context", "project-memory", "navigator", "code-environment", "thread"] as const)(

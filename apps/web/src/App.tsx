@@ -1405,11 +1405,8 @@ function LaunchedShell(
         relativePath: decodeCodeRelativePath(target.relativePath),
       });
     } else if (target.kind === "diff") {
-      void controller.openCodeSurface({
-        kind: "code-diff",
-        threadId: thread.id,
-        title: `${thread.title} changes`,
-      });
+      void controller.openCodeThread(thread.id, thread.title, undefined, thread.projectId);
+      openReviewForThread(String(thread.id));
     } else {
       void controller.openCodeSurface({
         kind: "code-test",
@@ -1919,7 +1916,9 @@ function LaunchedShell(
         canvasClient={canvasClient}
         chatClient={chatClient}
         chatReadCursorStore={chatReadCursorStore}
-        {...(dockThread.mode === "code" ? { codeController } : {})}
+        {...(dockThread.mode === "code" && activeCodeThreadController !== undefined
+          ? { codeController: activeCodeThreadController }
+          : {})}
         codeProviderGroups={codeProviderGroups}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
         planClient={planClient}
@@ -1973,6 +1972,11 @@ function LaunchedShell(
     if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
     setDockVisible(true);
     setDockStatesByThread((current) => openThreadUtilityTab(current, dockThreadKey, surface));
+  }
+  function openReviewForThread(threadId: string) {
+    const key = threadUtilityDockKey("code", threadId);
+    setDockVisible(true);
+    setDockStatesByThread((current) => openThreadUtilityTab(current, key, "review"));
   }
   function selectDockTab(surface: RightUtilityDockSurfaceId) {
     if (dockThreadKey === undefined) {
@@ -3902,6 +3906,7 @@ function LaunchedShell(
                     onOpenCodeThread={(threadId, title, projectId) =>
                       void controller.openCodeThread(threadId, title, undefined, projectId)
                     }
+                    onOpenReview={(threadId) => openReviewForThread(String(threadId))}
                     onOpenCodeSurface={(kind, threadId, title, terminalId) =>
                       void controller.openCodeSurface(
                         kind === "code-terminal"
@@ -4027,7 +4032,7 @@ function LaunchedShell(
               agents={threadUtility("agents")}
               browser={threadUtility("browser")}
               canvas={threadUtility("canvas")}
-              changes={threadUtility("changes")}
+              review={threadUtility("review")}
               delivery={threadUtility("delivery")}
               isNarrow={isNarrow}
               files={threadUtility("files")}

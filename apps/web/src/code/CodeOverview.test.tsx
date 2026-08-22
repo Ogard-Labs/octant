@@ -6,10 +6,12 @@ import type { CodeController } from "./useCodeController";
 
 describe("CodeOverview", () => {
   it("renders only authoritative thread, checkout, policy, and delivery facts", () => {
+    const onOpenReview = vi.fn();
     const onOpenSurface = vi.fn();
     render(
       <CodeOverview
         controller={controller()}
+        onOpenReview={onOpenReview}
         onOpenSurface={onOpenSurface}
         threadId={ids.thread as never}
       />,
@@ -21,12 +23,12 @@ describe("CodeOverview", () => {
     expect(screen.getByText("Active")).toBeVisible();
     expect(screen.getByText("feature/controller → development")).toBeVisible();
     expect(screen.getByRole("region", { name: "Code status summary" })).toBeVisible();
-    expect(screen.getByText("Git changes load in the Git pane.")).toBeVisible();
+    expect(screen.getByText("Local changes open in Review beside this thread.")).toBeVisible();
     expect(screen.getByText("Test summaries load when repository tests run.")).toBeVisible();
     expect(screen.getByText("Approval requests appear when the provider asks.")).toBeVisible();
     expect(screen.getByText("Review checkout changes")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Open Git changes" }));
-    expect(onOpenSurface).toHaveBeenCalledWith("code-diff");
+    fireEvent.click(screen.getByRole("button", { name: "View changes" }));
+    expect(onOpenReview).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Open terminal" }));
     expect(onOpenSurface).toHaveBeenCalledWith("code-terminal");
   });

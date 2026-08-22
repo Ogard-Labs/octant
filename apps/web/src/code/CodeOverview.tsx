@@ -31,6 +31,7 @@ import { useWorktreeRemoteFacts } from "./composer/useWorktreeRemoteFacts";
 export type CodeOverviewProps =
   | {
       readonly controller: CodeController;
+      readonly onOpenReview?: () => void;
       readonly onOpenSurface?: (kind: CodeOverviewSurfaceKind) => void;
       readonly threadId: CodeThreadId;
     }
@@ -189,7 +190,7 @@ export function CodeOverview(props: CodeOverviewProps) {
             <div>
               <span>Changes</span>
               <strong>Review checkout changes</strong>
-              <p>Git changes load in the Git pane.</p>
+              <p>Local changes open in Review beside this thread.</p>
             </div>
           </article>
           <article className="code-overview__signal">
@@ -210,60 +211,73 @@ export function CodeOverview(props: CodeOverviewProps) {
           </article>
         </div>
       </section>
-      {props.onOpenSurface === undefined ? null : (
+      {props.onOpenReview === undefined && props.onOpenSurface === undefined ? null : (
         <nav aria-label="Code workspace surfaces" className="project-overview__actions">
-          <OctantButton
-            className="project-button"
-            onClick={() => props.onOpenSurface!("code-diff")}
-            type="button"
-            variant="secondary"
-          >
-            <GitCompare aria-hidden="true" size={14} strokeWidth={1.8} />
-            <span>Open Git changes</span>
-            <ArrowUpRight aria-hidden="true" className="code-overview__action-arrow" size={14} />
-          </OctantButton>
-          <OctantButton
-            className="project-button"
-            onClick={() => props.onOpenSurface!("code-terminal")}
-            type="button"
-            variant="secondary"
-          >
-            <Terminal aria-hidden="true" size={14} strokeWidth={1.8} />
-            <span>Open terminal</span>
-            <ArrowUpRight aria-hidden="true" className="code-overview__action-arrow" size={14} />
-          </OctantButton>
-          <OctantButton
-            className="project-button"
-            onClick={() => props.onOpenSurface!("code-git")}
-            type="button"
-            variant="secondary"
-          >
-            <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
-            <span>Open Git delivery</span>
-            <ArrowUpRight aria-hidden="true" className="code-overview__action-arrow" size={14} />
-          </OctantButton>
-          <OctantButton
-            className="project-button"
-            onClick={() => props.onOpenSurface!("code-pr")}
-            type="button"
-            variant="secondary"
-          >
-            <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.8} />
-            <span>Open pull request</span>
-            <ArrowUpRight aria-hidden="true" className="code-overview__action-arrow" size={14} />
-          </OctantButton>
+          {props.onOpenReview === undefined ? null : (
+            <OctantButton
+              className="project-button"
+              onClick={props.onOpenReview}
+              type="button"
+              variant="secondary"
+            >
+              <GitCompare aria-hidden="true" size={14} strokeWidth={1.8} />
+              <span>View changes</span>
+              <ArrowUpRight aria-hidden="true" className="code-overview__action-arrow" size={14} />
+            </OctantButton>
+          )}
+          {props.onOpenSurface === undefined ? null : (
+            <>
+              <OctantButton
+                className="project-button"
+                onClick={() => props.onOpenSurface!("code-terminal")}
+                type="button"
+                variant="secondary"
+              >
+                <Terminal aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>Open terminal</span>
+                <ArrowUpRight
+                  aria-hidden="true"
+                  className="code-overview__action-arrow"
+                  size={14}
+                />
+              </OctantButton>
+              <OctantButton
+                className="project-button"
+                onClick={() => props.onOpenSurface!("code-git")}
+                type="button"
+                variant="secondary"
+              >
+                <GitBranch aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>Open Git delivery</span>
+                <ArrowUpRight
+                  aria-hidden="true"
+                  className="code-overview__action-arrow"
+                  size={14}
+                />
+              </OctantButton>
+              <OctantButton
+                className="project-button"
+                onClick={() => props.onOpenSurface!("code-pr")}
+                type="button"
+                variant="secondary"
+              >
+                <GitPullRequest aria-hidden="true" size={14} strokeWidth={1.8} />
+                <span>Open pull request</span>
+                <ArrowUpRight
+                  aria-hidden="true"
+                  className="code-overview__action-arrow"
+                  size={14}
+                />
+              </OctantButton>
+            </>
+          )}
         </nav>
       )}
     </section>
   );
 }
 
-export type CodeOverviewSurfaceKind =
-  | "code-diff"
-  | "code-terminal"
-  | "code-test"
-  | "code-git"
-  | "code-pr";
+export type CodeOverviewSurfaceKind = "code-terminal" | "code-test" | "code-git" | "code-pr";
 
 function ProjectCodeOverview(props: Extract<CodeOverviewProps, { readonly projectId: ProjectId }>) {
   const [boardState, setBoardState] = useState<ProjectBoardState>({ kind: "loading" });

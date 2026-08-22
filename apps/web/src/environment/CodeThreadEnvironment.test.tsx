@@ -184,6 +184,24 @@ describe("CodeThreadEnvironment", () => {
     });
   });
 
+  it("opens Review from View changes without leaving the thread surface", async () => {
+    const onOpenChanges = vi.fn();
+    render(
+      <CodeThreadEnvironment
+        onOpenChanges={onOpenChanges}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div data-testid="code-workspace-content">Transcript stays here</div>
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    fireEvent.click(screen.getByRole("button", { name: "View changes" }));
+    expect(onOpenChanges).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("code-workspace-content")).toBeVisible();
+  });
+
   it("renders the authoritative Git facts in the disclosure once opened", async () => {
     render(
       <CodeThreadEnvironment

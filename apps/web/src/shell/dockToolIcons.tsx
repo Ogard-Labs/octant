@@ -17,7 +17,7 @@ import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
   browser: Globe2,
   canvas: FileStack,
-  changes: GitCompareArrows,
+  review: GitCompareArrows,
   delivery: Truck,
   agents: Bot,
   files: Files,

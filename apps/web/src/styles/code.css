@@ -381,7 +381,8 @@
   line-height: var(--oct-leading-snug);
 }
 
-.code-editor-pane__warning button {
+.code-editor-pane__warning button,
+.code-diff-pane__warning button {
   margin-top: var(--oct-space-2);
 }
 

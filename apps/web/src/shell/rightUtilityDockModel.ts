@@ -8,7 +8,7 @@ export type RightUtilityDockSurfaceId =
   | "plan"
   | "delivery"
   | "agents"
-  | "changes"
+  | "review"
   | "terminal"
   | "tests"
   | "ios-simulator";
@@ -91,7 +91,7 @@ export type RightUtilityDockResolution =
  * memory in Overview, Navigator on the profile control. Plan and Delivery are
  * still mode-valid here; presence is gated by the thread's current artifact or
  * enabled target, not by this catalog. Agents is conditional: it appears when
- * children exist or the user invokes Add agent. Review remains a later tool.
+ * children exist or the user invokes Add agent. Review is the local-diff tool.
  */
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
@@ -137,8 +137,8 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     scope: "thread",
   },
   {
-    id: "changes",
-    label: "Changes",
+    id: "review",
+    label: "Review",
     modes: ["code"],
     scope: "thread",
   },
@@ -171,7 +171,7 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     plan: RIGHT_UTILITY_DOCK_SURFACES[4],
     delivery: RIGHT_UTILITY_DOCK_SURFACES[5],
     agents: RIGHT_UTILITY_DOCK_SURFACES[6],
-    changes: RIGHT_UTILITY_DOCK_SURFACES[7],
+    review: RIGHT_UTILITY_DOCK_SURFACES[7],
     terminal: RIGHT_UTILITY_DOCK_SURFACES[8],
     tests: RIGHT_UTILITY_DOCK_SURFACES[9],
     "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[10],
@@ -183,7 +183,8 @@ export function resolveRightUtilityDockSurface(
   if (input.savedSurface === null || input.savedSurface === undefined) {
     return closed("no-surface");
   }
-  if (!isRightUtilityDockSurfaceId(input.savedSurface)) {
+  const savedSurface = canonicalizeDockSurface(input.savedSurface);
+  if (!isRightUtilityDockSurfaceId(savedSurface)) {
     return closed("unknown-surface");
   }
   if (input.connectionState !== "connected") {
@@ -193,7 +194,7 @@ export function resolveRightUtilityDockSurface(
     return closed(input.presentationAvailability);
   }
 
-  const surface = descriptors[input.savedSurface];
+  const surface = descriptors[savedSurface];
   if (!surface.modes.includes(input.activeMode)) {
     return closed("mode-invalid");
   }
@@ -208,5 +209,13 @@ function closed(reason: RightUtilityDockClosedReason): RightUtilityDockResolutio
 }
 
 function isRightUtilityDockSurfaceId(value: unknown): value is RightUtilityDockSurfaceId {
-  return Object.hasOwn(descriptors, String(value));
+  return Object.hasOwn(descriptors, String(canonicalizeDockSurface(value)));
+}
+
+/**
+ * A dock that still names the retired Changes id is asking for Review: that
+ * tool is the same local-diff destination, renamed.
+ */
+function canonicalizeDockSurface(value: unknown): unknown {
+  return value === "changes" ? "review" : value;
 }
