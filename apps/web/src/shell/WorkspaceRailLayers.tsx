@@ -2,7 +2,6 @@ import type { AutomationClient } from "@octant/client-runtime";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
-import type { CodeThreadId } from "@octant/contracts/code";
 import type { OctantMode } from "@octant/contracts/modes";
 import { ArtifactLibrarySurface } from "../artifacts/ArtifactLibrarySurface";
 import { AutomationCenter } from "../automation/AutomationCenter";
@@ -10,7 +9,7 @@ import type {
   AutomationEditorCatalog,
   AutomationThreadTarget,
 } from "../automation/automationCenterModel";
-import { CodeThreadBoard } from "../code/CodeThreadBoard";
+import { CodeThreadBoard, type CodeThreadOpenTarget } from "../code/CodeThreadBoard";
 import type { CodeBoardProjectRef } from "../code/codeBoardGrouping";
 import { ShellState } from "./ShellState";
 
@@ -22,7 +21,9 @@ export interface WorkspaceRailLayersProps {
   readonly codeClient: CodeClient;
   readonly codeBoardProjects: ReadonlyArray<CodeBoardProjectRef>;
   readonly onCloseCodeBoard: () => void;
-  readonly onOpenCodeBoardThread: (threadId: CodeThreadId) => void;
+  readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
+  readonly unreadThreadIds?: ReadonlySet<string>;
+  readonly providerLabels?: ReadonlyMap<string, string>;
   readonly artifactLibraryOpen: boolean;
   readonly onCloseArtifactLibrary: () => void;
   readonly onCreateArtifact: () => void;
@@ -62,10 +63,17 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
       {props.codeBoardOpen && props.activeMode === "code" ? (
         <div className="code-board-layer">
           <CodeThreadBoard
+            isNarrow={props.isNarrow}
             loadBoard={(query) => props.codeClient.queryBoard(query)}
             projects={props.codeBoardProjects}
             onClose={props.onCloseCodeBoard}
             onOpenThread={props.onOpenCodeBoardThread}
+            {...(props.unreadThreadIds === undefined
+              ? {}
+              : { unreadThreadIds: props.unreadThreadIds })}
+            {...(props.providerLabels === undefined
+              ? {}
+              : { providerLabels: props.providerLabels })}
           />
         </div>
       ) : null}

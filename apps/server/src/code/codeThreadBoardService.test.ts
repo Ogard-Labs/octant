@@ -3,6 +3,7 @@ import {
   decodeCodeBoardQuery,
   decodeCodeBoardView,
   decodeCodeCheckoutHead,
+  decodeCodeCheckoutIdentity,
   decodeCodeThread,
   decodeCodeThreadId,
   decodeProjectId,
@@ -84,8 +85,22 @@ function boardThread(
   return {
     thread: overrides.thread,
     project: overrides.project ?? { id: overrides.thread.projectId, name: "Project A" },
+    checkout:
+      overrides.checkout ??
+      decodeCodeCheckoutIdentity({
+        id: overrides.thread.checkoutId,
+        repositoryId,
+        kind: "managed-worktree",
+        availability: "available",
+        head: {
+          kind: "branch",
+          name: "feature/x",
+          oid: "a".repeat(40),
+        },
+        ownershipReceiptId: "00000000-0000-4000-8000-000000003013",
+        observedAt: now,
+      }),
     projectProjectionPresent: overrides.projectProjectionPresent ?? true,
-    unread: overrides.unread ?? false,
     followUp: overrides.followUp ?? false,
   };
 }
@@ -148,7 +163,8 @@ function metadataService() {
 function runtimeSource(
   activity: (threadId: unknown) => CodeBoardRuntimeActivity = () => ({
     executing: false,
-    waiting: false,
+    awaitingInput: false,
+    interrupted: false,
   }),
 ) {
   return { observe: vi.fn((threadId: unknown) => activity(threadId)) };
@@ -196,8 +212,8 @@ describe("CodeThreadBoardService derivation", () => {
       ],
       runtime: (threadId) =>
         threadId === ids.executing
-          ? { executing: true, waiting: false }
-          : { executing: false, waiting: false },
+          ? { executing: true, awaitingInput: false, interrupted: false }
+          : { executing: false, awaitingInput: false, interrupted: false },
     });
 
     const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
@@ -210,12 +226,70 @@ describe("CodeThreadBoardService derivation", () => {
     expect(cardFor(view.cards, ids.waiting).status).toBe("waiting");
     expect(cardFor(view.cards, ids.executing).status).toBe("in-progress");
     expect(cardFor(view.cards, ids.ready).status).toBe("ready");
+    expect(cardFor(view.cards, ids.ready).projectId).toBe(ids.projectA);
 
     // The default query echoes the applied all-status filter.
     expect(view.query.statuses).toEqual(["ready", "in-progress", "waiting", "done"]);
     expect(view.generatedAt).toBe(now);
     // The whole view round-trips through the strict contract decoder.
     expect(decodeCodeBoardView(view)).toEqual(view);
+  });
+
+  it("makes zero GitHub calls and shows only already-cached PR evidence with freshness", async () => {
+    const github = { observe: vi.fn() };
+    const history = {
+      read: vi.fn((): CodeThreadOperationHistory => {
+        return {
+          status: "ok",
+          frames: [
+            {
+              threadId: ids.ready,
+              operationId: "00000000-0000-4000-8000-000000003099",
+              cursor: 1,
+              occurredAt: now,
+              event: {
+                kind: "operation-result",
+                result: {
+                  kind: "pull-request-state",
+                  operationId: "00000000-0000-4000-8000-000000003099",
+                  state: "created",
+                  number: 18,
+                  url: "https://github.com/acme/repo/pull/18",
+                  headRepository: "acme/repo",
+                  headBranch: "feature/x",
+                  baseRepository: "acme/repo",
+                  baseBranch: "development",
+                },
+              },
+            } as never,
+          ],
+        } as unknown as CodeThreadOperationHistory;
+      }),
+    };
+    const board = new CodeThreadBoardService({
+      threads: {
+        list: () => [boardThread({ thread: thread({ id: ids.ready, outcomeKind: "opened-pr" }) })],
+      },
+      metadata: new CodeThreadMetadataService({
+        git: { observe: () => gitObserved() },
+        history,
+      }),
+      runtime: runtimeSource(),
+      clock: () => now,
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    const card = cardFor(view.cards, ids.ready);
+
+    expect(github.observe).not.toHaveBeenCalled();
+    expect(card.linkedPullRequest).toMatchObject({
+      kind: "linked",
+      freshness: "stale",
+      number: 18,
+    });
+    expect(card.githubFreshness).toBe("stale");
+    expect(card.status).toBe("waiting");
+    expect(card.statusReason).toBe("delivery-waiting");
   });
 
   it("keeps a recovering thread visible and in Waiting", async () => {
@@ -232,15 +306,15 @@ describe("CodeThreadBoardService derivation", () => {
     const card = cardFor(view.cards, ids.ready);
     expect(card.recovery).toEqual({ kind: "recovering", reasons: ["project-projection-missing"] });
     expect(card.status).toBe("waiting");
+    expect(card.statusReason).toBe("recovering");
   });
 
-  it("carries unread and follow-up without letting them change status", async () => {
+  it("carries follow-up without letting it change status and omits client unread", async () => {
     const board = new CodeThreadBoardService({
       threads: {
         list: () => [
           boardThread({
             thread: thread({ id: ids.done, outcomeKind: "local-implementation" }),
-            unread: true,
             followUp: true,
           }),
         ],
@@ -252,10 +326,80 @@ describe("CodeThreadBoardService derivation", () => {
 
     const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
     const card = cardFor(view.cards, ids.done);
-    expect(card.unread).toBe(true);
     expect(card.followUp).toBe(true);
-    // Delivery is objectively satisfied, so it is Done despite unread/follow-up.
+    expect(card).not.toHaveProperty("unread");
+    // Delivery is objectively satisfied, so it is Done despite follow-up.
     expect(card.status).toBe("done");
+    expect(card.statusReason).toBe("delivery-satisfied");
+  });
+
+  it("names a specific reason for Ready, In Progress, Waiting, and Done", async () => {
+    const board = service({
+      threads: allThreads,
+      runtime: (threadId) =>
+        threadId === ids.executing
+          ? { executing: true, awaitingInput: false, interrupted: false }
+          : { executing: false, awaitingInput: false, interrupted: false },
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    expect(cardFor(view.cards, ids.done).statusReason).toBe("delivery-satisfied");
+    expect(cardFor(view.cards, ids.executing).statusReason).toBe("executing");
+    expect(cardFor(view.cards, ids.waiting).statusReason).toBe("delivery-waiting");
+    expect(cardFor(view.cards, ids.ready).statusReason).toBe("idle-unmet-delivery");
+  });
+
+  it("does not treat a completed model turn as Done when the delivery target is unmet", async () => {
+    const board = service({
+      threads: [boardThread({ thread: thread({ id: ids.ready, outcomeKind: "opened-pr" }) })],
+      runtime: () => ({ executing: false, awaitingInput: false, interrupted: false }),
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    const card = cardFor(view.cards, ids.ready);
+    expect(card.status).toBe("ready");
+    expect(card.deliverySatisfaction).not.toBe("done");
+  });
+
+  it("shows checkout or worktree and branch from the thread's checkout identity", async () => {
+    const board = new CodeThreadBoardService({
+      threads: {
+        list: () => [boardThread({ thread: thread({ id: ids.ready, outcomeKind: "opened-pr" }) })],
+      },
+      metadata: new CodeThreadMetadataService({
+        git: { observe: () => ({ status: "unavailable" }) },
+        history: { read: () => ({ status: "ok", frames: [] }) },
+      }),
+      runtime: runtimeSource(),
+      clock: () => now,
+    });
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    const card = cardFor(view.cards, ids.ready);
+    expect(card.checkoutKind).toBe("managed-worktree");
+    expect(card.worktree).toMatchObject({
+      kind: "available",
+      path: "Managed worktree",
+      head: { kind: "branch", name: "feature/x" },
+    });
+  });
+
+  it("does not include a thread the window-filtered source omitted", async () => {
+    const board = service({
+      threads: [boardThread({ thread: thread({ id: ids.ready, projectId: ids.projectA }) })],
+    });
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    expect(view.cards.map((card) => card.threadId)).toEqual([ids.ready]);
+    expect(view.cards.some((card) => card.threadId === ids.waiting)).toBe(false);
+  });
+
+  it("scopes cards to Code threads of the requested Project", async () => {
+    const board = service({ threads: allThreads });
+    const view = await board.query(
+      decodeCodeBoardQuery({ version: 1, projectIds: [ids.projectB] }),
+    );
+    expect(view.cards).toHaveLength(1);
+    expect(view.cards[0]?.projectId).toBe(ids.projectB);
+    expect(view.cards[0]?.threadId).toBe(ids.waiting);
   });
 });
 
@@ -265,8 +409,8 @@ describe("CodeThreadBoardService filters", () => {
       threads: allThreads,
       runtime: (threadId) =>
         threadId === ids.executing
-          ? { executing: true, waiting: false }
-          : { executing: false, waiting: false },
+          ? { executing: true, awaitingInput: false, interrupted: false }
+          : { executing: false, awaitingInput: false, interrupted: false },
     });
     return board.query(q);
   }
@@ -365,7 +509,7 @@ describe("boardRuntimeActivityFromWorks", () => {
         work("provider-turn", "interrupted", 3),
         work("provider-turn", "completed", 4),
       ]),
-    ).toEqual({ executing: false, waiting: false });
+    ).toEqual({ executing: false, awaitingInput: false, interrupted: false });
   });
 
   it("ignores a superseded provider turn still frozen in running or waiting", () => {
@@ -377,7 +521,7 @@ describe("boardRuntimeActivityFromWorks", () => {
           work("provider-turn", stale, 1),
           work("provider-turn", "completed", 2),
         ]),
-      ).toEqual({ executing: false, waiting: false });
+      ).toEqual({ executing: false, awaitingInput: false, interrupted: false });
     }
   });
 
@@ -392,7 +536,11 @@ describe("boardRuntimeActivityFromWorks", () => {
       [stale, latest],
       [latest, stale],
     ]) {
-      expect(boardRuntimeActivityFromWorks(order)).toEqual({ executing: false, waiting: false });
+      expect(boardRuntimeActivityFromWorks(order)).toEqual({
+        executing: false,
+        awaitingInput: false,
+        interrupted: false,
+      });
     }
 
     // A wall-clock stamp can also run backwards — the host clock guard exists
@@ -403,7 +551,7 @@ describe("boardRuntimeActivityFromWorks", () => {
         work("provider-turn", "running", 1, "2026-07-22T09:30:00.000Z"),
         work("provider-turn", "completed", 2, "2026-07-22T09:00:00.000Z"),
       ]),
-    ).toEqual({ executing: false, waiting: false });
+    ).toEqual({ executing: false, awaitingInput: false, interrupted: false });
   });
 
   it("keeps the thread Waiting for the latest interrupted provider turn", () => {
@@ -414,7 +562,8 @@ describe("boardRuntimeActivityFromWorks", () => {
       ]),
     ).toEqual({
       executing: false,
-      waiting: true,
+      awaitingInput: false,
+      interrupted: true,
       blockingReason: "The last agent turn was interrupted.",
     });
   });
@@ -431,14 +580,16 @@ describe("boardRuntimeActivityFromWorks", () => {
         ]),
       ).toEqual({
         executing: false,
-        waiting: true,
+        awaitingInput: true,
+        interrupted: false,
         blockingReason: "Runtime work is waiting for a decision or input.",
       });
     }
 
     expect(boardRuntimeActivityFromWorks([work("test", "ambiguous", 1)])).toMatchObject({
       executing: false,
-      waiting: true,
+      awaitingInput: true,
+      interrupted: false,
     });
   });
 
@@ -448,6 +599,6 @@ describe("boardRuntimeActivityFromWorks", () => {
         work("provider-turn", "interrupted", 1),
         work("terminal", "running", 2),
       ]),
-    ).toEqual({ executing: true, waiting: true });
+    ).toEqual({ executing: true, awaitingInput: false, interrupted: true });
   });
 });

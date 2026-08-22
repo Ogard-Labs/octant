@@ -1,17 +1,17 @@
-import type { CodeBoardCard, CodeBoardStatus } from "@octant/contracts";
+import type { CodeBoardCard, CodeBoardStatus, CodeBoardStatusReason } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import {
-  CODE_BOARD_STATUS_COLUMN_ORDER,
-  compareCodeBoardActivityDescending,
-  compareCodeBoardProjectOrder,
-} from "@octant/domain/code-policy";
+  THREAD_BOARD_STATUS_COLUMN_ORDER,
+  compareThreadBoardActivityDescending,
+  compareThreadBoardProjectOrder,
+} from "@octant/domain/thread-board-policy";
 
 export type CodeBoardGrouping = "status" | "project";
 
 export interface CodeBoardColumn {
   readonly key: string;
   readonly label: string;
-  readonly kind: "status" | "project" | "recovery";
+  readonly kind: "status" | "project";
   readonly status?: CodeBoardStatus;
   readonly projectId?: ProjectId;
   readonly cards: readonly CodeBoardCard[];
@@ -34,17 +34,29 @@ const STATUS_LABELS: Record<CodeBoardStatus, string> = {
   done: "Done",
 };
 
+const STATUS_REASON_LABELS: Record<CodeBoardStatusReason, string> = {
+  "delivery-satisfied": "The confirmed delivery target is satisfied",
+  executing: "A provider turn, tool, or child run is executing",
+  "awaiting-input": "Waiting for a decision or input",
+  interrupted: "The last agent turn was interrupted",
+  recovering: "Recovering Project or operation history",
+  "delivery-waiting": "Delivery evidence is stale or ambiguous",
+  "idle-unmet-delivery": "Idle; the delivery target is not yet met",
+};
+
 export function codeBoardStatusLabel(status: CodeBoardStatus): string {
   return STATUS_LABELS[status];
+}
+
+export function codeBoardStatusReasonLabel(reason: CodeBoardStatusReason): string {
+  return STATUS_REASON_LABELS[reason];
 }
 
 /**
  * Project a single ordered board result into columns for the chosen grouping.
  * Grouping is a pure projection: it performs no command and never reclassifies,
- * duplicates, or drops a card. A card whose metadata is recovering (e.g. a
- * temporarily missing Project projection) is surfaced in a dedicated Recovery
- * column — with its actionable reason — rather than a Status or Project column,
- * so it stays visible even when its bound Project cannot be resolved.
+ * duplicates, or drops a card. Recovering threads stay in Waiting with their
+ * specific reason visible rather than a fifth column.
  *
  * Every matching card appears in exactly one column. `Done` is a first-class
  * column and is never suppressed. Column counts therefore reflect the full
@@ -55,26 +67,11 @@ export function groupCodeBoardCards(
   grouping: CodeBoardGrouping,
   options: GroupCodeBoardCardsOptions,
 ): readonly CodeBoardColumn[] {
-  const recovering = cards.filter((card) => card.recovery.kind === "recovering");
-  const placeable = cards.filter((card) => card.recovery.kind !== "recovering");
-
-  const columns =
-    grouping === "status" ? groupByStatus(placeable) : groupByProject(placeable, options.projects);
-
-  if (recovering.length === 0) return columns;
-  return [
-    ...columns,
-    {
-      key: "recovery",
-      label: "Recovery",
-      kind: "recovery",
-      cards: [...recovering].sort(sortByActivity),
-    },
-  ];
+  return grouping === "status" ? groupByStatus(cards) : groupByProject(cards, options.projects);
 }
 
 function groupByStatus(cards: readonly CodeBoardCard[]): readonly CodeBoardColumn[] {
-  return CODE_BOARD_STATUS_COLUMN_ORDER.map((status) => ({
+  return THREAD_BOARD_STATUS_COLUMN_ORDER.map((status) => ({
     key: `status:${status}`,
     label: codeBoardStatusLabel(status),
     kind: "status" as const,
@@ -111,14 +108,14 @@ function groupByProject(
 }
 
 function sortByActivity(a: CodeBoardCard, b: CodeBoardCard): number {
-  return compareCodeBoardActivityDescending(
+  return compareThreadBoardActivityDescending(
     { lastMeaningfulActivityAtMs: activityMs(a) },
     { lastMeaningfulActivityAtMs: activityMs(b) },
   );
 }
 
 function sortByProjectOrder(a: CodeBoardCard, b: CodeBoardCard): number {
-  return compareCodeBoardProjectOrder(
+  return compareThreadBoardProjectOrder(
     { status: a.status, lastMeaningfulActivityAtMs: activityMs(a) },
     { status: b.status, lastMeaningfulActivityAtMs: activityMs(b) },
   );

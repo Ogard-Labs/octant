@@ -6,6 +6,7 @@ import {
   type CodeDeliveryTarget,
   type CodeMetadataFreshness,
   type CodeOperationEventFrame,
+  type CodeOperationResult,
   type CodeThread,
   type CodeThreadCheckState,
   type CodeThreadChangedFileState,
@@ -82,11 +83,14 @@ export interface CodeGitWorktreeSource {
  * A live observation of the thread's linked pull request, checks, and review
  * state. `unavailable` means GitHub could not be refreshed; the projection then
  * labels the GitHub-derived metadata stale, and stale GitHub metadata can never
- * independently satisfy a delivery target.
+ * independently satisfy a delivery target. `freshness` is `stale` when the
+ * observation was reconstructed from already-cached journal evidence rather
+ * than a live GitHub read.
  */
 export type CodeGithubMetadataObservation =
   | {
       readonly status: "observed";
+      readonly freshness?: CodeMetadataFreshness;
       readonly pullRequest: {
         readonly number: number;
         readonly url: string;
@@ -110,7 +114,11 @@ export interface CodeGithubMetadataSource {
 export interface CodeThreadMetadataServiceDependencies {
   readonly history: CodeThreadOperationHistorySource;
   readonly git: CodeGitWorktreeSource;
-  readonly github: CodeGithubMetadataSource;
+  /**
+   * Live GitHub observation. Omit it to reconstruct PR evidence from already
+   * journaled results only — board queries never call GitHub.
+   */
+  readonly github?: CodeGithubMetadataSource;
 }
 
 type PreviousProjection =
@@ -121,7 +129,7 @@ type PreviousProjection =
 export class CodeThreadMetadataService {
   readonly #history: CodeThreadOperationHistorySource;
   readonly #git: CodeGitWorktreeSource;
-  readonly #github: CodeGithubMetadataSource;
+  readonly #github: CodeGithubMetadataSource | undefined;
 
   constructor(dependencies: CodeThreadMetadataServiceDependencies) {
     this.#history = dependencies.history;
@@ -162,12 +170,13 @@ export class CodeThreadMetadataService {
     const historyFresh = history.status === "ok";
 
     const git = await this.#observeGit(thread);
-    const github = await this.#observeGithub(thread);
+    const github = await this.#observeGithub(thread, history);
 
     const worktree = buildWorktree(git, thread.checkoutId);
-    const changedFiles = buildChangedFiles(git, previous);
+    const changedFiles = buildChangedFiles(git, previous, history);
 
-    const githubFreshness: CodeMetadataFreshness = github.status === "observed" ? "fresh" : "stale";
+    const githubFreshness: CodeMetadataFreshness =
+      github.status === "observed" ? (github.freshness ?? "fresh") : "stale";
     const linkedPullRequest = buildLinkedPullRequest(github, deliveryTarget, previous);
     const checks = buildCheckState(github, previous);
     const reviewState = buildReviewState(github, previous);
@@ -233,7 +242,13 @@ export class CodeThreadMetadataService {
     }
   }
 
-  async #observeGithub(thread: CodeThread): Promise<CodeGithubMetadataObservation> {
+  async #observeGithub(
+    thread: CodeThread,
+    history: CodeThreadOperationHistory,
+  ): Promise<CodeGithubMetadataObservation> {
+    if (this.#github === undefined) {
+      return cachedGithubObservationFromHistory(history);
+    }
     try {
       return await this.#github.observe({
         threadId: thread.id,
@@ -333,6 +348,7 @@ function buildWorktree(
 function buildChangedFiles(
   git: CodeGitWorktreeObservation,
   previous: CodeThreadOperationalMetadata | undefined,
+  history: CodeThreadOperationHistory,
 ): CodeThreadChangedFileState {
   if (git.status === "observed") {
     return {
@@ -344,6 +360,8 @@ function buildChangedFiles(
       workingTreeClean: git.workingTreeClean,
     };
   }
+  const journaled = cachedChangedFilesFromHistory(history);
+  if (journaled !== undefined) return journaled;
   if (previous?.changedFiles.kind === "observed") {
     return { ...previous.changedFiles, freshness: "stale" };
   }
@@ -356,11 +374,12 @@ function buildLinkedPullRequest(
   previous: CodeThreadOperationalMetadata | undefined,
 ): CodeThreadLinkedPullRequest {
   if (github.status === "observed") {
-    if (github.pullRequest === null) return { kind: "none", freshness: "fresh" };
+    const freshness = github.freshness ?? "fresh";
+    if (github.pullRequest === null) return { kind: "none", freshness };
     const pr = github.pullRequest;
     return {
       kind: "linked",
-      freshness: "fresh",
+      freshness,
       number: pr.number,
       url: pr.url,
       baseRepository: pr.baseRepository,
@@ -383,7 +402,9 @@ function buildCheckState(
   github: CodeGithubMetadataObservation,
   previous: CodeThreadOperationalMetadata | undefined,
 ): CodeThreadCheckState {
-  if (github.status === "observed") return { freshness: "fresh", state: github.checks };
+  if (github.status === "observed") {
+    return { freshness: github.freshness ?? "fresh", state: github.checks };
+  }
   if (previous?.checks !== undefined) return { ...previous.checks, freshness: "stale" };
   return { freshness: "stale", state: "unknown" };
 }
@@ -392,7 +413,9 @@ function buildReviewState(
   github: CodeGithubMetadataObservation,
   previous: CodeThreadOperationalMetadata | undefined,
 ): CodeThreadReviewState {
-  if (github.status === "observed") return { freshness: "fresh", state: github.review };
+  if (github.status === "observed") {
+    return { freshness: github.freshness ?? "fresh", state: github.review };
+  }
   if (previous?.reviewState !== undefined) return { ...previous.reviewState, freshness: "stale" };
   return { freshness: "stale", state: "unknown" };
 }
@@ -519,5 +542,127 @@ function buildRecovery(input: {
   return {
     kind: "recovering",
     reasons: reasons as [CodeThreadMetadataRecoveryReason, ...CodeThreadMetadataRecoveryReason[]],
+  };
+}
+
+type PullRequestReviewResult = Extract<CodeOperationResult, { kind: "pull-request-review" }>;
+type ObservedPullRequestReview = Extract<PullRequestReviewResult, { state: "observed" }>;
+type PullRequestStateResult = Extract<CodeOperationResult, { kind: "pull-request-state" }>;
+
+/**
+ * Reconstruct PR, checks, and review evidence from already-journaled operation
+ * results. This is the only GitHub-shaped input a board query is allowed to
+ * use: it never talks to GitHub.
+ */
+export function cachedGithubObservationFromHistory(
+  history: CodeThreadOperationHistory,
+): CodeGithubMetadataObservation {
+  if (history.status !== "ok") return { status: "unavailable" };
+  let latestReview: PullRequestReviewResult | undefined;
+  let latestState: PullRequestStateResult | undefined;
+  for (const frame of history.frames) {
+    if (frame.event.kind !== "operation-result") continue;
+    const result = frame.event.result;
+    if (result.kind === "pull-request-review") latestReview = result;
+    else if (result.kind === "pull-request-state") latestState = result;
+  }
+  if (latestReview !== undefined) return observationFromReview(latestReview);
+  if (latestState !== undefined) return observationFromPullRequestState(latestState);
+  return { status: "unavailable" };
+}
+
+function observationFromReview(review: PullRequestReviewResult): CodeGithubMetadataObservation {
+  if (review.state !== "observed") {
+    return {
+      status: "observed",
+      freshness: review.freshness,
+      pullRequest: null,
+      checks: "unknown",
+      review: "unknown",
+    };
+  }
+  return {
+    status: "observed",
+    freshness: review.freshness,
+    pullRequest: {
+      number: review.number,
+      url: review.url,
+      baseRepository: review.baseRepository,
+      baseBranch: review.baseBranch,
+      headBranch: review.headBranch,
+      state: review.pullRequestState === "draft" ? "open" : review.pullRequestState,
+    },
+    checks: summarizeCachedChecks(review.checks),
+    review: summarizeCachedReviews(review.reviews),
+  };
+}
+
+function observationFromPullRequestState(
+  state: PullRequestStateResult,
+): CodeGithubMetadataObservation {
+  if (state.state !== "created" && state.state !== "existing" && state.state !== "merged") {
+    return { status: "unavailable" };
+  }
+  return {
+    status: "observed",
+    // A mutation receipt is cached evidence, not a live GitHub read.
+    freshness: "stale",
+    pullRequest: {
+      number: state.number,
+      url: state.url,
+      baseRepository: state.baseRepository,
+      baseBranch: state.baseBranch,
+      headBranch: state.headBranch,
+      state: state.state === "merged" ? "merged" : "open",
+    },
+    checks: "unknown",
+    review: "unknown",
+  };
+}
+
+function summarizeCachedChecks(
+  checks: ObservedPullRequestReview["checks"],
+): CodeThreadCheckState["state"] {
+  if (checks.length === 0) return "unknown";
+  if (checks.some((check) => check.state === "failure")) return "failing";
+  if (checks.some((check) => check.state === "pending")) return "pending";
+  if (checks.every((check) => check.state === "success" || check.state === "neutral")) {
+    return "passing";
+  }
+  return "unknown";
+}
+
+function summarizeCachedReviews(
+  reviews: ObservedPullRequestReview["reviews"],
+): CodeThreadReviewState["state"] {
+  if (reviews.length === 0) return "none";
+  if (reviews.some((entry) => entry.state === "changes-requested")) return "changes-requested";
+  if (reviews.some((entry) => entry.state === "approved")) return "approved";
+  if (reviews.some((entry) => entry.state === "pending")) return "pending";
+  return "unknown";
+}
+
+type GitObservedResult = Extract<CodeOperationResult, { kind: "git-observed" }>;
+
+function cachedChangedFilesFromHistory(
+  history: CodeThreadOperationHistory,
+): Extract<CodeThreadChangedFileState, { kind: "observed" }> | undefined {
+  if (history.status !== "ok") return undefined;
+  let latest: GitObservedResult | undefined;
+  for (const frame of history.frames) {
+    if (frame.event.kind !== "operation-result") continue;
+    if (frame.event.result.kind === "git-observed") latest = frame.event.result;
+  }
+  if (latest === undefined) return undefined;
+  const stagedCount = latest.status.filter(
+    (entry) => entry.index !== " " && entry.index !== "?",
+  ).length;
+  return {
+    kind: "observed",
+    freshness: "stale",
+    changedPathCount: latest.changedPaths.length,
+    stagedCount,
+    committedAhead: 0,
+    workingTreeClean: latest.changedPaths.length === 0 && stagedCount === 0,
   };
 }

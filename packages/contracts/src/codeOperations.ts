@@ -37,6 +37,7 @@ import {
 } from "./providers";
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
+import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -1587,13 +1588,15 @@ export const MAX_CODE_BOARD_CARDS = 5_000;
 export const MAX_CODE_BOARD_CARD_BLOCKING_REASON_BYTES = 2_048;
 
 /**
- * The runtime-derived status of a Code thread on the board. It mirrors the
- * domain `deriveCodeBoardStatus` result: it is always projected from
- * authoritative runtime, Git, GitHub, and delivery-target evidence, never
- * manually assigned. Ambiguous or stale evidence can never produce `done`.
+ * The runtime-derived status of a Code thread on the board. It is the shared
+ * Work and Code `ThreadBoardStatus`: always projected from authoritative
+ * runtime, recovery, and delivery-target evidence, never assigned by hand.
+ * Ambiguous or stale evidence can never produce `done`.
  */
-export const CodeBoardStatus = Schema.Literal("ready", "in-progress", "waiting", "done");
-export type CodeBoardStatus = typeof CodeBoardStatus.Type;
+export const CodeBoardStatus = ThreadBoardStatus;
+export type CodeBoardStatus = ThreadBoardStatus;
+export const CodeBoardStatusReason = ThreadBoardReason;
+export type CodeBoardStatusReason = ThreadBoardReason;
 
 /**
  * The pull-request filter on the board toolbar. `any` disables the filter;
@@ -1654,15 +1657,19 @@ export type CodeBoardQuery = typeof CodeBoardQuery.Type;
  * matches the active query. It composes the journal-rebuildable operational
  * metadata (worktree/branch, changed files, linked PR, checks, review, child
  * agents, recovery, delivery satisfaction, activity) with the derived board
- * `status`, live `executing` activity, and permission-filtered thread identity.
- * Unread and follow-up are carried but never influence `status`.
+ * `status` and `statusReason`, live `executing` activity, and
+ * permission-filtered thread identity. Follow-up is carried but never
+ * influences `status`. Client-specific unread is omitted: each client overlays
+ * its own unread projection.
  */
 export const CodeBoardCard = Schema.Struct({
   threadId: CodeThreadId,
   projectId: ProjectId,
   checkoutId: CodeCheckoutId,
+  checkoutKind: Schema.Literal("existing-worktree", "managed-worktree"),
   title: boundedNonEmptyText(512),
   status: CodeBoardStatus,
+  statusReason: CodeBoardStatusReason,
   outcomeKind: CodeDeliveryOutcomeKind,
   deliverySatisfaction: CodeThreadDeliverySatisfaction,
   providerInstanceId: ProviderInstanceId,
@@ -1677,7 +1684,6 @@ export const CodeBoardCard = Schema.Struct({
   recovery: CodeThreadMetadataRecovery,
   githubFreshness: CodeMetadataFreshness,
   blockingReason: Schema.optional(boundedNonEmptyText(MAX_CODE_BOARD_CARD_BLOCKING_REASON_BYTES)),
-  unread: Schema.Boolean,
   followUp: Schema.Boolean,
   lastMeaningfulActivityAt: Schema.NullOr(UtcTimestamp),
 }).annotations(strict);
@@ -1827,6 +1833,7 @@ export const decodeCodeThreadOperationalMetadataView = Schema.decodeUnknownSync(
   CodeThreadOperationalMetadataView,
 );
 export const decodeCodeBoardStatus = Schema.decodeUnknownSync(CodeBoardStatus);
+export const decodeCodeBoardStatusReason = Schema.decodeUnknownSync(CodeBoardStatusReason);
 export const decodeCodeBoardQuery = Schema.decodeUnknownSync(CodeBoardQuery);
 export const decodeCodeBoardCard = Schema.decodeUnknownSync(CodeBoardCard);
 export const decodeCodeBoardView = Schema.decodeUnknownSync(CodeBoardView);

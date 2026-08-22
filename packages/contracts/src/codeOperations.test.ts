@@ -12,6 +12,7 @@ import {
   decodeCodeThreadOperationalMetadata,
   decodeCodeThreadOperationalMetadataView,
   decodeCodeBoardStatus,
+  decodeCodeBoardStatusReason,
   decodeCodeBoardQuery,
   decodeCodeBoardCard,
   decodeCodeBoardView,
@@ -868,8 +869,10 @@ function boardCard(overrides: Record<string, unknown> = {}) {
     threadId: boardIds.thread,
     projectId: boardIds.project,
     checkoutId: boardIds.checkout,
+    checkoutKind: "managed-worktree",
     title: "Board thread",
     status: "waiting",
+    statusReason: "awaiting-input",
     outcomeKind: "opened-pr",
     deliverySatisfaction: "waiting",
     providerInstanceId: boardIds.provider,
@@ -888,7 +891,6 @@ function boardCard(overrides: Record<string, unknown> = {}) {
     childAgents: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },
     recovery: { kind: "ok" },
     githubFreshness: "fresh",
-    unread: false,
     followUp: false,
     lastMeaningfulActivityAt: null,
     ...overrides,
@@ -953,6 +955,21 @@ describe("Code board contracts", () => {
     expect(() => decodeCodeBoardStatus("blocked")).toThrow();
   });
 
+  it("decodes the shared status reasons and rejects unknown ones", () => {
+    for (const reason of [
+      "delivery-satisfied",
+      "executing",
+      "awaiting-input",
+      "interrupted",
+      "recovering",
+      "delivery-waiting",
+      "idle-unmet-delivery",
+    ] as const) {
+      expect(decodeCodeBoardStatusReason(reason)).toBe(reason);
+    }
+    expect(() => decodeCodeBoardStatusReason("blocked")).toThrow();
+  });
+
   it("decodes a minimal default query (all statuses implied) and a fully specified query", () => {
     expect(decodeCodeBoardQuery({ version: 1 })).toEqual({ version: 1 });
 
@@ -982,16 +999,19 @@ describe("Code board contracts", () => {
   it("strictly decodes a board card composed of runtime-derived metadata", () => {
     const card = boardCard({
       status: "done",
+      statusReason: "delivery-satisfied",
       deliverySatisfaction: "done",
       blockingReason: "Waiting on CI",
-      unread: true,
       followUp: true,
       lastMeaningfulActivityAt: "2026-07-21T12:05:00.000Z",
     });
     expect(decodeCodeBoardCard(card)).toEqual(card);
 
+    // Client-specific unread is not part of the server card.
+    expect(() => decodeCodeBoardCard({ ...boardCard(), unread: true })).toThrow();
     // Status must be a known board status.
     expect(() => decodeCodeBoardCard({ ...boardCard(), status: "blocked" })).toThrow();
+    expect(() => decodeCodeBoardCard({ ...boardCard(), statusReason: "blocked" })).toThrow();
     // Excess properties are rejected.
     expect(() => decodeCodeBoardCard({ ...boardCard(), extra: 1 })).toThrow();
   });
