@@ -90,6 +90,7 @@
     "./cursor-acp": "./src/cursorAcp.ts",
     "./github-catalogue": "./src/githubCatalogue.ts",
     "./github-onboarding": "./src/githubOnboarding.ts",
+    "./code-project-pull-requests": "./src/codeProjectPullRequests.ts",
     "./canvas-share-snapshot": "./src/canvasShareSnapshot.ts",
     "./canvas-share-access-log": "./src/canvasShareAccessLog.ts"
   },

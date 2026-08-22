@@ -98,5 +98,6 @@ export * from "./cursorAcp";
 export * from "./githubCatalogue";
 export * from "./githubClone";
 export * from "./githubOnboarding";
+export * from "./codeProjectPullRequests";
 export * from "./canvasShareSnapshot";
 export * from "./canvasShareAccessLog";

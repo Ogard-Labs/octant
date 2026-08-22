@@ -1,0 +1,372 @@
+import { decodeProjectId, decodeWindowId } from "@octant/contracts";
+import { decodeCodeThreadId } from "@octant/contracts/code";
+import { describe, expect, it, vi } from "vitest";
+import {
+  CodeProjectPullRequestService,
+  type CodeProjectPullRequestAuthorizedProject,
+} from "./codeProjectPullRequestService";
+import type { GhActivePullRequestListResult, GhActivePullRequestRow } from "./ghPullRequestPort";
+
+const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
+const projectA = decodeProjectId("10000000-0000-4000-8000-000000000001");
+const projectB = decodeProjectId("10000000-0000-4000-8000-000000000002");
+const projectC = decodeProjectId("10000000-0000-4000-8000-000000000003");
+const threadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000001");
+const now = "2026-08-22T08:00:00.000Z";
+
+function codeProject(input: {
+  readonly id: typeof projectA;
+  readonly name: string;
+  readonly root: string;
+}): CodeProjectPullRequestAuthorizedProject {
+  return {
+    id: input.id,
+    name: input.name,
+    type: "code",
+    lifecycle: "active",
+    binding: { canonicalRoot: input.root },
+  };
+}
+
+function ghRow(overrides: Partial<GhActivePullRequestRow> = {}): GhActivePullRequestRow {
+  return {
+    number: 12,
+    title: "List active pull requests",
+    draft: false,
+    author: "octocat",
+    baseBranch: "development",
+    headBranch: "feature/manual-refresh",
+    updatedAt: "2026-08-22T07:00:00Z",
+    url: "https://github.com/octant/octant/pull/12",
+    checks: "passing",
+    review: "approved",
+    ...overrides,
+  };
+}
+
+function serviceFixture(options: {
+  readonly projects?: ReadonlyArray<CodeProjectPullRequestAuthorizedProject>;
+  readonly remotes?: Record<
+    string,
+    ReadonlyArray<{ readonly name: string; readonly fetchUrl: string }>
+  >;
+  readonly list?: (
+    request: { readonly owner: string; readonly name: string; readonly limit: number },
+    signal: AbortSignal,
+  ) => Promise<GhActivePullRequestListResult>;
+  readonly journal?: { readonly append: ReturnType<typeof vi.fn> };
+}) {
+  const listActive = vi.fn(
+    options.list ??
+      (async () =>
+        ({
+          status: "ok",
+          rows: [ghRow()],
+        }) satisfies GhActivePullRequestListResult),
+  );
+  const journal = options.journal ?? { append: vi.fn() };
+  const service = new CodeProjectPullRequestService({
+    projects: {
+      bootstrap: async () => ({
+        active: options.projects ?? [
+          codeProject({ id: projectA, name: "Octant", root: "/repos/octant" }),
+          codeProject({ id: projectB, name: "Local notes", root: "/repos/notes" }),
+        ],
+      }),
+    },
+    remotes: {
+      remotes: async (root) =>
+        options.remotes?.[root] ??
+        (root === "/repos/octant"
+          ? [{ name: "origin", fetchUrl: "https://github.com/octant/octant.git" }]
+          : []),
+    },
+    list: { listActive },
+    threads: {
+      list: async () => [
+        {
+          threadId: String(threadId),
+          title: "Manual refresh",
+          repository: { owner: "octant", name: "octant" },
+          deliveryBranch: "feature/manual-refresh",
+        },
+      ],
+    },
+    clock: () => now,
+  });
+  return { service, listActive, journal };
+}
+
+describe("CodeProjectPullRequestService", () => {
+  it("returns authorized projects without invoking GitHub on a cached query", async () => {
+    const { service, listActive, journal } = serviceFixture({});
+
+    const view = await service.query(windowId, { version: 1 });
+
+    expect(view.projects).toEqual([
+      {
+        kind: "connected",
+        projectId: projectA,
+        projectName: "Octant",
+        repositoryOwner: "octant",
+        repositoryName: "octant",
+      },
+      { kind: "unconnected", projectId: projectB, projectName: "Local notes" },
+    ]);
+    expect(view.rows).toEqual([]);
+    expect(view.freshness).toEqual({ status: "empty" });
+    expect(listActive).not.toHaveBeenCalled();
+    expect(journal.append).not.toHaveBeenCalled();
+  });
+
+  it("resolves HTTPS, SCP-style, and ssh GitHub remotes and leaves other remotes unconnected", async () => {
+    const { service } = serviceFixture({
+      projects: [
+        codeProject({ id: projectA, name: "HTTPS", root: "/https" }),
+        codeProject({ id: projectB, name: "SCP", root: "/scp" }),
+        codeProject({ id: projectC, name: "SSH", root: "/ssh" }),
+        codeProject({
+          id: decodeProjectId("10000000-0000-4000-8000-000000000004"),
+          name: "Enterprise",
+          root: "/enterprise",
+        }),
+      ],
+      remotes: {
+        "/https": [{ name: "origin", fetchUrl: "https://github.com/octant/https.git" }],
+        "/scp": [{ name: "origin", fetchUrl: "git@github.com:octant/scp.git" }],
+        "/ssh": [{ name: "origin", fetchUrl: "ssh://git@github.com/octant/ssh.git" }],
+        "/enterprise": [{ name: "origin", fetchUrl: "https://github.example.com/octant/ent.git" }],
+      },
+    });
+
+    const view = await service.query(windowId, { version: 1 });
+    expect(view.projects.map((project) => [project.kind, project.projectName])).toEqual([
+      ["connected", "HTTPS"],
+      ["connected", "SCP"],
+      ["connected", "SSH"],
+      ["unconnected", "Enterprise"],
+    ]);
+  });
+
+  it("refreshes repositories sequentially and keeps an unconnected project visible", async () => {
+    const order: string[] = [];
+    const { service, listActive, journal } = serviceFixture({
+      projects: [
+        codeProject({ id: projectA, name: "Octant", root: "/repos/octant" }),
+        codeProject({ id: projectB, name: "Notes", root: "/repos/notes" }),
+        codeProject({ id: projectC, name: "Docs", root: "/repos/docs" }),
+      ],
+      remotes: {
+        "/repos/octant": [{ name: "origin", fetchUrl: "https://github.com/octant/octant.git" }],
+        "/repos/notes": [],
+        "/repos/docs": [{ name: "origin", fetchUrl: "git@github.com:octant/docs.git" }],
+      },
+      list: async (request) => {
+        order.push(`start:${request.owner}/${request.name}`);
+        await Promise.resolve();
+        order.push(`end:${request.owner}/${request.name}`);
+        return { status: "ok", rows: [ghRow({ number: request.name === "docs" ? 4 : 12 })] };
+      },
+    });
+
+    const view = await service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+
+    expect(order).toEqual([
+      "start:octant/octant",
+      "end:octant/octant",
+      "start:octant/docs",
+      "end:octant/docs",
+    ]);
+    expect(listActive).toHaveBeenCalledTimes(2);
+    expect(view.projects.some((project) => project.kind === "unconnected")).toBe(true);
+    expect(view.rows.map((row) => row.number)).toEqual([12, 4]);
+    expect(view.rows[0]?.linkedThreads).toEqual([{ threadId, title: "Manual refresh" }]);
+    expect(view.freshness).toEqual({ status: "fresh", lastSuccessfulRefreshAt: now });
+    expect(journal.append).not.toHaveBeenCalled();
+  });
+
+  it("refreshes only the requested Project and leaves the other cached rows in place", async () => {
+    const { service, listActive } = serviceFixture({
+      projects: [
+        codeProject({ id: projectA, name: "Octant", root: "/repos/octant" }),
+        codeProject({ id: projectC, name: "Docs", root: "/repos/docs" }),
+      ],
+      remotes: {
+        "/repos/octant": [{ name: "origin", fetchUrl: "https://github.com/octant/octant.git" }],
+        "/repos/docs": [{ name: "origin", fetchUrl: "https://github.com/octant/docs.git" }],
+      },
+      list: async (request) => ({
+        status: "ok",
+        rows: [ghRow({ number: request.name === "docs" ? 4 : 12, title: request.name })],
+      }),
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    listActive.mockClear();
+    const view = await service.refresh(
+      windowId,
+      { kind: "refresh-project", projectId: projectC },
+      new AbortController().signal,
+    );
+
+    expect(listActive).toHaveBeenCalledTimes(1);
+    expect(listActive.mock.calls[0]?.[0]).toMatchObject({ owner: "octant", name: "docs" });
+    expect(view.rows.map((row) => row.number)).toEqual([12, 4]);
+  });
+
+  it("labels refresh when more than 25 connected repositories or 100 pull requests are present", async () => {
+    const projects = Array.from({ length: 26 }, (_, index) =>
+      codeProject({
+        id: decodeProjectId(`10000000-0000-4000-8000-0000000000${String(index).padStart(2, "0")}`),
+        name: `Repo ${index}`,
+        root: `/repos/r${index}`,
+      }),
+    );
+    const remotes = Object.fromEntries(
+      projects.map((project, index) => [
+        `/repos/r${index}`,
+        [{ name: "origin", fetchUrl: `https://github.com/octant/r${index}.git` }],
+      ]),
+    );
+    const many = serviceFixture({
+      projects,
+      remotes,
+      list: async () => ({ status: "ok", rows: [ghRow({ number: 1 })] }),
+    });
+    const truncatedRepos = await many.service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+    expect(many.listActive).toHaveBeenCalledTimes(25);
+    expect(truncatedRepos.repositoriesTruncated).toBe(true);
+    expect(truncatedRepos.pullRequestsTruncated).toBe(false);
+
+    const overflow = serviceFixture({
+      list: async (request) => ({
+        status: "ok",
+        rows: Array.from({ length: request.limit }, (_, index) =>
+          ghRow({ number: index + 1, title: `PR ${index + 1}` }),
+        ),
+      }),
+    });
+    const truncatedPrs = await overflow.service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+    expect(truncatedPrs.rows).toHaveLength(100);
+    expect(truncatedPrs.pullRequestsTruncated).toBe(true);
+  });
+
+  it("keeps the last authorized snapshot when GitHub rate-limits, times out, or returns malformed output", async () => {
+    let next: GhActivePullRequestListResult = { status: "ok", rows: [ghRow()] };
+    const { service } = serviceFixture({
+      list: async () => next,
+    });
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+
+    next = { status: "rate-limited", retryAfterSeconds: 30 };
+    const rateLimited = await service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+    expect(rateLimited.rows).toHaveLength(1);
+    expect(rateLimited.rows[0]?.title).toBe("List active pull requests");
+    expect(rateLimited.freshness).toEqual({
+      status: "stale",
+      staleReason: "rate-limited",
+      lastSuccessfulRefreshAt: now,
+      retryAfter: "2026-08-22T08:00:30.000Z",
+    });
+
+    next = { status: "timeout" };
+    expect(
+      (await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal))
+        .freshness,
+    ).toMatchObject({
+      status: "stale",
+      staleReason: "timeout",
+      lastSuccessfulRefreshAt: now,
+    });
+
+    next = { status: "malformed" };
+    expect(
+      (await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal))
+        .freshness,
+    ).toMatchObject({
+      status: "stale",
+      staleReason: "malformed",
+    });
+
+    next = { status: "disconnected" };
+    const disconnected = await service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+    expect(disconnected.rows[0]?.title).toBe("List active pull requests");
+    expect(disconnected.freshness.staleReason).toBe("disconnected");
+
+    const cached = await service.query(windowId, { version: 1 });
+    expect(cached.rows[0]?.title).toBe("List active pull requests");
+    expect(cached.freshness.status).toBe("stale");
+  });
+
+  it("drops private pull-request facts when GitHub authority is revoked", async () => {
+    const { service } = serviceFixture({});
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    service.revokeGithub();
+
+    const view = await service.query(windowId, { version: 1 });
+    expect(view.rows).toEqual([]);
+    expect(JSON.stringify(view)).not.toContain("List active pull requests");
+    expect(JSON.stringify(view)).not.toContain("octocat");
+    expect(JSON.stringify(view)).not.toContain("feature/manual-refresh");
+    expect(view.freshness).toEqual({ status: "stale", staleReason: "disconnected" });
+  });
+
+  it("drops a Project's cached rows once that Project is no longer authorized", async () => {
+    let active: ReadonlyArray<CodeProjectPullRequestAuthorizedProject> = [
+      codeProject({ id: projectA, name: "Octant", root: "/repos/octant" }),
+      codeProject({ id: projectC, name: "Docs", root: "/repos/docs" }),
+    ];
+    const service = new CodeProjectPullRequestService({
+      projects: { bootstrap: async () => ({ active }) },
+      remotes: {
+        remotes: async (root) =>
+          root === "/repos/notes"
+            ? []
+            : [
+                {
+                  name: "origin",
+                  fetchUrl:
+                    root === "/repos/docs"
+                      ? "https://github.com/octant/docs.git"
+                      : "https://github.com/octant/octant.git",
+                },
+              ],
+      },
+      list: {
+        listActive: async (request) => ({
+          status: "ok",
+          rows: [ghRow({ number: request.name === "docs" ? 4 : 12, title: request.name })],
+        }),
+      },
+      threads: { list: async () => [] },
+      clock: () => now,
+    });
+
+    await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    active = [codeProject({ id: projectC, name: "Docs", root: "/repos/docs" })];
+    const view = await service.query(windowId, { version: 1 });
+    expect(view.projects.map((project) => project.projectName)).toEqual(["Docs"]);
+    expect(view.rows.map((row) => row.repositoryName)).toEqual(["docs"]);
+    expect(view.rows.some((row) => row.repositoryName === "octant")).toBe(false);
+  });
+});

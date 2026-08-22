@@ -112,6 +112,26 @@ describe("GithubCapabilityService", () => {
     expect(probeOperations).not.toHaveBeenCalled();
   });
 
+  it("notifies listeners after an authentication command changes GitHub authority", async () => {
+    const onAuthenticationChanged = vi.fn();
+    const service = new GithubCapabilityService(
+      {
+        observe: async () => ({ kind: "unauthorized" }),
+        execute: async () => ({ kind: "completed" }),
+      } as never,
+      { onAuthenticationChanged },
+    );
+
+    await service.execute(
+      { kind: "logout", confirmation: "confirm-github-local-logout" },
+      new AbortController().signal,
+    );
+
+    expect(onAuthenticationChanged).toHaveBeenCalledWith(
+      expect.objectContaining({ state: "unauthorized", capabilities: [] }),
+    );
+  });
+
   it("fails closed when the normalized port observation violates the renderer contract", async () => {
     const service = new GithubCapabilityService({
       observe: async () => ({

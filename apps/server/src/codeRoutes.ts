@@ -12,6 +12,9 @@ import {
   decodeCodeAttachmentReference,
   decodeCodeBoardQuery,
   decodeCodeBoardView,
+  decodeCodeProjectPullRequestQuery,
+  decodeCodeProjectPullRequestRefreshCommand,
+  decodeCodeProjectPullRequestView,
   decodeCodeCommand,
   decodeCodeEvidenceReference,
   decodeCodeEventFrame,
@@ -37,6 +40,9 @@ import {
   decodeCodeThreadId,
   type CodeBoardQuery,
   type CodeBoardView,
+  type CodeProjectPullRequestQuery,
+  type CodeProjectPullRequestRefreshCommand,
+  type CodeProjectPullRequestView,
   type CodeAttachmentId,
   type CodeAttachmentMediaType,
   type CodeAttachmentReference,
@@ -193,6 +199,15 @@ export interface CodeRouteService {
     authenticatedWindowId: WindowId,
     query: CodeBoardQuery,
   ) => Promise<CodeBoardView> | CodeBoardView;
+  readonly queryProjectPullRequests?: (
+    authenticatedWindowId: WindowId,
+    query: CodeProjectPullRequestQuery,
+  ) => Promise<CodeProjectPullRequestView> | CodeProjectPullRequestView;
+  readonly refreshProjectPullRequests?: (
+    authenticatedWindowId: WindowId,
+    command: CodeProjectPullRequestRefreshCommand,
+    signal?: AbortSignal,
+  ) => Promise<CodeProjectPullRequestView> | CodeProjectPullRequestView;
   readonly readFollowUp?: (
     authenticatedWindowId: WindowId,
     threadId: CodeThreadId,
@@ -608,6 +623,64 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "project-pull-requests": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.queryProjectPullRequests === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code project pull requests are unavailable." },
+              503,
+              origin,
+            );
+          }
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
+          refuseRendererAuthoredIdentity(value);
+          let query: CodeProjectPullRequestQuery;
+          try {
+            query = decodeCodeProjectPullRequestQuery(value);
+          } catch {
+            throw new CodeRouteRejected("Code project pull-request query is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestView(
+              await dependencies.service.queryProjectPullRequests(authenticatedWindowId, query),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "project-pull-requests-refresh": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.refreshProjectPullRequests === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Code project pull requests are unavailable." },
+              503,
+              origin,
+            );
+          }
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
+          refuseRendererAuthoredIdentity(value);
+          let command: CodeProjectPullRequestRefreshCommand;
+          try {
+            command = decodeCodeProjectPullRequestRefreshCommand(value);
+          } catch {
+            throw new CodeRouteRejected("Code project pull-request refresh is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestView(
+              await dependencies.service.refreshProjectPullRequests(
+                authenticatedWindowId,
+                command,
+                request.signal,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
         case "operation-content": {
           requireMethodAndEmptyQuery(request, url, "GET");
           if (dependencies.service.readOperationContent === undefined) {
@@ -885,7 +958,9 @@ type MatchedRoute =
         | "test-listing"
         | "stage-evidence"
         | "attachment"
-        | "board";
+        | "board"
+        | "project-pull-requests"
+        | "project-pull-requests-refresh";
     }>
   | Readonly<{ kind: "thread" | "events" | "conversation" | "follow-up"; threadId: string }>
   | Readonly<{ kind: "operation-events"; threadId: string; operationId: string }>
@@ -993,6 +1068,10 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/commands") return { kind: "commands" };
   if (pathname === "/api/code/terminals/inspect") return { kind: "terminal-inspection" };
   if (pathname === "/api/code/board") return { kind: "board" };
+  if (pathname === "/api/code/project-pull-requests") return { kind: "project-pull-requests" };
+  if (pathname === "/api/code/project-pull-requests/refresh") {
+    return { kind: "project-pull-requests-refresh" };
+  }
   if (pathname === "/api/code/files/content") return { kind: "file-save" };
   if (pathname === "/api/code/files/open") return { kind: "file-open" };
   if (pathname === "/api/code/files/listing") return { kind: "file-listing" };
@@ -1498,6 +1577,21 @@ function publicMessage(error: unknown, fallback: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function refuseRendererAuthoredIdentity(value: unknown): void {
+  if (!isRecord(value)) return;
+  if (Object.prototype.hasOwnProperty.call(value, "windowId")) {
+    throw new CodeRouteRejected("Code requests cannot supply window identity.", 400);
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(value, "owner") ||
+    Object.prototype.hasOwnProperty.call(value, "name") ||
+    Object.prototype.hasOwnProperty.call(value, "root") ||
+    Object.prototype.hasOwnProperty.call(value, "credentials")
+  ) {
+    throw new CodeRouteRejected("Code requests cannot supply repository identity.", 400);
+  }
 }
 
 class CodeRouteRejected extends Error {

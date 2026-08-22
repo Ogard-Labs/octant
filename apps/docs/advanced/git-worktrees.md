@@ -89,13 +89,24 @@ receives an explicit normalized path set.
 | Merge or other PR mutation      | Deny everywhere                                             | Deny everywhere                                          | Deny        |
 | Create sibling managed root     | Separate local-user confirmation (denied to remote clients) |                                                          |             |
 
-## Pull Requests window
+## Pull requests workspace
 
-The Pull Requests surface lists all repository PRs with descriptions,
-commits, changed files, diffs, checks, reviews, and comments, plus navigation
-to the linked thread or worktree and **Open the PR on GitHub**. Commenting,
-approving, requesting changes, merging, closing, or reopening remain on
-GitHub in V1.
+Code's **Pull requests** destination is a Project-scoped list of active open
+and draft pull requests from authorized connected Code Projects. Octant
+resolves each Project's github.com origin from the bound root's git remotes.
+Projects without a github.com origin stay visible as unconnected.
+
+The list is a cached read of a temporary in-memory snapshot. Opening the
+workspace, switching Projects, and ordinary board queries do not call GitHub.
+Refresh all and per-Project refresh are explicit; repositories are read
+sequentially through the installed authenticated `gh` CLI. The preview bounds
+the refresh to 25 repositories and 100 pull requests. Disconnect, timeout,
+malformed output, and rate limits keep the last authorized snapshot and label
+it stale. Logging out of GitHub or losing Project authority drops private
+actionable data. The journal never stores the list.
+
+Thread-scoped create and observe remain on the thread. This workspace does
+not merge, approve, comment, close, or force-push.
 
 ## Next steps
 

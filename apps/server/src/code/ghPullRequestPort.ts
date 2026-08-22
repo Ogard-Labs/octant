@@ -14,6 +14,8 @@ const BRANCH_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 export interface GhCommandResult {
   readonly exitCode: number;
   readonly stdout: string;
+  readonly stderr?: string;
+  readonly timedOut?: boolean;
 }
 
 export interface GhCommandOptions {
@@ -138,6 +140,43 @@ export interface GhPullRequestMergeRequest {
     expectedHeadSha: string;
   }>;
 }
+
+export interface GhActivePullRequestRow {
+  readonly number: number;
+  readonly title: string;
+  readonly draft: boolean;
+  readonly author: string;
+  readonly baseBranch: string;
+  readonly headBranch: string;
+  readonly updatedAt: string;
+  readonly url: string;
+  readonly checks: "unknown" | "pending" | "passing" | "failing";
+  readonly review: "unknown" | "none" | "pending" | "approved" | "changes-requested";
+}
+
+export type GhActivePullRequestListResult =
+  | { readonly status: "ok"; readonly rows: ReadonlyArray<GhActivePullRequestRow> }
+  | {
+      readonly status: "rate-limited";
+      readonly retryAfterSeconds?: number;
+    }
+  | { readonly status: "timeout" }
+  | { readonly status: "malformed" }
+  | { readonly status: "disconnected" }
+  | { readonly status: "unauthorized" };
+
+const ACTIVE_PR_LIST_FIELDS = [
+  "number",
+  "title",
+  "isDraft",
+  "author",
+  "updatedAt",
+  "url",
+  "baseRefName",
+  "headRefName",
+  "statusCheckRollup",
+  "reviewDecision",
+].join(",");
 
 export type GhPullRequestMergeResult =
   | Readonly<{
@@ -344,6 +383,54 @@ export class GhPullRequestPort {
       comments: detail?.comments ?? [],
       ...(mergePreview === undefined ? {} : { mergePreview }),
     };
+  }
+
+  /**
+   * List open and draft pull requests for one server-resolved github.com
+   * repository. This never mutates GitHub.
+   */
+  async listActive(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly limit: number;
+    },
+    signal: AbortSignal,
+  ): Promise<GhActivePullRequestListResult> {
+    const repository = `${request.owner}/${request.name}`;
+    if (
+      !validRepository(repository) ||
+      !Number.isSafeInteger(request.limit) ||
+      request.limit < 1 ||
+      request.limit > 101
+    ) {
+      return { status: "malformed" };
+    }
+    let result: GhCommandResult;
+    try {
+      result = await this.#command.run(
+        [
+          "pr",
+          "list",
+          "--repo",
+          repository,
+          "--state",
+          "open",
+          "--limit",
+          String(request.limit),
+          "--json",
+          ACTIVE_PR_LIST_FIELDS,
+        ],
+        { environment: this.#environment, stdin: undefined },
+        signal,
+      );
+    } catch {
+      return { status: "disconnected" };
+    }
+    if (result.timedOut === true) return { status: "timeout" };
+    if (result.exitCode !== 0) return classifyActiveListFailure(result);
+    const rows = decodeActivePullRequests(result.stdout);
+    return rows === undefined ? { status: "malformed" } : { status: "ok", rows };
   }
 
   /**
@@ -903,6 +990,103 @@ function decodeAdvertisedMergeMethods(
   return methods;
 }
 
+function classifyActiveListFailure(result: GhCommandResult): GhActivePullRequestListResult {
+  const diagnostic = `${result.stderr ?? ""}\n${result.stdout}`;
+  if (/rate limit/i.test(diagnostic)) {
+    const retryAfter = /retry.after[:\s]+(\d{1,6})/i.exec(diagnostic)?.[1];
+    return {
+      status: "rate-limited",
+      ...(retryAfter === undefined ? {} : { retryAfterSeconds: Number(retryAfter) }),
+    };
+  }
+  if (/HTTP 401|bad credentials|authentication required|not logged in/i.test(diagnostic)) {
+    return { status: "unauthorized" };
+  }
+  if (
+    /Could not resolve host|no such host|connection refused|network is unreachable|TLS handshake|connection reset/i.test(
+      diagnostic,
+    )
+  ) {
+    return { status: "disconnected" };
+  }
+  return { status: "disconnected" };
+}
+
+function decodeActivePullRequests(
+  output: string,
+): ReadonlyArray<GhActivePullRequestRow> | undefined {
+  let value: unknown;
+  try {
+    value = JSON.parse(output);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(value)) return undefined;
+  const rows: GhActivePullRequestRow[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return undefined;
+    const number =
+      typeof item.number === "number" && Number.isSafeInteger(item.number) ? item.number : 0;
+    const title = clampBytes(item.title, 256).trim();
+    const author = loginOf(item.author).trim();
+    const baseBranch = typeof item.baseRefName === "string" ? item.baseRefName : "";
+    const headBranch = typeof item.headRefName === "string" ? item.headRefName : "";
+    const updatedAt = typeof item.updatedAt === "string" ? item.updatedAt : "";
+    const url = typeof item.url === "string" ? item.url : "";
+    if (
+      number <= 0 ||
+      title.length === 0 ||
+      author.length === 0 ||
+      !validBranch(baseBranch) ||
+      !validBranch(headBranch) ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(updatedAt) ||
+      !url.startsWith("https://github.com/")
+    ) {
+      return undefined;
+    }
+    rows.push({
+      number,
+      title,
+      draft: item.isDraft === true,
+      author,
+      baseBranch,
+      headBranch,
+      updatedAt,
+      url,
+      checks: summarizeChecks(item.statusCheckRollup),
+      review: summarizeReview(item.reviewDecision),
+    });
+  }
+  return rows;
+}
+
+function summarizeChecks(value: unknown): GhActivePullRequestRow["checks"] {
+  if (!Array.isArray(value) || value.length === 0) return "unknown";
+  let pending = false;
+  let failing = false;
+  let passing = false;
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    const state = normalizeCheckState(entry);
+    if (state === "failure") failing = true;
+    else if (state === "pending") pending = true;
+    else if (state === "success") passing = true;
+  }
+  if (failing) return "failing";
+  if (pending) return "pending";
+  if (passing) return "passing";
+  return "unknown";
+}
+
+function summarizeReview(value: unknown): GhActivePullRequestRow["review"] {
+  const decision = typeof value === "string" ? value.toUpperCase() : "";
+  if (decision === "APPROVED") return "approved";
+  if (decision === "CHANGES_REQUESTED") return "changes-requested";
+  if (decision === "REVIEW_REQUIRED") return "pending";
+  if (decision === "") return "none";
+  return "unknown";
+}
+
 function mapMergeDenyCode(
   code: Extract<
     ReturnType<typeof decidePullRequestMergeability>,
@@ -1090,9 +1274,12 @@ async function runGh(
     });
     let settled = false;
     let overflow = false;
+    let timedOut = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const chunks: Buffer[] = [];
     let length = 0;
+    const errorChunks: Buffer[] = [];
+    let errorLength = 0;
     const finish = (exitCode: number) => {
       if (settled) return;
       settled = true;
@@ -1101,6 +1288,8 @@ async function runGh(
       resolve({
         exitCode: overflow ? 1 : exitCode,
         stdout: overflow ? "" : Buffer.concat(chunks, length).toString("utf8"),
+        stderr: Buffer.concat(errorChunks, errorLength).toString("utf8"),
+        timedOut,
       });
     };
     const terminate = () => {
@@ -1117,7 +1306,11 @@ async function runGh(
       finish(1);
     };
     signal.addEventListener("abort", onAbort, { once: true });
-    timeout = setTimeout(onAbort, timeoutMs);
+    timeout = setTimeout(() => {
+      timedOut = true;
+      terminate();
+      finish(1);
+    }, timeoutMs);
     child.stdout.on("data", (chunk: Buffer) => {
       if (overflow) return;
       if (length + chunk.length > outputLimitBytes) {
@@ -1128,7 +1321,12 @@ async function runGh(
       chunks.push(Buffer.from(chunk));
       length += chunk.length;
     });
-    child.stderr.resume();
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (errorLength >= 8_192) return;
+      const next = chunk.subarray(0, Math.max(0, 8_192 - errorLength));
+      errorChunks.push(Buffer.from(next));
+      errorLength += next.length;
+    });
     child.once("error", () => finish(1));
     child.once("close", (code) => finish(code ?? 1));
     if (options.stdin === undefined) child.stdin.end();

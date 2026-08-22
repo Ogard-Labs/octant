@@ -126,7 +126,8 @@ wider-than-parent grants.
 
 Threads form one real hierarchy (Project → thread → linked or child thread).
 Work and Code have server-derived thread boards (Ready / In progress / Waiting /
-Done); Chat has no board. A Work or Code thread is Done only when its
+Done); Chat has no board. Code also lists active open and draft pull requests
+from connected Projects in a manually refreshed, in-memory workspace. A Work or Code thread is Done only when its
 user-confirmed delivery target is objectively satisfied; ambiguous state
 resolves to Waiting.
 
@@ -172,7 +173,13 @@ becomes an overlay drawer. Environment belongs to a thread as a compact header s
 with a transient disclosure whose open state is renderer-only. Work and Code
 have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
-Chat has no board. Context usage is a circular used-versus-available meter on
+Chat has no board. Code also has a Project-scoped Pull requests workspace that
+lists active open and draft pull requests from authorized connected Code
+Projects. The list is a cached read of an in-memory snapshot: opening it,
+navigating, and ordinary board queries do not call GitHub. Only an explicit
+Refresh all or per-Project refresh talks to the installed authenticated `gh`
+CLI, sequentially and within preview bounds. The journal never stores that
+cache. Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
 composition inspector for pin, exclude, and rebuild. Project memory lives on

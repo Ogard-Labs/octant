@@ -11,6 +11,7 @@ export class GithubCapabilityService {
   readonly #probes: GhOperationProbePort | undefined;
   readonly #now: () => number;
   readonly #probeTtlMs: number;
+  readonly #onAuthenticationChanged: ((snapshot: GithubAuthenticationSnapshot) => void) | undefined;
   #cachedProbes: { readonly results: GhOperationProbeResults; readonly at: number } | undefined;
   constructor(
     port: GhAuthenticationPort,
@@ -18,12 +19,14 @@ export class GithubCapabilityService {
       readonly probes?: GhOperationProbePort;
       readonly now?: () => number;
       readonly probeTtlMs?: number;
+      readonly onAuthenticationChanged?: (snapshot: GithubAuthenticationSnapshot) => void;
     } = {},
   ) {
     this.#port = port;
     this.#probes = options.probes;
     this.#now = options.now ?? Date.now;
     this.#probeTtlMs = options.probeTtlMs ?? DEFAULT_PROBE_TTL_MS;
+    this.#onAuthenticationChanged = options.onAuthenticationChanged;
   }
   async snapshot(signal: AbortSignal): Promise<GithubAuthenticationSnapshot> {
     const observation = await this.#port.observe(signal);
@@ -56,7 +59,7 @@ export class GithubCapabilityService {
     // prove; drop the bounded cache instead of advertising pre-command state.
     this.#cachedProbes = undefined;
     if (execution.kind === "device-flow") {
-      return decodeOrUnavailable({
+      const snapshot = decodeOrUnavailable({
         state: "unauthorized",
         capabilities: [],
         interaction: {
@@ -65,8 +68,12 @@ export class GithubCapabilityService {
           userCode: execution.userCode,
         },
       });
+      this.#onAuthenticationChanged?.(snapshot);
+      return snapshot;
     }
-    return this.snapshot(signal);
+    const snapshot = await this.snapshot(signal);
+    this.#onAuthenticationChanged?.(snapshot);
+    return snapshot;
   }
 
   /**
