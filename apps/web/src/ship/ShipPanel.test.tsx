@@ -3,7 +3,7 @@ import type { ShipTarget } from "@octant/contracts";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ShipPanel } from "./ShipPanel";
+import { deliveryToolIsPresent, ShipPanel } from "./ShipPanel";
 
 const threadId = "00000000-0000-4000-8000-000000000701";
 const targetId = "00000000-0000-4000-8000-000000000702";
@@ -42,7 +42,7 @@ function client(overrides: Partial<ShipClient> = {}): ShipClient {
   } as unknown as ShipClient;
 }
 
-describe("publishing to somewhere you own", () => {
+describe("delivering to somewhere you own", () => {
   it("says Octant runs no target of its own and routes nothing through itself", async () => {
     render(<ShipPanel client={client()} threadId={threadId} />);
 
@@ -50,19 +50,66 @@ describe("publishing to somewhere you own", () => {
     expect(screen.getByText(/Nothing is routed\s+through Octant/i)).toBeVisible();
   });
 
-  it("names the revision and the exact place before anyone approves anything", async () => {
+  it("names the revision, destination, and digest before anyone approves anything", async () => {
     render(<ShipPanel client={client()} threadId={threadId} />);
     await screen.findByText("Public site");
 
-    await userEvent.click(screen.getByRole("button", { name: "Review publication" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review delivery" }));
 
     await waitFor(() =>
-      expect(screen.getByText(/Publish 111111111111 to origin\/published/)).toBeVisible(),
+      expect(screen.getByText(/Deliver 111111111111 to origin\/published/)).toBeVisible(),
     );
+    expect(screen.getByText(/sha256:aaaaaaaa/)).toBeVisible();
     expect(screen.getByText(/no checkpoint here/i)).toBeVisible();
   });
 
-  it("shows the host's refusal rather than pretending the publication happened", async () => {
+  it("approves the exact reviewed plan rather than a standing grant", async () => {
+    const execute = vi.fn(async (command: Parameters<ShipClient["execute"]>[0]) => {
+      if (command.kind === "plan-ship") {
+        return {
+          kind: "ship-plan" as const,
+          plan: {
+            targetId,
+            targetName: "Public site",
+            destination: target.destination,
+            revision: "1".repeat(40),
+            artifactDigest: `sha256:${"a".repeat(64)}`,
+            producedByRunId: "run-1",
+          },
+        };
+      }
+      return {
+        kind: "ship-receipt" as const,
+        receipt: {
+          receiptId: "00000000-0000-4000-8000-000000000703",
+          targetId,
+          destination: target.destination,
+          revision: "1".repeat(40),
+          artifactDigest: `sha256:${"a".repeat(64)}`,
+          outcome: "published" as const,
+          approvalId: "approval-1",
+          observedAt: "2026-08-19T09:00:00.000Z",
+        },
+      };
+    });
+    render(<ShipPanel client={client({ execute: execute as never })} threadId={threadId} />);
+    await screen.findByText("Public site");
+    await userEvent.click(screen.getByRole("button", { name: "Review delivery" }));
+    await screen.findByRole("button", { name: "Approve delivery" });
+    await userEvent.click(screen.getByRole("button", { name: "Approve delivery" }));
+
+    await waitFor(() => expect(screen.getByText("Delivered.")).toBeVisible());
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        kind: "ship",
+        targetId,
+        revision: "1".repeat(40),
+        artifactDigest: `sha256:${"a".repeat(64)}`,
+      }),
+    );
+  });
+
+  it("shows the host's refusal rather than pretending the delivery happened", async () => {
     const shipClient = client({
       execute: vi.fn(async () => ({
         kind: "ship-refused",
@@ -73,22 +120,25 @@ describe("publishing to somewhere you own", () => {
     render(<ShipPanel client={shipClient} threadId={threadId} />);
     await screen.findByText("Public site");
 
-    await userEvent.click(screen.getByRole("button", { name: "Review publication" }));
+    await userEvent.click(screen.getByRole("button", { name: "Review delivery" }));
 
     await waitFor(() =>
       expect(screen.getByText("This is not the revision that was reviewed.")).toBeVisible(),
     );
   });
 
-  it("says an installed target grants nothing until it is enabled and bound", async () => {
-    render(
+  it("is absent when no target is enabled and there is no delivery plan", async () => {
+    const { container } = render(
       <ShipPanel
         client={client({ targets: vi.fn(async () => []) as unknown as ShipClient["targets"] })}
         threadId={threadId}
       />,
     );
 
-    expect(await screen.findByText(/installing one grants it nothing/i)).toBeVisible();
+    await waitFor(() => expect(container.firstChild).toBeNull());
+    expect(deliveryToolIsPresent([])).toBe(false);
+    expect(deliveryToolIsPresent([{ ...target, enabled: false }])).toBe(false);
+    expect(deliveryToolIsPresent([target])).toBe(true);
   });
 
   it("renders nothing at all on a host with no ship surface", () => {

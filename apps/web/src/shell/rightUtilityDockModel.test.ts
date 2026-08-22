@@ -43,6 +43,24 @@ describe("resolving what the right utility dock shows", () => {
         scope: "thread",
       },
       {
+        id: "canvas",
+        label: "Canvas",
+        modes: ["chat", "work", "code"],
+        scope: "thread",
+      },
+      {
+        id: "plan",
+        label: "Plan",
+        modes: ["chat", "work", "code"],
+        scope: "thread",
+      },
+      {
+        id: "delivery",
+        label: "Delivery",
+        modes: ["code"],
+        scope: "thread",
+      },
+      {
         id: "changes",
         label: "Changes",
         modes: ["code"],
@@ -63,12 +81,6 @@ describe("resolving what the right utility dock shows", () => {
       {
         id: "ios-simulator",
         label: "iOS Simulator",
-        modes: ["code"],
-        scope: "thread",
-      },
-      {
-        id: "thread",
-        label: "Thread tools",
         modes: ["code"],
         scope: "thread",
       },
@@ -109,7 +121,7 @@ describe("resolving what the right utility dock shows", () => {
     ).toEqual({ kind: "closed", reason: "mode-invalid" });
   });
 
-  it.each(["context", "project-memory", "navigator", "code-environment"] as const)(
+  it.each(["context", "project-memory", "navigator", "code-environment", "thread"] as const)(
     "refuses a restored %s tab and opens nothing",
     (savedSurface) => {
       expect(

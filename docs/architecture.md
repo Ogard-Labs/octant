@@ -160,13 +160,15 @@ server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
 Thread utilities live in the Right Utility Dock outside the split tree. The
-top-right control reveals the dock. Add utility tab opens Side Chat, Browser,
-Files, Changes, Terminal, Tests, Thread tools, or iOS Simulator without
-replacing the active pane. The dock follows the active pane's thread and
-Project, restores that subject's open tabs, and presents an explicit
-unavailable state when the newly active pane cannot describe the selected
-tool — never the previous pane's content. At narrow widths the dock becomes an
-overlay drawer. Environment belongs to a thread as a compact header summary
+top-right control reveals the dock. An empty dock shows a compact launcher; an
+open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
+Canvas, artifact-gated Plan, conditional Delivery, Changes, Terminal, Tests,
+and iOS Simulator, as mode and capability allow. The dock follows the active
+pane's thread and Project, restores that subject's open tools, and presents an
+explicit unavailable state when the newly active pane cannot describe the
+selected tool — never the previous pane's content. Hiding a Browser or Terminal
+tool does not stop its server-owned lifecycle. At narrow widths the dock
+becomes an overlay drawer. Environment belongs to a thread as a compact header summary
 with a transient disclosure whose open state is renderer-only. Work and Code
 have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
@@ -180,20 +182,21 @@ opening it never changes the active Project or thread. Zen is a separate
 presentation aggregate inside the same window, not a split-tree tab and not a
 fourth authority mode.
 
-**Approved migration, not yet the renderer.** Proposed records
+**Approved migration, not yet fully the renderer.** Proposed records
 [0041](decisions/0041-panes-hold-one-surface.md) and
 [0044](decisions/0044-the-dock-hosts-live-thread-owned-tools.md) are the agreed
 interaction model for remaining renderer work. Environment is already a compact
 header summary with a transient disclosure whose open state is not persisted
 ([0042](decisions/0042-environment-is-a-transient-disclosure.md)).
-The dock hosts live thread-owned tool instances — Review, Files, Browser,
-Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery, and
-conditional Agents — rather than generic category tabs. Context usage already
-lives on the composer meter. Project memory already lives in Project Overview.
-Navigator is already one host-wide chat popover from the bottom-left profile
-and Settings control. Simulator placement is already
-[0043](decisions/0043-simulator-follows-the-active-thread.md). 0015 remains the
-Accepted implemented shell until that remaining migration is accepted.
+The dock already hosts live thread-owned tool instances — Files, Browser,
+Terminal, Canvas, Side chat, artifact-gated Plan, and conditional Delivery —
+rather than a generic Thread accordion. Review and thread-level Agents remain
+later tools. Context usage already lives on the composer meter. Project memory
+already lives in Project Overview. Navigator is already one host-wide chat
+popover from the bottom-left profile and Settings control. Simulator placement
+is already [0043](decisions/0043-simulator-follows-the-active-thread.md). 0015
+remains the Accepted implemented shell until that remaining migration is
+accepted.
 
 ## Persistence
 

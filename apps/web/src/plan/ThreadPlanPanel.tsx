@@ -15,6 +15,11 @@ export interface ThreadPlanPanelProps {
    * mode — but a window that cannot command the thread offers no controls.
    */
   readonly readOnly?: boolean;
+  /**
+   * Dock Plan shows the current artifact, never an empty Propose plan form.
+   * Proposal stays the thread's planning workflow.
+   */
+  readonly artifactOnly?: boolean;
 }
 
 /**
@@ -52,11 +57,24 @@ export function ThreadPlanPanel(props: ThreadPlanPanelProps) {
     );
   }
 
-  const writing = plan === null || plan.status === "withdrawn" || revising;
+  const artifactOnly = props.artifactOnly === true;
+  if (artifactOnly && (plan === null || plan.status === "withdrawn")) {
+    return (
+      <section aria-label="Plan" className="thread-plan">
+        <p className="thread-plan__empty" role="note">
+          <ListChecks aria-hidden="true" size={13} strokeWidth={1.8} />
+          <span>This thread has no current plan artifact.</span>
+        </p>
+      </section>
+    );
+  }
+  const writing = artifactOnly
+    ? revising
+    : plan === null || plan.status === "withdrawn" || revising;
 
   return (
     <section aria-label="Plan" className="thread-plan">
-      <h3 className="thread-plan__title">Plan</h3>
+      {artifactOnly ? null : <h3 className="thread-plan__title">Plan</h3>}
       {plan === null || plan.status === "withdrawn" ? null : (
         <>
           <PlanCard

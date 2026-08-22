@@ -3317,13 +3317,6 @@ button:focus-visible {
   }
 }
 
-/* Position and size only. The groups inside carry the system's own
-   treatment; this rail just gives them the dock's measure. */
-.thread-dock-panel {
-  display: grid;
-  align-content: start;
-}
-
 .working-directory-change {
   display: grid;
   gap: 6px;

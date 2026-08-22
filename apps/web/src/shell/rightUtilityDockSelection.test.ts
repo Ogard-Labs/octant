@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   closeThreadUtilityTab,
   openThreadUtilityTab,
+  retainAvailableUtilityTabs,
   selectThreadUtilityTab,
   threadUtilityDockState,
   threadUtilityDockKey,
@@ -34,5 +35,14 @@ describe("thread-owned right utility dock tabs", () => {
       active: "terminal",
     });
     expect(threadUtilityDockState(states, second).active).toBe("ios-simulator");
+  });
+
+  it("drops tools the host no longer offers without rebinding the remaining selection", () => {
+    expect(
+      retainAvailableUtilityTabs(
+        { tabs: ["browser", "plan", "terminal"], active: "plan" },
+        new Set(["browser", "terminal"]),
+      ),
+    ).toEqual({ tabs: ["browser", "terminal"], active: "terminal" });
   });
 });

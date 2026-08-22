@@ -42,8 +42,9 @@ once. The sidebar's hierarchy is the one and only switcher.
 - **The right utility dock follows the active pane and remembers per thread.**
   One surface per pane means the active pane names the dock's subject
   unambiguously. Pointer activity or keyboard focus activates that pane. Each
-  thread owns its open Side Chat, Browser, Files, Changes, Terminal, Tests,
-  Thread tools, and iOS Simulator tabs plus which tab is selected. Returning to
+  thread owns its open Side Chat, Browser, Files, Canvas, Plan, Delivery,
+  Changes, Terminal, Tests, and iOS Simulator tools plus which tool is selected.
+  Returning to
   a visible thread restores that tab set and reconnects to the thread's
   host-owned utility state. The whole sidebar is window state and opens or
   closes only from the explicit top-right control. Project- and host-scoped
