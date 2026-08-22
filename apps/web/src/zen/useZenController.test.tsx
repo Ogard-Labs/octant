@@ -635,6 +635,167 @@ describe("useZenController", () => {
     expect(result.current.message).toMatch(/stale|failed|rejected/i);
   });
 
+  it("serializes element updates so a resize cannot be replaced by a stale focus response", async () => {
+    const element = {
+      elementId: "00000000-0000-4000-8000-000000000903" as ZenElementId,
+      kind: "notes" as const,
+      widgetVersion: 0 as AggregateVersion,
+      content: "note",
+      geometry: { x: 10, y: 10, width: 240, height: 160 },
+      zIndex: 1,
+      minimized: false,
+      locked: false,
+    };
+    const initial = makeSpace({ active: true, elements: [element] });
+    const focused = makeSpace({
+      version: 2 as AggregateVersion,
+      active: true,
+      elements: [{ ...element, zIndex: 2 }],
+    });
+    const resized = makeSpace({
+      version: 3 as AggregateVersion,
+      active: true,
+      elements: [{ ...element, zIndex: 2, geometry: { ...element.geometry, x: 80 } }],
+    });
+    let updateCalls = 0;
+    let resolveFocus: ((result: ZenResult) => void) | undefined;
+    const bootstrap = vi.fn(async () => {
+      const space = bootstrap.mock.calls.length === 1 ? initial : focused;
+      return { space, focusZone: makeZone(space), windowId };
+    });
+    const client = createClient({
+      bootstrap,
+      command: vi.fn(async (command: ZenCommand): Promise<ZenResult> => {
+        if (command.command !== "update-element") {
+          return { result: "mutation", space: initial };
+        }
+        updateCalls += 1;
+        if (updateCalls === 1) {
+          return new Promise((resolve) => {
+            resolveFocus = resolve;
+          });
+        }
+        if (command.expectedVersion === initial.version) {
+          throw new Error("Zen error: stale-version");
+        }
+        return { result: "mutation", space: resized };
+      }),
+    });
+    const { result } = renderHook(() => useZenController({ client, windowId }));
+
+    await act(async () => {
+      await result.current.enterZen();
+    });
+
+    const focusRequest = result.current.updateElement({ ...element, zIndex: 2 });
+    await waitFor(() => expect(updateCalls).toBe(1));
+    const resizeRequest = result.current.updateElement({
+      ...element,
+      zIndex: 2,
+      geometry: { ...element.geometry, x: 80 },
+    });
+    resolveFocus?.({ result: "mutation", space: focused });
+
+    await act(async () => {
+      await Promise.all([focusRequest, resizeRequest]);
+    });
+
+    expect(client.command).toHaveBeenNthCalledWith(2, {
+      command: "update-element",
+      spaceId,
+      element: { ...element, zIndex: 2, geometry: { ...element.geometry, x: 80 } },
+      expectedVersion: 2,
+    });
+    expect(result.current.space?.elements[0]?.geometry.x).toBe(80);
+  });
+
+  it("uploads a background against the version left by an in-flight element update", async () => {
+    const element = {
+      elementId: "00000000-0000-4000-8000-000000000903" as ZenElementId,
+      kind: "notes" as const,
+      widgetVersion: 0 as AggregateVersion,
+      content: "note",
+      geometry: { x: 10, y: 10, width: 240, height: 160 },
+      zIndex: 1,
+      minimized: false,
+      locked: false,
+    };
+    const initial = makeSpace({ active: true, elements: [element] });
+    const focused = makeSpace({
+      version: 2 as AggregateVersion,
+      active: true,
+      elements: [{ ...element, zIndex: 2 }],
+    });
+    const assetId = "00000000-0000-4000-8000-000000000910" as never;
+    const uploaded = makeSpace({
+      version: 3 as AggregateVersion,
+      active: true,
+      elements: focused.elements,
+      appearance: {
+        ...DEFAULT_ZEN_APPEARANCE,
+        background: { kind: "image", assetId, overlay: 40, fill: "cover" },
+      },
+    });
+    let resolveFocus: ((result: ZenResult) => void) | undefined;
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:uploaded-background"),
+      revokeObjectURL: vi.fn(),
+    });
+    const client = createClient({
+      bootstrap: vi.fn(async () => ({ space: initial, focusZone: makeZone(initial), windowId })),
+      command: vi.fn(async (command: ZenCommand): Promise<ZenResult> => {
+        if (command.command !== "update-element") return { result: "mutation", space: initial };
+        return new Promise((resolve) => {
+          resolveFocus = resolve;
+        });
+      }),
+      uploadBackground: vi.fn(async (input) => {
+        if (input.expectedVersion !== focused.version) {
+          throw new Error("Zen error: stale-version");
+        }
+        return uploaded;
+      }),
+      readBackground: vi.fn(async () => new Blob([new Uint8Array([1])], { type: "image/png" })),
+    });
+    const { result } = renderHook(() => useZenController({ client, windowId }));
+
+    await act(async () => {
+      await result.current.enterZen();
+    });
+
+    const focusRequest = result.current.updateElement({ ...element, zIndex: 2 });
+    await waitFor(() =>
+      expect(client.command).toHaveBeenCalledWith(
+        expect.objectContaining({ command: "update-element", expectedVersion: 1 }),
+      ),
+    );
+    const file = {
+      name: "uploaded.png",
+      size: 1,
+      type: "image/png",
+      arrayBuffer: vi.fn(async () => new Uint8Array([1]).buffer),
+    } as unknown as File;
+    const uploadRequest = result.current.uploadBackground(file);
+    resolveFocus?.({ result: "mutation", space: focused });
+
+    await act(async () => {
+      await Promise.all([focusRequest, uploadRequest]);
+    });
+
+    expect(client.uploadBackground).toHaveBeenCalledWith(
+      expect.objectContaining({ spaceId, expectedVersion: 2 }),
+    );
+    expect(result.current.space?.appearance.background).toEqual({
+      kind: "image",
+      assetId,
+      overlay: 40,
+      fill: "cover",
+    });
+    await waitFor(() =>
+      expect(result.current.backgroundObjectUrl).toBe("blob:uploaded-background"),
+    );
+  });
+
   it("refreshes the server snapshot after a typed stale-version conflict", async () => {
     const localSpace = makeSpace({ version: 1 as AggregateVersion, active: true });
     const serverSpace = makeSpace({

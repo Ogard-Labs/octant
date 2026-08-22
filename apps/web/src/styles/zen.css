@@ -253,7 +253,10 @@
   top: 76px;
   left: 50%;
   z-index: 6;
+  box-sizing: border-box;
+  min-width: 0;
   width: min(620px, calc(100% - 32px));
+  max-width: calc(100% - 32px);
   max-height: calc(100% - 180px);
   transform: translateX(-50%);
 }
@@ -262,7 +265,16 @@
    Panels ride the system card (.card .card-tight .card-raised in the
    markup); a panel scrolls itself rather than the surface behind it. */
 .zen-panel {
+  min-width: 0;
+  max-width: 100%;
   overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.zen-panel fieldset {
+  min-width: 0;
+  min-inline-size: 0;
+  max-width: 100%;
 }
 
 .zen-panel h2,
@@ -516,8 +528,15 @@
 
 .zen-appearance__presets {
   border: 0;
+  min-width: 0;
+  min-inline-size: 0;
   padding: 0;
   margin: var(--oct-space-3) 0 0;
+}
+
+.zen-appearance__group,
+.zen-appearance__preset-grid {
+  min-width: 0;
 }
 
 .zen-appearance__group h3 {
@@ -529,8 +548,16 @@
 
 .zen-appearance__preset-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--oct-space-2);
+}
+
+.zen-appearance__preset-grid > .btn {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /*
