@@ -127,15 +127,15 @@ export interface WorkBoardPullRequestSource {
 }
 
 export interface WorkBoardPromotionSource {
-  snapshot(): ReadonlyMap<WorkPromotionProposalId, WorkPromotionEntry> | Promise<
-    ReadonlyMap<WorkPromotionProposalId, WorkPromotionEntry>
-  >;
+  snapshot():
+    | ReadonlyMap<WorkPromotionProposalId, WorkPromotionEntry>
+    | Promise<ReadonlyMap<WorkPromotionProposalId, WorkPromotionEntry>>;
 }
 
 export interface WorkBoardCodeThreadSource {
-  list(): ReadonlyArray<{ readonly id: CodeThreadId; readonly projectId: ProjectId }> | Promise<
-    ReadonlyArray<{ readonly id: CodeThreadId; readonly projectId: ProjectId }>
-  >;
+  list():
+    | ReadonlyArray<{ readonly id: CodeThreadId; readonly projectId: ProjectId }>
+    | Promise<ReadonlyArray<{ readonly id: CodeThreadId; readonly projectId: ProjectId }>>;
 }
 
 export interface WorkThreadBoardServiceDependencies {
@@ -227,7 +227,10 @@ function buildCard(
   pullRequestContext: {
     readonly pullRequestSnapshot: ThreadBoardPullRequestSnapshot;
     readonly promotions: ReadonlyMap<WorkPromotionProposalId, WorkPromotionEntry>;
-    readonly codeThreads: ReadonlyArray<{ readonly id: CodeThreadId; readonly projectId: ProjectId }>;
+    readonly codeThreads: ReadonlyArray<{
+      readonly id: CodeThreadId;
+      readonly projectId: ProjectId;
+    }>;
   },
 ): WorkBoardCard {
   const pullRequestSummaries = joinWorkThreadBoardPullRequests({

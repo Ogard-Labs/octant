@@ -7,12 +7,14 @@ import {
   decodeCodeThread,
   decodeCodeThreadId,
   decodeProjectId,
+  UtcTimestamp,
   type CodeBoardCard,
   type CodeBoardQuery,
   type CodeDeliveryOutcomeKind,
   type CodeRuntimeWork,
   type CodeThread,
 } from "@octant/contracts";
+import { Schema } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import {
@@ -27,8 +29,10 @@ import {
   type CodeBoardRuntimeActivity,
   type CodeBoardThread,
 } from "./codeThreadBoardService";
+import type { ThreadBoardPullRequestSnapshot } from "./threadBoardPullRequestJoin";
 
 const now = "2026-07-22T10:00:00.000Z";
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 const repositoryId = `repo_${"d".repeat(64)}`;
 
 const ids = {
@@ -170,10 +174,10 @@ function runtimeSource(
   return { observe: vi.fn((threadId: unknown) => activity(threadId)) };
 }
 
-function emptyPullRequestSnapshot() {
+function emptyPullRequestSnapshot(): ThreadBoardPullRequestSnapshot {
   return {
     rows: [],
-    freshness: { status: "empty" as const },
+    freshness: { status: "empty" },
     githubRevoked: false,
   };
 }
@@ -181,7 +185,7 @@ function emptyPullRequestSnapshot() {
 function service(options: {
   readonly threads: readonly CodeBoardThread[];
   readonly runtime?: (threadId: unknown) => CodeBoardRuntimeActivity;
-  readonly pullRequests?: ReturnType<typeof emptyPullRequestSnapshot>;
+  readonly pullRequests?: ThreadBoardPullRequestSnapshot;
 }) {
   return new CodeThreadBoardService({
     threads: { list: () => [...options.threads] },
@@ -437,7 +441,7 @@ describe("CodeThreadBoardService derivation", () => {
             linkedThreads: [{ threadId: ids.ready, title: "Board thread" }],
           },
         ],
-        freshness: { status: "fresh", lastSuccessfulRefreshAt: now },
+        freshness: { status: "fresh", lastSuccessfulRefreshAt: decodeTimestamp(now) },
         githubRevoked: false,
       },
     });

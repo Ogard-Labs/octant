@@ -1,5 +1,6 @@
-import { decodeProjectId } from "@octant/contracts";
+import { decodeProjectId, UtcTimestamp } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   composeThreadBoardPullRequestSummaries,
@@ -12,6 +13,7 @@ import {
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
 const threadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000001");
 const otherThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000002");
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 function row(overrides: {
   readonly number?: number;
@@ -119,7 +121,10 @@ describe("thread board pull-request policy", () => {
     }));
     const summaries = composeThreadBoardPullRequestSummaries({
       rows: matches.map((match) => match.row),
-      snapshotFreshness: { status: "fresh", lastSuccessfulRefreshAt: "2026-08-22T08:00:00.000Z" },
+      snapshotFreshness: {
+        status: "fresh",
+        lastSuccessfulRefreshAt: decodeTimestamp("2026-08-22T08:00:00.000Z"),
+      },
       githubRevoked: false,
       matches,
     });

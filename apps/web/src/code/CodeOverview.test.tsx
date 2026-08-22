@@ -547,5 +547,5 @@ function boardCard(overrides: Partial<CodeBoardCard>): CodeBoardCard {
     followUp: false,
     lastMeaningfulActivityAt: null,
     ...overrides,
-  } as CodeBoardCard;
+  } as unknown as CodeBoardCard;
 }

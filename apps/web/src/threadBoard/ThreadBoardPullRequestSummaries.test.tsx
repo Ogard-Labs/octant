@@ -1,7 +1,10 @@
+import { decodeProjectId } from "@octant/contracts";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadBoardPullRequestSummaries } from "./ThreadBoardPullRequestSummaries";
+
+const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
 
 describe("ThreadBoardPullRequestSummaries", () => {
   it("renders bounded pull-request summaries and overflow", () => {
@@ -11,7 +14,7 @@ describe("ThreadBoardPullRequestSummaries", () => {
           items: [
             {
               identity: {
-                projectId: "10000000-0000-4000-8000-000000000001",
+                projectId,
                 repositoryOwner: "octant",
                 repositoryName: "octant",
                 number: 12,
@@ -44,7 +47,7 @@ describe("ThreadBoardPullRequestSummaries", () => {
           items: [
             {
               identity: {
-                projectId: "10000000-0000-4000-8000-000000000001",
+                projectId,
                 repositoryOwner: "octant",
                 repositoryName: "octant",
                 number: 12,
@@ -65,7 +68,7 @@ describe("ThreadBoardPullRequestSummaries", () => {
 
     await user.click(screen.getByRole("button", { name: /Board pull request/i }));
     expect(onSelect).toHaveBeenCalledWith({
-      projectId: "10000000-0000-4000-8000-000000000001",
+      projectId,
       repositoryOwner: "octant",
       repositoryName: "octant",
       number: 12,

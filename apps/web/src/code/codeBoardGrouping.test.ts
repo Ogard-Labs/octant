@@ -56,7 +56,7 @@ function card(overrides: {
       overrides.activity === undefined
         ? null
         : (overrides.activity as CodeBoardCard["lastMeaningfulActivityAt"]),
-  } as CodeBoardCard;
+  } as unknown as CodeBoardCard;
 }
 
 const projects: readonly CodeBoardProjectRef[] = [

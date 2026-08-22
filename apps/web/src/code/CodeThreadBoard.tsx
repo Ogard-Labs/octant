@@ -876,7 +876,11 @@ function cardFacts(
       className: card.checks.state === "failing" ? "fact bad" : "fact",
     });
   }
-  if (!hasPullRequestSummaries && card.reviewState.state !== "unknown" && card.reviewState.state !== "none") {
+  if (
+    !hasPullRequestSummaries &&
+    card.reviewState.state !== "unknown" &&
+    card.reviewState.state !== "none"
+  ) {
     facts.push({
       key: "review",
       text: `Review ${card.reviewState.state.replace("-", " ")}`,

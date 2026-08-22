@@ -1,8 +1,4 @@
 import { Schema } from "effect";
-import {
-  CodeProjectPullRequestChecksSummary,
-  CodeProjectPullRequestReviewSummary,
-} from "./codeProjectPullRequests";
 import { GithubRepositoryName, GithubRepositoryOwner } from "./githubCatalogue";
 import { ProjectId } from "./projects";
 
@@ -33,6 +29,23 @@ export type ThreadBoardPullRequestState = typeof ThreadBoardPullRequestState.Typ
 export const ThreadBoardPullRequestFreshness = Schema.Literal("fresh", "stale");
 export type ThreadBoardPullRequestFreshness = typeof ThreadBoardPullRequestFreshness.Type;
 
+export const ThreadBoardPullRequestChecksSummary = Schema.Literal(
+  "unknown",
+  "pending",
+  "passing",
+  "failing",
+);
+export type ThreadBoardPullRequestChecksSummary = typeof ThreadBoardPullRequestChecksSummary.Type;
+
+export const ThreadBoardPullRequestReviewSummary = Schema.Literal(
+  "unknown",
+  "none",
+  "pending",
+  "approved",
+  "changes-requested",
+);
+export type ThreadBoardPullRequestReviewSummary = typeof ThreadBoardPullRequestReviewSummary.Type;
+
 /**
  * How a Work board card reaches pull-request evidence through a Code thread.
  * Code board cards omit this field.
@@ -50,8 +63,8 @@ export const ThreadBoardPullRequestSummary = Schema.Struct({
   identity: ThreadBoardPullRequestIdentity,
   title: boundedNonEmptyText(256),
   state: ThreadBoardPullRequestState,
-  checks: CodeProjectPullRequestChecksSummary,
-  review: CodeProjectPullRequestReviewSummary,
+  checks: ThreadBoardPullRequestChecksSummary,
+  review: ThreadBoardPullRequestReviewSummary,
   freshness: ThreadBoardPullRequestFreshness,
   readyToMerge: Schema.Boolean,
   relationship: Schema.optional(ThreadBoardPullRequestRelationship),

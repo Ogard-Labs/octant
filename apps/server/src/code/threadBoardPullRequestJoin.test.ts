@@ -1,17 +1,25 @@
-import { decodeProjectId } from "@octant/contracts";
+import { decodeProjectId, UtcTimestamp } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
-import { decodeWorkArtifactRef, decodeWorkPromotionProposalId } from "@octant/contracts/work-promotion";
+import { decodeWorkArtifactRef } from "@octant/contracts/work-artifacts";
+import {
+  decodeWorkPromotionFrame,
+  decodeWorkPromotionProposalId,
+} from "@octant/contracts/work-promotion";
+import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
+import { WorkPromotionProjection } from "../work/workPromotionProjection";
 import {
   joinCodeThreadBoardPullRequests,
   joinWorkThreadBoardPullRequests,
 } from "./threadBoardPullRequestJoin";
 
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
+const targetProjectId = decodeProjectId("10000000-0000-4000-8000-000000000099");
 const codeThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000001");
 const promotedThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000002");
 const linkedThreadId = decodeCodeThreadId("20000000-0000-4000-8000-000000000003");
 const proposalId = decodeWorkPromotionProposalId("30000000-0000-4000-8000-000000000001");
+const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 
 describe("thread board pull-request join", () => {
   it("joins cached project pull requests onto Code board cards without GitHub calls", () => {
@@ -36,7 +44,10 @@ describe("thread board pull-request join", () => {
             linkedThreads: [{ threadId: codeThreadId, title: "Linked thread" }],
           },
         ],
-        freshness: { status: "fresh", lastSuccessfulRefreshAt: "2026-08-22T08:00:00.000Z" },
+        freshness: {
+          status: "fresh",
+          lastSuccessfulRefreshAt: decodeTimestamp("2026-08-22T08:00:00.000Z"),
+        },
         githubRevoked: false,
       },
     });
@@ -47,42 +58,45 @@ describe("thread board pull-request join", () => {
   });
 
   it("joins Work board pull requests only through promoted or linked Code threads", () => {
+    const projection = new WorkPromotionProjection();
+    projection.apply(
+      decodeWorkPromotionFrame({
+        kind: "approved",
+        proposal: {
+          proposalId,
+          originProjectId: projectId,
+          targetCodeProjectId: targetProjectId,
+          selectedContext: {
+            summary: "Promoted work",
+            artifactRefs: [decodeWorkArtifactRef("artifact-a")],
+          },
+          status: "approved",
+          proposedCodeExecutionPolicy: "approval-gated",
+          proposedCodePermissionPersistence: "current-session",
+          proposedBy: {
+            kind: "local-user",
+            actorId: "55555555-5555-4555-8555-555555555555",
+          },
+          proposedAt: decodeTimestamp("2026-08-22T08:00:00.000Z"),
+          decidedAt: decodeTimestamp("2026-08-22T08:01:00.000Z"),
+          linkedCodeThreadId: promotedThreadId,
+          version: 2,
+        },
+        linkedCodeThreadId: promotedThreadId,
+      }),
+    );
+
     const summaries = joinWorkThreadBoardPullRequests({
       workProjectId: projectId,
-      promotions: new Map([
-        [
-          proposalId,
-          {
-            proposalId,
-            proposal: {
-              proposalId,
-              originProjectId: projectId,
-              targetCodeProjectId: decodeProjectId("10000000-0000-4000-8000-000000000099"),
-              selectedContext: {
-                summary: "Promoted work",
-                artifactRefs: [decodeWorkArtifactRef("artifact-a")],
-              },
-              status: "approved",
-              proposedCodeExecutionPolicy: "approval-gated",
-              proposedCodePermissionPersistence: "current-session",
-              proposedBy: { kind: "local-user", actorId: "user-a" },
-              proposedAt: "2026-08-22T08:00:00.000Z",
-              decidedAt: "2026-08-22T08:01:00.000Z",
-              linkedCodeThreadId: promotedThreadId,
-              version: 2,
-            },
-            linkedCodeThreadId: promotedThreadId,
-          },
-        ],
-      ]),
+      promotions: projection.snapshot(),
       codeThreads: [
-        { id: promotedThreadId, projectId: decodeProjectId("10000000-0000-4000-8000-000000000099") },
-        { id: linkedThreadId, projectId: decodeProjectId("10000000-0000-4000-8000-000000000099") },
+        { id: promotedThreadId, projectId: targetProjectId },
+        { id: linkedThreadId, projectId: targetProjectId },
       ],
       snapshot: {
         rows: [
           {
-            projectId: decodeProjectId("10000000-0000-4000-8000-000000000099"),
+            projectId: targetProjectId,
             projectName: "Target Code Project",
             repositoryOwner: "octant",
             repositoryName: "octant",
@@ -98,7 +112,7 @@ describe("thread board pull-request join", () => {
             linkedThreads: [{ threadId: promotedThreadId, title: "Promoted thread" }],
           },
           {
-            projectId: decodeProjectId("10000000-0000-4000-8000-000000000099"),
+            projectId: targetProjectId,
             projectName: "Target Code Project",
             repositoryOwner: "octant",
             repositoryName: "octant",
@@ -114,7 +128,10 @@ describe("thread board pull-request join", () => {
             linkedThreads: [{ threadId: linkedThreadId, title: "Linked thread" }],
           },
         ],
-        freshness: { status: "fresh", lastSuccessfulRefreshAt: "2026-08-22T08:00:00.000Z" },
+        freshness: {
+          status: "fresh",
+          lastSuccessfulRefreshAt: decodeTimestamp("2026-08-22T08:00:00.000Z"),
+        },
         githubRevoked: false,
       },
     });

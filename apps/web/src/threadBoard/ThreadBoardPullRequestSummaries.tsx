@@ -1,15 +1,15 @@
 import type {
   ThreadBoardPullRequestIdentity,
-  ThreadBoardPullRequestSummaries,
+  ThreadBoardPullRequestSummaries as ThreadBoardPullRequestSummaryList,
 } from "@octant/contracts";
 import { GitPullRequest } from "lucide-react";
 
 export interface ThreadBoardPullRequestSummariesProps {
-  readonly summaries: ThreadBoardPullRequestSummaries;
+  readonly summaries: ThreadBoardPullRequestSummaryList;
   readonly onSelect?: (identity: ThreadBoardPullRequestIdentity) => void;
 }
 
-function stateLabel(state: ThreadBoardPullRequestSummaries["items"][number]["state"]): string {
+function stateLabel(state: ThreadBoardPullRequestSummaryList["items"][number]["state"]): string {
   switch (state) {
     case "draft":
       return "Draft";
@@ -23,7 +23,7 @@ function stateLabel(state: ThreadBoardPullRequestSummaries["items"][number]["sta
 }
 
 function checksLabel(
-  checks: ThreadBoardPullRequestSummaries["items"][number]["checks"],
+  checks: ThreadBoardPullRequestSummaryList["items"][number]["checks"],
 ): string | undefined {
   if (checks === "unknown") return undefined;
   if (checks === "passing") return "Checks passing";
@@ -32,7 +32,7 @@ function checksLabel(
 }
 
 function reviewLabel(
-  review: ThreadBoardPullRequestSummaries["items"][number]["review"],
+  review: ThreadBoardPullRequestSummaryList["items"][number]["review"],
 ): string | undefined {
   if (review === "unknown" || review === "none") return undefined;
   if (review === "approved") return "Approved";
@@ -41,7 +41,7 @@ function reviewLabel(
 }
 
 function relationshipLabel(
-  relationship: ThreadBoardPullRequestSummaries["items"][number]["relationship"],
+  relationship: ThreadBoardPullRequestSummaryList["items"][number]["relationship"],
 ): string | undefined {
   if (relationship === undefined) return undefined;
   return relationship === "promoted" ? "Promoted Code thread" : "Linked Code thread";
@@ -83,7 +83,10 @@ export function ThreadBoardPullRequestSummaries(props: ThreadBoardPullRequestSum
         );
       })}
       {props.summaries.hiddenCount === 0 ? null : (
-        <li aria-label={`${props.summaries.hiddenCount} more pull requests`} className="board-card-pr-more">
+        <li
+          aria-label={`${props.summaries.hiddenCount} more pull requests`}
+          className="board-card-pr-more"
+        >
           +{props.summaries.hiddenCount} more
         </li>
       )}

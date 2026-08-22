@@ -72,7 +72,7 @@ function card(overrides: {
     ...(overrides.blockingReason === undefined ? {} : { blockingReason: overrides.blockingReason }),
     followUp: overrides.followUp ?? false,
     lastMeaningfulActivityAt: overrides.lastMeaningfulActivityAt ?? null,
-  } as CodeBoardCard;
+  } as unknown as CodeBoardCard;
 }
 
 function view(

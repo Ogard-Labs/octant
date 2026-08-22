@@ -99,28 +99,30 @@ export function composeThreadBoardPullRequestSummaries(
     right.row.updatedAt.localeCompare(left.row.updatedAt),
   );
   const hiddenCount = Math.max(0, sorted.length - MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY);
-  const items = sorted.slice(0, MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY).map(({ row, relationship }) => {
-    const state = deriveThreadBoardPullRequestState({ draft: row.draft });
-    return {
-      identity: {
-        projectId: row.projectId,
-        repositoryOwner: row.repositoryOwner,
-        repositoryName: row.repositoryName,
-        number: row.number,
-      },
-      title: row.title,
-      state,
-      checks: row.checks,
-      review: row.review,
-      freshness,
-      readyToMerge: deriveConservativeReadyToMerge({
+  const items = sorted
+    .slice(0, MAX_THREAD_BOARD_PULL_REQUEST_DISPLAY)
+    .map(({ row, relationship }) => {
+      const state = deriveThreadBoardPullRequestState({ draft: row.draft });
+      return {
+        identity: {
+          projectId: row.projectId,
+          repositoryOwner: row.repositoryOwner,
+          repositoryName: row.repositoryName,
+          number: row.number,
+        },
+        title: row.title,
         state,
         checks: row.checks,
         review: row.review,
         freshness,
-      }),
-      ...(relationship === undefined ? {} : { relationship }),
-    };
-  });
+        readyToMerge: deriveConservativeReadyToMerge({
+          state,
+          checks: row.checks,
+          review: row.review,
+          freshness,
+        }),
+        ...(relationship === undefined ? {} : { relationship }),
+      };
+    });
   return { items, hiddenCount };
 }
