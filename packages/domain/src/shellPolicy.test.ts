@@ -158,7 +158,7 @@ describe("shell settings policy", () => {
       contextSidebarWidth: 360,
       lastContextSurface: null,
       sidebarMaterial: "system",
-      modeSwitcherPresentation: "buttons",
+      modeSwitcherPresentation: "dropdown",
       projectViewSwitcherPresentation: "dropdown",
       sidebarBackground: {
         kind: "none",

@@ -23,6 +23,8 @@ export interface ShellFrameProps {
   readonly theme?: ThemeSettings;
   readonly availableFonts?: ReadonlyArray<string>;
   readonly wideContextOpen: boolean;
+  readonly bottomPanelOpen?: boolean;
+  readonly bottomPanelHeight?: number;
   readonly workspace: ReactNode;
 }
 
@@ -71,6 +73,9 @@ export function ShellFrame(props: ShellFrameProps) {
           data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
           style={
             {
+              ...(props.bottomPanelHeight === undefined
+                ? {}
+                : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
               "--octant-context-sidebar-width": `${props.contextSidebarWidth}px`,
               "--octant-sidebar-width": `${props.sidebarWidth}px`,
             } as CSSProperties
@@ -93,7 +98,7 @@ export function ShellFrame(props: ShellFrameProps) {
           <div
             className={`workspace-layer${
               props.wideContextOpen ? " workspace-layer--wide-context-open" : ""
-            }`}
+            }${props.bottomPanelOpen ? " workspace-layer--bottom-panel-open" : ""}`}
           >
             {props.workspace}
           </div>

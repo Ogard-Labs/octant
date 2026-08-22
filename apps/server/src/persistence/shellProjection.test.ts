@@ -1025,7 +1025,7 @@ describe("ShellProjection", () => {
             ...legacyPayload.settings,
             contextSidebarWidth: 360,
             lastContextSurface: null,
-            modeSwitcherPresentation: "buttons",
+            modeSwitcherPresentation: "dropdown",
             sidebarBackground: {
               kind: "none",
               overlayColor: "#1a1a1c",
@@ -1048,7 +1048,7 @@ describe("ShellProjection", () => {
         ...legacyPayload.settings,
         contextSidebarWidth: 360,
         lastContextSurface: null,
-        modeSwitcherPresentation: "buttons",
+        modeSwitcherPresentation: "dropdown",
         sidebarBackground: {
           kind: "none",
           overlayColor: "#1a1a1c",
@@ -1142,7 +1142,7 @@ describe("ShellProjection", () => {
         ...legacy,
         contextSidebarWidth: 360,
         lastContextSurface: null,
-        modeSwitcherPresentation: "buttons",
+        modeSwitcherPresentation: "dropdown",
         sidebarBackground: {
           kind: "none",
           overlayColor: "#1a1a1c",
@@ -1212,7 +1212,7 @@ describe("ShellProjection", () => {
         .run(JSON.stringify(current));
 
       expect(readShellSettings(connection)).toEqual({
-        settings: { ...current, modeSwitcherPresentation: "buttons" },
+        settings: { ...current, modeSwitcherPresentation: "dropdown" },
         aggregateVersion: 1,
       });
       connection.close();

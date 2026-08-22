@@ -3718,6 +3718,26 @@ input.switch:checked::after {
   border: 0;
   background: none;
 }
+.mode-switcher__brand {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modeswitch[data-oct-modeswitch="icons"] .mode-switcher__brand {
+  flex: 1 1 auto;
+  padding-inline: var(--oct-space-2);
+}
+.mode-switcher__context {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
+}
 .modeswitch[data-oct-modeswitch="icons"] .mode {
   position: relative;
   flex: 0 0 auto;
@@ -3746,6 +3766,15 @@ input.switch:checked::after {
    on a wide screen too, not only a narrow one. */
 .app[data-compact="true"] .modeswitch[data-oct-modeswitch="icons"] {
   flex-direction: column;
+}
+.app[data-compact="true"] .mode-switcher__brand,
+.app[data-compact="true"] .mode-switcher__context {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 /* menu: a trigger that names the current surface, and the list of three

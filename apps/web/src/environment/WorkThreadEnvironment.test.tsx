@@ -88,8 +88,11 @@ describe("WorkThreadEnvironment", () => {
     );
 
     expect(screen.getByTestId("work-workspace-content")).toBeVisible();
-    expect(await screen.findByText("work-root")).toBeVisible();
-    expect(screen.getByText("available")).toBeVisible();
+    expect(
+      await screen.findByRole("button", {
+        name: /Show environment for Knowledge Base\. work-root/,
+      }),
+    ).toHaveAttribute("data-environment-status", "available");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -104,8 +107,9 @@ describe("WorkThreadEnvironment", () => {
       </WorkThreadEnvironment>,
     );
 
-    expect(await screen.findByText("No folder Project")).toBeVisible();
-    expect(screen.getByText("unavailable")).toBeVisible();
+    expect(
+      await screen.findByRole("button", { name: "Show environment for Work. No folder Project" }),
+    ).toHaveAttribute("data-environment-status", "unavailable");
   });
 
   it("submits a bounded relative working directory through the focused Change working folder flow", async () => {

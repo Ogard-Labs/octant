@@ -127,7 +127,8 @@ describe("WorkspaceRailLayers", () => {
     // probe would pass on the fallback before the chunk settled.
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     expect(await screen.findByRole("region", { name: "Code thread" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Automations" }));
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("menuitem", { name: "Automations" }));
 
     expect(await screen.findByRole("heading", { name: "Automation Center" })).toBeVisible();
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
@@ -136,7 +137,8 @@ describe("WorkspaceRailLayers", () => {
     await user.click(screen.getByRole("button", { name: "Back to workspace" }));
     expect(screen.queryByRole("heading", { name: "Automation Center" })).not.toBeInTheDocument();
     expect(document.querySelector(".workspace")).not.toHaveAttribute("hidden");
-    await user.click(screen.getByRole("button", { name: "Automations" }));
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("menuitem", { name: "Automations" }));
 
     await user.click(await screen.findByRole("button", { name: "Nightly build check" }));
     expect(await screen.findByRole("heading", { name: "Nightly build check" })).toBeVisible();
@@ -281,10 +283,7 @@ describe("WorkspaceRailLayers", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Chat" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    expect(await screen.findByRole("button", { name: "Workspace mode, Chat" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Thread board" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
   });

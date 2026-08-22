@@ -1028,5 +1028,5 @@ export async function openSidebarProject(user: ReturnType<typeof userEvent.setup
  */
 export async function openSettingsFromSidebar(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "Set your name" }));
-  await user.click(await screen.findByRole("button", { name: "Settings" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Settings" }));
 }

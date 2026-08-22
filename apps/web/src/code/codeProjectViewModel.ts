@@ -1,4 +1,5 @@
 export const CODE_PROJECT_VIEWS_STORAGE_KEY = "octant.code.project-views.v1";
+export const WORK_PROJECT_VIEWS_STORAGE_KEY = "octant.work.project-views.v1";
 export const ALL_CODE_PROJECTS_VIEW_ID = "all";
 export const ALL_CODE_PROJECTS_VIEW_NAME = "All Projects";
 
@@ -67,6 +68,12 @@ export interface CodeProjectViewCandidate {
   readonly name: string;
 }
 
+export type ProjectViewMode = "code" | "work";
+
+function projectViewStorageKey(mode: ProjectViewMode): string {
+  return mode === "code" ? CODE_PROJECT_VIEWS_STORAGE_KEY : WORK_PROJECT_VIEWS_STORAGE_KEY;
+}
+
 export function defaultCodeProjectViewState(): CodeProjectViewState {
   return { activeViewId: ALL_CODE_PROJECTS_VIEW_ID, views: [] };
 }
@@ -74,9 +81,16 @@ export function defaultCodeProjectViewState(): CodeProjectViewState {
 export function readCodeProjectViewState(
   storage: Pick<Storage, "getItem"> | undefined = defaultStorage(),
 ): CodeProjectViewState {
+  return readProjectViewState("code", storage);
+}
+
+export function readProjectViewState(
+  mode: ProjectViewMode,
+  storage: Pick<Storage, "getItem"> | undefined = defaultStorage(),
+): CodeProjectViewState {
   if (storage === undefined) return defaultCodeProjectViewState();
   try {
-    const raw = storage.getItem(CODE_PROJECT_VIEWS_STORAGE_KEY);
+    const raw = storage.getItem(projectViewStorageKey(mode));
     if (raw === null || raw.trim() === "") return defaultCodeProjectViewState();
     return normalizeCodeProjectViewState(JSON.parse(raw));
   } catch {
@@ -88,10 +102,18 @@ export function writeCodeProjectViewState(
   state: CodeProjectViewState,
   storage: Pick<Storage, "setItem"> | undefined = defaultStorage(),
 ): void {
+  writeProjectViewState("code", state, storage);
+}
+
+export function writeProjectViewState(
+  mode: ProjectViewMode,
+  state: CodeProjectViewState,
+  storage: Pick<Storage, "setItem"> | undefined = defaultStorage(),
+): void {
   if (storage === undefined) return;
   try {
     storage.setItem(
-      CODE_PROJECT_VIEWS_STORAGE_KEY,
+      projectViewStorageKey(mode),
       JSON.stringify(normalizeCodeProjectViewState(state)),
     );
   } catch {

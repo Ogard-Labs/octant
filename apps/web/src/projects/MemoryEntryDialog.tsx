@@ -97,7 +97,7 @@ export function MemoryEntryDialog(props: MemoryEntryDialogProps) {
       ) : (
         <blockquote className="memory-entry-dialog__original">{props.mode.content}</blockquote>
       )}
-      <form onSubmit={(event) => void submit(event)}>
+      <form noValidate onSubmit={(event) => void submit(event)}>
         <label>
           {props.mode.kind === "create"
             ? "Memory content"

@@ -25,13 +25,15 @@ function hostBridge(): OctantHostBridge {
 function renderChrome(overrides: Partial<React.ComponentProps<typeof WindowChrome>> = {}) {
   const props: React.ComponentProps<typeof WindowChrome> = {
     activeSurface: "Welcome to Code",
+    bottomPanelAvailable: true,
+    bottomPanelExpanded: false,
     dockAvailable: false,
     dockExpanded: false,
     dockLabel: "Right sidebar",
     hostBridge: hostBridge(),
     isNarrow: false,
     material: "opaque",
-    onOpenZen: vi.fn(),
+    onToggleBottomPanel: vi.fn(),
     onToggleDock: vi.fn(),
     ...overrides,
   };
@@ -98,7 +100,6 @@ describe("WindowChrome", () => {
         dockLabel="Utility dock"
         isNarrow={false}
         material="opaque"
-        onOpenZen={() => undefined}
         onToggleDock={() => undefined}
       />,
     );
@@ -181,7 +182,7 @@ describe("WindowChrome", () => {
 
   it("keeps compact native chrome geometry and neutral tool controls", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
-    expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 24px;");
+    expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 0;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
     expect(cssRule(".window-chrome__button")).toContain("width: 26px;");
@@ -224,7 +225,7 @@ describe("WindowChrome", () => {
   it("keeps the Project tree readable and reserves status ink for active work", () => {
     const projectName = cssRule(".project-row__copy > span");
     expect(projectName).toContain("font-family: var(--oct-font-ui);");
-    expect(projectName).toContain("font-weight: 500;");
+    expect(projectName).toContain("font-weight: 400;");
     expect(projectName).not.toMatch(/text-transform|letter-spacing|mono/);
     expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
       "opacity: 0;",
@@ -244,8 +245,8 @@ describe("WindowChrome", () => {
   });
 
   it("keeps semantic shell borders and controls restrained", () => {
-    expect(cssRule(":root")).toContain("--octant-border: #312f2c;");
-    expect(cssRule(":root")).toContain("--octant-border-strong: #494844;");
+    expect(cssRule(":root")).toContain("--octant-border: #2d2d2d;");
+    expect(cssRule(":root")).toContain("--octant-border-strong: #454545;");
     expect(cssRule(".sidebar__native-leading")).not.toMatch(/background|border|box-shadow/);
 
     expect(cssRule(".new-project", 1)).toContain("color: var(--octant-text-primary);");
@@ -467,12 +468,13 @@ describe("WindowChrome", () => {
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
-    const openZen = screen.getByRole("button", { name: "Open Zen" });
-    expect(openZen).toHaveAttribute("title", "Open Zen");
-    expect(openZen).toHaveClass("window-no-drag");
-    openZen.focus();
+    expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
+    const bottomPanel = screen.getByRole("button", { name: "Open bottom panel" });
+    expect(bottomPanel).toHaveAttribute("aria-controls", "bottom-utility-panel");
+    expect(bottomPanel).toHaveClass("window-no-drag");
+    bottomPanel.focus();
     await user.keyboard("{Enter}");
-    expect(props.onOpenZen).toHaveBeenCalledOnce();
+    expect(props.onToggleBottomPanel).toHaveBeenCalledWith(bottomPanel);
 
     expect(screen.queryByRole("group", { name: "Window controls" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Minimize window" })).not.toBeInTheDocument();
@@ -499,17 +501,17 @@ describe("WindowChrome", () => {
     expect(overflow).toHaveAttribute("aria-expanded", "true");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(container.querySelector(".window-chrome__disclosure")).toBeInTheDocument();
-    const openZen = screen.getByRole("button", { name: "Open Zen" });
-    expect(openZen).toHaveFocus();
+    const openBottomPanel = screen.getByRole("button", { name: "Open bottom panel" });
+    expect(openBottomPanel).toHaveFocus();
 
     await user.keyboard("{Escape}");
     expect(overflow).toHaveAttribute("aria-expanded", "false");
     expect(overflow).toHaveFocus();
 
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Open Zen" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(props.onOpenZen).toHaveBeenCalledOnce();
+    expect(props.onToggleBottomPanel).toHaveBeenCalledOnce();
     expect(overflow).toHaveAttribute("aria-expanded", "false");
     expect(overflow).toHaveFocus();
   });
@@ -519,7 +521,7 @@ describe("WindowChrome", () => {
     const { props, rerender } = renderChrome({ isNarrow: true });
 
     await user.click(screen.getByRole("button", { name: "More window actions" }));
-    expect(screen.getByRole("button", { name: "Open Zen" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
 
     rerender(<WindowChrome {...props} isNarrow={false} />);
     expect(screen.queryByRole("button", { name: "More window actions" })).not.toBeInTheDocument();
@@ -528,24 +530,26 @@ describe("WindowChrome", () => {
     rerender(<WindowChrome {...props} isNarrow />);
     const overflow = screen.getByRole("button", { name: "More window actions" });
     expect(overflow).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open bottom panel" })).not.toBeInTheDocument();
     expect(document.body).toHaveFocus();
 
     overflow.focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("button", { name: "Open Zen" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
   });
 
   it("maps the whole chrome as draggable while controls carve out no-drag regions", () => {
     const { container } = render(
       <WindowChrome
         activeSurface="Welcome to Code"
+        bottomPanelAvailable
+        bottomPanelExpanded={false}
         dockAvailable={false}
         dockExpanded={false}
         dockLabel="Right sidebar"
         isNarrow={false}
         material="opaque"
-        onOpenZen={vi.fn()}
+        onToggleBottomPanel={vi.fn()}
         onToggleDock={vi.fn()}
       />,
     );

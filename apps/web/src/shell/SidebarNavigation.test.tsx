@@ -43,12 +43,12 @@ describe("SidebarNavigation", () => {
       />,
     );
 
-    for (const label of ["New thread", "Automations", "Plugins", "Thread board", "Pull requests"]) {
+    for (const label of ["New thread", "Thread board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     expect(actions["new-code-thread"]).toHaveBeenCalledOnce();
-    expect(actions.automations).toHaveBeenCalledOnce();
-    expect(actions.plugins).toHaveBeenCalledOnce();
+    expect(actions.automations).not.toHaveBeenCalled();
+    expect(actions.plugins).not.toHaveBeenCalled();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(actions["pull-requests"]).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "New thread" })).toHaveClass("sidebar-item");
@@ -58,8 +58,7 @@ describe("SidebarNavigation", () => {
     expect(screen.queryByRole("button", { name: "Threads" })).not.toBeInTheDocument();
   });
 
-  it("renders Artifacts when the library is available and a real handler is present", async () => {
-    const user = userEvent.setup();
+  it("keeps secondary destinations out of primary navigation", () => {
     const openLibrary = vi.fn();
     render(
       <SidebarNavigation
@@ -69,8 +68,9 @@ describe("SidebarNavigation", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Artifacts" }));
-    expect(openLibrary).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Artifacts" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
+    expect(openLibrary).not.toHaveBeenCalled();
   });
 
   it("omits Artifacts when the library is unavailable even if a handler exists", () => {
@@ -101,8 +101,7 @@ describe("SidebarNavigation", () => {
     expect(createChat).toHaveBeenCalledWith();
   });
 
-  it("renders only model descriptors backed by real handlers and content", async () => {
-    const user = userEvent.setup();
+  it("renders only primary model descriptors backed by real handlers and content", () => {
     const onPlugins = vi.fn();
     render(
       <SidebarNavigation
@@ -113,20 +112,15 @@ describe("SidebarNavigation", () => {
       />,
     );
 
-    const plugins = screen.getByRole("button", { name: "Plugins" });
     const createProject = screen.getByRole("button", { name: "New Code Project" });
     const projects = screen.getByRole("navigation", { name: "Projects" });
-    expect(plugins.compareDocumentPosition(createProject)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(createProject.compareDocumentPosition(projects)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.queryByRole("button", { name: /new thread/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /thread board/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /pull requests/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /automations/i })).not.toBeInTheDocument();
-
-    plugins.focus();
-    expect(plugins).toHaveFocus();
-    await user.keyboard("{Enter}");
-    expect(onPlugins).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: /plugins/i })).not.toBeInTheDocument();
+    expect(onPlugins).not.toHaveBeenCalled();
   });
 
   it.each(["disabled", "unavailable", "unauthorized"] as const)(
@@ -180,8 +174,7 @@ describe("SidebarNavigation", () => {
     );
 
     expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar-item");
-    // Plugins reach Chat too; boards and a second thread list do not.
-    expect(screen.getByRole("button", { name: "Plugins" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /thread board/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Recent chats" })).not.toBeInTheDocument();
   });
