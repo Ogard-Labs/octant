@@ -37,6 +37,7 @@ import {
   type CodeOperationId,
   type CodeThreadForkOrigin,
   type CodeThreadId,
+  type OctantMode,
   type WorkThreadId,
 } from "@octant/contracts";
 import type { ExtensionProviderFamily, StandaloneSkillScope } from "@octant/contracts/extensions";
