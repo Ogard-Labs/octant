@@ -55,9 +55,11 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New thread", "Plugins", "Thread board"]) {
+    for (const label of ["New thread", "Thread board"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("menuitem", { name: "Plugins" }));
     expect(actions["new-work-thread"]).toHaveBeenCalledOnce();
     expect(actions.plugins).toHaveBeenCalledOnce();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
@@ -89,15 +91,17 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New thread", "Plugins", "Thread board", "Pull requests"]) {
+    for (const label of ["New thread", "Thread board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("menuitem", { name: "Plugins" }));
     expect(actions["new-code-thread"]).toHaveBeenCalledOnce();
     expect(actions.automations).not.toHaveBeenCalled();
     expect(actions.plugins).toHaveBeenCalledOnce();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(actions["pull-requests"]).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Automations" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Threads" })).not.toBeInTheDocument();
   });
 
@@ -123,11 +127,13 @@ describe("ShellSidebar", () => {
     // Explicit false overrides the production gate so the prop still controls
     // visibility even when AUTOMATION_CENTER_NAVIGATION_ENABLED is true.
     const gated = render(sidebar(false));
-    expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    expect(screen.queryByRole("menuitem", { name: "Automations" })).not.toBeInTheDocument();
     gated.unmount();
 
     render(sidebar(true));
-    await user.click(screen.getByRole("button", { name: "Automations" }));
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("menuitem", { name: "Automations" }));
     expect(automations).toHaveBeenCalledOnce();
   });
 
@@ -183,7 +189,7 @@ describe("ShellSidebar", () => {
         />,
       );
 
-      const modes = screen.getByRole("group", { name: "Workspace mode" });
+      const modes = screen.getByRole("button", { name: `Workspace mode, ${modeLabel}` });
       const search = screen.getByRole("button", { name: "Search" });
       const projects = screen.getByRole("navigation", { name: "Projects" });
       // The foot of the sidebar names the person, and their settings are one
@@ -205,7 +211,7 @@ describe("ShellSidebar", () => {
       expect(field).toHaveFocus();
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
       await user.click(profile);
-      await user.click(screen.getByRole("button", { name: "Settings" }));
+      await user.click(screen.getByRole("menuitem", { name: "Settings" }));
       expect(onOpenSettings).toHaveBeenCalledOnce();
     },
   );
@@ -225,9 +231,10 @@ describe("ShellSidebar", () => {
       />,
     );
 
+    const trigger = screen.getByRole("button", { name: "Workspace mode, Code" });
+    expect(trigger).toHaveTextContent("Code");
     expect(screen.queryByRole("button", { name: "Chat" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Work" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Code" })).toBeVisible();
   });
 
   it("keeps New chat available while Chat is reconnecting or unauthorized", () => {

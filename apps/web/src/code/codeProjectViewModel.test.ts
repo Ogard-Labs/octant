@@ -2,12 +2,15 @@ import { describe, expect, it } from "vitest";
 import {
   ALL_CODE_PROJECTS_VIEW_ID,
   CODE_PROJECT_VIEWS_STORAGE_KEY,
+  WORK_PROJECT_VIEWS_STORAGE_KEY,
   createCodeProjectView,
   deleteCodeProjectView,
   readCodeProjectViewState,
+  readProjectViewState,
   selectCodeProjectView,
   visibleCodeProjects,
   writeCodeProjectViewState,
+  writeProjectViewState,
 } from "./codeProjectViewModel";
 
 const alpha = {
@@ -164,5 +167,20 @@ describe("codeProjectViewModel", () => {
       activeViewId: ALL_CODE_PROJECTS_VIEW_ID,
       views: [],
     });
+  });
+
+  it("keeps Work and Code Project View sets separate", () => {
+    const storage = memoryStorage();
+    const workView = createCodeProjectView(readProjectViewState("work", storage), {
+      id: "view-work",
+      name: "Writing",
+      projectIds: [alpha.id],
+    });
+    writeProjectViewState("work", workView, storage);
+
+    expect(storage.getItem(WORK_PROJECT_VIEWS_STORAGE_KEY)).toContain("Writing");
+    expect(storage.getItem(CODE_PROJECT_VIEWS_STORAGE_KEY)).toBeNull();
+    expect(readProjectViewState("work", storage).activeViewId).toBe("view-work");
+    expect(readProjectViewState("code", storage).activeViewId).toBe(ALL_CODE_PROJECTS_VIEW_ID);
   });
 });

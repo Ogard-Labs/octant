@@ -1419,6 +1419,7 @@ function ProviderInputPrompt(props: {
     <form
       className="callout callout-warn thread-column code-thread-workspace__callout code-thread-workspace__provider-request"
       aria-label="Provider question"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         if (trimmed.length > 0) props.onAnswer(trimmed);

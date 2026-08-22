@@ -103,7 +103,7 @@ function ChatProjectCreateDialog(props: ProjectCreateDialogProps) {
         </OctantButton>
       </div>
       <p>A virtual space for approved memory. No filesystem or shell access.</p>
-      <form onSubmit={submit}>
+      <form noValidate onSubmit={submit}>
         <label htmlFor="project-name">Project name</label>
         <OctantInput
           autoFocus
@@ -265,7 +265,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             ? "One folder, opened as a Git repository. Octant records the binding."
             : "One folder, bound as this Project's root. Octant records the binding."}
         </p>
-        <form onSubmit={submit}>
+        <form noValidate onSubmit={submit}>
           <label htmlFor="project-name">Project name</label>
           <OctantInput
             id="project-name"

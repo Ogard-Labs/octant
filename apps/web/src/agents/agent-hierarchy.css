@@ -152,6 +152,11 @@
   padding: 0.35rem 0.5rem;
 }
 
+.agent-run-create-form textarea {
+  min-height: 5rem;
+  resize: none;
+}
+
 .agent-run-create-form fieldset {
   display: flex;
   flex-wrap: wrap;

@@ -810,11 +810,11 @@ describe("SettingsView", () => {
     expect(screen.getByRole("switch", { name: "Translucent sidebar" })).toHaveClass(
       "octant-switch",
     );
-    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveValue("buttons");
+    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveValue("dropdown");
     fireEvent.change(screen.getByRole("combobox", { name: "Mode switcher" }), {
-      target: { value: "dropdown" },
+      target: { value: "buttons" },
     });
-    expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "dropdown" });
+    expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "buttons" });
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveClass(
       "settings-view__action",

@@ -27,11 +27,14 @@ describe("the thread environment summary", () => {
         }}
       />,
     );
-    expect(
-      screen.getByRole("button", {
-        name: "Show environment for Octant. feature/name · Dirty · packages/app · 2 servers",
-      }),
-    ).toBeVisible();
+    const summary = screen.getByRole("button", {
+      name: "Show environment for Octant. feature/name · Dirty · packages/app · 2 servers",
+    });
+    expect(summary).toBeVisible();
+    expect(summary).toHaveTextContent("Environment");
+    expect(summary).not.toHaveTextContent(
+      /Octant|feature\/name|packages\/app|2 servers|available/i,
+    );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 

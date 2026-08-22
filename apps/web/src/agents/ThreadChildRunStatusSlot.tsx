@@ -2,14 +2,13 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { ChildRunStatusChrome } from "./ChildRunStatusChrome";
 import { useChildRunStatus } from "./useChildRunStatus";
-import { OctantButton } from "../ui/base/OctantButton";
 
 /**
  * Compact child-run status for one parent thread.
  *
  * A separate component so the hook is never called conditionally from the
- * branching workspace renderer. An empty hierarchy still offers Add agent so
- * the Agents dock tool can be invoked without appearing on the launcher first.
+ * branching workspace renderer. The status chrome appears only when the
+ * thread has child runs; child creation belongs to the Agents tool.
  */
 export function ThreadChildRunStatusSlot(props: {
   readonly client?: AgentRunClient;
@@ -21,16 +20,7 @@ export function ThreadChildRunStatusSlot(props: {
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
   if (childRuns.status !== "ready") return null;
-  if (childRuns.entries.length === 0) {
-    if (props.onAddAgent === undefined) return null;
-    return (
-      <div className="child-run-status child-run-status--empty">
-        <OctantButton onClick={props.onAddAgent} size="sm" type="button" variant="ghost">
-          Add agent
-        </OctantButton>
-      </div>
-    );
-  }
+  if (childRuns.entries.length === 0) return null;
   return (
     <ChildRunStatusChrome
       entries={childRuns.entries}

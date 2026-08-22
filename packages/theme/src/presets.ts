@@ -26,9 +26,53 @@ export interface ThemePresetValidation {
 export const BUILT_IN_THEME_PRESET_IDS = ["system", "light", "dark", "octant"] as const;
 export type BuiltInThemePresetId = (typeof BUILT_IN_THEME_PRESET_IDS)[number];
 
-const LIGHT_OCTANT_TOKENS: Readonly<Record<string, string>> = DEFAULT_LIGHT_TOKENS;
+const LIGHT_OCTANT_TOKENS: Readonly<Record<string, string>> = {
+  ...DEFAULT_LIGHT_TOKENS,
+  "app-background": "#edece7",
+  chrome: "#e9e8e3",
+  sidebar: "#eeede8",
+  workspace: "#f2f1ed",
+  floating: "#e6e5e0",
+  control: "#ebeae5",
+  "control-hover": "#e3e2dc",
+  "control-pressed": "#dbdad3",
+  border: "#d5d4d0",
+  "border-strong": "#bdbcb7",
+  "divider-strong": "#8c8b86",
+  "text-primary": "#26251e",
+  "text-secondary": "#61605a",
+  "text-muted": "#74726d",
+  "primary-foreground": "#14130f",
+  "focus-ring": "#8a6218",
+  selection: "#d9d8d4",
+  accent: "#d9a441",
+  "accent-foreground": "#14130f",
+  "accent-text": "#8a6218",
+};
 
-const DARK_OCTANT_TOKENS: Readonly<Record<string, string>> = DEFAULT_DARK_TOKENS;
+const DARK_OCTANT_TOKENS: Readonly<Record<string, string>> = {
+  ...DEFAULT_DARK_TOKENS,
+  "app-background": "#0e0d0a",
+  chrome: "#12110d",
+  sidebar: "#11100c",
+  workspace: "#14130f",
+  floating: "#1c1b16",
+  control: "#232219",
+  "control-hover": "#2a2920",
+  "control-pressed": "#322f25",
+  border: "#312f2c",
+  "border-strong": "#494844",
+  "divider-strong": "#787773",
+  "text-primary": "#f2f1ed",
+  "text-secondary": "#959490",
+  "text-muted": "#787773",
+  "primary-foreground": "#14130f",
+  "focus-ring": "#d9a441",
+  selection: "#353430",
+  accent: "#d9a441",
+  "accent-foreground": "#14130f",
+  "accent-text": "#d9a441",
+};
 
 const freezeTokens = (tokens: Readonly<Record<string, string>>) =>
   Object.freeze(Object.fromEntries(THEME_TOKEN_ROLE_IDS.map((role) => [role, tokens[role]])));
@@ -55,21 +99,21 @@ export const THEME_PRESETS: ReadonlyArray<ThemePreset> = Object.freeze([
   makePreset({
     id: "light" as ThemePresetId,
     displayName: "Light",
-    description: "A warm paper workspace with cream surfaces and the brass Octant accent.",
+    description: "A quiet white workspace with graphite text and restrained neutral controls.",
     supportedModes: ["light"],
     tokens: { light: DEFAULT_LIGHT_TOKENS },
   }),
   makePreset({
     id: "dark" as ThemePresetId,
     displayName: "Dark",
-    description: "A warm charcoal workspace with cream text and the brass Octant accent.",
+    description: "A neutral graphite workspace with soft hierarchy and monochrome actions.",
     supportedModes: ["dark"],
     tokens: { dark: DEFAULT_DARK_TOKENS },
   }),
   makePreset({
     id: "octant" as ThemePresetId,
     displayName: "Octant",
-    description: "The warm charcoal-and-brass Octant identity across light and dark surfaces.",
+    description: "The original warm charcoal-and-brass Octant palette.",
     supportedModes: ["light", "dark"],
     tokens: { light: LIGHT_OCTANT_TOKENS, dark: DARK_OCTANT_TOKENS },
   }),

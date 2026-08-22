@@ -28,42 +28,42 @@
   color-scheme: dark;
   color: var(--octant-text-primary);
   background: var(--octant-workspace);
-  --octant-focus-ring: #d9a441;
-  --octant-focus: #d9a441;
-  --octant-selection: #353430;
-  --octant-border: #312f2c;
-  --octant-border-subtle: #312f2c;
-  --octant-border-strong: #494844;
-  --octant-workspace: #14130f;
-  --octant-surface: #14130f;
-  --octant-surface-canvas: #14130f;
-  --octant-chrome: #12110d;
-  --octant-sidebar-opaque: #11100c;
-  --octant-sidebar-translucent: rgb(17 16 12 / 88%);
-  --octant-sidebar-translucent-subtle: rgb(17 16 12 / 62%);
-  --octant-sidebar-translucent-strong: rgb(17 16 12 / 34%);
+  --octant-focus-ring: #f2f2f2;
+  --octant-focus: #f2f2f2;
+  --octant-selection: #303030;
+  --octant-border: #2d2d2d;
+  --octant-border-subtle: #2d2d2d;
+  --octant-border-strong: #454545;
+  --octant-workspace: #171717;
+  --octant-surface: #171717;
+  --octant-surface-canvas: #171717;
+  --octant-chrome: #181818;
+  --octant-sidebar-opaque: #202020;
+  --octant-sidebar-translucent: rgb(32 32 32 / 88%);
+  --octant-sidebar-translucent-subtle: rgb(32 32 32 / 62%);
+  --octant-sidebar-translucent-strong: rgb(32 32 32 / 34%);
   --octant-scrim: rgb(0 0 0 / 70%);
-  --octant-floating: #1c1b16;
-  --octant-control: #232219;
-  --octant-surface-muted: #232219;
-  --octant-control-hover: #2a2920;
-  --octant-surface-hover: #2a2920;
-  --octant-control-pressed: #322f25;
-  --octant-surface-selected: #353430;
-  --octant-surface-raised: #1c1b16;
-  --octant-surface-inset: #0e0d0a;
-  --octant-text-primary: #f2f1ed;
-  --octant-text-secondary: #959490;
-  --octant-text-muted: #787773;
+  --octant-floating: #242424;
+  --octant-control: #292929;
+  --octant-surface-muted: #292929;
+  --octant-control-hover: #303030;
+  --octant-surface-hover: #303030;
+  --octant-control-pressed: #383838;
+  --octant-surface-selected: #303030;
+  --octant-surface-raised: #242424;
+  --octant-surface-inset: #121212;
+  --octant-text-primary: #f2f2f2;
+  --octant-text-secondary: #b5b5b5;
+  --octant-text-muted: #8a8a8a;
   --octant-text-primary-high-contrast: #ffffff;
   --octant-text-secondary-high-contrast: #c9c8c3;
   --octant-text-muted-high-contrast: #a5a4a0;
-  --octant-primary-foreground: #14130f;
-  --octant-accent: #d9a441;
-  --octant-accent-foreground: #14130f;
-  --octant-accent-text: #d9a441;
+  --octant-primary-foreground: #171717;
+  --octant-accent: #f2f2f2;
+  --octant-accent-foreground: #171717;
+  --octant-accent-text: #f2f2f2;
   --octant-accent-tint: color-mix(in srgb, var(--octant-focus-ring) 16%, transparent);
-  --octant-divider-strong: #787773;
+  --octant-divider-strong: #6b6b6b;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
   --octant-shadow-sm: 0 0 0 1px var(--octant-border-strong), 0 1px 2px rgb(0 0 0 / 30%);
@@ -999,14 +999,13 @@ button:focus-visible {
   margin-top: 2px;
 }
 
-/* Nested threads keep the header's left edge: the header's chevron gutter plus
-   its gap equals the dot plus the row gap, so thread titles line up under the
-   Project's name with no extra indent. */
+/* Child threads are visibly nested under their folder. The title still aligns
+   with the Project label after accounting for the chevron and folder glyph. */
 .project-threads {
   display: grid;
   gap: 2px;
   margin: 2px 0 0;
-  padding-left: 0;
+  padding-left: 20px;
 }
 
 /* The container carries the system's .sidebar-section label treatment; the h2
@@ -1101,14 +1100,25 @@ button:focus-visible {
 .project-row__select {
   display: grid;
   min-width: 0;
-  grid-template-columns: 12px minmax(0, 1fr);
-  gap: var(--oct-space-2);
+  grid-template-columns: 12px 15px minmax(0, 1fr);
+  gap: 5px;
   align-items: center;
   min-height: 24px;
   padding: 0 var(--oct-space-2);
   color: inherit;
   cursor: pointer;
   text-align: left;
+}
+
+.project-row__folder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--oct-muted);
+}
+
+.project-row[data-active="true"] .project-row__folder-icon {
+  color: var(--oct-fg);
 }
 
 .project-row__disclosure {
@@ -1129,7 +1139,7 @@ button:focus-visible {
   overflow: hidden;
   font-family: var(--oct-font-ui);
   font-size: var(--oct-text-sm);
-  font-weight: 500;
+  font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1231,21 +1241,45 @@ button:focus-visible {
   left: 0;
   z-index: 40;
   display: grid;
-  min-width: 190px;
-  max-width: 100%;
-  gap: 1px;
-  padding: 4px;
-  background: var(--octant-surface);
+  width: min(248px, calc(100vw - 24px));
+  max-width: none;
+  gap: 3px;
+  padding: 6px;
+  background: var(--octant-floating);
   border: 1px solid var(--octant-border-strong);
   border-radius: 10px;
   box-shadow: var(--octant-shadow-overlay);
+}
+
+.sidebar-profile__chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--oct-meta);
+}
+
+.sidebar-profile__group {
+  display: grid;
+  gap: 1px;
+}
+
+.sidebar-profile__group + .sidebar-profile__group {
+  padding-top: 5px;
+  margin-top: 3px;
+  border-top: 1px solid var(--octant-border);
+}
+
+.sidebar-profile__group-label {
+  padding: 5px 8px 3px;
+  color: var(--octant-text-muted);
+  font-size: 10.5px;
+  font-weight: 500;
 }
 
 .sidebar-profile__action {
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: 30px;
+  min-height: 32px;
   gap: 8px;
   padding: 0 8px;
   color: var(--octant-text-secondary);
@@ -1254,6 +1288,11 @@ button:focus-visible {
 }
 
 .sidebar-profile__action:hover {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
+.sidebar-profile__action:focus-visible {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
 }
@@ -1285,9 +1324,24 @@ button:focus-visible {
   grid-column: 2;
   grid-row: 2;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.workspace-layer--bottom-panel-open {
+  grid-template-rows: minmax(0, 1fr) var(--octant-bottom-panel-height, 260px);
+}
+
+.workspace-layer > .primary-workspace-layer {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.workspace-layer > .right-utility-dock {
+  grid-column: 2;
+  grid-row: 1;
 }
 
 .workspace-layer--wide-context-open {
@@ -3097,31 +3151,46 @@ button:focus-visible {
 
 .thread-environment-summary {
   position: relative;
-  display: flex;
+  display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   min-width: 0;
-  padding: 4px 12px;
-  border-bottom: 1px solid var(--oct-border);
-  background: var(--oct-bg);
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .thread-environment-summary__button {
-  display: inline-flex;
-  min-width: 0;
-  max-width: 100%;
+  display: inline-grid;
+  width: 26px;
+  min-width: 26px;
+  max-width: none;
   align-items: center;
-  gap: 8px;
-  height: auto;
-  min-height: 28px;
-  padding: 2px 8px;
+  justify-content: center;
+  gap: 0;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
   overflow: hidden;
+  color: var(--oct-muted);
+  border-radius: 6px;
+}
+
+.thread-environment-summary__button:hover,
+.thread-environment-summary__button[aria-expanded="true"] {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+}
+
+.thread-environment-summary__button[data-environment-status="unavailable"],
+.thread-environment-summary__button[data-environment-status="disconnected"] {
+  color: var(--oct-warn-fg);
 }
 
 .thread-environment-summary__label {
   flex: 0 0 auto;
   color: var(--oct-fg);
-  font-size: var(--oct-text-xs);
+  font-size: 11.5px;
   font-weight: var(--oct-weight-strong);
 }
 
@@ -3130,7 +3199,7 @@ button:focus-visible {
   min-width: 0;
   color: var(--oct-muted);
   font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3171,10 +3240,10 @@ button:focus-visible {
 }
 
 .thread-environment-disclosure {
-  top: calc(100% + 4px);
-  right: 12px;
+  top: calc(100% + 7px);
+  right: 0;
   left: auto;
-  width: min(360px, calc(100% - 24px));
+  width: min(360px, calc(100vw - 24px));
   max-height: min(680px, calc(100vh - 96px));
   padding: 0;
 }
@@ -5123,6 +5192,7 @@ button:focus-visible {
 }
 
 .code-thread-workspace {
+  position: relative;
   display: flex;
   width: 100%;
   min-height: 0;

@@ -1469,10 +1469,11 @@ describe("WorkspaceView Work thread tab", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Draft brief" })).toBeVisible();
-    expect(
-      await screen.findByRole("button", { name: /Show environment for Knowledge Base/ }),
-    ).toBeVisible();
-    expect(screen.getByText("work-root")).toBeVisible();
+    const environment = await screen.findByRole("button", {
+      name: /Show environment for Knowledge Base\. work-root/,
+    });
+    expect(environment).toBeVisible();
+    expect(environment).toHaveTextContent("Environment");
     expect(
       screen.queryByRole("dialog", { name: "Environment for Knowledge Base" }),
     ).not.toBeInTheDocument();
@@ -1830,7 +1831,9 @@ describe("WorkspaceView Chat thread Environment", () => {
     expect(
       await screen.findByRole("button", { name: /Show environment for Planning/ }),
     ).toBeVisible();
-    expect(screen.getByText("Virtual Project")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /Show environment for Planning\. Virtual Project/ }),
+    ).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: /Show environment for Planning/ }));
     expect(await screen.findByRole("dialog", { name: "Environment for Planning" })).toBeVisible();
     expect(screen.getAllByText("Attachments").length).toBeGreaterThan(0);

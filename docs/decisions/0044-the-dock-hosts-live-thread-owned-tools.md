@@ -16,9 +16,10 @@ terminal, browser, or review.
 
 ## Decision
 
-The right dock is a resizable working region for live tools owned by the
-active pane's subject. It is not a list of shortcuts, not a second thread
-switcher, and not a place for host-wide or Project-wide surfaces.
+The shell has two resizable working regions for live tools owned by the active
+pane's subject: the right dock and a horizontal bottom panel. They are not
+lists of shortcuts, not second thread switchers, and not places for host-wide
+or Project-wide surfaces.
 
 - **Instances stay with their owner.** A dock tool instance belongs to the
   thread or Project authority that created it. Switching panes never rebinds a
@@ -32,8 +33,18 @@ switcher, and not a place for host-wide or Project-wide surfaces.
   tools, not threads, and shows only capabilities valid for that pane. Hiding
   a tool does not stop its server-owned process; close and stop keep their
   existing product meaning. Narrow windows keep the existing overlay drawer.
+- **Terminal-first bottom panel.** The pane title row may open a horizontal
+  bottom panel below the central workspace and right dock. Terminal is its
+  first supported tab; the strip remains tool-shaped so another horizontal
+  tool can be added without inventing another panel model. New windows start
+  closed. Open state and height are per-window presentation preferences, while
+  authority and content still follow the active pane.
+- **One instance, one presentation.** A thread-owned tool appears in one shell
+  region at a time. Moving Terminal between the right dock and bottom panel
+  remounts the same thread-owned tool over the same server session; it never
+  duplicates, transfers, or rebinds a terminal to another thread.
 - **Direct tools, no generic tabs.** When mode and capability allow them, the
-  dock hosts Review, Files, Browser, Terminal, Canvas, and Side chat. The
+  utility regions host Review, Files, Browser, Terminal, Canvas, and Side chat. The
   generic Context, Project memory, Navigator, and Thread tabs are removed.
 - **Plan is artifact-gated.** Plan appears only when the active thread has a
   real plan artifact (0027). The dock shows that artifact, revisions, approval,
@@ -68,8 +79,10 @@ a Project overview, or a Project-level list.
 
 - Project memory now lives in Project Overview, and Navigator opens from the
   profile control. Files, Browser, Terminal, Canvas, Side chat, artifact-gated
-  Plan, conditional Delivery, thread-level Agents, and Review are direct dock
-  tools; the generic Thread accordion is gone. Local checkout changes and
+  Plan, conditional Delivery, thread-level Agents, and Review are direct
+  thread-owned utility tools; the generic Thread accordion is gone. Terminal
+  may be presented in the horizontal bottom panel without creating another
+  session. Local checkout changes and
   merge-back run diffs open in Review beside the thread; the full-window Code
   diff surface is gone.
 - 0015 remains Accepted as the current implemented shell. This record, with

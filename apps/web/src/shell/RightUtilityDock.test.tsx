@@ -88,7 +88,7 @@ describe("RightUtilityDock", () => {
     const onClose = vi.fn();
     const { rerender } = render(
       <>
-        <button ref={opener} type="button">
+        <button onClick={() => undefined} ref={opener} type="button">
           Open utility dock
         </button>
         <RightUtilityDock {...props({ isNarrow: true, onClose, restoreFocus: opener })} />
@@ -109,7 +109,7 @@ describe("RightUtilityDock", () => {
     expect(onClose).toHaveBeenCalledOnce();
     rerender(
       <>
-        <button ref={opener} type="button">
+        <button onClick={() => undefined} ref={opener} type="button">
           Open utility dock
         </button>
         <RightUtilityDock

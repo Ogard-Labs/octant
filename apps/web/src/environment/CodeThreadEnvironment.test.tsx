@@ -227,8 +227,9 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    expect(screen.getByText("No project")).toBeVisible();
-    expect(screen.getByText("unavailable")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Show environment for Code. No project" }),
+    ).toHaveAttribute("data-environment-status", "unavailable");
   });
 
   it("keeps open state as renderer state and closes when the pane is no longer active", async () => {

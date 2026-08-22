@@ -87,7 +87,7 @@ function upcastPersistedShellSettings(value: unknown): unknown {
   const withModeSwitcher =
     "modeSwitcherPresentation" in withContextSettings
       ? withContextSettings
-      : { ...withContextSettings, modeSwitcherPresentation: "buttons" };
+      : { ...withContextSettings, modeSwitcherPresentation: "dropdown" };
   const withSidebarBackground =
     "sidebarBackground" in withModeSwitcher
       ? withModeSwitcher

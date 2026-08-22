@@ -252,7 +252,8 @@ describe("App", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Plugins" }));
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("menuitem", { name: "Plugins" }));
 
     // Skills and extensions have a real Settings section, so the entry opens it
     // rather than a placeholder explaining where the surface would be.
@@ -1396,7 +1397,7 @@ describe("App", () => {
         shellClient={shellApi}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Code" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     const separator = screen.getByRole("separator", { name: "Resize navigation sidebar" });
     Object.assign(separator, {
       hasPointerCapture: vi.fn(() => true),
@@ -1437,7 +1438,7 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Code" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     expect(screen.queryByRole("separator", { name: "Resize navigation sidebar" })).toBeNull();
     expect(document.querySelector(".shell")).toHaveStyle({ "--octant-sidebar-width": "320px" });
   });
@@ -1538,7 +1539,7 @@ describe("App", () => {
     ).toBeVisible();
     expect(screen.queryByRole("dialog", { name: "Navigator" })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "Set your name" }));
-    await user.click(screen.getByRole("button", { name: "Navigator" }));
+    await user.click(screen.getByRole("menuitem", { name: "Navigator" }));
 
     const navigator = await screen.findByRole("dialog", { name: "Navigator" });
     expect(navigator).toBeVisible();
@@ -1558,7 +1559,7 @@ describe("App", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Navigator" })).toBeNull());
 
     await user.click(screen.getByRole("button", { name: "Set your name" }));
-    await user.click(screen.getByRole("button", { name: "Navigator" }));
+    await user.click(screen.getByRole("menuitem", { name: "Navigator" }));
     expect(await screen.findByRole("dialog", { name: "Navigator" })).toBeVisible();
     expect(screen.getByText("Answered: Stay on this thread")).toBeVisible();
     expect(
@@ -2140,7 +2141,7 @@ describe("App", () => {
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("heading", { name: "No tool open" })).toBeVisible();
+    expect(within(dock).getByText("Open a tool beside the active pane.")).toBeVisible();
     expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
   });
@@ -2247,7 +2248,7 @@ describe("App", () => {
     expect(screen.queryByRole("dialog", { name: "Right sidebar" })).toBeNull();
   });
 
-  it("does not disclose Code environment for Chat, Work, or no active Project", async () => {
+  it("does not disclose a thread environment for a Project overview", async () => {
     const user = userEvent.setup();
     render(
       <App
@@ -2259,18 +2260,13 @@ describe("App", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Code" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     await openSidebarProject(user, "Octant");
     expect(screen.getByRole("button", { name: "Open Right sidebar" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open Code environment" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
     expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Code environment" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Chat" }));
-    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: /Code environment/i })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Work" }));
-    expect(screen.queryByRole("button", { name: /Code environment/i })).not.toBeInTheDocument();
   });
 
   it("treats the native minimum width as compact desktop chrome", async () => {
@@ -2348,9 +2344,8 @@ describe("App", () => {
 
     expect(await screen.findByRole("banner")).toHaveClass("window-chrome--material-opaque");
     expect(document.querySelector(".shell")).toHaveClass("shell--material-opaque");
-    expect(
-      screen.getByRole("status", { name: /^Host: This Mac · (Connected|Connecting)$/ }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open Right sidebar" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Open Zen" })).not.toBeInTheDocument();
     expect(document.querySelector(".window-chrome__identity")).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Workspace pane: Welcome to Chat" })).toBeVisible();
     expect(screen.getByRole("banner")).toHaveAccessibleName(
@@ -2721,10 +2716,7 @@ describe("App", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("Loading Octant workspace");
-    expect(await screen.findByRole("button", { name: "Code" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    );
+    expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     expect(document.querySelector(".shell")).toHaveStyle({
       "--octant-sidebar-width": "232px",
     });
@@ -2743,7 +2735,7 @@ describe("App", () => {
     expect(sidebar).not.toHaveClass("window-drag-region");
     expect(sidebar.querySelector(".sidebar__drag-surface")).toHaveClass("window-drag-region");
     expect(sidebar.querySelector(".sidebar__content")).toHaveClass("window-no-drag");
-    expect(within(sidebar).getByRole("group", { name: "Workspace mode" })).toHaveClass(
+    expect(within(sidebar).getByRole("button", { name: "Workspace mode, Code" })).toHaveClass(
       "window-no-drag",
     );
     expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass("window-no-drag");
@@ -2759,7 +2751,8 @@ describe("App", () => {
     }
     expect(await screen.findByRole("button", { name: "Project actions for Octant" })).toBeVisible();
     expect(screen.getByRole("button", { name: "New thread" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Plugins" })).toBeVisible();
+    await user.click(within(sidebar).getByRole("button", { name: "Set your name" }));
+    expect(within(sidebar).getByRole("menuitem", { name: "Plugins" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Thread board" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
     const addFolder = screen.getByRole("button", { name: "Add folder" });
@@ -3264,7 +3257,7 @@ describe("App", () => {
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).not.toHaveAttribute("aria-current");
     await waitFor(() =>
-      expect(within(dock).getByRole("heading", { name: "No tool open" })).toBeVisible(),
+      expect(within(dock).getByText("Open a tool beside the active pane.")).toBeVisible(),
     );
     expect(within(dock).queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
     await user.click(within(dock).getByRole("button", { name: "Terminal" }));
@@ -3292,6 +3285,40 @@ describe("App", () => {
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
     expect(screen.getByRole("region", { name: "Workspace pane: Second thread" })).toBeVisible();
+  });
+
+  it("moves the active thread Terminal into a remembered bottom panel", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
+    const panel = await screen.findByRole("region", { name: "Bottom panel" });
+    expect(within(panel).getByRole("tab", { name: "Terminal" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Close bottom panel" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(within(dock).queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
+
+    await user.click(within(panel).getByRole("button", { name: "Hide bottom panel" }));
+    expect(screen.queryByRole("region", { name: "Bottom panel" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
   });
 
   it("clears the previous thread's dock tool before a pane with no thread loads", async () => {
@@ -3364,7 +3391,7 @@ describe("App", () => {
 
     fireEvent.pointerDown(screen.getByRole("region", { name: "Workspace pane: Octant" }));
 
-    expect(await within(dock).findByRole("heading", { name: "No tool open" })).toBeVisible();
+    expect(await within(dock).findByText("Open a tool beside the active pane.")).toBeVisible();
     expect(within(dock).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Workspace pane: Octant" })).toHaveAttribute(
       "aria-current",

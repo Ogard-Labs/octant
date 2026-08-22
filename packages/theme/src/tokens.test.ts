@@ -75,30 +75,30 @@ describe("theme semantic token catalog", () => {
     expect(getDefaultToken("accent", "dark")).toBe(getRoleDefinition("accent").defaultDark);
   });
 
-  it("uses the design system's warm charcoal-and-brass palette in both modes", () => {
+  it("uses the design system's neutral graphite palette in both modes", () => {
     expect(DEFAULT_LIGHT_TOKENS).toMatchObject({
-      "app-background": "#edece7",
-      workspace: "#f2f1ed",
-      floating: "#e6e5e0",
-      "text-primary": "#26251e",
-      accent: "#d9a441",
-      "accent-foreground": "#14130f",
-      "accent-text": "#8a6218",
+      "app-background": "#f7f7f7",
+      workspace: "#ffffff",
+      floating: "#f3f3f3",
+      "text-primary": "#202020",
+      accent: "#202020",
+      "accent-foreground": "#ffffff",
+      "accent-text": "#202020",
     });
     expect(DEFAULT_DARK_TOKENS).toMatchObject({
-      "app-background": "#0e0d0a",
-      workspace: "#14130f",
-      floating: "#1c1b16",
-      "text-primary": "#f2f1ed",
-      accent: "#d9a441",
-      "accent-foreground": "#14130f",
-      "accent-text": "#d9a441",
+      "app-background": "#171717",
+      workspace: "#171717",
+      floating: "#242424",
+      "text-primary": "#f2f2f2",
+      accent: "#f2f2f2",
+      "accent-foreground": "#171717",
+      "accent-text": "#f2f2f2",
     });
   });
 
-  it("keeps the brass accent fill constant across modes while accent-as-text darkens for light", () => {
-    expect(DEFAULT_LIGHT_TOKENS["accent"]).toBe(DEFAULT_DARK_TOKENS["accent"]);
-    expect(DEFAULT_LIGHT_TOKENS["accent-text"]).not.toBe(DEFAULT_LIGHT_TOKENS["accent"]);
+  it("uses theme-appropriate monochrome accent fills", () => {
+    expect(DEFAULT_LIGHT_TOKENS["accent"]).not.toBe(DEFAULT_DARK_TOKENS["accent"]);
+    expect(DEFAULT_LIGHT_TOKENS["accent-text"]).toBe(DEFAULT_LIGHT_TOKENS["accent"]);
     expect(DEFAULT_DARK_TOKENS["accent-text"]).toBe(DEFAULT_DARK_TOKENS["accent"]);
   });
 

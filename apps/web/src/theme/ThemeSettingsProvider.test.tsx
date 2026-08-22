@@ -13,15 +13,15 @@ describe("ThemeSettingsProvider", () => {
 
     const root = document.documentElement;
     expect(root.dataset.octantThemeMode).toBe("light");
-    expect(root.style.getPropertyValue("--octant-workspace")).toBe("#f2f1ed");
-    expect(root.style.getPropertyValue("--octant-surface")).toBe("#f2f1ed");
-    expect(root.style.getPropertyValue("--octant-surface-raised")).toBe("#e6e5e0");
-    expect(root.style.getPropertyValue("--octant-surface-muted")).toBe("#ebeae5");
-    expect(root.style.getPropertyValue("--octant-border-subtle")).toBe("#d5d4d0");
-    expect(root.style.getPropertyValue("--octant-focus")).toBe("#8a6218");
+    expect(root.style.getPropertyValue("--octant-workspace")).toBe("#ffffff");
+    expect(root.style.getPropertyValue("--octant-surface")).toBe("#ffffff");
+    expect(root.style.getPropertyValue("--octant-surface-raised")).toBe("#f3f3f3");
+    expect(root.style.getPropertyValue("--octant-surface-muted")).toBe("#efefef");
+    expect(root.style.getPropertyValue("--octant-border-subtle")).toBe("#dedede");
+    expect(root.style.getPropertyValue("--octant-focus")).toBe("#202020");
     expect(root.style.getPropertyValue("--octant-palette-green")).toBe("#41761c");
     expect(root.style.getPropertyValue("--octant-sidebar-translucent-subtle")).toBe(
-      "color-mix(in srgb, #eeede8 78%, transparent)",
+      "color-mix(in srgb, #f0f0f0 78%, transparent)",
     );
 
     result.unmount();

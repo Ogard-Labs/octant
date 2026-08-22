@@ -41,7 +41,6 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
     if (mode !== props.activeMode) props.onSelectMode(mode);
   };
 
-  const ActiveIcon = modeIcons[props.activeMode];
   const items: Array<OctantMenuItem> = modes.map((mode) => {
     const ModeIcon = modeIcons[mode];
     return {
@@ -60,6 +59,7 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
         data-oct-modeswitch="icons"
         role="group"
       >
+        <span className="mode-switcher__brand">Octant</span>
         {modes.map((mode) => {
           const ModeIcon = modeIcons[mode];
           const active = props.activeMode === mode;
@@ -89,8 +89,8 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
         }}
         trigger={
           <>
-            <ActiveIcon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
-            <span>{modeLabels[props.activeMode]}</span>
+            <span className="mode-switcher__brand">Octant</span>
+            <span className="mode-switcher__context">{modeLabels[props.activeMode]}</span>
             <ChevronDown
               aria-hidden="true"
               className="icon mode-caret"

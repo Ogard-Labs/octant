@@ -10,7 +10,7 @@ export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonEle
 
 /** Shell icon control backed by the Octant/shadcn button recipe. */
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
-  { className, icon: Icon, label, title = label, type = "button", ...buttonProps },
+  { className, icon: Icon, label, onClick, title = label, type = "button", ...buttonProps },
   ref,
 ) {
   return (
@@ -18,6 +18,7 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       {...buttonProps}
       aria-label={label}
       className={cn("shell-icon-button", "window-no-drag", className)}
+      onClick={onClick}
       ref={ref}
       size="icon"
       title={title}

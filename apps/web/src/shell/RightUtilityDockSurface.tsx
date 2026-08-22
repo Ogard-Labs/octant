@@ -85,11 +85,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       <div className="dock-body right-utility-dock__content">
         {props.resolution.kind === "closed" ? (
           <div className="dock-tool-launcher">
-            <ShellState
-              message="Open a thread-owned tool to work beside this pane."
-              state="neutral"
-              title="No tool open"
-            />
+            <p className="dock-tool-launcher__hint">Open a tool beside the active pane.</p>
             {props.launchableSurfaces.length === 0 ? null : (
               <div className="dock-tool-launcher__list">
                 <DockToolLaunchList onOpen={props.onOpenTab} surfaces={props.launchableSurfaces} />

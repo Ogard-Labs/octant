@@ -444,7 +444,7 @@ describe("database CLI runtime composition", () => {
       firstRunOnboarding: "completed",
       automaticUpdateChecks: true,
       lastContextSurface: null,
-      modeSwitcherPresentation: "buttons",
+      modeSwitcherPresentation: "dropdown",
       navigatorAssistant: {},
       projectViewSwitcherPresentation: "dropdown",
       userProfile: { accent: "indigo", avatar: { kind: "initials" } },

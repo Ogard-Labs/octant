@@ -70,6 +70,7 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     expect(screen.queryByRole("navigation", { name: "Recent chats" })).not.toBeInTheDocument();
 
     const disclosure = screen.getByRole("button", { name: "Collapse Test" });
+    expect(disclosure.querySelector('[data-project-icon="chat"]')).toBeInTheDocument();
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     await user.click(disclosure);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
@@ -107,6 +108,42 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     expect(onNewChatInProject).toHaveBeenCalledWith(chatProjectA.id);
     await user.click(screen.getByRole("button", { name: /Planning/i }));
     expect(onSelectThread).toHaveBeenCalledWith("thread-a");
+  });
+
+  it("reads and filters a separate Work Project View set", async () => {
+    window.localStorage.setItem(
+      "octant.work.project-views.v1",
+      JSON.stringify({
+        activeViewId: "view-writing",
+        views: [
+          {
+            id: "view-writing",
+            name: "Writing",
+            projectIds: [String(chatProjectB.id)],
+            icon: "folder",
+            color: "neutral",
+          },
+        ],
+      }),
+    );
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewsEnabled
+        projectViewsMode="work"
+        projects={[chatProjectA, chatProjectB]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Project view" })).toHaveTextContent("Writing");
+    expect(screen.getByRole("button", { name: "Collapse Research" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Collapse Test" })).not.toBeInTheDocument();
   });
 
   it("expands and focuses the requested Project thread list", async () => {
