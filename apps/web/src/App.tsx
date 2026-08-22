@@ -2889,6 +2889,13 @@ function LaunchedShell(
         setDraftError("The thread was created, but its first provider turn could not be started.");
         return false;
       }
+      // The window-level create controller owns the command, while the open
+      // thread's transcript belongs to its per-thread controller. Opening the
+      // thread before the turn starts can make that controller hydrate an
+      // honestly empty journal. Notify that exact controller after the
+      // operation is durable; the registry queues the refresh if React has not
+      // published the controller slot yet.
+      codeThreadControllers.refreshConversation(created.thread.id);
       return true;
     } catch (error) {
       setDraftError(

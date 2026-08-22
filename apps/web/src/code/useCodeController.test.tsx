@@ -1241,6 +1241,73 @@ describe("useCodeController", () => {
     expect(result.current.conversation).toEqual([]);
   });
 
+  it("hydrates the first provider turn when its new thread is already active", async () => {
+    const promptId = "60000000-0000-4000-8000-000000000024";
+    const replyId = "60000000-0000-4000-8000-000000000025";
+    let startedOperationId: string | undefined;
+    const conversation = vi.fn(async () => ({
+      version: 3 as const,
+      threadId: ids.thread,
+      turns:
+        startedOperationId === undefined
+          ? []
+          : [
+              {
+                operationId: startedOperationId,
+                providerInstanceId: ids.provider,
+                modelId: "model-a",
+                sessionId: "80000000-0000-4000-8000-000000000024",
+                prompt: { contentId: promptId, digest: "a".repeat(64), byteLength: 17 },
+                assistant: [{ contentId: replyId, digest: "b".repeat(64), byteLength: 5 }],
+                status: "completed" as const,
+                startedAt: now,
+                updatedAt: now,
+              },
+            ],
+      nextCursor: startedOperationId === undefined ? 0 : 1,
+      hasMore: false,
+    }));
+    const client = fakeClient({
+      conversation: conversation as never,
+      putEvidence: vi.fn(async () => ({
+        contentId: promptId,
+        digest: "a".repeat(64),
+        byteLength: 17,
+      })) as never,
+      executeOperation: vi.fn(async (command) => {
+        startedOperationId = String(command.operationId);
+        return {
+          kind: "provider-turn-state" as const,
+          operationId: command.operationId,
+          state: "running" as const,
+        };
+      }) as never,
+      operationContent: vi.fn(async (_threadId, _operationId, contentId) =>
+        new TextEncoder().encode(contentId === promptId ? "First prompt text" : "Reply"),
+      ),
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+    expect(result.current.conversation).toEqual([]);
+
+    await act(async () => {
+      await result.current.startThreadTurn({
+        threadId: ids.thread,
+        checkoutId: ids.checkout as never,
+        prompt: "First prompt text",
+      });
+    });
+
+    await waitFor(() =>
+      expect(result.current.conversation.map((message) => message.text)).toEqual([
+        "First prompt text",
+        "Reply",
+      ]),
+    );
+  });
+
   it("restores a failed first-turn prompt when its newly created thread becomes active", async () => {
     const client = fakeClient({
       executeOperation: vi.fn(async () => ({
