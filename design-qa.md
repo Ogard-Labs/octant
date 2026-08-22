@@ -23,8 +23,9 @@ fixture.
 - Structure: matches the references' optional right rail, compact top context,
   horizontal tab strip, adjacent add button, and one active utility occupying
   the remaining height.
-- Hierarchy: the active utility is primary; Context, Project memory, and
-  Navigator remain compact secondary rows rather than competing cards.
+- Hierarchy: the active utility is primary. Context, Project memory, and
+  Navigator later left those compact summary rows — Context to the composer
+  meter, memory to Project Overview, Navigator to the profile control.
 - Density: tabs, rows, borders, and type reuse Octant's incumbent compact shell
   scale. The dock does not introduce the large cards, badges, or excess section
   chrome visible in the discarded implementation.
@@ -33,8 +34,7 @@ fixture.
 - Icons: utility actions use the existing Lucide icon dependency. No raster,
   emoji, inline SVG, or approximation assets were introduced.
 - Behavior: the launcher fits inside the dock without clipping, the selected
-  Browser tab is closable, the main thread remains visible, and the top summary
-  remains stable across utility changes.
+  Browser tab is closable, and the main thread remains visible.
 
 ## Iteration history
 

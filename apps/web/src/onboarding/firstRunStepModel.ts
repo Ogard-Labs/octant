@@ -56,7 +56,7 @@ const SUMMARIES: Record<FirstRunStepId, string> = {
   workspace: "Appearance, and which modes you use.",
   providers: "What this Mac can actually reach.",
   "default-model": "The model new Chat threads start with.",
-  navigator: "The optional assistant in the sidebar.",
+  navigator: "The optional assistant from the profile control.",
 };
 
 /**

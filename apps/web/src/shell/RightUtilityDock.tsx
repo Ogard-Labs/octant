@@ -16,7 +16,6 @@ export interface RightUtilityDockProps {
   readonly iosSimulator?: ReactNode;
   readonly isNarrow: boolean;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
-  readonly navigator: ReactNode;
   readonly onClose: () => void;
   readonly onCloseTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly onCommitWidth: (width: number) => void;
@@ -24,11 +23,9 @@ export interface RightUtilityDockProps {
   readonly onPreviewWidth: (width: number) => void;
   readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
   readonly open: boolean;
-  readonly projectMemory: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
   readonly sideChat?: ReactNode;
-  readonly summary: ReactNode;
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
@@ -52,14 +49,11 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       {...(props.files === undefined ? {} : { files: props.files })}
       {...(props.iosSimulator === undefined ? {} : { iosSimulator: props.iosSimulator })}
       launchableSurfaces={props.launchableSurfaces}
-      navigator={props.navigator}
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
       onSelectSurface={props.onSelectSurface}
-      projectMemory={props.projectMemory}
       resolution={props.resolution}
       {...(props.sideChat === undefined ? {} : { sideChat: props.sideChat })}
-      summary={props.summary}
       tabs={props.tabs}
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
       {...(props.tests === undefined ? {} : { tests: props.tests })}

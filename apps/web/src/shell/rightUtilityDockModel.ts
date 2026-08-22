@@ -1,14 +1,6 @@
 import type { OctantMode } from "@octant/contracts/modes";
-import type {
-  CanonicalProjectBinding,
-  ProjectId,
-  ProjectLifecycle,
-  ProjectType,
-} from "@octant/contracts/projects";
 
 export type RightUtilityDockSurfaceId =
-  | "project-memory"
-  | "navigator"
   | "side-chat"
   | "browser"
   | "files"
@@ -21,26 +13,18 @@ export type RightUtilityDockSurfaceId =
 /**
  * What a panel answers for, and therefore what makes it truthful.
  *
- * A `project` panel is only truthful next to the Project it describes, so a
- * missing, incompatible, or stale Project makes it unavailable. A `host` panel
- * has no Project to be stale against — asking it for one would close it
- * forever. A `thread` panel answers for the thread in the active pane, so a
- * pane holding no thread is what makes it unavailable.
+ * Remaining dock tools are thread-owned. A pane holding no thread is what
+ * makes a selected tool unavailable. Retired category ids (Context, Project
+ * memory, Navigator) stay decodeable in persisted settings and resolve to a
+ * closed dock rather than a panel the dock no longer hosts.
  */
-export type RightUtilityDockSurfaceScope = "host" | "project" | "thread";
+export type RightUtilityDockSurfaceScope = "thread";
 
 export interface RightUtilityDockSurfaceDescriptor {
   readonly id: RightUtilityDockSurfaceId;
   readonly label: string;
   readonly modes: ReadonlyArray<OctantMode>;
   readonly scope: RightUtilityDockSurfaceScope;
-}
-
-export interface RightUtilityDockProject {
-  readonly id: ProjectId;
-  readonly type: ProjectType;
-  readonly lifecycle: ProjectLifecycle;
-  readonly binding?: CanonicalProjectBinding;
 }
 
 export type RightUtilityDockSurfaceAvailability =
@@ -53,7 +37,6 @@ export type RightUtilityDockConnectionState = "connected" | "disconnected";
 
 export interface RightUtilityDockResolutionInput {
   readonly activeMode: OctantMode;
-  readonly activeProject?: RightUtilityDockProject;
   /**
    * The thread the active pane holds, absent when it holds something else — a
    * welcome surface, a Project overview, a utility surface. A thread-scoped
@@ -63,7 +46,6 @@ export interface RightUtilityDockResolutionInput {
   readonly connectionState: RightUtilityDockConnectionState;
   readonly presentationAvailability: RightUtilityDockSurfaceAvailability;
   readonly savedSurface: unknown;
-  readonly surfaceProjectId?: ProjectId;
 }
 
 export type RightUtilityDockClosedReason =
@@ -75,22 +57,11 @@ export type RightUtilityDockClosedReason =
   | "unknown"
   | "unknown-surface";
 
-export type RightUtilityDockUnavailableReason =
-  | "project-incompatible"
-  | "project-required"
-  | "project-stale"
-  | "thread-required";
+export type RightUtilityDockUnavailableReason = "thread-required";
 
 export type RightUtilityDockResolution =
   | {
       readonly kind: "surface";
-      /**
-       * The Project this surface describes, present only when the surface is
-       * about one. A host-owned surface reports no Project rather than a
-       * placeholder id, so a consumer cannot read an identity the dock never
-       * resolved.
-       */
-      readonly projectId?: ProjectId;
       readonly surface: RightUtilityDockSurfaceDescriptor;
     }
   | {
@@ -114,31 +85,13 @@ export type RightUtilityDockResolution =
 /*
  * What the dock holds is decided by scope, not by convenience.
  *
- * A thread-scoped panel used to be a panel that lies: a leaf held a strip of
- * tabs, so with two threads visible the window-scoped dock could only ever
- * answer for one of them, and `code-environment` and `plan` were removed for
- * it. 0041 changed that premise — a pane holds exactly one surface and the
- * dock follows the active pane — so the active pane now names the dock's
- * thread unambiguously, and a thread-scoped panel can be truthful here. The
- * direct utilities restore independently for each active thread; the legacy
- * Thread panel keeps only the secondary Plan, Publish, and Agents tools that
- * were never workspace-launcher entries.
+ * Direct thread utilities restore independently for each active thread; the
+ * legacy Thread panel keeps only the secondary Plan, Publish, and Agents tools
+ * that were never workspace-launcher entries. Generic category tabs are gone:
+ * Context lives on the composer meter, Project memory in Overview, Navigator
+ * on the profile control.
  */
 export const RIGHT_UTILITY_DOCK_SURFACES = [
-  {
-    id: "project-memory",
-    label: "Project memory",
-    modes: ["chat", "work", "code"],
-    scope: "project",
-  },
-  // Host-owned: Navigator answers for the host across every mode, so it is the
-  // one surface here that is not about a Project.
-  {
-    id: "navigator",
-    label: "Navigator",
-    modes: ["chat", "work", "code"],
-    scope: "host",
-  },
   {
     id: "side-chat",
     label: "Side Chat",
@@ -191,16 +144,14 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
 
 const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSurfaceDescriptor>> =
   {
-    "project-memory": RIGHT_UTILITY_DOCK_SURFACES[0],
-    navigator: RIGHT_UTILITY_DOCK_SURFACES[1],
-    "side-chat": RIGHT_UTILITY_DOCK_SURFACES[2],
-    browser: RIGHT_UTILITY_DOCK_SURFACES[3],
-    files: RIGHT_UTILITY_DOCK_SURFACES[4],
-    changes: RIGHT_UTILITY_DOCK_SURFACES[5],
-    terminal: RIGHT_UTILITY_DOCK_SURFACES[6],
-    tests: RIGHT_UTILITY_DOCK_SURFACES[7],
-    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[8],
-    thread: RIGHT_UTILITY_DOCK_SURFACES[9],
+    "side-chat": RIGHT_UTILITY_DOCK_SURFACES[0],
+    browser: RIGHT_UTILITY_DOCK_SURFACES[1],
+    files: RIGHT_UTILITY_DOCK_SURFACES[2],
+    changes: RIGHT_UTILITY_DOCK_SURFACES[3],
+    terminal: RIGHT_UTILITY_DOCK_SURFACES[4],
+    tests: RIGHT_UTILITY_DOCK_SURFACES[5],
+    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[6],
+    thread: RIGHT_UTILITY_DOCK_SURFACES[7],
   };
 
 export function resolveRightUtilityDockSurface(
@@ -224,49 +175,17 @@ export function resolveRightUtilityDockSurface(
     return closed("mode-invalid");
   }
 
-  // A host-owned surface answers for the host, not for a Project, so the
-  // presence, compatibility, and staleness checks below have nothing to read.
-  // Running them anyway would close it permanently.
-  if (surface.scope === "host") {
-    return { kind: "surface", surface };
-  }
-
-  if (surface.scope === "thread") {
-    return input.activeThreadId === undefined
-      ? { kind: "unavailable", reason: "thread-required", surface }
-      : { kind: "surface", surface };
-  }
-
-  const project = input.activeProject;
-  if (project === undefined) {
-    return { kind: "unavailable", reason: "project-required", surface };
-  }
-  if (
-    project.lifecycle !== "active" ||
-    project.type !== input.activeMode ||
-    (project.type !== "chat" && !hasBinding(project.binding))
-  ) {
-    return { kind: "unavailable", reason: "project-incompatible", surface };
-  }
-  if (input.surfaceProjectId === undefined || input.surfaceProjectId !== project.id) {
-    return { kind: "unavailable", reason: "project-stale", surface };
-  }
-
-  return { kind: "surface", projectId: project.id, surface };
+  return input.activeThreadId === undefined
+    ? { kind: "unavailable", reason: "thread-required", surface }
+    : { kind: "surface", surface };
 }
 
 function closed(reason: RightUtilityDockClosedReason): RightUtilityDockResolution {
   return { kind: "closed", reason };
 }
 
-function hasBinding(binding: CanonicalProjectBinding | undefined): boolean {
-  return binding !== undefined && binding.canonicalRoot.trim().length > 0;
-}
-
 function isRightUtilityDockSurfaceId(value: unknown): value is RightUtilityDockSurfaceId {
   return [
-    "project-memory",
-    "navigator",
     "side-chat",
     "browser",
     "files",

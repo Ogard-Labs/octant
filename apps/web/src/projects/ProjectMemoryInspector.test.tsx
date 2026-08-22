@@ -10,14 +10,8 @@ import {
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { RightUtilityDock } from "../shell/RightUtilityDock";
-import { RIGHT_UTILITY_DOCK_SURFACES } from "../shell/rightUtilityDockModel";
 import { ProjectMemoryInspector } from "./ProjectMemoryInspector";
 
-const projectMemorySurface = RIGHT_UTILITY_DOCK_SURFACES.find(
-  (surface) => surface.id === "project-memory",
-);
-if (projectMemorySurface === undefined) throw new Error("Missing Project memory dock surface.");
 const sourceProjectId = decodeProjectId("00000000-0000-4000-8000-000000000901");
 const destinationProjectId = decodeProjectId("00000000-0000-4000-8000-000000000902");
 const archivedProjectId = decodeProjectId("00000000-0000-4000-8000-000000000903");
@@ -136,42 +130,12 @@ function renderInspector(
 }
 
 describe("ProjectMemoryInspector", () => {
-  it("embeds under one utility dock landmark and selected tab, with no close of its own", () => {
-    const inspector = renderInspector();
-    inspector.unmount();
-    render(
-      <RightUtilityDock
-        isNarrow={false}
-        launchableSurfaces={[]}
-        navigator={null}
-        onClose={vi.fn()}
-        onCloseTab={vi.fn()}
-        onCommitWidth={vi.fn()}
-        onOpenTab={vi.fn()}
-        onPreviewWidth={vi.fn()}
-        onSelectSurface={vi.fn()}
-        open
-        projectMemory={<ProjectMemoryInspector {...inspector.props} embedded />}
-        resolution={{
-          kind: "surface",
-          projectId: sourceProjectId,
-          surface: projectMemorySurface,
-        }}
-        summary={null}
-        tabs={[projectMemorySurface]}
-        width={360}
-      />,
-    );
+  it("embeds in Project Overview without a close control of its own", () => {
+    renderInspector({ embedded: true });
 
-    expect(screen.getAllByRole("complementary", { name: "Right Utility Dock" })).toHaveLength(1);
-    expect(screen.getByRole("tab", { name: "Project memory" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    // The tab strip owns utility closure. The embedded inspector does not add
-    // another close control beside it.
-    expect(screen.queryAllByRole("button", { name: "Close Project memory" })).toHaveLength(0);
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeVisible();
     expect(screen.getByText("Source")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Close Project memory" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add memory" })).toBeVisible();
   });
 
@@ -233,7 +197,7 @@ describe("ProjectMemoryInspector", () => {
     expect(screen.getAllByText("The workspace remains local-first.")[0]).toBeVisible();
   });
 
-  it("does not expose stale Project memory or mutations while a new dock owner loads", () => {
+  it("does not expose stale Project memory or mutations while another Project loads", () => {
     const destination = project(destinationProjectId, "Destination");
     const { props, rerender } = renderInspector();
 

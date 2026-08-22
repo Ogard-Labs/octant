@@ -5,7 +5,7 @@ import type { NavigatorAssistantController } from "../navigator/useNavigatorAssi
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface ZenAssistantProps {
-  /** The shared Navigator reader — the same one the utility dock panel uses. */
+  /** The shared Navigator reader — the same one the profile popover uses. */
   readonly controller: NavigatorAssistantController;
   /** Zen's own facts: tool capability and the inert recipe preview. */
   readonly snapshot: ZenAssistantSnapshot | null;
@@ -20,7 +20,7 @@ export interface ZenAssistantProps {
  * Zen's front onto Navigator.
  *
  * The conversation, its readiness, and the model it runs on are not Zen's to
- * own: this is a wrapper over the same Navigator panel the utility dock shows,
+ * own: this is a wrapper over the same Navigator panel the profile popover shows,
  * driven by the same controller, so both surfaces are one conversation on the
  * one configured model. What stays here is what is genuinely Zen's — the Zen
  * tool-capability notice and the inert recipe preview, which remain

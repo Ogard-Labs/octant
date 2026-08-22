@@ -87,8 +87,9 @@ export type SidebarWidth = typeof SidebarWidth.Type;
 
 /**
  * A panel the right utility dock can remember as the last one shown. Retired
- * ids stay in the literal so a stored preference still decodes; the renderer
- * refuses one it no longer offers and simply opens nothing.
+ * ids — Context, Project memory, Navigator, and earlier Environment/Plan
+ * placements — stay in the literal so a stored preference still decodes; the
+ * renderer refuses one it no longer offers and simply opens nothing.
  */
 export const ContextSurfaceId = Schema.Literal(
   "context",

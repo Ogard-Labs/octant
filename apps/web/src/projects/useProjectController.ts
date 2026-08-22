@@ -494,6 +494,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     rename,
     retry: () => load("retry"),
     retryMemory: loadMemory,
+    touchMemoryRevision: advanceMemoryRevision,
     search,
     searchErrorMessage,
     searchResults,

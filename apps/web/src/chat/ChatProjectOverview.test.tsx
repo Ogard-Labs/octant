@@ -2,7 +2,6 @@ import { ProjectClientFailure } from "@octant/client-runtime/project-client";
 import { ChatClientFailure } from "@octant/client-runtime/chat-client";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ProjectMemoryInspectorProvider } from "../projects/ProjectMemoryInspector";
 import { ChatProjectOverview, type ChatProjectOverviewModel } from "./ChatProjectOverview";
 
 const model: ChatProjectOverviewModel = {
@@ -528,7 +527,7 @@ describe("ChatProjectOverview", () => {
     ).toHaveTextContent("Outcomes and decisions are unauthorized.");
   });
 
-  it("discloses bounded item counts and opens their authoritative Project paths", async () => {
+  it("discloses bounded item counts and opens the complete Project thread list", async () => {
     const projectId = "00000000-0000-4000-8000-000000000001" as never;
     const thread = {
       id: "00000000-0000-4000-8000-000000000011",
@@ -536,43 +535,40 @@ describe("ChatProjectOverview", () => {
       title: "Attachment and follow-up thread",
     };
     const onViewAllProjectThreads = vi.fn();
-    const onOpenMemoryInspector = vi.fn();
     render(
-      <ProjectMemoryInspectorProvider onOpen={onOpenMemoryInspector}>
-        <ChatProjectOverview
-          client={
-            {
-              thread: vi.fn(async () => ({
-                thread,
-                attachments: Array.from({ length: 10 }, (_, index) => ({
-                  id: `attachment-${index}`,
-                  displayName: `Attachment ${index + 1}`,
-                  status: "finalized",
-                })),
-                workItems: Array.from({ length: 10 }, (_, index) => ({
-                  id: `work-${index}`,
-                  status: "open",
-                  title: `Follow-up ${index + 1}`,
-                })),
+      <ChatProjectOverview
+        client={
+          {
+            thread: vi.fn(async () => ({
+              thread,
+              attachments: Array.from({ length: 10 }, (_, index) => ({
+                id: `attachment-${index}`,
+                displayName: `Attachment ${index + 1}`,
+                status: "finalized",
               })),
-            } as never
-          }
-          controller={{ bootstrap: { threads: [thread] }, status: "ready" } as never}
-          onViewAllProjectThreads={onViewAllProjectThreads}
-          projectClient={
-            {
-              memory: vi.fn(async () => ({
-                active: Array.from({ length: 10 }, (_, index) => ({
-                  id: `memory-${index}`,
-                  content: `Decision ${index + 1}`,
-                  kind: "decision",
-                })),
+              workItems: Array.from({ length: 10 }, (_, index) => ({
+                id: `work-${index}`,
+                status: "open",
+                title: `Follow-up ${index + 1}`,
               })),
-            } as never
-          }
-          projectId={projectId}
-        />
-      </ProjectMemoryInspectorProvider>,
+            })),
+          } as never
+        }
+        controller={{ bootstrap: { threads: [thread] }, status: "ready" } as never}
+        onViewAllProjectThreads={onViewAllProjectThreads}
+        projectClient={
+          {
+            memory: vi.fn(async () => ({
+              active: Array.from({ length: 10 }, (_, index) => ({
+                id: `memory-${index}`,
+                content: `Decision ${index + 1}`,
+                kind: "decision",
+              })),
+            })),
+          } as never
+        }
+        projectId={projectId}
+      />,
     );
 
     expect(
@@ -584,8 +580,9 @@ describe("ChatProjectOverview", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "View all Project threads" })[0]!);
     expect(onViewAllProjectThreads).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getAllByRole("button", { name: "View all Project memory" })[0]!);
-    expect(onOpenMemoryInspector).toHaveBeenCalledWith(projectId, expect.any(HTMLButtonElement));
+    expect(
+      screen.queryByRole("button", { name: "View all Project memory" }),
+    ).not.toBeInTheDocument();
   });
 
   it("refreshes the bounded projections when live Chat navigation changes", async () => {

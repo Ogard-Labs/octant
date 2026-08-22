@@ -27,7 +27,7 @@ function renderChrome(overrides: Partial<React.ComponentProps<typeof WindowChrom
     activeSurface: "Welcome to Code",
     dockAvailable: false,
     dockExpanded: false,
-    dockLabel: "Project memory",
+    dockLabel: "Right sidebar",
     hostBridge: hostBridge(),
     isNarrow: false,
     material: "opaque",
@@ -410,8 +410,8 @@ describe("WindowChrome", () => {
       dockAvailable: true,
     });
 
-    const dock = screen.getByRole("button", { name: "Open Project memory" });
-    expect(dock).toHaveAttribute("title", "Open Project memory");
+    const dock = screen.getByRole("button", { name: "Open Right sidebar" });
+    expect(dock).toHaveAttribute("title", "Open Right sidebar");
     expect(dock).toHaveAttribute("aria-expanded", "false");
     expect(dock).toHaveAttribute("aria-controls", "right-utility-dock");
     expect(dock).toHaveAttribute("data-dock-opener", "true");
@@ -420,13 +420,13 @@ describe("WindowChrome", () => {
     expect(props.onToggleDock).toHaveBeenCalledWith(dock);
 
     rerender(<WindowChrome {...props} dockAvailable dockExpanded />);
-    expect(screen.getByRole("button", { name: "Close Project memory" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Close Right sidebar" })).toHaveAttribute(
       "aria-expanded",
       "true",
     );
 
     rerender(<WindowChrome {...props} dockAvailable={false} />);
-    expect(screen.queryByRole("button", { name: /Project memory/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Right sidebar/i })).not.toBeInTheDocument();
   });
 
   it("moves the single utility dock action into narrow disclosure", async () => {
@@ -439,7 +439,7 @@ describe("WindowChrome", () => {
     expect(overflow).toHaveAttribute("data-dock-opener", "true");
 
     await user.click(overflow);
-    const dock = screen.getByRole("button", { name: "Open Project memory" });
+    const dock = screen.getByRole("button", { name: "Open Right sidebar" });
     expect(dock).toHaveAttribute("aria-expanded", "false");
     expect(dock).toHaveAttribute("aria-controls", "right-utility-dock");
     dock.focus();
@@ -542,7 +542,7 @@ describe("WindowChrome", () => {
         activeSurface="Welcome to Code"
         dockAvailable={false}
         dockExpanded={false}
-        dockLabel="Project memory"
+        dockLabel="Right sidebar"
         isNarrow={false}
         material="opaque"
         onOpenZen={vi.fn()}

@@ -11,8 +11,7 @@ import { ProjectThreadList, type ProjectThreadListStatus } from "./ProjectThread
  * The Overview sits several layers below the shell that owns thread navigation,
  * and the layers between it belong to other surfaces. Rather than thread props
  * through them, the shell publishes the same list and the same selection
- * handler the sidebar uses, exactly as `ProjectMemoryInspectorProvider`
- * publishes the memory opener.
+ * handler the sidebar uses.
  */
 export interface ProjectThreadsAccess {
   readonly errorMessage?: string;

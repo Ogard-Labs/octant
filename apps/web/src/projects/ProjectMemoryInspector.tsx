@@ -7,7 +7,7 @@ import type {
   ProjectMemoryView,
   ProjectSummary,
 } from "@octant/contracts/projects";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { MemoryEntryDialog } from "./MemoryEntryDialog";
@@ -19,50 +19,17 @@ type InspectorDialog =
   | { readonly kind: "retract"; readonly entry: ActiveMemoryEntry }
   | { readonly kind: "transfer"; readonly entry: ActiveMemoryEntry };
 
-type OpenMemoryInspector = (projectId: ProjectId | undefined, opener: HTMLElement) => void;
-const MemoryInspectorContext = createContext<OpenMemoryInspector | undefined>(undefined);
 const memoryTimestampFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
 });
-
-export function ProjectMemoryInspectorProvider(props: {
-  readonly children: React.ReactNode;
-  readonly onOpen: OpenMemoryInspector;
-}) {
-  return (
-    <MemoryInspectorContext.Provider value={props.onOpen}>
-      {props.children}
-    </MemoryInspectorContext.Provider>
-  );
-}
-
-export function ProjectMemoryOpenButton(
-  props: {
-    readonly label?: string;
-    readonly projectId?: ProjectId;
-  } = {},
-) {
-  const openMemoryInspector = useContext(MemoryInspectorContext);
-  if (openMemoryInspector === undefined) return null;
-  return (
-    <OctantButton
-      className="project-button project-overview__memory-action"
-      onClick={(event) => openMemoryInspector(props.projectId, event.currentTarget)}
-      type="button"
-      variant="secondary"
-    >
-      {props.label ?? "Review Project memory"}
-    </OctantButton>
-  );
-}
 
 export interface ProjectMemoryInspectorProps {
   readonly busy: boolean;
   readonly embedded?: boolean;
   readonly errorMessage?: string;
   readonly memory?: ProjectMemoryView;
-  readonly onClose: () => void;
+  readonly onClose?: () => void;
   readonly onCreate: (kind: MemoryKind, content: string) => Promise<boolean>;
   readonly onLoad: (projectId: ProjectId) => Promise<void>;
   readonly onRetract: (entryId: MemoryEntryId, reason: string) => Promise<boolean>;
@@ -74,6 +41,7 @@ export interface ProjectMemoryInspectorProps {
   ) => Promise<boolean>;
   readonly project: ProjectSummary;
   readonly projects: ReadonlyArray<ProjectSummary>;
+  readonly readOnly?: boolean;
   readonly status: "idle" | "loading" | "ready" | "error" | "conflict-reload";
 }
 
@@ -83,7 +51,7 @@ export function ProjectMemoryInspector(props: ProjectMemoryInspectorProps) {
   const [filter, setFilter] = useState<MemoryKind | "all">("all");
   const [dialog, setDialog] = useState<InspectorDialog>();
   const dialogOpener = useRef<HTMLElement | undefined>(undefined);
-  const readOnly = props.project.lifecycle === "archived";
+  const readOnly = props.readOnly === true || props.project.lifecycle === "archived";
   const memory =
     props.memory !== undefined && String(props.memory.projectId) === String(props.project.id)
       ? props.memory
@@ -130,15 +98,13 @@ export function ProjectMemoryInspector(props: ProjectMemoryInspectorProps) {
       {...(props.embedded ? {} : { "aria-label": "Project memory" })}
       className={`project-memory-inspector window-no-drag${props.embedded ? " project-memory-inspector--embedded" : ""}`}
     >
-      {props.embedded ? (
-        <p className="project-memory-inspector__project">{props.project.name}</p>
-      ) : (
-        <header className="project-memory-inspector__header">
-          <div>
-            <span>Project context</span>
-            <h2>Memory</h2>
-            <p>{props.project.name}</p>
-          </div>
+      <header className="project-memory-inspector__header">
+        <div>
+          <span>Project context</span>
+          <h2>Memory</h2>
+          <p>{props.project.name}</p>
+        </div>
+        {props.embedded || props.onClose === undefined ? null : (
           <OctantButton
             aria-label="Close Project memory"
             onClick={props.onClose}
@@ -148,8 +114,8 @@ export function ProjectMemoryInspector(props: ProjectMemoryInspectorProps) {
           >
             ×
           </OctantButton>
-        </header>
-      )}
+        )}
+      </header>
       <div className="project-memory-inspector__toolbar">
         <label>
           <span className="sr-only">Filter memory by kind</span>

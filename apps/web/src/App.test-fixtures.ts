@@ -167,7 +167,11 @@ export function projects(value = projectBootstrap()): ProjectClient {
       }
       throw new Error(`Unhandled ${command.kind}`);
     }),
-    memory: vi.fn(),
+    memory: vi.fn(async (requestedProjectId) => ({
+      projectId: requestedProjectId,
+      active: [],
+      history: [],
+    })),
     environment: vi.fn(async () => {
       throw new Error("Unexpected environment request.");
     }),

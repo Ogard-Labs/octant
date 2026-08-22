@@ -6,7 +6,6 @@ import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
-import { ProjectMemoryOpenButton } from "../projects/ProjectMemoryInspector";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import type { ChatController } from "./useChatController";
@@ -554,12 +553,6 @@ function SectionBody(props: {
           >
             View all Project threads
           </OctantButton>
-        ) : null}
-        {props.section.completePath === "project-memory" ? (
-          <ProjectMemoryOpenButton
-            label="View all Project memory"
-            {...(props.projectId === undefined ? {} : { projectId: props.projectId })}
-          />
         ) : null}
         {props.section.status === "stale" && items.length > 0 ? (
           <p role="status">{message}</p>

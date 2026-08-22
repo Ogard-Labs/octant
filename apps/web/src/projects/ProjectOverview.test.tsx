@@ -4,34 +4,31 @@ import type { ProjectSummary } from "@octant/contracts/projects";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { ProjectMemoryInspectorProvider } from "./ProjectMemoryInspector";
 import { ProjectOverview } from "./ProjectOverview";
 import { ProjectThreadsProvider, type ProjectThreadsAccess } from "./ProjectThreadsSection";
 
 describe("ProjectOverview", () => {
   it("composes the Chat overview into a virtual Chat Project", () => {
     render(
-      <ProjectMemoryInspectorProvider onOpen={vi.fn()}>
-        <ProjectOverview
-          chatOverview={<section aria-label="Chat Project Overview">Chat-only overview</section>}
-          onArchive={vi.fn()}
-          onRelink={vi.fn()}
-          onRename={vi.fn()}
-          project={
-            {
-              id: "20000000-0000-4000-8000-000000000000",
-              name: "Launch planning",
-              lifecycle: "active",
-              pinned: true,
-              rank: "0/1",
-              version: 1,
-              createdAt: "2026-07-21T12:00:00.000Z",
-              updatedAt: "2026-07-21T12:00:00.000Z",
-              type: "chat",
-            } as never
-          }
-        />
-      </ProjectMemoryInspectorProvider>,
+      <ProjectOverview
+        chatOverview={<section aria-label="Chat Project Overview">Chat-only overview</section>}
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={
+          {
+            id: "20000000-0000-4000-8000-000000000000",
+            name: "Launch planning",
+            lifecycle: "active",
+            pinned: true,
+            rank: "0/1",
+            version: 1,
+            createdAt: "2026-07-21T12:00:00.000Z",
+            updatedAt: "2026-07-21T12:00:00.000Z",
+            type: "chat",
+          } as never
+        }
+      />,
     );
 
     expect(screen.getByRole("region", { name: "Chat Project Overview" })).toHaveTextContent(
@@ -42,8 +39,61 @@ describe("ProjectOverview", () => {
     expect(
       screen.queryByText(/Virtual organization with approved memory/i),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Review memory" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Archive" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Memory" })).not.toBeInTheDocument();
+  });
+
+  it("exposes Project memory on the Overview for the Project it is showing", async () => {
+    const projectId = "20000000-0000-4000-8000-000000000000";
+    const projectClient = {
+      memory: vi.fn(async () => ({
+        projectId,
+        active: [
+          {
+            id: "20000000-0000-4000-8000-000000000010",
+            projectId,
+            kind: "fact",
+            content: "Keep this Project's memory on the Overview.",
+            provenance: { kind: "user-authored" },
+            author: { kind: "local-user", actorId: "20000000-0000-4000-8000-000000000011" },
+            status: "active",
+            version: 1,
+            createdAt: "2026-07-21T12:00:00.000Z",
+            updatedAt: "2026-07-21T12:00:00.000Z",
+          },
+        ],
+        history: [],
+      })),
+      executeMemory: vi.fn(),
+    };
+
+    render(
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={
+          {
+            id: projectId,
+            name: "Launch planning",
+            lifecycle: "active",
+            pinned: true,
+            rank: "0/1",
+            version: 1,
+            createdAt: "2026-07-21T12:00:00.000Z",
+            updatedAt: "2026-07-21T12:00:00.000Z",
+            type: "chat",
+          } as never
+        }
+        projectClient={projectClient as never}
+      />,
+    );
+
+    expect(await screen.findByRole("region", { name: "Project memory" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Memory" })).toBeVisible();
+    expect(screen.getByText("Keep this Project's memory on the Overview.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add memory" })).toBeVisible();
+    expect(projectClient.memory).toHaveBeenCalledWith(projectId);
   });
 
   it("composes the authoritative Code overview into a Code Project", () => {
@@ -79,44 +129,42 @@ describe("ProjectOverview", () => {
 
   it("shows a Code Project's threads once: the sessions list owns the page", () => {
     render(
-      <ProjectMemoryInspectorProvider onOpen={vi.fn()}>
-        <ProjectThreadsProvider
-          value={{
-            onSelectThread: vi.fn(),
-            status: "ready",
-            threads: [
-              {
-                projectId: "20000000-0000-4000-8000-000000000001",
-                threadId: "thread-code",
-                title: "Fix the flaky smoke",
-                updatedAt: "2026-08-14T09:00:00.000Z",
-              },
-            ],
-          }}
-        >
-          <ProjectOverview
-            codeOverview={<section aria-label="Code sessions">Authoritative sessions</section>}
-            onArchive={vi.fn()}
-            onRelink={vi.fn()}
-            onRename={vi.fn()}
-            project={
-              {
-                id: "20000000-0000-4000-8000-000000000001",
-                name: "Octant",
-                lifecycle: "active",
-                pinned: true,
-                rank: "0/1",
-                version: 1,
-                createdAt: "2026-07-21T12:00:00.000Z",
-                updatedAt: "2026-07-21T12:00:00.000Z",
-                type: "code",
-                binding: { canonicalRoot: "/opaque/repository" },
-                codeAccessPersistence: "current-session",
-              } as never
-            }
-          />
-        </ProjectThreadsProvider>
-      </ProjectMemoryInspectorProvider>,
+      <ProjectThreadsProvider
+        value={{
+          onSelectThread: vi.fn(),
+          status: "ready",
+          threads: [
+            {
+              projectId: "20000000-0000-4000-8000-000000000001",
+              threadId: "thread-code",
+              title: "Fix the flaky smoke",
+              updatedAt: "2026-08-14T09:00:00.000Z",
+            },
+          ],
+        }}
+      >
+        <ProjectOverview
+          codeOverview={<section aria-label="Code sessions">Authoritative sessions</section>}
+          onArchive={vi.fn()}
+          onRelink={vi.fn()}
+          onRename={vi.fn()}
+          project={
+            {
+              id: "20000000-0000-4000-8000-000000000001",
+              name: "Octant",
+              lifecycle: "active",
+              pinned: true,
+              rank: "0/1",
+              version: 1,
+              createdAt: "2026-07-21T12:00:00.000Z",
+              updatedAt: "2026-07-21T12:00:00.000Z",
+              type: "code",
+              binding: { canonicalRoot: "/opaque/repository" },
+              codeAccessPersistence: "current-session",
+            } as never
+          }
+        />
+      </ProjectThreadsProvider>,
     );
 
     expect(screen.getByRole("region", { name: "Code sessions" })).toBeVisible();
@@ -322,16 +370,14 @@ describe("ProjectOverview threads and recent activity", () => {
 
   function renderWithThreads(access: ProjectThreadsAccess) {
     return render(
-      <ProjectMemoryInspectorProvider onOpen={vi.fn()}>
-        <ProjectThreadsProvider value={access}>
-          <ProjectOverview
-            onArchive={vi.fn()}
-            onRelink={vi.fn()}
-            onRename={vi.fn()}
-            project={chatProject}
-          />
-        </ProjectThreadsProvider>
-      </ProjectMemoryInspectorProvider>,
+      <ProjectThreadsProvider value={access}>
+        <ProjectOverview
+          onArchive={vi.fn()}
+          onRelink={vi.fn()}
+          onRename={vi.fn()}
+          project={chatProject}
+        />
+      </ProjectThreadsProvider>,
     );
   }
 
@@ -397,24 +443,22 @@ describe("ProjectOverview threads and recent activity", () => {
     expect(screen.queryByText("No threads in this Project yet.")).not.toBeInTheDocument();
 
     rerender(
-      <ProjectMemoryInspectorProvider onOpen={vi.fn()}>
-        <ProjectThreadsProvider
-          value={{
-            errorMessage: "The host refused the thread list.",
-            onRetry,
-            onSelectThread: vi.fn(),
-            status: "unavailable",
-            threads: [],
-          }}
-        >
-          <ProjectOverview
-            onArchive={vi.fn()}
-            onRelink={vi.fn()}
-            onRename={vi.fn()}
-            project={chatProject}
-          />
-        </ProjectThreadsProvider>
-      </ProjectMemoryInspectorProvider>,
+      <ProjectThreadsProvider
+        value={{
+          errorMessage: "The host refused the thread list.",
+          onRetry,
+          onSelectThread: vi.fn(),
+          status: "unavailable",
+          threads: [],
+        }}
+      >
+        <ProjectOverview
+          onArchive={vi.fn()}
+          onRelink={vi.fn()}
+          onRename={vi.fn()}
+          project={chatProject}
+        />
+      </ProjectThreadsProvider>,
     );
 
     expect(screen.getByRole("status", { name: "Thread list status" })).toHaveTextContent(
@@ -425,16 +469,14 @@ describe("ProjectOverview threads and recent activity", () => {
     expect(onRetry).toHaveBeenCalledOnce();
 
     rerender(
-      <ProjectMemoryInspectorProvider onOpen={vi.fn()}>
-        <ProjectThreadsProvider value={{ onSelectThread: vi.fn(), status: "ready", threads: [] }}>
-          <ProjectOverview
-            onArchive={vi.fn()}
-            onRelink={vi.fn()}
-            onRename={vi.fn()}
-            project={chatProject}
-          />
-        </ProjectThreadsProvider>
-      </ProjectMemoryInspectorProvider>,
+      <ProjectThreadsProvider value={{ onSelectThread: vi.fn(), status: "ready", threads: [] }}>
+        <ProjectOverview
+          onArchive={vi.fn()}
+          onRelink={vi.fn()}
+          onRename={vi.fn()}
+          project={chatProject}
+        />
+      </ProjectThreadsProvider>,
     );
 
     expect(screen.getByText("No threads in this Project yet.")).toBeVisible();
@@ -442,14 +484,12 @@ describe("ProjectOverview threads and recent activity", () => {
 
   it("claims nothing about threads on a surface that never published them", () => {
     render(
-      <ProjectMemoryInspectorProvider onOpen={vi.fn()}>
-        <ProjectOverview
-          onArchive={vi.fn()}
-          onRelink={vi.fn()}
-          onRename={vi.fn()}
-          project={chatProject}
-        />
-      </ProjectMemoryInspectorProvider>,
+      <ProjectOverview
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={chatProject}
+      />,
     );
 
     expect(
