@@ -3807,6 +3807,14 @@ function LaunchedShell(
               <ProjectMemoryInspectorProvider onOpen={openMemoryInspector}>
                 <AgentProfileNamesProvider profiles={executionProfileController.profiles}>
                   <ComposerContextMeterProvider
+                    busy={contextController.status === "updating"}
+                    onRebuild={() => void contextController.rebuild()}
+                    onSetExcluded={(entryId, excluded) =>
+                      void contextController.setExcluded(entryId, excluded)
+                    }
+                    onSetPinned={(entryId, pinned) =>
+                      void contextController.setPinned(entryId, pinned)
+                    }
                     status={contextController.status}
                     {...(contextController.snapshot === undefined
                       ? {}

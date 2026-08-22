@@ -172,9 +172,10 @@ or hidden presentation. Work and Code have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
 Chat has no board. Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
-popover without a further provider call. Zen is a separate presentation
-aggregate inside the same window, not a split-tree tab and not a fourth
-authority mode.
+popover without a further provider call, and Inspect context opens the
+composition inspector for pin, exclude, and rebuild. Zen is a separate
+presentation aggregate inside the same window, not a split-tree tab and not a
+fourth authority mode.
 
 **Approved migration, not yet the renderer.** Proposed records
 [0041](decisions/0041-panes-hold-one-surface.md),

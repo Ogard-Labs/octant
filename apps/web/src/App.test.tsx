@@ -1260,6 +1260,16 @@ describe("App", () => {
     expect(popover).toHaveTextContent(/Tools2 loaded· 6 deferred/);
     expect(inspect.mock.calls.length).toBe(inspectCalls);
 
+    await user.click(screen.getByRole("button", { name: "Inspect context" }));
+    expect(await screen.findByRole("dialog", { name: "Context inspector" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Rebuild context plan" })).toBeVisible();
+    expect(inspect.mock.calls.length).toBe(inspectCalls);
+    await user.click(screen.getByRole("button", { name: "Pin Repository search next turn" }));
+    expect(contextApi.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "update-context-overrides" }),
+      expect.any(AbortSignal),
+    );
+
     await user.keyboard("{Escape}");
     await user.keyboard("{Control>}{Shift>}u{/Shift}{/Control}");
     expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();

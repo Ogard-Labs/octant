@@ -62,8 +62,9 @@ space, and only the categories the host actually measured. Estimated,
 deferred, unavailable, or provider-reported values say so. Provider account
 limits appear in a separate section, and only when the host reported them.
 Opening the popover does not make a further provider or network call.
-Switching the active pane closes a popover that belonged to the previous
-thread and retargets every value.
+Inspect context opens the composition list so you can pin, exclude, or
+rebuild the next-turn plan. Switching the active pane closes a popover or
+inspector that belonged to the previous thread and retargets every value.
 
 The planner, manifest, and limits on this page do not change with that
 placement. Sensitive values are redacted in previews.

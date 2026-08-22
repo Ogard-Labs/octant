@@ -1,7 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+import type { ContextEntryId } from "@octant/contracts/context";
 import { ComposerContextMeter } from "./ComposerContextMeter";
 import {
   ComposerContextMeterGate,
@@ -15,6 +16,9 @@ import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 function Harness(props: {
   readonly children?: ReactNode;
   readonly inspect?: () => void;
+  readonly onRebuild?: () => void;
+  readonly onSetExcluded?: (entryId: ContextEntryId, excluded: boolean) => void;
+  readonly onSetPinned?: (entryId: ContextEntryId, pinned: boolean) => void;
   readonly snapshot?: ContextInspectorSnapshot;
   readonly status?: ContextControllerStatus;
   readonly subjectKey?: string;
@@ -23,6 +27,9 @@ function Harness(props: {
   const inspect = props.inspect ?? vi.fn();
   return (
     <ComposerContextMeterProvider
+      {...(props.onRebuild === undefined ? {} : { onRebuild: props.onRebuild })}
+      {...(props.onSetExcluded === undefined ? {} : { onSetExcluded: props.onSetExcluded })}
+      {...(props.onSetPinned === undefined ? {} : { onSetPinned: props.onSetPinned })}
       snapshot={props.snapshot ?? contextFixture()}
       status={props.status ?? "ready"}
       subjectKey={props.subjectKey ?? "chat-thread:a"}
@@ -147,6 +154,41 @@ describe("ComposerContextMeter", () => {
   it("does not render on a composer the active pane does not own", () => {
     render(<Harness visible={false} />);
     expect(screen.queryByRole("button", { name: /context usage/i })).not.toBeInTheDocument();
+  });
+
+  it("opens the context inspector from the usage popover so pin, exclude, and rebuild stay reachable", async () => {
+    const user = userEvent.setup();
+    const onRebuild = vi.fn();
+    const onSetExcluded = vi.fn();
+    const onSetPinned = vi.fn();
+    render(
+      <Harness onRebuild={onRebuild} onSetExcluded={onSetExcluded} onSetPinned={onSetPinned} />,
+    );
+    await user.click(screen.getByRole("button", { name: /Show context usage/i }));
+    await user.click(screen.getByRole("button", { name: "Inspect context" }));
+    expect(screen.queryByRole("dialog", { name: "Context usage" })).not.toBeInTheDocument();
+    const inspector = await screen.findByRole("dialog", { name: "Context inspector" });
+    expect(inspector).toBeVisible();
+    await user.click(
+      within(inspector).getByRole("button", { name: "Pin Repository search next turn" }),
+    );
+    expect(onSetPinned).toHaveBeenCalledWith("50000000-0000-4000-8000-000000000002", true);
+    await user.click(
+      within(inspector).getByRole("button", { name: "Exclude Repository search next turn" }),
+    );
+    expect(onSetExcluded).toHaveBeenCalledWith("50000000-0000-4000-8000-000000000002", true);
+    await user.click(within(inspector).getByRole("button", { name: "Rebuild context plan" }));
+    expect(onRebuild).toHaveBeenCalledOnce();
+  });
+
+  it("closes the context inspector when the subject changes", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<Harness subjectKey="chat-thread:a" />);
+    await user.click(screen.getByRole("button", { name: /Show context usage/i }));
+    await user.click(screen.getByRole("button", { name: "Inspect context" }));
+    expect(await screen.findByRole("dialog", { name: "Context inspector" })).toBeVisible();
+    rerender(<Harness subjectKey="chat-thread:b" />);
+    expect(screen.queryByRole("dialog", { name: "Context inspector" })).not.toBeInTheDocument();
   });
 
   it("names an unplanned thread instead of inventing usage", async () => {

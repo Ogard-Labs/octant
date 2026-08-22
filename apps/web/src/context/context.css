@@ -217,6 +217,16 @@
   color: var(--octant-text-secondary);
 }
 
+.octant-dialog__popup.context-inspector-dialog {
+  --octant-dialog-width: 42rem;
+  --octant-dialog-height: min(86vh, 40rem);
+
+  display: grid;
+  height: min(var(--octant-dialog-height), calc(100vh - 48px));
+  padding: 0;
+  overflow: hidden;
+}
+
 .context-health-warning {
   display: inline-flex;
   min-height: 24px;

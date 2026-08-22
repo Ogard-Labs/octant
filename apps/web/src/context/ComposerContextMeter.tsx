@@ -4,6 +4,7 @@ import { matchKeybinding } from "@octant/domain";
 import { useEffect, useId, useRef, useState } from "react";
 import { isApplePlatform } from "../platform";
 import { useKeybindings } from "../keybindings/useKeybindings";
+import { ContextInspector } from "./ContextInspector";
 import {
   contextHealthLabel,
   contextWindowModel,
@@ -12,6 +13,7 @@ import {
 } from "./contextInspectorModel";
 import { useComposerContextMeterScope } from "./composerContextMeterScope";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantDialog } from "../ui/base/OctantDialog";
 import "./context.css";
 
 const METER_RADIUS = 7;
@@ -37,6 +39,7 @@ export function ComposerContextMeter() {
   const scope = useComposerContextMeterScope();
   const snapshot = scope.snapshot;
   const [open, setOpen] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const panelId = useId();
@@ -44,7 +47,14 @@ export function ComposerContextMeter() {
 
   useEffect(() => {
     setOpen(false);
+    setInspecting(false);
   }, [scope.subjectKey]);
+
+  useEffect(() => {
+    if (scope.visible) return;
+    setOpen(false);
+    setInspecting(false);
+  }, [scope.visible]);
 
   useEffect(() => {
     if (scope.openNonce === seenOpenNonce.current) return;
@@ -147,15 +157,41 @@ export function ComposerContextMeter() {
           {windowModel === undefined || snapshot === undefined ? (
             <p>{emptyMessage(scope.status)}</p>
           ) : (
-            <ContextUsagePopover snapshot={snapshot} windowModel={windowModel} />
+            <ContextUsagePopover
+              onInspect={() => {
+                setOpen(false);
+                setInspecting(true);
+              }}
+              snapshot={snapshot}
+              windowModel={windowModel}
+            />
           )}
         </div>
+      ) : null}
+      {inspecting && snapshot !== undefined ? (
+        <OctantDialog
+          className="context-inspector-dialog"
+          label="Context inspector"
+          onClose={() => setInspecting(false)}
+          open
+          restoreFocus={trigger}
+        >
+          <ContextInspector
+            busy={scope.busy}
+            onClose={() => setInspecting(false)}
+            onRebuild={scope.rebuild}
+            onSetExcluded={scope.setExcluded}
+            onSetPinned={scope.setPinned}
+            snapshot={snapshot}
+          />
+        </OctantDialog>
       ) : null}
     </div>
   );
 }
 
 function ContextUsagePopover(props: {
+  readonly onInspect: () => void;
   readonly snapshot: ContextInspectorSnapshot;
   readonly windowModel: ReturnType<typeof contextWindowModel>;
 }) {
@@ -231,6 +267,14 @@ function ContextUsagePopover(props: {
           ))}
         </section>
       )}
+      <OctantButton
+        className="context-window-popover__inspect"
+        onClick={props.onInspect}
+        type="button"
+        variant="ghost"
+      >
+        Inspect context
+      </OctantButton>
     </>
   );
 }
