@@ -31,6 +31,39 @@ describe("ShellSidebar", () => {
     expect(container.querySelector(".sidebar__drag-surface")).toBeInTheDocument();
   });
 
+  it("exposes Work destinations backed by exact actions, including the Thread board", async () => {
+    const user = userEvent.setup();
+    const actions = {
+      "new-work-thread": vi.fn(),
+      automations: vi.fn(),
+      plugins: vi.fn(),
+      "thread-board": vi.fn(),
+    };
+    render(
+      <ShellSidebar
+        automationsEnabled={false}
+        workNavigation={{ actions }}
+        onAddFolder={vi.fn()}
+        onSearchQueryChange={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        searchQuery=""
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "work" }}
+      />,
+    );
+
+    for (const label of ["New thread", "Plugins", "Thread board"]) {
+      await user.click(screen.getByRole("button", { name: label }));
+    }
+    expect(actions["new-work-thread"]).toHaveBeenCalledOnce();
+    expect(actions.plugins).toHaveBeenCalledOnce();
+    expect(actions["thread-board"]).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
+  });
+
   it("exposes Code destinations backed by exact actions", async () => {
     const user = userEvent.setup();
     const actions = {

@@ -571,6 +571,7 @@ function LaunchedShell(
     readonly message: string;
   }>();
   const [codeBoardOpen, setCodeBoardOpen] = useState(false);
+  const [workBoardOpen, setWorkBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
   const [draftProviderInstanceId, setDraftProviderInstanceId] =
@@ -1743,6 +1744,13 @@ function LaunchedShell(
         .map((project) => ({ id: project.id, name: project.name })),
     [projectController.allProjects],
   );
+  const workBoardProjects = useMemo(
+    () =>
+      projectController.allProjects
+        .filter((project) => project.type === "work" && project.lifecycle === "active")
+        .map((project) => ({ id: project.id, name: project.name })),
+    [projectController.allProjects],
+  );
   const workProviderChoices = useMemo<ReadonlyArray<CodeThreadProviderChoice>>(
     () =>
       workProviderGroups.flatMap((group) =>
@@ -2211,6 +2219,7 @@ function LaunchedShell(
     zen.active ||
     railPlaceholder !== undefined ||
     codeBoardOpen ||
+    workBoardOpen ||
     automationCenterVisible
       ? new Map<string, ReadonlySet<string>>()
       : representedComputerUseSessions;
@@ -2491,15 +2500,10 @@ function LaunchedShell(
     void controller.openSettings({ section: "skills" });
   }
 
-  function openRailPlaceholder(title: string, message: string) {
-    setCodeBoardOpen(false);
-    setAutomationCenterOpen(false);
-    setRailPlaceholder({ title, message });
-  }
-
   function openAutomationCenter() {
     setRailPlaceholder(undefined);
     setCodeBoardOpen(false);
+    setWorkBoardOpen(false);
     setArtifactLibraryOpen(false);
     setAutomationCenterOpen(true);
   }
@@ -2510,6 +2514,7 @@ function LaunchedShell(
   function openArtifactLibrary() {
     setRailPlaceholder(undefined);
     setCodeBoardOpen(false);
+    setWorkBoardOpen(false);
     setAutomationCenterOpen(false);
     setArtifactLibraryOpen(true);
   }
@@ -2518,6 +2523,7 @@ function LaunchedShell(
     setRailPlaceholder(undefined);
     controller.setMode(mode);
     if (mode !== "code") setCodeBoardOpen(false);
+    if (mode !== "work") setWorkBoardOpen(false);
     // The Automation Center is one shared Work/Code surface; leaving both
     // work modes dismisses it.
     if (mode === "chat") setAutomationCenterOpen(false);
@@ -3501,6 +3507,7 @@ function LaunchedShell(
                         setRailPlaceholder(undefined);
                         setAutomationCenterOpen(false);
                         setArtifactLibraryOpen(false);
+                        setWorkBoardOpen(false);
                         setCodeBoardOpen(true);
                       },
                     },
@@ -3515,6 +3522,13 @@ function LaunchedShell(
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
+                      "thread-board": () => {
+                        setRailPlaceholder(undefined);
+                        setAutomationCenterOpen(false);
+                        setArtifactLibraryOpen(false);
+                        setCodeBoardOpen(false);
+                        setWorkBoardOpen(true);
+                      },
                     },
                   },
                 }
@@ -3692,23 +3706,26 @@ function LaunchedShell(
                 {...(railPlaceholder === undefined ? {} : { railPlaceholder })}
                 onDismissRailPlaceholder={() => setRailPlaceholder(undefined)}
                 codeBoardOpen={codeBoardOpen}
+                workBoardOpen={workBoardOpen}
                 activeMode={activeMode}
                 codeClient={codeClient}
+                workThreadClient={workThreadClient}
                 codeBoardProjects={codeBoardProjects}
+                workBoardProjects={workBoardProjects}
                 onCloseCodeBoard={() => setCodeBoardOpen(false)}
+                onCloseWorkBoard={() => setWorkBoardOpen(false)}
                 unreadThreadIds={
                   new Set(
-                    codeController.navigation
+                    (activeMode === "work" ? workNavigation.navigation : codeController.navigation)
                       .filter((thread) => thread.unread === true)
                       .map((thread) => String(thread.threadId)),
                   )
                 }
                 providerLabels={
                   new Map(
-                    codeProviderGroups.map((group) => [
-                      String(group.instance.id),
-                      group.instance.displayName,
-                    ]),
+                    (activeMode === "work" ? workProviderGroups : codeProviderGroups).map(
+                      (group) => [String(group.instance.id), group.instance.displayName],
+                    ),
                   )
                 }
                 onOpenCodeBoardThread={(target) => {
@@ -3719,6 +3736,18 @@ function LaunchedShell(
                   void controller.openCodeThread(
                     target.threadId,
                     thread?.title ?? "Code thread",
+                    undefined,
+                    target.projectId,
+                  );
+                }}
+                onOpenWorkBoardThread={(target) => {
+                  const thread = workNavigation.bootstrap?.threads.find(
+                    (candidate) => String(candidate.id) === String(target.threadId),
+                  );
+                  setWorkBoardOpen(false);
+                  void controller.openWorkThread(
+                    target.threadId,
+                    thread?.title ?? "Work thread",
                     undefined,
                     target.projectId,
                   );
@@ -3838,7 +3867,10 @@ function LaunchedShell(
                     githubCloneClient={githubCloneClient}
                     hostId={createHostId}
                     hidden={
-                      railPlaceholder !== undefined || codeBoardOpen || automationCenterVisible
+                      railPlaceholder !== undefined ||
+                      codeBoardOpen ||
+                      workBoardOpen ||
+                      automationCenterVisible
                     }
                     onActivatePane={(paneId) => void controller.activatePane(paneId)}
                     tabActivation={controller.tabActivation}

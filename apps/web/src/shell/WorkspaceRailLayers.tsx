@@ -1,6 +1,7 @@
 import type { AutomationClient } from "@octant/client-runtime";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
+import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
 import type { OctantMode } from "@octant/contracts/modes";
 import { ArtifactLibrarySurface } from "../artifacts/ArtifactLibrarySurface";
@@ -11,17 +12,24 @@ import type {
 } from "../automation/automationCenterModel";
 import { CodeThreadBoard, type CodeThreadOpenTarget } from "../code/CodeThreadBoard";
 import type { CodeBoardProjectRef } from "../code/codeBoardGrouping";
+import type { ThreadBoardProjectRef } from "../threadBoard/threadBoardGrouping";
+import { WorkThreadBoard, type WorkThreadOpenTarget } from "../work/WorkThreadBoard";
 import { ShellState } from "./ShellState";
 
 export interface WorkspaceRailLayersProps {
   readonly railPlaceholder?: { readonly title: string; readonly message: string };
   readonly onDismissRailPlaceholder: () => void;
   readonly codeBoardOpen: boolean;
+  readonly workBoardOpen: boolean;
   readonly activeMode: OctantMode;
   readonly codeClient: CodeClient;
+  readonly workThreadClient: WorkThreadClient;
   readonly codeBoardProjects: ReadonlyArray<CodeBoardProjectRef>;
+  readonly workBoardProjects: ReadonlyArray<ThreadBoardProjectRef>;
   readonly onCloseCodeBoard: () => void;
+  readonly onCloseWorkBoard: () => void;
   readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
+  readonly onOpenWorkBoardThread: (target: WorkThreadOpenTarget) => void;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly artifactLibraryOpen: boolean;
@@ -68,6 +76,23 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
             projects={props.codeBoardProjects}
             onClose={props.onCloseCodeBoard}
             onOpenThread={props.onOpenCodeBoardThread}
+            {...(props.unreadThreadIds === undefined
+              ? {}
+              : { unreadThreadIds: props.unreadThreadIds })}
+            {...(props.providerLabels === undefined
+              ? {}
+              : { providerLabels: props.providerLabels })}
+          />
+        </div>
+      ) : null}
+      {props.workBoardOpen && props.activeMode === "work" ? (
+        <div className="code-board-layer">
+          <WorkThreadBoard
+            isNarrow={props.isNarrow}
+            loadBoard={(query) => props.workThreadClient.queryBoard(query)}
+            projects={props.workBoardProjects}
+            onClose={props.onCloseWorkBoard}
+            onOpenThread={props.onOpenWorkBoardThread}
             {...(props.unreadThreadIds === undefined
               ? {}
               : { unreadThreadIds: props.unreadThreadIds })}

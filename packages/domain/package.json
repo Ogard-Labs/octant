@@ -32,6 +32,7 @@
     "./context-policy": "./src/contextPolicy.ts",
     "./diagnostics-policy": "./src/diagnosticsPolicy.ts",
     "./work-confinement-policy": "./src/workConfinementPolicy.ts",
+    "./work-delivery-policy": "./src/workDeliveryPolicy.ts",
     "./work-promotion-policy": "./src/workPromotionPolicy.ts",
     "./work-research-policy": "./src/workResearchPolicy.ts",
     "./event-policy": "./src/eventPolicy.ts",

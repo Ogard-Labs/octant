@@ -1,18 +1,25 @@
 import type { AutomationClient } from "@octant/client-runtime";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App";
 import {
   chats,
+  chatShellBootstrap,
   client,
   codeShellBootstrap,
   codes,
   projectWindowCapability,
   projects,
   providers,
+  providersWithToolModel,
   windowId,
+  workProjectId,
+  workProjects,
+  workShellBootstrap,
+  workThreadId,
 } from "../App.test-fixtures";
+import { decodeWorkThread } from "@octant/contracts";
 import {
   automationCodeDraftFixture,
   automationDefinitionFixture,
@@ -32,6 +39,7 @@ vi.mock("../automation/automationCenterGate", () => ({
 
 afterEach(() => {
   automationGate.enabled = false;
+  vi.unstubAllGlobals();
 });
 
 describe("WorkspaceRailLayers", () => {
@@ -140,5 +148,119 @@ describe("WorkspaceRailLayers", () => {
     expect(screen.queryByRole("heading", { name: "Pull requests" })).not.toBeInTheDocument();
     expect(document.querySelector(".rail-placeholder")).toBeNull();
     expect(document.querySelector(".workspace")).not.toHaveAttribute("hidden");
+  });
+
+  it("opens the Work Thread Board from the sidebar and activates the exact Project and thread", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url.includes("/api/work/overview") || url.includes("/api/work/board")) {
+          return new Response("{}", {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      }),
+    );
+    const queryBoard = vi.fn(async () => ({
+      version: 1 as const,
+      query: { version: 1 as const },
+      cards: [
+        {
+          threadId: workThreadId,
+          projectId: workProjectId,
+          title: "Draft brief",
+          status: "ready" as const,
+          statusReason: "idle-unmet-delivery" as const,
+          deliveryTarget: "Draft brief",
+          deliverySatisfaction: "pending" as const,
+          providerInstanceId: "90000000-0000-4000-8000-000000000001",
+          modelId: "gpt-5",
+          executing: false,
+          binding: { kind: "bound" as const, workingDirectory: "." },
+          activeRequest: { kind: "none" as const },
+          artifacts: { count: 0 },
+          citations: { count: 0, staleCount: 0 },
+          goal: { kind: "none" as const },
+          childRuns: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },
+          recovery: { kind: "ok" as const },
+          staleEvidence: false,
+          followUp: false,
+          lastMeaningfulActivityAt: null,
+        },
+      ],
+      generatedAt: "2026-07-26T09:30:00.000Z",
+    }));
+    const workThreadClient = {
+      bootstrap: vi.fn(async () => ({
+        threads: [
+          decodeWorkThread({
+            id: workThreadId,
+            projectId: workProjectId,
+            title: "Draft brief",
+            lifecycle: "active",
+            providerInstanceId: "90000000-0000-4000-8000-000000000001",
+            modelId: "gpt-5",
+            bindingRevisionId: "30000000-0000-4000-8000-000000000001",
+            workingDirectory: ".",
+            version: 1,
+            createdAt: "2026-07-26T09:30:00.000Z",
+            updatedAt: "2026-07-26T09:30:00.000Z",
+          }),
+        ],
+      })),
+      execute: vi.fn(),
+      queryBoard,
+    };
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={workProjects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client(workShellBootstrap())}
+        workThreadClient={workThreadClient as never}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Thread board" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Thread board" }));
+    expect(await screen.findByRole("region", { name: "Work Thread Board" })).toBeVisible();
+    expect(queryBoard).toHaveBeenCalled();
+    expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
+
+    const board = screen.getByRole("region", { name: "Work Thread Board" });
+    await user.click(within(board).getByRole("button", { name: "Draft brief" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Work Thread Board" })).not.toBeInTheDocument(),
+    );
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Draft brief" }),
+    ).toBeVisible();
+  });
+
+  it("does not offer a Thread board in Chat", async () => {
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codes()}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Chat" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.queryByRole("button", { name: "Thread board" })).not.toBeInTheDocument();
   });
 });

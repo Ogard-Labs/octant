@@ -87,6 +87,89 @@ describe("Work thread routes", () => {
     ).toBe(400);
   });
 
+  it("queries the Work Thread Board for an authenticated window", async () => {
+    const view = {
+      version: 1,
+      query: { version: 1, statuses: ["ready", "in-progress", "waiting", "done"] },
+      cards: [],
+      generatedAt: now,
+    };
+    const queryBoard = vi.fn(() => view);
+    const route = routeFixture({ queryBoard });
+
+    expect(
+      (
+        await route(
+          new Request("http://127.0.0.1/api/work/board", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ version: 1 }),
+          }),
+        )
+      )?.status,
+    ).toBe(401);
+
+    const response = await route(
+      request("/api/work/board", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1, statuses: ["waiting"] }),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual(view);
+    expect(queryBoard).toHaveBeenCalledWith(windowId, { version: 1, statuses: ["waiting"] });
+  });
+
+  it("rejects an invalid Work board query and caller-supplied window identity", async () => {
+    const queryBoard = vi.fn(() => ({
+      version: 1,
+      query: { version: 1 },
+      cards: [],
+      generatedAt: now,
+    }));
+    const route = routeFixture({ queryBoard });
+
+    expect(
+      (
+        await route(
+          request("/api/work/board", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ version: 1, statuses: ["blocked"] }),
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(queryBoard).not.toHaveBeenCalled();
+
+    expect(
+      (
+        await route(
+          request("/api/work/board", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ version: 1, windowId }),
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    expect(queryBoard).not.toHaveBeenCalled();
+  });
+
+  it("reports the board unavailable when no board service is mounted", async () => {
+    const route = routeFixture({});
+    const response = await route(
+      request("/api/work/board", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1 }),
+      }),
+    );
+    expect(response?.status).toBe(503);
+  });
+
   it("maps Work thread failures to typed HTTP responses", async () => {
     const execute = vi.fn(async () => {
       throw {

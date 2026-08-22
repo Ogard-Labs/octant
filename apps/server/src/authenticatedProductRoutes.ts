@@ -57,6 +57,7 @@ export function classifyProductAction(request: Request): string | undefined {
     return undefined;
   }
   if (path.startsWith("/api/work/")) {
+    if (method === "POST" && path === "/api/work/board") return "project.overview.read";
     if (method === "POST") return "work.update-document";
     if (method === "GET" || method === "HEAD") return "project.overview.read";
     return undefined;

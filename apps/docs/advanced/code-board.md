@@ -72,6 +72,7 @@ cards.
 
 ## Next steps
 
+- [Work Thread Board](/advanced/work-board) for the same statuses on Work threads
 - [Git and worktrees](/advanced/git-worktrees) for the underlying repository state
 - [Subagents](/advanced/subagents) for child runs that appear on cards
 - [Recovery and troubleshooting](/advanced/recovery) for blocked or waiting threads
