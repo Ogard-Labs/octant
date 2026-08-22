@@ -3,6 +3,7 @@ import {
   decodeWorkBoardView,
   MAX_WORK_BOARD_CARD_SUMMARY_BYTES,
   UtcTimestamp,
+  type CodeThreadId,
   type ProjectId,
   type ThreadGoalStatus,
   type WorkBoardCard,
@@ -12,6 +13,7 @@ import {
   type WorkThread,
   type WorkThreadId,
   type WorkTurnState,
+  type WorkPromotionProposalId,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import {
@@ -19,6 +21,9 @@ import {
   deriveThreadBoardStatus,
 } from "@octant/domain/thread-board-policy";
 import { evaluateWorkDeliverySatisfaction } from "@octant/domain/work-delivery-policy";
+import { joinWorkThreadBoardPullRequests } from "../code/threadBoardPullRequestJoin";
+import type { ThreadBoardPullRequestSnapshot } from "../code/threadBoardPullRequestJoin";
+import type { WorkPromotionEntry } from "./workPromotionProjection";
 
 const ALL_BOARD_STATUSES: readonly WorkBoardStatus[] = ["ready", "in-progress", "waiting", "done"];
 const DEFAULT_WORKING_DIRECTORY = decodeThreadWorkingDirectory(".");
@@ -117,10 +122,29 @@ function turnInterrupted(turn: {
   );
 }
 
+export interface WorkBoardPullRequestSource {
+  snapshot(): ThreadBoardPullRequestSnapshot | Promise<ThreadBoardPullRequestSnapshot>;
+}
+
+export interface WorkBoardPromotionSource {
+  snapshot():
+    | ReadonlyMap<WorkPromotionProposalId, WorkPromotionEntry>
+    | Promise<ReadonlyMap<WorkPromotionProposalId, WorkPromotionEntry>>;
+}
+
+export interface WorkBoardCodeThreadSource {
+  list():
+    | ReadonlyArray<{ readonly id: CodeThreadId; readonly projectId: ProjectId }>
+    | Promise<ReadonlyArray<{ readonly id: CodeThreadId; readonly projectId: ProjectId }>>;
+}
+
 export interface WorkThreadBoardServiceDependencies {
   readonly threads: WorkBoardThreadSource;
   readonly evidence: WorkBoardEvidenceSource;
   readonly runtime: WorkBoardRuntimeSource;
+  readonly pullRequests: WorkBoardPullRequestSource;
+  readonly promotions: WorkBoardPromotionSource;
+  readonly codeThreads: WorkBoardCodeThreadSource;
   readonly clock?: () => string;
 }
 
@@ -134,23 +158,40 @@ export class WorkThreadBoardService {
   readonly #threads: WorkBoardThreadSource;
   readonly #evidence: WorkBoardEvidenceSource;
   readonly #runtime: WorkBoardRuntimeSource;
+  readonly #pullRequests: WorkBoardPullRequestSource;
+  readonly #promotions: WorkBoardPromotionSource;
+  readonly #codeThreads: WorkBoardCodeThreadSource;
   readonly #clock: () => string;
 
   constructor(dependencies: WorkThreadBoardServiceDependencies) {
     this.#threads = dependencies.threads;
     this.#evidence = dependencies.evidence;
     this.#runtime = dependencies.runtime;
+    this.#pullRequests = dependencies.pullRequests;
+    this.#promotions = dependencies.promotions;
+    this.#codeThreads = dependencies.codeThreads;
     this.#clock = dependencies.clock ?? (() => new Date().toISOString());
   }
 
   async query(query: WorkBoardQuery): Promise<WorkBoardView> {
     const boardThreads = await this.#threads.list();
+    const [pullRequestSnapshot, promotions, codeThreads] = await Promise.all([
+      this.#pullRequests.snapshot(),
+      this.#promotions.snapshot(),
+      this.#codeThreads.list(),
+    ]);
     const cards: WorkBoardCard[] = [];
     for (const entry of boardThreads) {
       if (entry.thread.lifecycle === "archived" || entry.thread.lifecycle === "deleted") continue;
       const evidence = await this.#evidence.forThread(entry);
       const activity = await this.#observeRuntime(entry.thread.id);
-      cards.push(buildCard(entry, evidence, activity));
+      cards.push(
+        buildCard(entry, evidence, activity, {
+          pullRequestSnapshot,
+          promotions,
+          codeThreads,
+        }),
+      );
     }
 
     const appliedStatuses = query.statuses ?? ALL_BOARD_STATUSES;
@@ -183,7 +224,21 @@ function buildCard(
   entry: WorkBoardThread,
   evidence: WorkBoardEvidence,
   activity: WorkBoardRuntimeActivity,
+  pullRequestContext: {
+    readonly pullRequestSnapshot: ThreadBoardPullRequestSnapshot;
+    readonly promotions: ReadonlyMap<WorkPromotionProposalId, WorkPromotionEntry>;
+    readonly codeThreads: ReadonlyArray<{
+      readonly id: CodeThreadId;
+      readonly projectId: ProjectId;
+    }>;
+  },
 ): WorkBoardCard {
+  const pullRequestSummaries = joinWorkThreadBoardPullRequests({
+    workProjectId: entry.thread.projectId,
+    promotions: pullRequestContext.promotions,
+    codeThreads: pullRequestContext.codeThreads,
+    snapshot: pullRequestContext.pullRequestSnapshot,
+  });
   const recovery = recoveryFrom(entry);
   const deliverySatisfaction = evaluateWorkDeliverySatisfaction({
     completionConfirmed: entry.thread.completionConfirmed === true,
@@ -230,6 +285,7 @@ function buildCard(
     citations: evidence.citations,
     goal: evidence.goal,
     childRuns: evidence.childRuns,
+    pullRequestSummaries,
     recovery,
     staleEvidence: evidence.staleEvidence,
     ...(blockingReason === undefined ? {} : { blockingReason }),

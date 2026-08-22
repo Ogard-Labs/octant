@@ -150,6 +150,23 @@ export class CodeProjectPullRequestService {
     });
   }
 
+  /**
+   * Read-only board join snapshot. Never reaches GitHub; it reuses the
+   * in-memory list cache only.
+   */
+  async boardSnapshot(windowId: WindowId): Promise<{
+    readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
+    readonly freshness: CodeProjectPullRequestFreshness;
+    readonly githubRevoked: boolean;
+  }> {
+    const projects = await this.#resolveProjects(windowId);
+    return {
+      rows: this.#authorizedRows(projects),
+      freshness: this.#queryFreshness(),
+      githubRevoked: this.#githubRevoked,
+    };
+  }
+
   async queryDetail(
     windowId: WindowId,
     query: CodeProjectPullRequestDetailQuery,

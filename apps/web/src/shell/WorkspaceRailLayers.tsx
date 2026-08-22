@@ -1,6 +1,6 @@
 import type { AutomationClient } from "@octant/client-runtime";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
-import type { CodeProjectPullRequestRow } from "@octant/contracts";
+import type { CodeProjectPullRequestRow, ThreadBoardPullRequestIdentity } from "@octant/contracts";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
@@ -38,6 +38,7 @@ export interface WorkspaceRailLayersProps {
   readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
   readonly onOpenWorkBoardThread: (target: WorkThreadOpenTarget) => void;
   readonly onSelectProjectPullRequest?: (row: CodeProjectPullRequestRow) => void;
+  readonly onSelectBoardPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly selectedProjectPullRequestKey?: string;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly providerLabels?: ReadonlyMap<string, string>;
@@ -108,6 +109,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
             projects={props.codeBoardProjects}
             onClose={props.onCloseCodeBoard}
             onOpenThread={props.onOpenCodeBoardThread}
+            {...(props.onSelectBoardPullRequest === undefined
+              ? {}
+              : { onSelectPullRequest: props.onSelectBoardPullRequest })}
             {...(props.unreadThreadIds === undefined
               ? {}
               : { unreadThreadIds: props.unreadThreadIds })}
@@ -125,6 +129,9 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
             projects={props.workBoardProjects}
             onClose={props.onCloseWorkBoard}
             onOpenThread={props.onOpenWorkBoardThread}
+            {...(props.onSelectBoardPullRequest === undefined
+              ? {}
+              : { onSelectPullRequest: props.onSelectBoardPullRequest })}
             {...(props.unreadThreadIds === undefined
               ? {}
               : { unreadThreadIds: props.unreadThreadIds })}

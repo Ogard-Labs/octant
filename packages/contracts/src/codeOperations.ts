@@ -38,6 +38,7 @@ import {
 import { FileMentionPathInput, MAX_FILE_MENTIONS_PER_TURN } from "./fileMention";
 import { MAX_THREAD_MENTIONS_PER_TURN, MentionableThreadId } from "./threadMentionIdentity";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
+import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const encoder = new TextEncoder();
@@ -1637,6 +1638,7 @@ export const CodeBoardCard = Schema.Struct({
   worktree: CodeThreadWorktreeMetadata,
   changedFiles: CodeThreadChangedFileState,
   linkedPullRequest: CodeThreadLinkedPullRequest,
+  pullRequestSummaries: ThreadBoardPullRequestSummaries,
   checks: CodeThreadCheckState,
   reviewState: CodeThreadReviewState,
   childAgents: CodeThreadChildAgentSummary,

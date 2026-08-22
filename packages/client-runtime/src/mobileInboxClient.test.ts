@@ -130,6 +130,7 @@ const codeBoard = decodeCodeBoardView({
         workingTreeClean: false,
       },
       linkedPullRequest: { kind: "none", freshness: "fresh" },
+      pullRequestSummaries: { items: [], hiddenCount: 0 },
       checks: { freshness: "fresh", state: "passing" },
       reviewState: { freshness: "fresh", state: "approved" },
       childAgents: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },

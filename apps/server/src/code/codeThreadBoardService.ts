@@ -15,6 +15,8 @@ import {
   deriveThreadBoardStatus,
 } from "@octant/domain/thread-board-policy";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
+import { joinCodeThreadBoardPullRequests } from "./threadBoardPullRequestJoin";
+import type { ThreadBoardPullRequestSnapshot } from "./threadBoardPullRequestJoin";
 import { CodeThreadMetadataService } from "./codeThreadMetadataService";
 
 const ALL_BOARD_STATUSES: readonly CodeBoardStatus[] = ["ready", "in-progress", "waiting", "done"];
@@ -113,10 +115,15 @@ export function boardRuntimeActivityFromWorks(
   };
 }
 
+export interface CodeBoardPullRequestSource {
+  snapshot(): ThreadBoardPullRequestSnapshot | Promise<ThreadBoardPullRequestSnapshot>;
+}
+
 export interface CodeThreadBoardServiceDependencies {
   readonly threads: CodeBoardThreadSource;
   readonly metadata: CodeThreadMetadataService;
   readonly runtime: CodeBoardRuntimeSource;
+  readonly pullRequests: CodeBoardPullRequestSource;
   readonly clock?: () => string;
 }
 
@@ -132,17 +139,20 @@ export class CodeThreadBoardService {
   readonly #threads: CodeBoardThreadSource;
   readonly #metadata: CodeThreadMetadataService;
   readonly #runtime: CodeBoardRuntimeSource;
+  readonly #pullRequests: CodeBoardPullRequestSource;
   readonly #clock: () => string;
 
   constructor(dependencies: CodeThreadBoardServiceDependencies) {
     this.#threads = dependencies.threads;
     this.#metadata = dependencies.metadata;
     this.#runtime = dependencies.runtime;
+    this.#pullRequests = dependencies.pullRequests;
     this.#clock = dependencies.clock ?? (() => new Date().toISOString());
   }
 
   async query(query: CodeBoardQuery): Promise<CodeBoardView> {
     const boardThreads = await this.#threads.list();
+    const pullRequestSnapshot = await this.#pullRequests.snapshot();
     const view = await this.#metadata.project(
       boardThreads.map((entry) => ({
         thread: entry.thread,
@@ -160,7 +170,7 @@ export class CodeThreadBoardService {
       // Archived threads are dropped by the metadata projection; skip them here.
       if (metadata === undefined) continue;
       const activity = await this.#observeRuntime(entry.thread.id);
-      cards.push(buildCard(entry, metadata, activity));
+      cards.push(buildCard(entry, metadata, activity, pullRequestSnapshot));
     }
 
     const appliedStatuses = query.statuses ?? ALL_BOARD_STATUSES;
@@ -195,7 +205,12 @@ function buildCard(
   entry: CodeBoardThread,
   metadata: CodeThreadOperationalMetadata,
   activity: CodeBoardRuntimeActivity,
+  pullRequestSnapshot: ThreadBoardPullRequestSnapshot,
 ): CodeBoardCard {
+  const pullRequestSummaries = joinCodeThreadBoardPullRequests({
+    threadId: entry.thread.id,
+    snapshot: pullRequestSnapshot,
+  });
   const derivation = deriveThreadBoardStatus({
     deliverySatisfaction: metadata.deliverySatisfaction,
     executing: activity.executing,
@@ -220,6 +235,7 @@ function buildCard(
     worktree: overlayCheckoutWorktree(metadata.worktree, entry.checkout),
     changedFiles: metadata.changedFiles,
     linkedPullRequest: metadata.linkedPullRequest,
+    pullRequestSummaries,
     checks: metadata.checks,
     reviewState: metadata.reviewState,
     childAgents: metadata.childAgents,
