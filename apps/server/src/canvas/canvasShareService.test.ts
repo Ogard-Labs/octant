@@ -329,6 +329,27 @@ describe("CanvasShareService", () => {
     expect(service.overview(canvasId, context, project)?.sharingEnabled).toBe(false);
   });
 
+  it("journals an allowed share read through the access-log policy before returning it", () => {
+    const { service, shareEventNames } = harness();
+    service.share(shareRequest(), context, project, localPrincipal);
+
+    const allowed = service.access({
+      request: accessRequest(),
+      userAgent: "Mozilla/5.0 Chrome/120.0.0.0 Safari/537.36",
+      principal: localPrincipal,
+    });
+
+    expect(allowed.kind).toBe("allowed");
+    if (allowed.kind !== "allowed") return;
+    expect(allowed.event.kind).toBe("canvas-share-access-log");
+    expect(allowed.event.outcome).toBe("allowed");
+    expect(allowed.event.browserFamily).toBe("chrome");
+    expect(JSON.stringify(allowed.event)).not.toContain("Mozilla");
+    expect(JSON.stringify(allowed.event)).not.toContain("Chrome/120");
+    expect(shareEventNames()).toEqual([CANVAS_SHARE_SNAPSHOT_CREATED, CANVAS_SHARE_ACCESS_LOGGED]);
+    expect(service.overview(canvasId, context, project)?.accessLog).toEqual([allowed.event]);
+  });
+
   it("serves the snapshot to its audience and refuses it after revocation", () => {
     const { service, shareEventNames } = harness();
     service.share(shareRequest(), context, project, localPrincipal);

@@ -128,6 +128,41 @@ describe("host control routes", () => {
     expect(status.lifecycle.restart.kind).toBe("unavailable");
   });
 
+  it("reports an unwired service policy store as unavailable and withholds policy mutations", async () => {
+    const windowAuthorityStore = new WindowAuthorityStore();
+    windowAuthorityStore.register({ windowId: windowId as never, capability, now: nowMs });
+    const handler = createHostControlRouteHandler({
+      windowAuthorityStore,
+      diagnostics: () => makeDiagnostics(),
+      now: () => nowMs,
+      scheduleStop: (callback) => callback(),
+    });
+    const statusResponse = await handler(
+      makeRequest("/api/host-control/status", { method: "GET", capability }),
+    );
+    const status = decodeHostControlStatus(await statusResponse!.json());
+    expect(status.policy).toEqual({
+      kind: "unavailable",
+      reason: "The service policy store is not wired on this host.",
+    });
+    expect(status.lifecycle.enable).toEqual({
+      kind: "unavailable",
+      reason: "The service policy store is not wired on this host.",
+    });
+    expect(status.lifecycle.disable).toEqual({
+      kind: "unavailable",
+      reason: "The service policy store is not wired on this host.",
+    });
+
+    const enable = await handler(
+      makeRequest("/api/host-control/lifecycle", { capability, body: { action: "enable" } }),
+    );
+    expect(decodeHostLifecycleOutcome(await enable!.json())).toMatchObject({
+      kind: "refused",
+      code: "policy-unavailable",
+    });
+  });
+
   it("reports an unavailable policy honestly and withholds policy mutations", async () => {
     const { handler } = setup({
       servicePolicy: {

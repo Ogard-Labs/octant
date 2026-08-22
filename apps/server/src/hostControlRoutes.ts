@@ -81,6 +81,11 @@ export interface HostControlRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   /** Live owner diagnostics; `undefined` until the server is composed. */
   readonly diagnostics: () => HostRuntimeDiagnostics | undefined;
+  /**
+   * Persisted automatic-startup policy. Production owners inject the store.
+   * Omitting it is a test seam that reports `unavailable` instead of
+   * pretending a policy is wired.
+   */
   readonly servicePolicy?: HostControlServicePolicyPort;
   /** Graceful owner drain request (the same authority the control socket uses). */
   readonly requestOwnerStop?: () => void;

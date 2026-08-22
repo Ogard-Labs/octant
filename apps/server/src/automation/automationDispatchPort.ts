@@ -20,12 +20,3 @@ export interface AutomationDispatchOffer {
 export interface AutomationDispatchPort {
   readonly offer: (offer: AutomationDispatchOffer) => void;
 }
-
-/**
- * Test/fallback port that drops offers. Production hosts wire
- * {@link AutomationDispatchService} instead so claimed runs dispatch into
- * ordinary Work/Code threads after authority revalidation.
- */
-export function unavailableAutomationDispatchPort(): AutomationDispatchPort {
-  return { offer: () => undefined };
-}

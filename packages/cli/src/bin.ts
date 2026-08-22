@@ -2,7 +2,7 @@
 import { runStatusCommand } from "./status";
 import { runWebCommand } from "./web";
 import { resolveServerRunOptions, runServerRunCommand } from "./serverRun";
-import { resolveHostRuntimePaths } from "@octant/host-runtime";
+import { resolveHostRuntimePaths, ServicePolicyStore } from "@octant/host-runtime";
 import { homedir, tmpdir } from "node:os";
 import { runServerLifecycleCommand, type ServerLifecycleAction } from "./serverLifecycle";
 import {
@@ -59,6 +59,9 @@ async function main(): Promise<number> {
       port: typeof args.flags.port === "string" ? Number(args.flags.port) : undefined,
       noOpen: args.flags["no-open"] === true,
       dev: args.flags.dev === true,
+      servicePolicyStore: new ServicePolicyStore({
+        path: resolveCliHostRuntimePaths().servicePolicyPath,
+      }),
     });
     return result.kind === "opened" || result.kind === "served" || result.kind === "dev" ? 0 : 1;
   }
@@ -79,13 +82,7 @@ async function main(): Promise<number> {
       return 1;
     }
     try {
-      const paths = resolveHostRuntimePaths({
-        env: process.env,
-        platform: process.platform,
-        home: homedir(),
-        temporaryDirectory: tmpdir(),
-        uid: process.getuid?.() ?? 0,
-      });
+      const paths = resolveCliHostRuntimePaths();
       const followAbortController = logs?.follow === true ? new AbortController() : undefined;
       const stopFollowing = () => followAbortController?.abort();
       if (followAbortController !== undefined) {
@@ -97,6 +94,7 @@ async function main(): Promise<number> {
         report = await runServerLifecycleCommand({
           action,
           paths,
+          policyStore: new ServicePolicyStore({ path: paths.servicePolicyPath }),
           stdout: process.stdout,
           ...(logs === undefined ? {} : { logs }),
           ...(followAbortController === undefined ? {} : { signal: followAbortController.signal }),
@@ -132,13 +130,7 @@ async function main(): Promise<number> {
       args.positional[0] === "uninstall")
   ) {
     try {
-      const paths = resolveHostRuntimePaths({
-        env: process.env,
-        platform: process.platform,
-        home: homedir(),
-        temporaryDirectory: tmpdir(),
-        uid: process.getuid?.() ?? 0,
-      });
+      const paths = resolveCliHostRuntimePaths();
       const artifactCommand = resolveHeadlessArtifactCliCommand(args.positional, args.flags, {
         installRoot: process.env.OCTANT_INSTALL_ROOT ?? join(paths.stateDirectory, "install"),
         dataDirectory: paths.dataDirectory,
@@ -181,6 +173,16 @@ async function main(): Promise<number> {
   }
   printUsage();
   return 1;
+}
+
+function resolveCliHostRuntimePaths() {
+  return resolveHostRuntimePaths({
+    env: process.env,
+    platform: process.platform,
+    home: homedir(),
+    temporaryDirectory: tmpdir(),
+    uid: process.getuid?.() ?? 0,
+  });
 }
 
 function printUsage(): void {

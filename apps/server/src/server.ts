@@ -712,8 +712,9 @@ export interface StartOctantServerOptions {
    * Host control wiring for the shared web Settings host card. The
    * service policy port persists the automatic-startup policy and
    * `requestOwnerStop` requests the same graceful owner drain the control
-   * socket uses. Both are optional: without them the web surface reports the
-   * exact unavailable state instead of pretending.
+   * socket uses. Production owners always inject both. Omitting them is a
+   * test seam: the web surface then reports the exact unavailable state
+   * instead of pretending a store is wired.
    */
   readonly hostControl?: {
     readonly servicePolicy?: HostControlServicePolicyPort;
