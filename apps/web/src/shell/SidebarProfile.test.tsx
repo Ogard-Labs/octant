@@ -35,6 +35,7 @@ describe("SidebarProfile", () => {
     const onOpenZen = vi.fn();
     render(
       <SidebarProfile
+        navigatorAvailable
         onOpenNavigator={onOpenNavigator}
         onOpenSettings={onOpenSettings}
         onOpenZen={onOpenZen}
@@ -54,6 +55,14 @@ describe("SidebarProfile", () => {
     await user.click(screen.getByRole("button", { name: "Henrik" }));
     await user.click(screen.getByRole("button", { name: "Zen mode" }));
     expect(onOpenZen).toHaveBeenCalledOnce();
+  });
+
+  it("omits Navigator until the host has a model for it", async () => {
+    const user = userEvent.setup();
+    render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
+
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    expect(screen.queryByRole("button", { name: "Navigator" })).not.toBeInTheDocument();
   });
 
   it("offers no Zen row on a window that cannot enter Zen", async () => {

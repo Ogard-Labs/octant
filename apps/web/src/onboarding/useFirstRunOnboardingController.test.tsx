@@ -43,6 +43,21 @@ describe("useFirstRunOnboardingController", () => {
     expect(render().result.current.visible).toBe(true);
   });
 
+  it("hides while another setup surface is open and returns to the same pending draft afterward", () => {
+    const { result, rerender, resolve } = render({ concealed: true });
+
+    expect(result.current.visible).toBe(false);
+    expect(resolve).not.toHaveBeenCalled();
+
+    rerender({
+      onboarding: "pending",
+      shellStatus: "ready",
+      resolve,
+      concealed: false,
+    });
+    expect(result.current.visible).toBe(true);
+  });
+
   it("records the chosen outcome on the host and reports the in-flight answer", async () => {
     let release = () => {};
     const resolve = vi.fn(
