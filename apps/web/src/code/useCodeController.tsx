@@ -1397,6 +1397,9 @@ export function useCodeController(options: CodeControllerOptions) {
         }
         activeTurnOperations.current.set(String(input.threadId), operationId);
         setTurnStatus("running");
+        if (String(activeThreadId.current) === String(input.threadId)) {
+          void activateThread(input.threadId);
+        }
         return true;
       } catch (error) {
         const failure = codeFailure(error);
@@ -1405,8 +1408,15 @@ export function useCodeController(options: CodeControllerOptions) {
         return false;
       }
     },
-    [beginProviderTurn, clearFailure, fail],
+    [activateThread, beginProviderTurn, clearFailure, fail],
   );
+
+  const refreshConversation = useCallback((): boolean => {
+    const threadId = activeThreadId.current;
+    if (threadId === undefined) return false;
+    void activateThread(threadId);
+    return true;
+  }, [activateThread]);
 
   /**
    * Rename or pin one thread through the ordinary command path.
@@ -1940,6 +1950,7 @@ export function useCodeController(options: CodeControllerOptions) {
     renameThread,
     providerRequests,
     refreshFollowUp,
+    refreshConversation,
     restoreUndo,
     noteRestoreUndo,
     // A retry issued from a thread view is asking for that thread back, not

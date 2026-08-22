@@ -114,6 +114,17 @@ function client(): CodeClient {
 }
 
 describe("CodeThreadControllerSlots", () => {
+  it("delivers a queued first-turn refresh when the new thread controller is published", () => {
+    const registry = createCodeThreadControllers();
+    const refreshConversation = vi.fn(() => true);
+
+    registry.refreshConversation(threadA);
+    registry.publish(threadA, { refreshConversation } as never);
+    registry.publish(threadA, { refreshConversation } as never);
+
+    expect(refreshConversation).toHaveBeenCalledOnce();
+  });
+
   it("gives every open Code thread its own view instead of one shared with the front tab", async () => {
     const registry = createCodeThreadControllers();
     render(
