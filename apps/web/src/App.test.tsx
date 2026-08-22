@@ -1865,7 +1865,7 @@ describe("App", () => {
     const alphaProject = alphaOverview.closest(".project-overview");
     if (!(alphaProject instanceof HTMLElement)) throw new Error("Expected Project Alpha overview.");
     const alphaMemory = await within(alphaProject).findByRole("region", { name: "Project memory" });
-    expect(alphaMemory).toHaveTextContent("Alpha remembers the roadmap.");
+    await within(alphaMemory).findByText("Alpha remembers the roadmap.");
 
     await user.click(screen.getByRole("region", { name: "Workspace pane: Older chat" }));
 
@@ -1982,10 +1982,119 @@ describe("App", () => {
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
-    await user.click(within(dock).getByRole("button", { name: "Add utility tab" }));
-    expect(screen.queryByRole("button", { name: "Project memory" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Navigator" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Context" })).not.toBeInTheDocument();
+    expect(within(dock).queryByRole("tab", { name: "Thread tools" })).not.toBeInTheDocument();
+    expect(within(dock).getByRole("button", { name: "Files" })).toBeVisible();
+    expect(within(dock).queryByRole("button", { name: "Project memory" })).not.toBeInTheDocument();
+    expect(within(dock).queryByRole("button", { name: "Navigator" })).not.toBeInTheDocument();
+    expect(within(dock).queryByRole("button", { name: "Context" })).not.toBeInTheDocument();
+    expect(within(dock).queryByRole("button", { name: "Thread tools" })).not.toBeInTheDocument();
+    expect(within(dock).queryByRole("button", { name: "Plan" })).not.toBeInTheDocument();
+    expect(within(dock).queryByRole("button", { name: "Delivery" })).not.toBeInTheDocument();
+    expect(within(dock).queryByRole("button", { name: "Agents" })).not.toBeInTheDocument();
+  });
+
+  it("offers Plan only when the thread has a current plan artifact", async () => {
+    const user = userEvent.setup();
+    const projectApi = projects({
+      ...projectBootstrap(),
+      availability: [{ ...projectBootstrap().availability[0]!, status: "available" as const }],
+    });
+    vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+    const planClient = {
+      read: vi.fn(async () => ({
+        plan: {
+          id: "20000000-0000-4000-8000-000000000001",
+          threadId: String(codeThreadId),
+          revisionId: "30000000-0000-4000-8000-000000000001",
+          title: "Land the replay fix",
+          status: "proposed",
+          steps: [
+            {
+              stepId: "40000000-0000-4000-8000-000000000001",
+              position: 0,
+              title: "Reproduce the gap",
+              status: "pending",
+            },
+          ],
+          proposedAt: "2026-08-18T09:00:00.000Z",
+          updatedAt: "2026-08-18T09:00:00.000Z",
+          version: 1,
+        },
+        history: [],
+      })),
+      execute: vi.fn(),
+    };
+
+    render(
+      <App
+        codeClient={codes()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        planClient={planClient as never}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Controller foundation" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(await within(dock).findByRole("button", { name: "Plan" })).toBeVisible();
+    await user.click(within(dock).getByRole("button", { name: "Plan" }));
+    expect(await within(dock).findByText("Land the replay fix")).toBeVisible();
+    expect(within(dock).queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
+  });
+
+  it("offers Delivery only when a target is enabled", async () => {
+    const user = userEvent.setup();
+    const projectApi = projects({
+      ...projectBootstrap(),
+      availability: [{ ...projectBootstrap().availability[0]!, status: "available" as const }],
+    });
+    vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+    const shipClient = {
+      targets: vi.fn(async () => [
+        {
+          id: "00000000-0000-4000-8000-000000000702",
+          extensionId: "ship-to-a-branch",
+          displayName: "Public site",
+          destination: {
+            kind: "git-branch",
+            remoteName: "origin",
+            branch: "published",
+            artifactDirectory: "dist",
+          },
+          enabled: true,
+          credentialReference: "credential/site",
+          version: 2,
+          updatedAt: "2026-08-19T09:00:00.000Z",
+        },
+      ]),
+      execute: vi.fn(),
+    };
+
+    render(
+      <App
+        codeClient={codes()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+        shipClient={shipClient as never}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Controller foundation" }),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(await within(dock).findByRole("button", { name: "Delivery" })).toBeVisible();
+    expect(within(dock).queryByRole("button", { name: "Publish" })).not.toBeInTheDocument();
   });
 
   it("keeps the right sidebar closed after restart until the user opens it", async () => {
@@ -2031,7 +2140,7 @@ describe("App", () => {
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("heading", { name: "No utility open" })).toBeVisible();
+    expect(within(dock).getByRole("heading", { name: "No tool open" })).toBeVisible();
     expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
   });
@@ -3135,8 +3244,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
     let dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await user.click(within(dock).getByRole("button", { name: "Add utility tab" }));
-    await user.click(screen.getByRole("button", { name: "Browser" }));
+    await user.click(within(dock).getByRole("button", { name: "Browser" }));
     expect(within(dock).getByRole("tab", { name: "Browser" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -3156,11 +3264,10 @@ describe("App", () => {
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).not.toHaveAttribute("aria-current");
     await waitFor(() =>
-      expect(within(dock).getByRole("heading", { name: "No utility open" })).toBeVisible(),
+      expect(within(dock).getByRole("heading", { name: "No tool open" })).toBeVisible(),
     );
     expect(within(dock).queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
-    await user.click(within(dock).getByRole("button", { name: "Add utility tab" }));
-    await user.click(screen.getByRole("button", { name: "Terminal" }));
+    await user.click(within(dock).getByRole("button", { name: "Terminal" }));
     dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(within(dock).getByRole("tab", { name: "Terminal" })).toHaveAttribute(
       "aria-selected",
@@ -3249,8 +3356,7 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await user.click(within(dock).getByRole("button", { name: "Add utility tab" }));
-    await user.click(screen.getByRole("button", { name: "Terminal" }));
+    await user.click(within(dock).getByRole("button", { name: "Terminal" }));
     expect(within(dock).getByRole("tab", { name: "Terminal" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -3258,7 +3364,7 @@ describe("App", () => {
 
     fireEvent.pointerDown(screen.getByRole("region", { name: "Workspace pane: Octant" }));
 
-    expect(await within(dock).findByRole("heading", { name: "No utility open" })).toBeVisible();
+    expect(await within(dock).findByRole("heading", { name: "No tool open" })).toBeVisible();
     expect(within(dock).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Workspace pane: Octant" })).toHaveAttribute(
       "aria-current",

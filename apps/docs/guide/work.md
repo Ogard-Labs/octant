@@ -33,10 +33,11 @@ The active Work thread's composer shows a circular context-usage meter. Opening
 it shows the authoritative used-versus-available breakdown for that thread.
 Project memory lives on the Work Project Overview. Navigator opens from the
 bottom-left profile and Settings control without changing the active Project
-or thread. **Add utility tab** opens Side Chat, Browser, or Files in the right
-sidebar instead of replacing the Work thread. The sidebar follows the pane
-that last received pointer or keyboard input and restores that thread's open
-tabs and selected tab when you return to it.
+or thread. The right sidebar is a compact launcher when empty and a tool strip
+when open. It can host Side Chat, Browser, Files, Canvas, or Plan when this
+thread has a current plan artifact, instead of replacing the Work thread. The
+sidebar follows the pane that last received pointer or keyboard input and
+restores that thread's open tools and selected tool when you return to it.
 
 Work does not expose Code Git/terminal authority. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 

@@ -4,19 +4,21 @@ export type RightUtilityDockSurfaceId =
   | "side-chat"
   | "browser"
   | "files"
+  | "canvas"
+  | "plan"
+  | "delivery"
   | "changes"
   | "terminal"
   | "tests"
-  | "ios-simulator"
-  | "thread";
+  | "ios-simulator";
 
 /**
  * What a panel answers for, and therefore what makes it truthful.
  *
- * Remaining dock tools are thread-owned. A pane holding no thread is what
- * makes a selected tool unavailable. Retired category ids (Context, Project
- * memory, Navigator) stay decodeable in persisted settings and resolve to a
- * closed dock rather than a panel the dock no longer hosts.
+ * Dock tools are thread-owned. A pane holding no thread is what makes a
+ * selected tool unavailable. Retired category ids (Context, Project memory,
+ * Navigator, Thread tools) stay decodeable in persisted settings and resolve
+ * to a closed dock rather than a panel the dock no longer hosts.
  */
 export type RightUtilityDockSurfaceScope = "thread";
 
@@ -83,13 +85,12 @@ export type RightUtilityDockResolution =
     };
 
 /*
- * What the dock holds is decided by scope, not by convenience.
- *
- * Direct thread utilities restore independently for each active thread; the
- * legacy Thread panel keeps only the secondary Plan, Publish, and Agents tools
- * that were never workspace-launcher entries. Generic category tabs are gone:
- * Context lives on the composer meter, Project memory in Overview, Navigator
- * on the profile control.
+ * Direct thread-owned tools restore independently for each active thread.
+ * Generic category tabs are gone: Context lives on the composer meter, Project
+ * memory in Overview, Navigator on the profile control. Plan and Delivery are
+ * still mode-valid here; presence is gated by the thread's current artifact or
+ * enabled target, not by this catalog. Review and thread-level Agents are
+ * later tools, not entries on this list.
  */
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
@@ -108,6 +109,24 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     id: "files",
     label: "Files",
     modes: ["work", "code"],
+    scope: "thread",
+  },
+  {
+    id: "canvas",
+    label: "Canvas",
+    modes: ["chat", "work", "code"],
+    scope: "thread",
+  },
+  {
+    id: "plan",
+    label: "Plan",
+    modes: ["chat", "work", "code"],
+    scope: "thread",
+  },
+  {
+    id: "delivery",
+    label: "Delivery",
+    modes: ["code"],
     scope: "thread",
   },
   {
@@ -134,12 +153,6 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     modes: ["code"],
     scope: "thread",
   },
-  {
-    id: "thread",
-    label: "Thread tools",
-    modes: ["code"],
-    scope: "thread",
-  },
 ] as const satisfies ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 
 const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSurfaceDescriptor>> =
@@ -147,11 +160,13 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     "side-chat": RIGHT_UTILITY_DOCK_SURFACES[0],
     browser: RIGHT_UTILITY_DOCK_SURFACES[1],
     files: RIGHT_UTILITY_DOCK_SURFACES[2],
-    changes: RIGHT_UTILITY_DOCK_SURFACES[3],
-    terminal: RIGHT_UTILITY_DOCK_SURFACES[4],
-    tests: RIGHT_UTILITY_DOCK_SURFACES[5],
-    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[6],
-    thread: RIGHT_UTILITY_DOCK_SURFACES[7],
+    canvas: RIGHT_UTILITY_DOCK_SURFACES[3],
+    plan: RIGHT_UTILITY_DOCK_SURFACES[4],
+    delivery: RIGHT_UTILITY_DOCK_SURFACES[5],
+    changes: RIGHT_UTILITY_DOCK_SURFACES[6],
+    terminal: RIGHT_UTILITY_DOCK_SURFACES[7],
+    tests: RIGHT_UTILITY_DOCK_SURFACES[8],
+    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[9],
   };
 
 export function resolveRightUtilityDockSurface(
@@ -185,14 +200,5 @@ function closed(reason: RightUtilityDockClosedReason): RightUtilityDockResolutio
 }
 
 function isRightUtilityDockSurfaceId(value: unknown): value is RightUtilityDockSurfaceId {
-  return [
-    "side-chat",
-    "browser",
-    "files",
-    "changes",
-    "terminal",
-    "tests",
-    "ios-simulator",
-    "thread",
-  ].includes(String(value));
+  return Object.hasOwn(descriptors, String(value));
 }

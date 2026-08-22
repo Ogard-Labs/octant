@@ -8,6 +8,12 @@ vi.mock("../code/CodeWorkspaceTab", () => ({
   ),
 }));
 
+vi.mock("../browser/BrowserWorkspace", () => ({
+  BrowserWorkspace: (props: { readonly tab: { readonly threadId?: string } }) => (
+    <p>{`browser:${props.tab.threadId ?? "none"}`}</p>
+  ),
+}));
+
 const threadId = "10000000-0000-4000-8000-000000000001";
 const codeController = {
   activeView: {
@@ -41,5 +47,41 @@ describe("thread utility dock content", () => {
     const { appleProjectPath: _missing, ...withoutProject } = props();
     render(<ThreadUtilityDockContent {...withoutProject} />);
     expect(screen.getByRole("heading", { name: "iOS Simulator is unavailable" })).toBeVisible();
+  });
+
+  it("renders the live Browser instance owned by the thread", () => {
+    const stop = vi.fn();
+    const { unmount } = render(
+      <ThreadUtilityDockContent
+        {...props()}
+        browserAutomationClient={{ stop } as never}
+        subject={{ mode: "code", threadId }}
+        surface="browser"
+      />,
+    );
+    expect(screen.getByText(`browser:${threadId}`)).toBeVisible();
+    unmount();
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("renders the live Terminal instance owned by the thread", async () => {
+    render(<ThreadUtilityDockContent {...props()} surface="terminal" />);
+    expect(await screen.findByText("code-terminal:none")).toBeVisible();
+  });
+
+  it("does not offer a Propose plan form in the dock", () => {
+    render(
+      <ThreadUtilityDockContent
+        {...props()}
+        planClient={
+          {
+            read: vi.fn(async () => ({ plan: null, history: [] })),
+            execute: vi.fn(),
+          } as never
+        }
+        surface="plan"
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
   });
 });

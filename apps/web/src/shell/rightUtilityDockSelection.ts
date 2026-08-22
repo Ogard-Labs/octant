@@ -85,6 +85,21 @@ export function closeUtilityTabState(
   return { tabs, ...(active === undefined ? {} : { active }) };
 }
 
+export function retainAvailableUtilityTabs(
+  state: ThreadUtilityDockState,
+  available: ReadonlySet<RightUtilityDockSurfaceId>,
+): ThreadUtilityDockState {
+  const tabs = state.tabs.filter((surface) => available.has(surface));
+  if (tabs.length === state.tabs.length) {
+    if (state.active === undefined || available.has(state.active)) return state;
+  }
+  const active =
+    state.active !== undefined && tabs.includes(state.active)
+      ? state.active
+      : tabs[tabs.length - 1];
+  return { tabs, ...(active === undefined ? {} : { active }) };
+}
+
 function replace(
   states: ThreadUtilityDockStates,
   key: ThreadUtilityDockKey,

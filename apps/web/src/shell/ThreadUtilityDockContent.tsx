@@ -1,9 +1,13 @@
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
+import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
+import type { PlanClient } from "@octant/client-runtime/plan-client";
+import type { ShipClient } from "@octant/client-runtime/ship-client";
 import type { CodeCheckoutId, CodeRelativePath } from "@octant/contracts/code";
 import type { ChatThreadId } from "@octant/contracts/chat";
 import type { OctantMode } from "@octant/contracts/modes";
+import type { ProjectId } from "@octant/contracts/projects";
 import {
   decodeBrowserThreadId,
   decodeCodeThreadId,
@@ -19,8 +23,12 @@ import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import type { ChatReadCursorStore } from "../chat/useChatController";
 import { CodeFileExplorerPanel } from "../code/CodeFileExplorerPanel";
 import type { CodeController } from "../code/useCodeController";
+import { ThreadPlanProvider } from "../plan/ThreadPlanContext";
+import { ThreadPlanPanel } from "../plan/ThreadPlanPanel";
+import { ShipPanel } from "../ship/ShipPanel";
 import type { PickerGroup } from "@octant/domain";
 import type { ProviderController } from "../providers/useProviderController";
+import { DockCanvasTool } from "./DockCanvasTool";
 import type { OctantHostBridge } from "./hostBridge";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 import { ShellState } from "./ShellState";
@@ -39,6 +47,7 @@ const dockTabIds = {
 export interface ThreadUtilityDockSubject {
   readonly checkoutId?: CodeCheckoutId;
   readonly mode: OctantMode;
+  readonly projectId?: ProjectId;
   readonly threadId: string;
 }
 
@@ -46,6 +55,7 @@ export interface ThreadUtilityDockContentProps {
   readonly appleProjectPath?: string;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
+  readonly canvasClient?: CanvasClient;
   readonly chatClient: ChatClient;
   readonly chatReadCursorStore: ChatReadCursorStore;
   readonly codeController?: CodeController;
@@ -53,8 +63,10 @@ export interface ThreadUtilityDockContentProps {
   readonly hostBridge?: OctantHostBridge;
   readonly onOpenFile: (relativePath: CodeRelativePath) => void;
   readonly onSidecarOpened: (sidecar: SideChatSidecar) => void;
+  readonly planClient?: PlanClient;
   readonly providerController?: ProviderController;
   readonly serverUrl?: string;
+  readonly shipClient?: ShipClient;
   readonly sidecarThreadId?: ChatThreadId;
   readonly subject: ThreadUtilityDockSubject;
   readonly surface: RightUtilityDockSurfaceId;
@@ -127,6 +139,35 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
         {...(props.windowCapability === undefined
           ? {}
           : { windowCapability: props.windowCapability })}
+      />
+    );
+  }
+
+  if (props.surface === "plan") {
+    return (
+      <ThreadPlanProvider
+        {...(props.planClient === undefined ? {} : { client: props.planClient })}
+        threadId={props.subject.threadId}
+      >
+        <ThreadPlanPanel artifactOnly />
+      </ThreadPlanProvider>
+    );
+  }
+
+  if (props.surface === "delivery") {
+    if (props.shipClient === undefined) {
+      return unavailable("Delivery", "This thread has no Delivery target available.");
+    }
+    return <ShipPanel client={props.shipClient} threadId={props.subject.threadId} />;
+  }
+
+  if (props.surface === "canvas") {
+    return (
+      <DockCanvasTool
+        {...(props.canvasClient === undefined ? {} : { client: props.canvasClient })}
+        mode={props.subject.mode}
+        {...(props.subject.projectId === undefined ? {} : { projectId: props.subject.projectId })}
+        threadId={props.subject.threadId}
       />
     );
   }

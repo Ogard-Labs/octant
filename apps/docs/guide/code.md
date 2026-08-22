@@ -52,10 +52,9 @@ transcript. Write one in the thread's **Plan** panel — one step per line, with
 an optional reason after an em dash — and press **Propose plan**. It appears
 beside the transcript as well, so it stays in view while you read the thread.
 
-That panel, including the empty Propose plan form, is current product
-behavior. The approved later placement is a right-dock Plan tool that appears
-only when the thread already has a real plan artifact; proposal stays the
-thread's planning workflow, not an empty dock form.
+The right dock's Plan tool appears only when this thread already has a current
+plan artifact. Proposal stays the thread's planning workflow; the dock does not
+show an empty Propose plan form.
 
 A plan starts **Proposed · not approved**. Nothing about it is work yet: the
 host refuses to start, finish, or drop a step until the plan is approved.
@@ -138,12 +137,14 @@ The active Code thread's composer shows a circular context-usage meter. Opening
 it shows the authoritative used-versus-available breakdown for that thread.
 Project memory lives on the Code Project Overview. Navigator opens from the
 bottom-left profile and Settings control without changing the active Project
-or thread. **Add utility tab** opens Side Chat, Browser, Files, Changes,
-Terminal, Tests, Thread tools, or iOS Simulator in the right sidebar instead
-of replacing the Code thread. iOS Simulator says when Octant has not found an
-Xcode project or Apple toolchain instead of opening a dead view. The sidebar
-follows the pane that last received pointer or keyboard input. Each thread
-remembers its open tabs and selected tab.
+or thread. The right sidebar is a compact launcher when empty and a tool strip
+when open. It can host Side Chat, Browser, Files, Canvas, Plan when this thread
+has a current plan artifact, Delivery when a target is enabled, Changes,
+Terminal, Tests, or iOS Simulator instead of replacing the Code thread. iOS
+Simulator is absent until Octant has found an Xcode project and Apple
+toolchain. Hiding Browser or Terminal does not stop the server-owned session.
+The sidebar follows the pane that last received pointer or keyboard input.
+Each thread remembers its open tools and selected tool.
 
 ## Next steps
 
