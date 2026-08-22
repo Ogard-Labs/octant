@@ -299,6 +299,23 @@
   overflow-wrap: anywhere;
 }
 
+/*
+ * A missing handoff fact is itself the control that opens the matching setup
+ * surface. It keeps the name's type and only adds a button's cursor and focus.
+ */
+button.first-run__fact-action {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+}
+
 /* The state word beside the icon: the settings vocabulary's mono label. */
 .first-run__provider-label {
   font-family: var(--oct-font-mono);

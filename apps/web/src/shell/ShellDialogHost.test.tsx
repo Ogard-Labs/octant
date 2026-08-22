@@ -35,6 +35,9 @@ describe("ShellDialogHost", () => {
               onSelectNavigatorDefault: vi.fn(),
               onToggleChat: vi.fn(),
               onToggleWork: vi.fn(),
+              projects: [],
+              onCreateProject: vi.fn(),
+              onStartThread: vi.fn(),
               profile: {
                 displayName: "",
                 version: 1,

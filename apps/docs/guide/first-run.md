@@ -4,55 +4,82 @@ description: "Complete the first-run flow: configure a provider, create a Projec
 
 # First Run
 
-After launching Octant for the first time, you need to configure at least one AI provider and create a Project before you can start a thread.
+After launching Octant for the first time, the welcome surface walks through
+who you are, how the workspace looks, which providers this Mac can reach, a
+default Chat model, and whether Navigator is on. None of those setup steps
+except your name is a gate. Skip, dismiss, or quit keeps every answer that
+already landed; first run stays pending until an answer is accepted.
+
+The last screen is a readiness view. It reports three facts separately:
+whether a provider can answer, whether a Project exists for the mode you
+selected, and whether that mode has a model it can actually use. One primary
+action starts a real thread in that mode when those facts are true. A missing
+prerequisite opens its exact setup surface — provider settings, Project
+create, or the default-model step — and returns to the same draft when that
+surface closes. Skip does not mark the host ready or start a thread.
 
 ## Configure a provider
 
-Octant is provider-neutral. No core capability requires a specific provider. Go to **Settings** and add a provider instance:
+Octant is provider-neutral. No core capability requires a specific provider.
+From first run, **Set up a provider** opens Settings on the Providers section:
 
-1. Open the Settings panel from the app menu.
-2. Navigate to the **Providers** section.
-3. Create a new provider instance (for example, OpenCode, Codex, Claude, or an OpenAI-compatible endpoint).
-4. Provide the required configuration:
-   - **OpenCode**: absolute path to the `opencode` binary. Run `opencode login` outside Octant if authentication is required.
-   - **Codex**: absolute path to the `codex` binary. Run `codex login` outside Octant if authentication is required.
-   - **Claude**: absolute path to the Claude Code binary and an authentication mode (subscription or API key).
-   - **OpenAI-compatible**: endpoint URL, Bearer credential, and optional model IDs.
-5. Run **Connection Check** to verify readiness. The check reports normalized readiness, detected version, models, and capabilities without sending a prompt or exposing account identity.
+1. Create a new provider instance (for example, OpenCode, Codex, Claude, or an
+   OpenAI-compatible endpoint).
+2. Provide the required configuration:
+   - **OpenCode**: absolute path to the `opencode` binary. Run `opencode login`
+     outside Octant if authentication is required.
+   - **Codex**: absolute path to the `codex` binary. Run `codex login` outside
+     Octant if authentication is required.
+   - **Claude**: absolute path to the Claude Code binary and an authentication
+     mode (subscription or API key).
+   - **OpenAI-compatible**: endpoint URL, Bearer credential, and optional model
+     IDs.
+3. Run **Connection Check** to verify readiness. The check reports normalized
+   readiness, detected version, models, and capabilities without sending a
+   prompt or exposing account identity.
 
-Credentials are stored in macOS Keychain and resolved through the authenticated desktop broker. They are never written to the event journal or returned to the renderer.
+Credentials are stored in macOS Keychain and resolved through the
+authenticated desktop broker. They are never written to the event journal or
+returned to the renderer.
+
+Closing Settings returns to first run with the answers you already gave.
 
 ## Create your first Project
 
-Projects organize your work and determine the authority available to threads. The mode determines the Project type:
+A thread starts in a Project. The readiness view's Project fact opens the
+same create surface the sidebar uses:
 
-- **Chat Projects** are virtual containers with scoped memory and no filesystem authority.
+- **Chat Projects** are virtual containers with scoped memory and no
+  filesystem authority. First run asks only for a name.
 - **Work Projects** bind one OS-confined folder for local knowledge work.
-- **Code Projects** bind one folder for engineering work; Git tools activate when it is a repository.
+- **Code Projects** bind one folder for engineering work; Git tools activate
+  when it is a repository.
 
-To create a Project:
-
-1. Click the **New Project** button in the sidebar.
-2. Select the mode (Chat, Work, or Code).
-3. For Work and Code, use the native picker to select a directory.
-4. Name the Project.
-
-The selected root is validated to exist. The renderer receives an opaque, single-use receipt rather than the raw path.
+The selected root is validated to exist. The renderer receives an opaque,
+single-use receipt rather than the raw path.
 
 ## Start a thread
 
-With a Project and provider configured:
+When the readiness view shows a provider, a Project, and a mode-valid model:
 
-1. Select your Project.
-2. Open the composer in the workspace.
-3. Choose the provider and model for the thread.
-4. Send your first prompt.
+1. Choose Chat, Work, or Code. Modes you turned off on the workspace step are
+   absent.
+2. Press the primary action. Octant records first run as completed and opens a
+   real draft thread in that Project.
 
-The thread starts in the authority mode you selected: **Full access**, **Approval-gated**, or **Plan** (read-only). Code threads start approval-gated unless you explicitly remember Full access.
+The thread starts in the authority mode you selected: **Full access**,
+**Approval-gated**, or **Plan** (read-only). Code threads start approval-gated
+unless you explicitly remember Full access.
+
+Destinations that this host cannot back — Navigator without a model, a Work
+board that is not wired, GitHub pull requests without a working GitHub
+capability, Agents without child runs — stay absent rather than advertised.
 
 ## Local profile and execution settings
 
-Octant supports persisted execution profiles that capture settings, provider defaults, and effective context. Create, edit, and restore profiles through Settings to avoid reconfiguring each thread.
+Octant supports persisted execution profiles that capture settings, provider
+defaults, and effective context. Create, edit, and restore profiles through
+Settings to avoid reconfiguring each thread.
 
 Selecting a profile in the Code composer binds it to the thread you start. The
 profile can only narrow that thread: if it defaults to Approval-gated and you

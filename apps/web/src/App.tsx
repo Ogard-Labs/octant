@@ -184,6 +184,7 @@ import type { ThreadSearchThread } from "./shell/threadSearchViewModel";
 import { EXECUTION_POLICY_LABEL } from "./shell/shellCommandWiring";
 import { useWorkPromotionController } from "./work/useWorkPromotionController";
 import { ShellState } from "./shell/ShellState";
+import type { FirstRunHandoffProject } from "./onboarding/firstRunHandoffModel";
 import type { WorkspaceChoices } from "./onboarding/firstRunStepModel";
 import {
   describeDiscoveryNotice,
@@ -557,6 +558,11 @@ function LaunchedShell(
     void zen.refreshThreads();
   }, [zen.active, zen.refreshThreads]);
   const [createOpen, setCreateOpen] = useState(false);
+  const [projectCreateMode, setProjectCreateMode] = useState<OctantMode | undefined>(undefined);
+  function openProjectCreate(mode?: OctantMode) {
+    setProjectCreateMode(mode);
+    setCreateOpen(true);
+  }
   const [draftCreating, setDraftCreating] = useState(false);
   const [draftError, setDraftError] = useState<string>();
   const [draftPendingMessage, setDraftPendingMessage] = useState<string>();
@@ -1628,7 +1634,16 @@ function LaunchedShell(
     onboarding: controller.settings?.firstRunOnboarding,
     shellStatus: controller.status,
     resolve: recordFirstRunOutcome,
+    concealed: controller.settingsOpen || createOpen,
   });
+  const firstRunProjects: ReadonlyArray<FirstRunHandoffProject> = projectController.allProjects.map(
+    (project) => ({
+      id: project.id,
+      name: project.name,
+      type: project.type,
+      lifecycle: project.lifecycle,
+    }),
+  );
 
   const codeProviderGroups = useMemo(
     () =>
@@ -3484,11 +3499,6 @@ function LaunchedShell(
                         setArtifactLibraryOpen(false);
                         setCodeBoardOpen(true);
                       },
-                      "pull-requests": () =>
-                        openRailPlaceholder(
-                          "Pull requests",
-                          "Pull request review for Code threads is reserved for a later preview.",
-                        ),
                     },
                   },
                 }
@@ -3501,16 +3511,12 @@ function LaunchedShell(
                       automations: openAutomationCenter,
                       "artifact-library": openArtifactLibrary,
                       plugins: openSkillsSettings,
-                      "thread-board": () =>
-                        openRailPlaceholder(
-                          "Thread board",
-                          "The Work Thread Board will show runtime-derived threads and server-authoritative status.",
-                        ),
                     },
                   },
                 }
               : {})}
-            onAddFolder={() => setCreateOpen(true)}
+            onAddFolder={() => openProjectCreate()}
+            navigatorAvailable={navigatorAssistant.state.kind === "ready"}
             onSearchQueryChange={setSidebarSearchQuery}
             searchQuery={sidebarSearchQuery}
             {...(isNarrow ? {} : { onCollapseSidebar: () => setSidebarCollapsedPersistent(true) })}
@@ -3592,11 +3598,11 @@ function LaunchedShell(
                       ? (chatController.navigation?.length ?? 0) > 0
                         ? {
                             addProjectLabel: "chat-project" as const,
-                            onAddProject: () => setCreateOpen(true),
+                            onAddProject: () => openProjectCreate(),
                           }
                         : {}
                       : {
-                          onAddProject: () => setCreateOpen(true),
+                          onAddProject: () => openProjectCreate(),
                           unfiledLabel: "Recents" as const,
                         })}
                     onArchive={(projectId) => void projectController.setArchived(projectId, true)}
@@ -3992,7 +3998,7 @@ function LaunchedShell(
                     {...(draftPendingMessage === undefined
                       ? {}
                       : { onDraftPendingMessage: draftPendingMessage })}
-                    onAttachFolder={() => setCreateOpen(true)}
+                    onAttachFolder={() => openProjectCreate()}
                     onOpenProviderSettings={() =>
                       void controller.openSettings({ section: "providers" })
                     }
@@ -4053,14 +4059,20 @@ function LaunchedShell(
           folderBrowseClient={folderBrowseClient}
           hostId={createHostId}
           {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          mode={controller.workspace.activeMode}
-          onCloseCreate={() => setCreateOpen(false)}
+          mode={projectCreateMode ?? controller.workspace.activeMode}
+          onCloseCreate={() => {
+            setCreateOpen(false);
+            setProjectCreateMode(undefined);
+          }}
           onCreateProject={(mode, name, receiptId) =>
             projectController.create(mode, name, receiptId, createHostId)
           }
-          onCreatedProject={(projectId, mode, name) =>
-            void openDraftInKnownProject(projectId, mode, name)
-          }
+          onCreatedProject={(projectId, mode, name) => {
+            // First run is still asking; creating a Project is a prerequisite
+            // round-trip, not the thread handoff.
+            if (controller.settings?.firstRunOnboarding === "pending") return;
+            void openDraftInKnownProject(projectId, mode, name);
+          }}
           searchOpen={searchOpen}
           searchThreads={threadSearchThreads}
           searchProjects={threadSearchProjects}
@@ -4117,6 +4129,8 @@ function LaunchedShell(
             : { windowCapability: props.projectWindowCapability })}
           firstRun={{
             chatModelGroups: chatProviderGroups,
+            workModelGroups: workProviderGroups,
+            codeModelGroups: codeProviderGroups,
             controller: firstRunController,
             navigatorModelGroups: chatProviderGroups,
             onClearNavigatorDefault: clearNavigatorDefault,
@@ -4130,6 +4144,11 @@ function LaunchedShell(
             onToggleWork: (workEnabled) => controller.updateSettings({ workEnabled }),
             workspace: firstRunWorkspace,
             profile: controller.settings?.userProfile ?? defaultShellSettings().userProfile,
+            projects: firstRunProjects,
+            onCreateProject: (mode) => openProjectCreate(mode),
+            onStartThread: ({ mode, projectId }) => {
+              void controller.openDraftThread(mode, projectId);
+            },
             readiness: firstRunReadiness,
             ...(firstRunDiscoveryNotice === undefined
               ? {}

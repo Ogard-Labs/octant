@@ -124,9 +124,12 @@ Settings > Privacy & Security. An unsigned build also does not update itself —
 the updater installs a replacement only when it satisfies the running app's code
 signature. Signed releases carry that signature and update in place.
 
-On first run, open **Settings > Providers**, enable or add a provider, run the
-connection check, then create a Project and start a thread. Local data lives
-in `~/Library/Application Support/Octant/` (override with `OCTANT_DATA_DIR`).
+On first run, the welcome surface collects a name and optional workspace
+choices, then reports provider, Project, and a mode-valid default model
+separately. One action starts a real thread when those facts are true; a
+missing prerequisite opens its exact setup surface and returns to the same
+draft. Local data lives in `~/Library/Application Support/Octant/` (override
+with `OCTANT_DATA_DIR`).
 
 ## Quick start (developers)
 

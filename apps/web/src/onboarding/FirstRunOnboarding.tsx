@@ -1,21 +1,27 @@
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts";
+import type { OctantMode } from "@octant/contracts/modes";
 import type { NavigatorAssistantModelRef } from "@octant/contracts/navigator-assistant";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
-import { isNamed, isProfileConfigured } from "@octant/domain";
+import { enabledModes, isNamed, isProfileConfigured } from "@octant/domain";
 import { Check } from "lucide-react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { ProfileEditor } from "../profile/ProfileEditor";
 import type { AvatarImageEnvironment } from "../profile/avatarImage";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import {
+  resolveFirstRunHandoff,
+  type FirstRunHandoffProject,
+  type FirstRunHandoffSetupTarget,
+} from "./firstRunHandoffModel";
 import { FirstRunModelStep } from "./FirstRunModelStep";
 import { FirstRunProviderStep } from "./FirstRunProviderStep";
+import { FirstRunReadinessStep } from "./FirstRunReadinessStep";
 import type { FirstRunDiscoveryNotice, FirstRunReadinessSummary } from "./firstRunReadinessModel";
 import { FirstRunWorkspaceStep } from "./FirstRunWorkspaceStep";
 import {
   buildFirstRunSteps,
-  isLastFirstRunStep,
   isWorkspaceConfigured,
   nextFirstRunStep,
   previousFirstRunStep,
@@ -45,8 +51,16 @@ export interface FirstRunOnboardingProps {
   readonly avatarEnvironment?: AvatarImageEnvironment;
 
   readonly chatModelGroups: ReadonlyArray<PickerGroup>;
+  readonly workModelGroups?: ReadonlyArray<PickerGroup>;
+  readonly codeModelGroups?: ReadonlyArray<PickerGroup>;
   readonly chatDefault?: FirstRunChatDefault | undefined;
   readonly onSelectChatDefault: SetupWrite<ModelPickerSelection>;
+  readonly projects: ReadonlyArray<FirstRunHandoffProject>;
+  readonly onCreateProject: (mode: OctantMode) => void;
+  readonly onStartThread: (input: {
+    readonly mode: OctantMode;
+    readonly projectId: FirstRunHandoffProject["id"];
+  }) => void;
 
   readonly navigatorModelGroups: ReadonlyArray<PickerGroup>;
   readonly navigatorDefault?: NavigatorAssistantModelRef | undefined;
@@ -72,28 +86,29 @@ type SetupWrite<Answer> = (answer: Answer) => Promise<boolean>;
 /**
  * Octant's first-run surface (`BOOT-01`).
  *
- * It exists to get a new user from a clean launch to an ordinary Chat composer
- * without a hidden prerequisite. Five steps — profile, workspace, providers,
- * default model, Navigator — and not one of them is a gate: any of them can be
- * walked past, and the surface states what stays unavailable rather than
- * refusing to continue. The steps are freely navigable in both directions,
- * because a user who sets up a provider must be able to go back to the model
- * list without restarting.
+ * It exists to get a new user from a clean launch to a real thread without a
+ * hidden prerequisite. Five setup steps — profile, workspace, providers,
+ * default model, Navigator — then a readiness view that reports provider,
+ * Project, and a mode-valid default model separately. Setup steps except the
+ * name can be walked past; the handoff does not invent readiness they skipped.
  *
  * Answers are recorded as they are made, so quitting mid-way keeps what was
  * already chosen; only the first-run *outcome* is recorded at the end.
  * Dismissing the dialog records the same durable "skipped" outcome as the
  * button, so first run never silently repeats.
  *
- * Sending the user to provider settings closes this surface. A modal that
- * stays open over the destination it just opened traps focus away from the
- * action it advertised, and the only alternative — recording an answer the
- * user did not give — would hide first run from someone who simply backed out
- * of Settings.
+ * Sending the user to provider settings or Project create conceals this
+ * surface without answering. Closing that destination returns to the same
+ * draft, because a modal left open over the destination traps focus, and
+ * recording skip would hide first run from someone who simply backed out.
  */
 export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const { controller } = props;
   const [step, setStep] = useState<FirstRunStepId>("profile");
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [selectedMode, setSelectedMode] = useState<OctantMode>(() =>
+    props.workspace.chatEnabled ? "chat" : "code",
+  );
   const [profileDraft, setProfileDraft] = useState<UserProfile>(props.profile);
   const [profileEdited, setProfileEdited] = useState(false);
   const [syncedProfile, setSyncedProfile] = useState<UserProfile>(props.profile);
@@ -126,6 +141,38 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   // call them, and it reads the draft rather than the saved profile so a name
   // just typed unblocks the step whether or not its write has landed yet.
   const unnamed = !isNamed(profileDraft);
+  const availableModes = enabledModes({
+    chatEnabled: props.workspace.chatEnabled,
+    workEnabled: props.workspace.workEnabled,
+  });
+  const mode = availableModes.includes(selectedMode) ? selectedMode : (availableModes[0] ?? "code");
+  const modeGroups =
+    mode === "chat"
+      ? props.chatModelGroups
+      : mode === "work"
+        ? (props.workModelGroups ?? [])
+        : (props.codeModelGroups ?? []);
+  const handoff = useMemo(
+    () =>
+      resolveFirstRunHandoff({
+        mode,
+        providerOverall: props.readiness.overall,
+        providerHeadline: props.readiness.headline,
+        projects: props.projects ?? [],
+        groups: modeGroups,
+        ...(mode === "chat" && props.chatDefault !== undefined
+          ? { preferredDefault: props.chatDefault }
+          : {}),
+      }),
+    [
+      mode,
+      modeGroups,
+      props.chatDefault,
+      props.projects,
+      props.readiness.headline,
+      props.readiness.overall,
+    ],
+  );
 
   if (!controller.visible) return null;
 
@@ -136,7 +183,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     providersReady: props.readiness.overall === "ready",
     chatDefaultConfigured: props.chatDefault !== undefined,
     navigatorConfigured: props.navigatorDefault !== undefined,
-  });
+  }).map((descriptor) => ({ ...descriptor, current: descriptor.current && !handoffOpen }));
 
   /**
    * Collect a setup write so the outcome can be withheld if it does not land.
@@ -197,12 +244,19 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     if (importing) return;
     if (unnamed && target !== "profile") return;
     if (step === "profile" && target !== "profile") flushProfile();
+    setHandoffOpen(false);
     setStep(target);
+  }
+
+  function openHandoff() {
+    if (importing || unnamed) return;
+    if (step === "profile") flushProfile();
+    setHandoffOpen(true);
   }
 
   // Every way out is guarded, not just the buttons. An import reports its
   // picture as a later change, and once this surface is gone that change has
-  // nowhere to land — so Escape, a backdrop press, and the deferral that sends
+  // nowhere to land — so Escape, a backdrop press, and the conceal that sends
   // the user to provider settings all wait for it too.
   //
   // The outcome is recorded last, and only once every answer has been
@@ -212,14 +266,25 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   // never be asked again. Leaving first run pending is the honest result:
   // the surface returns on the next launch, still holding the question.
   function finish() {
-    void resolveWith(controller.complete);
+    if (!handoffOpen) {
+      openHandoff();
+      return;
+    }
+    const primary = handoff.primary;
+    if (primary.kind === "setup") {
+      openSetup(primary.target);
+      return;
+    }
+    void resolveWith(controller.complete, () => {
+      props.onStartThread({ mode, projectId: primary.projectId });
+    });
   }
 
   function skip() {
     void resolveWith(controller.skip);
   }
 
-  async function resolveWith(record: () => void) {
+  async function resolveWith(record: () => void, after?: () => void) {
     if (importing || resolving || unnamed) return;
     flushProfile();
     setResolving(true);
@@ -227,16 +292,24 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
     setResolving(false);
     if (!accepted) return;
     record();
+    after?.();
+  }
+
+  function openSetup(target: FirstRunHandoffSetupTarget) {
+    if (importing) return;
+    if (target === "providers") {
+      props.onOpenProviderSettings();
+      return;
+    }
+    if (target === "project") {
+      props.onCreateProject(mode);
+      return;
+    }
+    goTo("default-model");
   }
 
   function leaveForProviderSettings() {
-    if (importing) return;
-    props.onOpenProviderSettings();
-    // This modal must not stay over the settings it just opened, and it must
-    // not answer for the user either: deferring leaves the host's status
-    // `pending`, so someone who backs out of Settings still meets first run on
-    // the next launch.
-    controller.defer();
+    openSetup("providers");
   }
 
   const back = previousFirstRunStep(step);
@@ -277,7 +350,17 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
         </nav>
 
         <div className="first-run__panel">
-          {step === "profile" ? (
+          {handoffOpen ? (
+            <FirstRunReadinessStep
+              handoff={handoff}
+              onSelectMode={setSelectedMode}
+              onSetup={openSetup}
+              selectedMode={mode}
+              workspace={props.workspace}
+            />
+          ) : null}
+
+          {handoffOpen || step !== "profile" ? null : (
             <div className="first-run__step">
               <p className="first-run__intro">
                 Octant has no account and signs you in to nothing. This is only how you want to be
@@ -307,9 +390,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   : { environment: props.avatarEnvironment })}
               />
             </div>
-          ) : null}
+          )}
 
-          {step === "workspace" ? (
+          {handoffOpen || step !== "workspace" ? null : (
             <FirstRunWorkspaceStep
               choices={props.workspace}
               onSelectColorScheme={(scheme) => track(props.onSelectColorScheme(scheme))}
@@ -319,9 +402,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               onToggleChat={(enabled) => track(props.onToggleChat(enabled))}
               onToggleWork={(enabled) => track(props.onToggleWork(enabled))}
             />
-          ) : null}
+          )}
 
-          {step === "providers" ? (
+          {handoffOpen || step !== "providers" ? null : (
             <FirstRunProviderStep
               onOpenProviderSettings={leaveForProviderSettings}
               onRescan={props.onRescan}
@@ -332,9 +415,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                 ? {}
                 : { discoveryNotice: props.discoveryNotice })}
             />
-          ) : null}
+          )}
 
-          {step === "default-model" ? (
+          {handoffOpen || step !== "default-model" ? null : (
             <FirstRunModelStep
               ariaLabel="Default model for new Chat threads"
               groups={props.chatModelGroups}
@@ -349,9 +432,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                     selectedProviderInstanceId: props.chatDefault.providerInstanceId,
                   })}
             />
-          ) : null}
+          )}
 
-          {step === "navigator" ? (
+          {handoffOpen || step !== "navigator" ? null : (
             <FirstRunModelStep
               ariaLabel="Navigator default model"
               clearLabel="Leave Navigator off"
@@ -368,7 +451,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                     selectedProviderInstanceId: props.navigatorDefault.providerInstanceId,
                   })}
             />
-          ) : null}
+          )}
         </div>
 
         {unnamed ? (
@@ -385,16 +468,22 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
 
         <footer className="first-run__actions">
           <div className="first-run__buttons btn-group">
-            {back === undefined ? null : (
+            {handoffOpen || back !== undefined ? (
               <OctantButton
                 disabled={importing}
-                onClick={() => goTo(back)}
+                onClick={() => {
+                  if (handoffOpen) {
+                    setHandoffOpen(false);
+                    return;
+                  }
+                  if (back !== undefined) goTo(back);
+                }}
                 type="button"
                 variant="ghost"
               >
                 Back
               </OctantButton>
-            )}
+            ) : null}
             <OctantButton
               disabled={busy || blocked || unnamed}
               onClick={skip}
@@ -403,18 +492,18 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             >
               {controller.submitting === "skipped" ? "Skipping…" : "Skip for now"}
             </OctantButton>
-            {isLastFirstRunStep(step) || forward === undefined ? (
+            {handoffOpen ? (
               <OctantButton disabled={busy || blocked || unnamed} onClick={finish} type="button">
                 {controller.submitting === "completed"
                   ? "Saving…"
                   : importing
                     ? "Finishing your picture…"
-                    : "Start using Octant"}
+                    : handoff.primary.label}
               </OctantButton>
             ) : (
               <OctantButton
                 disabled={importing || unnamed}
-                onClick={() => goTo(forward)}
+                onClick={() => (forward === undefined ? openHandoff() : goTo(forward))}
                 type="button"
               >
                 Continue

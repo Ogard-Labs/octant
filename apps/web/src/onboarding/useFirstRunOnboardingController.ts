@@ -16,6 +16,12 @@ export interface UseFirstRunOnboardingControllerOptions {
    * it; the authoritative `onboarding` value does.
    */
   readonly resolve: (outcome: FirstRunOnboardingOutcome) => Promise<void>;
+  /**
+   * Another host surface is covering this one — Settings, or the Project
+   * create dialog. The draft stays mounted and first run stays pending, so
+   * closing that surface returns to the same unanswered step.
+   */
+  readonly concealed?: boolean;
 }
 
 export interface FirstRunOnboardingController {
@@ -54,8 +60,9 @@ const BLOCKED_COPY: Partial<Record<ShellControllerStatus, string>> = {
  * afterwards.
  *
  * `defer` is the one renderer-local part, and deliberately records nothing: it
- * stands the surface down for this session only, so a user sent to Settings is
- * not answered for. A clean store still shows first run on the next launch.
+ * stands the surface down for this session only. Sending the user to Settings
+ * or Project create does not use it — those surfaces conceal first run and
+ * return to the same draft when they close.
  */
 export function useFirstRunOnboardingController(
   options: UseFirstRunOnboardingControllerOptions,
@@ -72,7 +79,7 @@ export function useFirstRunOnboardingController(
     };
   }, []);
 
-  const { onboarding, shellStatus, resolve } = options;
+  const { onboarding, shellStatus, resolve, concealed = false } = options;
 
   const record = useCallback(
     (outcome: FirstRunOnboardingOutcome) => {
@@ -100,7 +107,7 @@ export function useFirstRunOnboardingController(
   return {
     // Without authoritative settings the store's answer is unknown, so the
     // surface stays hidden rather than flashing over it.
-    visible: shellStatus !== "loading" && onboarding === "pending" && !deferred,
+    visible: shellStatus !== "loading" && onboarding === "pending" && !deferred && !concealed,
     submitting,
     blockedMessage: BLOCKED_COPY[shellStatus],
     complete,

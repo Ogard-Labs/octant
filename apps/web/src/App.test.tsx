@@ -2761,7 +2761,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "New thread" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Plugins" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Thread board" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
     const addFolder = screen.getByRole("button", { name: "Add folder" });
     expect(addFolder).toHaveClass("project-section__add");
     expect(addFolder).not.toHaveTextContent("Add folder");
@@ -2787,10 +2787,10 @@ describe("App", () => {
       codeThread.resolve(readyCodeThread);
     });
     expect(
-      await within(screen.getByRole("complementary")).findByRole("button", {
+      within(screen.getByRole("complementary")).queryByRole("button", {
         name: "Pull requests",
       }),
-    ).toBeVisible();
+    ).not.toBeInTheDocument();
     expect(await screen.findByRole("button", { name: "New thread" })).toBeVisible();
     expect(
       await screen.findByPlaceholderText("Ask for follow-up changes…", {}, { timeout: 5_000 }),
