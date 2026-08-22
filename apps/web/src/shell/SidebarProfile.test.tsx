@@ -11,7 +11,11 @@ describe("SidebarProfile", () => {
     const user = userEvent.setup();
     const onOpenSettings = vi.fn();
     const { container } = render(
-      <SidebarProfile onOpenSettings={onOpenSettings} profile={profile} />,
+      <SidebarProfile
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        profile={profile}
+      />,
     );
 
     const row = screen.getByRole("button", { name: "Set your name" });
@@ -26,10 +30,12 @@ describe("SidebarProfile", () => {
 
   it("shows the name the person gave and leads to the settings that are theirs", async () => {
     const user = userEvent.setup();
+    const onOpenNavigator = vi.fn();
     const onOpenSettings = vi.fn();
     const onOpenZen = vi.fn();
     render(
       <SidebarProfile
+        onOpenNavigator={onOpenNavigator}
         onOpenSettings={onOpenSettings}
         onOpenZen={onOpenZen}
         profile={{ ...profile, displayName: "Henrik" }}
@@ -41,13 +47,18 @@ describe("SidebarProfile", () => {
     expect(onOpenSettings).toHaveBeenCalledWith({ section: "usage" });
 
     await user.click(screen.getByRole("button", { name: "Henrik" }));
+    await user.click(screen.getByRole("button", { name: "Navigator" }));
+    expect(onOpenNavigator).toHaveBeenCalledOnce();
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole("button", { name: "Henrik" }));
     await user.click(screen.getByRole("button", { name: "Zen mode" }));
     expect(onOpenZen).toHaveBeenCalledOnce();
   });
 
   it("offers no Zen row on a window that cannot enter Zen", async () => {
     const user = userEvent.setup();
-    render(<SidebarProfile onOpenSettings={vi.fn()} profile={profile} />);
+    render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
     await user.click(screen.getByRole("button", { name: "Set your name" }));
     expect(screen.queryByRole("button", { name: "Zen mode" })).not.toBeInTheDocument();
@@ -55,7 +66,7 @@ describe("SidebarProfile", () => {
 
   it("closes on Escape and returns focus to the row it opened from", async () => {
     const user = userEvent.setup();
-    render(<SidebarProfile onOpenSettings={vi.fn()} profile={profile} />);
+    render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
     const row = screen.getByRole("button", { name: "Set your name" });
     await user.click(row);

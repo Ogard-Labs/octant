@@ -6,13 +6,13 @@
 
 0015 put the Right Utility Dock outside the split tree as a capability-gated
 region, and 0041 made that dock follow the active pane. 0043 already placed
-Simulator there. The renderer still fills remaining dock chrome with generic
-category tabs — Context, Project memory, Navigator, and Thread — plus launch
-buttons and static summaries. Those tabs make the user
-pick an implementation bucket before reaching the tool, and they cannot say
-honestly which thread owns a live terminal, browser, or review. Context usage
-is a status-bar inspector; Project memory and Navigator are dock tabs. None of
-those placements match the thread-first grammar 0041 started.
+Simulator there. The renderer still fills remaining dock chrome with a generic Thread tab plus
+launch buttons. Context usage already lives on the composer meter; Project
+memory already lives in Project Overview; Navigator already opens as a
+host-wide popover from the profile and Settings control. The remaining Thread
+tab still makes the user pick an implementation bucket before reaching Plan,
+Delivery, or Agents, and it cannot say honestly which thread owns a live
+terminal, browser, or review.
 
 ## Decision
 
@@ -66,8 +66,10 @@ a Project overview, or a Project-level list.
 
 ## Consequences
 
-- Callers must migrate onto these placements before the generic tabs or the
-  full-window diff can go; the renderer has not yet done so.
+- Project memory now lives in Project Overview, and Navigator opens from the
+  profile control. Remaining callers must still migrate live dock tools and
+  the full-window diff; the generic Context, Project memory, and Navigator
+  tabs are gone from the renderer.
 - 0015 remains Accepted as the current implemented shell. This record, with
   0041 and 0042, is the approved migration of dock content, tool ownership,
   and placement. It does not change mode authority, journal ownership, or

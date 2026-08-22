@@ -5,6 +5,7 @@ import { useEffect, useId, useRef, useState, type ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
 
 export interface SidebarProfileProps {
+  readonly onOpenNavigator: () => void;
   readonly onOpenSettings: (deepLink?: SettingsDeepLink) => void;
   /** Absent on a window that cannot enter Zen, which keeps the row off entirely. */
   readonly onOpenZen?: () => void;
@@ -73,7 +74,7 @@ export function SidebarProfile(props: SidebarProfileProps) {
           <ProfileAction
             icon={Compass}
             label="Navigator"
-            onClick={() => select(() => props.onOpenSettings({ section: "navigator-assistant" }))}
+            onClick={() => select(() => props.onOpenNavigator())}
           />
           <ProfileAction
             icon={Gauge}

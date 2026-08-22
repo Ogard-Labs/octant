@@ -196,10 +196,6 @@ import {
 import { ProjectSidebarSection } from "./projects/ProjectSidebarSection";
 import { OctantButton } from "./ui/base/OctantButton";
 import { useProjectController } from "./projects/useProjectController";
-import {
-  ProjectMemoryInspector,
-  ProjectMemoryInspectorProvider,
-} from "./projects/ProjectMemoryInspector";
 import { ProjectThreadsProvider } from "./projects/ProjectThreadsSection";
 import { useProviderController } from "./providers/useProviderController";
 import { useDiscoveryController } from "./providers/useDiscoveryController";
@@ -220,14 +216,12 @@ import {
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
-  type RightUtilityDockSurfaceAvailability,
   type RightUtilityDockSurfaceId,
 } from "./shell/rightUtilityDockModel";
 import {
   closeThreadUtilityTab,
   closeUtilityTabState,
   openThreadUtilityTab,
-  openUtilityTabState,
   selectThreadUtilityTab,
   selectUtilityTabState,
   threadUtilityDockState,
@@ -236,8 +230,7 @@ import {
   type ThreadUtilityDockKey,
   type ThreadUtilityDockStates,
 } from "./shell/rightUtilityDockSelection";
-import { RightUtilityDockSummary } from "./shell/RightUtilityDockSummary";
-import { NavigatorPanel } from "./navigator/NavigatorPanel";
+import { NavigatorPopover } from "./navigator/NavigatorPopover";
 import { useNavigatorAssistant } from "./navigator/useNavigatorAssistant";
 import { ComposerContextMeterShortcut } from "./context/ComposerContextMeter";
 import { ComposerContextMeterProvider } from "./context/composerContextMeterScope";
@@ -597,12 +590,13 @@ function LaunchedShell(
     { readonly projectId: ProjectId; readonly sequence: number } | undefined
   >(undefined);
   const [dockVisible, setDockVisible] = useState(false);
+  const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const navigatorOpener = useRef<HTMLElement | null>(null);
   const [fallbackDockState, setFallbackDockState] = useState<ThreadUtilityDockState>({ tabs: [] });
   const [dockStatesByThread, setDockStatesByThread] = useState<ThreadUtilityDockStates>(new Map());
   const [dockSidecarsByThread, setDockSidecarsByThread] = useState<
     ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>
   >(new Map());
-  const [dockProjectId, setDockProjectId] = useState<ProjectId>();
   const [previewSidebarWidth, setPreviewSidebarWidth] = useState<number>();
   // Presentation-only: whether the person hid the navigation sidebar. Kept in
   // local storage so a reload does not surprise them with it back.
@@ -1433,10 +1427,6 @@ function LaunchedShell(
       return next;
     });
   }, [activeProjectId, contextController.snapshot]);
-  const dockProject =
-    dockProjectId === undefined
-      ? undefined
-      : projectController.allProjects.find((project) => project.id === dockProjectId);
   const dockThread =
     dockThreadId === undefined
       ? undefined
@@ -1455,19 +1445,15 @@ function LaunchedShell(
                       )?.checkoutId,
               }),
         };
-  const dockResolution = resolveDockSurface(dockSurface, dockProjectId);
+  const dockResolution = resolveDockSurface(dockSurface);
   const availableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
-    (surface) =>
-      resolveDockSurface(surface.id, activeProjectId, surfaceAvailability(surface.id)).kind ===
-      "surface",
+    (surface) => resolveDockSurface(surface.id).kind === "surface",
   );
   const dockTabs = dockState.tabs.flatMap((surfaceId) => {
     const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
     return surface === undefined ? [] : [surface];
   });
-  const launchableDockSurfaces = availableDockSurfaces.filter(
-    (surface) => surface.scope === "thread",
-  );
+  const launchableDockSurfaces = availableDockSurfaces;
   const dockOpen = dockVisible;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -1872,19 +1858,6 @@ function LaunchedShell(
   const enabledProjectTypes = new Set(
     enabledModes(controller.settings ?? { chatEnabled: true, workEnabled: true }),
   );
-  const memoryTransferProjects = projectController.allProjects.filter((project) =>
-    enabledProjectTypes.has(project.type),
-  );
-  const memorySummaryValue = projectController.activeProject?.name ?? "No Project";
-  const navigatorSummaryValue =
-    navigatorAssistant.state.kind === "ready"
-      ? "Ready"
-      : navigatorAssistant.state.kind === "unconfigured"
-        ? "Choose model"
-        : navigatorAssistant.state.kind === "loading"
-          ? "Loading"
-          : "Unavailable";
-
   function threadUtility(surface: RightUtilityDockSurfaceId) {
     if (dockThread === undefined || dockThreadKey === undefined) return null;
     const sidecarThreadId = dockSidecarsByThread.get(dockThreadKey);
@@ -1930,28 +1903,13 @@ function LaunchedShell(
     );
   }
 
-  function openDockTab(
-    surface: RightUtilityDockSurfaceId,
-    opener?: HTMLElement,
-    projectId = activeProjectId,
-    target: "active" | "fallback" = "active",
-  ) {
+  function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
-    if (descriptor.scope === "thread" && (dockThreadKey === undefined || target === "fallback")) {
-      return;
-    }
+    if (dockThreadKey === undefined) return;
     if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
-    if (surface !== "project-memory" || String(dockProjectId) !== String(projectId)) {
-      projectController.clearMemory();
-    }
-    setDockProjectId(projectId);
     setDockVisible(true);
-    if (dockThreadKey === undefined || target === "fallback") {
-      setFallbackDockState((current) => openUtilityTabState(current, surface));
-    } else {
-      setDockStatesByThread((current) => openThreadUtilityTab(current, dockThreadKey, surface));
-    }
+    setDockStatesByThread((current) => openThreadUtilityTab(current, dockThreadKey, surface));
   }
   function selectDockTab(surface: RightUtilityDockSurfaceId) {
     if (dockThreadKey === undefined) {
@@ -1966,9 +1924,6 @@ function LaunchedShell(
     } else {
       setDockStatesByThread((current) => closeThreadUtilityTab(current, dockThreadKey, surface));
     }
-  }
-  function openMemoryInspector(projectId: ProjectId | undefined, opener: HTMLElement) {
-    openDockTab("project-memory", opener, projectId, "fallback");
   }
   /**
    * Takes the reader to the degraded Project. Context usage lives on that
@@ -1985,7 +1940,6 @@ function LaunchedShell(
   function closeDock() {
     pendingDockFocus.current = dockOpener.current;
     setDockVisible(false);
-    projectController.clearMemory();
   }
   function toggleDock(opener: HTMLElement) {
     dockOpener.current = { element: opener, logicalTarget: "dock" };
@@ -1993,15 +1947,8 @@ function LaunchedShell(
       closeDock();
       return;
     }
-    setDockProjectId(activeProjectId);
     setDockVisible(true);
   }
-  useEffect(() => {
-    if (!dockVisible) return;
-    if (String(dockProjectId) === String(activeProjectId)) return;
-    setDockProjectId(activeProjectId);
-    projectController.clearMemory();
-  }, [activeProjectId, dockProjectId, dockVisible, projectController.clearMemory]);
   useEffect(() => {
     const current = projectController.activeProject;
     const previous = previousProjectLifecycle.current;
@@ -2017,12 +1964,11 @@ function LaunchedShell(
       return;
     }
     queueMicrotask(() => {
-      const target = dockOpen
-        ? document.querySelector<HTMLElement>('button[aria-label="Close right sidebar"]')
-        : document.querySelector<HTMLElement>(".project-overview__memory-action");
-      target?.focus();
+      document
+        .querySelector<HTMLElement>(`input[id="project-name-${String(current.id)}"]`)
+        ?.focus();
     });
-  }, [dockOpen, projectController.activeProject]);
+  }, [projectController.activeProject]);
   useEffect(() => {
     if (dockVisible) return;
     const pending = pendingDockFocus.current;
@@ -2042,72 +1988,13 @@ function LaunchedShell(
     if (isNarrow) setPreviewSidebarWidth(undefined);
   }, [isNarrow]);
 
-  function surfaceAvailability(
-    surface: RightUtilityDockSurfaceId,
-    projectId = activeProjectId,
-  ): RightUtilityDockSurfaceAvailability {
-    // Navigator is host-owned, so no Project decides whether it can be shown.
-    // Its own readiness — unconfigured, unavailable — is the panel's to report
-    // from the host snapshot, not something to pre-empt by hiding the surface.
-    if (surface === "navigator") return "available";
-    if (
-      surface === "side-chat" ||
-      surface === "browser" ||
-      surface === "files" ||
-      surface === "changes" ||
-      surface === "terminal" ||
-      surface === "tests" ||
-      surface === "ios-simulator" ||
-      surface === "thread"
-    ) {
-      return "available";
-    }
-    if (projectController.status === "loading" || projectController.status === "conflict-reload") {
-      return "unknown";
-    }
-    if (projectController.status === "disconnected") return "unavailable";
-    // Whether a Project is active is the resolver's project-required question,
-    // not a presentation outage. Answering "unavailable" here used to short the
-    // resolver out before that question, which closed an open panel instead of
-    // letting it present its own empty-handed state when the active pane has
-    // no Project.
-    if (surface === "project-memory") return "available";
-    const availability =
-      projectId === undefined ? undefined : projectController.availabilityByProject.get(projectId);
-    if (availability?.status === "available") return "available";
-    if (availability?.status === "unavailable") return "unavailable";
-    return "unknown";
-  }
-
-  function resolveDockSurface(
-    surface: unknown,
-    surfaceProjectId: ProjectId | undefined,
-    availability = surfaceAvailability(
-      surface === "navigator" ||
-        surface === "side-chat" ||
-        surface === "browser" ||
-        surface === "files" ||
-        surface === "changes" ||
-        surface === "terminal" ||
-        surface === "tests" ||
-        surface === "ios-simulator" ||
-        surface === "thread"
-        ? surface
-        : "project-memory",
-    ),
-  ): RightUtilityDockResolution {
-    const project =
-      surfaceProjectId === undefined
-        ? undefined
-        : projectController.allProjects.find((candidate) => candidate.id === surfaceProjectId);
+  function resolveDockSurface(surface: unknown): RightUtilityDockResolution {
     return resolveRightUtilityDockSurface({
       activeMode,
-      ...(project === undefined ? {} : { activeProject: project }),
       ...(dockThreadId === undefined ? {} : { activeThreadId: dockThreadId }),
       connectionState: projectController.status === "disconnected" ? "disconnected" : "connected",
-      presentationAvailability: availability,
+      presentationAvailability: "available",
       savedSurface: surface,
-      ...(surfaceProjectId === undefined ? {} : { surfaceProjectId }),
     });
   }
 
@@ -3579,6 +3466,12 @@ function LaunchedShell(
             onSearchQueryChange={setSidebarSearchQuery}
             searchQuery={sidebarSearchQuery}
             {...(isNarrow ? {} : { onCollapseSidebar: () => setSidebarCollapsedPersistent(true) })}
+            onOpenNavigator={() => {
+              navigatorOpener.current = document.querySelector<HTMLElement>(
+                ".sidebar-profile .sidebar-item",
+              );
+              setNavigatorOpen(true);
+            }}
             onOpenSettings={(deepLink) => void controller.openSettings(deepLink)}
             onOpenZen={() => void zen.enterZen()}
             onRetryChat={() => void chatController.retry()}
@@ -3804,268 +3697,277 @@ function LaunchedShell(
                   }
                 }}
               />
-              <ProjectMemoryInspectorProvider onOpen={openMemoryInspector}>
-                <AgentProfileNamesProvider profiles={executionProfileController.profiles}>
-                  <ComposerContextMeterProvider
-                    busy={contextController.status === "updating"}
-                    onRebuild={() => void contextController.rebuild()}
-                    onSetExcluded={(entryId, excluded) =>
-                      void contextController.setExcluded(entryId, excluded)
+              <AgentProfileNamesProvider profiles={executionProfileController.profiles}>
+                <ComposerContextMeterProvider
+                  busy={contextController.status === "updating"}
+                  onRebuild={() => void contextController.rebuild()}
+                  onSetExcluded={(entryId, excluded) =>
+                    void contextController.setExcluded(entryId, excluded)
+                  }
+                  onSetPinned={(entryId, pinned) =>
+                    void contextController.setPinned(entryId, pinned)
+                  }
+                  status={contextController.status}
+                  {...(contextController.snapshot === undefined
+                    ? {}
+                    : { snapshot: contextController.snapshot })}
+                  {...(contextSubject === undefined
+                    ? {}
+                    : {
+                        subjectKey: `${contextSubject.aggregateType}:${contextSubject.aggregateId}`,
+                      })}
+                >
+                  <ComposerContextMeterShortcut />
+                  <WorkspaceView
+                    onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
+                    appleToolchainClient={appleToolchainClient}
+                    agentRunClient={agentRunClient}
+                    chatClient={chatClient}
+                    chatController={chatController}
+                    chatReadCursorStore={chatReadCursorStore}
+                    onPinTerminal={(request) => void zen.pinTerminal(request)}
+                    onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
+                    onDockResearch={(request) =>
+                      void zen.dockResearch({
+                        thread: {
+                          threadId:
+                            request.mode === "code"
+                              ? decodeCodeThreadId(request.threadId)
+                              : decodeWorkThreadId(request.threadId),
+                          mode: request.mode,
+                        },
+                      })
                     }
-                    onSetPinned={(entryId, pinned) =>
-                      void contextController.setPinned(entryId, pinned)
-                    }
-                    status={contextController.status}
-                    {...(contextController.snapshot === undefined
+                    codeController={codeController}
+                    codeControllers={codeThreadControllers}
+                    extensionClient={extensionClient}
+                    workPromotionController={workPromotionController}
+                    codeProviderChoices={codeProviderChoices}
+                    hosts={hosts}
+                    selectedCreateHostId={createHostId}
+                    createHostViewScope={createHostViewScope}
+                    {...(lastSelectedHealthyHostId === undefined
                       ? {}
-                      : { snapshot: contextController.snapshot })}
-                    {...(contextSubject === undefined
+                      : { lastSelectedHealthyHostId })}
+                    onSelectCreateHost={handleSelectCreateHost}
+                    {...(controller.workspace.focusedPaneId === undefined
+                      ? {}
+                      : { focusedPaneId: controller.workspace.focusedPaneId })}
+                    drag={workspaceDrag}
+                    layout={controller.presentedLayout}
+                    memoryRevision={projectController.memoryRevision}
+                    onMemoryChanged={projectController.touchMemoryRevision}
+                    availabilityByProject={projectController.availabilityByProject}
+                    {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                    folderBrowseClient={folderBrowseClient}
+                    githubClient={githubClient}
+                    githubCloneClient={githubCloneClient}
+                    hostId={createHostId}
+                    hidden={
+                      railPlaceholder !== undefined || codeBoardOpen || automationCenterVisible
+                    }
+                    onActivatePane={(paneId) => void controller.activatePane(paneId)}
+                    tabActivation={controller.tabActivation}
+                    onClearFocus={() => void controller.clearFocus()}
+                    onClosePane={controller.closePane}
+                    onCommitResize={controller.commitSplitResize}
+                    onCreateChat={createChat}
+                    onCreateChatProjectThread={handleCreateChatProjectThread}
+                    onOpenChatThread={(threadId, title, projectId) => {
+                      // A thread this window's sidebar controller has never seen
+                      // (a branch minted from a tab's own controller) must reach
+                      // navigation the same way a draft-created thread does:
+                      // through an authoritative bootstrap reload.
+                      if (
+                        !chatController.navigation.some(
+                          (item) => item.threadId === String(threadId),
+                        )
+                      ) {
+                        void chatController.refreshNavigation();
+                      }
+                      void controller.openChatThread(threadId, title, projectId);
+                    }}
+                    onViewAllChatProjectThreads={viewAllChatProjectThreads}
+                    onOpenSideChat={(sidecar) => void controller.openSideChat(sidecar)}
+                    {...(activeMode === "chat" && draftCreating
+                      ? { chatWelcomeCreating: true }
+                      : {})}
+                    {...(activeMode === "chat" && draftError !== undefined
+                      ? { chatWelcomeError: draftError }
+                      : {})}
+                    providerReady={providerReady}
+                    {...(discoveryController.message === undefined
+                      ? {}
+                      : { providerBootstrapMessage: discoveryController.message })}
+                    onOpenDraftThread={(mode) => void controller.openDraftThread(mode)}
+                    workCreateThreadAvailable={workCreateThreadAvailable}
+                    workMutationClient={workMutationClient}
+                    workThreadClient={workThreadClient}
+                    onWorkThreadUpdated={workNavigation.applyThread}
+                    workTurnClient={workTurnClient}
+                    workRequestClient={workRequestClient}
+                    workOverviewClient={workOverviewClient}
+                    workResearchClient={workResearchClient}
+                    goalClient={goalClient}
+                    goalLoopClient={goalLoopClient}
+                    planClient={planClient}
+                    onOpenCodeFile={({ threadId, relativePath }) => {
+                      void controller.openCodeSurface({
+                        kind: "code-file",
+                        threadId,
+                        title: relativePath,
+                        relativePath,
+                      });
+                    }}
+                    usageDashboardClient={usageDashboardClient}
+                    onOpenUsageDashboard={(filter) => {
+                      setPendingUsageFilter(filter);
+                      setUsageOpen(true);
+                    }}
+                    browserAutomationClient={browserAutomationClient}
+                    computerUseClient={computerUseClient}
+                    onComputerUseSessionChange={onComputerUseSessionChange}
+                    isNarrow={isNarrow}
+                    onFocus={(paneId) => void controller.focusPane(paneId)}
+                    onCreateWorkThread={handleCreateWorkThread}
+                    onOpenWorkThread={(threadId, projectId) => {
+                      const thread = workNavigation.navigation.find(
+                        (candidate) => candidate.threadId === String(threadId),
+                      );
+                      void controller.openWorkThread(
+                        threadId,
+                        thread?.title ?? "Work thread",
+                        undefined,
+                        projectId,
+                      );
+                    }}
+                    onArchiveProject={(projectId) =>
+                      void projectController.setArchived(projectId, true)
+                    }
+                    onOpenCodeThread={(threadId, title, projectId) =>
+                      void controller.openCodeThread(threadId, title, undefined, projectId)
+                    }
+                    onOpenCodeSurface={(kind, threadId, title, terminalId) =>
+                      void controller.openCodeSurface(
+                        kind === "code-terminal"
+                          ? {
+                              kind,
+                              threadId,
+                              title,
+                              ...(terminalId === undefined ? {} : { terminalId }),
+                            }
+                          : { kind, threadId, title },
+                      )
+                    }
+                    onPreviewResize={controller.previewSplitResize}
+                    onRelinkProject={projectController.relink}
+                    onRenameProject={projectController.rename}
+                    onSplitPane={(paneId, orientation, placement) =>
+                      void controller.splitPane(paneId, orientation, placement)
+                    }
+                    projects={projectController.allProjects}
+                    providerController={providerController}
+                    workspace={controller.workspace}
+                    mode={controller.workspace.activeMode}
+                    {...(controller.crossContextOffer === undefined
                       ? {}
                       : {
-                          subjectKey: `${contextSubject.aggregateType}:${contextSubject.aggregateId}`,
-                        })}
-                  >
-                    <ComposerContextMeterShortcut />
-                    <WorkspaceView
-                      onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
-                      appleToolchainClient={appleToolchainClient}
-                      agentRunClient={agentRunClient}
-                      chatClient={chatClient}
-                      chatController={chatController}
-                      chatReadCursorStore={chatReadCursorStore}
-                      onPinTerminal={(request) => void zen.pinTerminal(request)}
-                      onPinCanvasInFocusZone={(request) => void zen.pinCanvas(request)}
-                      onDockResearch={(request) =>
-                        void zen.dockResearch({
-                          thread: {
-                            threadId:
-                              request.mode === "code"
-                                ? decodeCodeThreadId(request.threadId)
-                                : decodeWorkThreadId(request.threadId),
-                            mode: request.mode,
+                          crossContextOffer: {
+                            message: controller.crossContextOffer.message,
+                            canOpenInNewWindow:
+                              controller.crossContextOffer.newWindowProjectId !== undefined &&
+                              controller.canOpenCrossContextInNewWindow,
                           },
-                        })
-                      }
-                      codeController={codeController}
-                      codeControllers={codeThreadControllers}
-                      extensionClient={extensionClient}
-                      workPromotionController={workPromotionController}
-                      codeProviderChoices={codeProviderChoices}
-                      hosts={hosts}
-                      selectedCreateHostId={createHostId}
-                      createHostViewScope={createHostViewScope}
-                      {...(lastSelectedHealthyHostId === undefined
-                        ? {}
-                        : { lastSelectedHealthyHostId })}
-                      onSelectCreateHost={handleSelectCreateHost}
-                      {...(controller.workspace.focusedPaneId === undefined
-                        ? {}
-                        : { focusedPaneId: controller.workspace.focusedPaneId })}
-                      drag={workspaceDrag}
-                      layout={controller.presentedLayout}
-                      memoryRevision={projectController.memoryRevision}
-                      availabilityByProject={projectController.availabilityByProject}
-                      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-                      folderBrowseClient={folderBrowseClient}
-                      githubClient={githubClient}
-                      githubCloneClient={githubCloneClient}
-                      hostId={createHostId}
-                      hidden={
-                        railPlaceholder !== undefined || codeBoardOpen || automationCenterVisible
-                      }
-                      onActivatePane={(paneId) => void controller.activatePane(paneId)}
-                      tabActivation={controller.tabActivation}
-                      onClearFocus={() => void controller.clearFocus()}
-                      onClosePane={controller.closePane}
-                      onCommitResize={controller.commitSplitResize}
-                      onCreateChat={createChat}
-                      onCreateChatProjectThread={handleCreateChatProjectThread}
-                      onOpenChatThread={(threadId, title, projectId) => {
-                        // A thread this window's sidebar controller has never seen
-                        // (a branch minted from a tab's own controller) must reach
-                        // navigation the same way a draft-created thread does:
-                        // through an authoritative bootstrap reload.
-                        if (
-                          !chatController.navigation.some(
-                            (item) => item.threadId === String(threadId),
-                          )
-                        ) {
-                          void chatController.refreshNavigation();
-                        }
-                        void controller.openChatThread(threadId, title, projectId);
-                      }}
-                      onViewAllChatProjectThreads={viewAllChatProjectThreads}
-                      onOpenSideChat={(sidecar) => void controller.openSideChat(sidecar)}
-                      {...(activeMode === "chat" && draftCreating
-                        ? { chatWelcomeCreating: true }
-                        : {})}
-                      {...(activeMode === "chat" && draftError !== undefined
-                        ? { chatWelcomeError: draftError }
-                        : {})}
-                      providerReady={providerReady}
-                      {...(discoveryController.message === undefined
-                        ? {}
-                        : { providerBootstrapMessage: discoveryController.message })}
-                      onOpenDraftThread={(mode) => void controller.openDraftThread(mode)}
-                      workCreateThreadAvailable={workCreateThreadAvailable}
-                      workMutationClient={workMutationClient}
-                      workThreadClient={workThreadClient}
-                      onWorkThreadUpdated={workNavigation.applyThread}
-                      workTurnClient={workTurnClient}
-                      workRequestClient={workRequestClient}
-                      workOverviewClient={workOverviewClient}
-                      workResearchClient={workResearchClient}
-                      goalClient={goalClient}
-                      goalLoopClient={goalLoopClient}
-                      planClient={planClient}
-                      onOpenCodeFile={({ threadId, relativePath }) => {
-                        void controller.openCodeSurface({
-                          kind: "code-file",
-                          threadId,
-                          title: relativePath,
-                          relativePath,
-                        });
-                      }}
-                      usageDashboardClient={usageDashboardClient}
-                      onOpenUsageDashboard={(filter) => {
-                        setPendingUsageFilter(filter);
-                        setUsageOpen(true);
-                      }}
-                      browserAutomationClient={browserAutomationClient}
-                      computerUseClient={computerUseClient}
-                      onComputerUseSessionChange={onComputerUseSessionChange}
-                      isNarrow={isNarrow}
-                      onFocus={(paneId) => void controller.focusPane(paneId)}
-                      onCreateWorkThread={handleCreateWorkThread}
-                      onOpenWorkThread={(threadId, projectId) => {
-                        const thread = workNavigation.navigation.find(
-                          (candidate) => candidate.threadId === String(threadId),
-                        );
-                        void controller.openWorkThread(
-                          threadId,
-                          thread?.title ?? "Work thread",
-                          undefined,
-                          projectId,
-                        );
-                      }}
-                      onArchiveProject={(projectId) =>
-                        void projectController.setArchived(projectId, true)
-                      }
-                      onOpenCodeThread={(threadId, title, projectId) =>
-                        void controller.openCodeThread(threadId, title, undefined, projectId)
-                      }
-                      onOpenCodeSurface={(kind, threadId, title, terminalId) =>
-                        void controller.openCodeSurface(
-                          kind === "code-terminal"
-                            ? {
-                                kind,
-                                threadId,
-                                title,
-                                ...(terminalId === undefined ? {} : { terminalId }),
-                              }
-                            : { kind, threadId, title },
-                        )
-                      }
-                      onPreviewResize={controller.previewSplitResize}
-                      onRelinkProject={projectController.relink}
-                      onRenameProject={projectController.rename}
-                      onSplitPane={(paneId, orientation, placement) =>
-                        void controller.splitPane(paneId, orientation, placement)
-                      }
-                      projects={projectController.allProjects}
-                      providerController={providerController}
-                      workspace={controller.workspace}
-                      mode={controller.workspace.activeMode}
-                      {...(controller.crossContextOffer === undefined
-                        ? {}
-                        : {
-                            crossContextOffer: {
-                              message: controller.crossContextOffer.message,
-                              canOpenInNewWindow:
-                                controller.crossContextOffer.newWindowProjectId !== undefined &&
-                                controller.canOpenCrossContextInNewWindow,
-                            },
-                          })}
-                      onOpenSurface={(surface, paneId, browserContextId) =>
-                        controller.openSurface(surface, paneId, browserContextId)
-                      }
-                      onDismissCrossContextOffer={controller.dismissCrossContextOffer}
-                      onOpenCrossContextInNewWindow={() =>
-                        void controller.openCrossContextInNewWindow()
-                      }
-                      environmentPresentation={
-                        controller.environmentPresentation ?? defaultEnvironmentPresentationState()
-                      }
-                      onSetEnvironmentPresentation={(next) =>
-                        void controller.setEnvironmentPresentation(next)
-                      }
-                      projectClient={projectController.client}
-                      projectServerUrl={props.launch.serverUrl}
-                      {...(props.projectWindowCapability === undefined
-                        ? {}
-                        : { projectWindowCapability: props.projectWindowCapability })}
-                      previewClient={previewClient}
-                      canvasClient={canvasClient}
-                      onOpenCanvasReference={(card) =>
-                        void controller.openCanvas({
-                          mode: card.scope.mode,
-                          title: card.title,
-                          canvasId: card.canvasId,
-                          projectId: card.scope.workspace.projectId as never,
-                        })
-                      }
-                      onOpenCanvas={(entry) =>
-                        void controller.openCanvas({
-                          mode: entry.mode,
-                          title: entry.title,
-                          canvasId: entry.canvasId,
-                          projectId: entry.projectId,
-                        })
-                      }
-                      draftProviderGroups={draftProviderGroups}
-                      codeProviderGroups={codeProviderGroups}
-                      workProviderGroups={workProviderGroups}
-                      {...(projectController.activeProject === undefined
-                        ? {}
-                        : { draftProjectName: projectController.activeProject.name })}
-                      {...(effectiveDraftProviderInstanceId === undefined
-                        ? {}
-                        : { draftSelectedProviderInstanceId: effectiveDraftProviderInstanceId })}
-                      {...(effectiveDraftModelId === undefined
-                        ? {}
-                        : { draftSelectedModelId: effectiveDraftModelId })}
-                      onDraftSelectProvider={(selection) => {
-                        setDraftProviderInstanceId(selection.providerInstanceId);
-                        setDraftModelId(selection.modelId);
-                      }}
-                      onDraftCreateThread={handleDraftCreateThread}
-                      onDraftCreateCodeThread={handleDraftCreateCodeThread}
-                      onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}
-                      draftCodeExecute={codeController.execute}
-                      onCreateProject={(mode, name, receiptId) =>
-                        projectController.create(mode, name, receiptId, createHostId)
-                      }
-                      {...(draftCreating ? { onDraftCreating: true } : {})}
-                      {...(draftError === undefined ? {} : { onDraftError: draftError })}
-                      {...(draftPendingMessage === undefined
-                        ? {}
-                        : { onDraftPendingMessage: draftPendingMessage })}
-                      onAttachFolder={() => setCreateOpen(true)}
-                      onOpenProviderSettings={() =>
-                        void controller.openSettings({ section: "providers" })
-                      }
-                      onOpenSettings={() => void controller.openSettings()}
-                      draftExecutionProfile={
-                        <ExecutionProfileWorkflow
-                          controller={executionProfileController}
-                          variant="composer"
-                        />
-                      }
-                    />
-                  </ComposerContextMeterProvider>
-                </AgentProfileNamesProvider>
-              </ProjectMemoryInspectorProvider>
+                        })}
+                    onOpenSurface={(surface, paneId, browserContextId) =>
+                      controller.openSurface(surface, paneId, browserContextId)
+                    }
+                    onDismissCrossContextOffer={controller.dismissCrossContextOffer}
+                    onOpenCrossContextInNewWindow={() =>
+                      void controller.openCrossContextInNewWindow()
+                    }
+                    environmentPresentation={
+                      controller.environmentPresentation ?? defaultEnvironmentPresentationState()
+                    }
+                    onSetEnvironmentPresentation={(next) =>
+                      void controller.setEnvironmentPresentation(next)
+                    }
+                    projectClient={projectController.client}
+                    projectServerUrl={props.launch.serverUrl}
+                    {...(props.projectWindowCapability === undefined
+                      ? {}
+                      : { projectWindowCapability: props.projectWindowCapability })}
+                    previewClient={previewClient}
+                    canvasClient={canvasClient}
+                    onOpenCanvasReference={(card) =>
+                      void controller.openCanvas({
+                        mode: card.scope.mode,
+                        title: card.title,
+                        canvasId: card.canvasId,
+                        projectId: card.scope.workspace.projectId as never,
+                      })
+                    }
+                    onOpenCanvas={(entry) =>
+                      void controller.openCanvas({
+                        mode: entry.mode,
+                        title: entry.title,
+                        canvasId: entry.canvasId,
+                        projectId: entry.projectId,
+                      })
+                    }
+                    draftProviderGroups={draftProviderGroups}
+                    codeProviderGroups={codeProviderGroups}
+                    workProviderGroups={workProviderGroups}
+                    {...(projectController.activeProject === undefined
+                      ? {}
+                      : { draftProjectName: projectController.activeProject.name })}
+                    {...(effectiveDraftProviderInstanceId === undefined
+                      ? {}
+                      : { draftSelectedProviderInstanceId: effectiveDraftProviderInstanceId })}
+                    {...(effectiveDraftModelId === undefined
+                      ? {}
+                      : { draftSelectedModelId: effectiveDraftModelId })}
+                    onDraftSelectProvider={(selection) => {
+                      setDraftProviderInstanceId(selection.providerInstanceId);
+                      setDraftModelId(selection.modelId);
+                    }}
+                    onDraftCreateThread={handleDraftCreateThread}
+                    onDraftCreateCodeThread={handleDraftCreateCodeThread}
+                    onChangeCodeNewThreadWorkspace={projectController.setCodeNewThreadWorkspace}
+                    draftCodeExecute={codeController.execute}
+                    onCreateProject={(mode, name, receiptId) =>
+                      projectController.create(mode, name, receiptId, createHostId)
+                    }
+                    {...(draftCreating ? { onDraftCreating: true } : {})}
+                    {...(draftError === undefined ? {} : { onDraftError: draftError })}
+                    {...(draftPendingMessage === undefined
+                      ? {}
+                      : { onDraftPendingMessage: draftPendingMessage })}
+                    onAttachFolder={() => setCreateOpen(true)}
+                    onOpenProviderSettings={() =>
+                      void controller.openSettings({ section: "providers" })
+                    }
+                    onOpenSettings={() => void controller.openSettings()}
+                    draftExecutionProfile={
+                      <ExecutionProfileWorkflow
+                        controller={executionProfileController}
+                        variant="composer"
+                      />
+                    }
+                  />
+                </ComposerContextMeterProvider>
+              </AgentProfileNamesProvider>
             </div>
+            <NavigatorPopover
+              controller={navigatorAssistant}
+              onClose={() => setNavigatorOpen(false)}
+              onOpenSettings={(target) => {
+                setNavigatorOpen(false);
+                void controller.openSettings(target);
+              }}
+              open={navigatorOpen}
+              restoreFocus={navigatorOpener}
+            />
             <RightUtilityDock
               browser={threadUtility("browser")}
               changes={threadUtility("changes")}
@@ -4073,13 +3975,6 @@ function LaunchedShell(
               files={threadUtility("files")}
               iosSimulator={threadUtility("ios-simulator")}
               launchableSurfaces={launchableDockSurfaces}
-              navigator={
-                <NavigatorPanel
-                  controller={navigatorAssistant}
-                  onClose={() => closeDockTab("navigator")}
-                  onOpenSettings={(target) => void controller.openSettings(target)}
-                />
-              }
               onClose={closeDock}
               onCloseTab={closeDockTab}
               onCommitWidth={(width) => {
@@ -4090,47 +3985,10 @@ function LaunchedShell(
               onOpenTab={(surface) => openDockTab(surface)}
               onSelectSurface={selectDockTab}
               open={dockVisible}
-              projectMemory={
-                dockProject === undefined ? null : (
-                  <ProjectMemoryInspector
-                    busy={projectController.memoryBusy}
-                    embedded
-                    {...(projectController.memoryErrorMessage === undefined
-                      ? {}
-                      : { errorMessage: projectController.memoryErrorMessage })}
-                    {...(projectController.memory === undefined
-                      ? {}
-                      : { memory: projectController.memory })}
-                    onClose={() => closeDockTab("project-memory")}
-                    onCreate={projectController.createMemory}
-                    onLoad={projectController.loadMemory}
-                    onRetract={projectController.retractMemory}
-                    onRetry={projectController.retryMemory}
-                    onSupersede={projectController.supersedeMemory}
-                    onTransfer={projectController.transferMemory}
-                    project={dockProject}
-                    projects={memoryTransferProjects}
-                    status={projectController.memoryStatus}
-                  />
-                )
-              }
               resolution={dockResolution}
               sideChat={threadUtility("side-chat")}
               terminal={threadUtility("terminal")}
               tests={threadUtility("tests")}
-              summary={
-                <RightUtilityDockSummary
-                  items={[
-                    {
-                      id: "project-memory",
-                      label: "Project memory",
-                      value: memorySummaryValue,
-                    },
-                    { id: "navigator", label: "Navigator", value: navigatorSummaryValue },
-                  ]}
-                  onOpen={(surface, opener) => openDockTab(surface, opener)}
-                />
-              }
               tabs={dockTabs}
               thread={
                 dockThread?.mode !== "code" ? null : (

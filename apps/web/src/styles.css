@@ -2857,9 +2857,21 @@ button:focus-visible {
   box-shadow: -18px 0 44px rgb(0 0 0 / 16%);
 }
 
+.project-overview__memory {
+  min-width: 0;
+  min-height: 0;
+  border-bottom: 1px solid var(--octant-border);
+}
+
+.project-overview__memory .project-memory-inspector {
+  height: auto;
+  min-height: 240px;
+  max-height: min(70vh, 560px);
+}
+
 .project-memory-inspector--embedded {
   grid-template-areas:
-    "project"
+    "header"
     "toolbar"
     "status"
     "scroll";

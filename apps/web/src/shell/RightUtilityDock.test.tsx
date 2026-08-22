@@ -1,13 +1,10 @@
 import { MAX_CONTEXT_SIDEBAR_WIDTH, MIN_CONTEXT_SIDEBAR_WIDTH } from "@octant/contracts/shell";
-import { decodeProjectId } from "@octant/contracts/projects";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { RIGHT_UTILITY_DOCK_SURFACES } from "./rightUtilityDockModel";
 import { RightUtilityDock, type RightUtilityDockProps } from "./RightUtilityDock";
-
-const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
 
 function dockSurface(
   id: (typeof RIGHT_UTILITY_DOCK_SURFACES)[number]["id"],
@@ -17,7 +14,7 @@ function dockSurface(
   return found;
 }
 
-const projectMemory = dockSurface("project-memory");
+const browser = dockSurface("browser");
 
 function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDockProps {
   return {
@@ -25,7 +22,6 @@ function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDock
     launchableSurfaces: RIGHT_UTILITY_DOCK_SURFACES.filter(
       (surface) => surface.id === "browser" || surface.id === "terminal",
     ),
-    navigator: <p>Host Navigator</p>,
     onClose: vi.fn(),
     onCloseTab: vi.fn(),
     onCommitWidth: vi.fn(),
@@ -33,15 +29,12 @@ function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDock
     onPreviewWidth: vi.fn(),
     onSelectSurface: vi.fn(),
     open: true,
-    projectMemory: <p>Private Project memory</p>,
     sideChat: <p>Thread side chat</p>,
     resolution: {
       kind: "surface",
-      projectId,
-      surface: projectMemory,
+      surface: browser,
     },
-    summary: <p>Thread context summary</p>,
-    tabs: [projectMemory],
+    tabs: [browser],
     width: 360,
     ...overrides,
   };
@@ -102,7 +95,7 @@ describe("RightUtilityDock", () => {
       </>,
     );
 
-    expect(screen.getByRole("dialog", { name: "Project memory" })).toHaveAttribute(
+    expect(screen.getByRole("dialog", { name: "Browser" })).toHaveAttribute(
       "id",
       "right-utility-dock",
     );
@@ -135,34 +128,35 @@ describe("RightUtilityDock", () => {
     );
   });
 
-  it("keeps the dock open but empties it when the Project identity goes stale", () => {
-    const { rerender } = render(<RightUtilityDock {...props()} />);
-    expect(screen.getByText("Private Project memory")).toBeVisible();
+  it("keeps the dock open but empties it when the active pane holds no thread", () => {
+    const { rerender } = render(<RightUtilityDock {...props({ browser: <p>Live Browser</p> })} />);
+    expect(screen.getByText("Live Browser")).toBeVisible();
 
     rerender(
       <RightUtilityDock
         {...props({
+          browser: <p>Live Browser</p>,
           resolution: {
             kind: "unavailable",
-            reason: "project-stale",
-            surface: projectMemory,
+            reason: "thread-required",
+            surface: browser,
           },
         })}
       />,
     );
-    expect(screen.queryByText("Private Project memory")).toBeNull();
+    expect(screen.queryByText("Live Browser")).toBeNull();
     expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: "Project memory has nothing to describe here" }),
+      screen.getByRole("heading", { name: "Browser has nothing to describe here" }),
     ).toBeVisible();
   });
 
   it("tears the dock down entirely only when the sidebar toggle closes", () => {
-    const { rerender } = render(<RightUtilityDock {...props()} />);
-    expect(screen.getByText("Private Project memory")).toBeVisible();
+    const { rerender } = render(<RightUtilityDock {...props({ browser: <p>Live Browser</p> })} />);
+    expect(screen.getByText("Live Browser")).toBeVisible();
 
     rerender(<RightUtilityDock {...props({ open: false })} />);
-    expect(screen.queryByText("Private Project memory")).toBeNull();
+    expect(screen.queryByText("Live Browser")).toBeNull();
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
   });
 });

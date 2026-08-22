@@ -13,7 +13,6 @@ import {
   projectWindowCapability,
   styles,
 } from "../App.test-fixtures";
-import { ProjectMemoryInspectorProvider } from "./ProjectMemoryInspector";
 import { ProjectOverview } from "./ProjectOverview";
 
 describe("ProjectOverview renderer flows", () => {
@@ -37,22 +36,19 @@ describe("ProjectOverview renderer flows", () => {
 
   it("shows an unavailable archived binding honestly without mutation actions", () => {
     render(
-      <ProjectMemoryInspectorProvider onOpen={vi.fn()}>
-        <ProjectOverview
-          availability={projectBootstrap().availability[0]!}
-          hostBridge={hostBridge(vi.fn())}
-          onArchive={vi.fn()}
-          onRelink={vi.fn()}
-          onRename={vi.fn()}
-          project={codeProject({ lifecycle: "archived" })}
-        />
-      </ProjectMemoryInspectorProvider>,
+      <ProjectOverview
+        availability={projectBootstrap().availability[0]!}
+        hostBridge={hostBridge(vi.fn())}
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={codeProject({ lifecycle: "archived" })}
+      />,
     );
 
     expect(screen.getByText(/Archived Project · read-only/i)).toBeVisible();
     expect(screen.getByText("Repository moved.")).toBeVisible();
     expect(screen.queryByText("Available")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Review Project memory" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Choose new root" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Archive Project" })).not.toBeInTheDocument();
   });
@@ -61,16 +57,14 @@ describe("ProjectOverview renderer flows", () => {
     const project = codeProject();
     if (project.type !== "code") throw new Error("Expected a Code Project.");
     render(
-      <ProjectMemoryInspectorProvider onOpen={vi.fn()}>
-        <ProjectOverview
-          availability={projectBootstrap().availability[0]!}
-          hostBridge={hostBridge(vi.fn())}
-          onArchive={vi.fn()}
-          onRelink={vi.fn()}
-          onRename={vi.fn()}
-          project={project}
-        />
-      </ProjectMemoryInspectorProvider>,
+      <ProjectOverview
+        availability={projectBootstrap().availability[0]!}
+        hostBridge={hostBridge(vi.fn())}
+        onArchive={vi.fn()}
+        onRelink={vi.fn()}
+        onRename={vi.fn()}
+        project={project}
+      />,
     );
 
     const overview = document.querySelector<HTMLElement>(".project-overview");
@@ -89,7 +83,6 @@ describe("ProjectOverview renderer flows", () => {
     expect(within(overview!).getByText("Relink required")).toBeVisible();
     expect(within(overview!).getByText("Repository moved.")).toBeVisible();
     expect(within(overview!).getByRole("button", { name: "Choose new root" })).toBeVisible();
-    expect(within(overview!).getByRole("button", { name: "Review Project memory" })).toBeVisible();
     expect(within(overview!).getByRole("button", { name: "Archive Project" })).toBeVisible();
     for (const heading of within(overview!).getAllByRole("heading")) {
       expect(Number(heading.tagName.slice(1))).toBeLessThanOrEqual(2);

@@ -356,7 +356,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               ariaLabel="Navigator default model"
               clearLabel="Leave Navigator off"
               groups={props.navigatorModelGroups}
-              intro="Navigator is the optional assistant in the sidebar. It answers questions about Octant itself and never changes anything without asking you first."
+              intro="Navigator is the optional assistant from the profile control. It answers questions about Octant itself and never changes anything without asking you first."
               onClear={() => track(props.onClearNavigatorDefault())}
               onOpenProviderSettings={leaveForProviderSettings}
               onSelect={(selection) => track(props.onSelectNavigatorDefault(selection))}

@@ -133,6 +133,7 @@ export interface WorkspaceViewProps {
   readonly hidden?: boolean;
   readonly layout: WorkspaceLayoutNode;
   readonly memoryRevision?: number;
+  readonly onMemoryChanged?: () => void;
   readonly mode: "chat" | "work" | "code";
   /** A pointer landing in a pane makes it the window's active pane. */
   readonly onActivatePane: (paneId: PaneId) => void;
@@ -1031,6 +1032,9 @@ function renderNonCodeTab(
     const availability = props.availabilityByProject.get(project.id);
     return (
       <ProjectOverview
+        {...(props.projectClient === undefined ? {} : { projectClient: props.projectClient })}
+        memoryProjects={props.projects}
+        {...(props.onMemoryChanged === undefined ? {} : { onMemoryChanged: props.onMemoryChanged })}
         {...(project.type === "chat"
           ? {
               chatOverview: (
