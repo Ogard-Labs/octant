@@ -478,6 +478,7 @@ function controller(): CodeController {
     lastExecuteError: { current: undefined },
     markFollowUp: vi.fn(async () => true),
     markThreadRead: vi.fn(),
+    refreshConversation: vi.fn(() => true),
     navigation: [],
     pendingDraft: "",
     pendingDraftCaret: 0,
