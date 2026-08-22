@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { decodeProjectId } from "@octant/contracts/projects";
 import {
   CodeClientFailure,
   CodeClientSnapshotRequiredError,
@@ -280,11 +281,11 @@ describe("code client", () => {
 
   it("queries cached project pull-request detail without a refresh flag", async () => {
     const detailQuery = {
-      projectId: "10000000-0000-4000-8000-000000000001",
+      projectId: decodeProjectId("10000000-0000-4000-8000-000000000001"),
       repositoryOwner: "octant",
       repositoryName: "octant",
       number: 12,
-    } as const;
+    };
     const view = {
       version: 1,
       query: detailQuery,
@@ -308,11 +309,11 @@ describe("code client", () => {
 
   it("refreshes project pull-request detail through a distinct envelope and refuses owner credentials", async () => {
     const detailQuery = {
-      projectId: "10000000-0000-4000-8000-000000000001",
+      projectId: decodeProjectId("10000000-0000-4000-8000-000000000001"),
       repositoryOwner: "octant",
       repositoryName: "octant",
       number: 12,
-    } as const;
+    };
     const view = {
       version: 1,
       query: detailQuery,
