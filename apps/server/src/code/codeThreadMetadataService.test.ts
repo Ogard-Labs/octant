@@ -1,6 +1,7 @@
 import {
   decodeBindingRevisionId,
   decodeCodeCheckoutHead,
+  decodeCodeEvidenceContentId,
   decodeCodeThread,
   decodeCodeOperationId,
   decodeCodeThreadId,
@@ -30,7 +31,7 @@ const ids = {
   binding: decodeBindingRevisionId("00000000-0000-4000-8000-000000002004"),
   checkout: "00000000-0000-4000-8000-000000002005",
   provider: "00000000-0000-4000-8000-000000002006",
-  operation: "00000000-0000-4000-8000-000000002007",
+  operation: decodeCodeOperationId("00000000-0000-4000-8000-000000002007"),
 } as const;
 
 function thread(
@@ -453,6 +454,71 @@ describe("CodeThreadMetadataService recovery and rebuild", () => {
   });
 });
 
+describe("CodeThreadMetadataService cached GitHub evidence", () => {
+  it("reconstructs PR evidence from the operation journal without a GitHub source", async () => {
+    const github = { observe: vi.fn() };
+    const service = new CodeThreadMetadataService({
+      git: { observe: () => gitObserved() },
+      history: {
+        read: () => ({
+          status: "ok",
+          frames: [
+            frame(
+              {
+                kind: "operation-result",
+                result: {
+                  kind: "pull-request-review",
+                  operationId: ids.operation as never,
+                  state: "observed",
+                  freshness: "fresh",
+                  ambiguous: false,
+                  staleSections: [],
+                  number: 18,
+                  url: "https://github.com/acme/repo/pull/18",
+                  title: "Parser",
+                  pullRequestState: "open",
+                  baseRepository: "acme/repo",
+                  baseBranch: "development",
+                  headRepository: "acme/repo",
+                  headBranch: "feature/x",
+                  author: "octant",
+                  matchesDeliveryBranch: true,
+                  description: {
+                    contentId: "00000000-0000-4000-8000-0000000020a1" as never,
+                    digest: "a".repeat(64),
+                    byteLength: 1,
+                  },
+                  diff: {
+                    contentId: "00000000-0000-4000-8000-0000000020a2" as never,
+                    digest: "b".repeat(64),
+                    byteLength: 1,
+                  },
+                  commits: [],
+                  files: [],
+                  checks: [{ name: "ci", state: "success" }],
+                  reviews: [{ author: "reviewer", state: "approved", body: "lgtm" }],
+                  comments: [],
+                },
+              } as never,
+              now,
+            ),
+          ],
+        }),
+      },
+    });
+
+    const view = await service.project([input()]);
+    expect(github.observe).not.toHaveBeenCalled();
+    expect(view.threads[0]!.linkedPullRequest).toMatchObject({
+      kind: "linked",
+      freshness: "fresh",
+      number: 18,
+    });
+    expect(view.threads[0]!.checks).toEqual({ freshness: "fresh", state: "passing" });
+    expect(view.threads[0]!.reviewState).toEqual({ freshness: "fresh", state: "approved" });
+  });
+});
+
 describe("CodeThreadMetadataService investigation-result gating", () => {
   it("does not treat a completed terminal/test/git operation as an investigation result", async () => {
     const fixture = serviceFixture({
@@ -625,5 +691,60 @@ describe("CodeThreadMetadataService child-result acknowledgement gating", () => 
       unacknowledgedResults: 1,
     });
     expect(metadata.deliverySatisfaction).toBe("waiting");
+  });
+});
+
+describe("CodeThreadMetadataService cached GitHub evidence", () => {
+  it("reconstructs already-cached PR evidence from the journal and never calls GitHub", async () => {
+    const github = { observe: vi.fn() };
+    const history = {
+      read: vi.fn(
+        (): CodeThreadOperationHistory => ({
+          status: "ok",
+          frames: [
+            frame(
+              {
+                kind: "operation-result",
+                result: {
+                  kind: "pull-request-state",
+                  operationId: decodeCodeOperationId(ids.operation),
+                  state: "created",
+                  number: 7,
+                  url: "https://github.com/acme/repo/pull/7",
+                  headRepository: "acme/repo",
+                  headBranch: "feature/x",
+                  baseRepository: "acme/repo",
+                  baseBranch: "development",
+                },
+              },
+              now,
+            ),
+          ],
+        }),
+      ),
+    };
+    const service = new CodeThreadMetadataService({
+      git: { observe: () => gitObserved() },
+      history,
+    });
+
+    const view = await service.project([input()]);
+    const metadata = view.threads[0]!;
+
+    expect(github.observe).not.toHaveBeenCalled();
+    expect(metadata.linkedPullRequest).toEqual({
+      kind: "linked",
+      freshness: "stale",
+      number: 7,
+      url: "https://github.com/acme/repo/pull/7",
+      baseRepository: "acme/repo",
+      baseBranch: "development",
+      headBranch: "feature/x",
+      state: "open",
+      matchesDeliveryBranch: true,
+    });
+    expect(metadata.githubFreshness).toBe("stale");
+    expect(metadata.checks).toEqual({ freshness: "stale", state: "unknown" });
+    expect(metadata.reviewState).toEqual({ freshness: "stale", state: "unknown" });
   });
 });

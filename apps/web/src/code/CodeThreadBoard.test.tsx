@@ -21,24 +21,43 @@ function card(overrides: {
   readonly followUp?: boolean;
   readonly checks?: CodeBoardCard["checks"];
   readonly activeAgents?: number;
-  readonly unread?: boolean;
+  readonly blockingReason?: string;
+  readonly worktree?: CodeBoardCard["worktree"];
+  readonly changedFiles?: CodeBoardCard["changedFiles"];
+  readonly linkedPullRequest?: CodeBoardCard["linkedPullRequest"];
+  readonly reviewState?: CodeBoardCard["reviewState"];
+  readonly lastMeaningfulActivityAt?: CodeBoardCard["lastMeaningfulActivityAt"];
 }): CodeBoardCard {
   return {
     threadId: `00000000-0000-4000-8000-0000000051${overrides.id}`,
     projectId: overrides.projectId ?? projectA,
     checkoutId: "00000000-0000-4000-8000-0000000050ff",
+    checkoutKind: "existing-worktree",
     title: overrides.title ?? `Thread ${overrides.id}`,
     status: overrides.status,
+    statusReason:
+      overrides.status === "done"
+        ? "delivery-satisfied"
+        : overrides.status === "in-progress"
+          ? "executing"
+          : overrides.status === "waiting"
+            ? overrides.recovering
+              ? "recovering"
+              : "awaiting-input"
+            : "idle-unmet-delivery",
     outcomeKind: "opened-pr",
     deliverySatisfaction: overrides.status === "done" ? "done" : "pending",
     providerInstanceId: "00000000-0000-4000-8000-0000000050fe",
     modelId: "model-a",
     executing: overrides.status === "in-progress",
-    worktree: { kind: "unavailable", checkoutId: "00000000-0000-4000-8000-0000000050ff" },
-    changedFiles: { kind: "unavailable" },
-    linkedPullRequest: { kind: "none", freshness: "fresh" },
+    worktree: overrides.worktree ?? {
+      kind: "unavailable",
+      checkoutId: "00000000-0000-4000-8000-0000000050ff",
+    },
+    changedFiles: overrides.changedFiles ?? { kind: "unavailable" },
+    linkedPullRequest: overrides.linkedPullRequest ?? { kind: "none", freshness: "fresh" },
     checks: overrides.checks ?? { freshness: "fresh", state: "unknown" },
-    reviewState: { freshness: "fresh", state: "unknown" },
+    reviewState: overrides.reviewState ?? { freshness: "fresh", state: "unknown" },
     childAgents: {
       active: overrides.activeAgents ?? 0,
       completed: 0,
@@ -49,9 +68,9 @@ function card(overrides: {
       ? { kind: "recovering", reasons: ["project-projection-missing"] }
       : { kind: "ok" },
     githubFreshness: "fresh",
-    unread: overrides.unread ?? false,
+    ...(overrides.blockingReason === undefined ? {} : { blockingReason: overrides.blockingReason }),
     followUp: overrides.followUp ?? false,
-    lastMeaningfulActivityAt: null,
+    lastMeaningfulActivityAt: overrides.lastMeaningfulActivityAt ?? null,
   } as CodeBoardCard;
 }
 
@@ -94,10 +113,10 @@ describe("CodeThreadBoard", () => {
     vi.restoreAllMocks();
   });
 
-  it("announces an unread card's marker to assistive technology", async () => {
+  it("overlays client unread without reading unread from the server card", async () => {
     const loadBoard = vi.fn(async () =>
       view([
-        card({ id: "01", status: "ready", title: "Unread thread", unread: true }),
+        card({ id: "01", status: "ready", title: "Unread thread" }),
         card({ id: "02", status: "ready", title: "Read thread" }),
       ]),
     );
@@ -107,6 +126,7 @@ describe("CodeThreadBoard", () => {
         onOpenThread={() => undefined}
         projects={projects}
         storage={memoryStorage()}
+        unreadThreadIds={new Set(["00000000-0000-4000-8000-000000005101"])}
       />,
     );
 
@@ -153,7 +173,10 @@ describe("CodeThreadBoard", () => {
     expect(screen.getByRole("region", { name: "Ready (1)" })).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Ready thread" }));
-    expect(onOpenThread).toHaveBeenCalledWith("00000000-0000-4000-8000-000000005101");
+    expect(onOpenThread).toHaveBeenCalledWith({
+      threadId: "00000000-0000-4000-8000-000000005101",
+      projectId: projectA,
+    });
   });
 
   it("remembers the empty-group view preference on this client", async () => {
@@ -360,7 +383,7 @@ describe("CodeThreadBoard", () => {
     fireEvent.click(screen.getByText("Details"));
     expect(metadata).toBeVisible();
     expect(within(metadata).getByText("Project A")).toBeVisible();
-    expect(within(metadata).getByText("Opened PR")).toBeVisible();
+    expect(within(metadata).getByText(/Opened PR/)).toBeVisible();
   });
 
   it("keeps failing checks and active agents visible in the board scan path", async () => {
@@ -377,7 +400,7 @@ describe("CodeThreadBoard", () => {
     render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
     expect(await screen.findByText("Checks failing")).toBeVisible();
-    expect(screen.getByText("2 active agents")).toBeVisible();
+    expect(screen.getByText("2 active runs")).toBeVisible();
   });
 
   it("explains active filters on an empty result without implying deletion", async () => {
@@ -397,18 +420,147 @@ describe("CodeThreadBoard", () => {
     }
   });
 
-  it("surfaces a recovering thread in a Recovery column with its reason", async () => {
+  it("keeps a recovering thread in Waiting with its specific reason visible", async () => {
     const loadBoard = vi.fn(async () =>
       view([card({ id: "01", status: "waiting", title: "Recovering thread", recovering: true })]),
     );
     render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
 
-    const recovery = await screen.findByRole("region", { name: "Recovery (1)" });
-    expect(within(recovery).getByText("Recovering thread")).toBeVisible();
-    expect(within(recovery).getByText(/Project projection missing/)).toBeVisible();
+    const waiting = await screen.findByRole("region", { name: "Waiting (1)" });
+    expect(within(waiting).getByText("Recovering thread")).toBeVisible();
+    expect(within(waiting).getByText(/Project projection missing/)).toBeVisible();
+    expect(screen.queryByRole("region", { name: /Recovery/ })).not.toBeInTheDocument();
   });
 
-  it("renders a recoverable error state when the board query fails", async () => {
+  it("keeps a specific Waiting reason visible in the narrow grouped list", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([
+        card({
+          id: "01",
+          status: "waiting",
+          title: "Blocked thread",
+          blockingReason: "Runtime work is waiting for a decision or input.",
+        }),
+      ]),
+    );
+    render(
+      <CodeThreadBoard
+        isNarrow
+        loadBoard={loadBoard}
+        projects={projects}
+        storage={memoryStorage()}
+      />,
+    );
+
+    expect(await screen.findByText("Blocked thread")).toBeVisible();
+    expect(screen.getByText("Runtime work is waiting for a decision or input.")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Ready (0)" })?.className).toContain(
+      "code-board__list-group",
+    );
+  });
+
+  it("preserves the last useful view while refreshing and after a later failure", async () => {
+    let resolveBoard: ((value: CodeBoardView) => void) | undefined;
+    const loadBoard = vi
+      .fn()
+      .mockImplementationOnce(async () =>
+        view([card({ id: "01", status: "ready", title: "Kept" })]),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<CodeBoardView>((resolve) => {
+            resolveBoard = resolve;
+          }),
+      )
+      .mockImplementationOnce(async () => {
+        throw new Error("The host could not refresh the board.");
+      });
+    render(<CodeThreadBoard loadBoard={loadBoard} projects={projects} storage={memoryStorage()} />);
+
+    expect(await screen.findByText("Kept")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh board" }));
+    expect(await screen.findByText("Refreshing local board state.")).toBeVisible();
+    expect(screen.getByText("Kept")).toBeVisible();
+    resolveBoard?.(view([card({ id: "01", status: "ready", title: "Kept" })]));
+    await waitFor(() => expect(screen.queryByText("Refreshing local board state.")).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh board" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The host could not refresh the board. Showing the last useful view.",
+    );
+    expect(screen.getByText("Kept")).toBeVisible();
+  });
+
+  it("shows Project, checkout, branch, files, provider, child runs, PR, checks, review, delivery, follow-up, recovery, and activity", async () => {
+    const loadBoard = vi.fn(async () =>
+      view([
+        card({
+          id: "01",
+          status: "waiting",
+          title: "Full card",
+          recovering: true,
+          followUp: true,
+          checks: { freshness: "fresh", state: "failing" },
+          reviewState: { freshness: "stale", state: "changes-requested" },
+          activeAgents: 1,
+          worktree: {
+            kind: "available",
+            checkoutId: "00000000-0000-4000-8000-0000000050ff",
+            path: "/tmp/wt",
+            head: { kind: "branch", name: "feature/board", oid: "a".repeat(40) },
+          } as CodeBoardCard["worktree"],
+          changedFiles: {
+            kind: "observed",
+            freshness: "fresh",
+            changedPathCount: 3,
+            stagedCount: 1,
+            committedAhead: 1,
+            workingTreeClean: false,
+          },
+          linkedPullRequest: {
+            kind: "linked",
+            freshness: "stale",
+            number: 18,
+            url: "https://github.com/acme/repo/pull/18",
+            baseRepository: "acme/repo",
+            baseBranch: "development",
+            headBranch: "feature/board",
+            state: "open",
+            matchesDeliveryBranch: true,
+          },
+          lastMeaningfulActivityAt:
+            "2026-07-22T10:00:00.000Z" as CodeBoardCard["lastMeaningfulActivityAt"],
+        }),
+      ]),
+    );
+    render(
+      <CodeThreadBoard
+        loadBoard={loadBoard}
+        projects={projects}
+        providerLabels={new Map([["00000000-0000-4000-8000-0000000050fe", "Studio"]])}
+        storage={memoryStorage()}
+      />,
+    );
+
+    await screen.findByRole("button", { name: "Full card" });
+    const article = cardFor("Full card");
+    const facts = article.querySelector(".board-card-facts");
+    if (facts === null) throw new Error("Expected card facts");
+    expect(facts).toHaveTextContent("Project A");
+    expect(facts).toHaveTextContent("Current checkout");
+    expect(facts).toHaveTextContent("feature/board");
+    expect(facts).toHaveTextContent("3 files");
+    expect(facts).toHaveTextContent("Studio · model-a");
+    expect(facts).toHaveTextContent("1 active run");
+    expect(facts).toHaveTextContent("#18 · stale");
+    expect(facts).toHaveTextContent("Checks failing");
+    expect(facts).toHaveTextContent("Review changes requested");
+    expect(facts).toHaveTextContent("Opened PR · pending");
+    expect(facts).toHaveTextContent("Follow-up");
+    expect(within(article).getByText(/Project projection missing/)).toBeVisible();
+  });
+
+  it("renders a recoverable error state when the first board query fails", async () => {
     const loadBoard = vi.fn(async () => {
       throw new Error("Code Thread Board is unavailable.");
     });

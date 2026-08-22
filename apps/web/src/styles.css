@@ -7295,12 +7295,73 @@ p.board-col-empty {
   display: grid;
   gap: 6px;
   max-width: 460px;
-  margin: var(--oct-space-6) auto;
-  padding: var(--oct-space-5);
+  margin: var(--oct-space-3) auto;
+  padding: var(--oct-space-3);
   color: var(--oct-fg-2);
   text-align: center;
   border: 1px dashed var(--oct-border);
   border-radius: var(--oct-radius-lg);
+}
+
+.code-board__refresh-status {
+  margin: 0 0 var(--oct-space-2);
+  color: var(--oct-muted);
+  font-size: 0.78rem;
+}
+
+.code-board__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-4);
+}
+
+.code-board__list-group {
+  min-width: 0;
+}
+
+.code-board__list-head {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+  margin-bottom: var(--oct-space-2);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
+  letter-spacing: var(--oct-tracking-wide);
+  text-transform: uppercase;
+  color: var(--oct-muted);
+}
+
+.code-board__list-head h2 {
+  margin: 0;
+  font: inherit;
+}
+
+.code-board__list-head .count {
+  margin-left: auto;
+  color: var(--oct-meta);
+}
+
+.code-board__list .issuelist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.code-board__list .issuerow {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.code-board__list .issuerow .unread {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-accent-fg);
+  flex: 0 0 auto;
+}
+
+.code-board__body[data-layout="list"] {
+  overflow: auto;
 }
 
 @media (max-width: 560px) {

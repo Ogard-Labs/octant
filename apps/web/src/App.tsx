@@ -3696,16 +3696,31 @@ function LaunchedShell(
                 codeClient={codeClient}
                 codeBoardProjects={codeBoardProjects}
                 onCloseCodeBoard={() => setCodeBoardOpen(false)}
-                onOpenCodeBoardThread={(threadId) => {
+                unreadThreadIds={
+                  new Set(
+                    codeController.navigation
+                      .filter((thread) => thread.unread === true)
+                      .map((thread) => String(thread.threadId)),
+                  )
+                }
+                providerLabels={
+                  new Map(
+                    codeProviderGroups.map((group) => [
+                      String(group.instance.id),
+                      group.instance.displayName,
+                    ]),
+                  )
+                }
+                onOpenCodeBoardThread={(target) => {
                   const thread = codeController.bootstrap?.threads.find(
-                    (candidate) => String(candidate.id) === String(threadId),
+                    (candidate) => String(candidate.id) === String(target.threadId),
                   );
                   setCodeBoardOpen(false);
                   void controller.openCodeThread(
-                    threadId,
+                    target.threadId,
                     thread?.title ?? "Code thread",
                     undefined,
-                    thread?.projectId,
+                    target.projectId,
                   );
                 }}
                 artifactLibraryOpen={artifactLibraryOpen}

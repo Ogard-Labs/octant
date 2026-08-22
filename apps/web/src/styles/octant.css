@@ -2774,12 +2774,20 @@ input.switch:checked::after {
      The floor keeps cards readable — below it the .board row scrolls
      horizontally rather than squeezing; the ceiling stops a few columns
      from stretching into slabs. */
-  flex: 1 1 268px;
-  min-width: 268px;
-  max-width: 420px;
+  flex: 1 1 220px;
+  min-width: 220px;
+  max-width: 360px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-lg);
   background: var(--oct-surface);
+}
+.board-col[data-empty="true"] {
+  flex: 0 0 148px;
+  min-width: 148px;
+  max-width: 168px;
+}
+.board-col[data-empty="true"] .board-col-empty {
+  padding: var(--oct-space-3) var(--oct-space-2);
 }
 .board-col-head {
   display: flex;
@@ -2813,9 +2821,10 @@ input.switch:checked::after {
   padding: var(--oct-space-2);
   scrollbar-width: thin;
 }
-/* an empty column still shows, so the workflow stays legible */
+/* an empty column still shows, so the workflow stays legible, without
+   padding that makes four empty columns fill the window */
 .board-col-empty {
-  padding: var(--oct-space-5) var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-space-3);
   text-align: center;
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);

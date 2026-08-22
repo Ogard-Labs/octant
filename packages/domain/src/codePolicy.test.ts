@@ -5,15 +5,7 @@ import {
   accessPosturesAtOrBelow,
   authorizeCodeOperation,
   clampTurnAccessPosture,
-  CODE_BOARD_PROJECT_STATUS_ORDER,
-  CODE_BOARD_STATUS_COLUMN_ORDER,
-  codeBoardProjectStatusRank,
-  compareCodeBoardActivityDescending,
-  compareCodeBoardProjectOrder,
-  deriveCodeBoardStatus,
   type CodeActor,
-  type CodeBoardStatus,
-  type CodeBoardStatusInput,
   type CodeOperation,
   type CodePolicyDecision,
 } from "./codePolicy";
@@ -276,111 +268,5 @@ describe("Code authority policy", () => {
       "request-local-confirmation",
     );
     expect(decision("remote-client", "full-access", "pr-mutation")).toBe("deny");
-  });
-});
-
-function statusInput(overrides: Partial<CodeBoardStatusInput> = {}): CodeBoardStatusInput {
-  return {
-    deliverySatisfaction: overrides.deliverySatisfaction ?? "pending",
-    executing: overrides.executing ?? false,
-    waiting: overrides.waiting ?? false,
-    recovering: overrides.recovering ?? false,
-  };
-}
-
-describe("deriveCodeBoardStatus", () => {
-  it("derives Done only when the delivery target is objectively satisfied", () => {
-    expect(deriveCodeBoardStatus(statusInput({ deliverySatisfaction: "done" }))).toBe("done");
-  });
-
-  it("keeps Done first: a satisfied target stays Done even while activity continues", () => {
-    expect(
-      deriveCodeBoardStatus(
-        statusInput({
-          deliverySatisfaction: "done",
-          executing: true,
-          waiting: true,
-          recovering: true,
-        }),
-      ),
-    ).toBe("done");
-  });
-
-  it("derives In Progress when a provider turn, tool, or subagent is executing", () => {
-    expect(deriveCodeBoardStatus(statusInput({ executing: true }))).toBe("in-progress");
-    // Executing outranks waiting/recovery signals but never outranks Done.
-    expect(
-      deriveCodeBoardStatus(statusInput({ executing: true, waiting: true, recovering: true })),
-    ).toBe("in-progress");
-  });
-
-  it("derives Waiting for wait signals, recovery, or an ambiguous/waiting delivery target", () => {
-    expect(deriveCodeBoardStatus(statusInput({ waiting: true }))).toBe("waiting");
-    expect(deriveCodeBoardStatus(statusInput({ recovering: true }))).toBe("waiting");
-    expect(deriveCodeBoardStatus(statusInput({ deliverySatisfaction: "waiting" }))).toBe("waiting");
-  });
-
-  it("never derives Done from an ambiguous or stale (waiting) delivery target", () => {
-    // deliverySatisfaction already collapses ambiguous/stale evidence to
-    // `waiting`; the board status must respect that and never promote to Done.
-    expect(deriveCodeBoardStatus(statusInput({ deliverySatisfaction: "waiting" }))).not.toBe(
-      "done",
-    );
-  });
-
-  it("derives Ready when nothing else applies", () => {
-    expect(deriveCodeBoardStatus(statusInput())).toBe("ready");
-    expect(deriveCodeBoardStatus(statusInput({ deliverySatisfaction: "pending" }))).toBe("ready");
-  });
-
-  it("ignores unread and follow-up: only the four runtime signals decide status", () => {
-    const inputs: readonly [CodeBoardStatusInput, CodeBoardStatus][] = [
-      [statusInput({ deliverySatisfaction: "done" }), "done"],
-      [statusInput({ executing: true }), "in-progress"],
-      [statusInput({ waiting: true }), "waiting"],
-      [statusInput(), "ready"],
-    ];
-    for (const [input, expected] of inputs) {
-      expect(deriveCodeBoardStatus(input)).toBe(expected);
-    }
-  });
-});
-
-describe("Code board grouping order", () => {
-  it("orders Status columns Ready, In Progress, Waiting, Done", () => {
-    expect(CODE_BOARD_STATUS_COLUMN_ORDER).toEqual(["ready", "in-progress", "waiting", "done"]);
-  });
-
-  it("prioritizes Project column cards Waiting, In Progress, Ready, then Done", () => {
-    expect(CODE_BOARD_PROJECT_STATUS_ORDER).toEqual(["waiting", "in-progress", "ready", "done"]);
-    expect(codeBoardProjectStatusRank("waiting")).toBeLessThan(
-      codeBoardProjectStatusRank("in-progress"),
-    );
-    expect(codeBoardProjectStatusRank("in-progress")).toBeLessThan(
-      codeBoardProjectStatusRank("ready"),
-    );
-    expect(codeBoardProjectStatusRank("ready")).toBeLessThan(codeBoardProjectStatusRank("done"));
-  });
-
-  it("sorts a Project column by status priority, then most recent activity, keeping Done last", () => {
-    const cards = [
-      { id: "done-new", status: "done" as const, lastMeaningfulActivityAtMs: 500 },
-      { id: "ready", status: "ready" as const, lastMeaningfulActivityAtMs: 100 },
-      { id: "waiting-old", status: "waiting" as const, lastMeaningfulActivityAtMs: 200 },
-      { id: "waiting-new", status: "waiting" as const, lastMeaningfulActivityAtMs: 400 },
-      { id: "in-progress", status: "in-progress" as const, lastMeaningfulActivityAtMs: 300 },
-    ];
-    const ordered = [...cards].sort(compareCodeBoardProjectOrder).map((card) => card.id);
-    expect(ordered).toEqual(["waiting-new", "waiting-old", "in-progress", "ready", "done-new"]);
-  });
-
-  it("sorts a Status column purely by most recent meaningful activity, nulls last", () => {
-    const cards = [
-      { id: "old", lastMeaningfulActivityAtMs: 100 },
-      { id: "never", lastMeaningfulActivityAtMs: null },
-      { id: "new", lastMeaningfulActivityAtMs: 900 },
-    ];
-    const ordered = [...cards].sort(compareCodeBoardActivityDescending).map((card) => card.id);
-    expect(ordered).toEqual(["new", "old", "never"]);
   });
 });

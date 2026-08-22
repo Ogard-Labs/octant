@@ -694,6 +694,31 @@ describe("Code board route", () => {
     generatedAt: now,
   };
 
+  it("authenticates a board query against the window and never accepts a spoofed window identity", async () => {
+    const queryBoard = vi.fn(() => boardView);
+    const route = routeFixture({ queryBoard });
+
+    const unauthenticated = await route(
+      new Request("http://127.0.0.1/api/code/board", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1 }),
+      }),
+    );
+    expect(unauthenticated?.status).toBe(401);
+    expect(queryBoard).not.toHaveBeenCalled();
+
+    const authorized = await route(
+      request("/api/code/board", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1 }),
+      }),
+    );
+    expect(authorized?.status).toBe(200);
+    expect(queryBoard).toHaveBeenCalledWith(windowId, { version: 1 });
+  });
+
   it("decodes a board query and returns the resolved board view", async () => {
     const queryBoard = vi.fn(() => boardView);
     const route = routeFixture({ queryBoard });

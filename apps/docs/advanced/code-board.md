@@ -11,41 +11,49 @@ board** action.
 
 ## Derived statuses
 
-Statuses are derived from the live server state, not manually assigned.
-Cards cannot be dragged or moved; grouping is a pure projection over one
-ordered card set.
+Statuses come from one shared Work and Code domain policy, each with a
+specific reason. Cards cannot be dragged or moved; grouping is a pure
+projection over one ordered card set.
 
 - **Ready** — configured, queued, or idle with unmet delivery criteria.
 - **In Progress** — a provider turn, tool, or subagent is actively executing.
-- **Waiting** — needs approval or input, provider recovery, CI or review, or
-  a dependency.
-- **Done** — the user-confirmed delivery target is objectively satisfied.
+- **Waiting** — needs approval or input, an interrupted turn, recovery, or
+  stale or ambiguous delivery evidence. The specific reason stays on the card.
+- **Done** — the user-confirmed delivery target is objectively satisfied. A
+  completed model turn is not enough.
 
 **Done** is a first-class visible status in both groupings, with no implicit
 completed-item suppression. Ambiguous evidence becomes **Waiting**, never
-**Done**.
+**Done**. Unread is a client overlay and is not part of the server card.
+Board queries never call GitHub; they may show already-cached PR evidence
+with freshness. Refresh re-queries local authoritative state and keeps the
+last useful view while refreshing or on failure.
 
 ## Grouping
 
 The **Group by** control switches between **Status** and **Project** and is
 remembered per client device (not authoritative host state).
 
-- **Status** grouping shows fixed columns with cards sorted by most recent
-  meaningful activity; the Code Project appears as metadata.
+- **Status** grouping shows compact columns with cards sorted by most recent
+  meaningful activity; the Code Project appears as metadata. Empty columns
+  stay narrow so they do not consume most of the window.
 - **Project** grouping shows one column per Code Project; cards keep a
   text-and-icon status badge and sort **Waiting → In Progress → Ready →
   Done**, then by most recent activity.
+- At a narrow width the same card set becomes a grouped list. Waiting
+  reasons remain visible in both layouts.
 
 Shared toolbar filters include text search, status, Code Project,
 provider/agent, pull-request and check state, delivery target, and follow-up.
 
 ## Card metadata
 
-Cards carry thread and Project identity, derived status, delivery target and
-evidence state, provider and model with live activity, active child-agent
-summary, checkout, worktree and branch, changed-file state, linked PR and
-checks, review state, blocking or recovery reason, follow-up state, and last
-meaningful activity.
+Cards carry thread and Project identity, derived status and reason, delivery
+target and evidence state, provider and model with live activity, active
+child-agent summary, checkout or worktree and branch, changed-file state,
+linked PR and checks, review state, blocking or recovery reason, follow-up
+state, and last meaningful activity. Opening a card activates that exact
+Project and thread.
 
 ## Delivery targets
 
