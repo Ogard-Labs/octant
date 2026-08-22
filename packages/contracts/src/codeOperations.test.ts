@@ -854,6 +854,7 @@ function boardCard(overrides: Record<string, unknown> = {}) {
     },
     changedFiles: { kind: "unavailable" },
     linkedPullRequest: { kind: "none", freshness: "fresh" },
+    pullRequestSummaries: { items: [], hiddenCount: 0 },
     checks: { freshness: "fresh", state: "unknown" },
     reviewState: { freshness: "fresh", state: "unknown" },
     childAgents: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },

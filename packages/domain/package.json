@@ -14,6 +14,7 @@
     "./chat-message-parts": "./src/chatMessageParts.ts",
     "./code-policy": "./src/codePolicy.ts",
     "./thread-board-policy": "./src/threadBoardPolicy.ts",
+    "./thread-board-pull-request-policy": "./src/threadBoardPullRequestPolicy.ts",
     "./code-follow-up-policy": "./src/codeFollowUpPolicy.ts",
     "./code-worktree-source-policy": "./src/codeWorktreeSourcePolicy.ts",
     "./delivery-target-policy": "./src/deliveryTargetPolicy.ts",

@@ -54,6 +54,7 @@ function card(overrides: {
       failed: 0,
       unacknowledgedResults: 0,
     },
+    pullRequestSummaries: { items: [], hiddenCount: 0 },
     recovery: overrides.recovering
       ? { kind: "recovering", reasons: ["project-projection-missing"] }
       : { kind: "ok" },

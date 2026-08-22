@@ -1,0 +1,92 @@
+import type {
+  ThreadBoardPullRequestIdentity,
+  ThreadBoardPullRequestSummaries,
+} from "@octant/contracts";
+import { GitPullRequest } from "lucide-react";
+
+export interface ThreadBoardPullRequestSummariesProps {
+  readonly summaries: ThreadBoardPullRequestSummaries;
+  readonly onSelect?: (identity: ThreadBoardPullRequestIdentity) => void;
+}
+
+function stateLabel(state: ThreadBoardPullRequestSummaries["items"][number]["state"]): string {
+  switch (state) {
+    case "draft":
+      return "Draft";
+    case "open":
+      return "Open";
+    case "merged":
+      return "Merged";
+    case "closed":
+      return "Closed";
+  }
+}
+
+function checksLabel(
+  checks: ThreadBoardPullRequestSummaries["items"][number]["checks"],
+): string | undefined {
+  if (checks === "unknown") return undefined;
+  if (checks === "passing") return "Checks passing";
+  if (checks === "failing") return "Checks failing";
+  return `Checks ${checks}`;
+}
+
+function reviewLabel(
+  review: ThreadBoardPullRequestSummaries["items"][number]["review"],
+): string | undefined {
+  if (review === "unknown" || review === "none") return undefined;
+  if (review === "approved") return "Approved";
+  if (review === "changes-requested") return "Changes requested";
+  return `Review ${review}`;
+}
+
+function relationshipLabel(
+  relationship: ThreadBoardPullRequestSummaries["items"][number]["relationship"],
+): string | undefined {
+  if (relationship === undefined) return undefined;
+  return relationship === "promoted" ? "Promoted Code thread" : "Linked Code thread";
+}
+
+export function ThreadBoardPullRequestSummaries(props: ThreadBoardPullRequestSummariesProps) {
+  if (props.summaries.items.length === 0 && props.summaries.hiddenCount === 0) return null;
+  return (
+    <ul aria-label="Linked pull requests" className="board-card-pr-list">
+      {props.summaries.items.map((summary) => {
+        const repo = `${summary.identity.repositoryOwner}/${summary.identity.repositoryName}`;
+        const details = [
+          stateLabel(summary.state),
+          checksLabel(summary.checks),
+          reviewLabel(summary.review),
+          summary.freshness === "stale" ? "Stale snapshot" : undefined,
+          summary.readyToMerge ? "Ready to merge" : undefined,
+          relationshipLabel(summary.relationship),
+        ].filter((value): value is string => value !== undefined);
+        const label = `${repo} #${summary.identity.number} · ${summary.title}${
+          details.length === 0 ? "" : ` · ${details.join(" · ")}`
+        }`;
+        return (
+          <li key={`${String(summary.identity.projectId)}:${repo}#${summary.identity.number}`}>
+            <button
+              aria-label={label}
+              className="board-card-pr"
+              onClick={() => props.onSelect?.(summary.identity)}
+              type="button"
+            >
+              <GitPullRequest aria-hidden="true" className="icon" size={12} strokeWidth={1.8} />
+              <span className="board-card-pr-title">{summary.title}</span>
+              <span className="board-card-pr-meta">
+                {repo} #{summary.identity.number}
+                {details.length === 0 ? null : ` · ${details.join(" · ")}`}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+      {props.summaries.hiddenCount === 0 ? null : (
+        <li aria-label={`${props.summaries.hiddenCount} more pull requests`} className="board-card-pr-more">
+          +{props.summaries.hiddenCount} more
+        </li>
+      )}
+    </ul>
+  );
+}

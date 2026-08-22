@@ -170,14 +170,24 @@ function runtimeSource(
   return { observe: vi.fn((threadId: unknown) => activity(threadId)) };
 }
 
+function emptyPullRequestSnapshot() {
+  return {
+    rows: [],
+    freshness: { status: "empty" as const },
+    githubRevoked: false,
+  };
+}
+
 function service(options: {
   readonly threads: readonly CodeBoardThread[];
   readonly runtime?: (threadId: unknown) => CodeBoardRuntimeActivity;
+  readonly pullRequests?: ReturnType<typeof emptyPullRequestSnapshot>;
 }) {
   return new CodeThreadBoardService({
     threads: { list: () => [...options.threads] },
     metadata: metadataService(),
     runtime: runtimeSource(options.runtime),
+    pullRequests: { snapshot: () => options.pullRequests ?? emptyPullRequestSnapshot() },
     clock: () => now,
   });
 }
@@ -275,6 +285,7 @@ describe("CodeThreadBoardService derivation", () => {
         history,
       }),
       runtime: runtimeSource(),
+      pullRequests: { snapshot: () => emptyPullRequestSnapshot() },
       clock: () => now,
     });
 
@@ -321,6 +332,7 @@ describe("CodeThreadBoardService derivation", () => {
       },
       metadata: metadataService(),
       runtime: runtimeSource(),
+      pullRequests: { snapshot: () => emptyPullRequestSnapshot() },
       clock: () => now,
     });
 
@@ -371,6 +383,7 @@ describe("CodeThreadBoardService derivation", () => {
         history: { read: () => ({ status: "ok", frames: [] }) },
       }),
       runtime: runtimeSource(),
+      pullRequests: { snapshot: () => emptyPullRequestSnapshot() },
       clock: () => now,
     });
     const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
@@ -400,6 +413,39 @@ describe("CodeThreadBoardService derivation", () => {
     expect(view.cards).toHaveLength(1);
     expect(view.cards[0]?.projectId).toBe(ids.projectB);
     expect(view.cards[0]?.threadId).toBe(ids.waiting);
+  });
+
+  it("joins cached project pull-request summaries onto board cards without GitHub calls", async () => {
+    const board = service({
+      threads: [boardThread({ thread: thread({ id: ids.ready, outcomeKind: "opened-pr" }) })],
+      pullRequests: {
+        rows: [
+          {
+            projectId: ids.projectA,
+            projectName: "Project A",
+            repositoryOwner: "octant",
+            repositoryName: "octant",
+            number: 12,
+            title: "Board pull request",
+            draft: false,
+            author: "octocat",
+            baseBranch: "main",
+            headBranch: "feature/x",
+            updatedAt: "2026-08-22T08:00:00Z",
+            checks: "passing",
+            review: "approved",
+            linkedThreads: [{ threadId: ids.ready, title: "Board thread" }],
+          },
+        ],
+        freshness: { status: "fresh", lastSuccessfulRefreshAt: now },
+        githubRevoked: false,
+      },
+    });
+
+    const view = await board.query(decodeCodeBoardQuery({ version: 1 }));
+    const card = cardFor(view.cards, ids.ready);
+    expect(card.pullRequestSummaries.items).toHaveLength(1);
+    expect(card.pullRequestSummaries.items[0]?.readyToMerge).toBe(true);
   });
 });
 

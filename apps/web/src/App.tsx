@@ -87,6 +87,7 @@ import type { CodeOperationId } from "@octant/contracts";
 import type {
   CodeProjectPullRequestDetailQuery,
   CodeProjectPullRequestRow,
+  ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import { decodeWorkspaceTabId, type WindowId, type WorkspaceTab } from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
@@ -2090,14 +2091,23 @@ function LaunchedShell(
     });
   }
 
-  function selectProjectPullRequest(row: CodeProjectPullRequestRow): void {
+  function selectProjectPullRequestIdentity(identity: ThreadBoardPullRequestIdentity): void {
     setSelectedProjectPullRequest({
+      projectId: identity.projectId,
+      repositoryOwner: identity.repositoryOwner,
+      repositoryName: identity.repositoryName,
+      number: identity.number,
+    });
+    openDockTab("review");
+  }
+
+  function selectProjectPullRequest(row: CodeProjectPullRequestRow): void {
+    selectProjectPullRequestIdentity({
       projectId: row.projectId,
       repositoryOwner: row.repositoryOwner,
       repositoryName: row.repositoryName,
       number: row.number,
     });
-    openDockTab("review");
   }
 
   function openLinkedProjectPullRequestThread(
@@ -3797,6 +3807,7 @@ function LaunchedShell(
                   setSelectedProjectPullRequest(undefined);
                 }}
                 onSelectProjectPullRequest={selectProjectPullRequest}
+                onSelectBoardPullRequest={selectProjectPullRequestIdentity}
                 {...(selectedProjectPullRequest === undefined
                   ? {}
                   : {
