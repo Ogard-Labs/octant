@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeChatThreadView } from "@octant/contracts/chat";
+import { decodeThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { describe, expect, it, vi } from "vitest";
 import { ChatTranscript } from "./ChatTranscript";
 
@@ -476,7 +477,7 @@ describe("ChatTranscript", () => {
     const onEditTurn = vi.fn();
     render(<ChatTranscript onEditTurn={onEditTurn} view={viewFixture()} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await chooseTurnAction("Edit");
     const editor = screen.getByRole("textbox", { name: "Edit your message" });
     expect(editor).toHaveValue("Please summarize this.");
     // An unchanged message is not a revision.
@@ -528,7 +529,7 @@ describe("ChatTranscript", () => {
   it("offers a branch from a turn and states a branch's own provenance", async () => {
     const onBranchTurn = vi.fn();
     render(<ChatTranscript onBranchTurn={onBranchTurn} view={viewFixture()} />);
-    await userEvent.click(screen.getByRole("button", { name: "Branch from here" }));
+    await chooseTurnAction("Branch from here");
     expect(onBranchTurn).toHaveBeenCalledWith(ids.turn);
 
     const base = viewFixture();
@@ -556,12 +557,19 @@ describe("ChatTranscript", () => {
     ).toBeVisible();
   });
 
-  it("keeps revising and branching unavailable while a response is running", () => {
+  it("keeps revising and branching unavailable while a response is running", async () => {
     render(
       <ChatTranscript busy onBranchTurn={vi.fn()} onEditTurn={vi.fn()} view={viewFixture()} />,
     );
-    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Branch from here" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Edit" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    expect(screen.getByRole("menuitemradio", { name: "Branch from here" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
   });
 
   it("offers a checkpoint on each message and marks the turn the user chose", async () => {
@@ -580,16 +588,128 @@ describe("ChatTranscript", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Checkpoint" }));
+    await chooseTurnAction("Checkpoint");
     await user.click(screen.getByRole("button", { name: "Mark" }));
 
     expect(onMark).toHaveBeenCalledWith(ids.turn, "Message 1");
   });
 
-  it("keeps the checkpoint affordance off a transcript the host serves none for", () => {
+  it("keeps the checkpoint marker visible only when a checkpoint exists", async () => {
+    render(
+      <ChatTranscript
+        checkpoints={{
+          byTurnId: new Map([[ids.turn, markedCheckpoint()]]),
+          busy: false,
+          onForget: vi.fn(),
+          onMark: vi.fn(),
+          onRestore: vi.fn(),
+        }}
+        onRetryAttempt={vi.fn()}
+        view={viewFixture()}
+      />,
+    );
+
+    expect(screen.getByText("Before the rewrite")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Checkpoint" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Forget" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry interrupted response" })).toBeVisible();
+    expect(screen.getByText("Interrupted")).toBeVisible();
+    expect(screen.getByText("Completed")).toBeVisible();
+
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(await screen.findByRole("menuitemradio", { name: "Restore from here" })).toBeVisible();
+    expect(screen.getByRole("menuitemradio", { name: "Forget" })).toBeVisible();
+    expect(screen.queryByRole("menuitemradio", { name: "Checkpoint" })).not.toBeInTheDocument();
+  });
+
+  it("forgets a marked checkpoint from the turn's action menu", async () => {
+    const onForget = vi.fn();
+    const checkpoint = markedCheckpoint();
+    render(
+      <ChatTranscript
+        checkpoints={{
+          byTurnId: new Map([[ids.turn, checkpoint]]),
+          busy: false,
+          onForget,
+          onMark: vi.fn(),
+          onRestore: vi.fn(),
+        }}
+        view={viewFixture()}
+      />,
+    );
+
+    await chooseTurnAction("Forget");
+    expect(onForget).toHaveBeenCalledWith(checkpoint);
+  });
+
+  it("restores a checkpoint by starting a second thread rather than rewinding this one", async () => {
+    const user = userEvent.setup();
+    const onRestore = vi.fn();
+    const checkpoint = markedCheckpoint();
+    render(
+      <ChatTranscript
+        checkpoints={{
+          byTurnId: new Map([[ids.turn, checkpoint]]),
+          busy: false,
+          onForget: vi.fn(),
+          onMark: vi.fn(),
+          onRestore,
+        }}
+        view={viewFixture()}
+      />,
+    );
+
+    await chooseTurnAction("Restore from here");
+    expect(screen.getByRole("button", { name: "Start the new thread" })).toBeVisible();
+    expect(screen.getByText("Please summarize this.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Start the new thread" }));
+    expect(onRestore).toHaveBeenCalledWith(checkpoint, "Before the rewrite");
+  });
+
+  it("keeps the checkpoint affordance off a transcript the host serves none for", async () => {
     render(<ChatTranscript view={viewFixture()} />);
 
-    expect(screen.queryByRole("button", { name: "Checkpoint" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+    expect(screen.queryByRole("menuitemradio", { name: "Checkpoint" })).not.toBeInTheDocument();
+  });
+
+  it("copies the turn's references from the action menu", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, clipboard: { writeText } });
+    render(<ChatTranscript view={viewFixture()} />);
+
+    await chooseTurnAction("Copy references");
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Please summarize this.")),
+    );
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("diagram.png"));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining("Here is the summary."));
+    expect(writeText).toHaveBeenCalledWith(
+      expect.stringContaining("Octant guide · https://example.test/guide"),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("mirrors fork, checkpoint, and copy on the turn's context menu", async () => {
+    const onBranchTurn = vi.fn();
+    render(
+      <ChatTranscript
+        checkpoints={{
+          byTurnId: new Map(),
+          busy: false,
+          onForget: vi.fn(),
+          onMark: vi.fn(),
+          onRestore: vi.fn(),
+        }}
+        onBranchTurn={onBranchTurn}
+        view={viewFixture()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByText("Please summarize this."));
+    expect(await screen.findByRole("menuitem", { name: "Branch from here" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Checkpoint" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Copy references" })).toBeVisible();
   });
 
   it("windows a 1000-turn conversation so only a bounded number of rows mount", () => {
@@ -608,6 +728,24 @@ describe("ChatTranscript", () => {
     expect(await screen.findByText("User turn 500")).toBeVisible();
   });
 });
+
+async function chooseTurnAction(name: string) {
+  await userEvent.click(screen.getByRole("button", { name: "More actions" }));
+  await userEvent.click(await screen.findByRole("menuitemradio", { name }));
+}
+
+function markedCheckpoint() {
+  return decodeThreadCheckpoint({
+    id: "11111111-1111-4111-8111-111111111111",
+    anchor: { mode: "chat", threadId: ids.thread, turnId: ids.turn },
+    label: "Before the rewrite",
+    lifecycle: "marked",
+    restoreCount: 0,
+    markedAt: now,
+    version: 1,
+    updatedAt: now,
+  });
+}
 
 const poolCandidates = [
   {

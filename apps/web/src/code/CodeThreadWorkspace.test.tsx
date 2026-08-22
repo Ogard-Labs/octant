@@ -193,10 +193,9 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    // The assistant reply carries no checkpoint, so only the message that
-    // started the turn offers to put the files back.
-    expect(screen.getAllByRole("button", { name: "Restore files to this point" })).toHaveLength(1);
-    await user.click(screen.getByRole("button", { name: "Restore files to this point" }));
+    // The assistant reply carries no checkout snapshot, so only the message
+    // that started the turn offers to put the files back.
+    await chooseTurnAction(user, "Restore files to this point", "rewrite the parser");
     await user.click(screen.getByRole("button", { name: "Restore files" }));
 
     // This thread decides effects by approval, and the approval was declined:
@@ -215,7 +214,7 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    await user.click(screen.getByRole("button", { name: "Restore files to this point" }));
+    await chooseTurnAction(user, "Restore files to this point", "rewrite the parser");
     await user.click(screen.getByRole("button", { name: "Restore files" }));
 
     await waitFor(() =>
@@ -254,7 +253,7 @@ describe("CodeThreadWorkspace", () => {
     }
     const { rerender } = render(<Harness open />);
 
-    await user.click(screen.getByRole("button", { name: "Restore files to this point" }));
+    await chooseTurnAction(user, "Restore files to this point", "rewrite the parser");
     await user.click(screen.getByRole("button", { name: "Restore files" }));
     await waitFor(() => expect(screen.getByText("Files restored to this point.")).toBeVisible());
     // The host returned what it replaced, so the destructive overwrite is
@@ -310,8 +309,8 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.getAllByRole("button", { name: "Fork from here" })).toHaveLength(1);
-    await user.click(screen.getByRole("button", { name: "Fork from here" }));
+    expect(screen.queryByRole("button", { name: "Fork from here" })).not.toBeInTheDocument();
+    await chooseTurnAction(user, "Fork from here", "done");
 
     await waitFor(() =>
       expect(forkThread).toHaveBeenCalledWith({
@@ -349,7 +348,7 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Fork from here" }));
+    await chooseTurnAction(user, "Fork from here", "done");
     expect(
       await screen.findByText("The thread could not be forked. This thread is unchanged."),
     ).toBeVisible();
@@ -389,7 +388,7 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
-  it("keeps the restore control off a thread that cannot change the checkout", () => {
+  it("keeps the restore control off a thread that cannot change the checkout", async () => {
     const conversation = [
       { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
     ];
@@ -412,7 +411,39 @@ describe("CodeThreadWorkspace", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Restore files to this point" })).toBeNull();
+    await userEvent.click(
+      within(turnArticle("rewrite the parser")).getByRole("button", { name: "More actions" }),
+    );
+    expect(
+      screen.queryByRole("menuitemradio", { name: "Restore files to this point" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("names putting files back separately from restoring a checkpoint", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          conversation: [
+            { id: "turn-1:user", role: "user" as const, text: "rewrite the parser", checkpoint },
+          ],
+        } as never)}
+        nextUuid={() => "30000000-0000-4000-8000-000000000001"}
+        operationClient={{ executeOperation: vi.fn() } as never}
+        requestApproval={vi.fn()}
+        threadId={threadId}
+      />,
+    );
+
+    await user.click(
+      within(turnArticle("rewrite the parser")).getByRole("button", { name: "More actions" }),
+    );
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Restore files to this point" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("menuitemradio", { name: "Restore from here" }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens the `#` picker in the Code composer and sends the chip as an id", async () => {
@@ -1615,4 +1646,22 @@ function textOnlyProviderGroup(): PickerGroup {
       },
     ],
   } as never;
+}
+
+function turnArticle(text: string): HTMLElement {
+  const turn = screen.getByText(text).closest("article");
+  expect(turn).toBeInstanceOf(HTMLElement);
+  if (!(turn instanceof HTMLElement)) {
+    throw new Error("the turn is not in the document");
+  }
+  return turn;
+}
+
+async function chooseTurnAction(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+  turnText: string,
+) {
+  await user.click(within(turnArticle(turnText)).getByRole("button", { name: "More actions" }));
+  await user.click(await screen.findByRole("menuitemradio", { name }));
 }

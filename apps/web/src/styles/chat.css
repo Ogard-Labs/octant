@@ -301,8 +301,8 @@
   line-height: 1.45;
 }
 
-/* A user turn carries more than the styleguide's bubble — edit and checkpoint
-   affordances follow it — so the flex row becomes a right-aligned column. */
+/* A user turn carries more than the styleguide's bubble — the editor and any
+   checkpoint marker follow it — so the flex row becomes a right-aligned column. */
 .chat-transcript .turn-user {
   flex-direction: column;
   align-items: flex-end;
@@ -314,18 +314,9 @@
   white-space: pre-wrap;
 }
 
-.chat-transcript__turn-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--oct-space-1);
-  margin-top: var(--oct-space-2);
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
-.chat-transcript__turn:hover .chat-transcript__turn-actions,
-.chat-transcript__turn-actions:focus-within {
-  opacity: 1;
+.chat-transcript__turn .turn-action-menu {
+  display: grid;
+  gap: 14px;
 }
 
 .chat-transcript__editor {
@@ -1071,10 +1062,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-transcript__turn-actions {
-    transition: none;
-  }
-
   .chat-transcript__attempt-status--streaming svg {
     animation: none;
   }
@@ -1084,10 +1071,6 @@
     color: var(--oct-meta);
     animation: none;
   }
-}
-
-html[data-octant-reduced-motion="true"] .chat-transcript__turn-actions {
-  transition: none;
 }
 
 html[data-octant-reduced-motion="true"] .chat-transcript__attempt-status--streaming svg {

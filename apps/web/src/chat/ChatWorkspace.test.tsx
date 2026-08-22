@@ -1952,7 +1952,7 @@ describe("ChatWorkspace", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Branch from here" }));
+    await chooseTurnAction(user, "Branch from here");
     expect(execute).toHaveBeenCalledWith({
       kind: "branch-chat-thread",
       threadId: threadId as never,
@@ -1961,7 +1961,7 @@ describe("ChatWorkspace", () => {
       title: "Calm planning (branch)",
     });
 
-    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await chooseTurnAction(user, "Edit");
     const editor = screen.getByRole("textbox", { name: "Edit your message" });
     await user.clear(editor);
     await user.type(editor, "Ship export first.");
@@ -1979,7 +1979,7 @@ describe("ChatWorkspace", () => {
     {
       what: "revises a turn",
       act: async (user: ReturnType<typeof userEvent.setup>) => {
-        await user.click(screen.getByRole("button", { name: "Edit" }));
+        await chooseTurnAction(user, "Edit");
         const editor = screen.getByRole("textbox", { name: "Edit your message" });
         await user.clear(editor);
         await user.type(editor, "Ship export first.");
@@ -2201,18 +2201,23 @@ describe("ChatWorkspace", () => {
       />,
     );
 
-    const branch = screen.getByRole("button", { name: "Branch from here" });
-    await user.click(branch);
+    await chooseTurnAction(user, "Branch from here");
     // While the server is still creating the branch, a second click must not
     // mint a second thread.
-    expect(branch).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    const branch = await screen.findByRole("menuitemradio", { name: "Branch from here" });
+    expect(branch).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(branch);
     expect(execute).toHaveBeenCalledTimes(1);
 
     resolveBranch({ kind: "thread-created", thread: branchedThread });
     await waitFor(() => expect(onThreadBranched).toHaveBeenCalledWith(branchedThread));
     expect(onThreadBranched).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(branch).toBeEnabled());
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    expect(
+      await screen.findByRole("menuitemradio", { name: "Branch from here" }),
+    ).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it("copies the conversation as Markdown and names what it could not include", async () => {
@@ -2269,4 +2274,9 @@ function pooledProviderSnapshot(): ProviderRegistrySnapshot {
       },
     ],
   } as ProviderRegistrySnapshot;
+}
+
+async function chooseTurnAction(user: ReturnType<typeof userEvent.setup>, name: string) {
+  await user.click(screen.getByRole("button", { name: "More actions" }));
+  await user.click(await screen.findByRole("menuitemradio", { name }));
 }

@@ -23,48 +23,53 @@ const checkpoint = decodeThreadCheckpoint({
 
 function controls(overrides: Partial<Parameters<typeof ThreadCheckpointControls>[0]> = {}) {
   const onMark = vi.fn();
-  const onForget = vi.fn();
+  const onCancelDraft = vi.fn();
   const onRestore = vi.fn();
   render(
     <ThreadCheckpointControls
       busy={false}
       defaultLabel="Message 1"
-      onForget={onForget}
+      onCancelDraft={onCancelDraft}
       onMark={onMark}
       onRestore={onRestore}
       {...overrides}
     />,
   );
-  return { onMark, onForget, onRestore };
+  return { onMark, onCancelDraft, onRestore };
 }
 
 describe("the checkpoint affordance on a message", () => {
+  it("shows nothing on an unmarked turn until the naming form is asked for", () => {
+    controls();
+
+    expect(screen.queryByRole("button", { name: "Checkpoint" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Checkpoint name" })).not.toBeInTheDocument();
+  });
+
   it("marks the point under the name the user typed", async () => {
     const user = userEvent.setup();
-    const { onMark } = controls();
+    const { onMark, onCancelDraft } = controls({ draft: "mark" });
 
-    await user.click(screen.getByRole("button", { name: "Checkpoint" }));
     const field = screen.getByRole("textbox", { name: "Checkpoint name" });
     await user.clear(field);
     await user.type(field, "Green tests");
     await user.click(screen.getByRole("button", { name: "Mark" }));
 
     expect(onMark).toHaveBeenCalledWith("Green tests");
+    expect(onCancelDraft).toHaveBeenCalledTimes(1);
   });
 
   it("offers no marking gesture while a checkpoint request is in flight", () => {
-    controls({ busy: true });
+    controls({ busy: true, draft: "mark" });
 
-    expect(screen.getByRole("button", { name: "Checkpoint" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Mark" })).toBeDisabled();
   });
 
   it("says restoring starts a new thread rather than undoing this one", async () => {
     const user = userEvent.setup();
-    const { onRestore } = controls({ checkpoint });
+    const { onRestore } = controls({ checkpoint, draft: "restore" });
 
     expect(screen.getByText("Before the rewrite")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Restore from here" }));
-
     expect(screen.getByRole("button", { name: "Start the new thread" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Start the new thread" }));
     // An untouched name falls back to the checkpoint's own, so a restore never
@@ -72,13 +77,12 @@ describe("the checkpoint affordance on a message", () => {
     expect(onRestore).toHaveBeenCalledWith("Before the rewrite");
   });
 
-  it("puts a point away without touching the message it marked", async () => {
-    const user = userEvent.setup();
-    const { onForget } = controls({ checkpoint });
+  it("keeps the marker visible once a point is marked, without a Forget control", () => {
+    controls({ checkpoint });
 
-    await user.click(screen.getByRole("button", { name: "Forget" }));
-
-    expect(onForget).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Before the rewrite")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Forget" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Restore from here" })).not.toBeInTheDocument();
   });
 
   it("says how often a point has already been taken up", () => {

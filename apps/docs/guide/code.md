@@ -77,6 +77,20 @@ journal, so it survives a restart.
 Assistant replies in Code render as markdown, so a plan an agent writes out as a
 heading and a numbered list reads as one. What you type stays exactly as typed.
 
+## Turn actions
+
+Fork, checkpoint, copy, and restoring files to a recorded point live in each
+turn's **More actions** menu (the ⋯ control that appears when the turn is
+hovered or focused). The same items are on the turn's context menu.
+
+**Restore from here** starts a second thread at the marked checkpoint and
+leaves this one untouched. **Restore files to this point** overwrites the
+working tree in place: it is named separately, still asks for confirmation,
+and still goes through the thread's approval path. Undo restore stays on the
+thread after a successful overwrite.
+
+A checkpoint marker stays on the turn only when that point is marked.
+
 ## Attaching images
 
 Paste or drop a PNG, JPEG, WebP, or GIF into the thread composer to send it with your next message. Each image uploads to the host as you attach it, and the turn sends only the identifier the host answered with, so the provider receives bytes the host itself accepted.

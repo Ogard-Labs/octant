@@ -43,6 +43,7 @@ import { useThreadMentions } from "../chat/useThreadMentions";
 import { CodeAttachmentGallery } from "./CodeAttachmentGallery";
 import { CodeTranscriptRow } from "./CodeTranscriptRow";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
+import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
 import { useThreadCheckpoints } from "../checkpoints/useThreadCheckpoints";
 import { ScaffoldPicker } from "../scaffolds/ScaffoldPicker";
@@ -149,6 +150,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   const [turnAccessOverride, setTurnAccessOverride] = useState<ProviderExecutionPolicy>();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [confirmingRestore, setConfirmingRestore] = useState<string>();
+  const [checkpointDraft, setCheckpointDraft] = useState<
+    { readonly messageId: string; readonly kind: "mark" | "restore" } | undefined
+  >();
   const checkpoints = useThreadCheckpoints({
     threadId: String(props.threadId),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
@@ -754,147 +758,160 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 <article
                   className={`code-thread-workspace__message code-thread-workspace__message--${message.role === "user" ? "user" : "agent"}`}
                 >
-                  {message.role === "assistant" ? (
-                    <header>
-                      <span>
-                        {message.providerInstanceId === undefined || message.modelId === undefined
-                          ? "Octant Code"
-                          : boundProviderModelLabel(providerGroups, {
-                              providerInstanceId: message.providerInstanceId,
-                              modelId: message.modelId,
-                            })}
-                      </span>
-                      {message.status === undefined || message.status === "completed" ? null : (
-                        <span className="code-thread-workspace__turn-status">
-                          {turnStatusLabel(message.status)}
+                  <TurnActionMenu
+                    actions={codeTurnActions({
+                      canFork:
+                        message.role === "assistant" &&
+                        message.operationId !== undefined &&
+                        message.status === "completed" &&
+                        props.onOpenCodeThread !== undefined,
+                      canCheckpoint:
+                        message.role === "assistant" &&
+                        message.operationId !== undefined &&
+                        message.status === "completed" &&
+                        checkpoints.available,
+                      canRestoreFiles:
+                        message.role === "user" && message.checkpoint !== undefined && mayRestore,
+                      checkpointBusy: checkpoints.busy,
+                      forking,
+                      marked: markedCheckpoint !== undefined,
+                      restoring,
+                    })}
+                    onAction={(value) => {
+                      if (value === "fork") void forkFrom(message);
+                      else if (value === "checkpoint-mark") {
+                        setCheckpointDraft({ messageId: message.id, kind: "mark" });
+                      } else if (value === "checkpoint-restore") {
+                        setCheckpointDraft({ messageId: message.id, kind: "restore" });
+                      } else if (value === "checkpoint-forget") {
+                        if (markedCheckpoint !== undefined)
+                          void checkpoints.forget(markedCheckpoint);
+                      } else if (value === "restore-files") {
+                        setRestoreMessage(undefined);
+                        setConfirmingRestore(message.id);
+                      } else if (value === "copy-references") {
+                        void copyText(message.text);
+                      }
+                    }}
+                  >
+                    {message.role === "assistant" ? (
+                      <header>
+                        <span>
+                          {message.providerInstanceId === undefined || message.modelId === undefined
+                            ? "Octant Code"
+                            : boundProviderModelLabel(providerGroups, {
+                                providerInstanceId: message.providerInstanceId,
+                                modelId: message.modelId,
+                              })}
                         </span>
-                      )}
-                    </header>
-                  ) : null}
-                  {message.attachments === undefined ? null : (
-                    <CodeAttachmentGallery
-                      attachments={message.attachments}
-                      {...(props.attachmentClient === undefined
-                        ? {}
-                        : { client: props.attachmentClient })}
-                      threadId={props.threadId}
-                    />
-                  )}
-                  {activity === undefined ? null : (
-                    <CodeTranscriptRow
-                      activity={activity}
-                      running={message.status === "incomplete"}
-                    />
-                  )}
-                  {/* An assistant reply is markdown — a plan arrives as a
+                        {message.status === undefined || message.status === "completed" ? null : (
+                          <span className="code-thread-workspace__turn-status">
+                            {turnStatusLabel(message.status)}
+                          </span>
+                        )}
+                      </header>
+                    ) : null}
+                    {message.attachments === undefined ? null : (
+                      <CodeAttachmentGallery
+                        attachments={message.attachments}
+                        {...(props.attachmentClient === undefined
+                          ? {}
+                          : { client: props.attachmentClient })}
+                        threadId={props.threadId}
+                      />
+                    )}
+                    {activity === undefined ? null : (
+                      <CodeTranscriptRow
+                        activity={activity}
+                        running={message.status === "incomplete"}
+                      />
+                    )}
+                    {/* An assistant reply is markdown — a plan arrives as a
                     heading and a numbered list, and rendering it as one long
                     line is what made plans unreadable here. What the user typed
                     stays exactly as they typed it. */}
-                  {message.role === "assistant" && message.text.length > 0 ? (
-                    <ChatRichText body={message.text} />
-                  ) : (
-                    <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
-                  )}
-                  {message.role === "user" && message.executionPolicy !== undefined ? (
-                    <p className="code-thread-workspace__turn-access">
-                      Access · {CODE_ACCESS_POSTURE_LABEL[message.executionPolicy]}
-                    </p>
-                  ) : null}
-                  {message.role === "assistant" &&
-                  message.operationId !== undefined &&
-                  message.status === "completed" &&
-                  props.onOpenCodeThread !== undefined ? (
-                    <footer className="code-thread-workspace__fork">
-                      <OctantButton
-                        disabled={forking}
-                        onClick={() => void forkFrom(message)}
-                        size="sm"
-                        variant="ghost"
-                      >
-                        {forking ? "Forking…" : "Fork from here"}
-                      </OctantButton>
-                    </footer>
-                  ) : null}
-                  {message.role === "assistant" &&
-                  message.operationId !== undefined &&
-                  message.status === "completed" &&
-                  checkpoints.available ? (
-                    <footer className="code-thread-workspace__checkpoint">
-                      <ThreadCheckpointControls
-                        busy={checkpoints.busy}
-                        {...(markedCheckpoint === undefined
-                          ? {}
-                          : { checkpoint: markedCheckpoint })}
-                        defaultLabel="Checkpoint"
-                        onForget={() => {
-                          if (markedCheckpoint !== undefined)
-                            void checkpoints.forget(markedCheckpoint);
-                        }}
-                        onMark={(label) => {
-                          const operationId = message.operationId;
-                          if (operationId === undefined || view === undefined) return;
-                          void checkpoints.mark(
-                            { mode: "code", threadId: view.thread.id, operationId },
-                            label,
-                          );
-                        }}
-                        onRestore={(title) => {
-                          const activeView = view;
-                          if (markedCheckpoint === undefined || activeView === undefined) return;
-                          void (async () => {
-                            const restored = await checkpoints.restore(markedCheckpoint, title);
-                            // The new thread runs on its own worktree at the
-                            // marked revision; opening it is what makes that
-                            // visible, and this thread is untouched either way.
-                            if (restored?.mode === "code") {
-                              props.onOpenCodeThread?.(
-                                restored.threadId,
-                                title,
-                                activeView.thread.projectId,
-                              );
-                            }
-                          })();
-                        }}
-                      />
-                    </footer>
-                  ) : null}
-                  {message.role === "user" && message.checkpoint !== undefined && mayRestore ? (
-                    <footer className="code-thread-workspace__restore">
-                      {confirmingRestore === message.id ? (
-                        <>
-                          <span>Put the files back the way they were before this message?</span>
-                          <OctantButton
-                            disabled={restoring}
-                            onClick={() => void restoreCheckpoint(message)}
-                            size="sm"
-                            variant="destructive"
-                          >
-                            Restore files
-                          </OctantButton>
-                          <OctantButton
-                            disabled={restoring}
-                            onClick={() => setConfirmingRestore(undefined)}
-                            size="sm"
-                            variant="ghost"
-                          >
-                            Keep current files
-                          </OctantButton>
-                        </>
-                      ) : (
+                    {message.role === "assistant" && message.text.length > 0 ? (
+                      <ChatRichText body={message.text} />
+                    ) : (
+                      <p>{message.text.length > 0 ? message.text : busy ? "Thinking…" : ""}</p>
+                    )}
+                    {message.role === "user" && message.executionPolicy !== undefined ? (
+                      <p className="code-thread-workspace__turn-access">
+                        Access · {CODE_ACCESS_POSTURE_LABEL[message.executionPolicy]}
+                      </p>
+                    ) : null}
+                    {(markedCheckpoint !== undefined ||
+                      checkpointDraft?.messageId === message.id) &&
+                    message.role === "assistant" &&
+                    message.operationId !== undefined &&
+                    message.status === "completed" &&
+                    checkpoints.available ? (
+                      <footer className="code-thread-workspace__checkpoint">
+                        <ThreadCheckpointControls
+                          busy={checkpoints.busy}
+                          {...(markedCheckpoint === undefined
+                            ? {}
+                            : { checkpoint: markedCheckpoint })}
+                          defaultLabel="Checkpoint"
+                          {...(checkpointDraft?.messageId === message.id
+                            ? { draft: checkpointDraft.kind }
+                            : {})}
+                          onCancelDraft={() => setCheckpointDraft(undefined)}
+                          onMark={(label) => {
+                            const operationId = message.operationId;
+                            if (operationId === undefined || view === undefined) return;
+                            void checkpoints.mark(
+                              { mode: "code", threadId: view.thread.id, operationId },
+                              label,
+                            );
+                            setCheckpointDraft(undefined);
+                          }}
+                          onRestore={(title) => {
+                            const activeView = view;
+                            if (markedCheckpoint === undefined || activeView === undefined) return;
+                            setCheckpointDraft(undefined);
+                            void (async () => {
+                              const restored = await checkpoints.restore(markedCheckpoint, title);
+                              // The new thread runs on its own worktree at the
+                              // marked revision; opening it is what makes that
+                              // visible, and this thread is untouched either way.
+                              if (restored?.mode === "code") {
+                                props.onOpenCodeThread?.(
+                                  restored.threadId,
+                                  title,
+                                  activeView.thread.projectId,
+                                );
+                              }
+                            })();
+                          }}
+                        />
+                      </footer>
+                    ) : null}
+                    {message.role === "user" &&
+                    message.checkpoint !== undefined &&
+                    mayRestore &&
+                    confirmingRestore === message.id ? (
+                      <footer className="code-thread-workspace__restore">
+                        <span>Put the files back the way they were before this message?</span>
                         <OctantButton
                           disabled={restoring}
-                          onClick={() => {
-                            setRestoreMessage(undefined);
-                            setConfirmingRestore(message.id);
-                          }}
+                          onClick={() => void restoreCheckpoint(message)}
+                          size="sm"
+                          variant="destructive"
+                        >
+                          Restore files
+                        </OctantButton>
+                        <OctantButton
+                          disabled={restoring}
+                          onClick={() => setConfirmingRestore(undefined)}
                           size="sm"
                           variant="ghost"
                         >
-                          Restore files to this point
+                          Keep current files
                         </OctantButton>
-                      )}
-                    </footer>
-                  ) : null}
+                      </footer>
+                    ) : null}
+                  </TurnActionMenu>
                 </article>
               </div>
             );
@@ -1180,6 +1197,54 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       />
     </section>
   );
+}
+
+function codeTurnActions(input: {
+  readonly canFork: boolean;
+  readonly canCheckpoint: boolean;
+  readonly canRestoreFiles: boolean;
+  readonly checkpointBusy: boolean;
+  readonly forking: boolean;
+  readonly marked: boolean;
+  readonly restoring: boolean;
+}): ReadonlyArray<TurnAction> {
+  const actions: TurnAction[] = [];
+  if (input.canFork) {
+    actions.push({
+      label: input.forking ? "Forking…" : "Fork from here",
+      value: "fork",
+      ...(input.forking ? { disabled: true } : {}),
+    });
+  }
+  if (input.canCheckpoint) {
+    if (input.marked) {
+      actions.push({
+        label: "Restore from here",
+        value: "checkpoint-restore",
+        ...(input.checkpointBusy ? { disabled: true } : {}),
+      });
+      actions.push({
+        label: "Forget",
+        value: "checkpoint-forget",
+        ...(input.checkpointBusy ? { disabled: true } : {}),
+      });
+    } else {
+      actions.push({
+        label: "Checkpoint",
+        value: "checkpoint-mark",
+        ...(input.checkpointBusy ? { disabled: true } : {}),
+      });
+    }
+  }
+  if (input.canRestoreFiles) {
+    actions.push({
+      label: "Restore files to this point",
+      value: "restore-files",
+      ...(input.restoring ? { disabled: true } : {}),
+    });
+  }
+  actions.push({ label: "Copy references", value: "copy-references" });
+  return actions;
 }
 
 function previousAssistantMessage(

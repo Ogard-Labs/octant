@@ -1,5 +1,5 @@
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
-import { Flag, RotateCcw } from "lucide-react";
+import { Flag } from "lucide-react";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -8,74 +8,61 @@ export interface ThreadCheckpointControlsProps {
   readonly checkpoint?: ThreadCheckpoint;
   readonly busy: boolean;
   readonly defaultLabel: string;
+  /** Present while the user is naming a new marker or the thread a restore starts. */
+  readonly draft?: "mark" | "restore";
+  readonly onCancelDraft: () => void;
   readonly onMark: (label: string) => void;
-  readonly onForget: () => void;
   readonly onRestore: (title: string) => void;
 }
 
 /**
- * The checkpoint affordance on one message: mark this point, or take the thread
- * up again from a point already marked.
+ * The checkpoint that is already on this message, and the short naming form
+ * for marking or restoring. The gestures that open those forms live in the
+ * turn's action menu: an unmarked turn shows nothing here, so the transcript
+ * is not a row of Checkpoint buttons.
  *
  * Restoring says what it does — it starts a second thread — because the word
  * "restore" elsewhere means putting files back in place. Nothing here is
  * undone: the thread this control sits in keeps every message it has.
  */
 export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
-  const [marking, setMarking] = useState(false);
-  const [restoring, setRestoring] = useState(false);
   const [label, setLabel] = useState(props.defaultLabel);
   const [title, setTitle] = useState("");
 
   if (props.checkpoint === undefined) {
-    if (marking) {
-      return (
-        <div className="thread-checkpoints" role="group" aria-label="Mark a checkpoint">
-          <input
-            aria-label="Checkpoint name"
-            className="thread-checkpoints__input"
-            maxLength={120}
-            onChange={(event) => setLabel(event.target.value)}
-            value={label}
-          />
-          <OctantButton
-            disabled={props.busy || label.trim().length === 0}
-            onClick={() => {
-              props.onMark(label.trim());
-              setMarking(false);
-            }}
-            size="sm"
-            type="button"
-            variant="secondary"
-          >
-            Mark
-          </OctantButton>
-          <OctantButton
-            disabled={props.busy}
-            onClick={() => {
-              setMarking(false);
-              setLabel(props.defaultLabel);
-            }}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            Cancel
-          </OctantButton>
-        </div>
-      );
-    }
+    if (props.draft !== "mark") return null;
     return (
-      <div className="thread-checkpoints">
+      <div className="thread-checkpoints" role="group" aria-label="Mark a checkpoint">
+        <input
+          aria-label="Checkpoint name"
+          className="thread-checkpoints__input"
+          maxLength={120}
+          onChange={(event) => setLabel(event.target.value)}
+          value={label}
+        />
+        <OctantButton
+          disabled={props.busy || label.trim().length === 0}
+          onClick={() => {
+            props.onMark(label.trim());
+            props.onCancelDraft();
+          }}
+          size="sm"
+          type="button"
+          variant="secondary"
+        >
+          Mark
+        </OctantButton>
         <OctantButton
           disabled={props.busy}
-          onClick={() => setMarking(true)}
+          onClick={() => {
+            setLabel(props.defaultLabel);
+            props.onCancelDraft();
+          }}
           size="sm"
           type="button"
           variant="ghost"
         >
-          <Flag aria-hidden="true" size={12} strokeWidth={1.8} />
-          Checkpoint
+          Cancel
         </OctantButton>
       </div>
     );
@@ -91,7 +78,7 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
           ? null
           : ` · taken up ${checkpoint.restoreCount === 1 ? "once" : `${String(checkpoint.restoreCount)} times`}`}
       </span>
-      {restoring ? (
+      {props.draft === "restore" ? (
         <>
           <input
             aria-label="New thread name"
@@ -105,8 +92,8 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
             disabled={props.busy}
             onClick={() => {
               props.onRestore(title.trim().length === 0 ? checkpoint.label : title.trim());
-              setRestoring(false);
               setTitle("");
+              props.onCancelDraft();
             }}
             size="sm"
             type="button"
@@ -116,7 +103,10 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
           </OctantButton>
           <OctantButton
             disabled={props.busy}
-            onClick={() => setRestoring(false)}
+            onClick={() => {
+              setTitle("");
+              props.onCancelDraft();
+            }}
             size="sm"
             type="button"
             variant="ghost"
@@ -124,29 +114,7 @@ export function ThreadCheckpointControls(props: ThreadCheckpointControlsProps) {
             Cancel
           </OctantButton>
         </>
-      ) : (
-        <>
-          <OctantButton
-            disabled={props.busy}
-            onClick={() => setRestoring(true)}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            <RotateCcw aria-hidden="true" size={12} strokeWidth={1.8} />
-            Restore from here
-          </OctantButton>
-          <OctantButton
-            disabled={props.busy}
-            onClick={props.onForget}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            Forget
-          </OctantButton>
-        </>
-      )}
+      ) : null}
     </div>
   );
 }

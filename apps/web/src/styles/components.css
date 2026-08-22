@@ -153,6 +153,66 @@ html[data-octant-reduced-transparency="true"] .folder-picker {
   }
 }
 
+/* ── Turn action menu ──────────────────────────────────────────── */
+
+/*
+ * Secondary turn actions live behind one More actions control. The control
+ * stays in the tree and is only faded, so hover and focus cannot shift the
+ * transcript, keyboard users can still reach it, and an open menu cannot
+ * vanish out from under the pointer that opened it.
+ */
+.turn-action-menu {
+  position: relative;
+}
+
+.turn-action-menu__more {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.turn-action-menu:hover .turn-action-menu__more,
+.turn-action-menu:focus-within .turn-action-menu__more,
+.turn-action-menu__more:has([aria-expanded="true"]),
+.turn-action-menu__more:has([data-popup-open]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Narrow and high-contrast keep the control visible: hover is not a route
+   there, and fading the only keyboard path would make the menu mouse-only. */
+@media (max-width: 680px) {
+  .turn-action-menu__more {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .turn-action-menu__more {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .turn-action-menu__more .btn-icon {
+    border-color: var(--octant-border-strong);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-action-menu__more {
+    transition: none;
+  }
+}
+
+html[data-octant-reduced-motion="true"] .turn-action-menu__more {
+  transition: none;
+}
+
 /* ── Thread Search overlay ─────────────────────────────────────── */
 
 /*
