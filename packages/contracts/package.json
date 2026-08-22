@@ -26,6 +26,7 @@
     "./context": "./src/context.ts",
     "./context-rpc": "./src/contextRpc.ts",
     "./work-artifacts": "./src/workArtifacts.ts",
+    "./work-board": "./src/workBoard.ts",
     "./work-overview": "./src/workOverview.ts",
     "./work-promotion": "./src/workPromotion.ts",
     "./work-requests": "./src/workRequests.ts",

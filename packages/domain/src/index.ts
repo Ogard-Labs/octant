@@ -33,6 +33,7 @@ export * from "./contextPolicy";
 export * from "./diagnosticsPolicy";
 export * from "./diagnosticsExportPolicy";
 export * from "./workConfinementPolicy";
+export * from "./workDeliveryPolicy";
 export * from "./workPromotionPolicy";
 export * from "./workRequestPolicy";
 export * from "./workResearchPolicy";

@@ -90,6 +90,56 @@ describe("createWorkThreadClient", () => {
     globalThis.fetch = original;
   });
 
+  it("posts Work board queries to the authenticated route", async () => {
+    const view = {
+      version: 1 as const,
+      query: { version: 1 as const, statuses: ["waiting" as const] },
+      cards: [],
+      generatedAt: now,
+    };
+    const fetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(view), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    const client = createWorkThreadClient({
+      baseUrl,
+      fetch,
+      windowCapability: capability,
+    });
+
+    await expect(client.queryBoard({ version: 1, statuses: ["waiting"] })).resolves.toEqual(view);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/work/board`,
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          "content-type": "application/json",
+          "x-octant-window-capability": capability,
+        }),
+        body: JSON.stringify({ version: 1, statuses: ["waiting"] }),
+      }),
+    );
+  });
+
+  it("rejects an invalid board query before sending it", async () => {
+    const fetch = vi.fn();
+    const client = createWorkThreadClient({
+      baseUrl,
+      fetch,
+      windowCapability: capability,
+    });
+
+    await expect(
+      client.queryBoard({ version: 1, statuses: ["blocked"] } as never),
+    ).rejects.toMatchObject({
+      name: "WorkThreadClientFailure",
+      message: "Work board query is invalid.",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("maps typed HTTP failures", async () => {
     const client = createWorkThreadClient({
       baseUrl,

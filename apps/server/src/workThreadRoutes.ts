@@ -1,8 +1,12 @@
 import {
   WorkThreadFailure as WorkThreadFailureSchema,
+  decodeWorkBoardQuery,
+  decodeWorkBoardView,
   decodeWorkThreadBootstrap,
   decodeWorkThreadCommand,
   decodeWorkThreadCommandResult,
+  type WorkBoardQuery,
+  type WorkBoardView,
   type WorkThreadBootstrap,
   type WorkThreadCommandResult,
   type WorkThreadFailure,
@@ -26,6 +30,10 @@ export interface WorkThreadRouteService {
     authenticatedWindowId: WindowId,
     command: unknown,
   ) => Promise<WorkThreadCommandResult> | WorkThreadCommandResult;
+  readonly queryBoard?: (
+    authenticatedWindowId: WindowId,
+    query: WorkBoardQuery,
+  ) => Promise<WorkBoardView> | WorkBoardView;
 }
 
 export interface WorkThreadRouteDependencies {
@@ -40,7 +48,9 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
   const jsonLimit = dependencies.maxJsonBodySize ?? JSON_BODY_LIMIT;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith("/api/work/threads")) return undefined;
+    if (url.pathname !== "/api/work/board" && !url.pathname.startsWith("/api/work/threads")) {
+      return undefined;
+    }
     const origin = request.headers.get("origin");
     if (!isLoopbackHostname(url.hostname)) {
       return failureResponse(
@@ -62,7 +72,8 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
 
     const isBootstrap = url.pathname === "/api/work/threads/bootstrap";
     const isCommands = url.pathname === "/api/work/threads/commands";
-    if (!isBootstrap && !isCommands) return undefined;
+    const isBoard = url.pathname === "/api/work/board";
+    if (!isBootstrap && !isCommands && !isBoard) return undefined;
 
     let authenticatedWindowId: WindowId;
     try {
@@ -113,6 +124,26 @@ export function createWorkThreadRouteHandler(dependencies: WorkThreadRouteDepend
         throw new WorkThreadRouteRejected(
           "Work thread requests cannot supply window identity.",
           400,
+        );
+      }
+      if (isBoard) {
+        if (dependencies.service.queryBoard === undefined) {
+          return failureResponse(
+            { category: "unavailable", message: "Work Thread Board is unavailable." },
+            503,
+            origin,
+          );
+        }
+        let query: WorkBoardQuery;
+        try {
+          query = decodeWorkBoardQuery(value);
+        } catch {
+          throw new WorkThreadRouteRejected("Work board query is invalid.", 400);
+        }
+        return jsonResponse(
+          decodeWorkBoardView(await dependencies.service.queryBoard(authenticatedWindowId, query)),
+          200,
+          origin,
         );
       }
       const command = decodeWorkThreadCommand(value);

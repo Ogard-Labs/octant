@@ -67,6 +67,7 @@ function threadClient(result: "ready" | "failed" = "ready"): WorkThreadClient {
           )
         : vi.fn(async () => Promise.reject(new Error("offline"))),
     execute: vi.fn(),
+    queryBoard: vi.fn(),
   };
 }
 

@@ -21,10 +21,11 @@ without over-trusting a surface that has not shipped.
 - [Files, previews, and selections](/advanced/files) — file authority by mode, secure read-only previews, and structured selections.
 - [Editor and terminals](/advanced/editor-and-terminals) — the Monaco editor, external-editor handoff, and integrated terminals.
 
-## Git, worktrees, and Code boards
+## Git, worktrees, and thread boards
 
 - [Git and worktrees](/advanced/git-worktrees) — repository identity, managed worktrees, Git operations, and pull requests.
-- [Code Thread Board](/advanced/code-board) — runtime-derived thread status and Project grouping.
+- [Code Thread Board](/advanced/code-board) — runtime-derived Code thread status and Project grouping.
+- [Work Thread Board](/advanced/work-board) — runtime-derived Work thread status, confined root binding, and delivery confirmation.
 
 ## Browser, Apple, and extensions
 

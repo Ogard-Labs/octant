@@ -39,6 +39,8 @@ thread has a current plan artifact, instead of replacing the Work thread. The
 sidebar follows the pane that last received pointer or keyboard input and
 restores that thread's open tools and selected tool when you return to it.
 
+The sidebar **Thread board** is a server-derived view of Work threads as Ready, In Progress, Waiting, and Done. Status comes from turn, request, artifact, citation, child-run, recovery, and delivery evidence; a thread is Done only when its confirmed delivery target is objectively satisfied. Cards are not dragged between columns. Opening a card activates that Work Project and thread. Chat has no board.
+
 Work does not expose Code Git/terminal authority. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
 ## Unsent drafts
@@ -71,8 +73,17 @@ A turn carries at most eight images, each up to 10 MB, alongside a written messa
 
 Type `#` in the composer to mention another thread as read-only context, the same bounded excerpt Chat uses. Type `@` to complete a path inside this Project's bound folder; the host refuses a path outside that root before reading it. Chat has no `@file` mention, because Chat Projects have no filesystem authority.
 
+## Thread board
+
+Work has a server-authoritative [Thread board](/advanced/work-board) that
+derives Ready, In progress, Waiting, and Done from turn, request, artifact,
+citation, child-run, recovery, and delivery evidence. Done requires your
+confirmed delivery target and objective evidence. Opening a card activates
+that Project and thread. Chat has no board.
+
 ## Next steps
 
+- [Work Thread Board](/advanced/work-board) for derived status, grouping, and delivery confirmation
 - [Promotions](/guide/promotions) for escalating Work work to a Code thread
 - [Projects](/guide/projects) for managing Work Projects
 - [Code](/guide/code) for repository engineering

@@ -1,7 +1,11 @@
 import {
+  decodeWorkBoardQuery,
+  decodeWorkBoardView,
   decodeWorkThreadBootstrap,
   decodeWorkThreadCommand,
   decodeWorkThreadCommandResult,
+  type WorkBoardQuery,
+  type WorkBoardView,
   type WorkThreadBootstrap,
   type WorkThreadCommand,
   type WorkThreadCommandResult,
@@ -17,6 +21,7 @@ export interface WorkThreadClientOptions {
 export interface WorkThreadClient {
   bootstrap(): Promise<WorkThreadBootstrap>;
   execute(command: WorkThreadCommand): Promise<WorkThreadCommandResult>;
+  queryBoard(query: WorkBoardQuery): Promise<WorkBoardView>;
 }
 
 export class WorkThreadClientFailure extends Error {
@@ -97,6 +102,46 @@ export function createWorkThreadClient(options: WorkThreadClientOptions): WorkTh
       } catch {
         throw new WorkThreadClientFailure(
           "Work thread service returned an invalid command response.",
+          0,
+        );
+      }
+    },
+
+    async queryBoard(query) {
+      let validated: WorkBoardQuery;
+      try {
+        validated = decodeWorkBoardQuery(query);
+      } catch {
+        throw new WorkThreadClientFailure("Work board query is invalid.", 0);
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(new URL("/api/work/board", options.baseUrl).toString(), {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-window-capability": options.windowCapability,
+          },
+          body: JSON.stringify(validated),
+        });
+      } catch {
+        throw new WorkThreadClientFailure("Work thread service is unavailable.", 0);
+      }
+
+      const body: unknown = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new WorkThreadClientFailure(
+          responseMessage(body, "Work Thread Board is unavailable."),
+          response.status,
+        );
+      }
+
+      try {
+        return decodeWorkBoardView(body);
+      } catch {
+        throw new WorkThreadClientFailure(
+          "Work thread service returned an invalid board response.",
           0,
         );
       }
