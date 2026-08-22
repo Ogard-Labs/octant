@@ -70,6 +70,29 @@ describe("useLocalServersController", () => {
     expect(result.current.snapshot?.currentCheckout).toEqual([]);
   });
 
+  it("does not scan listeners on a timer while polling is off", async () => {
+    const { client } = fakeClient([listedResult()]);
+    renderHook(() => useLocalServersController({ ...options(client), poll: false }));
+
+    await waitFor(() => expect(client.execute).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(client.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes immediately when polling starts after a quiet observation", async () => {
+    const { client } = fakeClient([listedResult()]);
+    const { rerender } = renderHook(
+      ({ poll }: { poll: boolean }) => useLocalServersController({ ...options(client), poll }),
+      { initialProps: { poll: false } },
+    );
+
+    await waitFor(() => expect(client.execute).toHaveBeenCalledTimes(1));
+    rerender({ poll: true });
+    await waitFor(() => expect(client.execute).toHaveBeenCalledTimes(2));
+  });
+
   it("never scans while the section is hidden", async () => {
     const { client } = fakeClient([listedResult()]);
     const { result } = renderHook(() => useLocalServersController(options(client, false)));

@@ -4,7 +4,6 @@ import type { GithubClient } from "@octant/client-runtime/github-client";
 import type {
   CodeCommand,
   CodeCommandResult,
-  EnvironmentPresentationState,
   LocalServerOpenTarget,
   ProjectSummary,
   WorkspaceTab,
@@ -14,19 +13,18 @@ import { useState, type ReactNode } from "react";
 import { EnvironmentGitGroup } from "./EnvironmentGitGroup";
 import { EnvironmentGroup } from "./EnvironmentGroup";
 import { EnvironmentPullRequests } from "./EnvironmentPullRequests";
-import { resolveTabPresentation } from "./EnvironmentPresentationModel";
+import { countGroupedLocalServerListeners } from "./localServerGroups";
 import { LocalServersGroup } from "./LocalServersGroup";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 import { useCodeEnvironmentController } from "./useCodeEnvironmentController";
 import { useLocalServersController } from "./useLocalServersController";
-import { WorkingDirectoryControl } from "./WorkingDirectoryControl";
+import { ChangeWorkingFolder } from "./WorkingDirectoryControl";
 
 type CodeThreadWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
 export interface CodeThreadEnvironmentProps {
   readonly tab: CodeThreadWorkspaceTab;
-  readonly presentation: EnvironmentPresentationState;
-  readonly onChangePresentation: (next: EnvironmentPresentationState) => void;
+  readonly active?: boolean;
   readonly project?: ProjectSummary | undefined;
   readonly projectClient?: ProjectClient | undefined;
   readonly serverUrl?: string;
@@ -59,18 +57,8 @@ export interface CodeThreadEnvironmentProps {
 }
 
 /**
- * Mounts the thread-scoped Environment panel inside a Code thread tab, backed
- * by the authoritative {@link CodeEnvironmentObservation} for the tab's
- * Project. The compact identity and capability-valid Code sections are derived
- * from the real observation, and the Git facts render in the panel body. The
- * panel presentation (floating/hidden) follows the per-tab shell presentation
- * state.
- *
- * The panel holds what the *environment* answers for — what the checkout has
- * changed, what is listening, where work happens. The thread's own working
- * surfaces (Files, Plan, Publish, Agents) are the dock's Thread panel, which
- * has room for them; stacked here they turned a glanceable float into a list
- * of disclosures.
+ * Compact Code Environment: a truthful header summary and a transient
+ * disclosure for checkout facts, local servers, and the working folder.
  */
 export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
   const controller = useCodeEnvironmentController({
@@ -87,7 +75,6 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     projectName,
     controllerStatus: controller.status,
   });
-  const resolved = resolveTabPresentation(props.presentation, "code", props.tab.id);
   const localServersSection = projection.sections.find((section) => section.id === "local-servers");
   const project = props.project;
   const onNewThreadInProject = props.onNewThreadInProject;
@@ -99,85 +86,70 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
     !checkoutUnusable || project === undefined || onNewThreadInProject === undefined
       ? undefined
       : { label: "New thread in this Project", onClick: () => onNewThreadInProject(project.id) };
-  // Named only from a ready observation. A detached HEAD has no branch name,
-  // so it says so rather than rendering a bare abbreviated oid that reads like
-  // one.
   const observed = controller.observation;
-  const location =
-    observed?.status === "ready"
-      ? {
-          branch:
-            observed.branch.kind === "named"
-              ? observed.branch.name
-              : `Detached ${observed.branch.oid.slice(0, 7)}`,
-          worktree: observed.worktreeRoot,
-        }
-      : undefined;
-  const [localServersOpen, setLocalServersOpen] = useState(false);
-  // Scan only while the section can actually be seen: a hidden panel or a
-  // collapsed group must not ask the host to enumerate listeners on a timer.
-  const localServersAvailable = resolved !== "hidden" && localServersSection?.available === true;
-  const localServersVisible = localServersAvailable && localServersOpen;
+  const readyObservation = observed?.status === "ready" ? observed : undefined;
+  const [disclosureOpen, setDisclosureOpen] = useState(false);
+  const localServersAvailable = localServersSection?.available === true;
   const localServers = useLocalServersController({
-    enabled: localServersVisible,
+    enabled: localServersAvailable,
+    poll: localServersAvailable && disclosureOpen,
     ...(props.localServerClient === undefined ? {} : { client: props.localServerClient }),
     threadId: props.tab.threadId,
     ...(props.project === undefined ? {} : { projectId: props.project.id }),
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
+  const runningServerCount =
+    localServers.snapshot === undefined
+      ? undefined
+      : countGroupedLocalServerListeners(localServers.snapshot);
+  const workingDirectory = readyObservation?.workingDirectory;
+  const threadVersion = readyObservation?.threadVersion;
 
   return (
-    <div className={`code-thread-environment code-thread-environment--${resolved}`}>
-      <div className="code-thread-environment__content">{props.children}</div>
+    <div className="code-thread-environment">
       <ThreadEnvironmentPanel
-        identity={projection.identity}
-        {...(location === undefined ? {} : { location })}
-        mode="code"
-        presentation={props.presentation}
-        tabId={props.tab.id}
-        onChangePresentation={props.onChangePresentation}
+        {...(props.active === undefined ? {} : { active: props.active })}
+        onOpenChange={setDisclosureOpen}
+        open={disclosureOpen}
+        summary={{
+          identity: projection.identity,
+          ...(readyObservation === undefined
+            ? {}
+            : {
+                branch:
+                  readyObservation.branch.kind === "named"
+                    ? readyObservation.branch.name
+                    : `Detached ${readyObservation.branch.oid.slice(0, 7)}`,
+                changes: readyObservation.changes,
+              }),
+          ...(workingDirectory === undefined ? {} : { workingLocation: String(workingDirectory) }),
+          ...(runningServerCount === undefined ? {} : { runningServerCount }),
+        }}
       >
+        <EnvironmentGitGroup
+          {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
+          {...(controller.errorMessage === undefined
+            ? {}
+            : { errorMessage: controller.errorMessage })}
+          {...(controller.observation === undefined ? {} : { observation: controller.observation })}
+          status={controller.status}
+        />
+        {props.onOpenChanges === undefined || readyObservation === undefined ? null : (
+          <button
+            className="environment-group__action window-no-drag"
+            onClick={props.onOpenChanges}
+            type="button"
+          >
+            View diff
+          </button>
+        )}
         <EnvironmentGroup
           defaultOpen
-          summary={
-            controller.observation?.status === "ready"
-              ? controller.observation.changes === "dirty"
-                ? "Dirty"
-                : "Clean"
-              : undefined
-          }
-          title="Changes"
-        >
-          <EnvironmentGitGroup
-            {...(freshThreadAction === undefined ? {} : { action: freshThreadAction })}
-            {...(controller.errorMessage === undefined
-              ? {}
-              : { errorMessage: controller.errorMessage })}
-            {...(controller.observation === undefined
-              ? {}
-              : { observation: controller.observation })}
-            status={controller.status}
-          />
-          {props.onOpenChanges === undefined ||
-          controller.observation?.status !== "ready" ? null : (
-            <button
-              className="environment-group__action window-no-drag"
-              onClick={props.onOpenChanges}
-              type="button"
-            >
-              View diff
-            </button>
-          )}
-        </EnvironmentGroup>
-        <EnvironmentGroup
-          onOpenChange={setLocalServersOpen}
           {...(localServers.snapshot === undefined
             ? {}
             : {
-                summary: `${
-                  localServers.snapshot.currentCheckout.length + localServers.snapshot.other.length
-                } running`,
+                summary: `${String(countGroupedLocalServerListeners(localServers.snapshot))} running`,
               })}
           title="Local servers"
         >
@@ -202,37 +174,32 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           <EnvironmentGroup defaultOpen title="Pull requests">
             <EnvironmentPullRequests
               client={props.githubClient}
-              enabled={resolved !== "hidden"}
+              enabled={disclosureOpen}
               repository={props.pullRequestRepository}
             />
           </EnvironmentGroup>
         )}
-        {controller.observation?.workingDirectory === undefined ||
-        controller.observation.threadVersion === undefined ||
+        {workingDirectory === undefined ||
+        threadVersion === undefined ||
         props.onExecute === undefined ? null : (
-          <EnvironmentGroup title="Working folder">
-            <WorkingDirectoryControl
-              value={controller.observation.workingDirectory}
-              onApply={async (workingDirectory) => {
-                const result = await props.onExecute?.({
-                  kind: "change-code-thread-working-directory",
-                  threadId: props.tab.threadId,
-                  expectedVersion: controller.observation!.threadVersion!,
-                  workingDirectory,
-                });
-                if (
-                  result === undefined ||
-                  !("kind" in result) ||
-                  result.kind !== "thread-updated"
-                ) {
-                  throw new Error("Code working directory was not updated.");
-                }
-                await controller.refresh();
-              }}
-            />
-          </EnvironmentGroup>
+          <ChangeWorkingFolder
+            value={workingDirectory}
+            onApply={async (nextWorkingDirectory) => {
+              const result = await props.onExecute?.({
+                kind: "change-code-thread-working-directory",
+                threadId: props.tab.threadId,
+                expectedVersion: threadVersion,
+                workingDirectory: nextWorkingDirectory,
+              });
+              if (result === undefined || !("kind" in result) || result.kind !== "thread-updated") {
+                throw new Error("Code working directory was not updated.");
+              }
+              await controller.refresh();
+            }}
+          />
         )}
       </ThreadEnvironmentPanel>
+      <div className="code-thread-environment__content">{props.children}</div>
     </div>
   );
 }

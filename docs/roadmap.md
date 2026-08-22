@@ -22,7 +22,7 @@ here is merged or being hardened for it.
   one conformance harness; provider-first model picker; in-thread provider and model changes; Keychain-backed credentials.
 - **Code workspace** — Monaco editor, file explorer, terminals, Git and
   worktrees, repository test discovery, PR observation and creation, thread
-  board, Environment panel with local-server discovery, external-editor handoff.
+  board, Environment summary with local-server discovery, external-editor handoff.
 - **Work workspace** — confined document production (docx, pptx, pdf, image),
   research with citations, project overview, secure split-view previews, board.
 - **App-managed, provider-neutral tools** — browser automation, macOS

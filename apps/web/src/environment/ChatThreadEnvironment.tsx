@@ -1,8 +1,7 @@
-import type { EnvironmentPresentationState, ProjectSummary, WorkspaceTab } from "@octant/contracts";
+import type { ProjectSummary, WorkspaceTab } from "@octant/contracts";
 import { deriveChatEnvironmentProjection } from "@octant/domain/shell-policy";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { ChatController } from "../chat/useChatController";
-import { resolveTabPresentation } from "./EnvironmentPresentationModel";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 
 type ChatThreadWorkspaceTab = Extract<WorkspaceTab, { readonly kind: "chat-thread" }>;
@@ -11,19 +10,19 @@ type ChatProject = Extract<ProjectSummary, { readonly type: "chat" }>;
 export interface ChatThreadEnvironmentProps {
   readonly children: ReactNode;
   readonly controller: ChatController;
-  readonly onChangePresentation: (next: EnvironmentPresentationState) => void;
-  readonly presentation: EnvironmentPresentationState;
   readonly projects: ReadonlyArray<ProjectSummary>;
   readonly tab: ChatThreadWorkspaceTab;
+  readonly active?: boolean;
 }
 
 /**
- * Mounts Chat's virtual, thread-authoritative context inside the existing
- * Environment presentation. Facts come only from the active Chat thread view;
- * renderer Project state is used solely to resolve the thread's exact Project
- * id and never as a fallback authority source.
+ * Mounts Chat's virtual, thread-authoritative context as a compact summary
+ * with a transient disclosure. Facts come only from the active Chat thread
+ * view; renderer Project state is used solely to resolve the thread's exact
+ * Project id and never as a fallback authority source.
  */
 export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
+  const [disclosureOpen, setDisclosureOpen] = useState(false);
   const view = props.controller.activeView;
   const projectId = view?.thread.projectId;
   const project = props.projects.find(
@@ -36,17 +35,14 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
     threadHasProject: projectId !== undefined,
     ...(project === undefined ? {} : { projectName: project.name }),
   });
-  const resolved = resolveTabPresentation(props.presentation, "chat", props.tab.id);
 
   return (
-    <div className={`thread-environment-wrapper thread-environment-wrapper--${resolved}`}>
-      <div className="thread-environment-wrapper__content">{props.children}</div>
+    <div className="thread-environment-wrapper">
       <ThreadEnvironmentPanel
-        identity={projection.identity}
-        mode="chat"
-        onChangePresentation={props.onChangePresentation}
-        presentation={props.presentation}
-        tabId={props.tab.id}
+        {...(props.active === undefined ? {} : { active: props.active })}
+        onOpenChange={setDisclosureOpen}
+        open={disclosureOpen}
+        summary={{ identity: projection.identity }}
       >
         <ChatEnvironmentFacts
           available={projection.identity.status === "available"}
@@ -55,6 +51,7 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
           unavailableMessage={projection.identity.detail}
         />
       </ThreadEnvironmentPanel>
+      <div className="thread-environment-wrapper__content">{props.children}</div>
     </div>
   );
 }

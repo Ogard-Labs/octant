@@ -100,17 +100,11 @@ function upcastPersistedShellSettings(value: unknown): unknown {
             vibrancyMode: "off",
           },
         };
-  if (!("environmentPresentationByMode" in withSidebarBackground)) {
-    return {
-      ...withSidebarBackground,
-      environmentPresentationByMode: DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
-    };
-  }
   return {
     ...withSidebarBackground,
-    environmentPresentationByMode: withoutPinnedPresentation(
-      withSidebarBackground.environmentPresentationByMode,
-    ),
+    // Open or closed is renderer state. Stored floating, pinned, or hidden
+    // presentation is dropped before decode rather than restored as a panel.
+    environmentPresentationByMode: DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
   };
 }
 
@@ -119,40 +113,11 @@ function upcastPersistedEnvironmentPresentationEvent(value: unknown): unknown {
   return { ...value, presentation: upcastPersistedEnvironmentPresentation(value.presentation) };
 }
 
-function upcastPersistedEnvironmentPresentation(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  const byMode =
-    "byMode" in value && isRecord(value.byMode)
-      ? withoutPinnedPresentation(value.byMode)
-      : DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE;
-  const byTab =
-    "byTab" in value && Array.isArray(value.byTab) ? value.byTab.map(upcastPersistedTabEntry) : [];
-  return { byTab, byMode };
-}
-
-/**
- * The environment panel briefly persisted a third `pinned` presentation with a
- * stored width. It floats or hides now, so a stored `pinned` reads as floating
- * and the width is dropped before decode — the wire schema rejects excess
- * properties, so a surviving `pinnedWidth` would fail the whole document and
- * cost the user every other tab's presentation with it.
- */
-function upcastPersistedTabEntry(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  const { pinnedWidth: _pinnedWidth, ...withoutWidth } = value;
-  return withoutWidth.presentation === "pinned"
-    ? { ...withoutWidth, presentation: "floating" }
-    : withoutWidth;
-}
-
-function withoutPinnedPresentation(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  return Object.fromEntries(
-    Object.entries(value).map(([mode, presentation]) => [
-      mode,
-      presentation === "pinned" ? "floating" : presentation,
-    ]),
-  );
+function upcastPersistedEnvironmentPresentation(_value: unknown): unknown {
+  return {
+    byTab: [],
+    byMode: DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
+  };
 }
 
 function sanitizePersistedWorkspaceEvent(value: unknown): unknown {

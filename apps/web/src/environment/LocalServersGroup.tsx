@@ -8,6 +8,7 @@ import {
   CircleAlert,
   CircleHelp,
   Copy,
+  Ellipsis,
   ExternalLink,
   Globe2,
   Radio,
@@ -16,6 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { groupLocalServerListeners, type LocalServerListenerGroup } from "./localServerGroups";
 import type { LocalServersController } from "./useLocalServersController";
 
 export interface LocalServersGroupProps {
@@ -39,11 +41,11 @@ export interface LocalServersGroupProps {
 /**
  * Code Environment "Local servers" section.
  *
- * Every status is carried by an icon *and* words — never colour alone — because
- * the difference between a listener that answers and one that merely holds the
- * port is the whole point of the section. Rows the host did not classify are
- * simply absent: this surface refuses to be a host process inventory, so there
- * is no disabled row to read.
+ * Rows are grouped by process and port so a dual-stack loopback listener is
+ * one server. Stop is exactly what the host classified: Octant-owned safe
+ * stops, leftover confirmation, or a reason with no fake control.
+ * Unclassified processes are absent from the snapshot; this surface is not a
+ * host process inventory.
  */
 export function LocalServersGroup(props: LocalServersGroupProps) {
   const [confirming, setConfirming] = useState<LocalServerListenerId>();
@@ -70,8 +72,6 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
     );
   }
   if (props.controller.snapshot === undefined) {
-    // Idle is not a failure: the host has simply not been asked yet, which is
-    // what a hidden or not-yet-authorized section looks like.
     return (
       <p className="local-servers__state" role="status">
         Octant is not observing local servers for this thread.
@@ -80,7 +80,9 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
   }
 
   const snapshot: LocalServerSnapshot = props.controller.snapshot;
-  const total = snapshot.currentCheckout.length + snapshot.other.length;
+  const currentCheckout = groupLocalServerListeners(snapshot.currentCheckout);
+  const other = groupLocalServerListeners(snapshot.other);
+  const total = currentCheckout.length + other.length;
 
   return (
     <div aria-label="Local servers" className="local-servers">
@@ -100,15 +102,15 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
       <LocalServerGroupSection
         {...props}
         confirming={confirming}
-        heading="This Project"
-        listeners={snapshot.currentCheckout}
+        heading="This checkout"
+        groups={currentCheckout}
         setConfirming={setConfirming}
       />
       <LocalServerGroupSection
         {...props}
         confirming={confirming}
         heading="Other leftovers"
-        listeners={snapshot.other}
+        groups={other}
         setConfirming={setConfirming}
       />
     </div>
@@ -118,55 +120,59 @@ export function LocalServersGroup(props: LocalServersGroupProps) {
 function LocalServerGroupSection(
   props: LocalServersGroupProps & {
     readonly heading: string;
-    readonly listeners: ReadonlyArray<LocalServerListener>;
+    readonly groups: ReadonlyArray<LocalServerListenerGroup>;
     readonly confirming: LocalServerListenerId | undefined;
     readonly setConfirming: (next: LocalServerListenerId | undefined) => void;
   },
 ) {
-  if (props.listeners.length === 0) return null;
+  if (props.groups.length === 0) return null;
   return (
     <section aria-label={props.heading} className="local-servers__group">
       <h3 className="local-servers__group-heading">{props.heading}</h3>
-      {props.listeners.map((listener) => (
-        <LocalServerRow
-          key={listener.listenerId}
-          confirming={props.confirming === listener.listenerId}
-          listener={listener}
-          busy={props.controller.busyListenerId === listener.listenerId}
-          onCancelConfirm={() => props.setConfirming(undefined)}
-          onCopyUrl={props.onCopyUrl}
-          {...(props.onOpenTarget === undefined
-            ? {}
-            : {
-                onOpen: async () => {
-                  const target = await props.controller.open(listener.listenerId);
-                  if (target !== undefined) await props.onOpenTarget?.(target);
-                },
-              })}
-          onRequestStop={() => props.setConfirming(listener.listenerId)}
-          onStop={async () => {
-            await props.controller.stop(listener.listenerId, {
-              acknowledgedProcessName: listener.processName,
-              acknowledgedPort: listener.port,
-              ...(listener.workingDirectory === undefined
-                ? {}
-                : { acknowledgedWorkingDirectory: listener.workingDirectory }),
-            });
-            props.setConfirming(undefined);
-          }}
-          onStopImmediately={async () => {
-            await props.controller.stop(listener.listenerId);
-          }}
-        />
-      ))}
+      {props.groups.map((group) => {
+        const listener = group.primary;
+        return (
+          <LocalServerRow
+            key={group.key}
+            busy={props.controller.busyListenerId === listener.listenerId}
+            confirming={props.confirming === listener.listenerId}
+            group={group}
+            listener={listener}
+            onCancelConfirm={() => props.setConfirming(undefined)}
+            onCopyUrl={props.onCopyUrl}
+            {...(props.onOpenTarget === undefined
+              ? {}
+              : {
+                  onOpen: async () => {
+                    const target = await props.controller.open(listener.listenerId);
+                    if (target !== undefined) await props.onOpenTarget?.(target);
+                  },
+                })}
+            onRequestStop={() => props.setConfirming(listener.listenerId)}
+            onStop={async () => {
+              await props.controller.stop(listener.listenerId, {
+                acknowledgedProcessName: listener.processName,
+                acknowledgedPort: listener.port,
+                ...(listener.workingDirectory === undefined
+                  ? {}
+                  : { acknowledgedWorkingDirectory: listener.workingDirectory }),
+              });
+              props.setConfirming(undefined);
+            }}
+            onStopImmediately={async () => {
+              await props.controller.stop(listener.listenerId);
+            }}
+          />
+        );
+      })}
     </section>
   );
 }
 
-/** How long a per-row success note such as "Copied" stays before it clears. */
 const ROW_FEEDBACK_CLEAR_MS = 2_500;
 
 function LocalServerRow(props: {
+  readonly group: LocalServerListenerGroup;
   readonly listener: LocalServerListener;
   readonly busy: boolean;
   readonly confirming: boolean;
@@ -182,12 +188,11 @@ function LocalServerRow(props: {
   const HealthIcon = health.icon;
   const stoppable = listener.stop.status === "available";
   const needsConfirmation = stoppable && listener.stop.confirmationRequired;
-  // Copy and Open confirm or fail *in words* beside the row: a click with no
-  // visible outcome is indistinguishable from a broken control.
   const [feedback, setFeedback] = useState<{
     readonly kind: "confirmation" | "failure";
     readonly text: string;
   }>();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     if (feedback?.kind !== "confirmation") return;
@@ -197,34 +202,24 @@ function LocalServerRow(props: {
 
   const onOpen = props.onOpen;
   const onCopyUrl = props.onCopyUrl;
+  const urls = uniqueUrls(props.group.listeners);
+  const name =
+    listener.framework === undefined
+      ? listener.processName
+      : `${listener.processName} · ${listener.framework}`;
 
   return (
     <div className="local-servers__row" data-listener-id={listener.listenerId}>
       <div className="local-servers__identity">
-        <span className="local-servers__name">
-          {listener.processName}
-          {listener.framework === undefined ? "" : ` · ${listener.framework}`}
-        </span>
-        <span className="local-servers__url" title={String(listener.url)}>
-          {String(listener.url)}
+        <span className="local-servers__name">{name}</span>
+        <span className="local-servers__url" title={urls.join(", ")}>
+          {urls[0] ?? String(listener.url)}
+          {urls.length > 1 ? ` · ${String(urls.length)} addresses` : ""}
         </span>
         <span className="local-servers__meta">
           <HealthIcon aria-hidden="true" size={14} strokeWidth={1.8} />
           {health.label}
         </span>
-        <span className="local-servers__meta">
-          <Radio aria-hidden="true" size={14} strokeWidth={1.8} />
-          {listener.bindScope === "loopback" ? "This computer only" : "Reachable on your network"}
-        </span>
-        <span className="local-servers__meta">
-          <Globe2 aria-hidden="true" size={14} strokeWidth={1.8} />
-          {startSourceLabel(listener)}
-        </span>
-        {listener.workingDirectory === undefined ? null : (
-          <span className="local-servers__meta" title={listener.workingDirectory}>
-            {listener.workspaceLabel ?? listener.workingDirectory}
-          </span>
-        )}
       </div>
 
       <div className="local-servers__actions">
@@ -253,27 +248,17 @@ function LocalServerRow(props: {
           </OctantButton>
         ) : null}
 
-        {onCopyUrl === undefined ? null : (
-          <OctantButton
-            aria-label={`Copy ${String(listener.url)}`}
-            onClick={() =>
-              void (async () => {
-                setFeedback(undefined);
-                try {
-                  await onCopyUrl(String(listener.url));
-                  setFeedback({ kind: "confirmation", text: "Copied" });
-                } catch {
-                  setFeedback({ kind: "failure", text: "Octant could not copy the URL." });
-                }
-              })()
-            }
-            type="button"
-            variant="ghost"
-          >
-            <Copy aria-hidden="true" size={14} strokeWidth={1.8} />
-            <span>Copy URL</span>
-          </OctantButton>
-        )}
+        <button
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          aria-label={`More actions for ${name} on port ${String(listener.port)}`}
+          className="local-servers__more"
+          onClick={() => setMenuOpen((current) => !current)}
+          type="button"
+        >
+          <Ellipsis aria-hidden="true" size={14} strokeWidth={1.8} />
+          <span>More</span>
+        </button>
 
         {feedback === undefined ? null : (
           <span
@@ -284,15 +269,12 @@ function LocalServerRow(props: {
           </span>
         )}
 
-        {listener.stop.status === "unavailable" ? (
-          <span className="local-servers__stop-unavailable">
-            <ShieldAlert aria-hidden="true" size={14} strokeWidth={1.8} />
-            {listener.stop.reason}
-          </span>
-        ) : needsConfirmation ? (
+        {listener.stop.status === "available" ? (
           <OctantButton
             disabled={props.busy}
-            onClick={props.onRequestStop}
+            onClick={() =>
+              needsConfirmation ? props.onRequestStop() : void props.onStopImmediately()
+            }
             type="button"
             variant="ghost"
           >
@@ -300,17 +282,62 @@ function LocalServerRow(props: {
             <span>Stop</span>
           </OctantButton>
         ) : (
-          <OctantButton
-            disabled={props.busy}
-            onClick={() => void props.onStopImmediately()}
-            type="button"
-            variant="ghost"
-          >
-            <Square aria-hidden="true" size={14} strokeWidth={1.8} />
-            <span>Stop</span>
-          </OctantButton>
+          <span className="local-servers__stop-unavailable">
+            <ShieldAlert aria-hidden="true" size={14} strokeWidth={1.8} />
+            {listener.stop.reason}
+          </span>
         )}
       </div>
+
+      {menuOpen ? (
+        <div
+          className="local-servers__menu"
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            setMenuOpen(false);
+          }}
+          role="menu"
+        >
+          {onCopyUrl === undefined
+            ? null
+            : urls.map((url) => (
+                <OctantButton
+                  aria-label={`Copy ${url}`}
+                  key={url}
+                  onClick={() =>
+                    void (async () => {
+                      setFeedback(undefined);
+                      try {
+                        await onCopyUrl(url);
+                        setFeedback({ kind: "confirmation", text: "Copied" });
+                        setMenuOpen(false);
+                      } catch {
+                        setFeedback({ kind: "failure", text: "Octant could not copy the URL." });
+                      }
+                    })()
+                  }
+                  role="menuitem"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Copy aria-hidden="true" size={14} strokeWidth={1.8} />
+                  <span>{urls.length === 1 ? "Copy URL" : `Copy ${url}`}</span>
+                </OctantButton>
+              ))}
+          <p className="local-servers__details">
+            <Radio aria-hidden="true" size={14} strokeWidth={1.8} />
+            {bindScopeLabel(props.group.listeners)}
+          </p>
+          <p className="local-servers__details">{startSourceLabel(listener)}</p>
+          {listener.workingDirectory === undefined ? null : (
+            <p className="local-servers__details" title={listener.workingDirectory}>
+              {listener.workspaceLabel ?? listener.workingDirectory}
+            </p>
+          )}
+        </div>
+      ) : null}
 
       {props.confirming && needsConfirmation ? (
         <div className="local-servers__confirm" role="alertdialog" aria-label="Confirm stop">
@@ -331,11 +358,18 @@ function LocalServerRow(props: {
   );
 }
 
-/**
- * `unknown` is a statement about Octant, not about the server: the host ran out
- * of time asking, so the row says that instead of describing a listener nobody
- * established anything about.
- */
+function uniqueUrls(listeners: ReadonlyArray<LocalServerListener>): ReadonlyArray<string> {
+  return [...new Set(listeners.map((listener) => String(listener.url)))];
+}
+
+function bindScopeLabel(listeners: ReadonlyArray<LocalServerListener>): string {
+  const scopes = new Set(listeners.map((listener) => listener.bindScope));
+  if (scopes.has("lan") && scopes.has("loopback")) {
+    return "This computer and the local network";
+  }
+  return scopes.has("lan") ? "Reachable on your network" : "This computer only";
+}
+
 function healthPresentation(listener: LocalServerListener) {
   switch (listener.health) {
     case "listening":

@@ -184,7 +184,7 @@ async function closePaneShowing(title: string): Promise<void> {
 
 async function expandLocalServers(): Promise<void> {
   fireEvent.click(
-    await screen.findByRole("button", { name: /^Local servers/ }, { timeout: 5_000 }),
+    await screen.findByRole("button", { name: /Show environment for/ }, { timeout: 5_000 }),
   );
 }
 
@@ -199,9 +199,8 @@ describe("WorkspaceView Local servers wiring", () => {
         onOpenSurface={onOpenSurface}
       />,
     );
-    // Collapsed by default: no listener enumeration until the user opens it.
-    await screen.findByRole("button", { name: /^Local servers/ }, { timeout: 5_000 });
-    expect(wired.props.localServerClient?.execute).not.toHaveBeenCalled();
+    // The compact summary may take one observation for the running-server
+    // count; the disclosure is what shows Open.
     await expandLocalServers();
 
     fireEvent.click(
@@ -426,14 +425,10 @@ describe("WorkspaceView Local servers wiring", () => {
       const wired = localServersWiring();
       render(<WorkspaceView {...wired.props} />);
       await expandLocalServers();
-
       fireEvent.click(
-        await screen.findByRole(
-          "button",
-          { name: "Copy http://127.0.0.1:5173/" },
-          { timeout: 5_000 },
-        ),
+        await screen.findByRole("button", { name: /More actions for/ }, { timeout: 5_000 }),
       );
+      fireEvent.click(screen.getByRole("menuitem", { name: "Copy http://127.0.0.1:5173/" }));
 
       expect(await screen.findByText("Copied")).toBeVisible();
       expect(writeText).toHaveBeenCalledWith("http://127.0.0.1:5173/");
@@ -1476,9 +1471,12 @@ describe("WorkspaceView Work thread tab", () => {
 
     expect(await screen.findByRole("heading", { name: "Draft brief" })).toBeVisible();
     expect(
-      await screen.findByRole("dialog", { name: "Environment for Knowledge Base" }),
+      await screen.findByRole("button", { name: /Show environment for Knowledge Base/ }),
     ).toBeVisible();
     expect(screen.getByText("work-root")).toBeVisible();
+    expect(
+      screen.queryByRole("dialog", { name: "Environment for Knowledge Base" }),
+    ).not.toBeInTheDocument();
     const composer = screen.getByRole("textbox", { name: "Work prompt" });
     await userEvent.type(composer, "Ship the preview");
     await userEvent.click(screen.getByRole("button", { name: "Create artifact" }));
@@ -1830,8 +1828,12 @@ describe("WorkspaceView Chat thread Environment", () => {
       />,
     );
 
-    expect(await screen.findByRole("dialog", { name: "Environment for Planning" })).toBeVisible();
+    expect(
+      await screen.findByRole("button", { name: /Show environment for Planning/ }),
+    ).toBeVisible();
     expect(screen.getByText("Virtual Project")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Show environment for Planning/ }));
+    expect(await screen.findByRole("dialog", { name: "Environment for Planning" })).toBeVisible();
     expect(screen.getAllByText("Attachments").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Sources").length).toBeGreaterThan(0);
     expect(screen.queryByText("Git")).not.toBeInTheDocument();

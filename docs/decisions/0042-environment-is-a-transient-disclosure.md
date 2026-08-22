@@ -1,6 +1,6 @@
 # 0042. Environment is a transient disclosure
 
-**Status:** Proposed
+**Status:** Accepted
 
 ## Context
 

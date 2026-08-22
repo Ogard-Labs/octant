@@ -70,7 +70,6 @@ export type ImplementedSettingId =
   | "sidebar-background"
   | "mode-switcher"
   | "project-view-switcher"
-  | "environment-presentation"
   | "theme-mode"
   | "theme-preset"
   | "ui-typography"
@@ -278,8 +277,6 @@ const settingSearchText: Readonly<Record<ImplementedSettingId, string>> = {
     "sidebar background image preset gradient custom upload overlay color opacity vibrancy",
   "mode-switcher": "mode switcher compact buttons dropdown sidebar navigation",
   "project-view-switcher": "project view switcher icons dropdown sidebar code",
-  "environment-presentation":
-    "environment panel presentation floating pinned hidden per mode default chat work code",
   "theme-mode": "theme mode system light dark appearance",
   "theme-preset": "theme preset Octant palette light dark",
   "ui-typography": "ui typography font family size prose interface",

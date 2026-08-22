@@ -167,8 +167,9 @@ without replacing the active pane. The dock follows the active pane's thread
 and Project, restores that subject's open tabs, and presents an explicit
 unavailable state when the newly active pane cannot describe the selected
 tool — never the previous pane's content. At narrow widths the dock becomes an
-overlay drawer. Environment belongs to a thread and currently persists floating
-or hidden presentation. Work and Code have server-authoritative thread boards
+overlay drawer. Environment belongs to a thread as a compact header summary
+with a transient disclosure whose open state is renderer-only. Work and Code
+have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
 Chat has no board. Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
@@ -178,11 +179,11 @@ presentation aggregate inside the same window, not a split-tree tab and not a
 fourth authority mode.
 
 **Approved migration, not yet the renderer.** Proposed records
-[0041](decisions/0041-panes-hold-one-surface.md),
-[0042](decisions/0042-environment-is-a-transient-disclosure.md), and
+[0041](decisions/0041-panes-hold-one-surface.md) and
 [0044](decisions/0044-the-dock-hosts-live-thread-owned-tools.md) are the agreed
-interaction model for remaining renderer work. Environment becomes a compact
-header summary with a transient disclosure whose open state is not persisted.
+interaction model for remaining renderer work. Environment is already a compact
+header summary with a transient disclosure whose open state is not persisted
+([0042](decisions/0042-environment-is-a-transient-disclosure.md)).
 The dock hosts live thread-owned tool instances — Review, Files, Browser,
 Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery, and
 conditional Agents — rather than generic category tabs. Context usage already
@@ -190,7 +191,7 @@ lives on the composer meter. Project memory belongs in Project Overview.
 Navigator is one host-wide chat popover from the bottom-left profile and
 Settings control. Simulator placement is already
 [0043](decisions/0043-simulator-follows-the-active-thread.md). 0015 remains the
-Accepted implemented shell until that migration is accepted.
+Accepted implemented shell until that remaining migration is accepted.
 
 ## Persistence
 

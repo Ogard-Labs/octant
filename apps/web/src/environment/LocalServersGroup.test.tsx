@@ -3,7 +3,7 @@ import type {
   LocalServerListenerId,
   LocalServerSnapshot,
 } from "@octant/contracts";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { LocalServersGroup } from "./LocalServersGroup";
 
@@ -56,7 +56,7 @@ function controller(overrides: Record<string, unknown> = {}) {
 }
 
 describe("LocalServersGroup", () => {
-  it("groups this Project's servers above other leftovers", () => {
+  it("groups this checkout's servers above other leftovers", () => {
     const leftover = listener({
       listenerId: "lsn_ffffffffffffffffffffffffffffffff" as LocalServerListenerId,
       attribution: "other",
@@ -72,12 +72,29 @@ describe("LocalServersGroup", () => {
     );
 
     const headings = screen.getAllByRole("heading").map((heading) => heading.textContent);
-    expect(headings).toEqual(["This Project", "Other leftovers"]);
+    expect(headings).toEqual(["This checkout", "Other leftovers"]);
+    const leftoverMore = screen.getByRole("button", {
+      name: "More actions for node on port 3000",
+    });
+    fireEvent.click(leftoverMore);
     expect(
       within(screen.getByRole("region", { name: "Other leftovers" })).getByText(
         "Started by VS Code",
       ),
     ).toBeVisible();
+  });
+
+  it("groups duplicate loopback listeners for one process and port", () => {
+    const ipv6 = listener({
+      listenerId: "lsn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as LocalServerListenerId,
+      url: "http://[::1]:5173/" as LocalServerListener["url"],
+    });
+    render(
+      <LocalServersGroup controller={controller({ snapshot: snapshot([listener(), ipv6]) })} />,
+    );
+    expect(screen.getAllByText("node · vite")).toHaveLength(1);
+    expect(screen.getByText(/2 addresses/)).toBeVisible();
+    expect(screen.getAllByRole("button", { name: /More actions for/ })).toHaveLength(1);
   });
 
   it("states health in words as well as an icon", () => {
@@ -113,6 +130,7 @@ describe("LocalServersGroup", () => {
         controller={controller({ snapshot: snapshot([listener({ bindScope: "lan" })]) })}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: /More actions for/ }));
     expect(screen.getByText("Reachable on your network")).toBeVisible();
   });
 
@@ -131,10 +149,11 @@ describe("LocalServersGroup", () => {
     await waitFor(() => expect(onOpenTarget).toHaveBeenCalledWith(target));
   });
 
-  it("copies the normalized local URL and confirms the copy in words", async () => {
+  it("copies the normalized local URL from the accessible menu and confirms the copy in words", async () => {
     const onCopyUrl = vi.fn(async () => undefined);
     render(<LocalServersGroup controller={controller()} onCopyUrl={onCopyUrl} />);
-    screen.getByRole("button", { name: /Copy http/ }).click();
+    fireEvent.click(screen.getByRole("button", { name: /More actions for/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Copy http/ }));
     expect(onCopyUrl).toHaveBeenCalledWith("http://127.0.0.1:5173/");
     expect(await screen.findByText("Copied")).toBeVisible();
   });
@@ -144,7 +163,8 @@ describe("LocalServersGroup", () => {
       throw new Error("clipboard unavailable");
     });
     render(<LocalServersGroup controller={controller()} onCopyUrl={onCopyUrl} />);
-    screen.getByRole("button", { name: /Copy http/ }).click();
+    fireEvent.click(screen.getByRole("button", { name: /More actions for/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Copy http/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Octant could not copy the URL.");
   });
 
@@ -169,11 +189,22 @@ describe("LocalServersGroup", () => {
     );
   });
 
+  it("keeps Open visible for a usable listener and hides Copy until the menu opens", () => {
+    render(
+      <LocalServersGroup controller={controller()} onCopyUrl={vi.fn()} onOpenTarget={vi.fn()} />,
+    );
+    expect(screen.getByRole("button", { name: /Open http/ })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: /Copy http/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /More actions for/ }));
+    expect(screen.getByRole("menuitem", { name: /Copy http/ })).toBeVisible();
+  });
+
   it("hides Open and Copy entirely when the host supplies no way to perform them", () => {
     render(<LocalServersGroup controller={controller()} />);
     expect(screen.getByText("node · vite")).toBeVisible();
     expect(screen.queryByRole("button", { name: /Open http/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Copy http/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /More actions for/ }));
+    expect(screen.queryByRole("menuitem", { name: /Copy http/ })).toBeNull();
   });
 
   it("stops an Octant-owned server without a confirmation step", async () => {
@@ -208,6 +239,28 @@ describe("LocalServersGroup", () => {
         acknowledgedWorkingDirectory: "/Users/example/code/other-app",
       }),
     );
+  });
+
+  it("never offers a fake Stop for an unmanaged process", () => {
+    render(
+      <LocalServersGroup
+        controller={controller({
+          snapshot: snapshot([
+            listener({
+              startSource: "unknown",
+              stop: {
+                status: "unavailable",
+                reason: "Octant does not own this process and will not stop it.",
+              },
+            }),
+          ]),
+        })}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(
+      screen.getByText("Octant does not own this process and will not stop it."),
+    ).toBeVisible();
   });
 
   it("shows the host's reason instead of a Stop control when Stop is withheld", () => {

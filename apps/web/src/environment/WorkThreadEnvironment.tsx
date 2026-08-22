@@ -1,23 +1,16 @@
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
-import type {
-  WorkThread,
-  EnvironmentPresentationState,
-  ProjectSummary,
-  WorkspaceTab,
-} from "@octant/contracts";
+import type { WorkThread, ProjectSummary, WorkspaceTab } from "@octant/contracts";
 import { deriveWorkEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useEffect, useState, type ReactNode } from "react";
-import { resolveTabPresentation } from "./EnvironmentPresentationModel";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
-import { WorkingDirectoryControl } from "./WorkingDirectoryControl";
+import { ChangeWorkingFolder } from "./WorkingDirectoryControl";
 
 type WorkThreadWorkspaceTab = Extract<WorkspaceTab, { readonly kind: "work-thread" }>;
 type WorkProject = Extract<ProjectSummary, { readonly type: "work" }>;
 
 export interface WorkThreadEnvironmentProps {
   readonly tab: WorkThreadWorkspaceTab;
-  readonly presentation: EnvironmentPresentationState;
-  readonly onChangePresentation: (next: EnvironmentPresentationState) => void;
+  readonly active?: boolean;
   readonly projects: ReadonlyArray<ProjectSummary>;
   readonly threadClient: WorkThreadClient;
   readonly children: ReactNode;
@@ -25,11 +18,12 @@ export interface WorkThreadEnvironmentProps {
 
 /**
  * Resolves the Work Project through authoritative thread state, then mounts
- * the confined folder identity inside the thread tab. Failure to resolve the
- * thread or its Project is represented as unavailable instead of guessing a
- * folder from renderer state.
+ * the confined folder identity as a compact summary with a transient
+ * disclosure. Failure to resolve the thread or its Project is represented as
+ * unavailable instead of guessing a folder from renderer state.
  */
 export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
+  const [disclosureOpen, setDisclosureOpen] = useState(false);
   const [project, setProject] = useState<WorkProject | undefined>(undefined);
   const [thread, setThread] = useState<WorkThread | undefined>(undefined);
 
@@ -41,12 +35,15 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
       .bootstrap()
       .then((bootstrap) => {
         if (cancelled) return;
-        const thread = bootstrap.threads.find((candidate) => candidate.id === props.tab.threadId);
+        const nextThread = bootstrap.threads.find(
+          (candidate) => candidate.id === props.tab.threadId,
+        );
         const candidate = props.projects.find(
-          (entry): entry is WorkProject => entry.type === "work" && entry.id === thread?.projectId,
+          (entry): entry is WorkProject =>
+            entry.type === "work" && entry.id === nextThread?.projectId,
         );
         setProject(candidate);
-        setThread(thread);
+        setThread(nextThread);
       })
       .catch(() => {
         if (!cancelled) setProject(undefined);
@@ -60,20 +57,22 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
     projectName: project?.name ?? "Work",
     ...(project === undefined ? {} : { boundRoot: project.binding.canonicalRoot }),
   });
-  const resolved = resolveTabPresentation(props.presentation, "work", props.tab.id);
 
   return (
-    <div className={`code-thread-environment code-thread-environment--${resolved}`}>
-      <div className="code-thread-environment__content">{props.children}</div>
+    <div className="code-thread-environment">
       <ThreadEnvironmentPanel
-        identity={projection.identity}
-        mode="work"
-        onChangePresentation={props.onChangePresentation}
-        presentation={props.presentation}
-        tabId={props.tab.id}
+        {...(props.active === undefined ? {} : { active: props.active })}
+        onOpenChange={setDisclosureOpen}
+        open={disclosureOpen}
+        summary={{
+          identity: projection.identity,
+          ...(thread === undefined
+            ? {}
+            : { workingLocation: String(thread.workingDirectory ?? ".") }),
+        }}
       >
         {thread === undefined ? null : (
-          <WorkingDirectoryControl
+          <ChangeWorkingFolder
             value={thread.workingDirectory ?? "."}
             onApply={async (workingDirectory) => {
               const result = await props.threadClient.execute({
@@ -91,6 +90,7 @@ export function WorkThreadEnvironment(props: WorkThreadEnvironmentProps) {
           />
         )}
       </ThreadEnvironmentPanel>
+      <div className="code-thread-environment__content">{props.children}</div>
     </div>
   );
 }
