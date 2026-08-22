@@ -19,6 +19,8 @@ import {
   decodeCodeProjectPullRequestDetailView,
   decodeCodeProjectPullRequestView,
   MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DIFF_BYTES,
+  MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS,
+  MAX_CODE_PROJECT_PULL_REQUEST_ROWS,
   UtcTimestamp as UtcTimestampSchema,
 } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
@@ -94,8 +96,9 @@ interface CachedDetail {
 }
 
 /**
- * In-memory Project-scoped active pull-request snapshot. Process restart
- * loses it. The journal never sees list or detail rows.
+ * In-memory Project-scoped pull-request snapshot. Manual refresh reconstructs
+ * the bounded open, draft, merged, and closed history after a process restart.
+ * The journal never sees list or detail rows.
  */
 export class CodeProjectPullRequestService {
   readonly #projects: CodeProjectPullRequestProjectSource;
@@ -139,7 +142,7 @@ export class CodeProjectPullRequestService {
     query: CodeProjectPullRequestQuery,
   ): Promise<CodeProjectPullRequestView> {
     const projects = await this.#resolveProjects(windowId);
-    const rows = this.#authorizedRows(projects);
+    const rows = this.#authorizedActiveRows(projects);
     return this.#view({
       query,
       projects,
@@ -151,8 +154,9 @@ export class CodeProjectPullRequestService {
   }
 
   /**
-   * Read-only board join snapshot. Never reaches GitHub; it reuses the
-   * in-memory list cache only.
+   * Read-only board join snapshot. Never reaches GitHub; it combines the
+   * process-local refresh cache with bounded exact identities recovered by the
+   * thread source from the operation journal.
    */
   async boardSnapshot(windowId: WindowId): Promise<{
     readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
@@ -160,9 +164,24 @@ export class CodeProjectPullRequestService {
     readonly githubRevoked: boolean;
   }> {
     const projects = await this.#resolveProjects(windowId);
+    const threads = await this.#threads.list(windowId);
+    const cachedRows = this.#authorizedRows(projects);
+    const rows = boundPullRequestRows(
+      mergePullRequestRows(cachedRows, this.#knownRows(projects, threads)),
+    );
+    const freshness = this.#queryFreshness();
+    const boardFreshness =
+      rows.some((row) => row.state === "unknown") && freshness.status !== "stale"
+        ? {
+            status: "stale" as const,
+            ...(freshness.lastSuccessfulRefreshAt === undefined
+              ? {}
+              : { lastSuccessfulRefreshAt: freshness.lastSuccessfulRefreshAt }),
+          }
+        : freshness;
     return {
-      rows: this.#authorizedRows(projects),
-      freshness: this.#queryFreshness(),
+      rows: this.#githubRevoked ? [] : rows,
+      freshness: boardFreshness,
       githubRevoked: this.#githubRevoked,
     };
   }
@@ -228,7 +247,7 @@ export class CodeProjectPullRequestService {
       },
       signal,
     );
-    if (observed.status !== "observed") {
+    if (observed.status !== "observed" || observed.freshness !== "fresh" || observed.ambiguous) {
       return this.#staleDetailView({
         query: command,
         authorized,
@@ -264,7 +283,7 @@ export class CodeProjectPullRequestService {
       return this.#view({
         query: { version: 1 },
         projects,
-        rows: this.#authorizedRows(projects),
+        rows: this.#authorizedActiveRows(projects),
         repositoriesTruncated: this.#cache?.repositoriesTruncated ?? false,
         pullRequestsTruncated: this.#cache?.pullRequestsTruncated ?? false,
         freshness: this.#queryFreshness(),
@@ -281,6 +300,7 @@ export class CodeProjectPullRequestService {
     });
     const collected: CodeProjectPullRequestRow[] = [];
     let pullRequestsTruncated = false;
+    let knownIdentityRefreshFailed = false;
     const threads = await this.#threads.list(windowId);
 
     for (const repository of bounded.repositories) {
@@ -312,11 +332,40 @@ export class CodeProjectPullRequestService {
       for (const row of usable) {
         collected.push(this.#row(repository, row, threads));
       }
+      const known = this.#knownRows([repository], threads);
+      const listedNumbers = new Set(usable.map((row) => row.number));
+      for (const knownRow of known) {
+        if (
+          listedNumbers.has(knownRow.number) ||
+          collected.length >= CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS
+        ) {
+          continue;
+        }
+        const observed = await this.#detail.observeReviewByIdentity(
+          {
+            owner: repository.repositoryOwner,
+            name: repository.repositoryName,
+            number: knownRow.number,
+            maxDiffBytes: MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DIFF_BYTES,
+          },
+          signal,
+        );
+        if (
+          observed.status === "observed" &&
+          observed.freshness === "fresh" &&
+          !observed.ambiguous
+        ) {
+          collected.push(this.#rowFromObserved(repository, observed, threads, knownRow.updatedAt));
+        } else {
+          knownIdentityRefreshFailed = true;
+          collected.push(knownRow);
+        }
+      }
     }
 
     this.#githubRevoked = false;
     const now = decodeUtcTimestamp(this.#clock());
-    const rows =
+    const refreshedRows =
       command.kind === "refresh-project"
         ? [
             ...this.#authorizedRows(projects).filter(
@@ -325,20 +374,21 @@ export class CodeProjectPullRequestService {
             ...collected,
           ]
         : collected;
+    const rows = boundPullRequestRows(refreshedRows);
+    if (rows.length < refreshedRows.length) pullRequestsTruncated = true;
     this.#cache = {
       rows,
       lastSuccessfulRefreshAt: now,
       repositoriesTruncated: bounded.repositoriesTruncated,
       pullRequestsTruncated,
     };
-    this.#freshness = {
-      status: "fresh",
-      lastSuccessfulRefreshAt: now,
-    };
+    this.#freshness = knownIdentityRefreshFailed
+      ? { status: "stale", staleReason: "refresh-failed", lastSuccessfulRefreshAt: now }
+      : { status: "fresh", lastSuccessfulRefreshAt: now };
     return this.#view({
       query: { version: 1 },
       projects,
-      rows,
+      rows: rows.filter((row) => row.state === "open"),
       repositoriesTruncated: bounded.repositoriesTruncated,
       pullRequestsTruncated,
       freshness: this.#freshness,
@@ -388,6 +438,12 @@ export class CodeProjectPullRequestService {
     );
   }
 
+  #authorizedActiveRows(
+    projects: ReadonlyArray<CodeProjectPullRequestConnection>,
+  ): ReadonlyArray<CodeProjectPullRequestRow> {
+    return this.#authorizedRows(projects).filter((row) => row.state === "open");
+  }
+
   #queryFreshness(): CodeProjectPullRequestFreshness {
     if (this.#githubRevoked) {
       return {
@@ -417,7 +473,7 @@ export class CodeProjectPullRequestService {
     return this.#view({
       query: { version: 1 },
       projects: input.projects,
-      rows: this.#authorizedRows(input.projects),
+      rows: this.#authorizedActiveRows(input.projects),
       repositoriesTruncated: this.#cache?.repositoriesTruncated ?? false,
       pullRequestsTruncated: this.#cache?.pullRequestsTruncated ?? false,
       freshness: this.#freshness,
@@ -437,6 +493,8 @@ export class CodeProjectPullRequestService {
       number: row.number,
       title: row.title,
       draft: row.draft,
+      state: row.state,
+      mergeability: row.mergeability,
       author: row.author,
       baseBranch: row.baseBranch,
       headBranch: row.headBranch,
@@ -446,15 +504,97 @@ export class CodeProjectPullRequestService {
       linkedThreads: matchLinkedThreadsToPullRequest({
         pullRequest: {
           repository: { owner: project.repositoryOwner, name: project.repositoryName },
+          projectId: String(project.projectId),
           number: row.number,
           headBranch: row.headBranch,
           title: row.title,
         },
         threads,
-      }).map((thread) => ({
-        threadId: decodeCodeThreadId(thread.threadId),
-        title: thread.title,
-      })),
+      })
+        .slice(0, MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS)
+        .map((thread) => ({
+          threadId: decodeCodeThreadId(thread.threadId),
+          title: thread.title,
+        })),
+    };
+  }
+
+  #knownRows(
+    projects: ReadonlyArray<CodeProjectPullRequestConnection>,
+    threads: ReadonlyArray<CodeProjectLinkedThreadFact>,
+  ): ReadonlyArray<CodeProjectPullRequestRow> {
+    const rows: CodeProjectPullRequestRow[] = [];
+    for (const project of projects) {
+      if (project.kind !== "connected") continue;
+      for (const thread of threads) {
+        if (thread.projectId !== String(project.projectId)) continue;
+        if (
+          thread.repository.owner !== project.repositoryOwner ||
+          thread.repository.name !== project.repositoryName
+        ) {
+          continue;
+        }
+        for (const identity of thread.pullRequestNumbers ?? []) {
+          rows.push({
+            projectId: project.projectId,
+            projectName: project.projectName,
+            repositoryOwner: project.repositoryOwner,
+            repositoryName: project.repositoryName,
+            number: identity.number,
+            title: `Pull request #${identity.number}`,
+            draft: false,
+            state: "unknown",
+            mergeability: "unknown",
+            author: "Unknown author",
+            baseBranch: "unknown",
+            headBranch: thread.deliveryBranch ?? "unknown",
+            updatedAt: identity.observedAt,
+            checks: "unknown",
+            review: "unknown",
+            linkedThreads: [{ threadId: decodeCodeThreadId(thread.threadId), title: thread.title }],
+          });
+        }
+      }
+    }
+    return boundPullRequestRows(mergePullRequestRows([], rows));
+  }
+
+  #rowFromObserved(
+    project: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
+    observed: Extract<GhPullRequestReviewResult, { readonly status: "observed" }>,
+    threads: ReadonlyArray<CodeProjectLinkedThreadFact>,
+    knownObservedAt: string,
+  ): CodeProjectPullRequestRow {
+    const pullRequest = observed.pullRequest;
+    const state = pullRequest.state === "draft" ? "open" : pullRequest.state;
+    return {
+      projectId: project.projectId,
+      projectName: project.projectName,
+      repositoryOwner: project.repositoryOwner,
+      repositoryName: project.repositoryName,
+      number: pullRequest.number,
+      title: pullRequest.title === "" ? `Pull request #${pullRequest.number}` : pullRequest.title,
+      draft: pullRequest.state === "draft",
+      state,
+      mergeability: pullRequest.mergeability ?? "unknown",
+      author: pullRequest.author === "" ? "Unknown author" : pullRequest.author,
+      baseBranch: pullRequest.baseBranch,
+      headBranch: pullRequest.headBranch,
+      updatedAt: pullRequest.updatedAt ?? knownObservedAt,
+      checks: summarizeObservedChecks(observed.checks),
+      review: summarizeObservedReviews(observed.reviews),
+      linkedThreads: matchLinkedThreadsToPullRequest({
+        pullRequest: {
+          projectId: String(project.projectId),
+          repository: { owner: project.repositoryOwner, name: project.repositoryName },
+          number: pullRequest.number,
+          headBranch: pullRequest.headBranch,
+          title: pullRequest.title,
+        },
+        threads,
+      })
+        .slice(0, MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS)
+        .map((thread) => ({ threadId: decodeCodeThreadId(thread.threadId), title: thread.title })),
     };
   }
 
@@ -586,15 +726,18 @@ export class CodeProjectPullRequestService {
     return matchLinkedThreadsToPullRequest({
       pullRequest: {
         repository: { owner: project.repositoryOwner, name: project.repositoryName },
+        projectId: String(project.projectId),
         number: detail.number,
         headBranch: detail.headBranch,
         title: detail.title,
       },
       threads,
-    }).map((thread) => ({
-      threadId: decodeCodeThreadId(thread.threadId),
-      title: thread.title,
-    }));
+    })
+      .slice(0, MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS)
+      .map((thread) => ({
+        threadId: decodeCodeThreadId(thread.threadId),
+        title: thread.title,
+      }));
   }
 
   #detailView(input: {
@@ -648,4 +791,77 @@ function retryAfterTimestamp(
   } catch {
     return undefined;
   }
+}
+
+function mergePullRequestRows(
+  primary: ReadonlyArray<CodeProjectPullRequestRow>,
+  fallback: ReadonlyArray<CodeProjectPullRequestRow>,
+): ReadonlyArray<CodeProjectPullRequestRow> {
+  const rows = [...primary];
+  const indexByKey = new Map(primary.map((row, index) => [pullRequestRowKey(row), index] as const));
+  for (const row of fallback) {
+    const key = pullRequestRowKey(row);
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex !== undefined) {
+      const existing = rows[existingIndex];
+      if (existing === undefined) continue;
+      const linkedThreads = [...existing.linkedThreads];
+      const linkedIds = new Set(linkedThreads.map((thread) => String(thread.threadId)));
+      for (const linked of row.linkedThreads) {
+        if (linkedIds.has(String(linked.threadId))) continue;
+        linkedIds.add(String(linked.threadId));
+        linkedThreads.push(linked);
+      }
+      rows[existingIndex] = {
+        ...existing,
+        linkedThreads: linkedThreads.slice(0, MAX_CODE_PROJECT_PULL_REQUEST_LINKED_THREADS),
+      };
+      continue;
+    }
+    indexByKey.set(key, rows.length);
+    rows.push(row);
+  }
+  return rows;
+}
+
+function boundPullRequestRows(
+  rows: ReadonlyArray<CodeProjectPullRequestRow>,
+): ReadonlyArray<CodeProjectPullRequestRow> {
+  return [...rows]
+    .sort((left, right) => {
+      const byUpdatedAt = right.updatedAt.localeCompare(left.updatedAt);
+      return byUpdatedAt === 0
+        ? pullRequestRowKey(left).localeCompare(pullRequestRowKey(right))
+        : byUpdatedAt;
+    })
+    .slice(0, MAX_CODE_PROJECT_PULL_REQUEST_ROWS);
+}
+
+function pullRequestRowKey(row: CodeProjectPullRequestRow): string {
+  return `${String(row.projectId)}:${row.repositoryOwner}/${row.repositoryName}:${row.number}`;
+}
+
+function summarizeObservedChecks(
+  checks: Extract<GhPullRequestReviewResult, { status: "observed" }>["checks"],
+): CodeProjectPullRequestRow["checks"] {
+  if (checks.some((check) => check.state === "failure")) return "failing";
+  if (checks.some((check) => check.state === "pending")) return "pending";
+  if (
+    checks.length > 0 &&
+    checks.every((check) => check.state === "success" || check.state === "neutral")
+  ) {
+    return "passing";
+  }
+  return "unknown";
+}
+
+function summarizeObservedReviews(
+  reviews: Extract<GhPullRequestReviewResult, { status: "observed" }>["reviews"],
+): CodeProjectPullRequestRow["review"] {
+  if (reviews.some((review) => review.state === "changes-requested")) {
+    return "changes-requested";
+  }
+  if (reviews.some((review) => review.state === "approved")) return "approved";
+  if (reviews.some((review) => review.state === "pending")) return "pending";
+  return reviews.length === 0 ? "none" : "unknown";
 }

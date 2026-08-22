@@ -26,6 +26,7 @@ describe("thread board pull-request contracts", () => {
           state: "open",
           checks: "passing",
           review: "approved",
+          mergeability: "mergeable",
           freshness: "fresh",
           readyToMerge: true,
         },

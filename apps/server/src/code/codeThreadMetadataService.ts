@@ -548,6 +548,38 @@ function buildRecovery(input: {
 type PullRequestReviewResult = Extract<CodeOperationResult, { kind: "pull-request-review" }>;
 type ObservedPullRequestReview = Extract<PullRequestReviewResult, { state: "observed" }>;
 type PullRequestStateResult = Extract<CodeOperationResult, { kind: "pull-request-state" }>;
+export const MAX_CODE_THREAD_KNOWN_PULL_REQUESTS = 16;
+
+/**
+ * Recover only exact PR identities from the authoritative operation journal.
+ * GitHub status remains external cache data: callers must label these
+ * identities stale/unknown until an explicit user-triggered refresh observes
+ * them again.
+ */
+export function pullRequestIdentitiesFromHistory(
+  history: CodeThreadOperationHistory,
+): ReadonlyArray<{ readonly number: number; readonly observedAt: string }> {
+  if (history.status !== "ok") return [];
+  const latestByNumber = new Map<number, string>();
+  for (const frame of history.frames) {
+    if (frame.event.kind !== "operation-result") continue;
+    const result = frame.event.result;
+    if (result.kind === "pull-request-review" && result.state === "observed") {
+      latestByNumber.set(result.number, frame.occurredAt);
+      continue;
+    }
+    if (
+      result.kind === "pull-request-state" &&
+      (result.state === "created" || result.state === "existing" || result.state === "merged")
+    ) {
+      latestByNumber.set(result.number, frame.occurredAt);
+    }
+  }
+  return [...latestByNumber]
+    .map(([number, observedAt]) => ({ number, observedAt }))
+    .sort((left, right) => right.observedAt.localeCompare(left.observedAt))
+    .slice(0, MAX_CODE_THREAD_KNOWN_PULL_REQUESTS);
+}
 
 /**
  * Reconstruct PR, checks, and review evidence from already-journaled operation

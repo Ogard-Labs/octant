@@ -88,6 +88,8 @@ export type GhPullRequestReviewResult =
         headRepository: string;
         headBranch: string;
         author: string;
+        mergeability?: "mergeable" | "conflicting" | "unknown";
+        updatedAt?: string;
         matchesDeliveryBranch: boolean;
       }>;
       description: string;
@@ -113,6 +115,8 @@ export interface GhActivePullRequestRow {
   readonly number: number;
   readonly title: string;
   readonly draft: boolean;
+  readonly state: "open" | "merged" | "closed";
+  readonly mergeability: "mergeable" | "conflicting" | "unknown";
   readonly author: string;
   readonly baseBranch: string;
   readonly headBranch: string;
@@ -137,6 +141,8 @@ const ACTIVE_PR_LIST_FIELDS = [
   "number",
   "title",
   "isDraft",
+  "state",
+  "mergeable",
   "author",
   "updatedAt",
   "url",
@@ -153,6 +159,8 @@ const PR_VIEW_FIELDS = [
   "title",
   "state",
   "isDraft",
+  "mergeable",
+  "updatedAt",
   "body",
   "author",
   "baseRefName",
@@ -294,6 +302,8 @@ export class GhPullRequestPort {
         headRepository: identity.headOwner,
         headBranch: identity.headBranch,
         author: detail?.author ?? "",
+        mergeability: detail?.mergeability ?? "unknown",
+        ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
         matchesDeliveryBranch: true,
       },
       description: detail?.description ?? "",
@@ -360,6 +370,8 @@ export class GhPullRequestPort {
         headRepository: detail?.headRepository ?? "",
         headBranch: detail?.headBranch ?? "",
         author: detail?.author ?? "",
+        mergeability: detail?.mergeability ?? "unknown",
+        ...(detail?.updatedAt === undefined ? {} : { updatedAt: detail.updatedAt }),
         matchesDeliveryBranch: false,
       },
       description: detail?.description ?? "",
@@ -374,8 +386,9 @@ export class GhPullRequestPort {
   }
 
   /**
-   * List open and draft pull requests for one server-resolved github.com
-   * repository. This never mutates GitHub.
+   * List a bounded pull-request history for one server-resolved github.com
+   * repository. The Project workspace filters this to active rows; the board
+   * also uses merged and closed rows. This never mutates GitHub.
    */
   async listActive(
     request: {
@@ -403,7 +416,7 @@ export class GhPullRequestPort {
           "--repo",
           repository,
           "--state",
-          "open",
+          "all",
           "--limit",
           String(request.limit),
           "--json",
@@ -644,6 +657,8 @@ interface GhPullRequestReviewDetail {
   readonly title: string;
   readonly state: "open" | "merged" | "closed" | "draft";
   readonly author: string;
+  readonly mergeability: "mergeable" | "conflicting" | "unknown";
+  readonly updatedAt?: string;
   readonly baseBranch: string;
   readonly headBranch: string;
   readonly headRepository: string;
@@ -672,23 +687,27 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
   if (!isRecord(value)) return undefined;
   const isDraft = value.isDraft === true;
   const rawState = typeof value.state === "string" ? value.state.toUpperCase() : "";
-  const state: GhPullRequestReviewDetail["state"] = isDraft
-    ? "draft"
-    : rawState === "MERGED"
-      ? "merged"
-      : rawState === "CLOSED"
-        ? "closed"
-        : "open";
+  const normalizedState = normalizePullRequestState(rawState);
+  const state: GhPullRequestReviewDetail["state"] | undefined = isDraft ? "draft" : normalizedState;
   const url = typeof value.url === "string" && value.url.startsWith("https://") ? value.url : "";
   const baseBranch = typeof value.baseRefName === "string" ? value.baseRefName : "";
   const headBranch = typeof value.headRefName === "string" ? value.headRefName : "";
   const headRepository = loginOf(value.headRepositoryOwner);
-  if (url === "" || baseBranch === "" || headBranch === "") return undefined;
+  const updatedAt =
+    typeof value.updatedAt === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value.updatedAt)
+      ? value.updatedAt
+      : undefined;
+  if (url === "" || baseBranch === "" || headBranch === "" || state === undefined) {
+    return undefined;
+  }
   return {
     url,
     title: clampBytes(value.title, 1_024),
     state,
     author: loginOf(value.author),
+    mergeability: normalizeMergeability(value.mergeable),
+    ...(updatedAt === undefined ? {} : { updatedAt }),
     baseBranch,
     headBranch,
     headRepository,
@@ -744,6 +763,7 @@ function decodeActivePullRequests(
     const headBranch = typeof item.headRefName === "string" ? item.headRefName : "";
     const updatedAt = typeof item.updatedAt === "string" ? item.updatedAt : "";
     const url = typeof item.url === "string" ? item.url : "";
+    const state = normalizePullRequestState(item.state);
     if (
       number <= 0 ||
       title.length === 0 ||
@@ -751,7 +771,8 @@ function decodeActivePullRequests(
       !validBranch(baseBranch) ||
       !validBranch(headBranch) ||
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(updatedAt) ||
-      !url.startsWith("https://github.com/")
+      !url.startsWith("https://github.com/") ||
+      state === undefined
     ) {
       return undefined;
     }
@@ -759,6 +780,8 @@ function decodeActivePullRequests(
       number,
       title,
       draft: item.isDraft === true,
+      state,
+      mergeability: normalizeMergeability(item.mergeable),
       author,
       baseBranch,
       headBranch,
@@ -769,6 +792,19 @@ function decodeActivePullRequests(
     });
   }
   return rows;
+}
+
+function normalizePullRequestState(value: unknown): GhActivePullRequestRow["state"] | undefined {
+  if (value === "OPEN") return "open";
+  if (value === "MERGED") return "merged";
+  if (value === "CLOSED") return "closed";
+  return undefined;
+}
+
+function normalizeMergeability(value: unknown): GhActivePullRequestRow["mergeability"] {
+  if (value === "MERGEABLE") return "mergeable";
+  if (value === "CONFLICTING") return "conflicting";
+  return "unknown";
 }
 
 function summarizeChecks(value: unknown): GhActivePullRequestRow["checks"] {
