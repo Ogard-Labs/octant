@@ -21,6 +21,7 @@
     "./chat": "./src/chat.ts",
     "./code": "./src/code.ts",
     "./code-operations": "./src/codeOperations.ts",
+    "./thread-board": "./src/threadBoard.ts",
     "./code-test-definitions": "./src/codeTestDefinitions.ts",
     "./context": "./src/context.ts",
     "./context-rpc": "./src/contextRpc.ts",

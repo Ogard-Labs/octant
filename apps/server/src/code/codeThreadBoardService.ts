@@ -4,15 +4,16 @@ import {
   type CodeBoardQuery,
   type CodeBoardStatus,
   type CodeBoardView,
+  type CodeCheckoutIdentity,
   type CodeThread,
   type CodeThreadId,
   type CodeThreadOperationalMetadata,
   type ProjectId,
 } from "@octant/contracts";
 import {
-  compareCodeBoardActivityDescending,
-  deriveCodeBoardStatus,
-} from "@octant/domain/code-policy";
+  compareThreadBoardActivityDescending,
+  deriveThreadBoardStatus,
+} from "@octant/domain/thread-board-policy";
 import type { ProjectedCodeRuntimeWork } from "../persistence/codeProjection";
 import { CodeThreadMetadataService } from "./codeThreadMetadataService";
 
@@ -21,14 +22,15 @@ const ALL_BOARD_STATUSES: readonly CodeBoardStatus[] = ["ready", "in-progress", 
 /**
  * A non-archived Code thread the board should resolve, plus the permission- and
  * projection-filtered context the card needs: its bound Project identity,
- * whether that Project projection is currently present, and the unread and
- * follow-up flags (which never influence runtime status).
+ * whether that Project projection is currently present, and the follow-up flag
+ * (which never influences runtime status). Client unread is not a server card
+ * field.
  */
 export interface CodeBoardThread {
   readonly thread: CodeThread;
   readonly project: { readonly id: ProjectId; readonly name: string };
+  readonly checkout: CodeCheckoutIdentity | undefined;
   readonly projectProjectionPresent: boolean;
-  readonly unread: boolean;
   readonly followUp: boolean;
 }
 
@@ -47,7 +49,8 @@ export interface CodeBoardThreadSource {
  */
 export interface CodeBoardRuntimeActivity {
   readonly executing: boolean;
-  readonly waiting: boolean;
+  readonly awaitingInput: boolean;
+  readonly interrupted: boolean;
   readonly blockingReason?: string;
 }
 
@@ -91,17 +94,18 @@ export function boardRuntimeActivityFromWorks(
     (entry) => entry.work.kind !== "provider-turn" || entry === latestTurn,
   );
   const executing = contributing.some((entry) => entry.work.state === "running");
-  const liveWait = contributing.some(
+  const awaitingInput = contributing.some(
     (entry) => entry.work.state === "waiting" || entry.work.state === "ambiguous",
   );
-  const interruptedTurn = latestTurn !== undefined && latestTurn.work.state === "interrupted";
-  const waiting = liveWait || interruptedTurn;
+  const interrupted = latestTurn !== undefined && latestTurn.work.state === "interrupted";
+  const waiting = awaitingInput || interrupted;
   return {
     executing,
-    waiting,
+    awaitingInput,
+    interrupted,
     ...(waiting && !executing
       ? {
-          blockingReason: liveWait
+          blockingReason: awaitingInput
             ? "Runtime work is waiting for a decision or input."
             : "The last agent turn was interrupted.",
         }
@@ -162,7 +166,7 @@ export class CodeThreadBoardService {
     const appliedStatuses = query.statuses ?? ALL_BOARD_STATUSES;
     const filtered = cards.filter((card) => matchesQuery(card, query, appliedStatuses));
     filtered.sort((a, b) =>
-      compareCodeBoardActivityDescending(
+      compareThreadBoardActivityDescending(
         { lastMeaningfulActivityAtMs: activityMs(a) },
         { lastMeaningfulActivityAtMs: activityMs(b) },
       ),
@@ -182,7 +186,7 @@ export class CodeThreadBoardService {
     } catch {
       // A runtime that cannot be observed keeps the thread visible; its status
       // still reflects delivery, recovery, and metadata evidence.
-      return { executing: false, waiting: false };
+      return { executing: false, awaitingInput: false, interrupted: false };
     }
   }
 }
@@ -192,24 +196,28 @@ function buildCard(
   metadata: CodeThreadOperationalMetadata,
   activity: CodeBoardRuntimeActivity,
 ): CodeBoardCard {
-  const status = deriveCodeBoardStatus({
+  const derivation = deriveThreadBoardStatus({
     deliverySatisfaction: metadata.deliverySatisfaction,
     executing: activity.executing,
-    waiting: activity.waiting,
+    awaitingInput: activity.awaitingInput,
+    interrupted: activity.interrupted,
     recovering: metadata.recovery.kind === "recovering",
   });
+  const blockingReason = activity.blockingReason ?? waitingReasonLabel(derivation.reason);
   return {
     threadId: entry.thread.id,
     projectId: entry.project.id,
     checkoutId: entry.thread.checkoutId,
+    checkoutKind: entry.checkout?.kind ?? "existing-worktree",
     title: entry.thread.title,
-    status,
+    status: derivation.status,
+    statusReason: derivation.reason,
     outcomeKind: metadata.outcomeKind,
     deliverySatisfaction: metadata.deliverySatisfaction,
     providerInstanceId: entry.thread.providerInstanceId,
     modelId: entry.thread.modelId,
     executing: activity.executing,
-    worktree: metadata.worktree,
+    worktree: overlayCheckoutWorktree(metadata.worktree, entry.checkout),
     changedFiles: metadata.changedFiles,
     linkedPullRequest: metadata.linkedPullRequest,
     checks: metadata.checks,
@@ -217,11 +225,40 @@ function buildCard(
     childAgents: metadata.childAgents,
     recovery: metadata.recovery,
     githubFreshness: metadata.githubFreshness,
-    ...(activity.blockingReason === undefined ? {} : { blockingReason: activity.blockingReason }),
-    unread: entry.unread,
+    ...(blockingReason === undefined ? {} : { blockingReason }),
     followUp: entry.followUp,
     lastMeaningfulActivityAt: metadata.lastMeaningfulActivityAt,
   };
+}
+
+function overlayCheckoutWorktree(
+  worktree: CodeBoardCard["worktree"],
+  checkout: CodeCheckoutIdentity | undefined,
+): CodeBoardCard["worktree"] {
+  if (worktree.kind === "available" || checkout === undefined) return worktree;
+  if (checkout.availability !== "available") return worktree;
+  return {
+    kind: "available",
+    checkoutId: checkout.id,
+    path: checkout.kind === "managed-worktree" ? "Managed worktree" : "Current checkout",
+    head: checkout.head,
+    ...(checkout.kind === "managed-worktree" ? { receiptId: checkout.ownershipReceiptId } : {}),
+  };
+}
+
+function waitingReasonLabel(reason: CodeBoardCard["statusReason"]): string | undefined {
+  switch (reason) {
+    case "recovering":
+      return "This thread is recovering its Project or operation history.";
+    case "awaiting-input":
+      return "Runtime work is waiting for a decision or input.";
+    case "interrupted":
+      return "The last agent turn was interrupted.";
+    case "delivery-waiting":
+      return "Delivery evidence is stale or ambiguous.";
+    default:
+      return undefined;
+  }
 }
 
 function matchesQuery(

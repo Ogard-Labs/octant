@@ -2868,11 +2868,11 @@ export function startOctantServer(
         ? codeService
         : withCodeOperationRuntime(codeService, codeOperationRuntime);
     // The Code Thread Board composes the journal-rebuildable operational
-    // metadata projection with live runtime works. Git/GitHub worktree and PR
-    // observation still degrade to unavailable here (surfaced as stale /
-    // Waiting for local-implementation and PR outcomes) until those ports are
-    // plumbed into the board; history + runtime already drive Ready / In
-    // Progress / Waiting / investigation Done without fabricating status.
+    // metadata projection with live runtime works. Local Git worktree
+    // observation still degrades to unavailable here when the checkout cannot
+    // be observed; GitHub is never called. Cached PR evidence comes from the
+    // operation journal, labeled with freshness, and cannot independently
+    // satisfy a delivery target when stale.
     const codeBoardEventStore = new CodeOperationEventStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -2881,7 +2881,6 @@ export function startOctantServer(
     });
     const codeThreadMetadataService = new CodeThreadMetadataService({
       git: { observe: () => ({ status: "unavailable" }) },
-      github: { observe: () => ({ status: "unavailable" }) },
       history: {
         read: (threadId) => codeBoardEventStore.historyForThread(threadId),
       },
@@ -2903,6 +2902,9 @@ export function startOctantServer(
         const projectById = new Map(
           projects.active.map((project) => [String(project.id), project] as const),
         );
+        const checkoutById = new Map(
+          bootstrap.checkouts.map((checkout) => [String(checkout.id), checkout] as const),
+        );
         const boardThreads: CodeBoardThread[] = bootstrap.threads
           .filter((thread) => thread.lifecycle !== "archived")
           .map((thread) => {
@@ -2910,13 +2912,13 @@ export function startOctantServer(
             return {
               thread,
               project: { id: thread.projectId, name: project?.name ?? thread.title },
+              checkout: checkoutById.get(String(thread.checkoutId)),
               // A temporarily missing Project projection keeps the thread visible
               // in a recovery state instead of dropping the card.
               projectProjectionPresent: project !== undefined,
-              // Unread is stubbed pending its own work item; follow-up is the
-              // durable, journal-rebuildable obligation projected here. Neither
-              // ever influences runtime status.
-              unread: false,
+              // Follow-up is the durable, journal-rebuildable obligation.
+              // Client unread is overlaid by each renderer and never stored on
+              // the server card.
               followUp: codeFollowUpService.read(thread.id).followUp?.state === "open",
             };
           });

@@ -3,6 +3,7 @@ export * from "./code";
 export * from "./codeFileListing";
 export * from "./codeSearch";
 export * from "./codeOperations";
+export * from "./threadBoard";
 export * from "./codeTestDefinitions";
 export * from "./context";
 export * from "./contextRpc";

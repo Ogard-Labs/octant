@@ -7,13 +7,14 @@ import type {
 } from "@octant/contracts";
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
-import { CODE_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/code-policy";
-import { ChevronDown, Filter, GitBranch, GitPullRequest, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { THREAD_BOARD_STATUS_COLUMN_ORDER } from "@octant/domain/thread-board-policy";
+import { ChevronDown, Filter, GitBranch, GitPullRequest, RefreshCw, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   codeBoardStatusLabel,
+  codeBoardStatusReasonLabel,
   groupCodeBoardCards,
   type CodeBoardColumn,
   type CodeBoardGrouping,
@@ -22,24 +23,36 @@ import {
 
 const GROUPING_STORAGE_KEY = "octant.code.board.grouping";
 const SHOW_EMPTY_GROUPS_STORAGE_KEY = "octant.code.board.show-empty-groups";
-const ALL_STATUSES: readonly CodeBoardStatus[] = CODE_BOARD_STATUS_COLUMN_ORDER;
+const ALL_STATUSES: readonly CodeBoardStatus[] = THREAD_BOARD_STATUS_COLUMN_ORDER;
 const FILTERS_PANEL_ID = "code-board-advanced-filters";
+
+export interface CodeThreadOpenTarget {
+  readonly threadId: CodeThreadId;
+  readonly projectId: ProjectId;
+}
 
 export interface CodeThreadBoardProps {
   readonly loadBoard: (query: CodeBoardQuery) => Promise<CodeBoardView>;
   /** Code Projects in the user's configured order (for grouping and filters). */
   readonly projects: readonly CodeBoardProjectRef[];
-  readonly onOpenThread?: (threadId: CodeThreadId) => void;
+  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
   readonly onClose?: () => void;
   readonly initialGrouping?: CodeBoardGrouping;
   /** Injectable for tests; defaults to `window.localStorage` when available. */
   readonly storage?: Pick<Storage, "getItem" | "setItem">;
+  /** Client unread overlay; server cards never carry unread. */
+  readonly unreadThreadIds?: ReadonlySet<string>;
+  /** Display names for provider instances, keyed by instance id. */
+  readonly providerLabels?: ReadonlyMap<string, string>;
+  /** Narrow view is a grouped list; wide view is compact columns. */
+  readonly isNarrow?: boolean;
 }
 
 type BoardState =
   | { readonly status: "loading" }
   | { readonly status: "ready"; readonly view: CodeBoardView }
-  | { readonly status: "error"; readonly message: string };
+  | { readonly status: "refreshing"; readonly view: CodeBoardView }
+  | { readonly status: "error"; readonly message: string; readonly view?: CodeBoardView };
 
 interface FilterState {
   readonly text: string;
@@ -80,6 +93,7 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
     () => readStoredBoolean(storage, SHOW_EMPTY_GROUPS_STORAGE_KEY) ?? true,
   );
   const [board, setBoard] = useState<BoardState>({ status: "loading" });
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const filtersRootRef = useRef<HTMLDivElement>(null);
   const filtersToggleRef = useRef<HTMLButtonElement>(null);
 
@@ -98,19 +112,24 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
 
   useEffect(() => {
     let active = true;
-    setBoard({ status: "loading" });
+    setBoard((previous) => {
+      const view = lastUsefulView(previous);
+      return view === undefined ? { status: "loading" } : { status: "refreshing", view };
+    });
     loadBoardRef.current(query).then(
       (view) => {
         if (active) setBoard({ status: "ready", view });
       },
       (error: unknown) => {
-        if (active) {
-          setBoard({
-            status: "error",
-            message:
-              error instanceof Error ? error.message : "The Code Thread Board is unavailable.",
-          });
-        }
+        if (!active) return;
+        const message =
+          error instanceof Error ? error.message : "The Code Thread Board is unavailable.";
+        setBoard((previous) => {
+          const view = lastUsefulView(previous);
+          return view === undefined
+            ? { status: "error", message }
+            : { status: "error", message, view };
+        });
       },
     );
     return () => {
@@ -118,10 +137,9 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
     };
     // queryKey captures every filter that affects the server result (`query` is
     // recomputed from the same filters, so it moves only when queryKey does).
-    // Grouping is deliberately excluded: switching grouping is a pure client
-    // projection and must not re-query or mutate any authoritative state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryKey]);
+    // refreshNonce re-queries the same local authoritative state. Grouping is
+    // deliberately excluded: switching grouping is a pure client projection.
+  }, [queryKey, refreshNonce]);
 
   useEffect(() => {
     if (!filtersOpen) return;
@@ -363,6 +381,18 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
             ) : null}
           </div>
 
+          <OctantButton
+            aria-label={board.status === "refreshing" ? "Refreshing board" : "Refresh board"}
+            disabled={board.status === "loading" || board.status === "refreshing"}
+            onClick={() => setRefreshNonce((nonce) => nonce + 1)}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <RefreshCw aria-hidden="true" size={14} strokeWidth={1.8} />
+            <span>{board.status === "refreshing" ? "Refreshing" : "Refresh"}</span>
+          </OctantButton>
+
           <details className="code-board__view-options">
             <summary>
               <span>View</span>
@@ -406,9 +436,12 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
         board={board}
         filters={filters}
         grouping={grouping}
+        isNarrow={props.isNarrow === true}
         projectNames={projectNames}
         projects={props.projects}
         showEmptyGroups={showEmptyGroups}
+        {...(props.providerLabels === undefined ? {} : { providerLabels: props.providerLabels })}
+        {...(props.unreadThreadIds === undefined ? {} : { unreadThreadIds: props.unreadThreadIds })}
         {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
       />
     </section>
@@ -421,8 +454,11 @@ function CodeBoardBody(props: {
   readonly grouping: CodeBoardGrouping;
   readonly projects: readonly CodeBoardProjectRef[];
   readonly projectNames: ReadonlyMap<string, string>;
+  readonly providerLabels?: ReadonlyMap<string, string>;
+  readonly unreadThreadIds?: ReadonlySet<string>;
   readonly showEmptyGroups: boolean;
-  readonly onOpenThread?: (threadId: CodeThreadId) => void;
+  readonly isNarrow: boolean;
+  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
 }) {
   if (props.board.status === "loading") {
     return (
@@ -436,12 +472,15 @@ function CodeBoardBody(props: {
       </div>
     );
   }
-  if (props.board.status === "error") {
+  const view = lastUsefulView(props.board);
+  if (view === undefined) {
     return (
       <div className="code-board__body">
         <ShellState
           eyebrow="Code Thread Board"
-          message={props.board.message}
+          message={
+            props.board.status === "error" ? props.board.message : "The board is unavailable"
+          }
           role="alert"
           state="disconnected"
           title="The board is unavailable"
@@ -449,7 +488,17 @@ function CodeBoardBody(props: {
       </div>
     );
   }
-  const cards = props.board.view.cards;
+  const refreshNotice =
+    props.board.status === "refreshing" ? (
+      <p className="code-board__refresh-status" role="status">
+        Refreshing local board state.
+      </p>
+    ) : props.board.status === "error" ? (
+      <p className="code-board__refresh-status" role="alert">
+        {props.board.message} Showing the last useful view.
+      </p>
+    ) : null;
+  const cards = view.cards;
   // Status grouping with empty groups shown promises four fixed columns. A
   // board with no matches is exactly when someone needs to see that shape, so
   // the result flows through grouping and the explanation sits above it.
@@ -470,18 +519,78 @@ function CodeBoardBody(props: {
     ? columns
     : columns.filter((column) => column.cards.length > 0);
   return (
-    <div className="code-board__body" data-grouping={props.grouping}>
+    <div
+      className="code-board__body"
+      data-grouping={props.grouping}
+      data-layout={props.isNarrow ? "list" : "columns"}
+    >
+      {refreshNotice}
       {emptyNote}
-      <div className="board" data-grouping={props.grouping}>
-        {visibleColumns.map((column) => (
-          <CodeBoardColumnView
-            column={column}
-            key={column.key}
-            projectNames={props.projectNames}
-            {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
-          />
-        ))}
-      </div>
+      {props.isNarrow ? (
+        <CodeBoardListView
+          columns={visibleColumns}
+          projectNames={props.projectNames}
+          {...overlayProps(props)}
+        />
+      ) : (
+        <div className="board" data-grouping={props.grouping}>
+          {visibleColumns.map((column) => (
+            <CodeBoardColumnView
+              column={column}
+              key={column.key}
+              projectNames={props.projectNames}
+              {...overlayProps(props)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CodeBoardListView(props: {
+  readonly columns: readonly CodeBoardColumn[];
+  readonly projectNames: ReadonlyMap<string, string>;
+  readonly providerLabels?: ReadonlyMap<string, string>;
+  readonly unreadThreadIds?: ReadonlySet<string>;
+  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+}) {
+  return (
+    <div className="code-board__list">
+      {props.columns.map((column) => (
+        <section
+          aria-label={`${column.label} (${column.cards.length})`}
+          className="code-board__list-group"
+          key={column.key}
+        >
+          <header className="code-board__list-head">
+            {column.status === undefined ? null : (
+              <span aria-hidden="true" className={`st st-${column.status}`} />
+            )}
+            <h2>{column.label}</h2>
+            <span aria-hidden="true" className="count">
+              {column.cards.length}
+            </span>
+          </header>
+          {column.cards.length === 0 ? (
+            <p className="board-col-empty">No threads</p>
+          ) : (
+            <ul className="issuelist">
+              {column.cards.map((card) => (
+                <li key={String(card.threadId)}>
+                  <CodeBoardCardView
+                    card={card}
+                    layout="list"
+                    statusPresentation="visible"
+                    unread={props.unreadThreadIds?.has(String(card.threadId)) === true}
+                    {...cardViewExtras(card, props)}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      ))}
     </div>
   );
 }
@@ -489,19 +598,22 @@ function CodeBoardBody(props: {
 function CodeBoardColumnView(props: {
   readonly column: CodeBoardColumn;
   readonly projectNames: ReadonlyMap<string, string>;
-  readonly onOpenThread?: (threadId: CodeThreadId) => void;
+  readonly providerLabels?: ReadonlyMap<string, string>;
+  readonly unreadThreadIds?: ReadonlySet<string>;
+  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
 }) {
   const { column } = props;
   // A Status column header already states the status visibly, so its cards only
-  // need the status for assistive technology. Project and Recovery columns carry
-  // no status of their own, so their cards must show it as visible text — the
-  // colored dot alone is not a status.
+  // need the status for assistive technology. Project columns carry no status of
+  // their own, so their cards must show it as visible text — the colored dot
+  // alone is not a status.
   const statusPresentation = column.kind === "status" ? "screen-reader" : "visible";
   return (
     <section
       aria-label={`${column.label} (${column.cards.length})`}
       className="board-col"
       data-column-kind={column.kind}
+      data-empty={column.cards.length === 0 ? "true" : "false"}
     >
       <header className="board-col-head">
         {column.status === undefined ? null : (
@@ -522,12 +634,10 @@ function CodeBoardColumnView(props: {
             <li key={String(card.threadId)}>
               <CodeBoardCardView
                 card={card}
+                layout="card"
                 statusPresentation={statusPresentation}
-                {...(() => {
-                  const projectName = props.projectNames.get(String(card.projectId));
-                  return projectName === undefined ? {} : { projectName };
-                })()}
-                {...(props.onOpenThread === undefined ? {} : { onOpen: props.onOpenThread })}
+                unread={props.unreadThreadIds?.has(String(card.threadId)) === true}
+                {...cardViewExtras(card, props)}
               />
             </li>
           ))}
@@ -539,37 +649,44 @@ function CodeBoardColumnView(props: {
 
 function CodeBoardCardView(props: {
   readonly card: CodeBoardCard;
+  readonly layout: "card" | "list";
   readonly statusPresentation: "visible" | "screen-reader";
+  readonly unread: boolean;
   readonly projectName?: string;
-  readonly onOpen?: (threadId: CodeThreadId) => void;
+  readonly providerLabel?: string;
+  readonly onOpen?: (target: CodeThreadOpenTarget) => void;
 }) {
   const { card } = props;
   const statusLabel = codeBoardStatusLabel(card.status);
-  const stale =
-    card.githubFreshness === "stale" ||
-    card.changedFiles.kind === "unavailable" ||
-    card.worktree.kind === "unavailable";
-  const changedFileCount =
-    card.changedFiles.kind === "observed" ? card.changedFiles.changedPathCount : 0;
+  const waitingReason = waitingReasonText(card);
+  const className = props.layout === "list" ? "issuerow" : "board-card";
   return (
     <article
-      className="board-card"
+      className={className}
       data-follow-up={card.followUp ? "true" : "false"}
       data-status={card.status}
     >
-      <span className="board-card-top">
+      <span className={props.layout === "list" ? "issuerow-main" : "board-card-top"}>
         {/* unread is a presence before the title; the img role is what makes
             the label real — a generic empty span's aria-label is dropped from
-            the accessibility tree */}
-        {card.unread ? <span aria-label="Unread" className="unread" role="img" /> : null}
+            the accessibility tree. It is a client overlay, never a server field. */}
+        {props.unread ? <span aria-label="Unread" className="unread" role="img" /> : null}
         <button
           className="code-board__card-open"
-          onClick={() => props.onOpen?.(card.threadId as CodeThreadId)}
+          onClick={() =>
+            props.onOpen?.({
+              threadId: card.threadId,
+              projectId: card.projectId,
+            })
+          }
           type="button"
         >
           {/* the recipe clamps the title to two lines; the attribute keeps
               the full title reachable on hover */}
-          <span className="board-card-title" title={card.title}>
+          <span
+            className={props.layout === "list" ? "issuerow-title" : "board-card-title"}
+            title={card.title}
+          >
             {card.title}
           </span>
         </button>
@@ -582,44 +699,16 @@ function CodeBoardCardView(props: {
           {statusLabel}
         </span>
       </span>
-      <span className="board-card-facts">
-        {props.projectName === undefined ? null : <span className="fact">{props.projectName}</span>}
-        <span className="fact">{card.modelId}</span>
-        {card.checks.state === "failing" ? <span className="fact bad">Checks failing</span> : null}
-        {card.followUp ? (
-          <span className="fact warn" data-indicator="follow-up">
-            <span aria-hidden="true">◆</span> Follow-up
+      <span className={props.layout === "list" ? "issuerow-meta" : "board-card-facts"}>
+        {cardFacts(card, props.projectName, props.providerLabel).map((fact) => (
+          <span className={fact.className ?? "fact"} key={fact.key}>
+            {fact.icon}
+            {fact.text}
           </span>
-        ) : null}
-        {card.childAgents.active === 0 ? null : (
-          <span className="fact">
-            {card.childAgents.active} active {card.childAgents.active === 1 ? "agent" : "agents"}
-          </span>
-        )}
-        {changedFileCount === 0 ? null : (
-          <span className="fact">
-            {changedFileCount} {changedFileCount === 1 ? "file" : "files"}
-          </span>
-        )}
-        {card.linkedPullRequest.kind === "linked" ? (
-          <span className="fact">
-            <GitPullRequest aria-hidden="true" className="icon" size={12} strokeWidth={1.8} /> #
-            {card.linkedPullRequest.number}
-          </span>
-        ) : null}
-        {stale ? (
-          <span className="fact" title="Some metadata could not be refreshed">
-            Stale metadata
-          </span>
-        ) : null}
+        ))}
       </span>
-      {card.recovery.kind === "recovering" ? (
-        <span className="board-card-blocked">
-          Recovery: {card.recovery.reasons.map(recoveryReasonLabel).join(", ")}
-        </span>
-      ) : null}
-      {card.blockingReason === undefined ? null : (
-        <span className="board-card-blocked">{card.blockingReason}</span>
+      {waitingReason === undefined ? null : (
+        <span className="board-card-blocked">{waitingReason}</span>
       )}
       <details className="code-board__card-details">
         <summary aria-label={`Details for ${card.title}`}>
@@ -627,44 +716,236 @@ function CodeBoardCardView(props: {
           <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
         </summary>
         <dl className="code-board__card-meta">
-          {props.projectName === undefined ? null : (
-            <div>
-              <dt>Project</dt>
-              <dd>{props.projectName}</dd>
+          {cardDetailRows(card, props.projectName, props.providerLabel).map((row) => (
+            <div key={row.label}>
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
             </div>
-          )}
-          <div>
-            <dt>Delivery target</dt>
-            <dd>{deliveryTargetLabel(card.outcomeKind)}</dd>
-          </div>
-          {card.worktree.kind === "available" && card.worktree.head.kind === "branch" ? (
-            <div>
-              <dt>Branch</dt>
-              <dd>
-                <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />{" "}
-                {card.worktree.head.name}
-              </dd>
-            </div>
-          ) : null}
-          {card.linkedPullRequest.kind === "linked" ? (
-            <div>
-              <dt>Pull request</dt>
-              <dd>
-                <GitPullRequest aria-hidden="true" size={13} strokeWidth={1.8} /> #
-                {card.linkedPullRequest.number} · {card.linkedPullRequest.state}
-              </dd>
-            </div>
-          ) : null}
-          {card.checks.state === "unknown" || card.checks.state === "failing" ? null : (
-            <div>
-              <dt>Checks</dt>
-              <dd>{card.checks.state}</dd>
-            </div>
-          )}
+          ))}
         </dl>
       </details>
     </article>
   );
+}
+
+function overlayProps(props: {
+  readonly providerLabels?: ReadonlyMap<string, string>;
+  readonly unreadThreadIds?: ReadonlySet<string>;
+  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+}): {
+  readonly providerLabels?: ReadonlyMap<string, string>;
+  readonly unreadThreadIds?: ReadonlySet<string>;
+  readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+} {
+  return {
+    ...(props.providerLabels === undefined ? {} : { providerLabels: props.providerLabels }),
+    ...(props.unreadThreadIds === undefined ? {} : { unreadThreadIds: props.unreadThreadIds }),
+    ...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread }),
+  };
+}
+
+function lastUsefulView(board: BoardState): CodeBoardView | undefined {
+  if (board.status === "ready" || board.status === "refreshing") return board.view;
+  if (board.status === "error") return board.view;
+  return undefined;
+}
+
+function cardViewExtras(
+  card: CodeBoardCard,
+  props: {
+    readonly projectNames: ReadonlyMap<string, string>;
+    readonly providerLabels?: ReadonlyMap<string, string>;
+    readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+  },
+): {
+  readonly projectName?: string;
+  readonly providerLabel?: string;
+  readonly onOpen?: (target: CodeThreadOpenTarget) => void;
+} {
+  const projectName = props.projectNames.get(String(card.projectId));
+  const providerLabel = props.providerLabels?.get(String(card.providerInstanceId));
+  return {
+    ...(projectName === undefined ? {} : { projectName }),
+    ...(providerLabel === undefined ? {} : { providerLabel }),
+    ...(props.onOpenThread === undefined ? {} : { onOpen: props.onOpenThread }),
+  };
+}
+
+function waitingReasonText(card: CodeBoardCard): string | undefined {
+  if (card.status !== "waiting") return undefined;
+  if (card.recovery.kind === "recovering") {
+    return `Recovery: ${card.recovery.reasons.map(recoveryReasonLabel).join(", ")}`;
+  }
+  if (card.blockingReason !== undefined) return card.blockingReason;
+  return codeBoardStatusReasonLabel(card.statusReason);
+}
+
+interface CardFact {
+  readonly key: string;
+  readonly text: string;
+  readonly className?: string;
+  readonly icon?: ReactNode;
+}
+
+function cardFacts(
+  card: CodeBoardCard,
+  projectName: string | undefined,
+  providerLabel: string | undefined,
+): ReadonlyArray<CardFact> {
+  const facts: CardFact[] = [];
+  if (projectName !== undefined) facts.push({ key: "project", text: projectName });
+  facts.push({
+    key: "checkout",
+    text: card.checkoutKind === "managed-worktree" ? "Managed worktree" : "Current checkout",
+  });
+  if (card.worktree.kind === "available" && card.worktree.head.kind === "branch") {
+    facts.push({
+      key: "branch",
+      text: card.worktree.head.name,
+      icon: <GitBranch aria-hidden="true" className="icon" size={12} strokeWidth={1.8} />,
+    });
+  }
+  if (card.changedFiles.kind === "observed" && card.changedFiles.changedPathCount > 0) {
+    const count = card.changedFiles.changedPathCount;
+    facts.push({
+      key: "files",
+      text: `${count} ${count === 1 ? "file" : "files"}`,
+    });
+  }
+  facts.push({
+    key: "provider-model",
+    text: providerLabel === undefined ? card.modelId : `${providerLabel} · ${card.modelId}`,
+  });
+  if (card.childAgents.active > 0 || card.childAgents.unacknowledgedResults > 0) {
+    const parts: string[] = [];
+    if (card.childAgents.active > 0) {
+      parts.push(
+        `${card.childAgents.active} active ${card.childAgents.active === 1 ? "run" : "runs"}`,
+      );
+    }
+    if (card.childAgents.unacknowledgedResults > 0) {
+      parts.push(
+        `${card.childAgents.unacknowledgedResults} ${
+          card.childAgents.unacknowledgedResults === 1 ? "result" : "results"
+        }`,
+      );
+    }
+    facts.push({ key: "child-runs", text: parts.join(" · ") });
+  }
+  if (card.linkedPullRequest.kind === "linked") {
+    facts.push({
+      key: "pr",
+      text: `#${card.linkedPullRequest.number}${
+        card.linkedPullRequest.freshness === "stale" ? " · stale" : ""
+      }`,
+      icon: <GitPullRequest aria-hidden="true" className="icon" size={12} strokeWidth={1.8} />,
+    });
+  }
+  if (card.checks.state !== "unknown") {
+    facts.push({
+      key: "checks",
+      text: card.checks.state === "failing" ? "Checks failing" : `Checks ${card.checks.state}`,
+      className: card.checks.state === "failing" ? "fact bad" : "fact",
+    });
+  }
+  if (card.reviewState.state !== "unknown" && card.reviewState.state !== "none") {
+    facts.push({
+      key: "review",
+      text: `Review ${card.reviewState.state.replace("-", " ")}`,
+    });
+  }
+  facts.push({
+    key: "delivery",
+    text: `${deliveryTargetLabel(card.outcomeKind)} · ${card.deliverySatisfaction}`,
+  });
+  if (card.followUp) {
+    facts.push({
+      key: "follow-up",
+      text: "Follow-up",
+      className: "fact warn",
+    });
+  }
+  if (card.recovery.kind === "recovering") {
+    facts.push({ key: "recovery", text: "Recovering" });
+  }
+  if (
+    card.githubFreshness === "stale" ||
+    (card.changedFiles.kind === "observed" && card.changedFiles.freshness === "stale") ||
+    card.worktree.kind === "unavailable"
+  ) {
+    facts.push({ key: "stale", text: "Stale metadata" });
+  }
+  if (card.lastMeaningfulActivityAt !== null) {
+    facts.push({
+      key: "activity",
+      text: activityLabel(card.lastMeaningfulActivityAt),
+    });
+  }
+  return facts;
+}
+
+function cardDetailRows(
+  card: CodeBoardCard,
+  projectName: string | undefined,
+  providerLabel: string | undefined,
+): ReadonlyArray<{ readonly label: string; readonly value: string }> {
+  const rows: Array<{ readonly label: string; readonly value: string }> = [];
+  if (projectName !== undefined) rows.push({ label: "Project", value: projectName });
+  if (card.worktree.kind === "available") {
+    rows.push({
+      label: card.checkoutKind === "managed-worktree" ? "Worktree" : "Checkout",
+      value: card.worktree.path,
+    });
+  }
+  rows.push({
+    label: "Provider",
+    value: providerLabel === undefined ? String(card.providerInstanceId) : providerLabel,
+  });
+  rows.push({ label: "Model", value: card.modelId });
+  rows.push({
+    label: "Delivery target",
+    value: `${deliveryTargetLabel(card.outcomeKind)} · ${card.deliverySatisfaction}`,
+  });
+  rows.push({ label: "Reason", value: codeBoardStatusReasonLabel(card.statusReason) });
+  if (card.worktree.kind === "available" && card.worktree.head.kind === "branch") {
+    rows.push({ label: "Branch", value: card.worktree.head.name });
+  }
+  if (card.linkedPullRequest.kind === "linked") {
+    rows.push({
+      label: "Pull request",
+      value: `#${card.linkedPullRequest.number} · ${card.linkedPullRequest.state}${
+        card.linkedPullRequest.freshness === "stale" ? " · stale" : ""
+      }`,
+    });
+  }
+  if (card.checks.state !== "unknown") {
+    rows.push({
+      label: "Checks",
+      value: `${card.checks.state}${card.checks.freshness === "stale" ? " · stale" : ""}`,
+    });
+  }
+  if (card.reviewState.state !== "unknown") {
+    rows.push({
+      label: "Review",
+      value: `${card.reviewState.state}${card.reviewState.freshness === "stale" ? " · stale" : ""}`,
+    });
+  }
+  if (card.childAgents.latestSummary !== undefined) {
+    rows.push({ label: "Latest child run", value: card.childAgents.latestSummary });
+  }
+  if (card.lastMeaningfulActivityAt !== null) {
+    rows.push({
+      label: "Last activity",
+      value: new Date(String(card.lastMeaningfulActivityAt)).toLocaleString(),
+    });
+  }
+  return rows;
+}
+
+function activityLabel(timestamp: string): string {
+  const parsed = Date.parse(timestamp);
+  if (!Number.isFinite(parsed)) return timestamp;
+  return new Date(parsed).toLocaleString();
 }
 
 function buildQuery(filters: FilterState): CodeBoardQuery {

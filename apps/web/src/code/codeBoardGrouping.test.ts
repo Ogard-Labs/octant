@@ -3,6 +3,7 @@ import type { ProjectId } from "@octant/contracts/projects";
 import { describe, expect, it } from "vitest";
 import {
   codeBoardStatusLabel,
+  codeBoardStatusReasonLabel,
   groupCodeBoardCards,
   type CodeBoardProjectRef,
 } from "./codeBoardGrouping";
@@ -23,6 +24,17 @@ function card(overrides: {
     checkoutId: "00000000-0000-4000-8000-0000000040ff",
     title: `Thread ${overrides.id}`,
     status: overrides.status,
+    statusReason:
+      overrides.status === "done"
+        ? "delivery-satisfied"
+        : overrides.status === "in-progress"
+          ? "executing"
+          : overrides.status === "waiting"
+            ? overrides.recovering
+              ? "recovering"
+              : "awaiting-input"
+            : "idle-unmet-delivery",
+    checkoutKind: "existing-worktree",
     outcomeKind: "local-implementation",
     deliverySatisfaction: overrides.status === "done" ? "done" : "pending",
     providerInstanceId: "00000000-0000-4000-8000-0000000040fe",
@@ -38,7 +50,6 @@ function card(overrides: {
       ? { kind: "recovering", reasons: ["project-projection-missing"] }
       : { kind: "ok" },
     githubFreshness: "fresh",
-    unread: false,
     followUp: false,
     lastMeaningfulActivityAt:
       overrides.activity === undefined
@@ -58,6 +69,19 @@ describe("codeBoardStatusLabel", () => {
     expect(codeBoardStatusLabel("in-progress")).toBe("In Progress");
     expect(codeBoardStatusLabel("waiting")).toBe("Waiting");
     expect(codeBoardStatusLabel("done")).toBe("Done");
+  });
+
+  it("labels each specific board reason", () => {
+    expect(codeBoardStatusReasonLabel("awaiting-input")).toBe("Waiting for a decision or input");
+    expect(codeBoardStatusReasonLabel("recovering")).toBe(
+      "Recovering Project or operation history",
+    );
+    expect(codeBoardStatusReasonLabel("delivery-waiting")).toBe(
+      "Delivery evidence is stale or ambiguous",
+    );
+    expect(codeBoardStatusReasonLabel("delivery-satisfied")).toBe(
+      "The confirmed delivery target is satisfied",
+    );
   });
 });
 
@@ -118,29 +142,26 @@ describe("groupCodeBoardCards by project", () => {
 });
 
 describe("groupCodeBoardCards recovery", () => {
-  it("surfaces recovering cards in a dedicated Recovery column in both groupings", () => {
+  it("keeps recovering cards in Waiting with their specific reason", () => {
     const cards = [
       card({ id: "ok", status: "ready", projectId: projectA }),
       card({ id: "recovering", status: "waiting", projectId: projectB, recovering: true }),
     ];
 
-    for (const grouping of ["status", "project"] as const) {
-      const columns = groupCodeBoardCards(cards, grouping, { projects });
-      const recovery = columns.find((column) => column.kind === "recovery");
-      expect(recovery?.cards.map((c) => c.threadId)).toEqual(["recovering"]);
-      // The recovering card is not duplicated into any status/project column.
-      const placed = columns
-        .filter((column) => column.kind !== "recovery")
-        .flatMap((column) => column.cards.map((c) => c.threadId));
-      expect(placed).not.toContain("recovering");
-      expect(placed).toContain("ok");
-    }
+    const columns = groupCodeBoardCards(cards, "status", { projects });
+    expect(columns.some((column) => column.key === "recovery")).toBe(false);
+    const waiting = columns.find((column) => column.status === "waiting")!;
+    expect(waiting.cards.map((c) => c.threadId)).toEqual(["recovering"]);
+    expect(waiting.cards[0]?.statusReason).toBe("recovering");
   });
+});
 
-  it("omits the Recovery column when no card is recovering", () => {
-    const columns = groupCodeBoardCards([card({ id: "ok", status: "ready" })], "status", {
-      projects,
-    });
-    expect(columns.some((column) => column.kind === "recovery")).toBe(false);
+describe("codeBoardStatusReasonLabel", () => {
+  it("labels each Waiting reason specifically", () => {
+    expect(codeBoardStatusReasonLabel("awaiting-input")).toBe("Waiting for a decision or input");
+    expect(codeBoardStatusReasonLabel("recovering")).toBe(
+      "Recovering Project or operation history",
+    );
+    expect(codeBoardStatusReasonLabel("interrupted")).toBe("The last agent turn was interrupted");
   });
 });
