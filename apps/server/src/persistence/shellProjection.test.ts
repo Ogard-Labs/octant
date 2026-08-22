@@ -806,7 +806,10 @@ describe("ShellProjection", () => {
     });
 
     expect(readEnvironmentPresentation(connection, ids.window)).toEqual({
-      presentation,
+      presentation: {
+        byTab: [],
+        byMode: { chat: "hidden", work: "floating", code: "floating" },
+      },
       aggregateVersion: 1,
     });
     connection.close();
@@ -871,7 +874,7 @@ describe("ShellProjection", () => {
     connection.close();
   });
 
-  it("restores a pinned environment presentation as floating and drops its stored width", () => {
+  it("drops stored floating, pinned, or hidden environment presentation at the persistence seam", () => {
     const connection = openConnection();
     const runtime = createPhase1RuntimeRegistries();
     const journal = new Journal({
@@ -912,10 +915,7 @@ describe("ShellProjection", () => {
       work: "floating",
       code: "floating",
     });
-    expect(restored?.presentation.byTab).toEqual([
-      { tabId: "30000000-0000-4000-8000-000000000003", presentation: "floating" },
-      { tabId: "30000000-0000-4000-8000-000000000004", presentation: "hidden" },
-    ]);
+    expect(restored?.presentation.byTab).toEqual([]);
     connection.close();
   });
 
@@ -1146,7 +1146,7 @@ describe("ShellProjection", () => {
     connection.close();
   });
 
-  it("reads a settings row that still names the retired pinned default as floating", () => {
+  it("drops stored environment presentation defaults from a settings row", () => {
     const connection = openConnection();
     appendShellEvents(connection);
     connection.prepare("UPDATE shell_settings_projection SET settings_json = ?").run(

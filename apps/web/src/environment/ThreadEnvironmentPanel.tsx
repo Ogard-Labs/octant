@@ -1,218 +1,127 @@
-import {
-  type EnvironmentCompactIdentity,
-  type EnvironmentPresentation,
-  type EnvironmentPresentationState,
-  type OctantMode,
-  type WorkspaceTabId,
-} from "@octant/contracts";
-import { GitBranch, PanelRightClose, PanelRightOpen } from "lucide-react";
-import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import type { EnvironmentCompactIdentity } from "@octant/contracts";
+import { useEffect, useId, useRef, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
-import {
-  clearTabPresentation,
-  replaceTabPresentation,
-  resolveTabPresentation,
-} from "./EnvironmentPresentationModel";
 
-/**
- * Where the environment's work happens. The branch and worktree used to be
- * readable only by opening the Changes group, and before that from a header
- * band on the thread itself; the panel is what answers for the checkout, so it
- * names it without being unfolded first.
- */
-export interface ThreadEnvironmentLocation {
-  readonly branch: string;
-  readonly worktree: string;
+export interface ThreadEnvironmentSummaryFacts {
+  readonly identity: EnvironmentCompactIdentity;
+  readonly branch?: string;
+  readonly changes?: "clean" | "dirty";
+  readonly workingLocation?: string;
+  readonly runningServerCount?: number;
 }
 
 export interface ThreadEnvironmentPanelProps {
-  readonly identity: EnvironmentCompactIdentity;
-  /** Absent when no checkout has been observed, which renders no location. */
-  readonly location?: ThreadEnvironmentLocation;
-  readonly mode: OctantMode;
-  readonly presentation: EnvironmentPresentationState;
-  readonly tabId: WorkspaceTabId;
-  readonly onChangePresentation: (next: EnvironmentPresentationState) => void;
+  readonly summary: ThreadEnvironmentSummaryFacts;
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+  /**
+   * False when another pane is in front. The disclosure is renderer state, so
+   * activating a different pane must close it rather than leave a stale overlay.
+   */
+  readonly active?: boolean;
   readonly children?: ReactNode;
 }
 
 /**
- * The thread's environment panel: it floats over the thread, or it hides
- * behind a reveal control. There is no docked presentation — a panel in the
- * row took width from the surface being read, and glanceable live status is
- * what the panel is for.
+ * Compact thread-header Environment summary with a transient disclosure.
+ * Open or closed is renderer state: it is not persisted and is not a journaled
+ * preference. Escape, an outside pointer, or losing the pane closes it.
  */
 export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
-  const presentation = resolveTabPresentation(props.presentation, props.mode, props.tabId);
-
-  const setPresentation = useCallback(
-    (next: EnvironmentPresentation) => {
-      if (next === presentation) return;
-      if (next === props.presentation.byMode[props.mode]) {
-        props.onChangePresentation(clearTabPresentation(props.presentation, props.tabId));
-      } else {
-        props.onChangePresentation(replaceTabPresentation(props.presentation, props.tabId, next));
-      }
-    },
-    [presentation, props],
-  );
-
-  if (presentation === "hidden") {
-    return (
-      <ThreadEnvironmentReveal
-        identity={props.identity}
-        onReveal={() => setPresentation("floating")}
-      />
-    );
-  }
-
-  return (
-    <ThreadEnvironmentFloating
-      identity={props.identity}
-      {...(props.location === undefined ? {} : { location: props.location })}
-      onHide={() => setPresentation("hidden")}
-    >
-      {props.children}
-    </ThreadEnvironmentFloating>
-  );
-}
-
-/**
- * The show half of the toggle. It collapses to an icon square in the thread's
- * top-right corner, so its accessible name has to carry what it opens and
- * which environment that is — the visible label is not always rendered.
- */
-function ThreadEnvironmentReveal(props: {
-  readonly identity: EnvironmentCompactIdentity;
-  readonly onReveal: () => void;
-}) {
-  const name = `Show environment panel for ${props.identity.label} ${props.identity.detail}`;
-  return (
-    <OctantButton
-      type="button"
-      className="thread-environment-reveal"
-      onClick={props.onReveal}
-      aria-label={name}
-      title={name}
-      variant="ghost"
-    >
-      <PanelRightOpen aria-hidden="true" size={16} strokeWidth={1.8} />
-      <span className="thread-environment-reveal__label">{props.identity.label}</span>
-      <span className="thread-environment-reveal__detail">{props.identity.detail}</span>
-      <span
-        className={`thread-environment-reveal__status thread-environment-reveal__status--${props.identity.status}`}
-      >
-        {props.identity.status}
-      </span>
-    </OctantButton>
-  );
-}
-
-function ThreadEnvironmentFloating(props: {
-  readonly identity: EnvironmentCompactIdentity;
-  readonly location?: ThreadEnvironmentLocation;
-  readonly onHide: () => void;
-  readonly children?: ReactNode;
-}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const onHideRef = useRef(props.onHide);
-  onHideRef.current = props.onHide;
+  const onOpenChangeRef = useRef(props.onOpenChange);
+  onOpenChangeRef.current = props.onOpenChange;
+  const panelId = useId();
+  const active = props.active !== false;
+  const facts = summaryFacts(props.summary);
+  const action = props.open ? "Hide" : "Show";
+  const name = `${action} environment for ${props.summary.identity.label}. ${facts.join(" · ")}`;
 
-  // Focus once on mount so Escape-to-hide works; do not refocus on parent
-  // re-renders (identity/sections/handlers change identity each render).
   useEffect(() => {
-    const node = panelRef.current;
-    if (node === null) return;
-    node.focus();
-  }, []);
+    if (active || !props.open) return;
+    onOpenChangeRef.current(false);
+  }, [active, props.open]);
 
-  // Escape-to-hide handler reads the latest onHide via a ref so the listener
-  // is bound once and never needs to re-attach on props changes.
   useEffect(() => {
-    const node = panelRef.current;
-    if (node === null) return;
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onHideRef.current();
+    if (!props.open) return;
+    panelRef.current?.focus();
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (triggerRef.current?.contains(event.target) || panelRef.current?.contains(event.target)) {
+        return;
       }
+      if (event.target instanceof Element && event.target.closest('[role="menu"]')) return;
+      onOpenChangeRef.current(false);
     };
-    node.addEventListener("keydown", handleKey);
-    return () => node.removeEventListener("keydown", handleKey);
-  }, []);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      onOpenChangeRef.current(false);
+      queueMicrotask(() => triggerRef.current?.focus());
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [props.open]);
 
   return (
-    <div
-      ref={panelRef}
-      className="thread-environment-panel thread-environment-panel--floating"
-      tabIndex={-1}
-      role="dialog"
-      aria-label={`Environment for ${props.identity.label}`}
-    >
-      {/* A plain row, not a <header>: the panel is a dialog rather than
-          sectioning content, so a <header> here would publish a second banner
-          landmark alongside the window chrome. */}
-      <div className="thread-environment-panel__header">
-        <div className="thread-environment-panel__heading">
-          <span className="thread-environment-panel__title">Environment</span>
-          <CompactIdentity identity={props.identity} />
-        </div>
-        <OctantButton
-          type="button"
-          className="thread-environment-panel__icon-button"
-          onClick={props.onHide}
-          aria-label="Hide environment panel"
-          title="Hide environment panel"
-          size="icon"
-          variant="ghost"
-        >
-          <PanelRightClose aria-hidden="true" size={14} strokeWidth={1.8} />
-        </OctantButton>
-      </div>
-      {props.location === undefined ? null : <CompactLocation location={props.location} />}
-      <div className="thread-environment-panel__body">{props.children}</div>
-    </div>
-  );
-}
-
-/**
- * The branch, and the worktree it is checked out in.
- *
- * The worktree is shown by its own folder name with the full path as its
- * title: a floating panel has no room for an absolute path, and the last
- * segment is what tells two checkouts of one repository apart.
- */
-function CompactLocation(props: { readonly location: ThreadEnvironmentLocation }) {
-  return (
-    <div className="thread-environment-location">
-      <GitBranch aria-hidden="true" size={13} strokeWidth={1.8} />
-      <span className="thread-environment-location__branch" title={props.location.branch}>
-        {props.location.branch}
-      </span>
-      <span aria-hidden="true" className="thread-environment-location__separator">
-        ·
-      </span>
-      <span className="thread-environment-location__worktree" title={props.location.worktree}>
-        {worktreeName(props.location.worktree)}
-      </span>
-    </div>
-  );
-}
-
-function worktreeName(path: string): string {
-  return path.split("/").filter(Boolean).at(-1) ?? path;
-}
-
-function CompactIdentity(props: { readonly identity: EnvironmentCompactIdentity }) {
-  return (
-    <div className="thread-environment-identity">
-      <span className="thread-environment-identity__label">{props.identity.label}</span>
-      <span
-        className={`thread-environment-identity__status thread-environment-identity__status--${props.identity.status}`}
+    <div className="thread-environment-summary">
+      <OctantButton
+        aria-controls={panelId}
+        aria-expanded={props.open}
+        aria-haspopup="dialog"
+        aria-label={name}
+        className="thread-environment-summary__button"
+        onClick={() => props.onOpenChange(!props.open)}
+        ref={triggerRef}
+        title={name}
+        type="button"
+        variant="ghost"
       >
-        {props.identity.status}
-      </span>
-      <span className="thread-environment-identity__detail">{props.identity.detail}</span>
+        <span className="thread-environment-summary__label">{props.summary.identity.label}</span>
+        {facts.map((fact) => (
+          <span className="thread-environment-summary__fact" key={fact}>
+            {fact}
+          </span>
+        ))}
+        <span
+          className={`thread-environment-summary__status thread-environment-summary__status--${props.summary.identity.status}`}
+        >
+          {props.summary.identity.status}
+        </span>
+      </OctantButton>
+      {props.open ? (
+        <div
+          aria-label={`Environment for ${props.summary.identity.label}`}
+          className="popover-panel thread-environment-disclosure window-no-drag"
+          id={panelId}
+          ref={panelRef}
+          role="dialog"
+          tabIndex={-1}
+        >
+          <div className="thread-environment-disclosure__body">{props.children}</div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function summaryFacts(summary: ThreadEnvironmentSummaryFacts): ReadonlyArray<string> {
+  const facts: string[] = [];
+  if (summary.branch !== undefined) facts.push(summary.branch);
+  else facts.push(summary.identity.detail);
+  if (summary.changes !== undefined) facts.push(summary.changes === "dirty" ? "Dirty" : "Clean");
+  if (summary.workingLocation !== undefined) facts.push(summary.workingLocation);
+  if (summary.runningServerCount !== undefined) {
+    facts.push(runningServerLabel(summary.runningServerCount));
+  }
+  return facts;
+}
+
+export function runningServerLabel(count: number): string {
+  return count === 1 ? "1 server" : `${String(count)} servers`;
 }

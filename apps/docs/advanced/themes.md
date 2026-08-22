@@ -11,9 +11,9 @@ those tokens, so theme choices stay consistent across the app.
 ## Settings → Appearance
 
 The **Appearance** section covers sidebar width, the mode switcher, the
-project view switcher, the environment panel, the translucent sidebar switch,
-sidebar background and vibrancy, theme mode and preset, UI/editor/terminal
-typography, theme accessibility, and theme import and export.
+project view switcher, the translucent sidebar switch, sidebar background and
+vibrancy, theme mode and preset, UI/editor/terminal typography, theme
+accessibility, and theme import and export.
 
 **Project view switcher** chooses how the Code sidebar offers saved project
 views: a dropdown, or one icon button per view that shows the view name on

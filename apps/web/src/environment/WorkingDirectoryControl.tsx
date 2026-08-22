@@ -2,6 +2,36 @@ import { decodeThreadWorkingDirectory, type ThreadWorkingDirectory } from "@octa
 import { useEffect, useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 
+export function ChangeWorkingFolder(props: {
+  readonly value: ThreadWorkingDirectory | ".";
+  readonly disabled?: boolean;
+  readonly onApply: (workingDirectory: ThreadWorkingDirectory) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  if (!editing) {
+    return (
+      <OctantButton onClick={() => setEditing(true)} type="button" variant="ghost">
+        Change working folder
+      </OctantButton>
+    );
+  }
+  return (
+    <div className="working-directory-change">
+      <WorkingDirectoryControl
+        {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
+        onApply={async (workingDirectory) => {
+          await props.onApply(workingDirectory);
+          setEditing(false);
+        }}
+        value={props.value}
+      />
+      <OctantButton onClick={() => setEditing(false)} type="button" variant="ghost">
+        Cancel
+      </OctantButton>
+    </div>
+  );
+}
+
 export function WorkingDirectoryControl(props: {
   readonly value: ThreadWorkingDirectory | ".";
   readonly disabled?: boolean;
@@ -41,6 +71,7 @@ export function WorkingDirectoryControl(props: {
       <label htmlFor={inputId}>Working folder</label>
       <div className="working-directory-control__row">
         <input
+          autoFocus
           id={inputId}
           value={draft}
           disabled={props.disabled === true || status === "saving"}

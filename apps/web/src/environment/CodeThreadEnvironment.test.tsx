@@ -7,11 +7,12 @@ import {
   decodeWorkspaceTab,
   decodeWorkspaceTabId,
   type CodeEnvironmentObservation,
+  type LocalServerCommand,
+  type LocalServerCommandResult,
   type ProjectId,
   type ProjectSummary,
   type WorkspaceTab,
 } from "@octant/contracts";
-import { defaultEnvironmentPresentationState } from "@octant/domain/shell-policy";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -74,12 +75,17 @@ function projectClient(observation: CodeEnvironmentObservation): ProjectClient {
   };
 }
 
+async function openEnvironment(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+  });
+  fireEvent.click(await screen.findByRole("button", { name: /Show environment for/ }));
+}
+
 describe("CodeThreadEnvironment", () => {
   it("renders the code workspace children inside the content area", () => {
     render(
       <CodeThreadEnvironment
-        onChangePresentation={vi.fn()}
-        presentation={defaultEnvironmentPresentationState()}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -90,11 +96,30 @@ describe("CodeThreadEnvironment", () => {
     expect(screen.getByTestId("code-workspace-content")).toBeVisible();
   });
 
+  it("shows a compact truthful Environment summary in the thread header", async () => {
+    render(
+      <CodeThreadEnvironment
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByRole("button", {
+        name: /Show environment for Octant\. feature\/issue-204 · Dirty · \./,
+      }),
+    ).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("holds only environment-scoped groups, leaving the thread's own surfaces to the dock", async () => {
     render(
       <CodeThreadEnvironment
-        onChangePresentation={vi.fn()}
-        presentation={defaultEnvironmentPresentationState()}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -102,14 +127,9 @@ describe("CodeThreadEnvironment", () => {
         <div data-testid="code-workspace-content">Code surface</div>
       </CodeThreadEnvironment>,
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await openEnvironment();
 
-    expect(screen.getByRole("button", { name: /^Changes/ })).toBeVisible();
     expect(screen.getByRole("button", { name: /^Local servers/ })).toBeVisible();
-    // Files, Plan, Publish, and Agents are thread surfaces, not environment
-    // facts; stacked here they turned a glance into a list of disclosures.
     expect(screen.queryByRole("button", { name: /^Files/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Plan/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Publish/ })).not.toBeInTheDocument();
@@ -144,8 +164,6 @@ describe("CodeThreadEnvironment", () => {
     render(
       <CodeThreadEnvironment
         githubClient={githubClient}
-        onChangePresentation={vi.fn()}
-        presentation={defaultEnvironmentPresentationState()}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         pullRequestRepository="acme/repo"
@@ -155,6 +173,7 @@ describe("CodeThreadEnvironment", () => {
       </CodeThreadEnvironment>,
     );
 
+    await openEnvironment();
     expect(await screen.findByText("#42 Keep the environment useful")).toBeVisible();
     expect(githubClient.readCatalogue).toHaveBeenCalledWith({
       kind: "pull-requests",
@@ -165,11 +184,9 @@ describe("CodeThreadEnvironment", () => {
     });
   });
 
-  it("projects an authoritative identity from the ready observation", async () => {
+  it("renders the authoritative Git facts in the disclosure once opened", async () => {
     render(
       <CodeThreadEnvironment
-        onChangePresentation={vi.fn()}
-        presentation={defaultEnvironmentPresentationState()}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -177,30 +194,7 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    await act(async () => {
-      await Promise.resolve();
-    });
-    // Code mode defaults to floating, so the panel is on screen.
-    expect(screen.getByRole("dialog", { name: "Environment for Octant" })).toBeVisible();
-    expect(screen.getAllByText("feature/issue-204").length).toBeGreaterThan(0);
-    expect(screen.getByText("available")).toBeVisible();
-  });
-
-  it("renders the authoritative Git facts in the panel body once ready", async () => {
-    render(
-      <CodeThreadEnvironment
-        onChangePresentation={vi.fn()}
-        presentation={defaultEnvironmentPresentationState()}
-        project={codeProject()}
-        projectClient={projectClient(readyObservation())}
-        tab={codeTab()}
-      >
-        <div />
-      </CodeThreadEnvironment>,
-    );
-    await act(async () => {
-      await Promise.resolve();
-    });
+    await openEnvironment();
     expect(screen.getByTestId("environment-worktree-value")).toBeVisible();
     expect(screen.getAllByText("Branch").length).toBeGreaterThan(0);
   });
@@ -208,8 +202,6 @@ describe("CodeThreadEnvironment", () => {
   it("reports an unavailable identity when no project is bound to the tab", () => {
     render(
       <CodeThreadEnvironment
-        onChangePresentation={vi.fn()}
-        presentation={defaultEnvironmentPresentationState()}
         project={undefined}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -217,18 +209,13 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    // No project -> effective presentation falls back to the code-mode default
-    // (floating), and the compact identity reports the unavailable state.
     expect(screen.getByText("No project")).toBeVisible();
     expect(screen.getByText("unavailable")).toBeVisible();
   });
 
-  it("dispatches presentation overrides through onChangePresentation", () => {
-    const onChange = vi.fn();
-    render(
+  it("keeps open state as renderer state and closes when the pane is no longer active", async () => {
+    const { rerender } = render(
       <CodeThreadEnvironment
-        onChangePresentation={onChange}
-        presentation={defaultEnvironmentPresentationState()}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -236,14 +223,23 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    screen.getByRole("button", { name: "Hide environment panel" }).click();
-    expect(onChange).toHaveBeenLastCalledWith({
-      ...defaultEnvironmentPresentationState(),
-      byTab: [{ tabId, presentation: "hidden" }],
-    });
+    await openEnvironment();
+    expect(screen.getByRole("dialog", { name: "Environment for Octant" })).toBeVisible();
+
+    rerender(
+      <CodeThreadEnvironment
+        active={false}
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("submits a bounded relative working directory through the Code command authority", async () => {
+  it("submits a bounded relative working directory through the focused Change working folder flow", async () => {
     const user = userEvent.setup();
     const onExecute = vi.fn(async () => ({
       kind: "thread-updated" as const,
@@ -251,9 +247,7 @@ describe("CodeThreadEnvironment", () => {
     }));
     render(
       <CodeThreadEnvironment
-        onChangePresentation={vi.fn()}
         onExecute={onExecute as never}
-        presentation={defaultEnvironmentPresentationState()}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -261,8 +255,11 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Working folder" }));
+    await openEnvironment();
+    expect(screen.queryByLabelText("Working folder")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Change working folder" }));
     await screen.findByDisplayValue(".");
+    expect(screen.getByLabelText("Working folder")).toHaveFocus();
     const workingFolder = screen.getByLabelText("Working folder");
     await user.clear(workingFolder);
     await user.type(workingFolder, "packages/app");
@@ -289,9 +286,7 @@ describe("CodeThreadEnvironment", () => {
     }));
     render(
       <CodeThreadEnvironment
-        onChangePresentation={vi.fn()}
         onExecute={onExecute as never}
-        presentation={defaultEnvironmentPresentationState()}
         project={codeProject()}
         projectClient={projectClient(readyObservation())}
         tab={codeTab()}
@@ -299,7 +294,8 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Working folder" }));
+    await openEnvironment();
+    fireEvent.click(screen.getByRole("button", { name: "Change working folder" }));
     await screen.findByDisplayValue(".");
     fireEvent.change(screen.getByLabelText("Working folder"), {
       target: { value: "missing" },
@@ -309,5 +305,49 @@ describe("CodeThreadEnvironment", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Choose an existing folder inside this Project.",
     );
+  });
+
+  it("does not scan listeners on a timer while the Environment disclosure is closed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const commands: LocalServerCommand[] = [];
+    const localServerClient = {
+      execute: vi.fn(async (command: LocalServerCommand) => {
+        commands.push(command);
+        return {
+          kind: "local-servers-listed",
+          requestId: command.requestId,
+          snapshot: {
+            threadId: codeThreadId,
+            projectId: codeProjectId,
+            currentCheckout: [],
+            other: [],
+            observedAt: "2026-08-14T08:00:00.000Z",
+          },
+        } as unknown as LocalServerCommandResult;
+      }),
+    };
+    try {
+      render(
+        <CodeThreadEnvironment
+          localServerClient={localServerClient as never}
+          project={codeProject()}
+          projectClient={projectClient(readyObservation())}
+          tab={codeTab()}
+        >
+          <div />
+        </CodeThreadEnvironment>,
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await waitFor(() => expect(localServerClient.execute).toHaveBeenCalled());
+      const initial = localServerClient.execute.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(12_000);
+      });
+      expect(localServerClient.execute.mock.calls.length).toBe(initial);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

@@ -49,7 +49,7 @@ distilled successor of the earlier long-form design specifications.
 | [0039](0039-journal-compaction-of-superseded-observations.md) | Journal compaction of superseded checkout observations            | Accepted           |
 | [0040](0040-share-a-host-or-a-git-remote.md)                  | Collaboration: share a host or a git remote                       | Proposed           |
 | [0041](0041-panes-hold-one-surface.md)                        | Panes hold one surface; the sidebar is the only switcher          | Proposed           |
-| [0042](0042-environment-is-a-transient-disclosure.md)         | Environment is a transient disclosure                             | Proposed           |
+| [0042](0042-environment-is-a-transient-disclosure.md)         | Environment is a transient disclosure                             | Accepted           |
 | [0043](0043-simulator-follows-the-active-thread.md)           | Simulator follows the active thread in the right sidebar          | Accepted           |
 | [0044](0044-the-dock-hosts-live-thread-owned-tools.md)        | The dock hosts live thread-owned tools                            | Proposed           |
 
