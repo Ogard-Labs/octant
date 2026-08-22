@@ -98,6 +98,14 @@ describe("the plan panel", () => {
     expect(screen.queryByRole("button", { name: "Approve plan" })).not.toBeInTheDocument();
   });
 
+  it("does not offer an empty Propose plan form when proposal is not this surface's job", () => {
+    render(<ThreadPlanPanel artifactOnly controller={controller({ plan: null })} />);
+
+    expect(screen.getByText("This thread has no current plan artifact.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Plan title" })).not.toBeInTheDocument();
+  });
+
   it("proposes a plan from one step per line", async () => {
     const propose = vi.fn(async () => true);
     render(<ThreadPlanPanel controller={controller({ plan: null, propose })} />);
@@ -124,6 +132,22 @@ describe("the plan panel", () => {
     expect(screen.queryByRole("button", { name: "Approve plan" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Plan title" })).not.toBeInTheDocument();
     expect(screen.getByText("Land the replay fix")).toBeInTheDocument();
+  });
+
+  it("shows a current artifact in the dock without an empty Propose plan form", () => {
+    render(<ThreadPlanPanel artifactOnly controller={controller()} />);
+
+    expect(screen.getByText("Land the replay fix")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Plan" })).not.toBeInTheDocument();
+  });
+
+  it("does not offer a Propose plan form when the dock has no current artifact", () => {
+    render(<ThreadPlanPanel artifactOnly controller={controller({ plan: null })} />);
+
+    expect(screen.getByText("This thread has no current plan artifact.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Plan title" })).not.toBeInTheDocument();
   });
 
   it("says why a refused command did not happen", () => {

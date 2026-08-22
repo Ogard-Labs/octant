@@ -8,8 +8,15 @@ export interface ShipPanelProps {
   readonly threadId: string;
 }
 
+export function deliveryToolIsPresent(
+  targets: ReadonlyArray<ShipTarget>,
+  plan?: ShipPlan,
+): boolean {
+  return plan !== undefined || targets.some((target) => target.enabled);
+}
+
 /**
- * Publishing this work to somewhere you own.
+ * Delivering this work to somewhere you own.
  *
  * The wording is deliberate about what Octant is not doing. There is no target
  * of its own to fall back to and nothing of yours routed through it: a target
@@ -41,6 +48,9 @@ export function ShipPanel(props: ShipPanelProps) {
 
   if (client === undefined) return null;
 
+  const enabled = targets.filter((target) => target.enabled);
+  if (!deliveryToolIsPresent(targets, plan) && notice === undefined) return null;
+
   const run = async (command: Parameters<ShipClient["execute"]>[0]) => {
     setBusy(true);
     try {
@@ -59,8 +69,8 @@ export function ShipPanel(props: ShipPanelProps) {
         setPlan(undefined);
         setNotice(
           result.receipt.outcome === "published"
-            ? "Published."
-            : (result.receipt.detail ?? "That publication did not happen."),
+            ? "Delivered."
+            : (result.receipt.detail ?? "That delivery did not happen."),
         );
         return;
       }
@@ -74,27 +84,22 @@ export function ShipPanel(props: ShipPanelProps) {
   };
 
   return (
-    <section aria-label="Publish" className="ship-panel">
+    <section aria-label="Delivery" className="ship-panel">
       <p className="ship-panel__note">
-        Octant publishes to a target you already own and runs none of its own. Nothing is routed
-        through Octant, and each publication is approved on its own.
+        Octant delivers to a target you already own and runs none of its own. Nothing is routed
+        through Octant, and each delivery is approved on its own.
       </p>
 
-      {targets.length === 0 ? (
-        <p className="ship-panel__empty" role="status">
-          No publish targets are installed. They arrive as extensions, and installing one grants it
-          nothing until you enable it and bind a credential.
-        </p>
-      ) : (
+      {enabled.length === 0 ? null : (
         <ul className="ship-panel__targets">
-          {targets.map((target) => (
+          {enabled.map((target) => (
             <li className="ship-panel__target" key={String(target.id)}>
               <span className="ship-panel__target-name">{target.displayName}</span>
               <span className="ship-panel__target-where">
                 {`${target.destination.remoteName}/${target.destination.branch}`}
               </span>
               <span className="ship-panel__target-state">
-                {target.enabled ? "Enabled" : "Not enabled"}
+                Enabled
                 {target.credentialReference === undefined
                   ? " · No credential"
                   : " · Credential bound"}
@@ -107,7 +112,7 @@ export function ShipPanel(props: ShipPanelProps) {
                 type="button"
                 variant="secondary"
               >
-                Review publication
+                Review delivery
               </OctantButton>
             </li>
           ))}
@@ -117,13 +122,30 @@ export function ShipPanel(props: ShipPanelProps) {
       {plan === undefined ? null : (
         <div className="ship-panel__plan">
           <p className="ship-panel__plan-line">
-            {`Publish ${plan.revision.slice(0, 12)} to ${plan.destination.remoteName}/${plan.destination.branch}`}
+            {`Deliver ${plan.revision.slice(0, 12)} to ${plan.destination.remoteName}/${plan.destination.branch}`}
           </p>
           <p className="ship-panel__plan-line ship-panel__plan-digest">{plan.artifactDigest}</p>
           <p className="ship-panel__note">
             This makes the change visible to people outside this machine, and no checkpoint here
             undoes that.
           </p>
+          <OctantButton
+            disabled={busy}
+            onClick={() =>
+              void run({
+                kind: "ship",
+                targetId: plan.targetId,
+                threadId: threadId as never,
+                approvalId: crypto.randomUUID(),
+                revision: plan.revision,
+                artifactDigest: plan.artifactDigest,
+              })
+            }
+            type="button"
+            variant="default"
+          >
+            Approve delivery
+          </OctantButton>
         </div>
       )}
 

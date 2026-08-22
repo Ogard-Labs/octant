@@ -12,13 +12,13 @@ import {
 } from "@octant/client-runtime/work-thread-client";
 import { createWorkTurnClient, type WorkTurnClient } from "@octant/client-runtime/work-turn-client";
 import { createPreviewClient } from "@octant/client-runtime/preview-client";
-import { createCanvasClient } from "@octant/client-runtime/canvas-client";
+import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { createWorkOverviewClient } from "@octant/client-runtime/work-overview-client";
 import { createWorkResearchClient } from "@octant/client-runtime/work-research-client";
 import { createGoalClient } from "@octant/client-runtime/goal-client";
 import { createGoalLoopClient } from "@octant/client-runtime/goal-loop-client";
-import { createShipClient } from "@octant/client-runtime/ship-client";
-import { createPlanClient } from "@octant/client-runtime/plan-client";
+import { createShipClient, type ShipClient } from "@octant/client-runtime/ship-client";
+import { createPlanClient, type PlanClient } from "@octant/client-runtime/plan-client";
 import { createUsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
 import { UsageWorkspace } from "./usage/UsageWorkspace";
@@ -210,7 +210,6 @@ import {
 import { ShellFrame } from "./shell/ShellFrame";
 import { RemotePairingView } from "./remote/RemotePairingView";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
-import { ThreadDockPanel } from "./shell/ThreadDockPanel";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import {
   RIGHT_UTILITY_DOCK_SURFACES,
@@ -222,6 +221,7 @@ import {
   closeThreadUtilityTab,
   closeUtilityTabState,
   openThreadUtilityTab,
+  retainAvailableUtilityTabs,
   selectThreadUtilityTab,
   selectUtilityTabState,
   threadUtilityDockState,
@@ -230,6 +230,8 @@ import {
   type ThreadUtilityDockKey,
   type ThreadUtilityDockStates,
 } from "./shell/rightUtilityDockSelection";
+import { isDockToolLaunchable, isDockToolStillOpenable } from "./shell/dockToolAvailability";
+import { useDockToolCapabilities } from "./shell/useDockToolCapabilities";
 import { NavigatorPopover } from "./navigator/NavigatorPopover";
 import { useNavigatorAssistant } from "./navigator/useNavigatorAssistant";
 import { ComposerContextMeterShortcut } from "./context/ComposerContextMeter";
@@ -307,7 +309,10 @@ export interface AppProps {
   readonly developmentAuthentication?: boolean;
   readonly extensionClient?: ExtensionClient;
   readonly navigatorAssistantClient?: NavigatorAssistantClient;
+  readonly planClient?: PlanClient;
   readonly shellClient?: ShellClient;
+  readonly shipClient?: ShipClient;
+  readonly canvasClient?: CanvasClient;
   readonly themeClient?: ThemeClient;
   readonly zenClient?: ZenClient;
 }
@@ -706,7 +711,6 @@ function LaunchedShell(
     dockThreadKey === undefined
       ? fallbackDockState
       : threadUtilityDockState(dockStatesByThread, dockThreadKey);
-  const dockSurface = dockState.active;
   // One drag pipeline for pane grips and sidebar rows. A sidebar row whose
   // thread belongs to a different Project is rerouted through the ordinary
   // open path on drop, so a drag cannot place a cross-Project thread without
@@ -900,21 +904,23 @@ function LaunchedShell(
   );
   const shipClient = useMemo(
     () =>
+      props.shipClient ??
       createShipClient({
         baseUrl: props.launch.serverUrl,
         fetch: globalThis.fetch,
         windowCapability: props.projectWindowCapability,
       }),
-    [props.launch.serverUrl, props.projectWindowCapability],
+    [props.launch.serverUrl, props.projectWindowCapability, props.shipClient],
   );
   const planClient = useMemo(
     () =>
+      props.planClient ??
       createPlanClient({
         baseUrl: props.launch.serverUrl,
         fetch: globalThis.fetch,
         windowCapability: props.projectWindowCapability,
       }),
-    [props.launch.serverUrl, props.projectWindowCapability],
+    [props.launch.serverUrl, props.projectWindowCapability, props.planClient],
   );
   // Export is offered only where a client resolves — the same test the chat
   // thread-actions menu applies — so a window without a server capability
@@ -1226,12 +1232,13 @@ function LaunchedShell(
   );
   const canvasClient = useMemo(
     () =>
+      props.canvasClient ??
       createCanvasClient({
         baseUrl: props.launch.serverUrl,
         fetch: globalThis.fetch,
         windowCapability: props.projectWindowCapability,
       }),
-    [props.launch.serverUrl, props.projectWindowCapability],
+    [props.canvasClient, props.launch.serverUrl, props.projectWindowCapability],
   );
   const contextSubject = useMemo(() => {
     if (activeMode === "chat" && activeChatThreadId !== undefined) {
@@ -1445,15 +1452,36 @@ function LaunchedShell(
                       )?.checkoutId,
               }),
         };
-  const dockResolution = resolveDockSurface(dockSurface);
-  const availableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
-    (surface) => resolveDockSurface(surface.id).kind === "surface",
+  const dockToolCapabilities = useDockToolCapabilities({
+    canvasClient,
+    hasAppleSimulator:
+      appleProjects[0]?.projectPath !== undefined && appleToolchainClient !== undefined,
+    mode: activeMode,
+    planClient,
+    ...(activeProjectId === undefined ? {} : { projectId: activeProjectId }),
+    shipClient,
+    ...(dockThreadId === undefined ? {} : { threadId: String(dockThreadId) }),
+  });
+  const retainedDockState = retainAvailableUtilityTabs(
+    dockState,
+    new Set(
+      RIGHT_UTILITY_DOCK_SURFACES.filter((surface) => {
+        if (resolveDockSurface(surface.id).kind !== "surface") return false;
+        return isDockToolStillOpenable(surface.id, dockToolCapabilities);
+      }).map((surface) => surface.id),
+    ),
   );
-  const dockTabs = dockState.tabs.flatMap((surfaceId) => {
+  const dockSurface = retainedDockState.active;
+  const dockResolution = resolveDockSurface(dockSurface);
+  const launchableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
+    (surface) =>
+      resolveDockSurface(surface.id).kind === "surface" &&
+      isDockToolLaunchable(surface.id, dockToolCapabilities),
+  );
+  const dockTabs = retainedDockState.tabs.flatMap((surfaceId) => {
     const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
     return surface === undefined ? [] : [surface];
   });
-  const launchableDockSurfaces = availableDockSurfaces;
   const dockOpen = dockVisible;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
@@ -1864,14 +1892,18 @@ function LaunchedShell(
     const appleProjectPath = appleProjects[0]?.projectPath;
     return (
       <ThreadUtilityDockContent
+        key={`${dockThreadKey}:${surface}`}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
         appleToolchainClient={appleToolchainClient}
         {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
+        canvasClient={canvasClient}
         chatClient={chatClient}
         chatReadCursorStore={chatReadCursorStore}
         {...(dockThread.mode === "code" ? { codeController } : {})}
         codeProviderGroups={codeProviderGroups}
         {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        planClient={planClient}
+        shipClient={shipClient}
         onOpenFile={(relativePath) => {
           if (dockThread.mode !== "code") return;
           void controller.openCodeSurface({
@@ -1896,6 +1928,7 @@ function LaunchedShell(
           mode: dockThread.mode,
           threadId: dockThread.threadId,
           ...(dockThread.checkoutId === undefined ? {} : { checkoutId: dockThread.checkoutId }),
+          ...(activeProjectId === undefined ? {} : { projectId: activeProjectId }),
         }}
         surface={surface}
         windowCapability={props.projectWindowCapability}
@@ -3970,7 +4003,9 @@ function LaunchedShell(
             />
             <RightUtilityDock
               browser={threadUtility("browser")}
+              canvas={threadUtility("canvas")}
               changes={threadUtility("changes")}
+              delivery={threadUtility("delivery")}
               isNarrow={isNarrow}
               files={threadUtility("files")}
               iosSimulator={threadUtility("ios-simulator")}
@@ -3985,21 +4020,12 @@ function LaunchedShell(
               onOpenTab={(surface) => openDockTab(surface)}
               onSelectSurface={selectDockTab}
               open={dockVisible}
+              plan={threadUtility("plan")}
               resolution={dockResolution}
               sideChat={threadUtility("side-chat")}
               terminal={threadUtility("terminal")}
               tests={threadUtility("tests")}
               tabs={dockTabs}
-              thread={
-                dockThread?.mode !== "code" ? null : (
-                  <ThreadDockPanel
-                    agentRunClient={agentRunClient}
-                    planClient={planClient}
-                    shipClient={shipClient}
-                    threadId={decodeCodeThreadId(dockThread.threadId)}
-                  />
-                )
-              }
               width={contextSidebarWidth}
             />
           </>

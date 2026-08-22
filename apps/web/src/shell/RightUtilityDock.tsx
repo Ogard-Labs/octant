@@ -11,7 +11,9 @@ import type {
 
 export interface RightUtilityDockProps {
   readonly browser?: ReactNode;
+  readonly canvas?: ReactNode;
   readonly changes?: ReactNode;
+  readonly delivery?: ReactNode;
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
   readonly isNarrow: boolean;
@@ -23,13 +25,13 @@ export interface RightUtilityDockProps {
   readonly onPreviewWidth: (width: number) => void;
   readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
   readonly open: boolean;
+  readonly plan?: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly restoreFocus?: RefObject<HTMLElement | null>;
   readonly sideChat?: ReactNode;
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
-  readonly thread?: ReactNode;
   readonly width: number;
 }
 
@@ -45,19 +47,21 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   const surface = (
     <RightUtilityDockSurface
       {...(props.browser === undefined ? {} : { browser: props.browser })}
+      {...(props.canvas === undefined ? {} : { canvas: props.canvas })}
       {...(props.changes === undefined ? {} : { changes: props.changes })}
+      {...(props.delivery === undefined ? {} : { delivery: props.delivery })}
       {...(props.files === undefined ? {} : { files: props.files })}
       {...(props.iosSimulator === undefined ? {} : { iosSimulator: props.iosSimulator })}
       launchableSurfaces={props.launchableSurfaces}
       onCloseTab={props.onCloseTab}
       onOpenTab={props.onOpenTab}
       onSelectSurface={props.onSelectSurface}
+      {...(props.plan === undefined ? {} : { plan: props.plan })}
       resolution={props.resolution}
       {...(props.sideChat === undefined ? {} : { sideChat: props.sideChat })}
       tabs={props.tabs}
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
       {...(props.tests === undefined ? {} : { tests: props.tests })}
-      {...(props.thread === undefined ? {} : { thread: props.thread })}
       {...dismiss}
     />
   );

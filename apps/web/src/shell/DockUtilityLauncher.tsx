@@ -1,16 +1,6 @@
-import {
-  Files,
-  FlaskConical,
-  GitCompareArrows,
-  Globe2,
-  MessageCircle,
-  PanelsTopLeft,
-  Plus,
-  Smartphone,
-  SquareTerminal,
-  type LucideIcon,
-} from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { Plus } from "lucide-react";
+import { useEffect, useId, useRef, useState, type Ref } from "react";
+import { DockToolIcon } from "./dockToolIcons";
 import { IconButton } from "./IconButton";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
@@ -46,7 +36,7 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
         aria-expanded={open}
         disabled={props.surfaces.length === 0}
         icon={Plus}
-        label="Add utility tab"
+        label="Add tool"
         onClick={() => setOpen((current) => !current)}
         ref={trigger}
       />
@@ -60,38 +50,39 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
             close();
           }}
         >
-          {props.surfaces.map((surface, index) => (
-            <button
-              className="workspace-disclosure__action window-no-drag"
-              key={surface.id}
-              onClick={() => {
-                props.onOpen(surface.id);
-                close();
-              }}
-              ref={index === 0 ? firstAction : undefined}
-              type="button"
-            >
-              <DockUtilityIcon surface={surface.id} />
-              <span>{surface.label}</span>
-            </button>
-          ))}
+          <DockToolLaunchList
+            firstAction={firstAction}
+            onOpen={(surface) => {
+              props.onOpen(surface);
+              close();
+            }}
+            surfaces={props.surfaces}
+          />
         </span>
       ) : null}
     </span>
   );
 }
 
-function DockUtilityIcon(props: { readonly surface: RightUtilityDockSurfaceId }) {
-  const icons: Partial<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
-    browser: Globe2,
-    changes: GitCompareArrows,
-    files: Files,
-    "ios-simulator": Smartphone,
-    "side-chat": MessageCircle,
-    terminal: SquareTerminal,
-    tests: FlaskConical,
-    thread: PanelsTopLeft,
-  };
-  const Icon = icons[props.surface];
-  return Icon === undefined ? null : <Icon aria-hidden="true" size={14} strokeWidth={1.8} />;
+export function DockToolLaunchList(props: {
+  readonly firstAction?: Ref<HTMLButtonElement>;
+  readonly onOpen: (surface: RightUtilityDockSurfaceId) => void;
+  readonly surfaces: ReadonlyArray<DockUtilityLauncherSurface>;
+}) {
+  return (
+    <>
+      {props.surfaces.map((surface, index) => (
+        <button
+          className="workspace-disclosure__action window-no-drag"
+          key={surface.id}
+          onClick={() => props.onOpen(surface.id)}
+          ref={index === 0 ? props.firstAction : undefined}
+          type="button"
+        >
+          <DockToolIcon surface={surface.id} />
+          <span>{surface.label}</span>
+        </button>
+      ))}
+    </>
+  );
 }

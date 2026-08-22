@@ -50,6 +50,7 @@
 /* The bar is the system's .dock-head; only the two-ended layout is ours,
    because the surface tabs sit where .dock-head expects a static label. */
 .right-utility-dock__toolbar {
+  min-width: 0;
   justify-content: space-between;
 }
 
@@ -72,42 +73,36 @@
   gap: 2px;
 }
 
-.right-utility-dock__tabs {
+.dock-tool-strip {
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
   gap: 2px;
 }
 
-.right-utility-dock__tab-scroll {
-  display: flex;
-  flex: 0 1 auto;
-  max-width: calc(100% - 30px);
-  min-width: 0;
-  gap: 2px;
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-
-.right-utility-dock__tab {
+.dock-tool-strip__tab {
   display: inline-flex;
   flex: none;
   min-width: 0;
+  max-width: 7.5rem;
   align-items: center;
   overflow: hidden;
   color: var(--oct-meta);
   border-radius: var(--oct-radius-sm);
 }
 
-.right-utility-dock__tab:has(.right-utility-dock__tab-select[aria-selected="true"]),
-.right-utility-dock__tab:hover {
+.dock-tool-strip__tab:has(.dock-tool-strip__select[aria-selected="true"]),
+.dock-tool-strip__tab:hover {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
 
-.right-utility-dock__tab-select {
+.dock-tool-strip__select {
+  display: inline-flex;
   min-width: 0;
   min-height: 26px;
+  align-items: center;
+  gap: 4px;
   padding: 0 4px 0 8px;
   overflow: hidden;
   color: inherit;
@@ -119,16 +114,65 @@
   white-space: nowrap;
 }
 
-.right-utility-dock__tab-close {
+.dock-tool-strip__close {
   width: 22px;
   height: 22px;
   min-height: 22px;
   opacity: 0.55;
 }
 
-.right-utility-dock__tab:hover .right-utility-dock__tab-close,
-.right-utility-dock__tab:focus-within .right-utility-dock__tab-close {
+.dock-tool-strip__tab:hover .dock-tool-strip__close,
+.dock-tool-strip__tab:focus-within .dock-tool-strip__close {
   opacity: 1;
+}
+
+.dock-tool-strip__overflow {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.dock-tool-strip__overflow-menu {
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  min-width: 176px;
+}
+
+.dock-tool-strip__overflow-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dock-tool-launcher {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.dock-tool-launcher__list {
+  display: grid;
+  gap: 2px;
+}
+
+.right-utility-dock__tool[hidden] {
+  display: none;
+}
+
+.dock-canvas-tool {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: 8px;
+}
+
+.dock-canvas-tool__list {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
 }
 
 .dock-utility-launcher {
@@ -162,10 +206,18 @@
 /* Thread utilities are complete work surfaces rather than cards inside the
    dock body. They own their scrolling and need the full measured rectangle —
    especially Browser, whose native view is positioned from this geometry. */
-.right-utility-dock__content:has(.browser-workspace),
-.right-utility-dock__content:has(.side-chat),
-.right-utility-dock__content:has(.code-file-explorer-panel),
-.right-utility-dock__content:has([data-code-tab-kind]) {
+.right-utility-dock__tool {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .browser-workspace),
+.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .side-chat),
+.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-file-explorer-panel),
+.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .canvas-workspace-tab),
+.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .dock-canvas-tool),
+.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) [data-code-tab-kind]) {
   padding: 0;
   overflow: hidden;
 }

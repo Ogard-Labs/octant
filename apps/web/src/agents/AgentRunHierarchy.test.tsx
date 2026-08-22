@@ -46,6 +46,21 @@ async function fillCreationForm(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("AgentRunHierarchy", () => {
+  it("does not offer child creation unless the surface opts in", async () => {
+    const requestRun = vi.fn(async (_input: unknown) => ({ kind: "run-accepted" as const }));
+    render(
+      <AgentRunHierarchy
+        client={emptyClient({ requestRun: requestRun as never })}
+        parentThreadId={parentThreadId}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("heading", { name: "Active / History" })).toBeVisible(),
+    );
+    expect(screen.queryByRole("form", { name: "Create subagent" })).not.toBeInTheDocument();
+    expect(requestRun).not.toHaveBeenCalled();
+  });
+
   it("renders server-authored history and acknowledges a completed child", async () => {
     const user = userEvent.setup();
     const acknowledge = vi.fn(async () => ({
