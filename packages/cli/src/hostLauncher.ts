@@ -36,6 +36,7 @@ export interface HostLauncherDependencies {
   };
   readonly resolveAttachedHost?: () => Promise<AttachedHostCandidate | undefined>;
   readonly developmentWebBootstrap?: true;
+  /** Persisted automatic-startup policy. Launch paths inject a real store. */
   readonly policyStore?: HostServicePolicyReader;
 }
 
@@ -122,7 +123,7 @@ export async function attachOrCreateHost(
   }
   let policy: HostServicePolicy;
   try {
-    policy = await (dependencies.policyStore ?? defaultServicePolicyStore()).read();
+    policy = await (dependencies.policyStore ?? createDefaultServicePolicyStore()).read();
   } catch {
     return {
       kind: "start-failed",
@@ -279,7 +280,7 @@ function defaultServerRoot(): string {
   return process.env.OCTANT_SERVER_ROOT ?? resolveDefaultServerRoot();
 }
 
-function defaultServicePolicyStore(): ServicePolicyStore {
+export function createDefaultServicePolicyStore(): ServicePolicyStore {
   return new ServicePolicyStore({
     path: resolveHostRuntimePaths({
       env: process.env,

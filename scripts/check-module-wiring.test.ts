@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   buildPackageExportMap,
@@ -12,6 +15,8 @@ import {
   findUnregisteredRouteModules,
   hasRuntimeExport,
   KNOWN_ISLANDS,
+  KNOWN_UNCALLED_ENDPOINTS,
+  KNOWN_UNREGISTERED_ROUTES,
   type ScannedFile,
 } from "./check-module-wiring";
 
@@ -505,5 +510,46 @@ describe("findUncalledEndpoints", () => {
     ]);
 
     expect(violations).toEqual([]);
+  });
+});
+
+describe("wiring exemptions", () => {
+  it("keeps known unregistered routes and uncalled endpoints empty", () => {
+    expect([...KNOWN_UNREGISTERED_ROUTES.keys()]).toEqual([]);
+    expect([...KNOWN_UNCALLED_ENDPOINTS.keys()]).toEqual([]);
+  });
+
+  it("states why each remaining island exists and when to remove it", () => {
+    expect(KNOWN_ISLANDS.size).toBeGreaterThan(0);
+    for (const reason of KNOWN_ISLANDS.values()) {
+      expect(reason).toMatch(/Remove (once|when) /);
+    }
+  });
+
+  it("does not exempt proven-live Canvas access logging or moved automation fallbacks", () => {
+    expect(KNOWN_ISLANDS.has("packages/domain/src/canvasShareAccessLogPolicy.ts")).toBe(false);
+    expect(KNOWN_ISLANDS.has("apps/server/src/automation/automationDispatchPort.ts")).toBe(false);
+    expect(KNOWN_ISLANDS.has("apps/server/src/automation/automationModeDispatchPorts.ts")).toBe(
+      false,
+    );
+  });
+});
+
+describe("production launch wiring", () => {
+  const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+
+  it("injects the service policy store on every real desktop, server, and CLI launch path", async () => {
+    const files = [
+      "apps/desktop/src/main.ts",
+      "apps/server/src/main.ts",
+      "packages/cli/src/bin.ts",
+      "packages/cli/src/web.ts",
+      "packages/cli/src/hostLauncher.ts",
+      "packages/cli/src/serverLifecycle.ts",
+    ] as const;
+    for (const relativePath of files) {
+      const content = await readFile(resolve(repoRoot, relativePath), "utf8");
+      expect(content).toMatch(/ServicePolicyStore/);
+    }
   });
 });

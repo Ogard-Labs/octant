@@ -50,6 +50,19 @@ function baseOptions(overrides: Partial<WebCommandOptions> = {}): WebCommandOpti
 }
 
 describe("runWebCommand", () => {
+  it("injects the persisted service policy store when the caller does not supply one", async () => {
+    const attachOrCreateHost = vi.fn(async (options: HostLauncherDependencies) => {
+      expect(options.policyStore).toBeDefined();
+      expect(typeof options.policyStore?.read).toBe("function");
+      return { kind: "disabled" as const, reason: "automatic startup disabled" };
+    });
+
+    const result = await runWebCommand(baseOptions({ attachOrCreateHost }));
+
+    expect(result).toEqual({ kind: "disabled", reason: "automatic startup disabled" });
+    expect(attachOrCreateHost).toHaveBeenCalledOnce();
+  });
+
   it("passes the persisted service policy to the automatic host launcher", async () => {
     const policyStore = {
       read: vi.fn(async () => ({
