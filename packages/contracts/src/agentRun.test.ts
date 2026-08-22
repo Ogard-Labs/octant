@@ -7,6 +7,8 @@ import {
   decodeAgentRunAdmittedContext,
   decodeAgentRunAuthority,
   decodeAgentRunCommand,
+  decodeAgentRunCenterQuery,
+  decodeAgentRunCenterResponse,
   decodeAgentRunLifecycleStatus,
   decodeAgentRunRoutingReceipt,
   decodeAgentRunStatusChanged,
@@ -422,5 +424,46 @@ describe("agentRun pool-derived route receipts", () => {
         poolRoute: { decision: selectedRequestedDecision, decidedAt },
       }),
     ).toThrow();
+  });
+
+  it("decodes center query and response contracts", () => {
+    const query = decodeAgentRunCenterQuery({
+      status: "active",
+      mode: "work",
+      limit: 25,
+      search: "implement",
+    });
+    expect(query.status).toBe("active");
+    const response = decodeAgentRunCenterResponse({
+      items: [
+        {
+          runId: ids.run,
+          requestId: ids.request,
+          parentThreadId: ids.thread,
+          parentThreadTitle: "Work thread",
+          mode: "work",
+          projectId: ids.project,
+          role: "implementation",
+          task: "Implement feature",
+          lifecycleStatus: "running",
+          executionKind: "octant-managed",
+          authority,
+          workspaceKind: "work-root",
+          usageQuality: "provider-reported",
+          route: {
+            requestedProviderInstanceId: ids.provider,
+            requestedModelId: "gpt-4o",
+            executionProviderInstanceId: ids.provider,
+            executionModelId: "gpt-4o",
+            poolDerived: false,
+          },
+          resultAcknowledgement: { required: false, acknowledged: false },
+          version: 1,
+          createdAt: "2026-08-01T10:00:00.000Z",
+          updatedAt: "2026-08-01T10:00:00.000Z",
+        },
+      ],
+    });
+    expect(response.items).toHaveLength(1);
   });
 });

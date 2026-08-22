@@ -8,12 +8,17 @@ import {
   decodeAgentRunStatusChanged,
   type EventEnvelope,
   type AgentRun,
+  type AgentRunCenterStatusFilter,
+  type AgentRunCenterWorkspaceKind,
   type AgentRunId,
   type AgentRunLifecycleStatus,
   type AgentRunParentThreadId,
   type AgentRunRequestId,
   type AgentRunResult,
   type AgentRunResultAcknowledgement,
+  type OctantMode,
+  type ProjectId,
+  type ProviderInstanceId,
   type UtcTimestamp,
 } from "@octant/contracts";
 import { effectiveAgentRunExecutionTarget, isAgentRunActiveStatus } from "@octant/domain";
@@ -64,6 +69,20 @@ export interface AgentRunParentSummaryEntry {
   readonly recoveryReason?: string;
   readonly version: AgentRun["version"];
   readonly updatedAt: UtcTimestamp;
+}
+
+export interface AgentRunCenterCandidate {
+  readonly run: AgentRun;
+  readonly route: AgentRunParentSummaryRoute;
+}
+
+export interface ListAgentRunCenterCandidatesInput {
+  readonly status: AgentRunCenterStatusFilter;
+  readonly mode: OctantMode | "all";
+  readonly projectId?: ProjectId;
+  readonly providerInstanceId?: ProviderInstanceId;
+  readonly parentThreadId?: AgentRunParentThreadId;
+  readonly search?: string;
 }
 
 export interface AgentRunStatusApplyInput {
@@ -251,6 +270,49 @@ export class AgentRunProjection implements Projection {
     });
   }
 
+  /**
+   * Every run matching the center query filters, newest first. Authorization is
+   * applied by the route before pagination so pages contain only readable rows.
+   */
+  listCenterCandidates(
+    input: ListAgentRunCenterCandidatesInput,
+  ): ReadonlyArray<AgentRunCenterCandidate> {
+    const search = input.search?.trim().toLowerCase();
+    const matches: AgentRunCenterCandidate[] = [];
+    for (const run of this.#byId.values()) {
+      if (input.mode !== "all" && run.routingReceipt.mode !== input.mode) continue;
+      if (
+        input.projectId !== undefined &&
+        String(run.routingReceipt.projectId ?? "") !== String(input.projectId)
+      ) {
+        continue;
+      }
+      if (
+        input.providerInstanceId !== undefined &&
+        run.routingReceipt.selectedProviderInstanceId !== input.providerInstanceId
+      ) {
+        continue;
+      }
+      if (
+        input.parentThreadId !== undefined &&
+        String(run.parentThreadId) !== String(input.parentThreadId)
+      ) {
+        continue;
+      }
+      const active = isAgentRunActiveStatus(run.lifecycleStatus);
+      if (input.status === "active" && !active) continue;
+      if (input.status === "history" && active) continue;
+      if (search !== undefined && search.length > 0) {
+        const haystack = `${run.task} ${run.role} ${run.lifecycleStatus}`.toLowerCase();
+        if (!haystack.includes(search)) continue;
+      }
+      matches.push({ run, route: summaryRoute(run.routingReceipt) });
+    }
+    return matches.sort((left, right) =>
+      centerCursorKey(right.run).localeCompare(centerCursorKey(left.run)),
+    );
+  }
+
   activeCounts(): {
     readonly global: number;
     readonly byParent: Map<AgentRunParentThreadId, number>;
@@ -282,4 +344,32 @@ export class AgentRunProjection implements Projection {
     parentSet.add(run.id);
     this.#byParent.set(run.parentThreadId, parentSet);
   }
+}
+
+function centerCursorKey(run: AgentRun): string {
+  return `${run.updatedAt}~${String(run.id)}`;
+}
+
+export function workspaceKindForRun(run: AgentRun): AgentRunCenterWorkspaceKind {
+  return run.workspaceReceipt.kind;
+}
+
+export function paginateCenterCandidates(
+  candidates: ReadonlyArray<AgentRunCenterCandidate>,
+  limit: number,
+  cursor: string | undefined,
+): { readonly items: ReadonlyArray<AgentRunCenterCandidate>; readonly nextCursor?: string } {
+  const window =
+    cursor === undefined
+      ? candidates
+      : candidates.filter((candidate) => centerCursorKey(candidate.run) < cursor);
+  const items = window.slice(0, limit);
+  const last = items[items.length - 1];
+  if (window.length <= items.length || last === undefined) return { items };
+  return { items, nextCursor: centerCursorKey(last.run) };
+}
+
+export function clampCenterLimit(limit: number, max: number): number {
+  if (!Number.isSafeInteger(limit) || limit < 1) return 1;
+  return Math.min(limit, max);
 }

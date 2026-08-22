@@ -6,6 +6,7 @@ import {
   Kanban,
   Library,
   MessageSquarePlus,
+  Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -69,6 +70,8 @@ function navigationIcon(id: SidebarNavigationDescriptorId) {
       return MessageSquarePlus;
     case "automations":
       return Bot;
+    case "agents":
+      return Users;
     case "plugins":
       return Blocks;
     case "artifact-library":

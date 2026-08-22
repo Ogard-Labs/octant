@@ -466,4 +466,52 @@ describe("AgentRunProjection", () => {
       updatedAt: later,
     });
   });
+
+  it("filters center candidates by status, mode, and search", () => {
+    const projection = new AgentRunProjection();
+    projection.applyRequested(baseRun());
+    projection.applyRequested(
+      baseRun({
+        id: ids.runB,
+        requestId: ids.requestB,
+        parentThreadId: ids.threadOther,
+        task: "Implement feature",
+        routingReceipt: {
+          ...baseRun().routingReceipt,
+          mode: "work",
+          projectId: "77777777-7777-4777-8777-777777777777" as never,
+        },
+        workspaceReceipt: {
+          kind: "work-root",
+          mode: "work",
+          projectId: "77777777-7777-4777-8777-777777777777" as never,
+          bindingRevisionId: "88888888-8888-4888-8888-888888888888" as never,
+          canonicalRoot: "/projects/demo",
+        },
+      }),
+    );
+    projection.applyStatusChanged({
+      runId: ids.run,
+      fromStatus: "queued",
+      toStatus: "completed",
+      version: 2,
+      updatedAt: later as never,
+    });
+
+    expect(
+      projection
+        .listCenterCandidates({ status: "active", mode: "all" })
+        .map((candidate) => String(candidate.run.id)),
+    ).toEqual([String(ids.runB)]);
+    expect(
+      projection
+        .listCenterCandidates({ status: "history", mode: "chat" })
+        .map((candidate) => candidate.run.task),
+    ).toEqual(["Summarize the design."]);
+    expect(
+      projection
+        .listCenterCandidates({ status: "all", mode: "work", search: "feature" })
+        .map((candidate) => candidate.run.task),
+    ).toEqual(["Implement feature"]);
+  });
 });

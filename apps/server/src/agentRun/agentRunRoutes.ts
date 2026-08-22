@@ -1,6 +1,7 @@
 import {
   decodeAgentRunControlPreviewRequest,
   decodeAgentRunControlRequest,
+  decodeAgentRunCenterQuery,
   decodeAgentRunId,
   decodeAgentRunParentThreadId,
   decodeAgentRunResumeRequest,
@@ -8,8 +9,10 @@ import {
   decodeAgentRunSteerRequest,
   decodeAgentRunWorkspaceConfirmationRequest,
   decodeAgentRunWorkspacePreparationRequest,
+  MAX_AGENT_RUN_CENTER_QUERY_LIMIT,
   type AgentRun,
   type AgentRunAuthority,
+  type AgentRunCenterSummary,
   type AgentRunControlRequest,
   type AgentRunCreationRequest,
   type AgentRunId,
@@ -18,8 +21,14 @@ import {
   type AgentRunWorkspaceReceipt,
   type AgentRunWorkspaceRefusalReason,
   type AggregateVersion,
+  type CodeThreadId,
   type MultiModelPool,
+  type OctantMode,
+  type ProjectId,
+  type ProviderInstanceId,
 } from "@octant/contracts";
+import { decodeProjectId } from "@octant/contracts/projects";
+import { decodeProviderInstanceId } from "@octant/contracts/providers";
 import {
   assertAgentRunResumeAllowed,
   assertAgentRunRetryAllowed,
@@ -53,6 +62,12 @@ import {
 } from "./agentRunOrchestrationService";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
 import type { AgentRunParentSummaryEntry } from "./agentRunProjection";
+import {
+  clampCenterLimit,
+  paginateCenterCandidates,
+  workspaceKindForRun,
+  type AgentRunCenterCandidate,
+} from "./agentRunProjection";
 
 const METHODS = "GET, POST, OPTIONS";
 const HEADERS = "content-type, x-octant-window-capability";
@@ -116,6 +131,18 @@ export interface AgentRunRouteDependencies {
    * admits no parent context, and such a request fails closed.
    */
   readonly parentContext?: AgentRunParentContextPort;
+  /**
+   * Resolves display facts for one center row after authorization. Parent
+   * titles come from this host's thread stores; child thread ids are derived
+   * for Code children without inventing filesystem paths.
+   */
+  readonly resolveCenterContext: (input: {
+    readonly parentThreadId: AgentRunParentThreadId;
+    readonly mode: OctantMode;
+  }) => {
+    readonly parentThreadTitle: string;
+    readonly childThreadId?: CodeThreadId;
+  };
   readonly uuid: () => string;
   readonly now?: () => number;
 }
@@ -178,6 +205,10 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
         return failure("AgentRun request is unauthorized.", 401, origin);
       }
       return failure("AgentRun request is invalid.", 400, origin);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/agent-runs/center") {
+      return handleCenter(dependencies, authenticatedWindowId, url, origin);
     }
 
     if (request.method === "GET" && url.pathname === "/api/agent-runs/parent-summary") {
@@ -532,6 +563,156 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
     }
 
     return failure("AgentRun route not found.", 404, origin);
+  };
+}
+
+async function handleCenter(
+  dependencies: AgentRunRouteDependencies,
+  windowId: string,
+  url: URL,
+  origin: string | null,
+): Promise<Response> {
+  const allowed = new Set([
+    "status",
+    "mode",
+    "projectId",
+    "providerInstanceId",
+    "parentThreadId",
+    "search",
+    "limit",
+    "cursor",
+  ]);
+  if (![...url.searchParams.keys()].every((key) => allowed.has(key))) {
+    return failure("AgentRun center query is invalid.", 400, origin);
+  }
+  const status = url.searchParams.get("status") ?? "all";
+  if (status !== "all" && status !== "active" && status !== "history") {
+    return failure("AgentRun center status filter is invalid.", 400, origin);
+  }
+  const mode = url.searchParams.get("mode") ?? "all";
+  if (mode !== "all" && mode !== "chat" && mode !== "work" && mode !== "code") {
+    return failure("AgentRun center mode filter is invalid.", 400, origin);
+  }
+  let projectId: ProjectId | undefined;
+  if (url.searchParams.has("projectId")) {
+    try {
+      projectId = decodeProjectId(url.searchParams.get("projectId") ?? "");
+    } catch {
+      return failure("AgentRun center Project ID is invalid.", 400, origin);
+    }
+  }
+  let providerInstanceId: ProviderInstanceId | undefined;
+  if (url.searchParams.has("providerInstanceId")) {
+    try {
+      providerInstanceId = decodeProviderInstanceId(
+        url.searchParams.get("providerInstanceId") ?? "",
+      );
+    } catch {
+      return failure("AgentRun center provider instance ID is invalid.", 400, origin);
+    }
+  }
+  let parentThreadId: AgentRunParentThreadId | undefined;
+  if (url.searchParams.has("parentThreadId")) {
+    try {
+      parentThreadId = decodeAgentRunParentThreadId(url.searchParams.get("parentThreadId") ?? "");
+    } catch {
+      return failure("AgentRun center parent thread ID is invalid.", 400, origin);
+    }
+  }
+  const rawLimit = url.searchParams.get("limit");
+  const limit = clampCenterLimit(
+    rawLimit === null ? MAX_AGENT_RUN_CENTER_QUERY_LIMIT : Number(rawLimit),
+    MAX_AGENT_RUN_CENTER_QUERY_LIMIT,
+  );
+  if (rawLimit !== null && !Number.isSafeInteger(Number(rawLimit))) {
+    return failure("AgentRun center limit is invalid.", 400, origin);
+  }
+  const cursor = url.searchParams.get("cursor") ?? undefined;
+  const search = url.searchParams.get("search") ?? undefined;
+  let query;
+  try {
+    query = decodeAgentRunCenterQuery({
+      status,
+      mode,
+      ...(projectId === undefined ? {} : { projectId }),
+      ...(providerInstanceId === undefined ? {} : { providerInstanceId }),
+      ...(parentThreadId === undefined ? {} : { parentThreadId }),
+      ...(search === undefined || search.trim().length === 0 ? {} : { search: search.trim() }),
+      limit,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+  } catch {
+    return failure("AgentRun center query is invalid.", 400, origin);
+  }
+
+  const candidates = dependencies.persistence.listCenterCandidates({
+    status: query.status,
+    mode: query.mode,
+    ...(query.projectId === undefined ? {} : { projectId: query.projectId }),
+    ...(query.providerInstanceId === undefined
+      ? {}
+      : { providerInstanceId: query.providerInstanceId }),
+    ...(query.parentThreadId === undefined ? {} : { parentThreadId: query.parentThreadId }),
+    ...(query.search === undefined ? {} : { search: query.search }),
+  });
+  const authorized: AgentRunCenterCandidate[] = [];
+  for (const candidate of candidates) {
+    if (
+      await dependencies.authorizeParentThread({
+        parentThreadId: candidate.run.parentThreadId,
+        windowId,
+      })
+    ) {
+      authorized.push(candidate);
+    }
+  }
+  const page = paginateCenterCandidates(authorized, query.limit, query.cursor);
+  const items = page.items.map((candidate) =>
+    serializeCenterSummary(candidate, dependencies.resolveCenterContext),
+  );
+  return json(
+    {
+      items,
+      ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+    },
+    200,
+    origin,
+  );
+}
+
+function serializeCenterSummary(
+  candidate: AgentRunCenterCandidate,
+  resolveCenterContext: AgentRunRouteDependencies["resolveCenterContext"],
+): AgentRunCenterSummary {
+  const { run, route } = candidate;
+  const context = resolveCenterContext({
+    parentThreadId: run.parentThreadId,
+    mode: run.routingReceipt.mode,
+  });
+  return {
+    runId: run.id,
+    requestId: run.requestId,
+    parentThreadId: run.parentThreadId,
+    parentThreadTitle: context.parentThreadTitle,
+    ...(run.parentRunId === undefined ? {} : { parentRunId: run.parentRunId }),
+    ...(context.childThreadId === undefined ? {} : { childThreadId: context.childThreadId }),
+    mode: run.routingReceipt.mode,
+    ...(run.routingReceipt.projectId === undefined
+      ? {}
+      : { projectId: run.routingReceipt.projectId }),
+    role: run.role,
+    task: run.task,
+    lifecycleStatus: run.lifecycleStatus,
+    executionKind: run.executionKind,
+    authority: run.authority,
+    workspaceKind: workspaceKindForRun(run),
+    usageQuality: run.routingReceipt.usageQuality,
+    route,
+    resultAcknowledgement: run.resultAcknowledgement,
+    ...(run.recoveryReason === undefined ? {} : { recoveryReason: run.recoveryReason }),
+    version: run.version,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
   };
 }
 

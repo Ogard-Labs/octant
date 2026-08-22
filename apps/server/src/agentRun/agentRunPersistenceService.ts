@@ -33,6 +33,10 @@ import {
   MAX_AGENT_RUN_REPLAY_LIMIT,
 } from "./agentRunEventStore";
 import { AgentRunProjection, type AgentRunParentSummaryEntry } from "./agentRunProjection";
+import type {
+  AgentRunCenterCandidate,
+  ListAgentRunCenterCandidatesInput,
+} from "./agentRunProjection";
 
 export interface AgentRunPersistenceServiceOptions {
   readonly store: AgentRunEventStore;
@@ -258,6 +262,12 @@ export class AgentRunPersistenceService {
         const resultText = this.resultText(entry.runId);
         return resultText === undefined ? entry : { ...entry, resultText };
       });
+  }
+
+  listCenterCandidates(
+    input: ListAgentRunCenterCandidatesInput,
+  ): ReadonlyArray<AgentRunCenterCandidate> {
+    return this.#projection.listCenterCandidates(input);
   }
 
   /** The stored reply of a completed run, or `undefined` once it was purged. */
