@@ -97,6 +97,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/agentRun/agentRunWorktreeReceiptPort.ts",
     "Code child isolation adapter used by the creation-command builder's receipt port tests. Product admission now goes through AgentRunWorkspaceService. Remove once those builder tests use admitted workspace grants only.",
   ],
+  [
+    "packages/domain/src/cursorAcpPolicy.ts",
+    "NO-GO residual Cursor ACP connection-check policy kept for cursorAcpPolicy.test.ts and future probe wiring; production runtime/settings paths were removed in OCT-106. Remove once a product caller imports runCursorAcpConnectionCheck or the probe suite is retired.",
+  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */
