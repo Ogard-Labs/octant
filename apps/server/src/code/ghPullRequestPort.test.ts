@@ -413,6 +413,70 @@ describe("GhPullRequestPort.observeReview", () => {
   });
 });
 
+describe("GhPullRequestPort.observeReviewByIdentity", () => {
+  const identityRequest = {
+    owner: "octant",
+    name: "octant",
+    number: 175,
+    maxDiffBytes: 1_048_576,
+  } as const;
+
+  it("observes every read-only section by repository identity without resolving a thread", async () => {
+    const { command, port } = fixture([
+      { exitCode: 0, stdout: detailJson },
+      { exitCode: 0, stdout: diffText },
+    ]);
+
+    await expect(
+      port.observeReviewByIdentity(identityRequest, new AbortController().signal),
+    ).resolves.toEqual({
+      status: "observed",
+      freshness: "fresh",
+      ambiguous: false,
+      staleSections: [],
+      pullRequest: {
+        number: 175,
+        url: pullRequest.url,
+        title: "Delivery notes",
+        state: "open",
+        baseRepository: target.baseRepository,
+        baseBranch: target.baseBranch,
+        headRepository: "",
+        headBranch: "feature/phase-7",
+        author: "octocat",
+        matchesDeliveryBranch: false,
+      },
+      description: "Verified implementation.",
+      diff: diffText,
+      diffTruncated: false,
+      commits: [{ oid: headSha, messageHeadline: "feat: phase 7", author: "octocat" }],
+      files: [{ path: "apps/web/src/code/x.ts", additions: 5, deletions: 1 }],
+      checks: [
+        { name: "web tests", state: "success" },
+        { name: "ci/build", state: "pending" },
+      ],
+      reviews: [{ author: "reviewer", state: "approved", body: "LGTM" }],
+      comments: [{ author: "octocat", body: "Ready." }],
+    });
+
+    const subcommands = vi
+      .mocked(command.run)
+      .mock.calls.map(([arguments_]) => `${arguments_[0]} ${arguments_[1]}`);
+    expect(subcommands).toEqual(["pr view", "pr diff"]);
+  });
+
+  it("returns unavailable when both gh pr view and gh pr diff fail", async () => {
+    const { port } = fixture([
+      { exitCode: 1, stdout: "private failure" },
+      { exitCode: 1, stdout: "" },
+    ]);
+
+    await expect(
+      port.observeReviewByIdentity(identityRequest, new AbortController().signal),
+    ).resolves.toEqual({ status: "unavailable" });
+  });
+});
+
 describe("GhPullRequestPort.merge", () => {
   const confirmation = {
     number: 175,

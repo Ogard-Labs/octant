@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeCodeProjectPullRequestDetailQuery,
+  decodeCodeProjectPullRequestDetailRefreshCommand,
+  decodeCodeProjectPullRequestDetailView,
   decodeCodeProjectPullRequestQuery,
   decodeCodeProjectPullRequestRefreshCommand,
   decodeCodeProjectPullRequestView,
@@ -136,5 +139,111 @@ describe("Code Project pull-request contracts", () => {
         }),
       ).toMatchObject({ freshness: { status: "stale", staleReason } });
     }
+  });
+});
+
+describe("Code Project pull-request detail contracts", () => {
+  const detailQuery = {
+    projectId,
+    repositoryOwner: "octant",
+    repositoryName: "octant",
+    number: 12,
+  };
+  const observedDetail = {
+    state: "observed",
+    freshness: "fresh",
+    ambiguous: false,
+    staleSections: [],
+    number: 12,
+    url: "https://github.com/octant/octant/pull/12",
+    title: "List active pull requests",
+    pullRequestState: "open",
+    baseRepository: "octant/octant",
+    baseBranch: "development",
+    headRepository: "octant",
+    headBranch: "feature/manual-refresh",
+    author: "octocat",
+    matchesDeliveryBranch: false,
+    description: "Verified implementation.",
+    diff: "diff --git a/x b/x\n",
+    diffTruncated: false,
+    commits: [{ oid: "a".repeat(40), messageHeadline: "feat: refresh", author: "octocat" }],
+    files: [{ path: "apps/server/src/x.ts", additions: 5, deletions: 1 }],
+    checks: [{ name: "web tests", state: "success" }],
+    reviews: [{ author: "reviewer", state: "approved", body: "LGTM" }],
+    comments: [{ author: "octocat", body: "Ready." }],
+  } as const;
+
+  it("accepts a cached detail query that cannot secretly refresh GitHub", () => {
+    expect(decodeCodeProjectPullRequestDetailQuery(detailQuery)).toEqual(detailQuery);
+    expect(() =>
+      decodeCodeProjectPullRequestDetailQuery({ ...detailQuery, refresh: true }),
+    ).toThrow();
+    expect(() =>
+      decodeCodeProjectPullRequestDetailQuery({ ...detailQuery, windowId: "win" }),
+    ).toThrow();
+  });
+
+  it("accepts an explicit detail refresh and refuses renderer-authored repository identity", () => {
+    expect(decodeCodeProjectPullRequestDetailRefreshCommand(detailQuery)).toEqual(detailQuery);
+    expect(() =>
+      decodeCodeProjectPullRequestDetailRefreshCommand({
+        ...detailQuery,
+        owner: "octant",
+        credentials: "secret",
+      }),
+    ).toThrow();
+  });
+
+  it("decodes an observed detail with inline description and diff plus linked threads", () => {
+    expect(
+      decodeCodeProjectPullRequestDetailView({
+        version: 1,
+        query: detailQuery,
+        detail: observedDetail,
+        freshness: { status: "fresh", lastSuccessfulRefreshAt: generatedAt },
+        linkedThreads: [{ threadId, title: "Manual refresh" }],
+        generatedAt,
+      }),
+    ).toMatchObject({
+      detail: { state: "observed", matchesDeliveryBranch: false, diffTruncated: false },
+      linkedThreads: [{ threadId }],
+    });
+  });
+
+  it("refuses credential-bearing pull-request URLs and labels empty or unavailable detail", () => {
+    expect(
+      decodeCodeProjectPullRequestDetailView({
+        version: 1,
+        query: detailQuery,
+        detail: { state: "empty" },
+        freshness: { status: "empty" },
+        linkedThreads: [],
+        generatedAt,
+      }),
+    ).toMatchObject({ detail: { state: "empty" } });
+    expect(
+      decodeCodeProjectPullRequestDetailView({
+        version: 1,
+        query: detailQuery,
+        detail: { state: "unavailable" },
+        freshness: { status: "stale", staleReason: "refresh-failed", lastSuccessfulRefreshAt: generatedAt },
+        linkedThreads: [],
+        generatedAt,
+      }),
+    ).toMatchObject({ detail: { state: "unavailable" } });
+    expect(() =>
+      decodeCodeProjectPullRequestDetailView({
+        version: 1,
+        query: detailQuery,
+        detail: {
+          ...observedDetail,
+          url: "https://secret:token@github.com/octant/octant/pull/12",
+        },
+        freshness: { status: "fresh", lastSuccessfulRefreshAt: generatedAt },
+        linkedThreads: [],
+        generatedAt,
+      }),
+    ).toThrow();
   });
 });

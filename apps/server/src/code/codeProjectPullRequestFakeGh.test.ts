@@ -42,6 +42,28 @@ function activeListJson(number: number): string {
   ]);
 }
 
+function detailJson(number: number): string {
+  return JSON.stringify({
+    number,
+    title: `Active ${number}`,
+    state: "OPEN",
+    isDraft: false,
+    body: "Verified implementation.",
+    author: { login: "octocat" },
+    baseRefName: "development",
+    headRefName: "feature/manual-refresh",
+    headRefOid: "a".repeat(40),
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
+    url: `https://github.com/octant/r${number}/pull/${number}`,
+    commits: [{ oid: "a".repeat(40), messageHeadline: "feat: refresh", authors: [{ login: "octocat" }] }],
+    files: [{ path: "apps/server/src/x.ts", additions: 5, deletions: 1 }],
+    statusCheckRollup: [{ __typename: "CheckRun", name: "web tests", status: "COMPLETED", conclusion: "SUCCESS" }],
+    reviews: [{ author: { login: "reviewer" }, state: "APPROVED", body: "LGTM" }],
+    comments: [{ author: { login: "octocat" }, body: "Ready." }],
+  });
+}
+
 describe("fake-gh project pull-request port", () => {
   it("executes zero gh commands on query and only sequential bounded list commands on refresh", async () => {
     const calls: string[][] = [];
@@ -79,6 +101,7 @@ describe("fake-gh project pull-request port", () => {
         ],
       },
       list: port,
+      detail: port,
       threads: { list: async () => [] },
       clock: () => now,
     });
@@ -116,5 +139,57 @@ describe("fake-gh project pull-request port", () => {
             arguments_[1] === "edit"),
       ),
     ).toBe(false);
+  });
+
+  it("executes zero gh commands on detail query and only gh pr view plus gh pr diff on detail refresh", async () => {
+    const calls: string[][] = [];
+    const command: GhCommandPort = {
+      run: vi.fn(async (arguments_) => {
+        calls.push([...arguments_]);
+        if (arguments_[1] === "list") {
+          return { exitCode: 0, stdout: activeListJson(12) } satisfies GhCommandResult;
+        }
+        if (arguments_[1] === "view") {
+          return { exitCode: 0, stdout: detailJson(12) } satisfies GhCommandResult;
+        }
+        if (arguments_[1] === "diff") {
+          return { exitCode: 0, stdout: "diff --git a/x b/x\n" } satisfies GhCommandResult;
+        }
+        return { exitCode: 1, stdout: "" } satisfies GhCommandResult;
+      }),
+    };
+    const port = new GhPullRequestPort({
+      command,
+      resolveTarget: async () => undefined,
+    });
+    const service = new CodeProjectPullRequestService({
+      projects: {
+        bootstrap: async () => ({
+          active: [codeProject({ id: projectA, name: "One", root: "/repos/1" })],
+        }),
+      },
+      remotes: {
+        remotes: async () => [{ name: "origin", fetchUrl: "https://github.com/octant/r1.git" }],
+      },
+      list: port,
+      detail: port,
+      threads: { list: async () => [] },
+      clock: () => now,
+    });
+    const detailQuery = {
+      projectId: projectA,
+      repositoryOwner: "octant",
+      repositoryName: "r1",
+      number: 12,
+    } as const;
+
+    await service.queryDetail(windowId, detailQuery);
+    expect(calls).toEqual([]);
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+    expect(calls.map((arguments_) => `${arguments_[0]} ${arguments_[1]}`)).toEqual([
+      "pr view",
+      "pr diff",
+    ]);
   });
 });

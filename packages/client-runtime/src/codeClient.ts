@@ -6,6 +6,9 @@ import {
   decodeCodeProjectPullRequestQuery,
   decodeCodeProjectPullRequestRefreshCommand,
   decodeCodeProjectPullRequestView,
+  decodeCodeProjectPullRequestDetailQuery,
+  decodeCodeProjectPullRequestDetailRefreshCommand,
+  decodeCodeProjectPullRequestDetailView,
   decodeCodeCommand,
   decodeCodeCommandResult,
   decodeCodeEvidenceContentId,
@@ -41,6 +44,9 @@ import {
   type CodeProjectPullRequestQuery,
   type CodeProjectPullRequestRefreshCommand,
   type CodeProjectPullRequestView,
+  type CodeProjectPullRequestDetailQuery,
+  type CodeProjectPullRequestDetailRefreshCommand,
+  type CodeProjectPullRequestDetailView,
   type CodeBootstrap,
   type CodeCheckoutId,
   type CodeCommand,
@@ -124,6 +130,12 @@ export interface CodeClient {
   refreshProjectPullRequests(
     command: CodeProjectPullRequestRefreshCommand,
   ): Promise<CodeProjectPullRequestView>;
+  queryProjectPullRequestDetail(
+    query: CodeProjectPullRequestDetailQuery,
+  ): Promise<CodeProjectPullRequestDetailView>;
+  refreshProjectPullRequestDetail(
+    command: CodeProjectPullRequestDetailRefreshCommand,
+  ): Promise<CodeProjectPullRequestDetailView>;
   readFollowUp(threadId: CodeThreadId): Promise<CodeThreadFollowUpView>;
   executeFollowUp(command: CodeFollowUpCommand): Promise<CodeThreadFollowUpUpdated>;
   putEvidence(threadId: CodeThreadId, text: string): Promise<CodeEvidenceReference>;
@@ -345,6 +357,42 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           body: JSON.stringify(validated),
         },
         decodeCodeProjectPullRequestView,
+      );
+    },
+    async queryProjectPullRequestDetail(query) {
+      let validated: CodeProjectPullRequestDetailQuery;
+      try {
+        validated = decodeCodeProjectPullRequestDetailQuery(query);
+      } catch {
+        throw invalidProjectPullRequestDetailQuery();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests/detail", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeCodeProjectPullRequestDetailView,
+      );
+    },
+    async refreshProjectPullRequestDetail(command) {
+      let validated: CodeProjectPullRequestDetailRefreshCommand;
+      try {
+        validated = decodeCodeProjectPullRequestDetailRefreshCommand(command);
+      } catch {
+        throw invalidProjectPullRequestDetailRefresh();
+      }
+      return request(
+        fetch,
+        new URL("/api/code/project-pull-requests/detail/refresh", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(validated),
+        },
+        decodeCodeProjectPullRequestDetailView,
       );
     },
     readFollowUp(threadId) {
@@ -1054,6 +1102,20 @@ function invalidProjectPullRequestRefresh(): CodeClientFailure {
   return new CodeClientFailure({
     category: "invalid",
     message: "Code project pull-request refresh is invalid.",
+  });
+}
+
+function invalidProjectPullRequestDetailQuery(): CodeClientFailure {
+  return new CodeClientFailure({
+    category: "invalid",
+    message: "Code project pull-request detail query is invalid.",
+  });
+}
+
+function invalidProjectPullRequestDetailRefresh(): CodeClientFailure {
+  return new CodeClientFailure({
+    category: "invalid",
+    message: "Code project pull-request detail refresh is invalid.",
   });
 }
 

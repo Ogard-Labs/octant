@@ -386,6 +386,78 @@ export class GhPullRequestPort {
   }
 
   /**
+   * Observe every read-only section of one pull request identified by
+   * repository and number. This never mutates GitHub and never resolves a
+   * thread delivery target.
+   */
+  async observeReviewByIdentity(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly number: number;
+      readonly maxDiffBytes: number;
+    },
+    signal: AbortSignal,
+  ): Promise<GhPullRequestReviewResult> {
+    const repository = `${request.owner}/${request.name}`;
+    if (
+      !validRepository(repository) ||
+      !Number.isSafeInteger(request.number) ||
+      request.number <= 0 ||
+      !Number.isSafeInteger(request.maxDiffBytes) ||
+      request.maxDiffBytes < 1
+    ) {
+      return { status: "unavailable" };
+    }
+
+    const staleSections: GhPullRequestReviewSection[] = [];
+    const detail = await this.#viewReviewDetail(repository, request.number, signal);
+    const diff = await this.#reviewDiff(
+      repository,
+      request.number,
+      request.maxDiffBytes,
+      signal,
+    );
+
+    if (detail === undefined) {
+      staleSections.push("description", "commits", "files", "checks", "reviews", "comments");
+    }
+    if (diff === undefined) staleSections.push("diff");
+    if (detail === undefined && diff === undefined) return { status: "unavailable" };
+
+    const url =
+      detail?.url ??
+      `https://github.com/${request.owner}/${request.name}/pull/${request.number}`;
+
+    return {
+      status: "observed",
+      freshness: staleSections.length === 0 ? "fresh" : "stale",
+      ambiguous: staleSections.length > 0,
+      staleSections,
+      pullRequest: {
+        number: request.number,
+        url,
+        title: detail?.title ?? "",
+        state: detail?.state ?? "open",
+        baseRepository: repository,
+        baseBranch: detail?.baseBranch ?? "",
+        headRepository: detail?.headRepository ?? "",
+        headBranch: detail?.headBranch ?? "",
+        author: detail?.author ?? "",
+        matchesDeliveryBranch: false,
+      },
+      description: detail?.description ?? "",
+      diff: diff?.text ?? "",
+      diffTruncated: diff?.truncated ?? false,
+      commits: detail?.commits ?? [],
+      files: detail?.files ?? [],
+      checks: detail?.checks ?? [],
+      reviews: detail?.reviews ?? [],
+      comments: detail?.comments ?? [],
+    };
+  }
+
+  /**
    * List open and draft pull requests for one server-resolved github.com
    * repository. This never mutates GitHub.
    */
@@ -842,9 +914,13 @@ function decodePullRequests(
 }
 
 interface GhPullRequestReviewDetail {
+  readonly url: string;
   readonly title: string;
   readonly state: "open" | "merged" | "closed" | "draft";
   readonly author: string;
+  readonly baseBranch: string;
+  readonly headBranch: string;
+  readonly headRepository: string;
   readonly description: string;
   readonly commits: readonly Readonly<{ oid: string; messageHeadline: string; author: string }>[];
   readonly files: readonly Readonly<{ path: string; additions: number; deletions: number }>[];
@@ -894,10 +970,19 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
         ? "closed"
         : "open";
   const mergePreview = decodeMergePreviewFacts(value);
+  const url = typeof value.url === "string" && value.url.startsWith("https://") ? value.url : "";
+  const baseBranch = typeof value.baseRefName === "string" ? value.baseRefName : "";
+  const headBranch = typeof value.headRefName === "string" ? value.headRefName : "";
+  const headRepository = loginOf(value.headRepositoryOwner);
+  if (url === "" || baseBranch === "" || headBranch === "") return undefined;
   return {
+    url,
     title: clampBytes(value.title, 1_024),
     state,
     author: loginOf(value.author),
+    baseBranch,
+    headBranch,
+    headRepository,
     description: clampBytes(value.body, MAX_PR_DESCRIPTION_BYTES),
     commits: decodeCommits(value.commits),
     files: decodeFiles(value.files),

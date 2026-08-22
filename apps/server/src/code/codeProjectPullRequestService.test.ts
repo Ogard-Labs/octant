@@ -5,7 +5,7 @@ import {
   CodeProjectPullRequestService,
   type CodeProjectPullRequestAuthorizedProject,
 } from "./codeProjectPullRequestService";
-import type { GhActivePullRequestListResult, GhActivePullRequestRow } from "./ghPullRequestPort";
+import type { GhActivePullRequestListResult, GhActivePullRequestRow, GhPullRequestReviewResult } from "./ghPullRequestPort";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 const projectA = decodeProjectId("10000000-0000-4000-8000-000000000001");
@@ -54,6 +54,15 @@ function serviceFixture(options: {
     request: { readonly owner: string; readonly name: string; readonly limit: number },
     signal: AbortSignal,
   ) => Promise<GhActivePullRequestListResult>;
+  readonly detail?: (
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly number: number;
+      readonly maxDiffBytes: number;
+    },
+    signal: AbortSignal,
+  ) => Promise<GhPullRequestReviewResult>;
   readonly journal?: { readonly append: ReturnType<typeof vi.fn> };
 }) {
   const listActive = vi.fn(
@@ -63,6 +72,9 @@ function serviceFixture(options: {
           status: "ok",
           rows: [ghRow()],
         }) satisfies GhActivePullRequestListResult),
+  );
+  const observeReviewByIdentity = vi.fn(
+    options.detail ?? (async () => ({ status: "unavailable" }) satisfies GhPullRequestReviewResult),
   );
   const journal = options.journal ?? { append: vi.fn() };
   const service = new CodeProjectPullRequestService({
@@ -82,6 +94,7 @@ function serviceFixture(options: {
           : []),
     },
     list: { listActive },
+    detail: { observeReviewByIdentity },
     threads: {
       list: async () => [
         {
@@ -94,7 +107,7 @@ function serviceFixture(options: {
     },
     clock: () => now,
   });
-  return { service, listActive, journal };
+  return { service, listActive, observeReviewByIdentity, journal };
 }
 
 describe("CodeProjectPullRequestService", () => {
@@ -358,6 +371,7 @@ describe("CodeProjectPullRequestService", () => {
           rows: [ghRow({ number: request.name === "docs" ? 4 : 12, title: request.name })],
         }),
       },
+      detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
       threads: { list: async () => [] },
       clock: () => now,
     });
@@ -368,5 +382,90 @@ describe("CodeProjectPullRequestService", () => {
     expect(view.projects.map((project) => project.projectName)).toEqual(["Docs"]);
     expect(view.rows.map((row) => row.repositoryName)).toEqual(["docs"]);
     expect(view.rows.some((row) => row.repositoryName === "octant")).toBe(false);
+  });
+
+  const detailQuery = {
+    projectId: projectA,
+    repositoryOwner: "octant",
+    repositoryName: "octant",
+    number: 12,
+  } as const;
+
+  const observedDetail = {
+    status: "observed",
+    freshness: "fresh",
+    ambiguous: false,
+    staleSections: [],
+    pullRequest: {
+      number: 12,
+      url: "https://github.com/octant/octant/pull/12",
+      title: "List active pull requests",
+      state: "open",
+      baseRepository: "octant/octant",
+      baseBranch: "development",
+      headRepository: "octant",
+      headBranch: "feature/manual-refresh",
+      author: "octocat",
+      matchesDeliveryBranch: false,
+    },
+    description: "Verified implementation.",
+    diff: "diff --git a/x b/x\n",
+    diffTruncated: false,
+    commits: [{ oid: "a".repeat(40), messageHeadline: "feat: refresh", author: "octocat" }],
+    files: [{ path: "apps/server/src/x.ts", additions: 5, deletions: 1 }],
+    checks: [{ name: "web tests", state: "success" }],
+    reviews: [{ author: "reviewer", state: "approved", body: "LGTM" }],
+    comments: [{ author: "octocat", body: "Ready." }],
+  } satisfies GhPullRequestReviewResult;
+
+  it("returns authorized detail from cache without invoking GitHub on query", async () => {
+    const { service, observeReviewByIdentity } = serviceFixture({
+      detail: async () => observedDetail,
+    });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+    observeReviewByIdentity.mockClear();
+    const view = await service.queryDetail(windowId, detailQuery);
+
+    expect(observeReviewByIdentity).not.toHaveBeenCalled();
+    expect(view.detail).toMatchObject({
+      state: "observed",
+      number: 12,
+      description: "Verified implementation.",
+      diff: "diff --git a/x b/x\n",
+    });
+    expect(view.linkedThreads).toEqual([{ threadId, title: "Manual refresh" }]);
+    expect(view.freshness).toEqual({ status: "fresh", lastSuccessfulRefreshAt: now });
+  });
+
+  it("keeps the last authorized detail when refresh fails", async () => {
+    let next: GhPullRequestReviewResult = observedDetail;
+    const { service } = serviceFixture({
+      detail: async () => next,
+    });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+    next = { status: "unavailable" };
+    const view = await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+    expect(view.detail).toMatchObject({ state: "observed", title: "List active pull requests" });
+    expect(view.freshness).toEqual({
+      status: "stale",
+      staleReason: "refresh-failed",
+      lastSuccessfulRefreshAt: now,
+    });
+  });
+
+  it("drops cached detail when GitHub authority is revoked", async () => {
+    const { service } = serviceFixture({
+      detail: async () => observedDetail,
+    });
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+    service.revokeGithub();
+
+    const view = await service.queryDetail(windowId, detailQuery);
+    expect(view.detail).toEqual({ state: "unavailable" });
+    expect(JSON.stringify(view)).not.toContain("Verified implementation.");
+    expect(view.freshness).toEqual({ status: "stale", staleReason: "disconnected" });
   });
 });

@@ -1,5 +1,10 @@
 import type {
   CodeProjectPullRequestConnection,
+  CodeProjectPullRequestDetail,
+  CodeProjectPullRequestDetailObserved,
+  CodeProjectPullRequestDetailQuery,
+  CodeProjectPullRequestDetailRefreshCommand,
+  CodeProjectPullRequestDetailView,
   CodeProjectPullRequestFreshness,
   CodeProjectPullRequestQuery,
   CodeProjectPullRequestRefreshCommand,
@@ -11,7 +16,9 @@ import type {
   WindowId,
 } from "@octant/contracts";
 import {
+  decodeCodeProjectPullRequestDetailView,
   decodeCodeProjectPullRequestView,
+  MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DIFF_BYTES,
   UtcTimestamp as UtcTimestampSchema,
 } from "@octant/contracts";
 import { decodeCodeThreadId } from "@octant/contracts/code";
@@ -23,7 +30,11 @@ import {
 } from "@octant/domain/code-project-pull-request-policy";
 import { parseGithubRemote } from "@octant/domain/github-remote-identity";
 import { Schema } from "effect";
-import type { GhActivePullRequestListResult, GhActivePullRequestRow } from "./ghPullRequestPort";
+import type {
+  GhActivePullRequestListResult,
+  GhActivePullRequestRow,
+  GhPullRequestReviewResult,
+} from "./ghPullRequestPort";
 
 const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 
@@ -54,6 +65,18 @@ export interface CodeProjectPullRequestListPort {
   ): Promise<GhActivePullRequestListResult>;
 }
 
+export interface CodeProjectPullRequestDetailPort {
+  observeReviewByIdentity(
+    request: {
+      readonly owner: string;
+      readonly name: string;
+      readonly number: number;
+      readonly maxDiffBytes: number;
+    },
+    signal: AbortSignal,
+  ): Promise<GhPullRequestReviewResult>;
+}
+
 export interface CodeProjectLinkedThreadSource {
   list(windowId: WindowId): Promise<ReadonlyArray<CodeProjectLinkedThreadFact>>;
 }
@@ -65,6 +88,11 @@ interface CachedSnapshot {
   readonly pullRequestsTruncated: boolean;
 }
 
+interface CachedDetail {
+  readonly detail: Extract<CodeProjectPullRequestDetail, { readonly state: "observed" }>;
+  readonly lastSuccessfulRefreshAt: UtcTimestamp;
+}
+
 /**
  * In-memory Project-scoped active pull-request snapshot. Process restart
  * loses it. The journal never sees list or detail rows.
@@ -73,22 +101,27 @@ export class CodeProjectPullRequestService {
   readonly #projects: CodeProjectPullRequestProjectSource;
   readonly #remotes: CodeProjectPullRequestRemoteSource;
   readonly #list: CodeProjectPullRequestListPort;
+  readonly #detail: CodeProjectPullRequestDetailPort;
   readonly #threads: CodeProjectLinkedThreadSource;
   readonly #clock: () => string;
   #cache: CachedSnapshot | undefined;
+  readonly #detailCache = new Map<string, CachedDetail>();
   #freshness: CodeProjectPullRequestFreshness = { status: "empty" };
+  readonly #detailFreshness = new Map<string, CodeProjectPullRequestFreshness>();
   #githubRevoked = false;
 
   constructor(options: {
     readonly projects: CodeProjectPullRequestProjectSource;
     readonly remotes: CodeProjectPullRequestRemoteSource;
     readonly list: CodeProjectPullRequestListPort;
+    readonly detail: CodeProjectPullRequestDetailPort;
     readonly threads: CodeProjectLinkedThreadSource;
     readonly clock?: () => string;
   }) {
     this.#projects = options.projects;
     this.#remotes = options.remotes;
     this.#list = options.list;
+    this.#detail = options.detail;
     this.#threads = options.threads;
     this.#clock = options.clock ?? (() => new Date().toISOString());
   }
@@ -96,6 +129,8 @@ export class CodeProjectPullRequestService {
   revokeGithub(): void {
     this.#githubRevoked = true;
     this.#cache = undefined;
+    this.#detailCache.clear();
+    this.#detailFreshness.clear();
     this.#freshness = { status: "stale", staleReason: "disconnected" };
   }
 
@@ -112,6 +147,89 @@ export class CodeProjectPullRequestService {
       repositoriesTruncated: this.#cache?.repositoriesTruncated ?? false,
       pullRequestsTruncated: this.#cache?.pullRequestsTruncated ?? false,
       freshness: this.#queryFreshness(),
+    });
+  }
+
+  async queryDetail(
+    windowId: WindowId,
+    query: CodeProjectPullRequestDetailQuery,
+  ): Promise<CodeProjectPullRequestDetailView> {
+    const projects = await this.#resolveProjects(windowId);
+    const authorized = this.#authorizedConnection(projects, query);
+    if (authorized === undefined) {
+      return this.#detailView({
+        query,
+        detail: { state: "empty" },
+        freshness: { status: "empty" },
+        linkedThreads: [],
+      });
+    }
+    if (this.#githubRevoked) {
+      return this.#detailView({
+        query,
+        detail: { state: "unavailable" },
+        freshness: this.#detailQueryFreshness(query),
+        linkedThreads: [],
+      });
+    }
+    const cached = this.#detailCache.get(detailKey(query));
+    if (cached === undefined) {
+      return this.#detailView({
+        query,
+        detail: { state: "empty" },
+        freshness: this.#detailFreshness.get(detailKey(query)) ?? { status: "empty" },
+        linkedThreads: [],
+      });
+    }
+    const threads = await this.#threads.list(windowId);
+    return this.#detailView({
+      query,
+      detail: cached.detail,
+      freshness: this.#detailQueryFreshness(query),
+      linkedThreads: this.#linkedThreads(authorized, cached.detail, threads),
+    });
+  }
+
+  async refreshDetail(
+    windowId: WindowId,
+    command: CodeProjectPullRequestDetailRefreshCommand,
+    signal: AbortSignal,
+  ): Promise<CodeProjectPullRequestDetailView> {
+    const projects = await this.#resolveProjects(windowId);
+    const authorized = this.#authorizedConnection(projects, command);
+    if (authorized === undefined || this.#githubRevoked) {
+      return this.queryDetail(windowId, command);
+    }
+
+    const key = detailKey(command);
+    const observed = await this.#detail.observeReviewByIdentity(
+      {
+        owner: command.repositoryOwner,
+        name: command.repositoryName,
+        number: command.number,
+        maxDiffBytes: MAX_CODE_PROJECT_PULL_REQUEST_DETAIL_DIFF_BYTES,
+      },
+      signal,
+    );
+    if (observed.status !== "observed") {
+      return this.#staleDetailView({
+        query: command,
+        authorized,
+        reason: "refresh-failed",
+        windowId,
+      });
+    }
+
+    const detail = this.#observedDetail(observed);
+    const now = decodeUtcTimestamp(this.#clock());
+    this.#detailCache.set(key, { detail, lastSuccessfulRefreshAt: now });
+    this.#detailFreshness.set(key, { status: "fresh", lastSuccessfulRefreshAt: now });
+    const threads = await this.#threads.list(windowId);
+    return this.#detailView({
+      query: command,
+      detail,
+      freshness: { status: "fresh", lastSuccessfulRefreshAt: now },
+      linkedThreads: this.#linkedThreads(authorized, detail, threads),
     });
   }
 
@@ -342,6 +460,142 @@ export class CodeProjectPullRequestService {
       generatedAt: decodeUtcTimestamp(this.#clock()),
     });
   }
+
+  #authorizedConnection(
+    projects: ReadonlyArray<CodeProjectPullRequestConnection>,
+    identity: {
+      readonly projectId: ProjectId;
+      readonly repositoryOwner: string;
+      readonly repositoryName: string;
+    },
+  ):
+    | Extract<CodeProjectPullRequestConnection, { kind: "connected" }>
+    | undefined {
+    const project = projects.find(
+      (entry) => String(entry.projectId) === String(identity.projectId),
+    );
+    if (project === undefined || project.kind !== "connected") return undefined;
+    if (
+      project.repositoryOwner !== identity.repositoryOwner ||
+      project.repositoryName !== identity.repositoryName
+    ) {
+      return undefined;
+    }
+    return project;
+  }
+
+  #detailQueryFreshness(
+    query: CodeProjectPullRequestDetailQuery,
+  ): CodeProjectPullRequestFreshness {
+    if (this.#githubRevoked) {
+      const current = this.#detailFreshness.get(detailKey(query));
+      return {
+        status: "stale",
+        staleReason: "disconnected",
+        ...(current?.lastSuccessfulRefreshAt === undefined
+          ? {}
+          : { lastSuccessfulRefreshAt: current.lastSuccessfulRefreshAt }),
+      };
+    }
+    return this.#detailFreshness.get(detailKey(query)) ?? { status: "empty" };
+  }
+
+  #staleDetailView(input: {
+    readonly query: CodeProjectPullRequestDetailQuery;
+    readonly authorized: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>;
+    readonly reason: CodeProjectPullRequestStaleReason;
+    readonly windowId: WindowId;
+  }): Promise<CodeProjectPullRequestDetailView> {
+    const key = detailKey(input.query);
+    const cached = this.#detailCache.get(key);
+    this.#detailFreshness.set(key, {
+      status: "stale",
+      staleReason: input.reason,
+      ...(cached === undefined ? {} : { lastSuccessfulRefreshAt: cached.lastSuccessfulRefreshAt }),
+    });
+    if (cached === undefined) {
+      return Promise.resolve(
+        this.#detailView({
+          query: input.query,
+          detail: { state: "unavailable" },
+          freshness: this.#detailFreshness.get(key) ?? { status: "stale", staleReason: input.reason },
+          linkedThreads: [],
+        }),
+      );
+    }
+    return this.#threads.list(input.windowId).then((threads) =>
+      this.#detailView({
+        query: input.query,
+        detail: cached.detail,
+        freshness: this.#detailFreshness.get(key) ?? { status: "stale", staleReason: input.reason },
+        linkedThreads: this.#linkedThreads(input.authorized, cached.detail, threads),
+      }),
+    );
+  }
+
+  #observedDetail(
+    observed: Extract<GhPullRequestReviewResult, { readonly status: "observed" }>,
+  ): CodeProjectPullRequestDetailObserved {
+    return {
+      state: "observed",
+      freshness: observed.freshness,
+      ambiguous: observed.ambiguous,
+      staleSections: [...observed.staleSections],
+      number: observed.pullRequest.number,
+      url: observed.pullRequest.url,
+      title: observed.pullRequest.title,
+      pullRequestState: observed.pullRequest.state,
+      baseRepository: observed.pullRequest.baseRepository,
+      baseBranch: observed.pullRequest.baseBranch,
+      headRepository: observed.pullRequest.headRepository,
+      headBranch: observed.pullRequest.headBranch,
+      author: observed.pullRequest.author,
+      matchesDeliveryBranch: false,
+      description: observed.description,
+      diff: observed.diff,
+      diffTruncated: observed.diffTruncated,
+      commits: observed.commits.map((commit) => ({ ...commit })),
+      files: observed.files.map((file) => ({ ...file })),
+      checks: observed.checks.map((check) => ({ ...check })),
+      reviews: observed.reviews.map((review) => ({ ...review })),
+      comments: observed.comments.map((comment) => ({ ...comment })),
+    };
+  }
+
+  #linkedThreads(
+    project: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>,
+    detail: Extract<CodeProjectPullRequestDetail, { readonly state: "observed" }>,
+    threads: ReadonlyArray<CodeProjectLinkedThreadFact>,
+  ) {
+    return matchLinkedThreadsToPullRequest({
+      pullRequest: {
+        repository: { owner: project.repositoryOwner, name: project.repositoryName },
+        number: detail.number,
+        headBranch: detail.headBranch,
+        title: detail.title,
+      },
+      threads,
+    }).map((thread) => ({
+      threadId: decodeCodeThreadId(thread.threadId),
+      title: thread.title,
+    }));
+  }
+
+  #detailView(input: {
+    readonly query: CodeProjectPullRequestDetailQuery;
+    readonly detail: CodeProjectPullRequestDetail;
+    readonly freshness: CodeProjectPullRequestFreshness;
+    readonly linkedThreads: CodeProjectPullRequestDetailView["linkedThreads"];
+  }): CodeProjectPullRequestDetailView {
+    return decodeCodeProjectPullRequestDetailView({
+      version: 1,
+      query: input.query,
+      detail: input.detail,
+      freshness: input.freshness,
+      linkedThreads: input.linkedThreads,
+      generatedAt: decodeUtcTimestamp(this.#clock()),
+    });
+  }
 }
 
 function githubIdentityFromRemotes(
@@ -355,6 +609,15 @@ function githubIdentityFromRemotes(
 
 function repositoryKey(projectId: ProjectId, owner: string, name: string): string {
   return `${String(projectId)}:${owner}/${name}`;
+}
+
+function detailKey(identity: {
+  readonly projectId: ProjectId;
+  readonly repositoryOwner: string;
+  readonly repositoryName: string;
+  readonly number: number;
+}): string {
+  return `${String(identity.projectId)}:${identity.repositoryOwner}/${identity.repositoryName}:${identity.number}`;
 }
 
 function retryAfterTimestamp(
