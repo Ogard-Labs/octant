@@ -57,6 +57,33 @@ describe("SidebarNavigation", () => {
     expect(screen.queryByRole("button", { name: "Threads" })).not.toBeInTheDocument();
   });
 
+  it("renders Artifacts when the library is available and a real handler is present", async () => {
+    const user = userEvent.setup();
+    const openLibrary = vi.fn();
+    render(
+      <SidebarNavigation
+        actions={{ "artifact-library": openLibrary, plugins: vi.fn() }}
+        input={{ ...truthfulInput, artifactLibrary: "available", plugins: "available" }}
+        projectSection={<nav aria-label="Projects">Octant</nav>}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Artifacts" }));
+    expect(openLibrary).toHaveBeenCalledOnce();
+  });
+
+  it("omits Artifacts when the library is unavailable even if a handler exists", () => {
+    render(
+      <SidebarNavigation
+        actions={{ "artifact-library": vi.fn() }}
+        input={{ ...truthfulInput, artifactLibrary: "unavailable" }}
+        projectSection={<nav aria-label="Projects">Octant</nav>}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Artifacts" })).not.toBeInTheDocument();
+  });
+
   it("does not forward the click event to the Chat creation handler", async () => {
     const user = userEvent.setup();
     const createChat = vi.fn<(prompt?: string) => void>();
