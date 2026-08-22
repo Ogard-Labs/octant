@@ -468,9 +468,7 @@ export class CodeProjectPullRequestService {
       readonly repositoryOwner: string;
       readonly repositoryName: string;
     },
-  ):
-    | Extract<CodeProjectPullRequestConnection, { kind: "connected" }>
-    | undefined {
+  ): Extract<CodeProjectPullRequestConnection, { kind: "connected" }> | undefined {
     const project = projects.find(
       (entry) => String(entry.projectId) === String(identity.projectId),
     );
@@ -484,9 +482,7 @@ export class CodeProjectPullRequestService {
     return project;
   }
 
-  #detailQueryFreshness(
-    query: CodeProjectPullRequestDetailQuery,
-  ): CodeProjectPullRequestFreshness {
+  #detailQueryFreshness(query: CodeProjectPullRequestDetailQuery): CodeProjectPullRequestFreshness {
     if (this.#githubRevoked) {
       const current = this.#detailFreshness.get(detailKey(query));
       return {
@@ -518,7 +514,10 @@ export class CodeProjectPullRequestService {
         this.#detailView({
           query: input.query,
           detail: { state: "unavailable" },
-          freshness: this.#detailFreshness.get(key) ?? { status: "stale", staleReason: input.reason },
+          freshness: this.#detailFreshness.get(key) ?? {
+            status: "stale",
+            staleReason: input.reason,
+          },
           linkedThreads: [],
         }),
       );

@@ -701,7 +701,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           requireJsonContentType(request);
           if (dependencies.service.queryProjectPullRequestDetail === undefined) {
             return failureResponse(
-              { category: "unavailable", message: "Code project pull-request detail is unavailable." },
+              {
+                category: "unavailable",
+                message: "Code project pull-request detail is unavailable.",
+              },
               503,
               origin,
             );
@@ -717,7 +720,10 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
           }
           return jsonResponse(
             decodeCodeProjectPullRequestDetailView(
-              await dependencies.service.queryProjectPullRequestDetail(authenticatedWindowId, query),
+              await dependencies.service.queryProjectPullRequestDetail(
+                authenticatedWindowId,
+                query,
+              ),
             ),
             200,
             origin,

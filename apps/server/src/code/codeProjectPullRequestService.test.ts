@@ -5,7 +5,11 @@ import {
   CodeProjectPullRequestService,
   type CodeProjectPullRequestAuthorizedProject,
 } from "./codeProjectPullRequestService";
-import type { GhActivePullRequestListResult, GhActivePullRequestRow, GhPullRequestReviewResult } from "./ghPullRequestPort";
+import type {
+  GhActivePullRequestListResult,
+  GhActivePullRequestRow,
+  GhPullRequestReviewResult,
+} from "./ghPullRequestPort";
 
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000901");
 const projectA = decodeProjectId("10000000-0000-4000-8000-000000000001");

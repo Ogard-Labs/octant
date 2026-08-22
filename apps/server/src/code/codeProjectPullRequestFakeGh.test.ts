@@ -56,9 +56,13 @@ function detailJson(number: number): string {
     mergeable: "MERGEABLE",
     mergeStateStatus: "CLEAN",
     url: `https://github.com/octant/r${number}/pull/${number}`,
-    commits: [{ oid: "a".repeat(40), messageHeadline: "feat: refresh", authors: [{ login: "octocat" }] }],
+    commits: [
+      { oid: "a".repeat(40), messageHeadline: "feat: refresh", authors: [{ login: "octocat" }] },
+    ],
     files: [{ path: "apps/server/src/x.ts", additions: 5, deletions: 1 }],
-    statusCheckRollup: [{ __typename: "CheckRun", name: "web tests", status: "COMPLETED", conclusion: "SUCCESS" }],
+    statusCheckRollup: [
+      { __typename: "CheckRun", name: "web tests", status: "COMPLETED", conclusion: "SUCCESS" },
+    ],
     reviews: [{ author: { login: "reviewer" }, state: "APPROVED", body: "LGTM" }],
     comments: [{ author: { login: "octocat" }, body: "Ready." }],
   });

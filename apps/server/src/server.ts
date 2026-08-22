@@ -1163,9 +1163,7 @@ function withCodeOperationRuntime(
   };
 }
 
-function createProjectPullRequestPorts(
-  ghExecutable: string | undefined,
-): {
+function createProjectPullRequestPorts(ghExecutable: string | undefined): {
   readonly list: CodeProjectPullRequestListPort;
   readonly detail: CodeProjectPullRequestDetailPort;
 } {
@@ -1185,8 +1183,7 @@ function createProjectPullRequestPorts(
         listActive: (request, signal) => port.listActive(request, signal),
       },
       detail: {
-        observeReviewByIdentity: (request, signal) =>
-          port.observeReviewByIdentity(request, signal),
+        observeReviewByIdentity: (request, signal) => port.observeReviewByIdentity(request, signal),
       },
     };
   } catch {

@@ -56,9 +56,7 @@ describe("DockProjectPullRequestReviewTool", () => {
       detailView(),
     );
     const load = vi.fn(async () => detailView());
-    render(
-      <DockProjectPullRequestReviewTool load={load} query={query} refresh={refresh} />,
-    );
+    render(<DockProjectPullRequestReviewTool load={load} query={query} refresh={refresh} />);
     await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     expect(load).not.toHaveBeenCalled();
     expect(await screen.findByText("Adds manual refresh.")).toBeVisible();

@@ -47,7 +47,9 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
           <span>Pull request #{detail.number}</span>
           <h1>{detail.title.length === 0 ? `Pull request #${detail.number}` : detail.title}</h1>
           <p className="code-pr-review__meta">
-            <span className="code-pr-review__badge">{PR_STATE_LABELS[detail.pullRequestState]}</span>
+            <span className="code-pr-review__badge">
+              {PR_STATE_LABELS[detail.pullRequestState]}
+            </span>
             <span>
               {detail.headBranch} → {detail.baseRepository}:{detail.baseBranch}
             </span>
@@ -69,7 +71,12 @@ export function ProjectPullRequestReviewPane(props: ProjectPullRequestReviewPane
             </a>
           )}
           {props.onRefresh === undefined ? null : (
-            <OctantButton onClick={() => props.onRefresh?.()} size="sm" type="button" variant="ghost">
+            <OctantButton
+              onClick={() => props.onRefresh?.()}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
               Refresh detail
             </OctantButton>
           )}

@@ -37,7 +37,8 @@ const uniqueArray = <A, I, R>(schema: Schema.Schema<A, I, R>, maximum: number) =
   Schema.Array(schema).pipe(
     Schema.filter(
       (values) =>
-        values.length <= maximum && new Set(values.map((value) => String(value))).size === values.length,
+        values.length <= maximum &&
+        new Set(values.map((value) => String(value))).size === values.length,
     ),
   );
 const PullRequestUrl = Schema.String.pipe(

@@ -412,12 +412,7 @@ export class GhPullRequestPort {
 
     const staleSections: GhPullRequestReviewSection[] = [];
     const detail = await this.#viewReviewDetail(repository, request.number, signal);
-    const diff = await this.#reviewDiff(
-      repository,
-      request.number,
-      request.maxDiffBytes,
-      signal,
-    );
+    const diff = await this.#reviewDiff(repository, request.number, request.maxDiffBytes, signal);
 
     if (detail === undefined) {
       staleSections.push("description", "commits", "files", "checks", "reviews", "comments");
@@ -426,8 +421,7 @@ export class GhPullRequestPort {
     if (detail === undefined && diff === undefined) return { status: "unavailable" };
 
     const url =
-      detail?.url ??
-      `https://github.com/${request.owner}/${request.name}/pull/${request.number}`;
+      detail?.url ?? `https://github.com/${request.owner}/${request.name}/pull/${request.number}`;
 
     return {
       status: "observed",

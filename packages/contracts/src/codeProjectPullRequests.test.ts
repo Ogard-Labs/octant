@@ -227,7 +227,11 @@ describe("Code Project pull-request detail contracts", () => {
         version: 1,
         query: detailQuery,
         detail: { state: "unavailable" },
-        freshness: { status: "stale", staleReason: "refresh-failed", lastSuccessfulRefreshAt: generatedAt },
+        freshness: {
+          status: "stale",
+          staleReason: "refresh-failed",
+          lastSuccessfulRefreshAt: generatedAt,
+        },
         linkedThreads: [],
         generatedAt,
       }),
