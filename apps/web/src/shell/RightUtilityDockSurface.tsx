@@ -7,13 +7,10 @@ import type {
   RightUtilityDockResolution,
   RightUtilityDockSurfaceDescriptor,
   RightUtilityDockSurfaceId,
-  RightUtilityDockUnavailableReason,
 } from "./rightUtilityDockModel";
 
-function unavailableMessage(reason: RightUtilityDockUnavailableReason): string {
-  return reason === "thread-required"
-    ? "The active pane holds no compatible thread. Focus a thread pane to restore its sidebar tabs."
-    : "The active pane has no compatible Project for this sidebar tab.";
+function unavailableMessage(): string {
+  return "The active pane holds no compatible thread. Focus a thread pane to restore its sidebar tabs.";
 }
 
 export interface RightUtilityDockSurfaceProps {
@@ -23,15 +20,12 @@ export interface RightUtilityDockSurfaceProps {
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
-  readonly navigator: ReactNode;
   readonly onClose?: () => void;
   readonly onCloseTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly onOpenTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly onSelectSurface: (surface: RightUtilityDockSurfaceId) => void;
-  readonly projectMemory: ReactNode;
   readonly resolution: RightUtilityDockResolution;
   readonly sideChat?: ReactNode;
-  readonly summary: ReactNode;
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
@@ -77,7 +71,6 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           />
         )}
       </header>
-      <div className="right-utility-dock__summary">{props.summary}</div>
       <div className="dock-body right-utility-dock__content">
         {props.resolution.kind === "closed" ? (
           <ShellState
@@ -87,14 +80,12 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           />
         ) : props.resolution.kind === "unavailable" ? (
           <ShellState
-            message={unavailableMessage(props.resolution.reason)}
+            message={unavailableMessage()}
             state="neutral"
             title={`${activeSurface?.label ?? "Utility"} has nothing to describe here`}
           />
         ) : (
           {
-            "project-memory": props.projectMemory,
-            navigator: props.navigator,
             "side-chat": props.sideChat,
             browser: props.browser,
             files: props.files,

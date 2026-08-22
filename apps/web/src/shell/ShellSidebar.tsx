@@ -58,6 +58,7 @@ export interface ShellSidebarProps {
     readonly actions: SidebarNavigationProps["actions"];
   };
   readonly onAddFolder: () => void;
+  readonly onOpenNavigator: () => void;
   readonly onOpenSettings: (deepLink?: SettingsDeepLink) => void;
   readonly onSearchQueryChange: (query: string) => void;
   readonly searchQuery: string;
@@ -225,6 +226,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
           </div>
         )}
         <SidebarProfile
+          onOpenNavigator={props.onOpenNavigator}
           onOpenSettings={props.onOpenSettings}
           {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}
           profile={props.settings?.userProfile ?? defaultShellSettings().userProfile}

@@ -160,11 +160,10 @@ server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
 Thread utilities live in the Right Utility Dock outside the split tree. The
-top-right control reveals the dock; its compact summary reports Project memory
-and Navigator state before any tool is opened. Add utility tab opens Side Chat,
-Browser, Files, Changes, Terminal, Tests, Thread tools, or iOS Simulator
-without replacing the active pane. The dock follows the active pane's thread
-and Project, restores that subject's open tabs, and presents an explicit
+top-right control reveals the dock. Add utility tab opens Side Chat, Browser,
+Files, Changes, Terminal, Tests, Thread tools, or iOS Simulator without
+replacing the active pane. The dock follows the active pane's thread and
+Project, restores that subject's open tabs, and presents an explicit
 unavailable state when the newly active pane cannot describe the selected
 tool — never the previous pane's content. At narrow widths the dock becomes an
 overlay drawer. Environment belongs to a thread as a compact header summary
@@ -174,7 +173,10 @@ have server-authoritative thread boards
 Chat has no board. Context usage is a circular used-versus-available meter on
 the active thread's composer; opening it shows an authoritative breakdown
 popover without a further provider call, and Inspect context opens the
-composition inspector for pin, exclude, and rebuild. Zen is a separate
+composition inspector for pin, exclude, and rebuild. Project memory lives on
+every mode's Project Overview. Navigator is one host-owned conversation opened
+as an app-wide popover from the bottom-left profile and Settings control, and
+opening it never changes the active Project or thread. Zen is a separate
 presentation aggregate inside the same window, not a split-tree tab and not a
 fourth authority mode.
 
@@ -187,9 +189,9 @@ header summary with a transient disclosure whose open state is not persisted
 The dock hosts live thread-owned tool instances — Review, Files, Browser,
 Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery, and
 conditional Agents — rather than generic category tabs. Context usage already
-lives on the composer meter. Project memory belongs in Project Overview.
-Navigator is one host-wide chat popover from the bottom-left profile and
-Settings control. Simulator placement is already
+lives on the composer meter. Project memory already lives in Project Overview.
+Navigator is already one host-wide chat popover from the bottom-left profile
+and Settings control. Simulator placement is already
 [0043](decisions/0043-simulator-follows-the-active-thread.md). 0015 remains the
 Accepted implemented shell until that remaining migration is accepted.
 

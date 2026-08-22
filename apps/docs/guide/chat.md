@@ -27,7 +27,7 @@ The active Chat thread's composer shows a circular context-usage meter. Opening 
 
 ## Scoped memory
 
-Chat Projects support shared scoped memory that persists across threads within the same Project. Memory entries include decisions, facts, preferences, summaries, and outcomes. See [Shared Memory](/guide/memory) for details on managing and transferring memory entries.
+Chat Projects support shared scoped memory that persists across threads within the same Project. Memory entries include decisions, facts, preferences, summaries, and outcomes. The Chat Project Overview is where you add, replace, retract, or transfer them. See [Shared Memory](/guide/memory) for details.
 
 ## Unfiled threads
 

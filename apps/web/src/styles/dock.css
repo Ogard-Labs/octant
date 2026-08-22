@@ -144,54 +144,6 @@
   min-width: 176px;
 }
 
-.right-utility-dock__summary {
-  min-width: 0;
-  padding: var(--oct-space-2) var(--oct-space-3) 0;
-}
-
-.right-utility-dock-summary {
-  display: grid;
-  overflow: hidden;
-  background: var(--oct-surface);
-  border: 1px solid var(--octant-border);
-  border-radius: var(--oct-radius-md);
-}
-
-.right-utility-dock-summary__item {
-  display: grid;
-  min-width: 0;
-  min-height: 32px;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: var(--oct-space-3);
-  align-items: center;
-  padding: 0 var(--oct-space-3);
-  color: var(--oct-fg);
-  text-align: left;
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--octant-border);
-  cursor: pointer;
-  font-size: var(--oct-text-xs);
-}
-
-.right-utility-dock-summary__item:last-child {
-  border-bottom: 0;
-}
-
-.right-utility-dock-summary__item:hover,
-.right-utility-dock-summary__item:focus-visible {
-  background: var(--oct-fg-soft);
-}
-
-.right-utility-dock-summary__item > span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--oct-meta);
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* Scroll and padding come from .dock-body. */
 .right-utility-dock__content {
   min-width: 0;
@@ -199,9 +151,12 @@
   overscroll-behavior: contain;
 }
 
-.right-utility-dock__content:has(.project-memory-inspector) {
-  padding: 0;
-  overflow: hidden;
+.navigator-popover {
+  --octant-dialog-width: 480px;
+  --octant-dialog-height: 640px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* Thread utilities are complete work surfaces rather than cards inside the
@@ -277,7 +232,7 @@
   }
 }
 
-/* Navigator: the host-owned dock surface, also embedded by Zen's assistant. */
+/* Navigator: the host-owned conversation, also embedded by Zen's assistant. */
 .navigator-panel {
   display: flex;
   flex-direction: column;

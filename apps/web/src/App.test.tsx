@@ -1,10 +1,13 @@
 import {
   decodeWorkThread,
+  type NavigatorAssistantSnapshot,
   type ShellBootstrap,
   type ProjectBootstrap,
   type ProviderRegistryCommand,
   type ProviderRegistryCommandResult,
+  type UtcTimestamp,
 } from "@octant/contracts";
+import type { NavigatorAssistantClient } from "@octant/client-runtime/navigator-assistant-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
@@ -78,6 +81,39 @@ afterEach(() => {
     // ignore
   }
 });
+
+function navigatorAssistantClient(
+  transcript: NavigatorAssistantSnapshot["transcript"] = [],
+): NavigatorAssistantClient {
+  let current: NavigatorAssistantSnapshot["transcript"] = [...transcript];
+  const timestamp = "2026-08-15T09:00:00.000Z" as UtcTimestamp;
+  const snapshot = (): NavigatorAssistantSnapshot =>
+    ({
+      status: "ready",
+      settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+      threadId: null,
+      transcript: current,
+      defaultProvider: {
+        providerInstanceId: "00000000-0000-4000-8000-00000000b001",
+        modelId: "model-a",
+      },
+      imageInput: "supported",
+      visionReviewer: null,
+    }) as NavigatorAssistantSnapshot;
+  return {
+    snapshot: async () => snapshot(),
+    execute: async (command) => {
+      if (command.kind === "send-message") {
+        current = [
+          ...current,
+          { role: "user", text: command.prompt, createdAt: timestamp },
+          { role: "assistant", text: `Answered: ${command.prompt}`, createdAt: timestamp },
+        ];
+      }
+      return { kind: "message-sent", snapshot: snapshot() };
+    },
+  };
+}
 
 describe("App", () => {
   it("tells the user why a Code draft bound to a vanished Project cannot start, and creates nothing", async () => {
@@ -1406,7 +1442,7 @@ describe("App", () => {
     expect(document.querySelector(".shell")).toHaveStyle({ "--octant-sidebar-width": "320px" });
   });
 
-  it("uses one validated Right Utility Dock host for the Project's own surfaces", async () => {
+  it("shows Project memory on Overview and refuses a restored Project memory dock tab", async () => {
     const user = userEvent.setup();
     const value = projectBootstrap();
     const secondProject = { ...value.active[0]!, id: otherProjectId, name: "Other Repository" };
@@ -1453,23 +1489,81 @@ describe("App", () => {
     );
 
     await openSidebarProject(user, "Octant");
-    await user.click(screen.getByRole("button", { name: "Review Project memory" }));
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findByText("Keep this Project's memory visible.")).toBeVisible();
-    expect(document.querySelectorAll("#right-utility-dock")).toHaveLength(1);
+    const overview = (await screen.findByDisplayValue("Octant")).closest(".project-overview");
+    if (!(overview instanceof HTMLElement)) throw new Error("Expected Octant Overview.");
+    expect(await within(overview).findByText("Keep this Project's memory visible.")).toBeVisible();
+    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     expect(document.querySelector("#environment-hub, #context-sidebar")).toBeNull();
-    // The dock answers for a Project, so it never repeats the thread's own
-    // environment: that lives beside the thread it describes.
-    expect(within(dock).queryByText(readyEnvironment.repositoryRoot)).toBeNull();
-    expect(within(dock).queryByRole("button", { name: "Code environment" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
     expect(projectApi.memory).toHaveBeenCalledWith(projectId);
 
+    vi.mocked(projectApi.memory).mockImplementation(async (requestedProjectId) => ({
+      projectId: requestedProjectId,
+      active: [],
+      history: [],
+    }));
     await openSidebarProject(user, "Other Repository");
-    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
-    expect(document.querySelectorAll("#right-utility-dock")).toHaveLength(1);
-    // The dock follows the active pane: opening another Project re-targets the
-    // open panel to that Project instead of keeping the previous one's memory.
+    const otherOverview = screen.getByDisplayValue("Other Repository").closest(".project-overview");
+    if (!(otherOverview instanceof HTMLElement)) throw new Error("Expected other Overview.");
     await waitFor(() => expect(projectApi.memory).toHaveBeenCalledWith(otherProjectId));
+    expect(within(otherOverview).queryByText("Keep this Project's memory visible.")).toBeNull();
+  });
+
+  it("opens Navigator from the profile control without changing the active Project or thread", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        codeClient={codes()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        navigatorAssistantClient={navigatorAssistantClient([
+          {
+            role: "user",
+            text: "Earlier question",
+            createdAt: "2026-08-15T09:00:00.000Z" as never,
+          },
+        ])}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client({
+          ...codeShellBootstrap(),
+          settings: { ...settingsPastFirstRun(), lastContextSurface: "navigator" },
+        })}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Controller foundation" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: "Navigator" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Navigator" }));
+
+    const navigator = await screen.findByRole("dialog", { name: "Navigator" });
+    expect(navigator).toBeVisible();
+    expect(await within(navigator).findByText("Earlier question")).toBeVisible();
+    expect(within(navigator).getByText("Running on model-a")).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Settings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
+
+    await user.type(within(navigator).getByLabelText("Message Navigator"), "Stay on this thread");
+    await user.click(within(navigator).getByRole("button", { name: "Send to Navigator" }));
+    expect(await within(navigator).findByText("Answered: Stay on this thread")).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Navigator" })).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Navigator" }));
+    expect(await screen.findByRole("dialog", { name: "Navigator" })).toBeVisible();
+    expect(screen.getByText("Answered: Stay on this thread")).toBeVisible();
+    expect(
+      screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
+    ).toBeVisible();
   });
 
   it("opens memory for the invoking Chat Project instead of the globally active split", async () => {
@@ -1571,31 +1665,23 @@ describe("App", () => {
     const alphaOverview = await screen.findByDisplayValue("Project Alpha");
     const alphaProject = alphaOverview.closest(".project-overview");
     if (!(alphaProject instanceof HTMLElement)) throw new Error("Expected Project Alpha overview.");
-    const reviewAlphaMemory = await within(alphaProject).findByRole("button", {
-      name: "Review memory",
-    });
-    vi.mocked(projectApi.memory).mockClear();
-    await user.click(reviewAlphaMemory);
-
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findAllByText("Project Alpha")).toHaveLength(2);
-    await waitFor(() => expect(projectApi.memory).toHaveBeenCalledWith(projectId));
+    const alphaMemory = await within(alphaProject).findByRole("region", { name: "Project memory" });
+    expect(await within(alphaMemory).findByText("Memory 1")).toBeVisible();
 
     const betaOverview = screen.getByDisplayValue("Project Beta").closest(".project-overview");
     if (!(betaOverview instanceof HTMLElement)) throw new Error("Expected Project Beta overview.");
-    await user.click(within(betaOverview).getByRole("button", { name: "Review memory" }));
-
-    expect((await within(dock).findAllByText("Project Beta")).length).toBeGreaterThan(0);
-    expect(within(dock).getByRole("button", { name: "Add memory" })).toBeDisabled();
-    expect(within(dock).queryByText("Memory 1")).not.toBeInTheDocument();
+    const betaMemoryRegion = within(betaOverview).getByRole("region", { name: "Project memory" });
+    expect(within(betaMemoryRegion).queryByText("Memory 1")).not.toBeInTheDocument();
+    expect(within(betaMemoryRegion).getByRole("button", { name: "Add memory" })).toBeDisabled();
 
     betaMemory.resolve({ projectId: otherProjectId, active: [], history: [] } as never);
     await waitFor(() =>
-      expect(within(dock).getByRole("button", { name: "Add memory" })).toBeEnabled(),
+      expect(within(betaMemoryRegion).getByRole("button", { name: "Add memory" })).toBeEnabled(),
     );
+    expect(within(betaMemoryRegion).queryByText("Memory 1")).not.toBeInTheDocument();
   });
 
-  it("re-targets the open dock when clicking into another pane, keeping the selected panel", async () => {
+  it("keeps each Overview's memory with its Project when another pane is activated", async () => {
     const user = userEvent.setup();
     const firstChatProject = {
       id: projectId,
@@ -1676,23 +1762,17 @@ describe("App", () => {
     const alphaOverview = await screen.findByDisplayValue("Project Alpha");
     const alphaProject = alphaOverview.closest(".project-overview");
     if (!(alphaProject instanceof HTMLElement)) throw new Error("Expected Project Alpha overview.");
-    await user.click(await within(alphaProject).findByRole("button", { name: "Review memory" }));
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findAllByText("Project Alpha")).toHaveLength(2);
+    expect(await within(alphaProject).findByRole("heading", { name: "Memory" })).toBeVisible();
 
-    // Clicking anywhere inside the other pane is the activation gesture. The
-    // dock follows the newly active pane's Project while the memory panel and
-    // its open state survive the move — no second "Review memory" is needed,
-    // and none of the previous pane's content leaks into the re-targeted dock.
     await user.click(screen.getByDisplayValue("Project Beta"));
-
-    expect((await within(dock).findAllByText("Project Beta")).length).toBeGreaterThan(0);
-    expect(within(dock).queryByText("Project Alpha")).not.toBeInTheDocument();
-    expect(within(dock).getByRole("button", { name: "Add memory" })).toBeVisible();
+    const betaOverview = screen.getByDisplayValue("Project Beta").closest(".project-overview");
+    if (!(betaOverview instanceof HTMLElement)) throw new Error("Expected Project Beta overview.");
+    expect(within(betaOverview).queryByText("Project Alpha")).not.toBeInTheDocument();
+    expect(within(betaOverview).getByRole("heading", { name: "Memory" })).toBeVisible();
     await waitFor(() => expect(projectApi.memory).toHaveBeenCalledWith(otherProjectId));
   });
 
-  it("empties the memory panel instead of leaking it when the active pane has no Project", async () => {
+  it("does not attribute Overview memory to a pane that holds no Project", async () => {
     const user = userEvent.setup();
     const chatProject = {
       id: projectId,
@@ -1784,19 +1864,16 @@ describe("App", () => {
     const alphaOverview = await screen.findByDisplayValue("Project Alpha");
     const alphaProject = alphaOverview.closest(".project-overview");
     if (!(alphaProject instanceof HTMLElement)) throw new Error("Expected Project Alpha overview.");
-    await user.click(await within(alphaProject).findByRole("button", { name: "Review memory" }));
-    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findByText("Alpha remembers the roadmap.")).toBeVisible();
+    const alphaMemory = await within(alphaProject).findByRole("region", { name: "Project memory" });
+    expect(alphaMemory).toHaveTextContent("Alpha remembers the roadmap.");
 
-    // The thread pane belongs to no Project, so following the activation the
-    // panel has nothing to describe. It must present that as its own state —
-    // never Alpha's memory, which would attribute one Project's memory to a
-    // pane about something else.
     await user.click(screen.getByRole("region", { name: "Workspace pane: Older chat" }));
 
-    expect(await within(dock).findByRole("heading", { name: "No utility open" })).toBeVisible();
-    expect(within(dock).queryByText("Alpha remembers the roadmap.")).not.toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
+    expect(screen.queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
+    expect(alphaMemory).toHaveTextContent("Alpha remembers the roadmap.");
+    expect(
+      screen.getByRole("region", { name: "Workspace pane: Older chat" }),
+    ).not.toHaveTextContent("Alpha remembers the roadmap.");
   });
 
   it("shows a Chat Project one threads list in its Overview and opens a thread from it", async () => {
@@ -1903,12 +1980,12 @@ describe("App", () => {
     ).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await user.click(within(dock).getByRole("button", { name: /^Project memory/ }));
-    expect(await within(dock).findByRole("tab", { name: "Project memory" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(projectApi.memory).toHaveBeenCalledWith(projectId);
+    expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
+    expect(within(dock).queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
+    await user.click(within(dock).getByRole("button", { name: "Add utility tab" }));
+    expect(screen.queryByRole("button", { name: "Project memory" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Navigator" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Context" })).not.toBeInTheDocument();
   });
 
   it("keeps the right sidebar closed after restart until the user opens it", async () => {
@@ -1955,7 +2032,8 @@ describe("App", () => {
     await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(within(dock).getByRole("heading", { name: "No utility open" })).toBeVisible();
-    expect(projectApi.memory).not.toHaveBeenCalled();
+    expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
+    expect(within(dock).queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
   });
 
   it("keeps Project context and the Right Utility Dock on the active split group", async () => {
@@ -2041,17 +2119,23 @@ describe("App", () => {
     );
 
     await openSidebarProject(user, "Octant");
-    const opener = screen.getByRole("button", { name: "Review Project memory" });
-    await user.click(opener);
+    const overview = (await screen.findByDisplayValue("Octant")).closest(".project-overview");
+    if (!(overview instanceof HTMLElement)) throw new Error("Expected Octant Overview.");
+    expect(await within(overview).findByRole("heading", { name: "Memory" })).toBeVisible();
+    expect(screen.queryByRole("dialog", { name: "Project memory" })).toBeNull();
 
-    expect(await screen.findByRole("dialog", { name: "Project memory" })).toBeVisible();
+    const overflow = screen.getByRole("button", { name: "More window actions" });
+    await user.click(overflow);
+    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+
+    expect(await screen.findByRole("dialog", { name: "Right sidebar" })).toBeVisible();
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     expect(document.querySelectorAll(".octant-dialog__backdrop")).toHaveLength(1);
     expect(document.querySelectorAll(".octant-dialog__viewport")).toHaveLength(1);
     expect(document.querySelectorAll(".octant-dialog__popup")).toHaveLength(1);
     await user.keyboard("{Escape}");
-    await waitFor(() => expect(opener).toHaveFocus());
-    expect(screen.queryByRole("dialog", { name: "Project memory" })).toBeNull();
+    await waitFor(() => expect(overflow).toHaveFocus());
+    expect(screen.queryByRole("dialog", { name: "Right sidebar" })).toBeNull();
   });
 
   it("does not disclose Code environment for Chat, Work, or no active Project", async () => {
@@ -2070,7 +2154,7 @@ describe("App", () => {
     await openSidebarProject(user, "Octant");
     expect(screen.getByRole("button", { name: "Open Right sidebar" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open Code environment" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Review Project memory" }));
+    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
     expect(await screen.findByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Code environment" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Chat" }));
@@ -2586,7 +2670,9 @@ describe("App", () => {
       "true",
     );
     await user.keyboard("{Escape}");
-    expect(screen.getByText("Relink required")).toBeVisible();
+    expect(
+      within(screen.getByRole("navigation", { name: "Projects" })).getByText("Relink required"),
+    ).toBeVisible();
     await act(async () => {
       codeBootstrap.resolve(readyCodeBootstrap);
       codeThread.resolve(readyCodeThread);
@@ -2602,8 +2688,9 @@ describe("App", () => {
     ).toBeVisible();
 
     await openSidebarProject(user, "Octant");
-    expect(await screen.findByRole("region", { name: "Workspace pane: Octant" })).toBeVisible();
-    expect(screen.getByRole("alert")).toHaveTextContent("Relink required");
+    const overview = await screen.findByRole("region", { name: "Workspace pane: Octant" });
+    expect(overview).toBeVisible();
+    expect(within(overview).getByText("Relink required")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Choose new root" }));
     expect(hostBridge.selectProjectRoot).toHaveBeenCalledWith("code");
     expect(projectApi.executeProject).toHaveBeenCalledWith({

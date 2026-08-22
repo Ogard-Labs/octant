@@ -1,11 +1,12 @@
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
+import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { FolderPicker } from "./FolderPicker";
-import { ProjectMemoryOpenButton } from "./ProjectMemoryInspector";
+import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
 
 export interface ProjectOverviewProps {
@@ -20,10 +21,13 @@ export interface ProjectOverviewProps {
   readonly folderBrowseClient?: FolderBrowseClient;
   readonly hostBridge?: OctantHostBridge;
   readonly hostId?: string;
+  readonly memoryProjects?: ReadonlyArray<ProjectSummary>;
   readonly onArchive: (projectId: ProjectId) => void;
+  readonly onMemoryChanged?: () => void;
   readonly onRelink: (projectId: ProjectId, receiptId: string) => Promise<boolean>;
   readonly onRename: (projectId: ProjectId, name: string) => Promise<boolean>;
   readonly project: ProjectSummary;
+  readonly projectClient?: ProjectClient;
 }
 
 export function ProjectOverview(props: ProjectOverviewProps) {
@@ -172,10 +176,6 @@ export function ProjectOverview(props: ProjectOverviewProps) {
         </section>
       ) : null}
       <div className="project-overview__actions" aria-label="Project actions">
-        <ProjectMemoryOpenButton
-          {...(props.project.type === "chat" ? { label: "Review memory" } : {})}
-          projectId={props.project.id}
-        />
         {props.project.type !== "chat" && !archived && allowRootRelink ? (
           <OctantButton
             className="project-button"
@@ -208,6 +208,16 @@ export function ProjectOverview(props: ProjectOverviewProps) {
           </OctantButton>
         )}
       </div>
+      {props.projectClient === undefined ? null : (
+        <ProjectMemorySection
+          client={props.projectClient}
+          key={String(props.project.id)}
+          {...(props.onMemoryChanged === undefined ? {} : { onChanged: props.onMemoryChanged })}
+          project={props.project}
+          projects={props.memoryProjects ?? []}
+          {...(connectionStale ? { readOnly: true } : {})}
+        />
+      )}
       {picking &&
       props.folderBrowseClient !== undefined &&
       props.hostId !== undefined &&
