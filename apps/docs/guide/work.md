@@ -29,11 +29,13 @@ Capability-aware workspace surfaces available in Work include:
 - Research with citations and provenance
 - Scoped memory and child agents
 
-The top-right sidebar control reveals Context, Project memory, and Navigator
-status without opening a tool. **Add utility tab** opens Side Chat, Browser, or
-Files in that sidebar instead of replacing the Work thread. The sidebar follows
-the pane that last received pointer or keyboard input and restores that
-thread's open tabs and selected tab when you return to it.
+The active Work thread's composer shows a circular context-usage meter. Opening
+it shows the authoritative used-versus-available breakdown for that thread.
+The top-right sidebar control reveals Project memory and Navigator status
+without opening a tool. **Add utility tab** opens Side Chat, Browser, or Files
+in that sidebar instead of replacing the Work thread. The sidebar follows the
+pane that last received pointer or keyboard input and restores that thread's
+open tabs and selected tab when you return to it.
 
 Work does not expose Code Git/terminal authority. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 

@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { ArrowUp, Square, X } from "lucide-react";
+import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { OctantButton } from "../ui/base/OctantButton";
 
 /**
@@ -148,11 +149,13 @@ function sendRefused(send: ThreadComposerSend): boolean {
 }
 
 function ThreadComposerTrailing(props: { readonly actions: ThreadComposerActions }) {
+  const meter = <ComposerContextMeter />;
   if (props.actions.kind === "send") {
     const { send, discard, sendHidden } = props.actions;
     return (
       <>
         <span className="composer-gap" />
+        {meter}
         {discard === undefined ? null : (
           <OctantButton
             aria-label={discard.ariaLabel}
@@ -182,6 +185,7 @@ function ThreadComposerTrailing(props: { readonly actions: ThreadComposerActions
   const { cellClassName, sending, send, stop, discard, sendHidden } = props.actions;
   return (
     <div className={cellClassName}>
+      {meter}
       {discard === undefined ? null : (
         <OctantButton
           aria-label={discard.ariaLabel}

@@ -14,6 +14,12 @@ Appearance it can present as compact buttons or a dropdown; both use the same
 authoritative command. Chat and Work can be disabled in Settings, while
 Code is always available.
 
+## Context usage
+
+**⌘/Ctrl+Shift+U** opens the active thread composer's context-usage popover.
+The chord is remappable in Settings. Opening the popover does not make a
+further provider or network call.
+
 ## Settings search
 
 Settings search is a keyboard-navigable result list that deep-links to the

@@ -20,7 +20,6 @@ export interface RightUtilityDockSurfaceProps {
   readonly browser?: ReactNode;
   readonly changes?: ReactNode;
   readonly closeButtonRef?: Ref<HTMLButtonElement>;
-  readonly context: ReactNode;
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
@@ -94,7 +93,6 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           />
         ) : (
           {
-            context: props.context,
             "project-memory": props.projectMemory,
             navigator: props.navigator,
             "side-chat": props.sideChat,

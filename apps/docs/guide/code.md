@@ -128,8 +128,10 @@ Code exposes repository-valid engineering surfaces:
 - Browser surfaces
 - Extension-contributed surfaces approved by effective activation policy
 
-The top-right sidebar control reveals Context, Project memory, and Navigator
-status without opening a tool. **Add utility tab** opens Side Chat, Browser,
+The active Code thread's composer shows a circular context-usage meter. Opening
+it shows the authoritative used-versus-available breakdown for that thread.
+The top-right sidebar control reveals Project memory and Navigator status
+without opening a tool. **Add utility tab** opens Side Chat, Browser,
 Files, Changes, Terminal, Tests, Thread tools, or iOS Simulator in that sidebar
 instead of replacing the Code thread. iOS Simulator says when Octant has not
 found an Xcode project or Apple toolchain instead of opening a dead view. The sidebar follows the

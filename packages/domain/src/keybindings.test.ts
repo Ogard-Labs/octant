@@ -91,6 +91,12 @@ describe("matchKeybinding", () => {
     expect(matchKeybinding(bindings, keyEvent("k"), true)).toBeUndefined();
   });
 
+  it("opens context usage on the configured chord", () => {
+    expect(matchKeybinding(bindings, keyEvent("u", { meta: true, shift: true }), true)).toBe(
+      "context-usage",
+    );
+  });
+
   it("runs the override rather than the default once one is set", () => {
     const rebound = resolveKeybindings({ "command-palette": "Alt+Shift+K" });
 

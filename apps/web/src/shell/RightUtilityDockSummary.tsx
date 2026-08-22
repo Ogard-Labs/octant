@@ -1,7 +1,7 @@
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
 export interface RightUtilityDockSummaryItem {
-  readonly id: "context" | "project-memory" | "navigator";
+  readonly id: "project-memory" | "navigator";
   readonly label: string;
   readonly value: string;
 }

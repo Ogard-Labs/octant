@@ -12,6 +12,7 @@
 /** An action a chord can be bound to. Ids are durable: overrides name them. */
 export type OctantKeybindingActionId =
   | "command-palette"
+  | "context-usage"
   | "code-file-search"
   | "code-content-search"
   | "zen-mode"
@@ -37,6 +38,12 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     label: "Open the command palette",
     area: "Shell",
     defaultChord: "Mod+K",
+  },
+  {
+    id: "context-usage",
+    label: "Show context usage",
+    area: "Shell",
+    defaultChord: "Mod+Shift+U",
   },
   { id: "zen-mode", label: "Toggle Zen mode", area: "Shell", defaultChord: "Mod+Shift+Z" },
   {

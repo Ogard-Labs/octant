@@ -7,7 +7,6 @@ import type {
 } from "@octant/contracts/projects";
 
 export type RightUtilityDockSurfaceId =
-  | "context"
   | "project-memory"
   | "navigator"
   | "side-chat"
@@ -127,12 +126,6 @@ export type RightUtilityDockResolution =
  */
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
-    id: "context",
-    label: "Context",
-    modes: ["chat", "work", "code"],
-    scope: "project",
-  },
-  {
     id: "project-memory",
     label: "Project memory",
     modes: ["chat", "work", "code"],
@@ -198,17 +191,16 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
 
 const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSurfaceDescriptor>> =
   {
-    context: RIGHT_UTILITY_DOCK_SURFACES[0],
-    "project-memory": RIGHT_UTILITY_DOCK_SURFACES[1],
-    navigator: RIGHT_UTILITY_DOCK_SURFACES[2],
-    "side-chat": RIGHT_UTILITY_DOCK_SURFACES[3],
-    browser: RIGHT_UTILITY_DOCK_SURFACES[4],
-    files: RIGHT_UTILITY_DOCK_SURFACES[5],
-    changes: RIGHT_UTILITY_DOCK_SURFACES[6],
-    terminal: RIGHT_UTILITY_DOCK_SURFACES[7],
-    tests: RIGHT_UTILITY_DOCK_SURFACES[8],
-    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[9],
-    thread: RIGHT_UTILITY_DOCK_SURFACES[10],
+    "project-memory": RIGHT_UTILITY_DOCK_SURFACES[0],
+    navigator: RIGHT_UTILITY_DOCK_SURFACES[1],
+    "side-chat": RIGHT_UTILITY_DOCK_SURFACES[2],
+    browser: RIGHT_UTILITY_DOCK_SURFACES[3],
+    files: RIGHT_UTILITY_DOCK_SURFACES[4],
+    changes: RIGHT_UTILITY_DOCK_SURFACES[5],
+    terminal: RIGHT_UTILITY_DOCK_SURFACES[6],
+    tests: RIGHT_UTILITY_DOCK_SURFACES[7],
+    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[8],
+    thread: RIGHT_UTILITY_DOCK_SURFACES[9],
   };
 
 export function resolveRightUtilityDockSurface(
@@ -273,7 +265,6 @@ function hasBinding(binding: CanonicalProjectBinding | undefined): boolean {
 
 function isRightUtilityDockSurfaceId(value: unknown): value is RightUtilityDockSurfaceId {
   return [
-    "context",
     "project-memory",
     "navigator",
     "side-chat",
