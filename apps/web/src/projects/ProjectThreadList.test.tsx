@@ -9,6 +9,14 @@ const thread = {
   provider: { displayName: "Claude", driverKind: "claude" },
 } as const;
 
+function threadRow() {
+  const row = document.querySelector('[data-thread-id="thread-one"]');
+  if (!(row instanceof HTMLElement)) {
+    throw new Error("Missing thread row.");
+  }
+  return row;
+}
+
 describe("ProjectThreadRows", () => {
   it("names a thread's provider and leaves its model off the row", () => {
     render(
@@ -41,7 +49,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await userEvent.pointer({
-      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      target: threadRow(),
       keys: "[MouseRight]",
     });
     await userEvent.click(await screen.findByRole("menuitem", { name: "Pin" }));
@@ -56,7 +64,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await userEvent.pointer({
-      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      target: threadRow(),
       keys: "[MouseRight]",
     });
     await userEvent.click(await screen.findByRole("menuitem", { name: "Pin in pane" }));
@@ -76,7 +84,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await userEvent.pointer({
-      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      target: threadRow(),
       keys: "[MouseRight]",
     });
     await userEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
@@ -100,7 +108,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await userEvent.pointer({
-      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      target: threadRow(),
       keys: "[MouseRight]",
     });
 
@@ -123,7 +131,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await userEvent.pointer({
-      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      target: threadRow(),
       keys: "[MouseRight]",
     });
 
@@ -146,7 +154,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await userEvent.pointer({
-      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      target: threadRow(),
       keys: "[MouseRight]",
     });
 
@@ -169,7 +177,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await userEvent.pointer({
-      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      target: threadRow(),
       keys: "[MouseRight]",
     });
 
@@ -191,7 +199,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await userEvent.pointer({
-      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      target: threadRow(),
       keys: "[MouseRight]",
     });
     await userEvent.click(await screen.findByRole("menuitem", { name: "Export…" }));
@@ -209,7 +217,7 @@ describe("ProjectThreadRows", () => {
     );
 
     await userEvent.pointer({
-      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      target: threadRow(),
       keys: "[MouseRight]",
     });
 
@@ -221,10 +229,36 @@ describe("ProjectThreadRows", () => {
     render(<ProjectThreadRows onSelectThread={vi.fn()} threads={[thread]} />);
 
     await userEvent.pointer({
-      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      target: threadRow(),
       keys: "[MouseRight]",
     });
 
     expect(screen.queryByRole("menuitem")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Thread actions for Controller foundation" }),
+    ).toBeNull();
+  });
+
+  it("opens thread actions from a keyboard-reachable menu without exposing identifiers", async () => {
+    const onPinThread = vi.fn();
+    const onSelectThread = vi.fn();
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread }}
+        onSelectThread={onSelectThread}
+        threads={[thread]}
+      />,
+    );
+
+    const menu = screen.getByRole("button", { name: "Thread actions for Controller foundation" });
+    menu.focus();
+    await userEvent.keyboard("{ArrowDown}");
+    expect(await screen.findByRole("menuitem", { name: "Pin" })).toBeVisible();
+    expect(screen.queryByRole("menuitem", { name: "Copy thread ID" })).toBeNull();
+    expect(screen.queryByText(thread.threadId)).toBeNull();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+
+    expect(onPinThread).toHaveBeenCalledWith("thread-one", true);
+    expect(onSelectThread).not.toHaveBeenCalled();
   });
 });

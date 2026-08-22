@@ -2,7 +2,7 @@
    Octant design system
    Every colour, size, and duration in this file comes from a token
    declared in the two :root blocks. Nothing below them declares a raw
-   colour. See DESIGN.md for the rules.
+   colour. See docs/DESIGN.md for the product-shell language.
    ══════════════════════════════════════════════════════════════════════ */
 
 /* ─── display face ────────────────────────────────────────────────────

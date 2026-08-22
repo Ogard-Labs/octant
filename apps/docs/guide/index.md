@@ -29,13 +29,15 @@ Welcome to the Octant guide. Use these pages to install the app, configure provi
 
 ## Workspace shell
 
-The window is mode-first: Chat, Work, and Code in the sidebar, a central
-workspace, and an optional right dock. A workspace pane holds one surface —
-the thread you are reading, a Project overview, a board, or a welcome — and
-the sidebar is how you switch. Same-authority threads can be pinned or dropped
-into split panes; the active pane is marked, and the right dock follows that
-pane's thread and Project. Work and Code have server-derived thread boards;
-Chat has no board.
+The window is a calm project-first workspace: Chat, Work, and Code in the
+sidebar, then New thread, Thread board, and Pull requests as the mode allows,
+then Projects and their threads. Agents, Automations, Artifacts, Plugins,
+Navigator, and Settings live in the bottom-left app menu. A workspace pane
+holds one surface — the thread you are reading, a Project overview, a board,
+or a welcome — and the sidebar is how you switch. Same-authority threads can
+be pinned or dropped into split panes; the active pane is marked, and the
+right dock follows that pane's thread and Project. Work and Code have
+server-derived thread boards; Chat has no board.
 
 An approved later interaction model is recorded in the architecture decision
 records and is **not** what the app renders today for remaining dock

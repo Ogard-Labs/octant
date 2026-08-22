@@ -29,4 +29,9 @@ describe("right sidebar tool launcher", () => {
     expect(onOpen).toHaveBeenCalledWith("ios-simulator");
     expect(trigger).toHaveFocus();
   });
+
+  it("omits Add tool when no tools remain to open", () => {
+    render(<DockUtilityLauncher onOpen={vi.fn()} surfaces={[]} />);
+    expect(screen.queryByRole("button", { name: "Add tool" })).not.toBeInTheDocument();
+  });
 });

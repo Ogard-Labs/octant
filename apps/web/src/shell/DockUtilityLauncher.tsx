@@ -29,12 +29,13 @@ export function DockUtilityLauncher(props: DockUtilityLauncherProps) {
     trigger.current?.focus();
   }
 
+  if (props.surfaces.length === 0) return null;
+
   return (
     <span className="dock-utility-launcher">
       <IconButton
         aria-controls={disclosureId}
         aria-expanded={open}
-        disabled={props.surfaces.length === 0}
         icon={Plus}
         label="Add tool"
         onClick={() => setOpen((current) => !current)}

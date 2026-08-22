@@ -1,13 +1,4 @@
-import {
-  Blocks,
-  Bot,
-  Code2,
-  GitPullRequest,
-  Kanban,
-  Library,
-  MessageSquarePlus,
-  Users,
-} from "lucide-react";
+import { Code2, GitPullRequest, Kanban, MessageSquarePlus } from "lucide-react";
 import type { ReactNode } from "react";
 import {
   buildSidebarNavigation,
@@ -68,14 +59,6 @@ function navigationIcon(id: SidebarNavigationDescriptorId) {
       return Code2;
     case "new-work-thread":
       return MessageSquarePlus;
-    case "automations":
-      return Bot;
-    case "agents":
-      return Users;
-    case "plugins":
-      return Blocks;
-    case "artifact-library":
-      return Library;
     case "thread-board":
       return Kanban;
     case "pull-requests":

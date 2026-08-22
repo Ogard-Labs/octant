@@ -58,7 +58,7 @@ describe("the right sidebar surface", () => {
     expect(onSelectSurface).toHaveBeenCalledWith("terminal");
     await user.click(screen.getByRole("button", { name: "Hide Browser" }));
     expect(onCloseTab).toHaveBeenCalledWith("browser");
-    expect(screen.getByRole("button", { name: "Add tool" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Add tool" })).not.toBeInTheDocument();
   });
 
   it("moves between tools from the keyboard without leaving the strip", async () => {

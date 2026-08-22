@@ -15,4 +15,18 @@ describe("AgentModeWelcome", () => {
     expect(screen.getByText("Select a confined folder on this Mac.")).toBeVisible();
     expect(screen.queryByText(/repository/i)).not.toBeInTheDocument();
   });
+
+  it("omits Open harness until a provider is ready rather than showing a dead card", () => {
+    render(
+      <AgentModeWelcome
+        mode="work"
+        onAddFolder={vi.fn()}
+        onOpenDraft={vi.fn()}
+        providerReady={false}
+      />,
+    );
+
+    expect(screen.getByText("Add folder")).toBeVisible();
+    expect(screen.queryByText("Open harness")).not.toBeInTheDocument();
+  });
 });

@@ -162,7 +162,8 @@ redesigns.
 
 The approved migration of pane, dock, Environment, and tool placement is 0041,
 0042, and 0044. This record remains the implemented shell until that
-migration is accepted.
+migration is accepted. 0045 specializes the sidebar destination grammar
+without changing layout, the split tree, or authority.
 
 - 0003 Product modes and authority
 - 0010 Secure file preview and canvas artifacts
@@ -170,3 +171,4 @@ migration is accepted.
 - 0041 Panes hold one surface; the sidebar is the only switcher
 - 0042 Environment is a transient disclosure
 - 0044 The dock hosts live thread-owned tools
+- 0045 Sidebar is a calm project-first workspace

@@ -43,46 +43,36 @@ describe("SidebarNavigation", () => {
       />,
     );
 
-    for (const label of ["New thread", "Automations", "Plugins", "Thread board", "Pull requests"]) {
+    for (const label of ["New thread", "Thread board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     expect(actions["new-code-thread"]).toHaveBeenCalledOnce();
-    expect(actions.automations).toHaveBeenCalledOnce();
-    expect(actions.plugins).toHaveBeenCalledOnce();
+    expect(actions.automations).not.toHaveBeenCalled();
+    expect(actions.plugins).not.toHaveBeenCalled();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(actions["pull-requests"]).toHaveBeenCalledOnce();
     expect(screen.getByRole("button", { name: "New thread" })).toHaveClass("sidebar-item");
+    expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Agents" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Artifacts" })).not.toBeInTheDocument();
     // Search is a mode-switcher icon and thread rows nest under Projects, so
     // neither is a navigation row here.
     expect(screen.queryByRole("button", { name: "Search" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Threads" })).not.toBeInTheDocument();
   });
 
-  it("renders Artifacts when the library is available and a real handler is present", async () => {
-    const user = userEvent.setup();
-    const openLibrary = vi.fn();
+  it("keeps Artifacts off the permanent sidebar even when the library is available", () => {
     render(
       <SidebarNavigation
-        actions={{ "artifact-library": openLibrary, plugins: vi.fn() }}
+        actions={{ "artifact-library": vi.fn(), plugins: vi.fn() }}
         input={{ ...truthfulInput, artifactLibrary: "available", plugins: "available" }}
         projectSection={<nav aria-label="Projects">Octant</nav>}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Artifacts" }));
-    expect(openLibrary).toHaveBeenCalledOnce();
-  });
-
-  it("omits Artifacts when the library is unavailable even if a handler exists", () => {
-    render(
-      <SidebarNavigation
-        actions={{ "artifact-library": vi.fn() }}
-        input={{ ...truthfulInput, artifactLibrary: "unavailable" }}
-        projectSection={<nav aria-label="Projects">Octant</nav>}
-      />,
-    );
-
     expect(screen.queryByRole("button", { name: "Artifacts" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
   });
 
   it("does not forward the click event to the Chat creation handler", async () => {
@@ -103,30 +93,30 @@ describe("SidebarNavigation", () => {
 
   it("renders only model descriptors backed by real handlers and content", async () => {
     const user = userEvent.setup();
-    const onPlugins = vi.fn();
+    const onBoard = vi.fn();
     render(
       <SidebarNavigation
-        actions={{ plugins: onPlugins }}
-        input={{ ...truthfulInput, plugins: "available" }}
+        actions={{ "thread-board": onBoard, plugins: vi.fn() }}
+        input={{ ...truthfulInput, threadBoard: "available", plugins: "available" }}
         projectAction={<button type="button">New Code Project</button>}
         projectSection={<nav aria-label="Projects">Octant</nav>}
       />,
     );
 
-    const plugins = screen.getByRole("button", { name: "Plugins" });
+    const board = screen.getByRole("button", { name: "Thread board" });
     const createProject = screen.getByRole("button", { name: "New Code Project" });
     const projects = screen.getByRole("navigation", { name: "Projects" });
-    expect(plugins.compareDocumentPosition(createProject)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(board.compareDocumentPosition(createProject)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(createProject.compareDocumentPosition(projects)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(screen.queryByRole("button", { name: /new thread/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /thread board/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /pull requests/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /automations/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
 
-    plugins.focus();
-    expect(plugins).toHaveFocus();
+    board.focus();
+    expect(board).toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(onPlugins).toHaveBeenCalledOnce();
+    expect(onBoard).toHaveBeenCalledOnce();
   });
 
   it.each(["disabled", "unavailable", "unauthorized"] as const)(
@@ -180,8 +170,9 @@ describe("SidebarNavigation", () => {
     );
 
     expect(screen.getByRole("button", { name: "New chat" })).toHaveClass("sidebar-item");
-    // Plugins reach Chat too; boards and a second thread list do not.
-    expect(screen.getByRole("button", { name: "Plugins" })).toBeVisible();
+    // Plugins reach Chat through the app menu; boards and a second thread list
+    // do not belong here.
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /thread board/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("navigation", { name: "Recent chats" })).not.toBeInTheDocument();
   });

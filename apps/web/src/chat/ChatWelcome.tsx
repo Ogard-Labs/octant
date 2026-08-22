@@ -163,27 +163,29 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         <p className="draft-thread__hint">
           Press Enter to start · Shift+Enter for a new line · Starts unfiled until you add a Project
         </p>
-        <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
-          {starterIdeas.map((idea) => {
-            const Icon = idea.icon;
-            return (
-              <OctantButton
-                disabled={!ready || props.creating}
-                key={idea.label}
-                onClick={() => {
-                  setPrompt(idea.prompt);
-                  textareaRef.current?.focus();
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
-                {idea.label}
-              </OctantButton>
-            );
-          })}
-        </div>
+        {ready ? (
+          <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
+            {starterIdeas.map((idea) => {
+              const Icon = idea.icon;
+              return (
+                <OctantButton
+                  disabled={props.creating}
+                  key={idea.label}
+                  onClick={() => {
+                    setPrompt(idea.prompt);
+                    textareaRef.current?.focus();
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <Icon aria-hidden="true" size={14} strokeWidth={1.7} />
+                  {idea.label}
+                </OctantButton>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
     </section>
   );

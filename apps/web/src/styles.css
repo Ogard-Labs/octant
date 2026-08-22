@@ -999,14 +999,13 @@ button:focus-visible {
   margin-top: 2px;
 }
 
-/* Nested threads keep the header's left edge: the header's chevron gutter plus
-   its gap equals the dot plus the row gap, so thread titles line up under the
-   Project's name with no extra indent. */
+/* Nested threads sit one step inside the folder they belong to, so the tree
+   reads as folder then child rather than two rows of the same rank. */
 .project-threads {
   display: grid;
   gap: 2px;
   margin: 2px 0 0;
-  padding-left: 0;
+  padding-left: 16px;
 }
 
 /* The container carries the system's .sidebar-section label treatment; the h2
@@ -1040,7 +1039,7 @@ button:focus-visible {
   display: flex;
   align-items: center;
   gap: 2px;
-  opacity: 0;
+  opacity: 0.7;
   transition: opacity 120ms ease;
 }
 
@@ -1166,12 +1165,9 @@ button:focus-visible {
   height: 24px;
   min-height: 0;
   padding: 0;
-  opacity: 0;
+  opacity: 0.7;
 }
 
-/* Reveal follows the pointer and focus only. The active row used to keep its
-   controls on permanently, which put a menu and an edit button on screen at
-   all times for the one row a user looks at most. */
 .project-row:hover .project-row__action--icon,
 .project-row:focus-within .project-row__action--icon,
 .project-row__action--icon:has([aria-expanded="true"]),
@@ -1256,6 +1252,12 @@ button:focus-visible {
 .sidebar-profile__action:hover {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
+}
+
+.sidebar-profile__separator {
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--octant-border);
 }
 
 .shell-icon-button {
@@ -2145,14 +2147,14 @@ button:focus-visible {
   display: grid;
   width: min(100%, 440px);
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 10px 12px;
+  gap: 8px 10px;
   align-items: start;
-  padding: 18px;
+  padding: 10px 0;
   text-align: left;
 }
 
 .workspace-pane__panel > .shell-state {
-  margin: clamp(36px, 8vh, 72px) clamp(28px, 6vw, 72px);
+  margin: clamp(16px, 4vh, 32px) clamp(16px, 4vw, 32px);
 }
 
 .shell-state__icon {
@@ -2187,9 +2189,9 @@ button:focus-visible {
 
 .shell-state__title {
   margin: 0;
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.01em;
 }
 
 .shell-state p {
