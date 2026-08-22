@@ -62,6 +62,11 @@ describe("authenticated product route dispatch", () => {
         new Request("https://octant.example/api/code/board", { method: "POST" }),
       ),
     ).toBe("project.overview.read");
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/work/board", { method: "POST" }),
+      ),
+    ).toBe("project.overview.read");
     // Local servers is its own catalogued authority, not a Code turn.
     expect(
       classifyProductAction(

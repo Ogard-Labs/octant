@@ -8,6 +8,7 @@ import {
   type DiscoveryCandidate,
   LOCAL_TOOL_HOST_ID,
   type AppleRpcEnvelope,
+  decodeAgentRunParentThreadId,
   decodeChatThreadId,
   decodeCodeCheckoutId,
   decodeCodeCheckoutIdentity,
@@ -85,6 +86,12 @@ import {
   hydrateWorkThreadProjectionFromJournal,
 } from "./work/workThreadProjection";
 import { WorkThreadService } from "./work/workThreadService";
+import {
+  boardRuntimeActivityFromTurnsAndSignals,
+  composeWorkBoardEvidence,
+  WorkThreadBoardService,
+  type WorkBoardThread,
+} from "./work/workThreadBoardService";
 import {
   WorkTurnProjection,
   hydrateWorkTurnProjectionFromJournal,
@@ -492,6 +499,7 @@ import {
   defaultAgentRunAuthorityCeilingForMode,
   defaultShellSettings,
   formatThreadMentionContext,
+  isAgentRunActiveStatus,
   THREAD_MENTION_UNREADABLE_CONTEXT,
   listHosts,
   resolveAgentRunLiveParentGrant,
@@ -4030,11 +4038,6 @@ export function startOctantServer(
           }),
         ),
     });
-    const workThreadRoutes = createWorkThreadRouteHandler({
-      service: workThreadServiceWithWorkflows,
-      windowAuthorityStore,
-      maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-    });
     const workTurnRoutes = createWorkTurnRouteHandler({
       service: workTurnService,
       windowAuthorityStore,
@@ -5113,6 +5116,92 @@ export function startOctantServer(
     });
     const workRequestRoutes = createWorkRequestRouteHandler({
       service: workRequestApplication,
+      windowAuthorityStore,
+      maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+    });
+    const workThreadRoutes = createWorkThreadRouteHandler({
+      service: {
+        bootstrap: (windowId) => workThreadServiceWithWorkflows.bootstrap(windowId),
+        execute: (windowId, command) => workThreadServiceWithWorkflows.execute(windowId, command),
+        queryBoard: async (windowId, query) => {
+          const bootstrap = await workThreadServiceWithWorkflows.bootstrap(windowId);
+          const projects = await projectService.bootstrap(windowId);
+          const projectById = new Map(
+            projects.active.map((project) => [String(project.id), project] as const),
+          );
+          const boardThreads: WorkBoardThread[] = bootstrap.threads
+            .filter((thread) => thread.lifecycle !== "archived")
+            .map((thread) => {
+              const project = projectById.get(String(thread.projectId));
+              const currentRevisionId =
+                project !== undefined && project.type === "work"
+                  ? project.bindingRevisionId
+                  : undefined;
+              return {
+                thread,
+                project: { id: thread.projectId, name: project?.name ?? thread.title },
+                projectProjectionPresent: project !== undefined,
+                bindingRevisionCurrent:
+                  thread.bindingRevisionId === undefined ||
+                  (currentRevisionId !== undefined &&
+                    String(currentRevisionId) === String(thread.bindingRevisionId)),
+                followUp: false,
+              };
+            });
+          const board = new WorkThreadBoardService({
+            threads: { list: () => boardThreads },
+            evidence: {
+              forThread: (entry) =>
+                composeWorkBoardEvidence({
+                  turns: workTurnProjection.listForThread(entry.thread.id),
+                  pendingRequests: workRequestService.listForThread(
+                    entry.thread.projectId,
+                    entry.thread.id,
+                  ),
+                  artifacts: [...workArtifactProjection.snapshot().values()].filter(
+                    (artifact) =>
+                      String(artifact.projectId) === String(entry.thread.projectId) &&
+                      !artifact.deleted,
+                  ),
+                  citations: [...workResearchProjection.snapshot().values()]
+                    .filter(
+                      (brief) => String(brief.brief.projectId) === String(entry.thread.projectId),
+                    )
+                    .flatMap((brief) => [...brief.sources.values()]),
+                  goal: goalService.read(String(entry.thread.id)).goal,
+                  childRuns: persistence.agentRunProjection.parentSummary(
+                    decodeAgentRunParentThreadId(String(entry.thread.id)),
+                  ),
+                }),
+            },
+            runtime: {
+              observe: (threadId) => {
+                const thread = workThreadProjection.read(threadId);
+                const pending = thread
+                  ? workRequestService
+                      .listForThread(thread.projectId, threadId)
+                      .some((request) => request.status === "pending")
+                  : false;
+                const childRuns = persistence.agentRunProjection.parentSummary(
+                  decodeAgentRunParentThreadId(String(threadId)),
+                );
+                return boardRuntimeActivityFromTurnsAndSignals({
+                  turns: workTurnProjection.listForThread(threadId),
+                  pendingRequest: pending,
+                  childActive: childRuns.filter(
+                    (run) =>
+                      isAgentRunActiveStatus(run.lifecycleStatus) &&
+                      run.lifecycleStatus !== "waiting",
+                  ).length,
+                  childWaiting: childRuns.filter((run) => run.lifecycleStatus === "waiting").length,
+                });
+              },
+            },
+            clock: () => new Date().toISOString(),
+          });
+          return board.query(query);
+        },
+      },
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });

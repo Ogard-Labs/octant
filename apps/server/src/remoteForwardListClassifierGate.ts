@@ -26,6 +26,7 @@ const PRODUCT_PROBES = [
   { path: "/api/chat/commands", method: "POST" },
   { path: "/api/chat/attachments", method: "POST" },
   { path: "/api/code/board", method: "POST" },
+  { path: "/api/work/board", method: "POST" },
   { path: "/api/code/evidence", method: "PUT" },
   { path: "/api/code/local-servers/commands", method: "POST" },
   { path: "/api/providers/bootstrap", method: "GET" },
