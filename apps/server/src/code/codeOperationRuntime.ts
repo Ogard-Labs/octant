@@ -1346,7 +1346,6 @@ function createPullRequestPort(options: CodeOperationRuntimeOptions): CodeOperat
   const unavailable: CodeOperationPullRequestPort = {
     ensure: async () => ({ status: "unavailable" as const }),
     observeReview: async () => ({ status: "unavailable" as const }),
-    merge: async () => ({ status: "unavailable" as const }),
   };
   if (options.ghExecutable === undefined) return unavailable;
   try {

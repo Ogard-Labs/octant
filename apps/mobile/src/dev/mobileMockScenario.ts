@@ -495,12 +495,6 @@ function pullRequestReview(operationId: string) {
     ],
     reviews: [{ author: "reviewer", state: "approved", body: "Ready for device QA." }],
     comments: [{ author: "octocat", body: "Mock review pass complete." }],
-    mergePreview: {
-      headSha: "a".repeat(40),
-      mergeable: true,
-      requiredChecksPassing: false,
-      advertisedMergeMethods: ["squash"],
-    },
   } as const;
 }
 

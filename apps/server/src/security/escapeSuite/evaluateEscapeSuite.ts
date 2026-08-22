@@ -46,7 +46,7 @@ export interface EscapeSuiteCaseRow {
   readonly componentKind?: string;
   readonly declaredCapabilities?: ReadonlyArray<string>;
   readonly action?: string;
-  readonly operation?: "push" | "create-pr" | "merge-pr" | "read" | "edit";
+  readonly operation?: "push" | "create-pr" | "read" | "edit";
 }
 
 export interface EscapeSuiteCaseFile {

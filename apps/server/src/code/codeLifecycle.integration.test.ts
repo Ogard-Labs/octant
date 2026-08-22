@@ -348,7 +348,6 @@ function makeRuntime(journal: Journal, checkoutRoot: string, headOid: string) {
     pullRequestPort: {
       ensure: ensurePullRequest,
       observeReview: async () => ({ status: "unavailable" as const }),
-      merge: async () => ({ status: "unavailable" as const }),
     },
     reviewFiles: { resolve: () => undefined },
     evidence: {

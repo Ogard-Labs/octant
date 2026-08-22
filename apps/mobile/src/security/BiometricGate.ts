@@ -2,11 +2,11 @@ import type { DeviceAuthenticator } from "./AppVault";
 import { beginMobileHighRiskPrompt } from "./mobileAuthPromptState";
 
 /**
- * High-risk mobile actions (approve, reject, merge, revoke) require a biometric
+ * High-risk mobile actions (approve, reject, revoke) require a biometric
  * (or device-credential) confirmation. Follow-ups after vault unlock do not.
  */
 
-export type BiometricPromptReason = "approve" | "reject" | "merge" | "revoke";
+export type BiometricPromptReason = "approve" | "reject" | "revoke";
 
 export type BiometricGateResult =
   | { readonly status: "confirmed" }
@@ -18,7 +18,6 @@ export type BiometricAuthenticator = DeviceAuthenticator;
 const PROMPTS: Record<BiometricPromptReason, string> = {
   approve: "Confirm approval with biometrics",
   reject: "Confirm rejection with biometrics",
-  merge: "Confirm clean pull-request merge with biometrics",
   revoke: "Confirm device revocation with biometrics",
 };
 

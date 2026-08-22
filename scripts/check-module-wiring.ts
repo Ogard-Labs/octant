@@ -90,14 +90,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Conformance kit for child-agent adapters, driven only by childAgentConformance.test.ts as its runner (like the other provider-sdk conformance kits). Remove once a product adapter runner imports it or the last driver test that uses the kit is retired.",
   ],
   [
-    "packages/domain/src/cursorAcpRuntimePolicy.ts",
-    "Cursor is deferred pending an ACP compatibility GO. Remove once Cursor ACP is admitted as a supported provider or the deferred policy is deleted with that deferral.",
-  ],
-  [
-    "packages/domain/src/cursorAcpSettingsPolicy.ts",
-    "Cursor is deferred pending an ACP compatibility GO. Remove once Cursor ACP is admitted as a supported provider or the deferred policy is deleted with that deferral.",
-  ],
-  [
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],

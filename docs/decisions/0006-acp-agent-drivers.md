@@ -5,7 +5,7 @@
 ## Context
 
 Several installed coding agents (Kimi Code, Kilo Code, Devin CLI, Mistral
-Vibe, Grok Build, and, when its runtime qualifies, Cursor) expose the Agent Client
+Vibe, and Grok Build) expose the Agent Client
 Protocol: JSON-RPC over stdio with initialize, authenticate, session create,
 load and resume, prompt, cancel, mode and configuration options, session
 update notifications, permission requests, and client filesystem or terminal
@@ -13,6 +13,10 @@ callbacks. They differ in authentication, which optional methods exist,
 whether tools execute inside the agent process, and how modes map to Octant
 authority. Designing and shipping each as an unrelated driver duplicated
 framing, correlation, cancellation, and cleanup code and invited drift.
+
+Cursor ACP probe contracts remain for a future compatibility GO, but Cursor
+is outside the technical-preview production provider surface until that probe
+returns GO.
 
 ## Decision
 

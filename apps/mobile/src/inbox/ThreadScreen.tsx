@@ -601,12 +601,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
               />
             ) : null}
             {props.selected.mode === "code" && transport !== undefined ? (
-              <PullRequestReviewPanel
-                authenticator={authenticator}
-                hostHealth={hostHealth}
-                threadId={props.selected.threadId}
-                transport={transport}
-              />
+              <PullRequestReviewPanel threadId={props.selected.threadId} transport={transport} />
             ) : null}
             {view !== undefined ? (
               <View style={styles.transcript} testID="mobile-thread-transcript">

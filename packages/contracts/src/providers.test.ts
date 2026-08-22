@@ -45,7 +45,6 @@ describe("provider registry contracts", () => {
   it.each([
     "codex",
     "claude",
-    "cursor",
     "opencode",
     "kilo",
     "pi",

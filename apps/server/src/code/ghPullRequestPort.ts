@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 import { accessSync, constants, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { CodeThreadId } from "@octant/contracts";
-import { decidePullRequestMergeability } from "@octant/domain/pull-request-mergeability-policy";
 
 const MAX_GH_OUTPUT_BYTES = 1_048_576;
 const MAX_TITLE_BYTES = 512;
@@ -106,40 +105,9 @@ export type GhPullRequestReviewResult =
         body: string;
       }>[];
       comments: readonly Readonly<{ author: string; body: string }>[];
-      mergePreview?: Readonly<{
-        headSha: string;
-        mergeable: boolean | null;
-        requiredChecksPassing: boolean;
-        advertisedMergeMethods: readonly ("merge" | "squash" | "rebase")[];
-      }>;
     }>
   | Readonly<{ status: "none" }>
   | Readonly<{ status: "unavailable" }>;
-
-export type GhPullRequestMergeMethod = "merge" | "squash" | "rebase";
-
-export type GhPullRequestMergeFailureCode =
-  | "conflict"
-  | "checks"
-  | "auth"
-  | "not-found"
-  | "sha-mismatch"
-  | "dirty"
-  | "not-mergeable";
-
-export interface GhPullRequestMergeRequest {
-  readonly threadId: CodeThreadId;
-  readonly expectedHeadSha: string;
-  readonly mergeMethod: GhPullRequestMergeMethod;
-  readonly confirmation: Readonly<{
-    number: number;
-    baseRepository: string;
-    baseBranch: string;
-    headBranch: string;
-    mergeMethod: GhPullRequestMergeMethod;
-    expectedHeadSha: string;
-  }>;
-}
 
 export interface GhActivePullRequestRow {
   readonly number: number;
@@ -178,23 +146,6 @@ const ACTIVE_PR_LIST_FIELDS = [
   "reviewDecision",
 ].join(",");
 
-export type GhPullRequestMergeResult =
-  | Readonly<{
-      status: "merged";
-      pullRequest: Readonly<{
-        number: number;
-        url: string;
-        baseRepository: string;
-        baseBranch: string;
-        headOwner: string;
-        headBranch: string;
-      }>;
-    }>
-  | Readonly<{
-      status: "unavailable" | "failed";
-      code?: GhPullRequestMergeFailureCode;
-    }>;
-
 const MAX_PR_REVIEW_ITEMS = 500;
 const MAX_PR_DESCRIPTION_BYTES = 256 * 1024;
 const PR_VIEW_FIELDS = [
@@ -206,28 +157,12 @@ const PR_VIEW_FIELDS = [
   "author",
   "baseRefName",
   "headRefName",
-  "headRefOid",
-  "mergeable",
-  "mergeStateStatus",
   "url",
   "commits",
   "files",
   "statusCheckRollup",
   "reviews",
   "comments",
-].join(",");
-const PR_MERGE_VIEW_FIELDS = [
-  "number",
-  "url",
-  "title",
-  "state",
-  "isDraft",
-  "baseRefName",
-  "headRefName",
-  "headRefOid",
-  "mergeable",
-  "mergeStateStatus",
-  "headRepositoryOwner",
 ].join(",");
 
 export class GhPullRequestPort {
@@ -344,18 +279,6 @@ export class GhPullRequestPort {
     }
     if (diff === undefined) staleSections.push("diff");
 
-    const advertisedMergeMethods =
-      detail === undefined
-        ? undefined
-        : await this.#advertisedMergeMethods(deliveryTarget.baseRepository, signal);
-    const mergePreview =
-      detail?.mergePreview === undefined || advertisedMergeMethods === undefined
-        ? undefined
-        : {
-            ...detail.mergePreview,
-            advertisedMergeMethods,
-          };
-
     return {
       status: "observed",
       freshness: staleSections.length === 0 ? "fresh" : "stale",
@@ -381,7 +304,6 @@ export class GhPullRequestPort {
       checks: detail?.checks ?? [],
       reviews: detail?.reviews ?? [],
       comments: detail?.comments ?? [],
-      ...(mergePreview === undefined ? {} : { mergePreview }),
     };
   }
 
@@ -497,196 +419,6 @@ export class GhPullRequestPort {
     if (result.exitCode !== 0) return classifyActiveListFailure(result);
     const rows = decodeActivePullRequests(result.stdout);
     return rows === undefined ? { status: "malformed" } : { status: "ok", rows };
-  }
-
-  /**
-   * Clean-merge the delivery-branch PR when host mergeability facts allow it.
-   * Never force, never admin-bypass, never merge with a mismatched head SHA.
-   */
-  async merge(
-    request: GhPullRequestMergeRequest,
-    signal: AbortSignal,
-  ): Promise<GhPullRequestMergeResult> {
-    if (
-      request.confirmation.mergeMethod !== request.mergeMethod ||
-      request.confirmation.expectedHeadSha !== request.expectedHeadSha
-    ) {
-      return { status: "failed", code: "dirty" };
-    }
-
-    let deliveryTarget: GhDeliveryTarget | undefined;
-    try {
-      deliveryTarget = await this.#resolveTarget(request.threadId);
-    } catch {
-      return { status: "unavailable", code: "not-found" };
-    }
-    const target = validateTarget(deliveryTarget);
-    if (deliveryTarget === undefined || target === undefined) {
-      return { status: "unavailable", code: "not-found" };
-    }
-    if (
-      deliveryTarget.baseRepository !== request.confirmation.baseRepository ||
-      deliveryTarget.baseBranch !== request.confirmation.baseBranch ||
-      target.headBranch !== request.confirmation.headBranch
-    ) {
-      return { status: "failed", code: "not-found" };
-    }
-
-    const observed = await this.#observe(deliveryTarget, target, signal);
-    if (observed.status === "unavailable") {
-      return { status: "unavailable", code: "not-found" };
-    }
-    if (
-      observed.pullRequest === undefined ||
-      observed.pullRequest.number !== request.confirmation.number
-    ) {
-      // Idempotent success: confirmation may already be merged.
-      const merged = await this.#viewMergeDetail(
-        deliveryTarget.baseRepository,
-        request.confirmation.number,
-        signal,
-      );
-      if (
-        merged !== undefined &&
-        merged.state === "merged" &&
-        merged.baseRefName === request.confirmation.baseBranch &&
-        merged.headRefName === request.confirmation.headBranch
-      ) {
-        return {
-          status: "merged",
-          pullRequest: {
-            number: merged.number,
-            url: merged.url,
-            baseRepository: deliveryTarget.baseRepository,
-            baseBranch: deliveryTarget.baseBranch,
-            headOwner: target.headOwner,
-            headBranch: target.headBranch,
-          },
-        };
-      }
-      return { status: "failed", code: "not-found" };
-    }
-
-    const identity = observed.pullRequest;
-    const detail = await this.#viewMergeDetail(
-      deliveryTarget.baseRepository,
-      identity.number,
-      signal,
-    );
-    if (detail === undefined) return { status: "unavailable", code: "not-found" };
-
-    const advertisedMergeMethods = await this.#advertisedMergeMethods(
-      deliveryTarget.baseRepository,
-      signal,
-    );
-    if (advertisedMergeMethods === undefined) {
-      return { status: "unavailable", code: "not-mergeable" };
-    }
-
-    const decision = decidePullRequestMergeability({
-      state: detail.state,
-      mergeable: detail.mergeable,
-      headSha: detail.headSha,
-      expectedHeadSha: request.expectedHeadSha,
-      requiredChecksPassing: detail.requiredChecksPassing,
-      mergeMethod: request.mergeMethod,
-      advertisedMergeMethods,
-    });
-    if (decision.decision === "deny") {
-      return { status: "failed", code: mapMergeDenyCode(decision.code) };
-    }
-
-    const methodFlag =
-      request.mergeMethod === "squash"
-        ? "--squash"
-        : request.mergeMethod === "rebase"
-          ? "--rebase"
-          : "--merge";
-    let mergeExitCode = 1;
-    try {
-      const merged = await this.#command.run(
-        [
-          "pr",
-          "merge",
-          String(identity.number),
-          "--repo",
-          deliveryTarget.baseRepository,
-          methodFlag,
-          "--match-head-commit",
-          request.expectedHeadSha,
-        ],
-        { environment: this.#environment, stdin: undefined },
-        signal,
-      );
-      mergeExitCode = merged.exitCode;
-    } catch {
-      // Re-observe once — merge may have landed before the local command failed.
-    }
-
-    const after = await this.#viewMergeDetail(
-      deliveryTarget.baseRepository,
-      identity.number,
-      signal,
-    );
-    if (after?.state === "merged") {
-      return {
-        status: "merged",
-        pullRequest: {
-          number: identity.number,
-          url: after.url || identity.url,
-          baseRepository: identity.baseRepository,
-          baseBranch: identity.baseBranch,
-          headOwner: identity.headOwner,
-          headBranch: identity.headBranch,
-        },
-      };
-    }
-    if (mergeExitCode !== 0) {
-      return { status: "failed", code: "auth" };
-    }
-    return { status: "failed", code: "not-mergeable" };
-  }
-
-  async #advertisedMergeMethods(
-    baseRepository: string,
-    signal: AbortSignal,
-  ): Promise<readonly GhPullRequestMergeMethod[] | undefined> {
-    let result: GhCommandResult;
-    try {
-      result = await this.#command.run(
-        [
-          "api",
-          `repos/${baseRepository}`,
-          "--jq",
-          "{allow_merge_commit,allow_squash_merge,allow_rebase_merge}",
-        ],
-        { environment: this.#environment, stdin: undefined },
-        signal,
-      );
-    } catch {
-      return undefined;
-    }
-    if (result.exitCode !== 0) return undefined;
-    return decodeAdvertisedMergeMethods(result.stdout);
-  }
-
-  async #viewMergeDetail(
-    baseRepository: string,
-    number: number,
-    signal: AbortSignal,
-  ): Promise<GhPullRequestMergeDetail | undefined> {
-    let result: GhCommandResult;
-    try {
-      result = await this.#command.run(
-        ["pr", "view", String(number), "--repo", baseRepository, "--json", PR_MERGE_VIEW_FIELDS],
-        { environment: this.#environment, stdin: undefined },
-        signal,
-      );
-    } catch {
-      return undefined;
-    }
-    if (result.exitCode !== 0) return undefined;
-    return decodeMergeDetail(result.stdout);
   }
 
   async #viewReviewDetail(
@@ -928,22 +660,6 @@ interface GhPullRequestReviewDetail {
     body: string;
   }>[];
   readonly comments: readonly Readonly<{ author: string; body: string }>[];
-  readonly mergePreview?: Readonly<{
-    headSha: string;
-    mergeable: boolean | null;
-    requiredChecksPassing: boolean;
-  }>;
-}
-
-interface GhPullRequestMergeDetail {
-  readonly number: number;
-  readonly url: string;
-  readonly state: "open" | "merged" | "closed" | "draft";
-  readonly baseRefName: string;
-  readonly headRefName: string;
-  readonly headSha: string;
-  readonly mergeable: boolean | null;
-  readonly requiredChecksPassing: boolean;
 }
 
 function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefined {
@@ -963,7 +679,6 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
       : rawState === "CLOSED"
         ? "closed"
         : "open";
-  const mergePreview = decodeMergePreviewFacts(value);
   const url = typeof value.url === "string" && value.url.startsWith("https://") ? value.url : "";
   const baseBranch = typeof value.baseRefName === "string" ? value.baseRefName : "";
   const headBranch = typeof value.headRefName === "string" ? value.headRefName : "";
@@ -983,90 +698,7 @@ function decodeReviewDetail(output: string): GhPullRequestReviewDetail | undefin
     checks: decodeChecks(value.statusCheckRollup),
     reviews: decodeReviews(value.reviews),
     comments: decodeComments(value.comments),
-    ...(mergePreview === undefined ? {} : { mergePreview }),
   };
-}
-
-function decodeMergeDetail(output: string): GhPullRequestMergeDetail | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(output);
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(value)) return undefined;
-  const number =
-    typeof value.number === "number" && Number.isSafeInteger(value.number) ? value.number : 0;
-  const url = typeof value.url === "string" && value.url.startsWith("https://") ? value.url : "";
-  const baseRefName = typeof value.baseRefName === "string" ? value.baseRefName : "";
-  const headRefName = typeof value.headRefName === "string" ? value.headRefName : "";
-  if (number <= 0 || url === "" || baseRefName === "" || headRefName === "") return undefined;
-  const isDraft = value.isDraft === true;
-  const rawState = typeof value.state === "string" ? value.state.toUpperCase() : "";
-  const state: GhPullRequestMergeDetail["state"] = isDraft
-    ? "draft"
-    : rawState === "MERGED"
-      ? "merged"
-      : rawState === "CLOSED"
-        ? "closed"
-        : "open";
-  const facts = decodeMergePreviewFacts(value);
-  if (facts === undefined) return undefined;
-  return {
-    number,
-    url,
-    state,
-    baseRefName,
-    headRefName,
-    headSha: facts.headSha,
-    mergeable: facts.mergeable,
-    requiredChecksPassing: facts.requiredChecksPassing,
-  };
-}
-
-function decodeMergePreviewFacts(value: Record<string, unknown>):
-  | Readonly<{
-      headSha: string;
-      mergeable: boolean | null;
-      requiredChecksPassing: boolean;
-    }>
-  | undefined {
-  const headSha = typeof value.headRefOid === "string" ? value.headRefOid.trim() : "";
-  if (!/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/.test(headSha)) return undefined;
-  const mergeable = decodeMergeable(value.mergeable);
-  const mergeStateStatus =
-    typeof value.mergeStateStatus === "string" ? value.mergeStateStatus.toUpperCase() : "";
-  return {
-    headSha,
-    mergeable,
-    requiredChecksPassing: mergeStateStatus === "CLEAN",
-  };
-}
-
-function decodeMergeable(value: unknown): boolean | null {
-  if (typeof value === "boolean") return value;
-  if (typeof value !== "string") return null;
-  const normalized = value.toUpperCase();
-  if (normalized === "MERGEABLE") return true;
-  if (normalized === "CONFLICTING") return false;
-  return null;
-}
-
-function decodeAdvertisedMergeMethods(
-  output: string,
-): readonly GhPullRequestMergeMethod[] | undefined {
-  let value: unknown;
-  try {
-    value = JSON.parse(output);
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(value)) return undefined;
-  const methods: GhPullRequestMergeMethod[] = [];
-  if (value.allow_merge_commit === true) methods.push("merge");
-  if (value.allow_squash_merge === true) methods.push("squash");
-  if (value.allow_rebase_merge === true) methods.push("rebase");
-  return methods;
 }
 
 function classifyActiveListFailure(result: GhCommandResult): GhActivePullRequestListResult {
@@ -1164,27 +796,6 @@ function summarizeReview(value: unknown): GhActivePullRequestRow["review"] {
   if (decision === "REVIEW_REQUIRED") return "pending";
   if (decision === "") return "none";
   return "unknown";
-}
-
-function mapMergeDenyCode(
-  code: Extract<
-    ReturnType<typeof decidePullRequestMergeability>,
-    { readonly decision: "deny" }
-  >["code"],
-): GhPullRequestMergeFailureCode {
-  switch (code) {
-    case "conflict":
-      return "conflict";
-    case "checks":
-      return "checks";
-    case "sha-mismatch":
-      return "sha-mismatch";
-    case "draft":
-    case "not-open":
-    case "unknown-mergeable":
-    case "method-unsupported":
-      return "not-mergeable";
-  }
 }
 
 function decodeCommits(value: unknown): GhPullRequestReviewDetail["commits"] {
