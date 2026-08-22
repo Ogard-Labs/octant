@@ -23,6 +23,8 @@ Chat threads receive no filesystem, shell, or repository authority. The composer
 
 Chat does not expose Terminal, Files, Diff, or Git surfaces. The server enforces this boundary; renderer focus cannot grant authority.
 
+The active Chat thread's composer shows a circular context-usage meter. Opening it shows the authoritative used-versus-available breakdown for that thread.
+
 ## Scoped memory
 
 Chat Projects support shared scoped memory that persists across threads within the same Project. Memory entries include decisions, facts, preferences, summaries, and outcomes. See [Shared Memory](/guide/memory) for details on managing and transferring memory entries.

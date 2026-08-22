@@ -31,6 +31,17 @@ describe("context inspector presentation model", () => {
     ).toBe("unknown");
   });
 
+  it("marks model-family estimates on the category they came from", () => {
+    const tools = contextWindowModel(contextFixture()).segments.find(
+      (segment) => segment.label === "Octant tools",
+    );
+    expect(tools).toMatchObject({ estimated: true, tokens: 58 });
+    const request = contextWindowModel(contextFixture()).segments.find(
+      (segment) => segment.label === "Current request",
+    );
+    expect(request?.estimated).toBeUndefined();
+  });
+
   it("labels last-sent usage as provider reported when the host reconciled it", () => {
     expect(contextWindowModel(contextFixture()).usedSource).toBe("provider-reported");
     expect(contextWindowUsedSourceLabel("provider-reported")).toBe("Provider reported");

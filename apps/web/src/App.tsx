@@ -1411,10 +1411,11 @@ function LaunchedShell(
       });
     }
   }, [codeController.bootstrap, controller, pendingCodeDeepLink, projectController.allProjects]);
-  // What the sidebar marks. The window plans context for the active Project
-  // only, so this covers the Projects it has actually visited; a Project it has
-  // not is absent rather than reported healthy. Full coverage would need the
-  // host to report health with the Project list itself.
+  // What the sidebar marks. The window inspects the active pane's thread, and
+  // that thread's health is remembered against the Project it belongs to so a
+  // degraded Project still announces itself when it is not the pane's subject.
+  // A Project this window has not visited is absent rather than reported
+  // healthy.
   const contextHealthByProject = useMemo(() => {
     const next = new Map<ProjectId, ContextHealth>();
     for (const [projectId, snapshot] of contextSnapshotsByProject) {

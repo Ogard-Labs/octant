@@ -58,6 +58,9 @@ describe("ComposerContextMeter", () => {
     expect(button).toHaveAccessibleName(/104 \/ 1K \(10%\)/);
     expect(button.querySelector(".composer-context-meter__ring")).not.toBeNull();
     expect(button.querySelector(".composer-context-meter__used")).not.toBeNull();
+    expect(
+      screen.getByText(/Fixture thread\. Last sent 104 \/ 1K \(10%\)\. Provider reported\./),
+    ).toBeInTheDocument();
   });
 
   it("opens the popover from pointer, Enter, and Space without a further inspect call", async () => {
@@ -73,7 +76,7 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent("Percentage10%");
     expect(popover).toHaveTextContent("Free space796");
     expect(popover).toHaveTextContent("Current request42");
-    expect(popover).toHaveTextContent("Octant tools58");
+    expect(popover).toHaveTextContent("Octant tools58 · Estimated");
     expect(popover).toHaveTextContent("Observed overhead4");
     expect(popover).toHaveTextContent("Reserved100");
     expect(popover).toHaveTextContent(/Tools2 loaded· 6 deferred/);

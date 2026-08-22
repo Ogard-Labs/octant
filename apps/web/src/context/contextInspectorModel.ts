@@ -29,6 +29,7 @@ export interface ContextCompositionEntry extends ContextEntry {
 }
 
 export interface ContextWindowSegment {
+  readonly estimated?: boolean;
   readonly key: string;
   readonly kind: "content" | "overhead" | "reserved" | "free";
   readonly label: string;
@@ -128,19 +129,34 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
   const totalTokens = snapshot.modelLimits.contextWindow;
   const byCategory = new Map<
     ContextEntryCategory,
-    { readonly key: string; readonly label: string; tokens: number; unknown: boolean }
+    {
+      estimated: boolean;
+      readonly key: string;
+      readonly label: string;
+      tokens: number;
+      unknown: boolean;
+    }
   >();
 
   for (const entry of contextCompositionEntries(snapshot, planSnapshot)) {
     if (entry.plannedState === "omitted") continue;
     const retained = byCategory.get(entry.category) ?? {
+      estimated: false,
       key: entry.category,
       label: contextCategoryLabel(entry.category),
       tokens: 0,
       unknown: false,
     };
     if (entry.plannedTokens.kind === "unknown") retained.unknown = true;
-    else retained.tokens += entry.plannedTokens.tokens;
+    else {
+      retained.tokens += entry.plannedTokens.tokens;
+      if (
+        entry.plannedTokens.accuracy === "model-family-estimate" ||
+        entry.plannedTokens.accuracy === "conservative-heuristic"
+      ) {
+        retained.estimated = true;
+      }
+    }
     byCategory.set(entry.category, retained);
   }
 
@@ -173,6 +189,7 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
     label: entry.label,
     percent: percentOf(entry.tokens, totalTokens),
     ...(entry.unknown ? {} : { tokens: entry.tokens }),
+    ...(entry.estimated && !entry.unknown ? { estimated: true } : {}),
     tone: toneAt(index),
   }));
   if (overheadTokens > 0) {

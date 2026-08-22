@@ -40,10 +40,10 @@ Chat has no board.
 An approved later interaction model is recorded in the architecture decision
 records and is **not** what the app renders today for remaining dock
 placement: Environment will be a compact header disclosure rather than a
-persisted panel; context usage will be a composer meter; Project memory will
-live in Project Overview; Navigator will open as a host-wide popover from the
-profile control. Until that migration lands, the pages in this guide describe
-the surfaces that are actually on screen.
+persisted panel; context usage already lives on the composer meter; Project
+memory will live in Project Overview; Navigator will open as a host-wide
+popover from the profile control. Until that migration lands, the pages in
+this guide describe the surfaces that are actually on screen.
 
 ## Current boundary
 

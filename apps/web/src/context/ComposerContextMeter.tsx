@@ -128,6 +128,14 @@ export function ComposerContextMeter() {
           ) : null}
         </svg>
       </OctantButton>
+      <span aria-live="polite" className="sr-only">
+        {liveLabel({
+          status: scope.status,
+          windowModel,
+          ...(snapshot === undefined ? {} : { snapshotLabel: snapshot.displayLabel }),
+          ...(health === undefined ? {} : { healthLabel: contextHealthLabel(health) }),
+        })}
+      </span>
       {open ? (
         <div
           aria-label="Context usage"
@@ -196,7 +204,11 @@ function ContextUsagePopover(props: {
               {segment.label}
             </dt>
             <dd>
-              {segment.tokens === undefined ? "Unknown" : compactTokens(segment.tokens)}
+              {segment.tokens === undefined
+                ? "Unknown"
+                : segment.estimated === true
+                  ? `${compactTokens(segment.tokens)} · Estimated`
+                  : compactTokens(segment.tokens)}
               {segment.tokens === undefined ? null : <span>{formatPercent(segment.percent)}</span>}
             </dd>
           </div>
@@ -289,6 +301,20 @@ function meterLabel(input: {
   const health = input.healthLabel === undefined ? "" : ` ${input.healthLabel}.`;
   const scope = input.snapshotLabel === undefined ? "" : ` for ${input.snapshotLabel}`;
   return `${action} context usage${scope}. ${input.windowModel.usageLabel} (${String(Math.round(input.windowModel.percent))}%)${unknown}. ${source}.${health}`;
+}
+
+function liveLabel(input: {
+  readonly healthLabel?: string;
+  readonly snapshotLabel?: string;
+  readonly status: string;
+  readonly windowModel: ReturnType<typeof contextWindowModel> | undefined;
+}): string {
+  if (input.windowModel === undefined) return emptyMessage(input.status);
+  const unknown = input.windowModel.hasUnknown ? " plus unknown" : "";
+  const source = contextWindowUsedSourceLabel(input.windowModel.usedSource);
+  const health = input.healthLabel === undefined ? "" : ` ${input.healthLabel}.`;
+  const scope = input.snapshotLabel === undefined ? "Context" : input.snapshotLabel;
+  return `${scope}. ${input.windowModel.sourceLabel} ${input.windowModel.usageLabel} (${String(Math.round(input.windowModel.percent))}%)${unknown}. ${source}.${health}`;
 }
 
 function isAvailableLimit(
