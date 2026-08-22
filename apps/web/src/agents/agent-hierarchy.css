@@ -180,6 +180,42 @@
   color: color-mix(in srgb, Canvas 15%, red 85%);
 }
 
+.agent-run-create-form__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+  border-radius: 0.5rem;
+}
+
+.agent-run-create-form__facts h4 {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.agent-run-create-form__facts dl {
+  display: grid;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+.agent-run-create-form__facts div {
+  display: contents;
+}
+
+.agent-run-create-form__facts dt {
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.agent-run-create-form__facts dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
 .agent-run-settings-panel__option {
   display: flex;
   gap: 0.6rem;

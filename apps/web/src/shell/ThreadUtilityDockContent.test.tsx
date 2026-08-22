@@ -38,6 +38,62 @@ function props() {
 }
 
 describe("thread utility dock content", () => {
+  it("remounts the AgentRun hierarchy as the Agents dock tool", async () => {
+    render(
+      <ThreadUtilityDockContent
+        {...props()}
+        agentRunClient={
+          {
+            parentSummary: vi.fn(async () => ({
+              parentThreadId: threadId,
+              entries: [],
+            })),
+            preview: vi.fn(async () => ({
+              status: "ready",
+              facts: {
+                mode: "code",
+                allowedRoles: ["implementation", "review"],
+                providerInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                modelId: "gpt-4o",
+                workspaceKind: "code-worktree",
+                authority: {
+                  filesystem: true,
+                  shell: true,
+                  git: true,
+                  network: true,
+                  tools: true,
+                  subagents: true,
+                  executionPolicy: "approval-gated",
+                  permissionPersistence: "current-session",
+                },
+                executionKind: "octant-managed",
+                attemptedExecutionKind: "provider-native",
+                nativeFallbackReason: "nativeChildAgents-claimed-unsupported",
+                capabilityDegradations: ["native-child-agents-unavailable"],
+                creationPosture: "ask",
+              },
+            })),
+            acknowledge: vi.fn(),
+            requestRun: vi.fn(),
+            cancel: vi.fn(),
+            steer: vi.fn(),
+            retry: vi.fn(),
+            resume: vi.fn(),
+            prepareWorkspace: vi.fn(),
+            confirmWorkspace: vi.fn(),
+          } as never
+        }
+        surface="agents"
+      />,
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      /Loading authoritative AgentRun hierarchy/i,
+    );
+    expect(await screen.findByRole("heading", { name: "Active / History" })).toBeVisible();
+    expect(await screen.findByRole("form", { name: "Create subagent" })).toBeVisible();
+    expect(screen.queryByLabelText("Provider instance ID")).not.toBeInTheDocument();
+  });
+
   it("opens iOS Simulator through the real Apple workbench surface", async () => {
     render(<ThreadUtilityDockContent {...props()} />);
     expect(await screen.findByText("apple-workbench:App/App.xcodeproj")).toBeVisible();

@@ -1,79 +1,64 @@
 import { useId, useState } from "react";
-import type { AgentRunCreationPosture, AgentRunRole } from "@octant/contracts/agent-run";
-import type { ProviderExecutionPolicy, PermissionPersistence } from "@octant/contracts/providers";
+import type {
+  AgentRunControlResolvedFacts,
+  AgentRunCreationPosture,
+  AgentRunRole,
+} from "@octant/contracts";
 import "./agent-hierarchy.css";
 
 export interface AgentRunCreateFormValues {
   readonly role: AgentRunRole;
   readonly task: string;
-  readonly providerInstanceId: string;
-  readonly modelId: string;
-  readonly reasoning?: string;
-  /**
-   * Ask the host to admit this child with the parent thread's own recent
-   * conversation. The form carries the ask only; the content is read and
-   * bounded server-side from the parent thread the host already authorized.
-   */
   readonly includeParentContext?: boolean;
-  readonly authority: {
-    readonly filesystem: boolean;
-    readonly shell: boolean;
-    readonly git: boolean;
-    readonly network: boolean;
-    readonly tools: boolean;
-    readonly subagents: boolean;
-    readonly executionPolicy: ProviderExecutionPolicy;
-    readonly permissionPersistence: PermissionPersistence;
-  };
 }
 
-const ROLES: ReadonlyArray<AgentRunRole> = ["research"];
-const EXECUTION_POLICIES: ReadonlyArray<ProviderExecutionPolicy> = [
-  "plan",
-  "approval-gated",
-  "auto-accept-edits",
-  "full-access",
-];
+const ROLE_LABELS: Readonly<Record<AgentRunRole, string>> = {
+  research: "Research",
+  implementation: "Implement",
+  review: "Review",
+  custom: "Custom",
+};
+
+function factLabel(kind: AgentRunControlResolvedFacts["workspaceKind"]): string {
+  if (kind === "chat-virtual") return "Research-only virtual workspace";
+  if (kind === "work-root") return "Bound Project root";
+  return "Confirmed isolated worktree";
+}
 
 /**
- * Explicit one-off child-creation form. Only chat-workspace
- * children are offered here: Work requires a bound project root and Code
- * requires a verified isolated worktree, neither of which this component has
- * access to, so both remain deferred rather than half-wired.
- *
- * The requested authority facts shown here are a *proposal* only — the
- * server always clamps them against the parent's authority ceiling
- * (`clampAgentRunAuthority`) before a run is admitted, so this form can never
- * widen authority no matter what a caller selects.
+ * One-off child creation. The user picks a mode-valid role and a task; every
+ * other fact is server-derived and shown read-only. Provider, model,
+ * workspace, and authority are never typed here.
  */
 export function AgentRunCreateForm(props: {
   readonly posture: AgentRunCreationPosture;
+  readonly facts?: AgentRunControlResolvedFacts;
+  readonly factsStatus?: "loading" | "ready" | "error";
   readonly submitting?: boolean;
   readonly errorMessage?: string;
+  readonly onRoleChange?: (role: AgentRunRole) => void;
   readonly onSubmit: (values: AgentRunCreateFormValues) => void;
 }) {
   const formId = useId();
-  const [role, setRole] = useState<AgentRunRole>("research");
+  const allowed = props.facts?.allowedRoles ?? ["research"];
+  const [role, setRole] = useState<AgentRunRole>(allowed[0] ?? "research");
   const [task, setTask] = useState("");
-  const [providerInstanceId, setProviderInstanceId] = useState("");
-  const [modelId, setModelId] = useState("");
-  const [reasoning, setReasoning] = useState("");
   const [includeParentContext, setIncludeParentContext] = useState(false);
-  const [filesystem, setFilesystem] = useState(false);
-  const [shell, setShell] = useState(false);
-  const [git, setGit] = useState(false);
-  const [network, setNetwork] = useState(false);
-  const [tools, setTools] = useState(true);
-  const [subagents, setSubagents] = useState(false);
-  const [executionPolicy, setExecutionPolicy] = useState<ProviderExecutionPolicy>("plan");
-  const [permissionPersistence, setPermissionPersistence] =
-    useState<PermissionPersistence>("current-session");
+  const selectedRole = allowed.includes(role) ? role : (allowed[0] ?? "research");
 
   if (props.posture === "off") {
     return (
       <p className="agent-run-create-form__disabled" role="status">
         Subagent creation posture is Off. Turn on Ask or Automatic in Settings → Agents to create a
         child.
+      </p>
+    );
+  }
+
+  if (props.factsStatus === "loading" && props.facts === undefined) {
+    return (
+      <p className="agent-run-create-form__disabled" role="status">
+        Loading server-derived child facts…
       </p>
     );
   }
@@ -85,22 +70,9 @@ export function AgentRunCreateForm(props: {
       onSubmit={(event) => {
         event.preventDefault();
         props.onSubmit({
-          role,
+          role: selectedRole,
           task,
-          providerInstanceId,
-          modelId,
-          ...(reasoning.trim().length === 0 ? {} : { reasoning: reasoning.trim() }),
           ...(includeParentContext ? { includeParentContext: true } : {}),
-          authority: {
-            filesystem,
-            shell,
-            git,
-            network,
-            tools,
-            subagents,
-            executionPolicy,
-            permissionPersistence,
-          },
         });
       }}
     >
@@ -120,12 +92,16 @@ export function AgentRunCreateForm(props: {
         Role
         <select
           id={`${formId}-role`}
-          value={role}
-          onChange={(event) => setRole(event.target.value as AgentRunRole)}
+          value={selectedRole}
+          onChange={(event) => {
+            const next = event.target.value as AgentRunRole;
+            setRole(next);
+            props.onRoleChange?.(next);
+          }}
         >
-          {ROLES.map((value) => (
+          {allowed.map((value) => (
             <option key={value} value={value}>
-              {value}
+              {ROLE_LABELS[value]}
             </option>
           ))}
         </select>
@@ -141,35 +117,6 @@ export function AgentRunCreateForm(props: {
         />
       </label>
 
-      <label htmlFor={`${formId}-provider`}>
-        Provider instance ID
-        <input
-          id={`${formId}-provider`}
-          required
-          value={providerInstanceId}
-          onChange={(event) => setProviderInstanceId(event.target.value)}
-        />
-      </label>
-
-      <label htmlFor={`${formId}-model`}>
-        Model ID
-        <input
-          id={`${formId}-model`}
-          required
-          value={modelId}
-          onChange={(event) => setModelId(event.target.value)}
-        />
-      </label>
-
-      <label htmlFor={`${formId}-reasoning`}>
-        Reasoning (optional)
-        <input
-          id={`${formId}-reasoning`}
-          value={reasoning}
-          onChange={(event) => setReasoning(event.target.value)}
-        />
-      </label>
-
       <label>
         <input
           type="checkbox"
@@ -179,86 +126,71 @@ export function AgentRunCreateForm(props: {
         Include this thread&rsquo;s recent conversation
       </label>
 
-      <fieldset>
-        <legend>Requested authority (clamped server-side, never widened)</legend>
-        <label>
-          <input
-            type="checkbox"
-            checked={filesystem}
-            onChange={(event) => setFilesystem(event.target.checked)}
-          />
-          Filesystem
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={shell}
-            onChange={(event) => setShell(event.target.checked)}
-          />
-          Shell
-        </label>
-        <label>
-          <input type="checkbox" checked={git} onChange={(event) => setGit(event.target.checked)} />
-          Git
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={network}
-            onChange={(event) => setNetwork(event.target.checked)}
-          />
-          Network
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={tools}
-            onChange={(event) => setTools(event.target.checked)}
-          />
-          Tools
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={subagents}
-            onChange={(event) => setSubagents(event.target.checked)}
-          />
-          Subagents
-        </label>
-      </fieldset>
+      {props.facts === undefined ? null : <ResolvedFacts facts={props.facts} />}
 
-      <label htmlFor={`${formId}-execution-policy`}>
-        Execution policy
-        <select
-          id={`${formId}-execution-policy`}
-          value={executionPolicy}
-          onChange={(event) => setExecutionPolicy(event.target.value as ProviderExecutionPolicy)}
-        >
-          {EXECUTION_POLICIES.map((value) => (
-            <option key={value} value={value}>
-              {value}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <label htmlFor={`${formId}-permission-persistence`}>
-        Permission persistence
-        <select
-          id={`${formId}-permission-persistence`}
-          value={permissionPersistence}
-          onChange={(event) =>
-            setPermissionPersistence(event.target.value as PermissionPersistence)
-          }
-        >
-          <option value="current-session">current-session</option>
-          <option value="project-default">project-default</option>
-        </select>
-      </label>
-
-      <button type="submit" disabled={props.submitting === true}>
+      <button type="submit" disabled={props.submitting === true || props.facts === undefined}>
         {props.submitting === true ? "Creating…" : "Create subagent"}
       </button>
     </form>
+  );
+}
+
+function ResolvedFacts(props: { readonly facts: AgentRunControlResolvedFacts }) {
+  const facts = props.facts;
+  return (
+    <section aria-label="Resolved child facts" className="agent-run-create-form__facts">
+      <h4>Resolved by the host</h4>
+      <dl>
+        <div>
+          <dt>Mode</dt>
+          <dd>{facts.mode}</dd>
+        </div>
+        {facts.projectId === undefined ? null : (
+          <div>
+            <dt>Project</dt>
+            <dd>{String(facts.projectId)}</dd>
+          </div>
+        )}
+        <div>
+          <dt>Provider</dt>
+          <dd>{String(facts.providerInstanceId)}</dd>
+        </div>
+        <div>
+          <dt>Model</dt>
+          <dd>{String(facts.modelId)}</dd>
+        </div>
+        {facts.reasoning === undefined ? null : (
+          <div>
+            <dt>Reasoning</dt>
+            <dd>{facts.reasoning}</dd>
+          </div>
+        )}
+        <div>
+          <dt>Workspace</dt>
+          <dd>{factLabel(facts.workspaceKind)}</dd>
+        </div>
+        <div>
+          <dt>Maximum authority</dt>
+          <dd>
+            {facts.authority.executionPolicy}
+            {facts.authority.filesystem ? " · filesystem" : ""}
+            {facts.authority.shell ? " · shell" : ""}
+            {facts.authority.git ? " · git" : ""}
+          </dd>
+        </div>
+        <div>
+          <dt>Execution</dt>
+          <dd>
+            {facts.executionKind === "provider-native" ? "Provider-native" : "Octant-managed"}
+          </dd>
+        </div>
+      </dl>
+      {facts.nativeFallbackReason === undefined ? null : (
+        <p className="agent-run-create-form__hint" role="status">
+          Native execution is ineligible ({facts.nativeFallbackReason}). This child will run as
+          Octant-managed.
+        </p>
+      )}
+    </section>
   );
 }

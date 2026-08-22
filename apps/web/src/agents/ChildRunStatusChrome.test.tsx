@@ -55,6 +55,14 @@ describe("ChildRunStatusChrome", () => {
     expect(screen.getByRole("button", { name: "Show child runs" })).toBeDisabled();
   });
 
+  it("offers Add agent so the Agents dock can open from an empty hierarchy", async () => {
+    const user = userEvent.setup();
+    const onAddAgent = vi.fn();
+    renderChrome([], { onAddAgent });
+    await user.click(screen.getByRole("button", { name: "Add agent" }));
+    expect(onAddAgent).toHaveBeenCalled();
+  });
+
   it("renders working, waiting, and blocked summaries as words beside an icon", () => {
     const cases = [
       { entries: [entry("a", "running")], text: "1 child run · Working" },

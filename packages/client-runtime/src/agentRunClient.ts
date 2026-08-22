@@ -1,15 +1,25 @@
 import {
   decodeAgentRunCommandResult,
-  decodeAgentRunCreationRequest,
+  decodeAgentRunControlPreviewRequest,
+  decodeAgentRunControlPreviewResult,
+  decodeAgentRunControlRequest,
   decodeAgentRunParentThreadId,
+  decodeAgentRunResumeRequest,
+  decodeAgentRunRetryRequest,
+  decodeAgentRunSteerRequest,
   decodeAgentRunWorkspaceConfirmationRequest,
   decodeAgentRunWorkspaceConfirmationResult,
   decodeAgentRunWorkspacePreparationRequest,
   decodeAgentRunWorkspacePreparationResult,
   type AgentRunCommandResult,
-  type AgentRunCreationRequest,
+  type AgentRunControlPreviewRequest,
+  type AgentRunControlPreviewResult,
+  type AgentRunControlRequest,
   type AgentRunId,
   type AgentRunParentThreadId,
+  type AgentRunResumeRequest,
+  type AgentRunRetryRequest,
+  type AgentRunSteerRequest,
   type AgentRunWorkspaceConfirmationRequest,
   type AgentRunWorkspaceConfirmationResult,
   type AgentRunWorkspacePreparationRequest,
@@ -107,13 +117,18 @@ export interface AgentRunClient {
   confirmWorkspace(
     input: AgentRunWorkspaceConfirmationRequest,
   ): Promise<AgentRunWorkspaceConfirmationResult>;
-  /** Proposes and creates a bounded child run. */
-  requestRun(input: AgentRunCreationRequest): Promise<AgentRunClientCommandResult>;
+  /** Reads server-derived parent facts for a child the user may create. */
+  preview(input: AgentRunControlPreviewRequest): Promise<AgentRunControlPreviewResult>;
+  /** Creates a bounded child from a role and task; the server derives the rest. */
+  requestRun(input: AgentRunControlRequest): Promise<AgentRunClientCommandResult>;
   /** Cancels a run, its subtree, or its whole hierarchy leaf-first. */
   cancel(input: {
     readonly runId: AgentRunId;
     readonly scope: "self" | "subtree" | "hierarchy";
   }): Promise<{ readonly results: ReadonlyArray<AgentRunClientCommandResult> }>;
+  steer(input: AgentRunSteerRequest): Promise<AgentRunClientCommandResult>;
+  retry(input: AgentRunRetryRequest): Promise<AgentRunClientCommandResult>;
+  resume(input: AgentRunResumeRequest): Promise<AgentRunClientCommandResult>;
 }
 
 export class AgentRunClientFailure extends Error {
@@ -217,10 +232,34 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
         throw new AgentRunClientFailure("unavailable", "AgentRun workspace confirm is malformed.");
       }
     },
-    async requestRun(input) {
-      let validated: AgentRunCreationRequest;
+    async preview(input) {
+      let validated: AgentRunControlPreviewRequest;
       try {
-        validated = decodeAgentRunCreationRequest(input);
+        validated = decodeAgentRunControlPreviewRequest(input);
+      } catch {
+        throw new AgentRunClientFailure("invalid", "AgentRun control preview request is invalid.");
+      }
+      const url = new URL("/api/agent-runs/control-preview", options.baseUrl);
+      url.searchParams.set("parentThreadId", String(validated.parentThreadId));
+      if (validated.role !== undefined) url.searchParams.set("role", validated.role);
+      const body = await requestJson(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers },
+        {
+          structuredWorkspaceResult: true,
+        },
+      );
+      try {
+        return decodeAgentRunControlPreviewResult(body);
+      } catch {
+        throw new AgentRunClientFailure("unavailable", "AgentRun control preview is malformed.");
+      }
+    },
+    async requestRun(input) {
+      let validated: AgentRunControlRequest;
+      try {
+        validated = decodeAgentRunControlRequest(input);
       } catch {
         throw new AgentRunClientFailure("invalid", "AgentRun creation request is invalid.");
       }
@@ -255,7 +294,50 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
       }
       return { results: body.results as ReadonlyArray<AgentRunClientCommandResult> };
     },
+    async steer(input) {
+      return postRunCommand(options, headers, "/api/agent-runs/steer", () =>
+        decodeAgentRunSteerRequest(input),
+      );
+    },
+    async retry(input) {
+      return postRunCommand(options, headers, "/api/agent-runs/retry", () =>
+        decodeAgentRunRetryRequest(input),
+      );
+    },
+    async resume(input) {
+      return postRunCommand(options, headers, "/api/agent-runs/resume", () =>
+        decodeAgentRunResumeRequest(input),
+      );
+    },
   };
+}
+
+async function postRunCommand(
+  options: AgentRunClientOptions,
+  headers: { readonly "x-octant-window-capability": string },
+  path: string,
+  decode: () => unknown,
+): Promise<AgentRunClientCommandResult> {
+  let validated: unknown;
+  try {
+    validated = decode();
+  } catch {
+    throw new AgentRunClientFailure("invalid", "AgentRun command request is invalid.");
+  }
+  const body = await requestJson(
+    options.fetch,
+    new URL(path, options.baseUrl).toString(),
+    {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify(validated),
+    },
+    { structuredCommandResult: true },
+  );
+  if (!isRecord(body) || typeof body.kind !== "string") {
+    throw new AgentRunClientFailure("unavailable", "AgentRun command response is malformed.");
+  }
+  return body as unknown as AgentRunClientCommandResult;
 }
 
 async function requestJson(

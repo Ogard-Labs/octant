@@ -9,10 +9,37 @@ import { AgentRunHierarchy } from "./AgentRunHierarchy";
 const parentThreadId = decodeAgentRunParentThreadId("11111111-1111-4111-8111-111111111111");
 const runId = decodeAgentRunId("22222222-2222-4222-8222-222222222222");
 
+const chatFacts = {
+  status: "ready" as const,
+  facts: {
+    mode: "chat" as const,
+    allowedRoles: ["research" as const],
+    providerInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" as never,
+    modelId: "gpt-4o" as never,
+    workspaceKind: "chat-virtual" as const,
+    authority: {
+      filesystem: false,
+      shell: false,
+      git: false,
+      network: false,
+      tools: true,
+      subagents: true,
+      executionPolicy: "plan" as const,
+      permissionPersistence: "current-session" as const,
+    },
+    executionKind: "octant-managed" as const,
+    attemptedExecutionKind: "provider-native" as const,
+    nativeFallbackReason: "nativeChildAgents-claimed-unsupported",
+    capabilityDegradations: ["native-child-agents-unavailable"],
+    creationPosture: "automatic" as const,
+  },
+};
+
 function emptyClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
   return {
     parentSummary: vi.fn(async () => ({ parentThreadId, entries: [] })),
     acknowledge: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
+    preview: vi.fn(async () => chatFacts),
     prepareWorkspace: vi.fn(async () => ({
       status: "prepared" as const,
       workspace: {
@@ -32,17 +59,11 @@ function emptyClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
     })),
     requestRun: vi.fn(async () => ({ kind: "run-accepted" as const })),
     cancel: vi.fn(async () => ({ results: [] })),
+    steer: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
+    retry: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
+    resume: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
     ...overrides,
   };
-}
-
-async function fillCreationForm(user: ReturnType<typeof userEvent.setup>) {
-  await user.type(screen.getByLabelText("Task"), "Summarize the open PRs.");
-  await user.type(
-    screen.getByLabelText("Provider instance ID"),
-    "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-  );
-  await user.type(screen.getByLabelText("Model ID"), "gpt-4o");
 }
 
 describe("AgentRunHierarchy", () => {
@@ -121,7 +142,7 @@ describe("AgentRunHierarchy", () => {
     expect(screen.queryByLabelText("Task")).not.toBeInTheDocument();
   });
 
-  it("submits an explicit child creation request and refreshes on acceptance", async () => {
+  it("submits a role and task and shows resolved facts instead of raw IDs", async () => {
     const user = userEvent.setup();
     const requestRun = vi.fn(async (_input: unknown) => ({ kind: "run-accepted" as const }));
     const parentSummary = vi.fn(async () => ({ parentThreadId, entries: [] }));
@@ -135,7 +156,11 @@ describe("AgentRunHierarchy", () => {
       />,
     );
     await waitFor(() => expect(screen.getByLabelText("Task")).toBeVisible());
-    await fillCreationForm(user);
+    expect(screen.queryByLabelText("Provider instance ID")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Resolved child facts" })).toHaveTextContent(
+      "Octant-managed",
+    );
+    await user.type(screen.getByLabelText("Task"), "Summarize the open PRs.");
     await user.click(screen.getByRole("button", { name: "Create subagent" }));
 
     await waitFor(() => expect(requestRun).toHaveBeenCalledTimes(1));
@@ -143,9 +168,10 @@ describe("AgentRunHierarchy", () => {
     expect(submitted).toMatchObject({
       parentThreadId,
       task: "Summarize the open PRs.",
-      mode: "chat",
-      workspace: { kind: "chat-virtual", mode: "chat" },
+      role: "research",
     });
+    expect(submitted).not.toHaveProperty("providerInstanceId");
+    expect(submitted).not.toHaveProperty("requestedAuthority");
     await waitFor(() => expect(parentSummary).toHaveBeenCalledTimes(2));
   });
 
@@ -166,7 +192,7 @@ describe("AgentRunHierarchy", () => {
       />,
     );
     await waitFor(() => expect(screen.getByLabelText("Task")).toBeVisible());
-    await fillCreationForm(user);
+    await user.type(screen.getByLabelText("Task"), "Summarize the open PRs.");
     await user.click(screen.getByRole("button", { name: "Create subagent" }));
 
     await waitFor(() =>
@@ -213,6 +239,49 @@ describe("AgentRunHierarchy", () => {
     await waitFor(() => expect(parentSummary).toHaveBeenCalledTimes(2));
   });
 
+  it("steers a running child with expected version", async () => {
+    const user = userEvent.setup();
+    const steer = vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never }));
+    const client = emptyClient({
+      steer,
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          {
+            runId,
+            requestId: "request-1",
+            parentThreadId,
+            role: "research",
+            task: "Draft the release notes",
+            lifecycleStatus: "running",
+            executionKind: "octant-managed",
+            usageQuality: "provider-reported",
+            resultAcknowledgement: { required: false, acknowledged: false },
+            version: 3,
+            updatedAt: "2026-08-01T15:01:00.000Z",
+          },
+        ],
+      })),
+    });
+    render(
+      <AgentRunHierarchy
+        allowCreation
+        client={client}
+        parentThreadId={parentThreadId}
+        creationPosture="automatic"
+      />,
+    );
+    await waitFor(() => expect(screen.getByText("Draft the release notes")).toBeVisible());
+    await user.click(screen.getByRole("button", { name: "Steer Draft the release notes" }));
+    await user.type(screen.getByLabelText("Steering instruction"), "Stay on the failing test.");
+    await user.click(screen.getByRole("button", { name: "Send steering" }));
+    expect(steer).toHaveBeenCalledWith({
+      runId,
+      expectedVersion: 3,
+      message: "Stay on the failing test.",
+    });
+  });
+
   it("fetches the server-authoritative posture from an injected settings client", async () => {
     const settingsClient: AgentRunSettingsClient = {
       current: vi.fn(async () => ({
@@ -232,9 +301,6 @@ describe("AgentRunHierarchy", () => {
         settingsClient={settingsClient}
       />,
     );
-    // The static `creationPosture="off"` prop is a fallback only; once the
-    // settings client resolves, the real (Automatic) posture wins and the
-    // creation form appears.
     await waitFor(() => expect(screen.getByLabelText("Task")).toBeVisible());
     expect(settingsClient.current).toHaveBeenCalled();
   });

@@ -22,6 +22,7 @@ type CodeWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 export default function CodeWorkspaceTab(props: {
   readonly controller: CodeController;
   readonly agentRunClient?: AgentRunClient;
+  readonly onAddAgent?: () => void;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly tab: CodeWorkspaceTab;
   readonly hostBridge?: OctantHostBridge;
@@ -107,6 +108,7 @@ export default function CodeWorkspaceTab(props: {
     >
       <CodeWorkspace
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+        {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}

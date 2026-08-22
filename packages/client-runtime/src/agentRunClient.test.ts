@@ -114,22 +114,8 @@ describe("agentRunClient", () => {
     const creationRequest = {
       requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       parentThreadId,
-      role: "implementation" as const,
+      role: "research" as const,
       task: "Summarize the open PRs.",
-      mode: "chat" as const,
-      providerInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-      modelId: "gpt-4o",
-      requestedAuthority: {
-        filesystem: false,
-        shell: false,
-        git: false,
-        network: true,
-        tools: true,
-        subagents: false,
-        executionPolicy: "plan" as const,
-        permissionPersistence: "current-session" as const,
-      },
-      workspace: { kind: "chat-virtual" as const, mode: "chat" as const },
     };
     const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       expect(String(input)).toContain("/api/agent-runs/request");
@@ -166,25 +152,11 @@ describe("agentRunClient", () => {
       windowCapability: "cap",
     });
     const result = await client.requestRun({
-      requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-      parentThreadId,
-      role: "implementation",
+      requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" as never,
+      parentThreadId: parentThreadId as never,
+      role: "research",
       task: "Summarize the open PRs.",
-      mode: "chat",
-      providerInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-      modelId: "gpt-4o",
-      requestedAuthority: {
-        filesystem: false,
-        shell: false,
-        git: false,
-        network: true,
-        tools: true,
-        subagents: false,
-        executionPolicy: "plan",
-        permissionPersistence: "current-session",
-      },
-      workspace: { kind: "chat-virtual", mode: "chat" },
-    } as never);
+    });
     expect(result.kind).toBe("run-command-failed");
     expect((result as { reason?: string }).reason).toBe("posture-rejected");
   });
@@ -202,25 +174,11 @@ describe("agentRunClient", () => {
 
     await expect(
       client.requestRun({
-        requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-        parentThreadId,
+        requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" as never,
+        parentThreadId: parentThreadId as never,
         role: "research",
         task: "Summarize the open PRs.",
-        mode: "chat",
-        providerInstanceId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-        modelId: "gpt-4o",
-        requestedAuthority: {
-          filesystem: false,
-          shell: false,
-          git: false,
-          network: false,
-          tools: true,
-          subagents: false,
-          executionPolicy: "plan",
-          permissionPersistence: "current-session",
-        },
-        workspace: { kind: "chat-virtual", mode: "chat" },
-      } as never),
+      }),
     ).rejects.toThrow("The selected provider/model is not ready.");
   });
 

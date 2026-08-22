@@ -189,9 +189,9 @@ interaction model for remaining renderer work. Environment is already a compact
 header summary with a transient disclosure whose open state is not persisted
 ([0042](decisions/0042-environment-is-a-transient-disclosure.md)).
 The dock already hosts live thread-owned tool instances — Files, Browser,
-Terminal, Canvas, Side chat, artifact-gated Plan, and conditional Delivery —
-rather than a generic Thread accordion. Review and thread-level Agents remain
-later tools. Context usage already lives on the composer meter. Project memory
+Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery, and
+thread-level Agents — rather than a generic Thread accordion. Review remains a
+later tool. Context usage already lives on the composer meter. Project memory
 already lives in Project Overview. Navigator is already one host-wide chat
 popover from the bottom-left profile and Settings control. Simulator placement
 is already [0043](decisions/0043-simulator-follows-the-active-thread.md). 0015

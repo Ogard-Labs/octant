@@ -7,6 +7,7 @@ export type RightUtilityDockSurfaceId =
   | "canvas"
   | "plan"
   | "delivery"
+  | "agents"
   | "changes"
   | "terminal"
   | "tests"
@@ -89,8 +90,8 @@ export type RightUtilityDockResolution =
  * Generic category tabs are gone: Context lives on the composer meter, Project
  * memory in Overview, Navigator on the profile control. Plan and Delivery are
  * still mode-valid here; presence is gated by the thread's current artifact or
- * enabled target, not by this catalog. Review and thread-level Agents are
- * later tools, not entries on this list.
+ * enabled target, not by this catalog. Agents is conditional: it appears when
+ * children exist or the user invokes Add agent. Review remains a later tool.
  */
 export const RIGHT_UTILITY_DOCK_SURFACES = [
   {
@@ -130,6 +131,12 @@ export const RIGHT_UTILITY_DOCK_SURFACES = [
     scope: "thread",
   },
   {
+    id: "agents",
+    label: "Agents",
+    modes: ["chat", "work", "code"],
+    scope: "thread",
+  },
+  {
     id: "changes",
     label: "Changes",
     modes: ["code"],
@@ -163,10 +170,11 @@ const descriptors: Readonly<Record<RightUtilityDockSurfaceId, RightUtilityDockSu
     canvas: RIGHT_UTILITY_DOCK_SURFACES[3],
     plan: RIGHT_UTILITY_DOCK_SURFACES[4],
     delivery: RIGHT_UTILITY_DOCK_SURFACES[5],
-    changes: RIGHT_UTILITY_DOCK_SURFACES[6],
-    terminal: RIGHT_UTILITY_DOCK_SURFACES[7],
-    tests: RIGHT_UTILITY_DOCK_SURFACES[8],
-    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[9],
+    agents: RIGHT_UTILITY_DOCK_SURFACES[6],
+    changes: RIGHT_UTILITY_DOCK_SURFACES[7],
+    terminal: RIGHT_UTILITY_DOCK_SURFACES[8],
+    tests: RIGHT_UTILITY_DOCK_SURFACES[9],
+    "ios-simulator": RIGHT_UTILITY_DOCK_SURFACES[10],
   };
 
 export function resolveRightUtilityDockSurface(

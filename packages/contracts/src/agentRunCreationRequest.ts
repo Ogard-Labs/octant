@@ -1,6 +1,8 @@
 import { Schema } from "effect";
 import {
   AgentRunAuthority,
+  AgentRunCreationPosture,
+  AgentRunExecutionKind,
   AgentRunId,
   AgentRunParentThreadId,
   AgentRunRequestId,
@@ -161,7 +163,90 @@ export const AgentRunCreationRequest = Schema.Struct({
   );
 export type AgentRunCreationRequest = typeof AgentRunCreationRequest.Type;
 
+/**
+ * Renderer-facing child creation intent. The client names a parent thread,
+ * a mode-valid role, and a bounded task. The server derives mode, Project,
+ * provider, model, reasoning, workspace, and maximum authority — those facts
+ * are never taken from this body.
+ */
+export const AgentRunControlRequest = Schema.Struct({
+  requestId: AgentRunRequestId,
+  parentThreadId: AgentRunParentThreadId,
+  parentRunId: Schema.optional(AgentRunId),
+  role: AgentRunRole,
+  task: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
+  includeParentContext: Schema.optional(Schema.Boolean),
+  /**
+   * Optional one-off multi-model pool. The server still resolves the route;
+   * the primary candidate is the parent thread's provider/model, never a
+   * renderer-supplied identity.
+   */
+  pool: Schema.optional(MultiModelPool),
+}).annotations(strict);
+export type AgentRunControlRequest = typeof AgentRunControlRequest.Type;
+
+export const AgentRunControlPreviewRequest = Schema.Struct({
+  parentThreadId: AgentRunParentThreadId,
+  role: Schema.optional(AgentRunRole),
+}).annotations(strict);
+export type AgentRunControlPreviewRequest = typeof AgentRunControlPreviewRequest.Type;
+
+export const AgentRunControlResolvedFacts = Schema.Struct({
+  mode: OctantMode,
+  projectId: Schema.optional(ProjectId),
+  allowedRoles: Schema.Array(AgentRunRole),
+  providerInstanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+  reasoning: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128))),
+  workspaceKind: Schema.Literal("chat-virtual", "work-root", "code-worktree"),
+  authority: AgentRunAuthority,
+  executionKind: AgentRunExecutionKind,
+  attemptedExecutionKind: AgentRunExecutionKind,
+  nativeFallbackReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  capabilityDegradations: Schema.Array(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1024))),
+  creationPosture: AgentRunCreationPosture,
+}).annotations(strict);
+export type AgentRunControlResolvedFacts = typeof AgentRunControlResolvedFacts.Type;
+
+export const AgentRunControlPreviewResult = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("ready"),
+    facts: AgentRunControlResolvedFacts,
+  }).annotations(strict),
+  AgentRunWorkspaceRefused,
+);
+export type AgentRunControlPreviewResult = typeof AgentRunControlPreviewResult.Type;
+
+export const AgentRunSteerRequest = Schema.Struct({
+  runId: AgentRunId,
+  expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
+  message: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(8192)),
+}).annotations(strict);
+export type AgentRunSteerRequest = typeof AgentRunSteerRequest.Type;
+
+export const AgentRunRetryRequest = Schema.Struct({
+  runId: AgentRunId,
+  expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
+}).annotations(strict);
+export type AgentRunRetryRequest = typeof AgentRunRetryRequest.Type;
+
+export const AgentRunResumeRequest = Schema.Struct({
+  runId: AgentRunId,
+  expectedVersion: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
+}).annotations(strict);
+export type AgentRunResumeRequest = typeof AgentRunResumeRequest.Type;
+
 export const decodeAgentRunCreationRequest = Schema.decodeUnknownSync(AgentRunCreationRequest);
+export const decodeAgentRunControlRequest = Schema.decodeUnknownSync(AgentRunControlRequest);
+export const decodeAgentRunControlPreviewRequest = Schema.decodeUnknownSync(
+  AgentRunControlPreviewRequest,
+);
+export const decodeAgentRunControlPreviewResult = Schema.decodeUnknownSync(
+  AgentRunControlPreviewResult,
+);
+export const decodeAgentRunSteerRequest = Schema.decodeUnknownSync(AgentRunSteerRequest);
+export const decodeAgentRunRetryRequest = Schema.decodeUnknownSync(AgentRunRetryRequest);
+export const decodeAgentRunResumeRequest = Schema.decodeUnknownSync(AgentRunResumeRequest);
 export const decodeAgentRunWorkspaceHandle = Schema.decodeUnknownSync(AgentRunWorkspaceHandle);
 export const decodeAgentRunWorkspacePreparationRequest = Schema.decodeUnknownSync(
   AgentRunWorkspacePreparationRequest,

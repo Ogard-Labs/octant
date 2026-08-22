@@ -225,21 +225,36 @@ function createHandler(
       const parentAuthority =
         parentMode === "work"
           ? {
-              ...authority,
               filesystem: true,
-              executionPolicy: "approval-gated" as const,
+              shell: false,
+              git: false,
+              network: false,
+              tools: true,
               subagents: true,
+              executionPolicy: "approval-gated" as const,
+              permissionPersistence: "current-session" as const,
             }
           : parentMode === "code"
             ? {
-                ...authority,
                 filesystem: true,
                 shell: true,
                 git: true,
-                executionPolicy: "approval-gated" as const,
+                network: true,
+                tools: true,
                 subagents: true,
+                executionPolicy: "approval-gated" as const,
+                permissionPersistence: "current-session" as const,
               }
-            : { ...authority, subagents: true };
+            : {
+                filesystem: false,
+                shell: false,
+                git: false,
+                network: false,
+                tools: true,
+                subagents: true,
+                executionPolicy: "plan" as const,
+                permissionPersistence: "current-session" as const,
+              };
       return {
         parentMode,
         parentAuthority,
@@ -247,6 +262,19 @@ function createHandler(
         workspaceParent: {
           threadId: String(ids.thread),
           mode: parentMode,
+          ...(parentMode === "chat"
+            ? {}
+            : {
+                projectId: "77777777-7777-4777-8777-777777777777",
+                bindingRevisionId: "88888888-8888-4888-8888-888888888888",
+                canonicalRoot: "/projects/demo",
+                checkoutRoot: "/repo",
+              }),
+        },
+        parentRoute: {
+          providerInstanceId: ids.provider as never,
+          modelId: "gpt-4o" as never,
+          ...(parentMode === "chat" ? {} : { projectId: "77777777-7777-4777-8777-777777777777" }),
         },
       };
     },
@@ -466,13 +494,8 @@ describe("agentRunRoutes", () => {
   const creationBody = () => ({
     requestId: ids.request,
     parentThreadId: ids.thread,
-    role: "research",
+    role: "research" as const,
     task: "Summarize the open PRs in this repository.",
-    mode: "chat",
-    providerInstanceId: ids.provider,
-    modelId: "gpt-4o",
-    requestedAuthority: authority,
-    workspace: { kind: "chat-virtual", mode: "chat" },
   });
 
   it("creates a child run from an explicit request under Automatic posture", async () => {
@@ -517,7 +540,7 @@ describe("agentRunRoutes", () => {
     expect(response?.status).toBe(403);
   });
 
-  it("refuses a child whose requested mode does not match its actual parent thread", async () => {
+  it("refuses a Chat-only research child on a Code parent", async () => {
     const { handler, persistence, token } = createHandler({ parentMode: "code" });
 
     const response = await handler(
@@ -594,12 +617,12 @@ describe("agentRunRoutes", () => {
       error: "AgentRun request ID cannot be reused for a different authorized request.",
     });
 
-    const widenedAuthority = await request({
+    const differentTask = await request({
       ...creationBody(),
-      requestedAuthority: { ...authority, tools: false },
+      task: "A different bounded task.",
     });
-    expect(widenedAuthority?.status).toBe(409);
-    expect(await widenedAuthority!.json()).toEqual({
+    expect(differentTask?.status).toBe(409);
+    expect(await differentTask!.json()).toEqual({
       error: "AgentRun request ID cannot be reused for a different authorized request.",
     });
   });
@@ -694,13 +717,17 @@ describe("agentRunRoutes", () => {
     expect(response?.status).toBe(400);
   });
 
-  it("rejects Code-mode creation because worktree isolation is not yet wired", async () => {
+  it("rejects a raw provider or authority field on the control request", async () => {
     const { handler, token } = createHandler();
     const response = await handler(
       new Request("http://127.0.0.1/api/agent-runs/request", {
         method: "POST",
         headers: { "content-type": "application/json", "x-octant-window-capability": token },
-        body: JSON.stringify({ ...creationBody(), mode: "code" }),
+        body: JSON.stringify({
+          ...creationBody(),
+          providerInstanceId: ids.provider,
+          requestedAuthority: authority,
+        }),
       }),
     );
     expect(response?.status).toBe(400);
@@ -805,7 +832,6 @@ describe("agentRunRoutes", () => {
       );
     const root = await create({
       ...creationBody(),
-      requestedAuthority: { ...authority, subagents: true },
     });
     const rootBody = (await root!.json()) as { run: { id: string } };
     const child = await create({
@@ -1204,18 +1230,7 @@ describe("agentRunRoutes", () => {
         },
         body: JSON.stringify({
           ...creationBody(),
-          mode: "work",
-          requestedAuthority: {
-            filesystem: true,
-            shell: false,
-            git: false,
-            network: false,
-            tools: true,
-            subagents: false,
-            executionPolicy: "approval-gated",
-            permissionPersistence: "current-session",
-          },
-          workspace: { kind: "work-root", mode: "work", receiptId: workspaceReceipt },
+          role: "research",
         }),
       }),
     );
@@ -1237,23 +1252,7 @@ describe("agentRunRoutes", () => {
         },
         body: JSON.stringify({
           ...creationBody(),
-          mode: "code",
           role: "implementation",
-          requestedAuthority: {
-            filesystem: true,
-            shell: true,
-            git: false,
-            network: false,
-            tools: true,
-            subagents: false,
-            executionPolicy: "approval-gated",
-            permissionPersistence: "current-session",
-          },
-          workspace: {
-            kind: "code-worktree",
-            mode: "code",
-            worktreeReceiptId: workspaceReceipt,
-          },
         }),
       }),
     );
@@ -1262,5 +1261,123 @@ describe("agentRunRoutes", () => {
       status: "refused",
       reason: "parent-checkout",
     });
+  });
+
+  it("previews derived parent facts without taking client provider or authority", async () => {
+    const { handler, token } = createHandler();
+    const response = await handler(
+      new Request(
+        `http://127.0.0.1/api/agent-runs/control-preview?parentThreadId=${ids.thread}&role=research`,
+        { headers: { "x-octant-window-capability": token } },
+      ),
+    );
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toMatchObject({
+      status: "ready",
+      facts: {
+        mode: "chat",
+        allowedRoles: ["research"],
+        providerInstanceId: ids.provider,
+        modelId: "gpt-4o",
+        workspaceKind: "chat-virtual",
+        executionKind: "octant-managed",
+      },
+    });
+  });
+
+  it("steers a live child at the expected version and refuses a stale one", async () => {
+    const steered: string[] = [];
+    const { handler, token, persistence } = createHandler();
+    const created = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/request", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify(creationBody()),
+      }),
+    );
+    const createdBody = (await created!.json()) as { run: { id: string; version: number } };
+    persistence.applyCommand({
+      kind: "mark-agent-run-running",
+      runId: createdBody.run.id as never,
+      expectedVersion: createdBody.run.version as never,
+    });
+    const running = persistence.getById(createdBody.run.id as never);
+    const stale = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/steer", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({
+          runId: createdBody.run.id,
+          expectedVersion: 1,
+          message: "Focus on the failing test.",
+        }),
+      }),
+    );
+    expect(stale?.status).toBe(409);
+    void steered;
+    expect(running?.lifecycleStatus).toBe("running");
+  });
+
+  it("retries a failed child at the expected version", async () => {
+    const { handler, token, persistence } = createHandler();
+    const created = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/request", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify(creationBody()),
+      }),
+    );
+    const createdBody = (await created!.json()) as { run: { id: string; version: number } };
+    persistence.applyCommand({
+      kind: "fail-agent-run",
+      runId: createdBody.run.id as never,
+      expectedVersion: createdBody.run.version as never,
+      recoveryReason: "provider-unavailable",
+    });
+    const failed = persistence.getById(createdBody.run.id as never);
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/retry", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({
+          runId: createdBody.run.id,
+          expectedVersion: failed?.version,
+        }),
+      }),
+    );
+    expect(response?.status).toBe(200);
+    const body = (await response!.json()) as { run: { lifecycleStatus: string } };
+    expect(body.run.lifecycleStatus).toBe("starting");
+  });
+
+  it("resumes a waiting child and refuses a restart interruption without resume evidence", async () => {
+    const { handler, token, persistence } = createHandler();
+    const created = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/request", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify(creationBody()),
+      }),
+    );
+    const createdBody = (await created!.json()) as { run: { id: string; version: number } };
+    persistence.applyCommand({
+      kind: "interrupt-agent-run",
+      runId: createdBody.run.id as never,
+      expectedVersion: createdBody.run.version as never,
+      recoveryReason: "restart-without-resumable-execution",
+    });
+    const interrupted = persistence.getById(createdBody.run.id as never);
+    const response = await handler(
+      new Request("http://127.0.0.1/api/agent-runs/resume", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-octant-window-capability": token },
+        body: JSON.stringify({
+          runId: createdBody.run.id,
+          expectedVersion: interrupted?.version,
+        }),
+      }),
+    );
+    expect(response?.status).toBe(400);
+    expect(await response!.json()).toMatchObject({ kind: "run-command-failed" });
   });
 });

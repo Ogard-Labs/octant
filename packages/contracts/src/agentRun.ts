@@ -402,6 +402,16 @@ export const AgentRunCommand = Schema.Union(
     runId: AgentRunId,
     expectedVersion: AggregateVersion,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("retry-agent-run"),
+    runId: AgentRunId,
+    expectedVersion: AggregateVersion,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("resume-agent-run"),
+    runId: AgentRunId,
+    expectedVersion: AggregateVersion,
+  }).annotations(strict),
 );
 export type AgentRunCommand = typeof AgentRunCommand.Type;
 
