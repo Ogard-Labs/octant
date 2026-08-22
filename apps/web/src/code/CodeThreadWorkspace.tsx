@@ -597,7 +597,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     <section aria-label="Code thread" className="code-thread-workspace">
       {/* No identity header. The title repeated the pane's own grip, the
           lifecycle badge said "Active" on nearly every thread, the branch is
-          the environment panel's fact, and follow-up is the thread row's
+          the Environment summary's fact, and follow-up is the thread row's
           right-click menu — leaving a band that cost height and said nothing.
           Live child runs are the one thing here that has no other home. */}
       {childRunStatus === undefined ? null : (

@@ -250,6 +250,10 @@ export interface WorkspaceViewProps {
   readonly statusBar?: ReactNode;
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
+  /**
+   * Bootstrap still carries presentation for journal compatibility. Open or
+   * closed is renderer state; these fields are not read.
+   */
   readonly environmentPresentation: EnvironmentPresentationState;
   readonly onSetEnvironmentPresentation: (next: EnvironmentPresentationState) => void;
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
@@ -658,8 +662,7 @@ function renderCodeTab(
         threadId={String(tab.threadId)}
       >
         <CodeThreadEnvironment
-          presentation={props.environmentPresentation}
-          onChangePresentation={props.onSetEnvironmentPresentation}
+          active={paneIsActive(props, paneId)}
           {...(project === undefined ? {} : { project })}
           {...(props.onNewThreadInProject === undefined
             ? {}
@@ -820,11 +823,10 @@ function renderNonCodeTab(
         chatReadCursorStore={props.chatReadCursorStore}
         {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
         {...(openProviderSettings === undefined ? {} : { onOpenSettings: openProviderSettings })}
-        environmentPresentation={props.environmentPresentation}
+        active={paneIsActive(props, paneId)}
         key={tab.threadId}
         onClearCanvasSelections={canvasContext.clearCanvasSelections}
         onRemoveCanvasSelection={canvasContext.onRemoveCanvasSelection}
-        onSetEnvironmentPresentation={props.onSetEnvironmentPresentation}
         pendingCanvasSelections={canvasContext.pendingCanvasSelections}
         projects={props.projects}
         tab={tab}
@@ -865,9 +867,8 @@ function renderNonCodeTab(
     }
     return (
       <WorkThreadEnvironment
+        active={paneIsActive(props, paneId)}
         key={tab.id}
-        onChangePresentation={props.onSetEnvironmentPresentation}
-        presentation={props.environmentPresentation}
         projects={props.projects}
         tab={tab}
         threadClient={props.workThreadClient}
@@ -1449,15 +1450,18 @@ function resolveCodeTabCheckoutId(
     ?.checkoutId;
 }
 
+function paneIsActive(props: WorkspaceViewProps, paneId: PaneId): boolean {
+  return paneId === (props.focusedPaneId ?? props.workspace.activePaneIds[props.mode]);
+}
+
 function ChatThreadWorkspace(props: {
   readonly chatClient: ChatClient;
   readonly chatReadCursorStore: ChatReadCursorStore;
-  readonly environmentPresentation: EnvironmentPresentationState;
+  readonly active?: boolean;
   readonly extensionClient?: ExtensionClient;
   readonly onOpenSettings?: () => void;
   readonly onClearCanvasSelections: () => void;
   readonly onRemoveCanvasSelection: (selectionId: CanvasContextSelectionId) => void;
-  readonly onSetEnvironmentPresentation: (next: EnvironmentPresentationState) => void;
   readonly pendingCanvasSelections: ReadonlyArray<CanvasContextSelection>;
   readonly projectServerUrl?: string;
   readonly projectWindowCapability?: string;
@@ -1496,9 +1500,8 @@ function ChatThreadWorkspace(props: {
   );
   return (
     <ChatThreadEnvironment
+      {...(props.active === undefined ? {} : { active: props.active })}
       controller={controller}
-      onChangePresentation={props.onSetEnvironmentPresentation}
-      presentation={props.environmentPresentation}
       projects={props.projects}
       tab={props.tab}
     >

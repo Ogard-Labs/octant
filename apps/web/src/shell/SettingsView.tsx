@@ -2,8 +2,6 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { ArrowLeft, Search, Settings2 } from "lucide-react";
 import type { ShellSettings } from "@octant/contracts/shell";
 import {
-  type EnvironmentPresentation,
-  type EnvironmentPresentationByMode,
   type SettingsDeepLink,
   type SettingsSectionId,
   type SettingsSettingId,
@@ -720,22 +718,6 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
             </OctantNativeSelect>
           </SettingRow>
         ) : null}
-        {isAvailable("environment-presentation") ? (
-          <SettingRow
-            description="Default presentation for the Environment panel in each mode."
-            focused={focusedSetting === settingId("environment-presentation")}
-            label="Environment panel"
-            scope="app"
-            settingId="environment-presentation"
-          >
-            <EnvironmentPresentationDefaultsRow
-              value={props.settings.environmentPresentationByMode}
-              onChange={(byMode) =>
-                props.onSettingsChange({ environmentPresentationByMode: byMode })
-              }
-            />
-          </SettingRow>
-        ) : null}
         {isAvailable("sidebar-background") ? (
           <SettingRow
             description="Choose a preset gradient, a custom image, or none. Adjust the overlay color and opacity for readability."
@@ -985,55 +967,6 @@ function SidebarBackgroundSettings({
           </OctantNativeSelect>
         </label>
       ) : null}
-    </div>
-  );
-}
-
-const ENVIRONMENT_PRESENTATION_OPTIONS: ReadonlyArray<{
-  readonly value: EnvironmentPresentation;
-  readonly label: string;
-}> = [
-  { value: "floating", label: "Floating" },
-  { value: "hidden", label: "Hidden" },
-];
-
-const ENVIRONMENT_PRESENTATION_MODES: ReadonlyArray<{
-  readonly key: keyof EnvironmentPresentationByMode;
-  readonly label: string;
-}> = [
-  { key: "chat", label: "Chat" },
-  { key: "work", label: "Work" },
-  { key: "code", label: "Code" },
-];
-
-function EnvironmentPresentationDefaultsRow(props: {
-  readonly value: EnvironmentPresentationByMode;
-  readonly onChange: (next: EnvironmentPresentationByMode) => void;
-}) {
-  return (
-    <div className="settings-view__field-group">
-      {ENVIRONMENT_PRESENTATION_MODES.map((entry) => (
-        <label className="settings-view__field" key={entry.key}>
-          <span>{entry.label}</span>
-          <OctantNativeSelect
-            aria-label={`${entry.label} environment presentation`}
-            className="settings-view__select"
-            onChange={(event) =>
-              props.onChange({
-                ...props.value,
-                [entry.key]: event.currentTarget.value as EnvironmentPresentation,
-              })
-            }
-            value={props.value[entry.key]}
-          >
-            {ENVIRONMENT_PRESENTATION_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </OctantNativeSelect>
-        </label>
-      ))}
     </div>
   );
 }

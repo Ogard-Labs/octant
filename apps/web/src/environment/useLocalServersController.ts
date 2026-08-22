@@ -35,8 +35,13 @@ export interface LocalServersControllerOptions {
   readonly client?: LocalServerClient;
   readonly threadId?: CodeThreadId | undefined;
   readonly projectId?: ProjectId | undefined;
-  /** True only while the Local servers section is actually visible. */
+  /** True only while local servers may be observed at all. */
   readonly enabled: boolean;
+  /**
+   * Interval refresh while the disclosure is open. A closed Environment still
+   * takes one observation for the summary count and then stays quiet.
+   */
+  readonly poll?: boolean;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly newRequestId?: () => string;
@@ -48,10 +53,9 @@ export interface LocalServersControllerOptions {
  *
  * The host is authoritative for classification, health, and whether Stop is
  * offered at all; this controller only transports commands and holds the last
- * snapshot. It scans when the section becomes visible, refreshes on a bounded
- * interval while it stays visible, and refreshes immediately after a Stop —
- * and it never scans while the section is hidden, so an unopened panel costs
- * the host nothing.
+ * snapshot. A closed Environment takes one observation for the compact count
+ * and then stays quiet. Interval refresh, and a refresh the moment polling
+ * starts, run only while the disclosure is open. Disabled sections never scan.
  */
 export function useLocalServersController(
   options: LocalServersControllerOptions,
@@ -153,12 +157,13 @@ export function useLocalServersController(
   }, [load]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || options.poll === false) return;
+    void load("poll");
     const interval = globalThis.setInterval(() => {
       void load("poll");
     }, options.refreshIntervalMs ?? LOCAL_SERVERS_REFRESH_INTERVAL_MS);
     return () => globalThis.clearInterval(interval);
-  }, [load, options.refreshIntervalMs, ready]);
+  }, [load, options.poll, options.refreshIntervalMs, ready]);
 
   useEffect(() => {
     mounted.current = true;

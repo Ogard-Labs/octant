@@ -101,13 +101,19 @@ Images stay readable in the transcript after a restart. Removing a chip before s
 
 ## Thread environment
 
-Each Code thread tab owns its Environment panel, which reflects the authoritative thread environment. The panel can be:
+Each Code thread tab owns a compact Environment summary in the thread header.
+It shows repository identity, branch, clean or dirty state, the current working
+folder, and how many local servers are running. Opening the summary shows a
+temporary disclosure with checkout facts, grouped local servers, and **Change
+working folder**. Escape, a click outside, or activating another pane closes
+it. Open or closed is not remembered.
 
-- **Floating**: a contained overlay within the thread tab.
-- **Pinned**: a resizable trailing rail inside the thread tab.
-- **Hidden**: no detailed panel, but a compact control shows effective placement and worktree identity.
-
-Environment content includes changes, checkout/worktree, branch, commit and push readiness, local servers, repository, external editor handoff, subagents, sources, and Browser sessions.
+Local servers are compact rows grouped by process and port, with this checkout
+separated from other classified leftovers. **Open** stays on a usable listener.
+Copy URL and details live in that row's menu. **Stop** appears only for an
+Octant-owned safe stop, or for a classified leftover after confirmation.
+Unmanaged processes say so and have no fake Stop control. Files, Plan,
+Delivery, Agents, Browser, and Review stay in the dock.
 
 ## Managed worktrees
 

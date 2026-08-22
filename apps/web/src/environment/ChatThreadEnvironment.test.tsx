@@ -6,8 +6,7 @@ import {
   type ProjectSummary,
   type WorkspaceTab,
 } from "@octant/contracts";
-import { defaultEnvironmentPresentationState } from "@octant/domain/shell-policy";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatController } from "../chat/useChatController";
 import { ChatThreadEnvironment } from "./ChatThreadEnvironment";
@@ -107,65 +106,41 @@ function controller(): ChatController {
   } as unknown as ChatController;
 }
 
-describe("the Chat thread environment panel", () => {
-  it("shares thread facts while retaining independent presentation for two tab views", () => {
-    const presentation = {
-      ...defaultEnvironmentPresentationState(),
-      byTab: [
-        { tabId: tabA.id, presentation: "hidden" as const },
-        { tabId: tabB.id, presentation: "floating" as const },
-      ],
-    };
+describe("the Chat thread environment summary", () => {
+  it("keeps independent open state for two tab views of the same thread", () => {
     const authoritative = controller();
 
     render(
       <>
-        <ChatThreadEnvironment
-          controller={authoritative}
-          onChangePresentation={vi.fn()}
-          presentation={presentation}
-          projects={[chatProject()]}
-          tab={tabA}
-        >
+        <ChatThreadEnvironment controller={authoritative} projects={[chatProject()]} tab={tabA}>
           <div>First view</div>
         </ChatThreadEnvironment>
-        <ChatThreadEnvironment
-          controller={authoritative}
-          onChangePresentation={vi.fn()}
-          presentation={presentation}
-          projects={[chatProject()]}
-          tab={tabB}
-        >
+        <ChatThreadEnvironment controller={authoritative} projects={[chatProject()]} tab={tabB}>
           <div>Second view</div>
         </ChatThreadEnvironment>
       </>,
     );
 
-    expect(
-      screen.getByRole("button", { name: /Show environment panel for Planning/ }),
-    ).toBeVisible();
-    expect(screen.getByRole("dialog", { name: "Environment for Planning" })).toBeVisible();
-    expect(screen.getAllByText("1 attachment")).toHaveLength(1);
+    const triggers = screen.getAllByRole("button", { name: /Show environment for Planning/ });
+    expect(triggers).toHaveLength(2);
+    const first = triggers[0];
+    expect(first).toBeInstanceOf(HTMLButtonElement);
+    if (!(first instanceof HTMLButtonElement)) return;
+    fireEvent.click(first);
+    expect(screen.getAllByRole("dialog", { name: "Environment for Planning" })).toHaveLength(1);
+    expect(screen.getByText("1 attachment")).toBeVisible();
     expect(screen.getByText("First view")).toBeVisible();
     expect(screen.getByText("Second view")).toBeVisible();
   });
 
   it("fails closed when the authoritative thread references an unresolved Project", () => {
     render(
-      <ChatThreadEnvironment
-        controller={controller()}
-        onChangePresentation={vi.fn()}
-        presentation={{
-          ...defaultEnvironmentPresentationState(),
-          byMode: { ...defaultEnvironmentPresentationState().byMode, chat: "floating" },
-        }}
-        projects={[]}
-        tab={tabA}
-      >
+      <ChatThreadEnvironment controller={controller()} projects={[]} tab={tabA}>
         <div />
       </ChatThreadEnvironment>,
     );
 
+    fireEvent.click(screen.getByRole("button", { name: /Show environment for Chat/ }));
     expect(screen.getByRole("dialog", { name: "Environment for Chat" })).toBeVisible();
     expect(screen.getByText("Project unavailable")).toBeVisible();
     expect(screen.getByText("Authoritative Chat context is unavailable.")).toBeVisible();

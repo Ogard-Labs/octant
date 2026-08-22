@@ -8,7 +8,6 @@ import {
   type ProjectSummary,
   type WorkspaceTab,
 } from "@octant/contracts";
-import { defaultEnvironmentPresentationState } from "@octant/domain/shell-policy";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -71,12 +70,14 @@ function threadClient(result: "ready" | "failed" = "ready"): WorkThreadClient {
   };
 }
 
+async function openEnvironment(name = /Show environment for/): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name }));
+}
+
 describe("WorkThreadEnvironment", () => {
   it("renders the Work workspace inside a thread-scoped environment", async () => {
     render(
       <WorkThreadEnvironment
-        onChangePresentation={vi.fn()}
-        presentation={defaultEnvironmentPresentationState()}
         projects={[workProject()]}
         tab={workTab()}
         threadClient={threadClient()}
@@ -86,18 +87,14 @@ describe("WorkThreadEnvironment", () => {
     );
 
     expect(screen.getByTestId("work-workspace-content")).toBeVisible();
-    expect(
-      await screen.findByRole("dialog", { name: "Environment for Knowledge Base" }),
-    ).toBeVisible();
-    expect(screen.getByText("work-root")).toBeVisible();
+    expect(await screen.findByText("work-root")).toBeVisible();
     expect(screen.getByText("available")).toBeVisible();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("fails closed when authoritative thread state cannot be loaded", async () => {
     render(
       <WorkThreadEnvironment
-        onChangePresentation={vi.fn()}
-        presentation={defaultEnvironmentPresentationState()}
         projects={[workProject()]}
         tab={workTab()}
         threadClient={threadClient("failed")}
@@ -106,25 +103,21 @@ describe("WorkThreadEnvironment", () => {
       </WorkThreadEnvironment>,
     );
 
-    expect(await screen.findByRole("dialog", { name: "Environment for Work" })).toBeVisible();
-    expect(screen.getByText("No folder Project")).toBeVisible();
+    expect(await screen.findByText("No folder Project")).toBeVisible();
     expect(screen.getByText("unavailable")).toBeVisible();
   });
 
-  it("submits a bounded relative working directory through the Work command authority", async () => {
+  it("submits a bounded relative working directory through the focused Change working folder flow", async () => {
     const client = threadClient();
     const user = userEvent.setup();
     render(
-      <WorkThreadEnvironment
-        onChangePresentation={vi.fn()}
-        presentation={defaultEnvironmentPresentationState()}
-        projects={[workProject()]}
-        tab={workTab()}
-        threadClient={client}
-      >
+      <WorkThreadEnvironment projects={[workProject()]} tab={workTab()} threadClient={client}>
         <div />
       </WorkThreadEnvironment>,
     );
+    await openEnvironment();
+    expect(screen.queryByLabelText("Working folder")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Change working folder" }));
     const input = await screen.findByDisplayValue(".");
     await user.clear(input);
     await user.type(input, "research/brief");
@@ -151,16 +144,12 @@ describe("WorkThreadEnvironment", () => {
       message: "Work working directory is unavailable.",
     });
     render(
-      <WorkThreadEnvironment
-        onChangePresentation={vi.fn()}
-        presentation={defaultEnvironmentPresentationState()}
-        projects={[workProject()]}
-        tab={workTab()}
-        threadClient={client}
-      >
+      <WorkThreadEnvironment projects={[workProject()]} tab={workTab()} threadClient={client}>
         <div />
       </WorkThreadEnvironment>,
     );
+    await openEnvironment();
+    fireEvent.click(screen.getByRole("button", { name: "Change working folder" }));
     await screen.findByDisplayValue(".");
     fireEvent.change(screen.getByLabelText("Working folder"), {
       target: { value: "missing" },

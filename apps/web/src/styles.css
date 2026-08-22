@@ -3082,235 +3082,96 @@ button:focus-visible {
   font-size: 10px;
 }
 
-.thread-environment-reveal {
-  display: inline-flex;
+.thread-environment-summary {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  border: 1px solid var(--octant-border);
-  border-radius: 6px;
-  background: var(--octant-surface);
-  color: var(--octant-text-secondary);
-  font-size: 11px;
-  cursor: pointer;
+  min-width: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--oct-border);
+  background: var(--oct-bg);
 }
 
-.thread-environment-reveal__label {
-  font-weight: 600;
-  color: var(--octant-text);
-}
-
-.thread-environment-reveal__detail {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  color: var(--octant-text-muted);
+.thread-environment-summary__button {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  height: auto;
+  min-height: 28px;
+  padding: 2px 8px;
   overflow: hidden;
+}
+
+.thread-environment-summary__label {
+  flex: 0 0 auto;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-strong);
+}
+
+.thread-environment-summary__fact {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--oct-muted);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 160px;
 }
 
-/* One status pill, worn by both presentations. The reveal button and the
-   floating panel report the same environment state, so a state that reads as a
-   tinted pill collapsed and as plain grey text expanded would be two answers
-   to one question. */
-.thread-environment-reveal__status,
-.thread-environment-identity__status {
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 9px;
+.thread-environment-summary__fact + .thread-environment-summary__fact::before {
+  content: "·";
+  margin-right: 8px;
+  opacity: 0.6;
+}
+
+.thread-environment-summary__status {
+  flex: 0 0 auto;
+  margin-left: auto;
   padding: 1px 5px;
   border-radius: 3px;
   background: var(--octant-surface-raised);
   color: var(--octant-text-muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-.thread-environment-reveal__status--available,
-.thread-environment-identity__status--available {
+.thread-environment-summary__status--available {
   color: var(--octant-success-text);
   background: var(--octant-success-surface);
 }
 
-.thread-environment-reveal__status--unavailable,
-.thread-environment-reveal__status--disconnected,
-.thread-environment-identity__status--unavailable,
-.thread-environment-identity__status--disconnected {
+.thread-environment-summary__status--unavailable,
+.thread-environment-summary__status--disconnected {
   color: var(--octant-warning-text);
   background: var(--octant-warning-surface);
 }
 
-.thread-environment-reveal__status--stale,
-.thread-environment-reveal__status--recovery,
-.thread-environment-identity__status--stale,
-.thread-environment-identity__status--recovery {
+.thread-environment-summary__status--stale,
+.thread-environment-summary__status--recovery {
   color: var(--octant-text-muted);
   background: var(--octant-surface-raised);
 }
 
-/* One elevation: the panel is the raised thing, and everything inside it is
-   drawn flat. A bordered card nested inside a bordered panel read as two
-   surfaces stacked rather than one composed panel. */
-.thread-environment-panel {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
+.thread-environment-disclosure {
+  top: calc(100% + 4px);
+  right: 12px;
+  left: auto;
+  width: min(360px, calc(100% - 24px));
+  max-height: min(680px, calc(100vh - 96px));
+  padding: 0;
 }
 
-/* It has to read as something floating over the thread rather than as a card
-   welded into the corner: the surface is translucent and blurred the way the
-   platform's own floating panels are, and the shadow is deep enough to lift it
-   off the transcript running underneath. */
-.thread-environment-panel--floating {
-  position: absolute;
-  top: var(--oct-space-4);
-  right: var(--oct-space-4);
-  width: min(352px, calc(100% - var(--oct-space-4) * 2));
-  max-height: min(680px, calc(100% - var(--oct-space-4) * 2));
-  z-index: 20;
-  background: color-mix(in oklab, var(--oct-surface) 88%, transparent);
-  border-color: color-mix(in oklab, var(--oct-border) 70%, transparent);
-  border-radius: var(--oct-radius-lg);
-  box-shadow:
-    0 1px 1px light-dark(rgb(0 0 0 / 6%), rgb(0 0 0 / 30%)),
-    0 12px 32px -8px light-dark(rgb(0 0 0 / 18%), rgb(0 0 0 / 55%));
-  overflow: hidden;
-  backdrop-filter: blur(20px) saturate(160%);
-}
-
-/* Without a backdrop filter the translucency has nothing to blur, so the panel
-   goes fully opaque rather than letting the transcript show through it. */
-@supports not (backdrop-filter: blur(1px)) {
-  .thread-environment-panel--floating {
-    background: var(--oct-surface);
-  }
-}
-
-/* The identity reads as the panel's header rather than as its first row: it
-   sits on the warm surface the system's dock head uses, and the checkout
-   detail runs under the name instead of competing with it on one line. */
-.thread-environment-panel__header {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-3) var(--oct-space-3) var(--oct-space-2);
-  background: color-mix(in oklab, var(--oct-surface) 92%, var(--oct-fg-soft));
-  border-bottom: 1px solid var(--oct-border);
-}
-
-.thread-environment-panel__heading {
+.thread-environment-disclosure__body {
   display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.thread-environment-panel__title {
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-strong);
-  letter-spacing: -0.01em;
-}
-
-.thread-environment-panel__icon-button {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: var(--oct-radius-sm);
-  background: transparent;
-  color: var(--oct-muted);
-  cursor: pointer;
-}
-
-.thread-environment-panel__icon-button:hover,
-.thread-environment-panel__icon-button:focus-visible {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-}
-
-.thread-environment-identity {
-  display: grid;
-  grid-template-columns: minmax(0, auto) auto;
-  align-items: baseline;
-  gap: 0 var(--oct-space-2);
-  min-width: 0;
-}
-
-.thread-environment-identity__label {
-  overflow: hidden;
-  color: var(--oct-fg);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thread-environment-identity__detail {
-  grid-column: 1 / -1;
-  overflow: hidden;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Where the checkout is, directly under the panel's name. A mono line so a
-   branch and a folder name line up with the identity above them, and quiet
-   enough that it reads as the panel's subtitle rather than as its first fact. */
-.thread-environment-location {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
   gap: var(--oct-space-2);
-  min-width: 0;
-  padding: var(--oct-space-2) var(--oct-space-3);
-  color: var(--oct-muted);
-  background: var(--oct-surface-warm);
-  border-bottom: 1px solid var(--oct-border);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
+  padding: var(--oct-space-3);
 }
 
-.thread-environment-location svg {
-  flex: 0 0 auto;
-}
-
-/* The branch gives up its width first: a worktree folder name is short and
-   fixed, and a long branch name would otherwise push it out of the panel. */
-.thread-environment-location__branch {
-  overflow: hidden;
-  flex: 0 1 auto;
-  min-width: 0;
-  color: var(--oct-fg);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.thread-environment-location__separator {
-  flex: 0 0 auto;
-  opacity: 0.6;
-}
-
-.thread-environment-location__worktree {
-  overflow: hidden;
-  flex: 0 1 auto;
-  min-width: 0;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The thread content owns the whole column. The panel is positioned against
-   this box rather than laid out beside it — a docked panel used to take the
-   row's width from the surface being read. */
 .code-thread-environment {
   position: relative;
   display: flex;
@@ -3328,66 +3189,26 @@ button:focus-visible {
   min-height: 0;
 }
 
-/* The hidden presentation renders a compact reveal control anchored to the
-   thread-tab bounds so the authoritative host/worktree identity stays visible
-   without covering the composer. */
-.code-thread-environment--hidden .thread-environment-reveal,
-.thread-environment-wrapper--hidden .thread-environment-reveal {
-  position: absolute;
-  top: 52px;
-  right: 8px;
-  z-index: 20;
-  width: 30px;
-  min-width: 30px;
-  height: 28px;
-  justify-content: center;
+.thread-environment-disclosure .environment-group__header {
+  min-height: 32px;
   padding: 0;
-}
-
-.code-thread-environment--hidden .thread-environment-reveal__label,
-.code-thread-environment--hidden .thread-environment-reveal__detail,
-.code-thread-environment--hidden .thread-environment-reveal__status,
-.thread-environment-wrapper--hidden .thread-environment-reveal__label,
-.thread-environment-wrapper--hidden .thread-environment-reveal__detail,
-.thread-environment-wrapper--hidden .thread-environment-reveal__status {
-  display: none;
-}
-
-.thread-environment-panel__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0 0 var(--oct-space-2);
-}
-
-/* The floating reference uses title-case rows with generous hit areas. Keep
-   the global Environment groups compact elsewhere, but make this one panel
-   read as a small, composed card rather than a stack of form sections. */
-.thread-environment-panel .environment-group__header {
-  min-height: 36px;
-  padding: 0 var(--oct-space-3);
   color: var(--oct-fg);
   font-size: var(--oct-text-sm);
   letter-spacing: normal;
   text-transform: none;
 }
 
-.thread-environment-panel .environment-group__header:hover,
-.thread-environment-panel .environment-group__header:focus-visible {
-  background: var(--oct-fg-soft);
+.thread-environment-disclosure .environment-group__body {
+  padding: 0 0 var(--oct-space-2);
 }
 
-.thread-environment-panel .environment-group__body {
-  padding: 0 var(--oct-space-3) var(--oct-space-3);
-}
-
-.thread-environment-panel .environment-git-group dl {
+.thread-environment-disclosure .environment-git-group dl {
   border: 0;
   border-radius: 0;
   background: transparent;
 }
 
-.thread-environment-panel .environment-git-group__row {
+.thread-environment-disclosure .environment-git-group__row {
   min-height: 30px;
   padding: 0;
 }
@@ -3472,11 +3293,15 @@ button:focus-visible {
 }
 
 @media (max-width: 720px) {
-  .thread-environment-panel--floating {
-    top: var(--oct-space-2);
+  .thread-environment-disclosure {
     right: var(--oct-space-2);
-    width: min(352px, calc(100% - var(--oct-space-2) * 2));
-    max-height: calc(100% - var(--oct-space-2) * 2);
+    left: var(--oct-space-2);
+    width: auto;
+    max-height: min(70vh, calc(100% - var(--oct-space-2) * 2));
+  }
+
+  .thread-environment-summary__fact {
+    max-width: 7rem;
   }
 }
 
@@ -3485,6 +3310,16 @@ button:focus-visible {
 .thread-dock-panel {
   display: grid;
   align-content: start;
+}
+
+.working-directory-change {
+  display: grid;
+  gap: 6px;
+}
+
+.working-directory-change .working-directory-control {
+  padding: 0;
+  border-bottom: 0;
 }
 
 .working-directory-control {
@@ -3766,6 +3601,40 @@ button:focus-visible {
 .local-servers__confirm p {
   margin: 0;
   color: var(--octant-text-secondary);
+}
+
+.local-servers__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
+  color: var(--oct-fg-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.local-servers__more:hover,
+.local-servers__more:focus-visible {
+  background: var(--oct-fg-soft);
+}
+
+.local-servers__menu {
+  display: grid;
+  gap: 4px;
+  padding: 6px 0 0;
+}
+
+.local-servers__details {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--octant-text-muted);
+  font-size: 10px;
 }
 
 .thread-environment-wrapper {

@@ -61,7 +61,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Appearance",
       scope: "app",
       keywords:
-        "appearance theme sidebar translucency layout width material background mode switcher environment panel",
+        "appearance theme sidebar translucency layout width material background mode switcher",
       settings: [
         {
           id: settingId("sidebar-width"),
@@ -86,13 +86,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Project view switcher",
           scope: "app",
           keywords: "project view switcher icons dropdown sidebar code",
-        },
-        {
-          id: settingId("environment-presentation"),
-          label: "Environment panel",
-          scope: "app",
-          keywords:
-            "environment panel presentation floating pinned hidden per mode default chat work code",
         },
         {
           id: settingId("sidebar-background"),
