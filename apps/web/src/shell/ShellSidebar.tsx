@@ -15,6 +15,11 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import { FIRST_PARTY_PLUGINS_EFFECTIVE, resolveSidebarContributions } from "./contributionRegistry";
 import { ModeSwitcher } from "./ModeSwitcher";
+import {
+  buildAppMenuNavigation,
+  type SidebarNavigationDescriptorId,
+  type SidebarNavigationInput,
+} from "./navigationModel";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarProfile } from "./SidebarProfile";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
@@ -104,6 +109,41 @@ export function ShellSidebar(props: ShellSidebarProps) {
             : props.chatStatus === "disconnected"
               ? "Chat is disconnected."
               : undefined));
+  const navigationActions: Partial<Readonly<Record<SidebarNavigationDescriptorId, () => void>>> = {
+    ...(chatReady ? props.chatNavigation.actions : {}),
+    ...codeActions,
+    ...workActions,
+  };
+  const navigationInput: SidebarNavigationInput = {
+    activeMode,
+    // The library is a host read, so it is offered wherever the shell
+    // can reach the host at all; an unreachable one shows no row rather
+    // than a destination that opens onto an error.
+    artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
+    // Gated by A3/A4 integration: never expose a dead Automations destination.
+    automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
+    agentsCenterEnabled: props.agentsCenterEnabled ?? AGENTS_CENTER_NAVIGATION_ENABLED,
+    createThread:
+      chatReady ||
+      codeActions["new-code-thread"] !== undefined ||
+      workActions["new-work-thread"] !== undefined
+        ? "available"
+        : "unavailable",
+    plugins: "available",
+    projects: "available",
+    pullRequests:
+      codeActions["pull-requests"] === undefined || !sidebarContributions.has("pull-requests")
+        ? "unavailable"
+        : "available",
+    threadBoard:
+      (codeActions["thread-board"] !== undefined || workActions["thread-board"] !== undefined) &&
+      sidebarContributions.has("thread-board")
+        ? "available"
+        : "unavailable",
+  };
+  const appMenuDestinations = buildAppMenuNavigation(navigationInput).filter(
+    (destination) => navigationActions[destination.id] !== undefined,
+  );
   return (
     <aside aria-label="Octant sidebar" className="sidebar" data-octant-sidebar>
       {props.resolvedSidebarBackground !== undefined && props.backgroundFetcher !== undefined ? (
@@ -175,40 +215,8 @@ export function ShellSidebar(props: ShellSidebarProps) {
           />
         ) : null}
         <SidebarNavigation
-          actions={{
-            ...(chatReady ? props.chatNavigation.actions : {}),
-            ...codeActions,
-            ...workActions,
-          }}
-          input={{
-            activeMode,
-            // The library is a host read, so it is offered wherever the shell
-            // can reach the host at all; an unreachable one shows no row rather
-            // than a destination that opens onto an error.
-            artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
-            // Gated by A3/A4 integration: never expose a dead Automations destination.
-            automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
-            agentsCenterEnabled: props.agentsCenterEnabled ?? AGENTS_CENTER_NAVIGATION_ENABLED,
-            createThread:
-              chatReady ||
-              codeActions["new-code-thread"] !== undefined ||
-              workActions["new-work-thread"] !== undefined
-                ? "available"
-                : "unavailable",
-            plugins: "available",
-            projects: "available",
-            pullRequests:
-              codeActions["pull-requests"] === undefined ||
-              !sidebarContributions.has("pull-requests")
-                ? "unavailable"
-                : "available",
-            threadBoard:
-              (codeActions["thread-board"] !== undefined ||
-                workActions["thread-board"] !== undefined) &&
-              sidebarContributions.has("thread-board")
-                ? "available"
-                : "unavailable",
-          }}
+          actions={navigationActions}
+          input={navigationInput}
           projectSection={props.projectSection}
         />
         {chatStatusMessage === undefined ? null : (
@@ -231,9 +239,11 @@ export function ShellSidebar(props: ShellSidebarProps) {
           </div>
         )}
         <SidebarProfile
+          destinations={appMenuDestinations}
           navigatorAvailable={props.navigatorAvailable === true}
           onOpenNavigator={props.onOpenNavigator}
           onOpenSettings={props.onOpenSettings}
+          onSelectDestination={(id) => navigationActions[id]?.()}
           {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}
           profile={props.settings?.userProfile ?? defaultShellSettings().userProfile}
         />

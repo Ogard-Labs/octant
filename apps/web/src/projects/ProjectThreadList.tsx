@@ -4,7 +4,12 @@ import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navig
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ThreadRenameField } from "./ThreadRenameField";
-import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
+import {
+  type ThreadRowActions,
+  ThreadRowActionsMenu,
+  ThreadRowMenu,
+  threadRowMenuIsEmpty,
+} from "./ThreadRowMenu";
 import { OctantButton } from "../ui/base/OctantButton";
 
 /**
@@ -189,12 +194,21 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
             )}
           </OctantButton>
         );
-        if (!hasMenu) return <div key={rowId}>{row}</div>;
+        if (!hasMenu) {
+          return (
+            <div className="sidebar-navigation__thread-row" key={rowId}>
+              {row}
+            </div>
+          );
+        }
         return (
-          <ContextMenuPrimitive.Root key={rowId}>
-            <ContextMenuPrimitive.Trigger render={row} />
-            <ThreadRowMenu actions={actions} thread={thread} />
-          </ContextMenuPrimitive.Root>
+          <div className="sidebar-navigation__thread-row" key={rowId}>
+            <ContextMenuPrimitive.Root>
+              <ContextMenuPrimitive.Trigger render={row} />
+              <ThreadRowMenu actions={actions} thread={thread} />
+            </ContextMenuPrimitive.Root>
+            <ThreadRowActionsMenu actions={actions} thread={thread} />
+          </div>
         );
       })}
     </>

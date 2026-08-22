@@ -1027,6 +1027,17 @@ export async function openSidebarProject(user: ReturnType<typeof userEvent.setup
  * that wants Settings opens their row first.
  */
 export async function openSettingsFromSidebar(user: ReturnType<typeof userEvent.setup>) {
+  await openAppMenuFromSidebar(user, "Settings");
+}
+
+/**
+ * Secondary destinations live in the bottom-left app menu rather than above
+ * Projects, so a test that wants one opens the person's row first.
+ */
+export async function openAppMenuFromSidebar(
+  user: ReturnType<typeof userEvent.setup>,
+  item: string,
+) {
   await user.click(await screen.findByRole("button", { name: "Set your name" }));
-  await user.click(await screen.findByRole("button", { name: "Settings" }));
+  await user.click(await screen.findByRole("button", { name: item }));
 }

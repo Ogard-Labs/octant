@@ -1,10 +1,28 @@
 import type { SettingsDeepLink } from "@octant/contracts";
 import type { UserProfile } from "@octant/contracts/user-profile";
-import { Compass, Gauge, Plug, Settings, Sparkles } from "lucide-react";
+import {
+  Blocks,
+  Bot,
+  Compass,
+  Gauge,
+  Library,
+  Plug,
+  Settings,
+  Sparkles,
+  Users,
+} from "lucide-react";
 import { useEffect, useId, useRef, useState, type ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
+import type { SidebarNavigationDescriptor, SidebarNavigationDescriptorId } from "./navigationModel";
 
 export interface SidebarProfileProps {
+  /**
+   * Secondary destinations that used to compete with Projects. Each item is
+   * already capability-gated; an unavailable surface is omitted rather than
+   * shown disabled.
+   */
+  readonly destinations?: ReadonlyArray<SidebarNavigationDescriptor>;
+  readonly onSelectDestination?: (id: SidebarNavigationDescriptorId) => void;
   readonly onOpenNavigator: () => void;
   /** False until Navigator has a host-configured model; the row is then absent. */
   readonly navigatorAvailable?: boolean;
@@ -28,6 +46,11 @@ export function SidebarProfile(props: SidebarProfileProps) {
   const disclosure = useRef<HTMLDivElement>(null);
   const openZen = props.onOpenZen;
   const name = props.profile.displayName ?? "";
+  const destinations = (props.destinations ?? []).flatMap((destination) => {
+    const Icon = destinationIcon(destination.id);
+    if (Icon === undefined || props.onSelectDestination === undefined) return [];
+    return [destination];
+  });
 
   useEffect(() => {
     if (open) disclosure.current?.querySelector("button")?.focus();
@@ -68,11 +91,21 @@ export function SidebarProfile(props: SidebarProfileProps) {
           }}
           ref={disclosure}
         >
-          <ProfileAction
-            icon={Settings}
-            label="Settings"
-            onClick={() => select(() => props.onOpenSettings())}
-          />
+          {destinations.map((destination) => {
+            const Icon = destinationIcon(destination.id);
+            if (Icon === undefined) return null;
+            return (
+              <ProfileAction
+                icon={Icon}
+                key={destination.id}
+                label={destination.label}
+                onClick={() => select(() => props.onSelectDestination?.(destination.id))}
+              />
+            );
+          })}
+          {destinations.length > 0 ? (
+            <div aria-hidden="true" className="sidebar-profile__separator" />
+          ) : null}
           {props.navigatorAvailable === true ? (
             <ProfileAction
               icon={Compass}
@@ -80,6 +113,11 @@ export function SidebarProfile(props: SidebarProfileProps) {
               onClick={() => select(() => props.onOpenNavigator())}
             />
           ) : null}
+          <ProfileAction
+            icon={Settings}
+            label="Settings"
+            onClick={() => select(() => props.onOpenSettings())}
+          />
           <ProfileAction
             icon={Gauge}
             label="Usage"
@@ -97,6 +135,21 @@ export function SidebarProfile(props: SidebarProfileProps) {
       ) : null}
     </div>
   );
+}
+
+function destinationIcon(id: SidebarNavigationDescriptorId) {
+  switch (id) {
+    case "agents":
+      return Users;
+    case "automations":
+      return Bot;
+    case "artifact-library":
+      return Library;
+    case "plugins":
+      return Blocks;
+    default:
+      return undefined;
+  }
 }
 
 function ProfileAction(props: {

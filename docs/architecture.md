@@ -147,12 +147,24 @@ deleted targets fail closed.
 ## Workspace shell
 
 The window is mode-first: a persistent left sidebar with the Chat, Work, and
-Code selector, mode-aware destinations, Projects and threads, and settings; an
-integrated borderless top chrome; a central workspace; and an optional right
-dock. Mode changes alter content, authority, default composition, and density,
-never the navigation grammar. See [decisions/0015-workspace-shell-model.md](decisions/0015-workspace-shell-model.md).
+Code selector; permanent destinations New thread, Thread board, and Pull
+requests as the mode allows; Projects and their threads as the main hierarchy;
+and a bottom-left app menu for Agents, Automations, Artifacts, Plugins,
+Navigator, and Settings. An integrated borderless top chrome, a central
+workspace, and an optional right dock complete the shell. Mode changes alter
+content, authority, default composition, and density, never the navigation
+grammar. See [decisions/0015-workspace-shell-model.md](decisions/0015-workspace-shell-model.md),
+[decisions/0045-sidebar-is-a-calm-project-first-workspace.md](decisions/0045-sidebar-is-a-calm-project-first-workspace.md),
+and the product-shell language in [DESIGN.md](DESIGN.md).
 
-**Current shipped behavior.** The central workspace is one persistent recursive
+**Current shipped behavior.** The sidebar keeps only New thread, Thread board,
+and Pull requests above the Project tree. Secondary surfaces (Agents,
+Automations, Artifacts, Plugins, Navigator, Settings) live in the bottom-left
+app menu with truthful availability. Project and thread rows use a folder/child
+hierarchy, compact density, one selected state, and keyboard-reachable action
+menus; raw implementation identifiers stay off the row. Empty, loading,
+unavailable, stale, and error states are compact and do not present false
+affordances. The central workspace is one persistent recursive
 split tree. A leaf holds exactly one surface — a thread, a draft, a Project
 overview, a utility surface, or a mode welcome — with no tab strip; the sidebar
 is the switcher. Several same-authority threads can be pinned or dropped into

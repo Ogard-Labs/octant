@@ -55,13 +55,17 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New thread", "Plugins", "Thread board"]) {
+    for (const label of ["New thread", "Thread board"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     expect(actions["new-work-thread"]).toHaveBeenCalledOnce();
-    expect(actions.plugins).toHaveBeenCalledOnce();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Plugins" }));
+    expect(actions.plugins).toHaveBeenCalledOnce();
   });
 
   it("exposes Code destinations backed by exact actions", async () => {
@@ -89,16 +93,21 @@ describe("ShellSidebar", () => {
       />,
     );
 
-    for (const label of ["New thread", "Plugins", "Thread board", "Pull requests"]) {
+    for (const label of ["New thread", "Thread board", "Pull requests"]) {
       await user.click(screen.getByRole("button", { name: label }));
     }
     expect(actions["new-code-thread"]).toHaveBeenCalledOnce();
     expect(actions.automations).not.toHaveBeenCalled();
-    expect(actions.plugins).toHaveBeenCalledOnce();
     expect(actions["thread-board"]).toHaveBeenCalledOnce();
     expect(actions["pull-requests"]).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Threads" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    await user.click(screen.getByRole("button", { name: "Plugins" }));
+    expect(actions.plugins).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
   });
 
   it("keeps Automations hidden when the gate prop is off and reveals it when the gate flips", async () => {
@@ -123,10 +132,12 @@ describe("ShellSidebar", () => {
     // Explicit false overrides the production gate so the prop still controls
     // visibility even when AUTOMATION_CENTER_NAVIGATION_ENABLED is true.
     const gated = render(sidebar(false));
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
     expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
     gated.unmount();
 
     render(sidebar(true));
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
     await user.click(screen.getByRole("button", { name: "Automations" }));
     expect(automations).toHaveBeenCalledOnce();
   });
