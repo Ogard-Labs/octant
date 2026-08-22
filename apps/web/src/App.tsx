@@ -599,6 +599,7 @@ function LaunchedShell(
   const navigatorOpener = useRef<HTMLElement | null>(null);
   const [fallbackDockState, setFallbackDockState] = useState<ThreadUtilityDockState>({ tabs: [] });
   const [dockStatesByThread, setDockStatesByThread] = useState<ThreadUtilityDockStates>(new Map());
+  const [addAgentInvokedByThread, setAddAgentInvokedByThread] = useState(() => new Set<string>());
   const [dockSidecarsByThread, setDockSidecarsByThread] = useState<
     ReadonlyMap<ThreadUtilityDockKey, ChatThreadId>
   >(new Map());
@@ -1453,6 +1454,8 @@ function LaunchedShell(
               }),
         };
   const dockToolCapabilities = useDockToolCapabilities({
+    agentRunClient,
+    addAgentInvoked: dockThreadKey !== undefined && addAgentInvokedByThread.has(dockThreadKey),
     canvasClient,
     hasAppleSimulator:
       appleProjects[0]?.projectPath !== undefined && appleToolchainClient !== undefined,
@@ -1893,6 +1896,8 @@ function LaunchedShell(
     return (
       <ThreadUtilityDockContent
         key={`${dockThreadKey}:${surface}`}
+        agentRunClient={agentRunClient}
+        agentRunSettingsClient={agentRunSettingsClient}
         {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
         appleToolchainClient={appleToolchainClient}
         {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
@@ -1936,6 +1941,16 @@ function LaunchedShell(
     );
   }
 
+  function invokeAddAgent() {
+    if (dockThreadKey === undefined) return;
+    setAddAgentInvokedByThread((current) => {
+      if (current.has(dockThreadKey)) return current;
+      const next = new Set(current);
+      next.add(dockThreadKey);
+      return next;
+    });
+    openDockTab("agents");
+  }
   function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
@@ -3755,6 +3770,7 @@ function LaunchedShell(
                     onNewThreadInProject={(projectId) => void openDraftInProject(projectId)}
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
+                    onAddAgent={invokeAddAgent}
                     chatClient={chatClient}
                     chatController={chatController}
                     chatReadCursorStore={chatReadCursorStore}
@@ -4002,6 +4018,7 @@ function LaunchedShell(
               restoreFocus={navigatorOpener}
             />
             <RightUtilityDock
+              agents={threadUtility("agents")}
               browser={threadUtility("browser")}
               canvas={threadUtility("canvas")}
               changes={threadUtility("changes")}

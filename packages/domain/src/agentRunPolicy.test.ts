@@ -465,6 +465,39 @@ describe("agentRunPolicy", () => {
     expect(completed.result).toEqual(completedResult);
   });
 
+  it("retries a failed child into queued and resumes an interrupted child into starting", () => {
+    const failed = applyAgentRunLifecycleTransition(
+      applyAgentRunLifecycleTransition(
+        applyAgentRunLifecycleTransition(baseRun(), "starting", now as never, {
+          expectedVersion: 1 as never,
+        }),
+        "running",
+        now as never,
+        { expectedVersion: 2 as never },
+      ),
+      "failed",
+      now as never,
+      { expectedVersion: 3 as never, recoveryReason: "provider-unavailable" },
+    );
+    const queued = applyAgentRunLifecycleTransition(failed, "queued", now as never, {
+      expectedVersion: 4 as never,
+    });
+    expect(queued.lifecycleStatus).toBe("queued");
+
+    const interrupted = applyAgentRunLifecycleTransition(
+      applyAgentRunLifecycleTransition(baseRun(), "starting", now as never, {
+        expectedVersion: 1 as never,
+      }),
+      "interrupted",
+      now as never,
+      { expectedVersion: 2 as never, recoveryReason: "provider-session-resumable" },
+    );
+    const resumed = applyAgentRunLifecycleTransition(interrupted, "starting", now as never, {
+      expectedVersion: 3 as never,
+    });
+    expect(resumed.lifecycleStatus).toBe("starting");
+  });
+
   it("refuses a completion whose result is missing, oversized, or references another run", () => {
     const running = applyAgentRunLifecycleTransition(
       applyAgentRunLifecycleTransition(baseRun(), "starting", now as never, {

@@ -10,6 +10,7 @@ import type {
 } from "./rightUtilityDockModel";
 
 export interface RightUtilityDockProps {
+  readonly agents?: ReactNode;
   readonly browser?: ReactNode;
   readonly canvas?: ReactNode;
   readonly changes?: ReactNode;
@@ -46,6 +47,7 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
   const dismiss = props.isNarrow ? { closeButtonRef: closeButton, onClose: props.onClose } : {};
   const surface = (
     <RightUtilityDockSurface
+      {...(props.agents === undefined ? {} : { agents: props.agents })}
       {...(props.browser === undefined ? {} : { browser: props.browser })}
       {...(props.canvas === undefined ? {} : { canvas: props.canvas })}
       {...(props.changes === undefined ? {} : { changes: props.changes })}

@@ -42,6 +42,8 @@ describe("which live tools the dock may offer", () => {
       hasDelivery: "unknown" as const,
       hasCanvasDocument: "unknown" as const,
       hasAppleSimulator: false,
+      hasChildRuns: "unknown" as const,
+      addAgentInvoked: false,
     };
     expect(isDockToolLaunchable("plan", unknown)).toBe(false);
     expect(isDockToolLaunchable("delivery", unknown)).toBe(false);
@@ -67,10 +69,30 @@ describe("which live tools the dock may offer", () => {
       hasDelivery: false,
       hasCanvasDocument: false,
       hasAppleSimulator: false,
+      hasChildRuns: false,
+      addAgentInvoked: false,
     } as const;
     expect(isDockToolLaunchable("ios-simulator", capabilities)).toBe(false);
     expect(
       isDockToolLaunchable("ios-simulator", { ...capabilities, hasAppleSimulator: true }),
     ).toBe(true);
+  });
+
+  it("hides Agents until children exist or Add agent is invoked", () => {
+    const empty = {
+      hasPlanArtifact: false,
+      hasDelivery: false,
+      hasCanvasDocument: false,
+      hasAppleSimulator: false,
+      hasChildRuns: false,
+      addAgentInvoked: false,
+    } as const;
+    expect(isDockToolLaunchable("agents", empty)).toBe(false);
+    expect(isDockToolStillOpenable("agents", empty)).toBe(false);
+    expect(isDockToolLaunchable("agents", { ...empty, hasChildRuns: true })).toBe(true);
+    expect(isDockToolLaunchable("agents", { ...empty, addAgentInvoked: true })).toBe(true);
+    expect(isDockToolStillOpenable("agents", { ...empty, hasChildRuns: "unknown" as const })).toBe(
+      true,
+    );
   });
 });

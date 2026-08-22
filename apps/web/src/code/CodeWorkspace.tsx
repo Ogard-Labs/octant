@@ -80,6 +80,7 @@ export interface CodeWorkspaceApprovals {
 export interface CodeWorkspaceProps {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly agentRunClient?: AgentRunClient;
+  readonly onAddAgent?: () => void;
   readonly approvals?: CodeWorkspaceApprovals;
   readonly client: CodeClient;
   readonly controller: CodeController;
@@ -147,6 +148,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     return (
       <CodeThreadWorkspace
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+        {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
         controller={props.controller}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}

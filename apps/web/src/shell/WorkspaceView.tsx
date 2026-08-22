@@ -99,6 +99,7 @@ type CodeWorkspaceProps = import("../code/CodeWorkspace").CodeWorkspaceProps;
 export interface WorkspaceViewProps {
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly agentRunClient?: AgentRunClient;
+  readonly onAddAgent?: () => void;
   readonly chatClient: ChatClient;
   readonly chatController: ChatController;
   readonly chatReadCursorStore: ChatReadCursorStore;
@@ -578,6 +579,7 @@ function renderCodeTab(
     >
       <CodeWorkspaceTab
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
+        {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
         {...(props.appleToolchainClient === undefined
           ? {}
           : { appleToolchainClient: props.appleToolchainClient })}
@@ -849,6 +851,7 @@ function renderNonCodeTab(
         childRunStatus={
           <ThreadChildRunStatusSlot
             {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
+            {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
             threadId={String(tab.threadId)}
           />
         }
@@ -919,6 +922,7 @@ function renderNonCodeTab(
             childRunStatus={
               <ThreadChildRunStatusSlot
                 {...(props.agentRunClient === undefined ? {} : { client: props.agentRunClient })}
+                {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
                 threadId={String(tab.threadId)}
               />
             }

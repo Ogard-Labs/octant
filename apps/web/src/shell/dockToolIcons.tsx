@@ -1,4 +1,5 @@
 import {
+  Bot,
   FileStack,
   Files,
   FlaskConical,
@@ -18,6 +19,7 @@ const ICONS: Readonly<Record<RightUtilityDockSurfaceId, LucideIcon>> = {
   canvas: FileStack,
   changes: GitCompareArrows,
   delivery: Truck,
+  agents: Bot,
   files: Files,
   "ios-simulator": Smartphone,
   plan: ListChecks,

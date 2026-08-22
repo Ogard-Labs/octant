@@ -23,6 +23,11 @@ import {
 } from "@octant/contracts";
 import { assertAgentRunSandboxEqualOrNarrower } from "@octant/domain/agent-run-policy";
 import {
+  selectAgentRunExecutionKind,
+  type AgentRunExecutionSelection,
+  type AgentRunNativeCapabilityEvidence,
+} from "@octant/domain/agent-run-control-policy";
+import {
   resolveMultiModelRoute,
   type MultiModelCandidateRuntimeFacts,
 } from "@octant/domain/multi-model-pool-policy";
@@ -139,6 +144,12 @@ export interface BuildAgentRunRequestCommandInput {
    * closed instead of being admitted with an empty selection.
    */
   readonly parentContext?: AgentRunParentContextPort;
+  /**
+   * Server-observed native-child evidence. Absent means native is ineligible
+   * and the child is admitted as Octant-managed with an explicit reason.
+   */
+  readonly nativeEvidence?: AgentRunNativeCapabilityEvidence;
+  readonly executionSelection?: AgentRunExecutionSelection;
 }
 
 /**
@@ -150,8 +161,9 @@ export interface BuildAgentRunRequestCommandInput {
  * worktree receipt and equal-or-narrower sandbox relative to the parent
  * checkout.
  *
- * Execution kind is always `octant-managed`: native eligibility checking
- * is not wired into this creation path yet.
+ * Execution kind is native only when the caller supplies capability evidence
+ * for workspace, authority, observability, cancellation, steering, and
+ * recovery. Otherwise the child is Octant-managed and the reason is recorded.
  */
 export function buildAgentRunRequestCommand(
   input: BuildAgentRunRequestCommandInput,
@@ -213,6 +225,19 @@ export function buildAgentRunRequestCommand(
 
   const effectiveAuthorityDigest = agentRunRequestAuthorityDigest(request.requestedAuthority);
   const admittedContext = resolveAdmittedContext(input);
+  const executionSelection =
+    input.executionSelection ??
+    selectAgentRunExecutionKind(
+      input.nativeEvidence ?? {
+        claimedNativeSupport: "unsupported",
+        workspace: false,
+        authority: false,
+        observability: false,
+        cancellation: false,
+        steering: false,
+        recovery: false,
+      },
+    );
 
   const routingReceipt: AgentRunRoutingReceipt = {
     executionResolution: {
@@ -226,8 +251,8 @@ export function buildAgentRunRequestCommand(
       fallbackChain: ["one-off-override"],
       downgradeReasons: [],
     },
-    selectedExecutionKind: "octant-managed",
-    attemptedExecutionKind: "octant-managed",
+    selectedExecutionKind: executionSelection.selectedExecutionKind,
+    attemptedExecutionKind: executionSelection.attemptedExecutionKind,
     selectedProviderInstanceId: request.providerInstanceId,
     selectedModelId: request.modelId,
     ...(request.reasoning === undefined
@@ -246,7 +271,10 @@ export function buildAgentRunRequestCommand(
           },
         }
       : {}),
-    capabilityDegradations: ["native-child-agents-not-wired-in-this-slice-managed-baseline-used"],
+    capabilityDegradations:
+      executionSelection.nativeFallbackReason === undefined
+        ? [...executionSelection.capabilityDegradations]
+        : [...executionSelection.capabilityDegradations, executionSelection.nativeFallbackReason],
     contextSnapshotId: decodeAgentRunContextSnapshotId(input.uuid()),
     ...(admittedContext === undefined ? {} : { admittedContextBlocks: admittedContext.length }),
     effectiveAuthorityDigest,

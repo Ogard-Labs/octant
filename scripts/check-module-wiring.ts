@@ -102,8 +102,8 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
   [
-    "apps/web/src/agents/AgentRunHierarchy.tsx",
-    "Thread-level AgentRun control is a later dock tool. This panel is the existing production surface. Remove once that tool remounts it in the dock, or delete it if that tool replaces it.",
+    "apps/server/src/agentRun/agentRunWorktreeReceiptPort.ts",
+    "Code child isolation adapter used by the creation-command builder's receipt port tests. Product admission now goes through AgentRunWorkspaceService. Remove once those builder tests use admitted workspace grants only.",
   ],
 ]);
 

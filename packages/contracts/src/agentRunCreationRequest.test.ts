@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeAgentRunControlRequest,
   decodeAgentRunCreationRequest,
   decodeAgentRunWorkspaceConfirmationRequest,
   decodeAgentRunWorkspaceHandle,
@@ -228,6 +229,50 @@ describe("AgentRunCreationRequest", () => {
       },
     });
     expect(decoded.pool?.candidates).toHaveLength(2);
+  });
+
+  it("decodes a control request that names only a parent, role, and task", () => {
+    const decoded = decodeAgentRunControlRequest({
+      requestId: ids.request,
+      parentThreadId: ids.thread,
+      role: "research",
+      task: "Summarize the open PRs in this repository.",
+    });
+    expect(decoded.role).toBe("research");
+    expect("providerInstanceId" in decoded).toBe(false);
+    expect("requestedAuthority" in decoded).toBe(false);
+    expect("workspace" in decoded).toBe(false);
+    expect("mode" in decoded).toBe(false);
+  });
+
+  it("rejects a control request that smuggles a provider or authority", () => {
+    expect(() =>
+      decodeAgentRunControlRequest({
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Summarize the open PRs in this repository.",
+        providerInstanceId: ids.provider,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeAgentRunControlRequest({
+        requestId: ids.request,
+        parentThreadId: ids.thread,
+        role: "research",
+        task: "Summarize the open PRs in this repository.",
+        requestedAuthority: {
+          filesystem: true,
+          shell: true,
+          git: true,
+          network: true,
+          tools: true,
+          subagents: true,
+          executionPolicy: "full-access",
+          permissionPersistence: "project-default",
+        },
+      }),
+    ).toThrow();
   });
 
   it("rejects a pool with fewer than two candidates", () => {
