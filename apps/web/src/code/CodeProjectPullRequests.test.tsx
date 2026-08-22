@@ -61,6 +61,7 @@ function renderWorkspace(
       command: CodeProjectPullRequestRefreshCommand,
     ) => Promise<CodeProjectPullRequestView>;
     readonly isNarrow?: boolean;
+    readonly onSelectRow?: (row: import("@octant/contracts").CodeProjectPullRequestRow) => void;
   } = {},
 ) {
   const load = options.load ?? vi.fn(async () => view());
@@ -71,6 +72,7 @@ function renderWorkspace(
       load={load}
       refresh={refresh}
       onClose={() => undefined}
+      {...(options.onSelectRow === undefined ? {} : { onSelectRow: options.onSelectRow })}
     />,
   );
   return { load, refresh };
@@ -116,8 +118,12 @@ describe("CodeProjectPullRequests", () => {
     await waitFor(() =>
       expect(refresh).toHaveBeenCalledWith({ kind: "refresh-project", projectId: projectB }),
     );
+    const actions = document.querySelector(".code-project-pull-requests__actions");
+    expect(actions).not.toBeNull();
     expect(
-      screen.queryByRole("button", { name: /merge|approve|comment|close|force-push/i }),
+      within(actions as HTMLElement).queryByRole("button", {
+        name: /merge|approve|comment|close|force-push/i,
+      }),
     ).not.toBeInTheDocument();
   });
 
@@ -173,6 +179,17 @@ describe("CodeProjectPullRequests", () => {
     expect(document.querySelector(".code-project-pull-requests")).toHaveAttribute(
       "data-narrow",
       "true",
+    );
+  });
+
+  it("selects a pull request row without refreshing GitHub", async () => {
+    const user = userEvent.setup();
+    const onSelectRow = vi.fn();
+    renderWorkspace({ onSelectRow });
+    await screen.findByText("List active pull requests");
+    await user.click(screen.getByRole("button", { name: /List active pull requests/i }));
+    expect(onSelectRow).toHaveBeenCalledWith(
+      expect.objectContaining({ number: 12, title: "List active pull requests" }),
     );
   });
 });

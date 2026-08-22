@@ -15,6 +15,9 @@ import {
   decodeCodeProjectPullRequestQuery,
   decodeCodeProjectPullRequestRefreshCommand,
   decodeCodeProjectPullRequestView,
+  decodeCodeProjectPullRequestDetailQuery,
+  decodeCodeProjectPullRequestDetailRefreshCommand,
+  decodeCodeProjectPullRequestDetailView,
   decodeCodeCommand,
   decodeCodeEvidenceReference,
   decodeCodeEventFrame,
@@ -43,6 +46,9 @@ import {
   type CodeProjectPullRequestQuery,
   type CodeProjectPullRequestRefreshCommand,
   type CodeProjectPullRequestView,
+  type CodeProjectPullRequestDetailQuery,
+  type CodeProjectPullRequestDetailRefreshCommand,
+  type CodeProjectPullRequestDetailView,
   type CodeAttachmentId,
   type CodeAttachmentMediaType,
   type CodeAttachmentReference,
@@ -208,6 +214,15 @@ export interface CodeRouteService {
     command: CodeProjectPullRequestRefreshCommand,
     signal?: AbortSignal,
   ) => Promise<CodeProjectPullRequestView> | CodeProjectPullRequestView;
+  readonly queryProjectPullRequestDetail?: (
+    authenticatedWindowId: WindowId,
+    query: CodeProjectPullRequestDetailQuery,
+  ) => Promise<CodeProjectPullRequestDetailView> | CodeProjectPullRequestDetailView;
+  readonly refreshProjectPullRequestDetail?: (
+    authenticatedWindowId: WindowId,
+    command: CodeProjectPullRequestDetailRefreshCommand,
+    signal?: AbortSignal,
+  ) => Promise<CodeProjectPullRequestDetailView> | CodeProjectPullRequestDetailView;
   readonly readFollowUp?: (
     authenticatedWindowId: WindowId,
     threadId: CodeThreadId,
@@ -681,6 +696,76 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             origin,
           );
         }
+        case "project-pull-requests-detail": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.queryProjectPullRequestDetail === undefined) {
+            return failureResponse(
+              {
+                category: "unavailable",
+                message: "Code project pull-request detail is unavailable.",
+              },
+              503,
+              origin,
+            );
+          }
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
+          refuseRendererAuthoredIdentity(value);
+          let query: CodeProjectPullRequestDetailQuery;
+          try {
+            query = decodeCodeProjectPullRequestDetailQuery(value);
+          } catch {
+            throw new CodeRouteRejected("Code project pull-request detail query is invalid.", 400);
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestDetailView(
+              await dependencies.service.queryProjectPullRequestDetail(
+                authenticatedWindowId,
+                query,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
+        case "project-pull-requests-detail-refresh": {
+          requireMethodAndEmptyQuery(request, url, "POST");
+          requireJsonContentType(request);
+          if (dependencies.service.refreshProjectPullRequestDetail === undefined) {
+            return failureResponse(
+              {
+                category: "unavailable",
+                message: "Code project pull-request detail refresh is unavailable.",
+              },
+              503,
+              origin,
+            );
+          }
+          const body = await readBoundedBytes(request, jsonLimit);
+          const value = parseJson(body);
+          refuseRendererAuthoredIdentity(value);
+          let command: CodeProjectPullRequestDetailRefreshCommand;
+          try {
+            command = decodeCodeProjectPullRequestDetailRefreshCommand(value);
+          } catch {
+            throw new CodeRouteRejected(
+              "Code project pull-request detail refresh is invalid.",
+              400,
+            );
+          }
+          return jsonResponse(
+            decodeCodeProjectPullRequestDetailView(
+              await dependencies.service.refreshProjectPullRequestDetail(
+                authenticatedWindowId,
+                command,
+                request.signal,
+              ),
+            ),
+            200,
+            origin,
+          );
+        }
         case "operation-content": {
           requireMethodAndEmptyQuery(request, url, "GET");
           if (dependencies.service.readOperationContent === undefined) {
@@ -960,7 +1045,9 @@ type MatchedRoute =
         | "attachment"
         | "board"
         | "project-pull-requests"
-        | "project-pull-requests-refresh";
+        | "project-pull-requests-refresh"
+        | "project-pull-requests-detail"
+        | "project-pull-requests-detail-refresh";
     }>
   | Readonly<{ kind: "thread" | "events" | "conversation" | "follow-up"; threadId: string }>
   | Readonly<{ kind: "operation-events"; threadId: string; operationId: string }>
@@ -1071,6 +1158,12 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/project-pull-requests") return { kind: "project-pull-requests" };
   if (pathname === "/api/code/project-pull-requests/refresh") {
     return { kind: "project-pull-requests-refresh" };
+  }
+  if (pathname === "/api/code/project-pull-requests/detail") {
+    return { kind: "project-pull-requests-detail" };
+  }
+  if (pathname === "/api/code/project-pull-requests/detail/refresh") {
+    return { kind: "project-pull-requests-detail-refresh" };
   }
   if (pathname === "/api/code/files/content") return { kind: "file-save" };
   if (pathname === "/api/code/files/open") return { kind: "file-open" };

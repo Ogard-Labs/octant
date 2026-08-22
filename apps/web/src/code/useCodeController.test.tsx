@@ -1879,6 +1879,8 @@ function fakeClient(overrides: Partial<CodeClient> = {}): CodeClient {
     queryBoard: vi.fn(),
     queryProjectPullRequests: vi.fn(),
     refreshProjectPullRequests: vi.fn(),
+    queryProjectPullRequestDetail: vi.fn(),
+    refreshProjectPullRequestDetail: vi.fn(),
     conversation: vi.fn(async () => ({
       version: 3 as const,
       threadId: ids.thread,

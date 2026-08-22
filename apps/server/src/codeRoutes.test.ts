@@ -904,6 +904,89 @@ describe("Code project pull-request routes", () => {
   });
 });
 
+describe("Code project pull-request detail routes", () => {
+  const projectId = "10000000-0000-4000-8000-000000000001";
+  const detailQuery = {
+    projectId,
+    repositoryOwner: "octant",
+    repositoryName: "octant",
+    number: 12,
+  };
+  const detailView = {
+    version: 1 as const,
+    query: detailQuery,
+    detail: { state: "empty" as const },
+    freshness: { status: "empty" as const },
+    linkedThreads: [],
+    generatedAt: now,
+  };
+
+  it("queries cached detail without invoking a refresh", async () => {
+    const queryProjectPullRequestDetail = vi.fn(() => detailView);
+    const refreshProjectPullRequestDetail = vi.fn(() => detailView);
+    const route = routeFixture({ queryProjectPullRequestDetail, refreshProjectPullRequestDetail });
+
+    const response = await route(
+      request("/api/code/project-pull-requests/detail", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(detailQuery),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toEqual(detailView);
+    expect(queryProjectPullRequestDetail).toHaveBeenCalledWith(windowId, detailQuery);
+    expect(refreshProjectPullRequestDetail).not.toHaveBeenCalled();
+  });
+
+  it("refreshes detail through the explicit refresh route", async () => {
+    const queryProjectPullRequestDetail = vi.fn(() => detailView);
+    const refreshProjectPullRequestDetail = vi.fn(() => detailView);
+    const route = routeFixture({ queryProjectPullRequestDetail, refreshProjectPullRequestDetail });
+
+    const response = await route(
+      request("/api/code/project-pull-requests/detail/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(detailQuery),
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(refreshProjectPullRequestDetail).toHaveBeenCalledWith(
+      windowId,
+      detailQuery,
+      expect.any(AbortSignal),
+    );
+    expect(queryProjectPullRequestDetail).not.toHaveBeenCalled();
+  });
+
+  it("refuses renderer-authored window, owner, repository, root, or credentials", async () => {
+    const queryProjectPullRequestDetail = vi.fn(() => detailView);
+    const refreshProjectPullRequestDetail = vi.fn(() => detailView);
+    const route = routeFixture({ queryProjectPullRequestDetail, refreshProjectPullRequestDetail });
+
+    const bodies = [
+      { ...detailQuery, windowId },
+      { ...detailQuery, owner: "octant", credentials: "secret" },
+      { ...detailQuery, root: "/tmp" },
+    ];
+    for (const body of bodies) {
+      const response = await route(
+        request("/api/code/project-pull-requests/detail/refresh", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      );
+      expect(response?.status).toBe(400);
+    }
+    expect(queryProjectPullRequestDetail).not.toHaveBeenCalled();
+    expect(refreshProjectPullRequestDetail).not.toHaveBeenCalled();
+  });
+});
+
 function settings() {
   return {
     defaultExecutionPolicy: "approval-gated" as const,

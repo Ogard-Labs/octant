@@ -23,6 +23,8 @@ export function codeClient(options: { readonly evidence?: string } = {}): CodeCl
     queryBoard: vi.fn(),
     queryProjectPullRequests: vi.fn(),
     refreshProjectPullRequests: vi.fn(),
+    queryProjectPullRequestDetail: vi.fn(),
+    refreshProjectPullRequestDetail: vi.fn(),
     conversation: vi.fn(async (threadId) => ({
       version: 3 as const,
       threadId,
