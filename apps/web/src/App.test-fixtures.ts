@@ -430,6 +430,33 @@ export function codes(): CodeClient {
           generatedAt: now,
         }) as never,
     ),
+    queryProjectPullRequestDetail: vi.fn(
+      async (query) =>
+        ({
+          version: 1,
+          query,
+          detail: { state: "empty" },
+          freshness: { status: "empty" },
+          linkedThreads: [],
+          generatedAt: now,
+        }) as never,
+    ),
+    refreshProjectPullRequestDetail: vi.fn(
+      async (command) =>
+        ({
+          version: 1,
+          query: {
+            projectId: command.projectId,
+            repositoryOwner: command.repositoryOwner,
+            repositoryName: command.repositoryName,
+            number: command.number,
+          },
+          detail: { state: "empty" },
+          freshness: { status: "empty" },
+          linkedThreads: [],
+          generatedAt: now,
+        }) as never,
+    ),
     conversation: vi.fn(async (threadId) => ({
       version: 3 as const,
       threadId,

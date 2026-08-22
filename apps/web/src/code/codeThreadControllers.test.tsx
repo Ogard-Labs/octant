@@ -70,6 +70,8 @@ function client(): CodeClient {
     queryBoard: vi.fn(),
     queryProjectPullRequests: vi.fn(),
     refreshProjectPullRequests: vi.fn(),
+    queryProjectPullRequestDetail: vi.fn(),
+    refreshProjectPullRequestDetail: vi.fn(),
     conversation: vi.fn(async (threadId: unknown) => ({
       version: 3 as const,
       threadId,

@@ -7628,8 +7628,23 @@ p.board-col-empty {
 }
 
 .code-project-pull-requests__row {
+  display: block;
+  width: 100%;
   padding: 10px 0;
+  border: 0;
   border-bottom: 1px solid var(--oct-border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.code-project-pull-requests__row[aria-pressed="true"] {
+  background: var(--oct-surface-muted);
+}
+
+.code-project-pull-requests__row:hover {
+  background: var(--oct-surface-muted);
 }
 
 .code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__meta {

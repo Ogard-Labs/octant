@@ -18,6 +18,8 @@ export interface CodeProjectPullRequestsProps {
   ) => Promise<CodeProjectPullRequestView>;
   readonly onClose?: () => void;
   readonly isNarrow?: boolean;
+  readonly selectedRowKey?: string;
+  readonly onSelectRow?: (row: CodeProjectPullRequestRow) => void;
 }
 
 type WorkspaceState =
@@ -162,6 +164,10 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 rows={view.rows.filter(
                   (row) => String(row.projectId) === String(project.projectId),
                 )}
+                {...(props.onSelectRow === undefined ? {} : { onSelectRow: props.onSelectRow })}
+                {...(props.selectedRowKey === undefined
+                  ? {}
+                  : { selectedRowKey: props.selectedRowKey })}
               />
             ))}
           </div>
@@ -176,6 +182,8 @@ function ProjectGroup(props: {
   readonly rows: ReadonlyArray<CodeProjectPullRequestRow>;
   readonly busy: boolean;
   readonly onRefresh: () => void;
+  readonly selectedRowKey?: string;
+  readonly onSelectRow?: (row: CodeProjectPullRequestRow) => void;
 }) {
   const repositories = groupByRepository(props.rows);
   return (
@@ -214,32 +222,40 @@ function ProjectGroup(props: {
               {group.owner}/{group.name}
             </h3>
             <ul className="code-project-pull-requests__list">
-              {group.rows.map((row) => (
-                <li
-                  className="code-project-pull-requests__row"
-                  key={`${row.repositoryOwner}/${row.repositoryName}#${row.number}`}
-                >
-                  <div className="code-project-pull-requests__title-line">
-                    <span className="code-project-pull-requests__title">{row.title}</span>
-                    <span>#{row.number}</span>
-                    {row.draft ? <span>Draft</span> : null}
-                  </div>
-                  <div className="code-project-pull-requests__meta">
-                    <span>{row.author}</span>
-                    <span>
-                      {row.headBranch} → {row.baseBranch}
-                    </span>
-                    <time dateTime={row.updatedAt}>{formatUpdatedAt(row.updatedAt)}</time>
-                    <span>Checks {row.checks}</span>
-                    <span>Review {reviewCopy(row.review)}</span>
-                    <span>
-                      {row.linkedThreads.length === 0
-                        ? "No linked thread"
-                        : `Linked: ${row.linkedThreads.map((thread) => thread.title).join(", ")}`}
-                    </span>
-                  </div>
-                </li>
-              ))}
+              {group.rows.map((row) => {
+                const rowKey = pullRequestRowKey(row);
+                const selected = props.selectedRowKey === rowKey;
+                return (
+                  <li key={rowKey}>
+                    <button
+                      aria-pressed={selected}
+                      className="code-project-pull-requests__row"
+                      onClick={() => props.onSelectRow?.(row)}
+                      type="button"
+                    >
+                      <div className="code-project-pull-requests__title-line">
+                        <span className="code-project-pull-requests__title">{row.title}</span>
+                        <span>#{row.number}</span>
+                        {row.draft ? <span>Draft</span> : null}
+                      </div>
+                      <div className="code-project-pull-requests__meta">
+                        <span>{row.author}</span>
+                        <span>
+                          {row.headBranch} → {row.baseBranch}
+                        </span>
+                        <time dateTime={row.updatedAt}>{formatUpdatedAt(row.updatedAt)}</time>
+                        <span>Checks {row.checks}</span>
+                        <span>Review {reviewCopy(row.review)}</span>
+                        <span>
+                          {row.linkedThreads.length === 0
+                            ? "No linked thread"
+                            : `Linked: ${row.linkedThreads.map((thread) => thread.title).join(", ")}`}
+                        </span>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ))
@@ -309,4 +325,8 @@ function reviewCopy(review: CodeProjectPullRequestRow["review"]): string {
 function formatUpdatedAt(value: string): string {
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : value;
+}
+
+function pullRequestRowKey(row: CodeProjectPullRequestRow): string {
+  return `${String(row.projectId)}:${row.repositoryOwner}/${row.repositoryName}#${row.number}`;
 }

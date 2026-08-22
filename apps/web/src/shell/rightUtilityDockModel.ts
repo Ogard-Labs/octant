@@ -46,6 +46,11 @@ export interface RightUtilityDockResolutionInput {
    * panel has nothing to describe without it.
    */
   readonly activeThreadId?: string;
+  /**
+   * The Project pull-request list is central and a row is selected. Review may
+   * show that read-only detail without an active thread.
+   */
+  readonly projectPullRequestReviewOpen?: boolean;
   readonly connectionState: RightUtilityDockConnectionState;
   readonly presentationAvailability: RightUtilityDockSurfaceAvailability;
   readonly savedSurface: unknown;
@@ -199,9 +204,13 @@ export function resolveRightUtilityDockSurface(
     return closed("mode-invalid");
   }
 
-  return input.activeThreadId === undefined
-    ? { kind: "unavailable", reason: "thread-required", surface }
-    : { kind: "surface", surface };
+  if (
+    input.activeThreadId === undefined &&
+    !(input.projectPullRequestReviewOpen === true && savedSurface === "review")
+  ) {
+    return { kind: "unavailable", reason: "thread-required", surface };
+  }
+  return { kind: "surface", surface };
 }
 
 function closed(reason: RightUtilityDockClosedReason): RightUtilityDockResolution {
