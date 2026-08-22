@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
@@ -232,6 +234,38 @@ describe("ZenSurface", () => {
     expect(screen.getByLabelText("Upload local Zen background")).toHaveAttribute(
       "accept",
       "image/png,image/jpeg,image/webp,image/gif",
+    );
+  });
+
+  it("keeps the appearance dialog and preset labels inside a narrow Zen surface", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/zen.css"), "utf8");
+    expect(styles).toMatch(
+      /\.zen-surface__manual-panel\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*calc\(100% - 32px\);/s,
+    );
+    expect(styles).toMatch(
+      /\.zen-appearance__preset-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/s,
+    );
+    expect(styles).toMatch(
+      /\.zen-appearance__preset-grid > \.btn\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
+    );
+
+    render(
+      <ZenSurface
+        barCollapsed={false}
+        onExit={() => undefined}
+        onExpandBar={() => undefined}
+        onHideBar={() => undefined}
+        onUpdateAppearance={() => undefined}
+        onUpdateElement={() => undefined}
+        onUpdateViewport={() => undefined}
+        space={makeSpace()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+    const dialog = screen.getByRole("dialog", { name: "Zen appearance" });
+    expect(dialog.querySelector(".zen-appearance__preset-grid")).not.toBeNull();
+    expect(dialog.querySelectorAll(".zen-appearance__preset-grid > .btn").length).toBeGreaterThan(
+      0,
     );
   });
 

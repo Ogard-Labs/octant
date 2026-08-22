@@ -125,11 +125,29 @@ export function useZenController(options: UseZenControllerOptions) {
     "ready",
   );
   const backgroundObjectUrlRef = useRef<string | undefined>(undefined);
+  const spaceMutationQueue = useRef<Promise<void>>(Promise.resolve());
   const restoring = useRef(false);
 
   useEffect(() => {
     presentationSpace.current = space;
   }, [space]);
+
+  /**
+   * Keep mutations that replace the whole Zen space in server order. Pointer
+   * interaction and focus can finish in the same frame; sending both against
+   * one version lets the later response refresh the space back to the older
+   * geometry. The ref is updated synchronously so the next queued operation
+   * builds on the optimistic or accepted snapshot rather than a render that
+   * has not happened yet.
+   */
+  const enqueueSpaceMutation = useCallback((mutation: () => Promise<void>): Promise<void> => {
+    const next = spaceMutationQueue.current.then(mutation, mutation);
+    spaceMutationQueue.current = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }, []);
 
   const markActive = useCallback(
     (next: boolean) => {
@@ -449,48 +467,61 @@ export function useZenController(options: UseZenControllerOptions) {
 
   const updateElement = useCallback(
     async (element: ZenElementPayload) => {
-      if (client === undefined || space === null) return;
-      const previous = space;
-      const optimistic: ZenSpace = {
-        ...space,
-        elements: space.elements.map((el) => (el.elementId === element.elementId ? element : el)),
-      };
-      setSpace(optimistic);
-      setMessage(undefined);
-      try {
-        const result = await client.command({
-          command: "update-element",
-          spaceId: space.spaceId,
-          element,
-          expectedVersion: space.version,
-        });
-        if (result.result === "mutation" && mounted.current) {
-          setSpace(result.space);
-        }
-      } catch (error) {
-        if (mounted.current) {
-          if (isZenStaleConflict(error)) {
-            try {
-              const refreshed = await client.bootstrap();
-              if (mounted.current) setFocusZone(refreshed.focusZone);
-              if (refreshed.space !== null) setSpace(refreshed.space);
-              setMessage("Zen changed elsewhere; refreshed the current space.");
-            } catch {
-              setSpace(previous);
-              setMessage("Zen changed elsewhere and could not be refreshed.");
-            }
-            return;
+      if (client === undefined || presentationSpace.current === null) return;
+      await enqueueSpaceMutation(async () => {
+        const current = presentationSpace.current;
+        if (current === null) return;
+        const previous = current;
+        const optimistic: ZenSpace = {
+          ...current,
+          elements: current.elements.map((el) =>
+            el.elementId === element.elementId ? element : el,
+          ),
+        };
+        setSpace(optimistic);
+        presentationSpace.current = optimistic;
+        setMessage(undefined);
+        try {
+          const result = await client.command({
+            command: "update-element",
+            spaceId: current.spaceId,
+            element,
+            expectedVersion: current.version,
+          });
+          if (result.result === "mutation" && mounted.current) {
+            setSpace(result.space);
+            presentationSpace.current = result.space;
           }
-          setSpace(previous);
-          setMessage(
-            typeof error === "object" && error !== null && "message" in error
-              ? String(error.message)
-              : "Zen update was rejected.",
-          );
+        } catch (error) {
+          if (mounted.current) {
+            if (isZenStaleConflict(error)) {
+              try {
+                const refreshed = await client.bootstrap();
+                if (mounted.current) setFocusZone(refreshed.focusZone);
+                if (refreshed.space !== null) {
+                  setSpace(refreshed.space);
+                  presentationSpace.current = refreshed.space;
+                }
+                setMessage("Zen changed elsewhere; refreshed the current space.");
+              } catch {
+                setSpace(previous);
+                presentationSpace.current = previous;
+                setMessage("Zen changed elsewhere and could not be refreshed.");
+              }
+              return;
+            }
+            setSpace(previous);
+            presentationSpace.current = previous;
+            setMessage(
+              typeof error === "object" && error !== null && "message" in error
+                ? String(error.message)
+                : "Zen update was rejected.",
+            );
+          }
         }
-      }
+      });
     },
-    [client, space],
+    [client, enqueueSpaceMutation],
   );
 
   const removeElement = useCallback(
@@ -747,22 +778,29 @@ export function useZenController(options: UseZenControllerOptions) {
 
   const updateAppearance = useCallback(
     async (patch: Partial<ZenAppearance> & Pick<ZenAppearance, "dimming" | "elementOpacity">) => {
-      if (client === undefined || space === null) return;
-      try {
-        const result = await client.command({
-          command: "update-appearance",
-          spaceId: space.spaceId,
-          appearance: { ...space.appearance, ...patch },
-          expectedVersion: space.version,
-        });
-        if (result.result === "mutation" && mounted.current) setSpace(result.space);
-      } catch (error) {
-        if (mounted.current) {
-          setMessage(error instanceof Error ? error.message : "Zen appearance update failed.");
+      if (client === undefined || presentationSpace.current === null) return;
+      await enqueueSpaceMutation(async () => {
+        const current = presentationSpace.current;
+        if (current === null) return;
+        try {
+          const result = await client.command({
+            command: "update-appearance",
+            spaceId: current.spaceId,
+            appearance: { ...current.appearance, ...patch },
+            expectedVersion: current.version,
+          });
+          if (result.result === "mutation" && mounted.current) {
+            setSpace(result.space);
+            presentationSpace.current = result.space;
+          }
+        } catch (error) {
+          if (mounted.current) {
+            setMessage(error instanceof Error ? error.message : "Zen appearance update failed.");
+          }
         }
-      }
+      });
     },
-    [client, space],
+    [client, enqueueSpaceMutation],
   );
 
   /**
@@ -1105,13 +1143,16 @@ export function useZenController(options: UseZenControllerOptions) {
 
   const uploadBackground = useCallback(
     async (file: File) => {
-      if (client === undefined || space === null) throw new Error("Zen background is unavailable.");
-      if (
-        file.type !== "image/png" &&
-        file.type !== "image/jpeg" &&
-        file.type !== "image/webp" &&
-        file.type !== "image/gif"
-      ) {
+      if (client === undefined || presentationSpace.current === null)
+        throw new Error("Zen background is unavailable.");
+      const mediaType =
+        file.type === "image/png" ||
+        file.type === "image/jpeg" ||
+        file.type === "image/webp" ||
+        file.type === "image/gif"
+          ? file.type
+          : undefined;
+      if (mediaType === undefined) {
         throw new Error("Choose a PNG, JPEG, WebP, or GIF image.");
       }
       if (
@@ -1121,16 +1162,31 @@ export function useZenController(options: UseZenControllerOptions) {
       ) {
         throw new Error("Zen background is too large. Choose an image up to 8 MiB.");
       }
-      const next = await client.uploadBackground({
-        spaceId: space.spaceId,
-        expectedVersion: space.version,
-        bytes: new Uint8Array(await file.arrayBuffer()),
-        mediaType: file.type,
-        displayName: file.name,
+      await enqueueSpaceMutation(async () => {
+        const current = presentationSpace.current;
+        if (current === null) throw new Error("Zen background is unavailable.");
+        try {
+          const next = await client.uploadBackground({
+            spaceId: current.spaceId,
+            expectedVersion: current.version,
+            bytes: new Uint8Array(await file.arrayBuffer()),
+            mediaType,
+            displayName: file.name,
+          });
+          if (mounted.current) {
+            setSpace(next);
+            presentationSpace.current = next;
+            setMessage(undefined);
+          }
+        } catch (error) {
+          if (mounted.current) {
+            setMessage(error instanceof Error ? error.message : "Zen background upload failed.");
+          }
+          throw error;
+        }
       });
-      if (mounted.current) setSpace(next);
     },
-    [client, space],
+    [client, enqueueSpaceMutation],
   );
 
   useEffect(() => {
