@@ -6,8 +6,7 @@ import {
 } from "./approvalPresentation";
 
 describe("approvalPresentation", () => {
-  it("routes merge and revoke to phone biometrics", () => {
-    expect(venueForHighRiskAction("merge")).toBe("phone-biometric");
+  it("routes revoke to phone biometrics", () => {
     expect(venueForHighRiskAction("revoke")).toBe("phone-biometric");
   });
 

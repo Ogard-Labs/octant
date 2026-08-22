@@ -153,7 +153,6 @@ describe("CodeOperationService", () => {
       pullRequests: {
         ensure: vi.fn(),
         observeReview: vi.fn(async () => ({ status: "unavailable" as const })),
-        merge: vi.fn(async () => ({ status: "unavailable" as const })),
       },
       reviewFindings,
       turns,

@@ -6,7 +6,6 @@ const PREFERRED_DRIVERS: ReadonlyArray<ProviderDriverKind> = [
   "codex",
   "opencode",
   "claude",
-  "cursor",
   "kimi-code",
   "grok",
 ];

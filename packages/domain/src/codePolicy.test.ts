@@ -33,7 +33,6 @@ describe("Code authority policy", () => {
         "commit",
         "push",
         "create-pr",
-        "merge-pr",
         "managed-root",
         "pr-mutation",
       ] as const) {
@@ -97,7 +96,6 @@ describe("Code authority policy", () => {
         "commit",
         "push",
         "create-pr",
-        "merge-pr",
       ] as const) {
         expect(decision(actor, "auto-accept-edits", operation)).toBe("prompt");
       }
@@ -114,7 +112,6 @@ describe("Code authority policy", () => {
         "commit",
         "push",
         "create-pr",
-        "merge-pr",
       ] as const) {
         expect(decision(actor, "approval-gated", operation)).toBe("prompt");
         expect(decision(actor, "full-access", operation)).toBe("allow");
@@ -177,7 +174,7 @@ describe("Code authority policy", () => {
       externalContentIngested: true,
       ingestedSources: ["readme-md"],
     } as const;
-    for (const operation of ["discard", "push", "create-pr", "merge-pr"] as const) {
+    for (const operation of ["discard", "push", "create-pr"] as const) {
       const result = authorizeCodeOperation({
         actor: "local-user",
         posture: "full-access",
@@ -259,7 +256,7 @@ describe("Code authority policy", () => {
     for (const operation of ["edit", "terminal", "test", "stage", "commit"] as const) {
       expect(decision("remote-client", "full-access", operation)).toBe("host-thread-clamped");
     }
-    for (const operation of ["push", "create-pr", "merge-pr"] as const) {
+    for (const operation of ["push", "create-pr"] as const) {
       expect(decision("remote-client", "full-access", operation)).toBe(
         "host-thread-credential-clamped",
       );

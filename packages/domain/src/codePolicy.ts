@@ -19,7 +19,6 @@ export type CodeOperation =
   | "commit"
   | "push"
   | "create-pr"
-  | "merge-pr"
   | "merge-run"
   | "managed-root"
   | "pr-mutation";
@@ -84,7 +83,6 @@ export function approvalClassForCodeOperation(
     case "restore-checkpoint":
     case "push":
     case "create-pr":
-    case "merge-pr":
     // Bringing a run home rewrites the checkout the person works in. The host
     // records what it replaced first, but the merge itself is a wholesale
     // change to their tree and is gated like one.
@@ -229,11 +227,7 @@ function authorizeCodeOperationBase(input: CodePolicyInput): CodePolicyDecision 
   if (input.actor === "remote-client") {
     if (input.operation === "read") return { decision: "host-clamped" };
     if (input.posture === "plan") return { decision: "deny" };
-    if (
-      input.operation === "push" ||
-      input.operation === "create-pr" ||
-      input.operation === "merge-pr"
-    ) {
+    if (input.operation === "push" || input.operation === "create-pr") {
       return { decision: "host-thread-credential-clamped" };
     }
     // A remote client may ask for a merge into the person's own checkout, but

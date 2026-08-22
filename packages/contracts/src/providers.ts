@@ -26,7 +26,6 @@ export type ThreadProviderHandoff = typeof ThreadProviderHandoff.Type;
 export const ProviderDriverKind = Schema.Literal(
   "codex",
   "claude",
-  "cursor",
   "opencode",
   "kilo",
   "pi",

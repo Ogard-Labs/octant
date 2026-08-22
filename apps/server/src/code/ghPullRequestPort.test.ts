@@ -275,11 +275,6 @@ const detailJson = JSON.stringify({
   reviews: [{ author: { login: "reviewer" }, state: "APPROVED", body: "LGTM" }],
   comments: [{ author: { login: "octocat" }, body: "Ready." }],
 });
-const repoMethodsJson = JSON.stringify({
-  allow_merge_commit: true,
-  allow_squash_merge: true,
-  allow_rebase_merge: false,
-});
 const diffText = "diff --git a/x b/x\n@@ -1 +1 @@\n-old\n+new\n";
 
 describe("GhPullRequestPort.observeReview", () => {
@@ -288,7 +283,6 @@ describe("GhPullRequestPort.observeReview", () => {
       listResult([pullRequest]),
       { exitCode: 0, stdout: detailJson },
       { exitCode: 0, stdout: diffText },
-      { exitCode: 0, stdout: repoMethodsJson },
     ]);
 
     await expect(port.observeReview(reviewRequest, new AbortController().signal)).resolves.toEqual({
@@ -319,18 +313,12 @@ describe("GhPullRequestPort.observeReview", () => {
       ],
       reviews: [{ author: "reviewer", state: "approved", body: "LGTM" }],
       comments: [{ author: "octocat", body: "Ready." }],
-      mergePreview: {
-        headSha,
-        mergeable: true,
-        requiredChecksPassing: true,
-        advertisedMergeMethods: ["merge", "squash"],
-      },
     });
 
     const subcommands = vi
       .mocked(command.run)
       .mock.calls.map(([arguments_]) => `${arguments_[0]} ${arguments_[1]}`);
-    expect(subcommands).toEqual(["pr list", "pr view", "pr diff", "api repos/octant/octant"]);
+    expect(subcommands).toEqual(["pr list", "pr view", "pr diff"]);
   });
 
   it("labels detail sections stale and stays ambiguous when gh pr view fails", async () => {
@@ -357,7 +345,6 @@ describe("GhPullRequestPort.observeReview", () => {
       "files",
       "reviews",
     ]);
-    expect(result.status === "observed" ? result.mergePreview : undefined).toBeUndefined();
   });
 
   it("labels only the diff stale when gh pr diff fails", async () => {
@@ -365,7 +352,6 @@ describe("GhPullRequestPort.observeReview", () => {
       listResult([pullRequest]),
       { exitCode: 0, stdout: detailJson },
       { exitCode: 1, stdout: "" },
-      { exitCode: 0, stdout: repoMethodsJson },
     ]);
 
     await expect(
@@ -377,12 +363,6 @@ describe("GhPullRequestPort.observeReview", () => {
       staleSections: ["diff"],
       diff: "",
       description: "Verified implementation.",
-      mergePreview: {
-        headSha,
-        mergeable: true,
-        requiredChecksPassing: true,
-        advertisedMergeMethods: ["merge", "squash"],
-      },
     });
   });
 
@@ -391,7 +371,6 @@ describe("GhPullRequestPort.observeReview", () => {
       listResult([pullRequest]),
       { exitCode: 0, stdout: detailJson },
       { exitCode: 0, stdout: "0123456789" },
-      { exitCode: 0, stdout: repoMethodsJson },
     ]);
 
     await expect(
@@ -474,135 +453,6 @@ describe("GhPullRequestPort.observeReviewByIdentity", () => {
     await expect(
       port.observeReviewByIdentity(identityRequest, new AbortController().signal),
     ).resolves.toEqual({ status: "unavailable" });
-  });
-});
-
-describe("GhPullRequestPort.merge", () => {
-  const confirmation = {
-    number: 175,
-    baseRepository: target.baseRepository,
-    baseBranch: target.baseBranch,
-    headBranch: "feature/phase-7",
-    mergeMethod: "squash" as const,
-    expectedHeadSha: headSha,
-  };
-  const mergeRequest = {
-    threadId: request.threadId,
-    expectedHeadSha: headSha,
-    mergeMethod: "squash" as const,
-    confirmation,
-  };
-  const mergeDetailOpen = JSON.stringify({
-    number: 175,
-    url: pullRequest.url,
-    title: "Delivery notes",
-    state: "OPEN",
-    isDraft: false,
-    baseRefName: "development",
-    headRefName: "feature/phase-7",
-    headRefOid: headSha,
-    mergeable: "MERGEABLE",
-    mergeStateStatus: "CLEAN",
-    headRepositoryOwner: { login: "octocat" },
-  });
-  const mergeDetailMerged = JSON.stringify({
-    ...JSON.parse(mergeDetailOpen),
-    state: "MERGED",
-  });
-
-  it("merges a clean PR with match-head-commit and never admin-bypasses", async () => {
-    const { command, port } = fixture([
-      listResult([pullRequest]),
-      { exitCode: 0, stdout: mergeDetailOpen },
-      { exitCode: 0, stdout: repoMethodsJson },
-      { exitCode: 0, stdout: "" },
-      { exitCode: 0, stdout: mergeDetailMerged },
-    ]);
-
-    await expect(port.merge(mergeRequest, new AbortController().signal)).resolves.toEqual({
-      status: "merged",
-      pullRequest: {
-        number: 175,
-        url: pullRequest.url,
-        baseRepository: target.baseRepository,
-        baseBranch: target.baseBranch,
-        headOwner: "octocat",
-        headBranch: "feature/phase-7",
-      },
-    });
-
-    expect(command.run).toHaveBeenCalledWith(
-      [
-        "pr",
-        "merge",
-        "175",
-        "--repo",
-        target.baseRepository,
-        "--squash",
-        "--match-head-commit",
-        headSha,
-      ],
-      expect.objectContaining({ stdin: undefined }),
-      expect.any(AbortSignal),
-    );
-    const mergeArgs = vi.mocked(command.run).mock.calls.find(([args]) => args[1] === "merge")?.[0];
-    expect(mergeArgs).not.toContain("--admin");
-    expect(mergeArgs).not.toContain("--auto");
-  });
-
-  it("fails closed on conflict without calling gh pr merge", async () => {
-    const conflicting = JSON.stringify({
-      ...JSON.parse(mergeDetailOpen),
-      mergeable: "CONFLICTING",
-      mergeStateStatus: "DIRTY",
-    });
-    const { command, port } = fixture([
-      listResult([pullRequest]),
-      { exitCode: 0, stdout: conflicting },
-      { exitCode: 0, stdout: repoMethodsJson },
-    ]);
-
-    await expect(port.merge(mergeRequest, new AbortController().signal)).resolves.toEqual({
-      status: "failed",
-      code: "conflict",
-    });
-    expect(vi.mocked(command.run).mock.calls.some(([args]) => args[1] === "merge")).toBe(false);
-  });
-
-  it("fails closed on sha mismatch", async () => {
-    const { command, port } = fixture([
-      listResult([pullRequest]),
-      { exitCode: 0, stdout: mergeDetailOpen },
-      { exitCode: 0, stdout: repoMethodsJson },
-    ]);
-
-    await expect(
-      port.merge(
-        {
-          ...mergeRequest,
-          expectedHeadSha: "b".repeat(40),
-          confirmation: { ...confirmation, expectedHeadSha: "b".repeat(40) },
-        },
-        new AbortController().signal,
-      ),
-    ).resolves.toEqual({ status: "failed", code: "sha-mismatch" });
-    expect(vi.mocked(command.run).mock.calls.some(([args]) => args[1] === "merge")).toBe(false);
-  });
-
-  it("returns merged idempotently when the confirmation PR is already merged", async () => {
-    const { port } = fixture([listResult([]), { exitCode: 0, stdout: mergeDetailMerged }]);
-
-    await expect(port.merge(mergeRequest, new AbortController().signal)).resolves.toEqual({
-      status: "merged",
-      pullRequest: {
-        number: 175,
-        url: pullRequest.url,
-        baseRepository: target.baseRepository,
-        baseBranch: target.baseBranch,
-        headOwner: "octocat",
-        headBranch: "feature/phase-7",
-      },
-    });
   });
 });
 

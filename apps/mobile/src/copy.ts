@@ -112,7 +112,7 @@ export const MOBILE_COPY = {
   backgroundPermissionDenied: "Photo library access is required to set a background.",
   privacySecurityTitle: "Privacy & security",
   privacySecurityHelp:
-    "Biometric gates protect merge and revoke. Push and recents stay redacted; integrity checks fail soft.",
+    "Biometric gates protect revoke. Push and recents stay redacted; integrity checks fail soft.",
   screenshotPrivacyHint:
     "Prefer hide-in-recents on travel phones. Native capture blocking needs a device build.",
 } as const;

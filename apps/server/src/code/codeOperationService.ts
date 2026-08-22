@@ -447,45 +447,6 @@ export interface CodeOperationPullRequestPort {
     input: { readonly threadId: CodeThread["id"]; readonly maxDiffBytes: number },
     signal: AbortSignal,
   ) => Promise<CodeOperationPullRequestReview>;
-  readonly merge: (
-    input: {
-      readonly threadId: CodeThread["id"];
-      readonly expectedHeadSha: string;
-      readonly mergeMethod: "merge" | "squash" | "rebase";
-      readonly confirmation: {
-        readonly number: number;
-        readonly baseRepository: string;
-        readonly baseBranch: string;
-        readonly headBranch: string;
-        readonly mergeMethod: "merge" | "squash" | "rebase";
-        readonly expectedHeadSha: string;
-      };
-    },
-    signal: AbortSignal,
-  ) => Promise<
-    | {
-        readonly status: "merged";
-        readonly pullRequest: {
-          readonly number: number;
-          readonly url: string;
-          readonly baseRepository: string;
-          readonly baseBranch: string;
-          readonly headOwner: string;
-          readonly headBranch: string;
-        };
-      }
-    | {
-        readonly status: "unavailable" | "failed";
-        readonly code?:
-          | "conflict"
-          | "checks"
-          | "auth"
-          | "not-found"
-          | "sha-mismatch"
-          | "dirty"
-          | "not-mergeable";
-      }
-  >;
 }
 
 export type CodeOperationPullRequestReview =
@@ -543,12 +504,6 @@ export type CodeOperationPullRequestReview =
         readonly body: string;
       }[];
       readonly comments: readonly { readonly author: string; readonly body: string }[];
-      readonly mergePreview?: {
-        readonly headSha: string;
-        readonly mergeable: boolean | null;
-        readonly requiredChecksPassing: boolean;
-        readonly advertisedMergeMethods: readonly ("merge" | "squash" | "rebase")[];
-      };
     }
   | { readonly status: "none" }
   | { readonly status: "unavailable" };
@@ -1499,8 +1454,6 @@ export class CodeOperationService {
         return this.#pullRequest(command);
       case "observe-pull-request":
         return this.#pullRequestReview(command);
-      case "merge-pull-request":
-        return this.#mergePullRequest(command);
       case "create-review-finding": {
         const finding = await this.#options.reviewFindings.create(windowId, {
           id: command.findingId,
@@ -2090,41 +2043,6 @@ export class CodeOperationService {
       checks: result.checks,
       reviews: result.reviews,
       comments: result.comments,
-      ...(result.mergePreview === undefined ? {} : { mergePreview: result.mergePreview }),
-    });
-  }
-
-  async #mergePullRequest(
-    command: Extract<CodeOperationCommand, { readonly kind: "merge-pull-request" }>,
-  ): Promise<CodeOperationResult> {
-    const result = await this.#options.pullRequests.merge(
-      {
-        threadId: command.threadId,
-        expectedHeadSha: command.expectedHeadSha,
-        mergeMethod: command.mergeMethod,
-        confirmation: command.confirmation,
-      },
-      new AbortController().signal,
-    );
-    if (result.status === "merged") {
-      const pr = result.pullRequest;
-      return decodeCodeOperationResult({
-        kind: "pull-request-state",
-        operationId: command.operationId,
-        state: "merged",
-        number: pr.number,
-        url: pr.url,
-        headRepository: pr.headOwner,
-        headBranch: pr.headBranch,
-        baseRepository: pr.baseRepository,
-        baseBranch: pr.baseBranch,
-      });
-    }
-    return decodeCodeOperationResult({
-      kind: "pull-request-state",
-      operationId: command.operationId,
-      state: result.status === "unavailable" ? "unavailable" : "failed",
-      ...(result.code === undefined ? {} : { failureCode: result.code }),
     });
   }
 
@@ -2581,8 +2499,6 @@ function operationFor(kind: CodeOperationCommand["kind"]): CodeOperation {
       return "push";
     case "create-pull-request":
       return "create-pr";
-    case "merge-pull-request":
-      return "merge-pr";
     default:
       return "edit";
   }
