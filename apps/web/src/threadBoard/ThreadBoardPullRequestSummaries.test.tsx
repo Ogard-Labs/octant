@@ -23,6 +23,7 @@ describe("ThreadBoardPullRequestSummaries", () => {
               state: "open",
               checks: "passing",
               review: "approved",
+              mergeability: "mergeable",
               freshness: "fresh",
               readyToMerge: true,
             },
@@ -56,6 +57,7 @@ describe("ThreadBoardPullRequestSummaries", () => {
               state: "open",
               checks: "passing",
               review: "approved",
+              mergeability: "mergeable",
               freshness: "fresh",
               readyToMerge: true,
               relationship: "promoted",
@@ -73,5 +75,35 @@ describe("ThreadBoardPullRequestSummaries", () => {
       repositoryName: "octant",
       number: 12,
     });
+  });
+
+  it("shows conflicts and never labels them ready to merge", () => {
+    render(
+      <ThreadBoardPullRequestSummaries
+        summaries={{
+          items: [
+            {
+              identity: {
+                projectId,
+                repositoryOwner: "octant",
+                repositoryName: "octant",
+                number: 13,
+              },
+              title: "Conflicting pull request",
+              state: "open",
+              checks: "passing",
+              review: "approved",
+              mergeability: "conflicting",
+              freshness: "fresh",
+              readyToMerge: false,
+            },
+          ],
+          hiddenCount: 0,
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/Merge conflicts/i)).toBeVisible();
+    expect(screen.queryByText(/Ready to merge/i)).not.toBeInTheDocument();
   });
 });

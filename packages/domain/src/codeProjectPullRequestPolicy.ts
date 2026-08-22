@@ -8,13 +8,18 @@ export interface CodeProjectPullRequestRepositoryIdentity {
 
 export interface CodeProjectLinkedThreadFact {
   readonly threadId: string;
+  readonly projectId: string;
   readonly title: string;
   readonly repository: CodeProjectPullRequestRepositoryIdentity;
   readonly deliveryBranch?: string;
-  readonly pullRequestNumber?: number;
+  readonly pullRequestNumbers?: ReadonlyArray<{
+    readonly number: number;
+    readonly observedAt: string;
+  }>;
 }
 
 export interface CodeProjectPullRequestMatchTarget {
+  readonly projectId: string;
   readonly repository: CodeProjectPullRequestRepositoryIdentity;
   readonly number: number;
   readonly headBranch: string;
@@ -37,12 +42,13 @@ export function matchLinkedThreadsToPullRequest(input: {
 }): ReadonlyArray<CodeProjectLinkedThreadEvidence> {
   const matches: CodeProjectLinkedThreadEvidence[] = [];
   for (const thread of input.threads) {
+    if (thread.projectId !== input.pullRequest.projectId) continue;
     if (!sameRepository(thread.repository, input.pullRequest.repository)) continue;
     const byBranch =
       thread.deliveryBranch !== undefined && thread.deliveryBranch === input.pullRequest.headBranch;
     const byIdentity =
-      thread.pullRequestNumber !== undefined &&
-      thread.pullRequestNumber === input.pullRequest.number;
+      thread.pullRequestNumbers?.some((entry) => entry.number === input.pullRequest.number) ===
+      true;
     if (!byBranch && !byIdentity) continue;
     matches.push({ threadId: thread.threadId, title: thread.title });
   }

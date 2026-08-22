@@ -31,6 +31,8 @@ function activeListJson(number: number): string {
       number,
       title: `Active ${number}`,
       isDraft: false,
+      state: "OPEN",
+      mergeable: "MERGEABLE",
       author: { login: "octocat" },
       updatedAt: "2026-08-22T07:00:00Z",
       url: `https://github.com/octant/r${number}/pull/${number}`,
@@ -121,11 +123,11 @@ describe("fake-gh project pull-request port", () => {
       "--repo",
       "octant/r1",
       "--state",
-      "open",
+      "all",
       "--limit",
       "101",
       "--json",
-      "number,title,isDraft,author,updatedAt,url,baseRefName,headRefName,statusCheckRollup,reviewDecision",
+      "number,title,isDraft,state,mergeable,author,updatedAt,url,baseRefName,headRefName,statusCheckRollup,reviewDecision",
     ]);
     expect(calls[1]?.[3]).toBe("octant/r2");
     expect(calls.every((arguments_) => arguments_[0] === "pr" && arguments_[1] === "list")).toBe(

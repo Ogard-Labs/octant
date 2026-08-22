@@ -109,11 +109,6 @@ function service(input: {
     runtime: {
       observe: (threadId) => input.runtime?.(threadId) ?? idleRuntime(),
     },
-    pullRequests: {
-      snapshot: () => ({ rows: [], freshness: { status: "empty" }, githubRevoked: false }),
-    },
-    promotions: { snapshot: () => new Map() },
-    codeThreads: { list: () => [] },
     clock: () => now,
   });
 }
@@ -137,6 +132,19 @@ function cardFor(cards: readonly WorkBoardCard[], threadId: unknown): WorkBoardC
 }
 
 describe("WorkThreadBoardService derivation", () => {
+  it("does not attach Project-scoped Code pull requests to sibling Work threads", async () => {
+    const board = service({
+      threads: [
+        boardThread({ thread: thread({ id: ids.ready, title: "First Work thread" }) }),
+        boardThread({ thread: thread({ id: ids.waiting, title: "Sibling Work thread" }) }),
+      ],
+    });
+
+    const view = await board.query(decodeWorkBoardQuery({ version: 1 }));
+    expect(view.cards).toHaveLength(2);
+    expect(view.cards.every((card) => card.pullRequestSummaries.items.length === 0)).toBe(true);
+  });
+
   it("resolves one card per non-archived thread with a runtime-derived status", async () => {
     const board = service({
       threads: [

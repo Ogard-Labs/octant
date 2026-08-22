@@ -37,6 +37,8 @@ function ghRow(overrides: Partial<GhActivePullRequestRow> = {}): GhActivePullReq
     number: 12,
     title: "List active pull requests",
     draft: false,
+    state: "open",
+    mergeability: "mergeable",
     author: "octocat",
     baseBranch: "development",
     headBranch: "feature/manual-refresh",
@@ -68,6 +70,10 @@ function serviceFixture(options: {
     signal: AbortSignal,
   ) => Promise<GhPullRequestReviewResult>;
   readonly journal?: { readonly append: ReturnType<typeof vi.fn> };
+  readonly knownPullRequests?: ReadonlyArray<{
+    readonly number: number;
+    readonly observedAt: string;
+  }>;
 }) {
   const listActive = vi.fn(
     options.list ??
@@ -103,9 +109,11 @@ function serviceFixture(options: {
       list: async () => [
         {
           threadId: String(threadId),
+          projectId: String(projectA),
           title: "Manual refresh",
           repository: { owner: "octant", name: "octant" },
           deliveryBranch: "feature/manual-refresh",
+          pullRequestNumbers: options.knownPullRequests ?? [],
         },
       ],
     },
@@ -206,6 +214,98 @@ describe("CodeProjectPullRequestService", () => {
     expect(journal.append).not.toHaveBeenCalled();
   });
 
+  it("keeps the Project workspace active-only while the board snapshot includes merged history", async () => {
+    const { service } = serviceFixture({
+      list: async () => ({
+        status: "ok",
+        rows: [
+          ghRow({ number: 12, state: "open" }),
+          ghRow({
+            number: 11,
+            state: "merged",
+            mergeability: "unknown",
+            updatedAt: "2026-08-22T06:00:00Z",
+          }),
+        ],
+      }),
+    });
+
+    const workspace = await service.refresh(
+      windowId,
+      { kind: "refresh-all" },
+      new AbortController().signal,
+    );
+    const board = await service.boardSnapshot(windowId);
+
+    expect(workspace.rows.map((row) => row.number)).toEqual([12]);
+    expect(board.rows.map((row) => [row.number, row.state])).toEqual([
+      [12, "open"],
+      [11, "merged"],
+    ]);
+  });
+
+  it("reconstructs merged and closed board history on the first manual refresh after restart", async () => {
+    const first = serviceFixture({
+      knownPullRequests: [{ number: 11, observedAt: "2026-08-21T08:00:00Z" }],
+      list: async () => ({ status: "ok", rows: [] }),
+      detail: async () => ({
+        ...observedDetail,
+        pullRequest: {
+          ...observedDetail.pullRequest,
+          number: 11,
+          url: "https://github.com/octant/octant/pull/11",
+          title: "Merged pull request",
+          state: "merged",
+          mergeability: "unknown",
+          updatedAt: "2026-08-22T07:30:00Z",
+        },
+      }),
+    });
+    const before = await first.service.boardSnapshot(windowId);
+    expect(before.freshness).toEqual({ status: "stale" });
+    expect(before.rows[0]).toMatchObject({ number: 11, state: "unknown" });
+    expect(first.listActive).not.toHaveBeenCalled();
+    expect(first.observeReviewByIdentity).not.toHaveBeenCalled();
+
+    await first.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    expect(first.observeReviewByIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "octant", name: "octant", number: 11 }),
+      expect.any(AbortSignal),
+    );
+    expect((await first.service.boardSnapshot(windowId)).rows[0]).toMatchObject({
+      number: 11,
+      state: "merged",
+    });
+  });
+
+  it("keeps an unresolved known identity unknown and stale after refresh", async () => {
+    const fixture = serviceFixture({
+      knownPullRequests: [{ number: 11, observedAt: "2026-08-21T08:00:00Z" }],
+      list: async () => ({ status: "ok", rows: [] }),
+      detail: async () => ({ status: "unavailable" }),
+    });
+
+    await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    const board = await fixture.service.boardSnapshot(windowId);
+
+    expect(board.rows[0]).toMatchObject({ number: 11, state: "unknown" });
+    expect(board.freshness).toMatchObject({ status: "stale", staleReason: "refresh-failed" });
+  });
+
+  it("bounds restart-recovered identities before returning a board snapshot", async () => {
+    const knownPullRequests = Array.from({ length: 101 }, (_, index) => ({
+      number: index + 1,
+      observedAt: `2026-08-21T${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}:00Z`,
+    }));
+    const fixture = serviceFixture({ knownPullRequests });
+
+    const board = await fixture.service.boardSnapshot(windowId);
+
+    expect(board.rows).toHaveLength(100);
+    expect(board.rows[0]?.number).toBe(101);
+    expect(board.rows.at(-1)?.number).toBe(2);
+  });
+
   it("refreshes only the requested Project and leaves the other cached rows in place", async () => {
     const { service, listActive } = serviceFixture({
       projects: [
@@ -233,6 +333,38 @@ describe("CodeProjectPullRequestService", () => {
     expect(listActive).toHaveBeenCalledTimes(1);
     expect(listActive.mock.calls[0]?.[0]).toMatchObject({ owner: "octant", name: "docs" });
     expect(view.rows.map((row) => row.number)).toEqual([12, 4]);
+  });
+
+  it("bounds the combined cache when one Project is refreshed", async () => {
+    let selectedRefresh = false;
+    const fixture = serviceFixture({
+      projects: [
+        codeProject({ id: projectA, name: "Octant", root: "/repos/octant" }),
+        codeProject({ id: projectC, name: "Docs", root: "/repos/docs" }),
+      ],
+      remotes: {
+        "/repos/octant": [{ name: "origin", fetchUrl: "https://github.com/octant/octant.git" }],
+        "/repos/docs": [{ name: "origin", fetchUrl: "https://github.com/octant/docs.git" }],
+      },
+      list: async (request) => ({
+        status: "ok",
+        rows: Array.from(
+          { length: selectedRefresh && request.name === "docs" ? 100 : 50 },
+          (_, index) => ghRow({ number: index + 1, title: `${request.name} ${index + 1}` }),
+        ),
+      }),
+    });
+
+    await fixture.service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
+    selectedRefresh = true;
+    const view = await fixture.service.refresh(
+      windowId,
+      { kind: "refresh-project", projectId: projectC },
+      new AbortController().signal,
+    );
+
+    expect(view.rows).toHaveLength(100);
+    expect(view.pullRequestsTruncated).toBe(true);
   });
 
   it("labels refresh when more than 25 connected repositories or 100 pull requests are present", async () => {
@@ -458,6 +590,29 @@ describe("CodeProjectPullRequestService", () => {
       staleReason: "refresh-failed",
       lastSuccessfulRefreshAt: now,
     });
+  });
+
+  it("keeps the last authorized detail when an identity observation is partial", async () => {
+    let next: GhPullRequestReviewResult = observedDetail;
+    const { service } = serviceFixture({ detail: async () => next });
+
+    await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+    next = {
+      ...observedDetail,
+      freshness: "stale",
+      ambiguous: true,
+      staleSections: ["description", "checks"],
+      pullRequest: {
+        ...observedDetail.pullRequest,
+        title: "",
+        baseBranch: "",
+        headBranch: "",
+      },
+    };
+    const view = await service.refreshDetail(windowId, detailQuery, new AbortController().signal);
+
+    expect(view.detail).toMatchObject({ state: "observed", title: "List active pull requests" });
+    expect(view.freshness).toMatchObject({ status: "stale", staleReason: "refresh-failed" });
   });
 
   it("drops cached detail when GitHub authority is revoked", async () => {

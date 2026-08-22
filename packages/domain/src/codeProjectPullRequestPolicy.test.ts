@@ -13,6 +13,7 @@ describe("Code Project pull-request policy", () => {
   it("matches a linked thread only on the exact authorized repository and delivery branch or recorded pull-request identity", () => {
     const byBranch = matchLinkedThreadsToPullRequest({
       pullRequest: {
+        projectId: "project-a",
         repository: octantRepo,
         number: 12,
         headBranch: "feature/manual-refresh",
@@ -21,6 +22,7 @@ describe("Code Project pull-request policy", () => {
       threads: [
         {
           threadId: "thread-branch",
+          projectId: "project-a",
           title: "Manual refresh",
           repository: octantRepo,
           deliveryBranch: "feature/manual-refresh",
@@ -31,6 +33,7 @@ describe("Code Project pull-request policy", () => {
 
     const byIdentity = matchLinkedThreadsToPullRequest({
       pullRequest: {
+        projectId: "project-a",
         repository: octantRepo,
         number: 44,
         headBranch: "feature/other",
@@ -39,9 +42,10 @@ describe("Code Project pull-request policy", () => {
       threads: [
         {
           threadId: "thread-identity",
+          projectId: "project-a",
           title: "Recorded identity",
           repository: octantRepo,
-          pullRequestNumber: 44,
+          pullRequestNumbers: [{ number: 44, observedAt: "2026-08-22T08:00:00Z" }],
         },
       ],
     });
@@ -52,6 +56,7 @@ describe("Code Project pull-request policy", () => {
     expect(
       matchLinkedThreadsToPullRequest({
         pullRequest: {
+          projectId: "project-a",
           repository: octantRepo,
           number: 12,
           headBranch: "feature/manual-refresh",
@@ -60,18 +65,21 @@ describe("Code Project pull-request policy", () => {
         threads: [
           {
             threadId: "title-only",
+            projectId: "project-a",
             title: "List active pull requests",
             repository: octantRepo,
             deliveryBranch: "feature/something-else",
           },
           {
             threadId: "loose-branch",
+            projectId: "project-a",
             title: "Nearby branch",
             repository: octantRepo,
             deliveryBranch: "manual-refresh",
           },
           {
             threadId: "other-repo",
+            projectId: "project-a",
             title: "Same branch elsewhere",
             repository: { owner: "octant", name: "other" },
             deliveryBranch: "feature/manual-refresh",
