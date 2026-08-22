@@ -27,11 +27,13 @@ export interface CodeThreadControllers {
 
 export interface CodeThreadControllerRegistry extends CodeThreadControllers {
   readonly publish: (threadId: CodeThreadId, controller: CodeController) => void;
+  readonly refreshConversation: (threadId: CodeThreadId) => void;
   readonly release: (threadId: CodeThreadId) => void;
 }
 
 export function createCodeThreadControllers(): CodeThreadControllerRegistry {
   const byThread = new Map<string, CodeController>();
+  const refreshWhenPublished = new Set<string>();
   const listeners = new Set<() => void>();
   const announce = () => {
     for (const listener of listeners) listener();
@@ -40,12 +42,26 @@ export function createCodeThreadControllers(): CodeThreadControllerRegistry {
     get: (threadId) => byThread.get(String(threadId)),
     publish: (threadId, controller) => {
       const key = String(threadId);
-      if (byThread.get(key) === controller) return;
-      byThread.set(key, controller);
-      announce();
+      if (byThread.get(key) !== controller) {
+        byThread.set(key, controller);
+        announce();
+      }
+      if (!refreshWhenPublished.delete(key)) return;
+      controller.refreshConversation();
+    },
+    refreshConversation: (threadId) => {
+      const key = String(threadId);
+      const controller = byThread.get(key);
+      if (controller !== undefined) {
+        controller.refreshConversation();
+        return;
+      }
+      refreshWhenPublished.add(key);
     },
     release: (threadId) => {
-      if (!byThread.delete(String(threadId))) return;
+      const key = String(threadId);
+      refreshWhenPublished.delete(key);
+      if (!byThread.delete(key)) return;
       announce();
     },
     subscribe: (listener) => {
