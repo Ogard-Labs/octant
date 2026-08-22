@@ -209,6 +209,7 @@ describe("WorkspaceRailLayers", () => {
           citations: { count: 0, staleCount: 0 },
           goal: { kind: "none" as const },
           childRuns: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },
+          pullRequestSummaries: { items: [], hiddenCount: 0 },
           recovery: { kind: "ok" as const },
           staleEvidence: false,
           followUp: false,
