@@ -6,6 +6,8 @@ import { UserAvatar } from "../profile/UserAvatar";
 
 export interface SidebarProfileProps {
   readonly onOpenNavigator: () => void;
+  /** False until Navigator has a host-configured model; the row is then absent. */
+  readonly navigatorAvailable?: boolean;
   readonly onOpenSettings: (deepLink?: SettingsDeepLink) => void;
   /** Absent on a window that cannot enter Zen, which keeps the row off entirely. */
   readonly onOpenZen?: () => void;
@@ -71,11 +73,13 @@ export function SidebarProfile(props: SidebarProfileProps) {
             label="Settings"
             onClick={() => select(() => props.onOpenSettings())}
           />
-          <ProfileAction
-            icon={Compass}
-            label="Navigator"
-            onClick={() => select(() => props.onOpenNavigator())}
-          />
+          {props.navigatorAvailable === true ? (
+            <ProfileAction
+              icon={Compass}
+              label="Navigator"
+              onClick={() => select(() => props.onOpenNavigator())}
+            />
+          ) : null}
           <ProfileAction
             icon={Gauge}
             label="Usage"

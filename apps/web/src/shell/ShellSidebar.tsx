@@ -59,6 +59,8 @@ export interface ShellSidebarProps {
   };
   readonly onAddFolder: () => void;
   readonly onOpenNavigator: () => void;
+  /** Absent until Navigator has a model, so the profile menu does not advertise it. */
+  readonly navigatorAvailable?: boolean;
   readonly onOpenSettings: (deepLink?: SettingsDeepLink) => void;
   readonly onSearchQueryChange: (query: string) => void;
   readonly searchQuery: string;
@@ -226,6 +228,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
           </div>
         )}
         <SidebarProfile
+          navigatorAvailable={props.navigatorAvailable === true}
           onOpenNavigator={props.onOpenNavigator}
           onOpenSettings={props.onOpenSettings}
           {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}

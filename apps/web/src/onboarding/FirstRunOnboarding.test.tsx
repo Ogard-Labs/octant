@@ -6,10 +6,12 @@ import type {
   ProviderObservedState,
   UtcTimestamp,
 } from "@octant/contracts";
+import type { ProjectId } from "@octant/contracts/projects";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import { buildModelPickerGroups, type PickerGroup } from "@octant/domain";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { AvatarImageEnvironment } from "../profile/avatarImage";
 import { FirstRunOnboarding, type FirstRunOnboardingProps } from "./FirstRunOnboarding";
@@ -102,6 +104,13 @@ const emptyProfile: UserProfile = { accent: "indigo", avatar: { kind: "initials"
  */
 const namedProfile: UserProfile = { ...emptyProfile, displayName: "Ada Lovelace" };
 const encodedAvatar = "data:image/webp;base64,AAAA";
+const chatProjectId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as ProjectId;
+const chatProject = {
+  id: chatProjectId,
+  name: "Ada's notes",
+  type: "chat" as const,
+  lifecycle: "active" as const,
+};
 const defaultWorkspace = {
   colorScheme: "system",
   chatEnabled: true,
@@ -132,6 +141,9 @@ function mount(overrides: Partial<FirstRunOnboardingProps> = {}) {
     onToggleChat: vi.fn(async () => true),
     onToggleWork: vi.fn(async () => true),
     onSelectModeSwitcher: vi.fn(async () => true),
+    projects: [],
+    onCreateProject: vi.fn(),
+    onStartThread: vi.fn(),
     ...overrides,
   };
   const view = render(<FirstRunOnboarding {...props} />);
@@ -156,6 +168,46 @@ function avatarEnvironment(
 
 async function goToStep(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(screen.getByRole("button", { name: new RegExp(name) }));
+}
+
+async function openHandoff(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: /Navigator/ }));
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+}
+
+function readyObserved(): ProviderObservedState {
+  return {
+    instanceId,
+    readiness: "ready",
+    processState: "running",
+    models: [
+      {
+        id: modelId,
+        displayName: "Llama Test",
+        orderHint: undefined,
+        reasoning: "unavailable",
+        inputModalities: ["text"],
+        options: [],
+        source: "discovered",
+        verification: "verified",
+      } as ProviderModel,
+    ],
+    capabilities: {},
+    observedAt: now,
+  } as unknown as ProviderObservedState;
+}
+
+function readyHandoff(): Partial<FirstRunOnboardingProps> {
+  return {
+    chatModelGroups: readyGroups(),
+    chatDefault: { providerInstanceId: instanceId, modelId },
+    projects: [chatProject],
+    readiness: summarizeFirstRunReadiness({
+      providerStatus: "ready",
+      instances: [instance],
+      observedByInstance: new Map([[instanceId, readyObserved()]]),
+    }),
+  };
 }
 
 describe("FirstRunOnboarding", () => {
@@ -354,31 +406,32 @@ describe("FirstRunOnboarding", () => {
           acceptSelection = resolve;
         }),
     );
-    const props = mount({ chatModelGroups: readyGroups(), onSelectChatDefault });
+    const props = mount({ ...readyHandoff(), onSelectChatDefault });
 
     await user.click(screen.getByRole("button", { name: /Default model/ }));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
     // Chat settings are a separate controller, so this write is still running.
-    await user.click(screen.getByRole("button", { name: /Navigator/ }));
-    await user.click(screen.getByRole("button", { name: "Start using Octant" }));
+    await openHandoff(user);
+    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
 
     expect(props.controller.complete).not.toHaveBeenCalled();
 
     acceptSelection(true);
     await waitFor(() => expect(props.controller.complete).toHaveBeenCalledOnce());
+    expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
   });
 
   it("keeps first run pending when a model choice is rejected", async () => {
     const user = userEvent.setup();
     const props = mount({
-      chatModelGroups: readyGroups(),
+      ...readyHandoff(),
       onSelectChatDefault: vi.fn(async () => false),
     });
 
     await user.click(screen.getByRole("button", { name: /Default model/ }));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
-    await user.click(screen.getByRole("button", { name: /Navigator/ }));
-    await user.click(screen.getByRole("button", { name: "Start using Octant" }));
+    await openHandoff(user);
+    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
 
     await waitFor(() => expect(screen.getByRole("dialog")).toBeVisible());
     expect(props.controller.complete).not.toHaveBeenCalled();
@@ -434,20 +487,19 @@ describe("FirstRunOnboarding", () => {
     );
     const onSelectChatDefault = vi.fn(async () => false);
     const props = mount({
-      chatModelGroups: readyGroups(),
+      ...readyHandoff(),
       onSelectChatDefault,
       onSelectColorScheme,
     });
 
     await user.click(screen.getByRole("button", { name: /Workspace/ }));
     await user.click(screen.getByRole("radio", { name: "Dark" }));
-    await user.click(screen.getByRole("button", { name: /Navigator/ }));
-    await user.click(screen.getByRole("button", { name: "Start using Octant" }));
+    await openHandoff(user);
+    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
 
     // Only the footer is disabled while this settles, so the rail and the
     // pickers still answer. A choice made here is written after the wait
     // started, and completing without it would lose it for good.
-    await user.click(screen.getByRole("button", { name: /Chat/ }));
     await user.click(screen.getByRole("button", { name: /Default model/ }));
     await user.click(screen.getByRole("option", { name: /Llama Test/ }));
     acceptScheme(true);
@@ -469,16 +521,18 @@ describe("FirstRunOnboarding", () => {
     expect(props.onClearNavigatorDefault).toHaveBeenCalledOnce();
   });
 
-  it("offers completion only at the end, and saves an unsaved profile with it", async () => {
+  it("offers the thread handoff only after the setup steps, and starts a thread when ready", async () => {
     const user = userEvent.setup();
-    const props = mount();
+    const props = mount(readyHandoff());
 
-    expect(screen.queryByRole("button", { name: "Start using Octant" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start a Chat thread" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: /Navigator/ }));
-    await user.click(screen.getByRole("button", { name: "Start using Octant" }));
+    await openHandoff(user);
+    expect(screen.getByRole("button", { name: "Start a Chat thread" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Start a Chat thread" }));
 
     expect(props.controller.complete).toHaveBeenCalledOnce();
+    expect(props.onStartThread).toHaveBeenCalledWith({ mode: "chat", projectId: chatProjectId });
   });
 
   it("keeps a name the user typed even when they skip the rest of first run", async () => {
@@ -560,11 +614,12 @@ describe("FirstRunOnboarding", () => {
     const user = userEvent.setup();
     const props = mount();
 
-    await user.click(screen.getByRole("button", { name: /Navigator/ }));
-    await user.click(screen.getByRole("button", { name: "Start using Octant" }));
+    await openHandoff(user);
+    await user.click(screen.getByRole("button", { name: "Set up a provider" }));
 
     expect(props.onSaveProfile).not.toHaveBeenCalled();
-    expect(props.controller.complete).toHaveBeenCalledOnce();
+    expect(props.controller.complete).not.toHaveBeenCalled();
+    expect(props.onOpenProviderSettings).toHaveBeenCalledOnce();
   });
 
   it("releases the modal when it sends the user to provider settings", async () => {
@@ -573,10 +628,12 @@ describe("FirstRunOnboarding", () => {
     const resolve = vi.fn(async () => {});
 
     function Harness() {
+      const [concealed, setConcealed] = useState(false);
       const live = useFirstRunOnboardingController({
         onboarding: "pending",
         shellStatus: "ready",
         resolve,
+        concealed,
       });
       return (
         <FirstRunOnboarding
@@ -584,16 +641,22 @@ describe("FirstRunOnboarding", () => {
           controller={live}
           navigatorModelGroups={[]}
           onClearNavigatorDefault={vi.fn(async () => true)}
-          onOpenProviderSettings={onOpenProviderSettings}
+          onCreateProject={vi.fn()}
+          onOpenProviderSettings={() => {
+            onOpenProviderSettings();
+            setConcealed(true);
+          }}
           onRescan={vi.fn()}
           onSaveProfile={vi.fn(async () => true)}
           onSelectChatDefault={vi.fn(async () => true)}
           onSelectColorScheme={vi.fn(async () => true)}
           onSelectModeSwitcher={vi.fn(async () => true)}
           onSelectNavigatorDefault={vi.fn(async () => true)}
+          onStartThread={vi.fn()}
           onToggleChat={vi.fn(async () => true)}
           onToggleWork={vi.fn(async () => true)}
           profile={namedProfile}
+          projects={[]}
           readiness={summarizeFirstRunReadiness({
             providerStatus: "ready",
             instances: [instance],
@@ -607,18 +670,89 @@ describe("FirstRunOnboarding", () => {
     render(<Harness />);
 
     await user.click(screen.getByRole("button", { name: /Providers/ }));
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Set up a provider" }));
 
     expect(onOpenProviderSettings).toHaveBeenCalledOnce();
     // The dialog is modal, so leaving it open traps focus over the provider
     // settings this very action opened.
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    // Deferring answers nothing on the user's behalf: the host still reports
+    // Concealing answers nothing on the user's behalf: the host still reports
     // first run as pending, so backing out of Settings does not lose it.
     expect(resolve).not.toHaveBeenCalled();
     // Focus is released to a live element rather than stranded on the removed
     // dialog (`SHELL-03`).
     expect(document.activeElement?.isConnected).toBe(true);
+  });
+
+  it("returns to the same readiness draft after a missing prerequisite's setup closes", async () => {
+    const user = userEvent.setup();
+    function Harness() {
+      const [concealed, setConcealed] = useState(false);
+      const live = useFirstRunOnboardingController({
+        onboarding: "pending",
+        shellStatus: "ready",
+        resolve: vi.fn(async () => {}),
+        concealed,
+      });
+      return (
+        <>
+          <FirstRunOnboarding
+            chatModelGroups={[]}
+            controller={live}
+            navigatorModelGroups={[]}
+            onClearNavigatorDefault={vi.fn(async () => true)}
+            onCreateProject={() => setConcealed(true)}
+            onOpenProviderSettings={() => setConcealed(true)}
+            onRescan={vi.fn()}
+            onSaveProfile={vi.fn(async () => true)}
+            onSelectChatDefault={vi.fn(async () => true)}
+            onSelectColorScheme={vi.fn(async () => true)}
+            onSelectModeSwitcher={vi.fn(async () => true)}
+            onSelectNavigatorDefault={vi.fn(async () => true)}
+            onStartThread={vi.fn()}
+            onToggleChat={vi.fn(async () => true)}
+            onToggleWork={vi.fn(async () => true)}
+            profile={namedProfile}
+            projects={[]}
+            readiness={summarizeFirstRunReadiness({
+              providerStatus: "ready",
+              instances: [instance],
+              observedByInstance: new Map(),
+            })}
+            scanning={false}
+            workspace={defaultWorkspace}
+          />
+          {concealed ? (
+            <button onClick={() => setConcealed(false)} type="button">
+              Close setup
+            </button>
+          ) : null}
+        </>
+      );
+    }
+    render(<Harness />);
+
+    await openHandoff(user);
+    expect(screen.getByText("No Chat Project yet. A thread starts in a Project.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Set up a provider" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Close setup" }));
+    expect(screen.getByRole("dialog", { name: "Welcome to Octant" })).toBeVisible();
+    expect(screen.getByText("No Chat Project yet. A thread starts in a Project.")).toBeVisible();
+  });
+
+  it("does not start a thread or fabricate readiness when first run is skipped", async () => {
+    const user = userEvent.setup();
+    const props = mount(readyHandoff());
+
+    await openHandoff(user);
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    expect(props.controller.skip).toHaveBeenCalledOnce();
+    expect(props.controller.complete).not.toHaveBeenCalled();
+    expect(props.onStartThread).not.toHaveBeenCalled();
   });
 
   it("records the same durable skip when the dialog is dismissed", async () => {
@@ -639,15 +773,15 @@ describe("FirstRunOnboarding", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("cannot reach the host");
     expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: /Navigator/ }));
-    expect(screen.getByRole("button", { name: "Start using Octant" })).toBeDisabled();
+    await openHandoff(user);
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toBeDisabled();
   });
 
   it("shows which answer is in flight without offering a second one", async () => {
     const user = userEvent.setup();
     mount({ controller: controller({ submitting: "completed" }) });
 
-    await user.click(screen.getByRole("button", { name: /Navigator/ }));
+    await openHandoff(user);
 
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Skip for now" })).toBeDisabled();
@@ -670,5 +804,20 @@ describe("FirstRunOnboarding", () => {
       "data-configured",
       "false",
     );
+  });
+
+  it("reports provider, Project, and default model separately on a clean host", async () => {
+    const user = userEvent.setup();
+    const props = mount();
+
+    await openHandoff(user);
+
+    expect(screen.getByText("No provider is ready yet")).toBeVisible();
+    expect(screen.getByText("No Chat Project yet. A thread starts in a Project.")).toBeVisible();
+    expect(screen.getByText("No model this host can use in Chat yet.")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Project" }));
+    expect(props.onCreateProject).toHaveBeenCalledWith("chat");
+    expect(props.controller.complete).not.toHaveBeenCalled();
+    expect(props.onStartThread).not.toHaveBeenCalled();
   });
 });

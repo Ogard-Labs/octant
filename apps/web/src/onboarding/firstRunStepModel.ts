@@ -8,9 +8,9 @@
  * step found — offering a model list before the host has looked would offer an
  * empty one.
  *
- * Every step is skippable. None of them gates the composer: a user who wants
- * none of this can leave first run at any point, and the surface says what
- * that costs rather than refusing to let them.
+ * Every setup step except the name is skippable. The readiness view after them
+ * does not invent a provider, Project, or model they did not give: skip leaves
+ * first run answered as skipped, and a missing fact opens that setup surface.
  */
 export const FIRST_RUN_STEP_IDS = [
   "profile",

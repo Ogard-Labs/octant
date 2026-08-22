@@ -11,7 +11,6 @@ import {
   projectWindowCapability,
   projects,
   providers,
-  styles,
   windowId,
 } from "../App.test-fixtures";
 import {
@@ -36,8 +35,7 @@ afterEach(() => {
 });
 
 describe("WorkspaceRailLayers", () => {
-  it("keeps Automations hidden when the release gate is off and overlays implemented rail placeholders", async () => {
-    const user = userEvent.setup();
+  it("keeps Automations and GitHub destinations hidden when those host capabilities are absent", async () => {
     render(
       <App
         chatClient={chats()}
@@ -54,12 +52,7 @@ describe("WorkspaceRailLayers", () => {
       await screen.findByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Pull requests" }));
-
-    expect(screen.getByRole("heading", { name: "Pull requests" })).toBeVisible();
-    expect(document.querySelector(".rail-placeholder")).toBeVisible();
-    expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
-    expect(styles).toMatch(/\.rail-placeholder\s*\{[^}]*position:\s*absolute;[^}]*inset:\s*0;/s);
+    expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
   });
 
   it("opens the complete Automation Center from the sidebar once the release gate flips", async () => {
@@ -128,8 +121,7 @@ describe("WorkspaceRailLayers", () => {
     expect(await screen.findByRole("region", { name: "Code thread" })).toBeVisible();
   });
 
-  it("dismisses a rail placeholder when the user changes modes", async () => {
-    const user = userEvent.setup();
+  it("does not keep a GitHub placeholder overlay after the destination is absent", async () => {
     render(
       <App
         chatClient={chats()}
@@ -145,14 +137,8 @@ describe("WorkspaceRailLayers", () => {
     expect(
       await screen.findByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Pull requests" }));
-    expect(screen.getByRole("heading", { name: "Pull requests" })).toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: "Chat" }));
-
-    await waitFor(() =>
-      expect(screen.queryByRole("heading", { name: "Pull requests" })).not.toBeInTheDocument(),
-    );
+    expect(screen.queryByRole("heading", { name: "Pull requests" })).not.toBeInTheDocument();
+    expect(document.querySelector(".rail-placeholder")).toBeNull();
     expect(document.querySelector(".workspace")).not.toHaveAttribute("hidden");
   });
 });
