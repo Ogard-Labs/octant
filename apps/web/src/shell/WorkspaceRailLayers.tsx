@@ -1,4 +1,5 @@
 import type { AutomationClient } from "@octant/client-runtime";
+import type { CodeProjectPullRequestRow } from "@octant/contracts";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type { WorkThreadClient } from "@octant/client-runtime/work-thread-client";
@@ -33,6 +34,8 @@ export interface WorkspaceRailLayersProps {
   readonly onCloseWorkBoard: () => void;
   readonly onOpenCodeBoardThread: (target: CodeThreadOpenTarget) => void;
   readonly onOpenWorkBoardThread: (target: WorkThreadOpenTarget) => void;
+  readonly onSelectProjectPullRequest?: (row: CodeProjectPullRequestRow) => void;
+  readonly selectedProjectPullRequestKey?: string;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly artifactLibraryOpen: boolean;
@@ -78,6 +81,12 @@ export function WorkspaceRailLayers(props: WorkspaceRailLayersProps) {
             load={(query) => props.codeClient.queryProjectPullRequests(query)}
             onClose={props.onCloseCodePullRequests}
             refresh={(command) => props.codeClient.refreshProjectPullRequests(command)}
+            {...(props.onSelectProjectPullRequest === undefined
+              ? {}
+              : { onSelectRow: props.onSelectProjectPullRequest })}
+            {...(props.selectedProjectPullRequestKey === undefined
+              ? {}
+              : { selectedRowKey: props.selectedProjectPullRequestKey })}
           />
         </div>
       ) : null}

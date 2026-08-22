@@ -173,6 +173,7 @@ import {
 import { CodeFollowUpService } from "./code/codeFollowUpService";
 import {
   CodeProjectPullRequestService,
+  type CodeProjectPullRequestDetailPort,
   type CodeProjectPullRequestListPort,
 } from "./code/codeProjectPullRequestService";
 import { createGhCommandPort, GhPullRequestPort } from "./code/ghPullRequestPort";
@@ -1162,11 +1163,15 @@ function withCodeOperationRuntime(
   };
 }
 
-function createProjectPullRequestListPort(
-  ghExecutable: string | undefined,
-): CodeProjectPullRequestListPort {
+function createProjectPullRequestPorts(ghExecutable: string | undefined): {
+  readonly list: CodeProjectPullRequestListPort;
+  readonly detail: CodeProjectPullRequestDetailPort;
+} {
   if (ghExecutable === undefined) {
-    return { listActive: async () => ({ status: "disconnected" }) };
+    return {
+      list: { listActive: async () => ({ status: "disconnected" }) },
+      detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
+    };
   }
   try {
     const port = new GhPullRequestPort({
@@ -1174,10 +1179,18 @@ function createProjectPullRequestListPort(
       resolveTarget: async () => undefined,
     });
     return {
-      listActive: (request, signal) => port.listActive(request, signal),
+      list: {
+        listActive: (request, signal) => port.listActive(request, signal),
+      },
+      detail: {
+        observeReviewByIdentity: (request, signal) => port.observeReviewByIdentity(request, signal),
+      },
     };
   } catch {
-    return { listActive: async () => ({ status: "disconnected" }) };
+    return {
+      list: { listActive: async () => ({ status: "disconnected" }) },
+      detail: { observeReviewByIdentity: async () => ({ status: "unavailable" }) },
+    };
   }
 }
 
@@ -2177,6 +2190,7 @@ export function startOctantServer(
       });
     // Revocation is wired at construction, before any window can hold a watch.
     activeCodeService = codeService;
+    const projectPullRequestPorts = createProjectPullRequestPorts(options.ghExecutable);
     const projectPullRequestService = new CodeProjectPullRequestService({
       projects: projectService,
       remotes: {
@@ -2185,7 +2199,8 @@ export function startOctantServer(
           return observed.status === "ready" ? observed.remotes : undefined;
         },
       },
-      list: createProjectPullRequestListPort(options.ghExecutable),
+      list: projectPullRequestPorts.list,
+      detail: projectPullRequestPorts.detail,
       threads: {
         list: async (windowId) => {
           const bootstrap = await codeService.bootstrap(windowId);
@@ -3018,6 +3033,14 @@ export function startOctantServer(
         projectPullRequestService.query(windowId, query),
       refreshProjectPullRequests: (windowId, command, signal) =>
         projectPullRequestService.refresh(
+          windowId,
+          command,
+          signal ?? new AbortController().signal,
+        ),
+      queryProjectPullRequestDetail: (windowId, query) =>
+        projectPullRequestService.queryDetail(windowId, query),
+      refreshProjectPullRequestDetail: (windowId, command, signal) =>
+        projectPullRequestService.refreshDetail(
           windowId,
           command,
           signal ?? new AbortController().signal,

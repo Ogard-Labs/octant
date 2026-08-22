@@ -84,6 +84,10 @@ import {
 } from "@octant/contracts";
 import { pastedImageName } from "./chat/composerImagePaste";
 import type { CodeOperationId } from "@octant/contracts";
+import type {
+  CodeProjectPullRequestDetailQuery,
+  CodeProjectPullRequestRow,
+} from "@octant/contracts";
 import { decodeWorkspaceTabId, type WindowId, type WorkspaceTab } from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
 import type { OctantMode } from "@octant/contracts/modes";
@@ -211,6 +215,7 @@ import {
 import { ShellFrame } from "./shell/ShellFrame";
 import { RemotePairingView } from "./remote/RemotePairingView";
 import { RightUtilityDock } from "./shell/RightUtilityDock";
+import { DockProjectPullRequestReviewTool } from "./shell/DockProjectPullRequestReviewTool";
 import { ThreadUtilityDockContent } from "./shell/ThreadUtilityDockContent";
 import {
   RIGHT_UTILITY_DOCK_SURFACES,
@@ -222,6 +227,7 @@ import {
   closeThreadUtilityTab,
   closeUtilityTabState,
   openThreadUtilityTab,
+  openUtilityTabState,
   retainAvailableUtilityTabs,
   selectThreadUtilityTab,
   selectUtilityTabState,
@@ -572,6 +578,9 @@ function LaunchedShell(
   }>();
   const [codeBoardOpen, setCodeBoardOpen] = useState(false);
   const [codePullRequestsOpen, setCodePullRequestsOpen] = useState(false);
+  const [selectedProjectPullRequest, setSelectedProjectPullRequest] = useState<
+    CodeProjectPullRequestDetailQuery | undefined
+  >();
   const [workBoardOpen, setWorkBoardOpen] = useState(false);
   const [automationCenterOpen, setAutomationCenterOpen] = useState(false);
   const [artifactLibraryOpen, setArtifactLibraryOpen] = useState(false);
@@ -714,6 +723,8 @@ function LaunchedShell(
       : activeMode === "work"
         ? activeWorkThreadId
         : activeCodeThreadId;
+  const projectPullRequestReviewOpen =
+    codePullRequestsOpen && selectedProjectPullRequest !== undefined;
   const dockThreadKey =
     dockThreadId === undefined ? undefined : threadUtilityDockKey(activeMode, String(dockThreadId));
   const dockState =
@@ -1977,10 +1988,13 @@ function LaunchedShell(
   function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
-    if (dockThreadKey === undefined) return;
     if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
     setDockVisible(true);
-    setDockStatesByThread((current) => openThreadUtilityTab(current, dockThreadKey, surface));
+    if (dockThreadKey === undefined) {
+      setFallbackDockState((current) => openUtilityTabState(current, surface));
+    } else {
+      setDockStatesByThread((current) => openThreadUtilityTab(current, dockThreadKey, surface));
+    }
   }
   function openReviewForThread(threadId: string) {
     const key = threadUtilityDockKey("code", threadId);
@@ -2068,10 +2082,38 @@ function LaunchedShell(
     return resolveRightUtilityDockSurface({
       activeMode,
       ...(dockThreadId === undefined ? {} : { activeThreadId: dockThreadId }),
+      ...(projectPullRequestReviewOpen ? { projectPullRequestReviewOpen: true } : {}),
       connectionState: projectController.status === "disconnected" ? "disconnected" : "connected",
       presentationAvailability: "available",
       savedSurface: surface,
     });
+  }
+
+  function selectProjectPullRequest(row: CodeProjectPullRequestRow): void {
+    setSelectedProjectPullRequest({
+      projectId: row.projectId,
+      repositoryOwner: row.repositoryOwner,
+      repositoryName: row.repositoryName,
+      number: row.number,
+    });
+    openDockTab("review");
+  }
+
+  function openLinkedProjectPullRequestThread(
+    thread: CodeProjectPullRequestRow["linkedThreads"][number],
+    projectId: CodeProjectPullRequestRow["projectId"],
+  ): void {
+    setSelectedProjectPullRequest(undefined);
+    const threadRecord = codeController.bootstrap?.threads.find(
+      (candidate) => String(candidate.id) === String(thread.threadId),
+    );
+    void controller.openCodeThread(
+      thread.threadId,
+      threadRecord?.title ?? thread.title,
+      undefined,
+      projectId,
+    );
+    openReviewForThread(String(thread.threadId));
   }
 
   if (controller.status === "loading") {
@@ -3729,7 +3771,16 @@ function LaunchedShell(
                 codeBoardProjects={codeBoardProjects}
                 workBoardProjects={workBoardProjects}
                 onCloseCodeBoard={() => setCodeBoardOpen(false)}
-                onCloseCodePullRequests={() => setCodePullRequestsOpen(false)}
+                onCloseCodePullRequests={() => {
+                  setCodePullRequestsOpen(false);
+                  setSelectedProjectPullRequest(undefined);
+                }}
+                onSelectProjectPullRequest={selectProjectPullRequest}
+                {...(selectedProjectPullRequest === undefined
+                  ? {}
+                  : {
+                      selectedProjectPullRequestKey: `${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`,
+                    })}
                 onCloseWorkBoard={() => setWorkBoardOpen(false)}
                 unreadThreadIds={
                   new Set(
@@ -4098,7 +4149,24 @@ function LaunchedShell(
               agents={threadUtility("agents")}
               browser={threadUtility("browser")}
               canvas={threadUtility("canvas")}
-              review={threadUtility("review")}
+              review={
+                projectPullRequestReviewOpen && selectedProjectPullRequest !== undefined ? (
+                  <DockProjectPullRequestReviewTool
+                    key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
+                    load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+                    onOpenLinkedThread={(thread) =>
+                      openLinkedProjectPullRequestThread(
+                        thread,
+                        selectedProjectPullRequest.projectId,
+                      )
+                    }
+                    query={selectedProjectPullRequest}
+                    refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
+                  />
+                ) : (
+                  threadUtility("review")
+                )
+              }
               delivery={threadUtility("delivery")}
               isNarrow={isNarrow}
               files={threadUtility("files")}

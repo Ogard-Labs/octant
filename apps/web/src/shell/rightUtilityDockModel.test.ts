@@ -115,6 +115,21 @@ describe("resolving what the right utility dock shows", () => {
     });
   });
 
+  it("opens Review without a thread when a Project pull request is selected in the central list", () => {
+    expect(
+      resolveRightUtilityDockSurface({
+        activeMode: "code",
+        connectionState: "connected",
+        presentationAvailability: "available",
+        savedSurface: "review",
+        projectPullRequestReviewOpen: true,
+      }),
+    ).toEqual({
+      kind: "surface",
+      surface: surface("review"),
+    });
+  });
+
   it("does not offer a mode-incompatible utility", () => {
     expect(
       resolveRightUtilityDockSurface({
