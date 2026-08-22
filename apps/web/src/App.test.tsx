@@ -1865,7 +1865,7 @@ describe("App", () => {
     const alphaProject = alphaOverview.closest(".project-overview");
     if (!(alphaProject instanceof HTMLElement)) throw new Error("Expected Project Alpha overview.");
     const alphaMemory = await within(alphaProject).findByRole("region", { name: "Project memory" });
-    expect(alphaMemory).toHaveTextContent("Alpha remembers the roadmap.");
+    await within(alphaMemory).findByText("Alpha remembers the roadmap.");
 
     await user.click(screen.getByRole("region", { name: "Workspace pane: Older chat" }));
 
