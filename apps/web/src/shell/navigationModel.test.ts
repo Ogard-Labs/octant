@@ -1,6 +1,7 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import { describe, expect, it } from "vitest";
 import {
+  buildAppMenuNavigation,
   buildChatThreadNavigation,
   buildSidebarNavigation,
   type NavigationAvailability,
@@ -34,14 +35,62 @@ describe("buildSidebarNavigation", () => {
     expect(descriptorIds({ activeMode, ...availableBaseCapabilities })).toEqual(expectedIds);
   });
 
-  it("adds Agents Center to every mode when enabled", () => {
-    expect(
-      descriptorIds({
-        activeMode: "chat",
-        ...availableBaseCapabilities,
-        agentsCenterEnabled: true,
-      }),
-    ).toEqual(["new-chat", "agents", "projects"]);
+  it("keeps Agents, Automations, Artifacts, and Plugins off the permanent sidebar", () => {
+    const capabilities = {
+      ...availableBaseCapabilities,
+      threadBoard: "available" as const,
+      pullRequests: "available" as const,
+      plugins: "available" as const,
+      automationsEnabled: true,
+      agentsCenterEnabled: true,
+      artifactLibrary: "available" as const,
+    } as const;
+
+    expect(descriptorIds({ activeMode: "chat", ...capabilities })).toEqual([
+      "new-chat",
+      "projects",
+    ]);
+    expect(descriptorIds({ activeMode: "work", ...capabilities })).toEqual([
+      "new-work-thread",
+      "thread-board",
+      "projects",
+    ]);
+    expect(descriptorIds({ activeMode: "code", ...capabilities })).toEqual([
+      "new-code-thread",
+      "thread-board",
+      "pull-requests",
+      "projects",
+    ]);
+  });
+
+  it("places secondary destinations in the app menu with truthful availability", () => {
+    const capabilities = {
+      ...availableBaseCapabilities,
+      threadBoard: "available" as const,
+      pullRequests: "available" as const,
+      plugins: "available" as const,
+      automationsEnabled: true,
+      agentsCenterEnabled: true,
+      artifactLibrary: "available" as const,
+    } as const;
+
+    expect(appMenuIds({ activeMode: "chat", ...capabilities })).toEqual([
+      "agents",
+      "artifact-library",
+      "plugins",
+    ]);
+    expect(appMenuIds({ activeMode: "work", ...capabilities })).toEqual([
+      "agents",
+      "automations",
+      "artifact-library",
+      "plugins",
+    ]);
+    expect(appMenuIds({ activeMode: "code", ...capabilities })).toEqual([
+      "agents",
+      "automations",
+      "artifact-library",
+      "plugins",
+    ]);
   });
 
   it("adds only the destinations supported by each mode", () => {
@@ -54,27 +103,26 @@ describe("buildSidebarNavigation", () => {
       artifactLibrary: "unavailable" as const,
     } as const;
 
-    // Plugins reach every mode; Automations and the work-mode boards do not.
+    // Plugins reach every mode via the app menu; Automations and the work-mode
+    // boards do not belong in Chat.
     expect(descriptorIds({ activeMode: "chat", ...capabilities })).toEqual([
       "new-chat",
-      "plugins",
       "projects",
     ]);
+    expect(appMenuIds({ activeMode: "chat", ...capabilities })).toEqual(["plugins"]);
     expect(descriptorIds({ activeMode: "work", ...capabilities })).toEqual([
       "new-work-thread",
-      "automations",
-      "plugins",
       "thread-board",
       "projects",
     ]);
+    expect(appMenuIds({ activeMode: "work", ...capabilities })).toEqual(["automations", "plugins"]);
     expect(descriptorIds({ activeMode: "code", ...capabilities })).toEqual([
       "new-code-thread",
-      "automations",
-      "plugins",
       "thread-board",
       "pull-requests",
       "projects",
     ]);
+    expect(appMenuIds({ activeMode: "code", ...capabilities })).toEqual(["automations", "plugins"]);
   });
 
   it.each(["disabled", "unavailable", "unauthorized"] as const)(
@@ -98,7 +146,6 @@ describe("buildSidebarNavigation", () => {
 
   it.each([
     ["chat", "createThread", "new-chat"],
-    ["chat", "plugins", "plugins"],
     ["chat", "projects", "projects"],
     ["work", "createThread", "new-work-thread"],
     ["work", "projects", "projects"],
@@ -128,30 +175,26 @@ describe("buildSidebarNavigation", () => {
   });
 
   it("never exposes Automations in Chat before a separate Chat automation design", () => {
-    expect(
-      descriptorIds({
-        activeMode: "chat",
-        ...availableBaseCapabilities,
-        automationsEnabled: true,
-        artifactLibrary: "unavailable" as const,
-      }),
-    ).toEqual(["new-chat", "projects"]);
+    const input = {
+      activeMode: "chat" as const,
+      ...availableBaseCapabilities,
+      automationsEnabled: true,
+      artifactLibrary: "unavailable" as const,
+    };
+    expect(descriptorIds(input)).toEqual(["new-chat", "projects"]);
+    expect(appMenuIds(input)).not.toContain("automations");
   });
 
   it.each(["work", "code"] as const)(
-    "shows Automations in %s only when explicitly enabled",
+    "shows Automations in the %s app menu only when explicitly enabled",
     (activeMode) => {
-      const expectedIds = {
-        work: ["new-work-thread", "automations", "projects"],
-        code: ["new-code-thread", "automations", "projects"],
-      } as const;
-
+      expect(
+        appMenuIds({ activeMode, ...availableBaseCapabilities, automationsEnabled: true }),
+      ).toEqual(["automations"]);
       expect(
         descriptorIds({ activeMode, ...availableBaseCapabilities, automationsEnabled: true }),
-      ).toEqual(expectedIds[activeMode]);
-      expect(descriptorIds({ activeMode, ...availableBaseCapabilities })).not.toContain(
-        "automations",
-      );
+      ).not.toContain("automations");
+      expect(appMenuIds({ activeMode, ...availableBaseCapabilities })).not.toContain("automations");
     },
   );
 
@@ -247,26 +290,14 @@ describe("buildSidebarNavigation", () => {
       "unauthorized",
     ];
     const allowedByMode: Record<OctantMode, ReadonlySet<SidebarNavigationDescriptorId>> = {
-      chat: new Set(["new-chat", "agents", "artifact-library", "plugins", "projects"]),
-      work: new Set([
-        "new-work-thread",
-        "agents",
-        "thread-board",
-        "projects",
-        "automations",
-        "artifact-library",
-        "plugins",
-      ]),
-      code: new Set([
-        "new-code-thread",
-        "agents",
-        "thread-board",
-        "pull-requests",
-        "projects",
-        "automations",
-        "artifact-library",
-        "plugins",
-      ]),
+      chat: new Set(["new-chat", "projects"]),
+      work: new Set(["new-work-thread", "thread-board", "projects"]),
+      code: new Set(["new-code-thread", "thread-board", "pull-requests", "projects"]),
+    };
+    const allowedAppMenuByMode: Record<OctantMode, ReadonlySet<SidebarNavigationDescriptorId>> = {
+      chat: new Set(["agents", "artifact-library", "plugins"]),
+      work: new Set(["agents", "automations", "artifact-library", "plugins"]),
+      code: new Set(["agents", "automations", "artifact-library", "plugins"]),
     };
 
     for (const activeMode of modes) {
@@ -276,23 +307,33 @@ describe("buildSidebarNavigation", () => {
             for (const artifactLibrary of availability) {
               for (const automationsEnabled of [false, true]) {
                 for (const agentsCenterEnabled of [false, true]) {
-                  const ids = descriptorIds({
+                  const input = {
                     activeMode,
-                    createThread: "available",
-                    projects: "available",
+                    createThread: "available" as const,
+                    projects: "available" as const,
                     threadBoard,
                     pullRequests,
                     plugins,
                     artifactLibrary,
                     automationsEnabled,
                     agentsCenterEnabled,
-                  });
+                  };
+                  const ids = descriptorIds(input);
+                  const menuIds = appMenuIds(input);
                   expect(new Set(ids).size).toBe(ids.length);
+                  expect(new Set(menuIds).size).toBe(menuIds.length);
                   for (const id of ids) {
                     expect(allowedByMode[activeMode].has(id)).toBe(true);
                   }
-                  expect(ids.includes("artifact-library")).toBe(artifactLibrary === "available");
-                  expect(ids.includes("agents")).toBe(agentsCenterEnabled);
+                  for (const id of menuIds) {
+                    expect(allowedAppMenuByMode[activeMode].has(id)).toBe(true);
+                  }
+                  expect(ids.includes("artifact-library")).toBe(false);
+                  expect(menuIds.includes("artifact-library")).toBe(
+                    artifactLibrary === "available",
+                  );
+                  expect(ids.includes("agents")).toBe(false);
+                  expect(menuIds.includes("agents")).toBe(agentsCenterEnabled);
                 }
               }
             }
@@ -307,4 +348,8 @@ function descriptorIds(
   input: SidebarNavigationInput,
 ): ReadonlyArray<SidebarNavigationDescriptorId> {
   return buildSidebarNavigation(input).map((descriptor) => descriptor.id);
+}
+
+function appMenuIds(input: SidebarNavigationInput): ReadonlyArray<SidebarNavigationDescriptorId> {
+  return buildAppMenuNavigation(input).map((descriptor) => descriptor.id);
 }

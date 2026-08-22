@@ -54,6 +54,7 @@ describe("ChatWelcome", () => {
     );
 
     expect(screen.getByRole("button", { name: "Start chat" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Learn" })).not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Chat is disconnected.");
     await user.click(screen.getByRole("button", { name: "Retry Chat" }));
     expect(onRetry).toHaveBeenCalledOnce();

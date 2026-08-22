@@ -52,6 +52,7 @@ distilled successor of the earlier long-form design specifications.
 | [0042](0042-environment-is-a-transient-disclosure.md)         | Environment is a transient disclosure                             | Accepted           |
 | [0043](0043-simulator-follows-the-active-thread.md)           | Simulator follows the active thread in the right sidebar          | Accepted           |
 | [0044](0044-the-dock-hosts-live-thread-owned-tools.md)        | The dock hosts live thread-owned tools                            | Proposed           |
+| [0045](0045-sidebar-is-a-calm-project-first-workspace.md)     | Sidebar is a calm project-first workspace                         | Accepted           |
 
 ## Adding an ADR
 

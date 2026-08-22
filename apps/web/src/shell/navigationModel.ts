@@ -3,14 +3,16 @@ import type { OctantMode } from "@octant/contracts/modes";
 export type NavigationAvailability = "available" | "disabled" | "unavailable" | "unauthorized";
 
 /**
- * Destinations the sidebar can offer.
+ * Destinations the shell can offer.
  *
- * Every id here renders somewhere. Three earlier ones did not: `search` is an
- * icon in the mode switcher rather than a list row, and `threads` and
- * `recent-chats` both described flat thread lists that `ProjectSidebarSection`
- * already renders nested under Projects — emitting either would have shown the
- * same threads twice. A model that describes rows the shell refuses to build
- * reads as a missing feature to whoever finds it next.
+ * Permanent sidebar rows above Projects are only New thread, Thread board, and
+ * Pull requests. Agents, Automations, Artifacts, and Plugins live in the
+ * bottom-left app menu. Three earlier ids never rendered: `search` is an icon
+ * in the mode switcher rather than a list row, and `threads` and `recent-chats`
+ * both described flat thread lists that `ProjectSidebarSection` already renders
+ * nested under Projects — emitting either would have shown the same threads
+ * twice. A model that describes rows the shell refuses to build reads as a
+ * missing feature to whoever finds it next.
  */
 export type SidebarNavigationDescriptorId =
   | "new-chat"
@@ -23,6 +25,15 @@ export type SidebarNavigationDescriptorId =
   | "thread-board"
   | "pull-requests"
   | "projects";
+
+const PERMANENT_SIDEBAR_DESTINATIONS = new Set<SidebarNavigationDescriptorId>([
+  "new-chat",
+  "new-work-thread",
+  "new-code-thread",
+  "thread-board",
+  "pull-requests",
+  "projects",
+]);
 
 export interface SidebarNavigationDescriptor {
   readonly id: SidebarNavigationDescriptorId;
@@ -119,7 +130,7 @@ const descriptors = {
   projects: { id: "projects", label: "Projects" },
 } as const satisfies Record<SidebarNavigationDescriptorId, SidebarNavigationDescriptor>;
 
-export function buildSidebarNavigation(
+function modeDestinations(
   input: SidebarNavigationInput,
 ): ReadonlyArray<SidebarNavigationDescriptor> {
   const automations = input.automationsEnabled ? [descriptors.automations] : [];
@@ -164,4 +175,29 @@ export function buildSidebarNavigation(
         ...(input.projects === "available" ? [descriptors.projects] : []),
       ];
   }
+}
+
+/**
+ * Permanent rows above Projects: New thread, Thread board, and Pull requests.
+ * Secondary product surfaces belong in {@link buildAppMenuNavigation}.
+ */
+export function buildSidebarNavigation(
+  input: SidebarNavigationInput,
+): ReadonlyArray<SidebarNavigationDescriptor> {
+  return modeDestinations(input).filter((descriptor) =>
+    PERMANENT_SIDEBAR_DESTINATIONS.has(descriptor.id),
+  );
+}
+
+/**
+ * Keyboard-reachable app-menu destinations that used to compete with Projects.
+ * Availability is still mode- and capability-gated; an unavailable row is
+ * omitted rather than shown disabled.
+ */
+export function buildAppMenuNavigation(
+  input: SidebarNavigationInput,
+): ReadonlyArray<SidebarNavigationDescriptor> {
+  return modeDestinations(input).filter(
+    (descriptor) => !PERMANENT_SIDEBAR_DESTINATIONS.has(descriptor.id),
+  );
 }

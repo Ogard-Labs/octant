@@ -148,7 +148,12 @@
 .dock-tool-launcher {
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 8px;
+}
+
+.dock-tool-launcher .shell-state {
+  width: auto;
+  padding: 4px 0;
 }
 
 .dock-tool-launcher__list {

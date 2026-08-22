@@ -41,6 +41,7 @@ import {
   observedProvider,
   oldChatThreadId,
   openAiProvider,
+  openAppMenuFromSidebar,
   openSettingsFromSidebar,
   openSidebarProject,
   otherProjectId,
@@ -252,7 +253,7 @@ describe("App", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Controller foundation" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Plugins" }));
+    await openAppMenuFromSidebar(user, "Plugins");
 
     // Skills and extensions have a real Settings section, so the entry opens it
     // rather than a placeholder explaining where the surface would be.
@@ -2759,9 +2760,12 @@ describe("App", () => {
     }
     expect(await screen.findByRole("button", { name: "Project actions for Octant" })).toBeVisible();
     expect(screen.getByRole("button", { name: "New thread" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Plugins" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Thread board" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
+    await user.click(within(sidebar).getByRole("button", { name: "Set your name" }));
+    expect(screen.getByRole("button", { name: "Plugins" })).toBeVisible();
+    await user.keyboard("{Escape}");
     const addFolder = screen.getByRole("button", { name: "Add folder" });
     expect(addFolder).toHaveClass("project-section__add");
     expect(addFolder).not.toHaveTextContent("Add folder");

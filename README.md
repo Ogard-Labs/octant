@@ -190,6 +190,7 @@ import apps; provider-specific payloads stop at adapters.
 ## Documentation
 
 - [Architecture](docs/architecture.md)
+- [Product shell language](docs/DESIGN.md)
 - [Decision records](docs/decisions/)
 - [User guide](apps/docs/) (VitePress; `bun run --cwd apps/docs dev`)
 - [Contributing](CONTRIBUTING.md)

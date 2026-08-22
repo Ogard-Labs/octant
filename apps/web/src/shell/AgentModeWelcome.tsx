@@ -58,10 +58,9 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
               Select a confined folder on this Mac.
             </span>
           </OctantButton>
-          {props.onOpenDraft === undefined ? null : (
+          {props.onOpenDraft === undefined || !props.providerReady ? null : (
             <OctantButton
               className="draft-thread__intent-card"
-              disabled={!props.providerReady}
               onClick={props.onOpenDraft}
               role="listitem"
               type="button"

@@ -1,4 +1,7 @@
 import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
+import { Menu as MenuPrimitive } from "@base-ui/react/menu";
+import { MoreHorizontal } from "lucide-react";
+import { useRef } from "react";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 
 export const MENU_ITEM_CLASS =
@@ -59,151 +62,191 @@ export function threadRowMenuIsEmpty(actions: ThreadRowActions | undefined): boo
   );
 }
 
+type ThreadMenuEntry =
+  | { readonly kind: "label"; readonly label: string }
+  | { readonly kind: "separator" }
+  | { readonly kind: "item"; readonly label: string; readonly onSelect: () => void };
+
+function threadMenuEntries(
+  thread: ChatThreadNavigationItem,
+  actions: ThreadRowActions,
+): ReadonlyArray<ThreadMenuEntry> {
+  const threadId = thread.navigationId ?? thread.threadId;
+  const pinned = thread.pinned === true;
+  const entries: ThreadMenuEntry[] = [{ kind: "label", label: thread.title }];
+  if (actions.onPinInPane !== undefined) {
+    entries.push({
+      kind: "item",
+      label: "Pin in pane",
+      onSelect: () => actions.onPinInPane?.(threadId),
+    });
+  }
+  if (actions.onPinThread !== undefined) {
+    entries.push({
+      kind: "item",
+      label: pinned ? "Unpin" : "Pin",
+      onSelect: () => actions.onPinThread?.(threadId, !pinned),
+    });
+  }
+  if (actions.onStartRenameThread !== undefined) {
+    entries.push({
+      kind: "item",
+      label: "Rename",
+      onSelect: () => actions.onStartRenameThread?.(threadId),
+    });
+  }
+  // A row offers the one read-state action that would change the thread:
+  // marking it with the state it is already in would render as present and
+  // inert. An unread thread used to get neither.
+  if (thread.unread === true) {
+    if (actions.onMarkThreadRead !== undefined) {
+      entries.push({
+        kind: "item",
+        label: "Mark as read",
+        onSelect: () => actions.onMarkThreadRead?.(threadId),
+      });
+    }
+  } else if (actions.onMarkThreadUnread !== undefined) {
+    entries.push({
+      kind: "item",
+      label: "Mark as unread",
+      onSelect: () => actions.onMarkThreadUnread?.(threadId),
+    });
+  }
+  // The row offers the follow-up action that would change the thread, the
+  // same rule the read-state pair above follows. This is the only place the
+  // mark can be set now that the thread carries no header band of its own.
+  if (thread.followUp === true) {
+    if (actions.onCompleteFollowUp !== undefined) {
+      entries.push({
+        kind: "item",
+        label: "Complete follow-up",
+        onSelect: () => actions.onCompleteFollowUp?.(threadId),
+      });
+    }
+  } else if (actions.onMarkFollowUp !== undefined) {
+    entries.push({
+      kind: "item",
+      label: "Mark for follow-up",
+      onSelect: () => actions.onMarkFollowUp?.(threadId),
+    });
+  }
+  entries.push({ kind: "separator" });
+  entries.push({ kind: "item", label: "Copy title", onSelect: () => void copyText(thread.title) });
+  if (actions.onExportThread !== undefined) {
+    entries.push({
+      kind: "item",
+      label: "Export…",
+      onSelect: () => actions.onExportThread?.(String(thread.threadId), thread.title),
+    });
+  }
+  if (actions.onArchiveThread !== undefined) {
+    entries.push({ kind: "separator" });
+    entries.push({
+      kind: "item",
+      label: "Archive",
+      onSelect: () => actions.onArchiveThread?.(threadId),
+    });
+  }
+  return entries;
+}
+
 /**
  * The right-click menu for one thread row.
  *
- * Copy is always offered because it needs nothing from the host, and it is the
- * one answer that works even when a thread's own commands are unavailable.
+ * Copy title is always offered because it needs nothing from the host, and it
+ * is the one answer that works even when a thread's own commands are
+ * unavailable. Thread identifiers stay off the row and out of the menu.
  */
 export function ThreadRowMenu(props: {
   readonly actions: ThreadRowActions;
   readonly thread: ChatThreadNavigationItem;
 }) {
-  const threadId = props.thread.navigationId ?? props.thread.threadId;
-  const pinned = props.thread.pinned === true;
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Positioner className="z-50 window-no-drag">
         <ContextMenuPrimitive.Popup className="window-no-drag z-50 min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none">
-          <ContextMenuPrimitive.Group>
-            <ContextMenuPrimitive.GroupLabel className="truncate px-2 py-1.5 text-xs text-muted-foreground">
-              {props.thread.title}
-            </ContextMenuPrimitive.GroupLabel>
-          </ContextMenuPrimitive.Group>
-          {props.actions.onPinInPane === undefined ? null : (
-            <ContextMenuPrimitive.Item
-              className={MENU_ITEM_CLASS}
-              closeOnClick
-              label="Pin in pane"
-              onClick={() => props.actions.onPinInPane?.(threadId)}
-            >
-              Pin in pane
-            </ContextMenuPrimitive.Item>
-          )}
-          {props.actions.onPinThread === undefined ? null : (
-            <ContextMenuPrimitive.Item
-              className={MENU_ITEM_CLASS}
-              closeOnClick
-              label={pinned ? "Unpin" : "Pin"}
-              onClick={() => props.actions.onPinThread?.(threadId, !pinned)}
-            >
-              {pinned ? "Unpin" : "Pin"}
-            </ContextMenuPrimitive.Item>
-          )}
-          {props.actions.onStartRenameThread === undefined ? null : (
-            <ContextMenuPrimitive.Item
-              className={MENU_ITEM_CLASS}
-              closeOnClick
-              label="Rename"
-              onClick={() => props.actions.onStartRenameThread?.(threadId)}
-            >
-              Rename
-            </ContextMenuPrimitive.Item>
-          )}
-          {/* A row offers the one read-state action that would change the
-              thread: marking it with the state it is already in would render
-              as present and inert. An unread thread used to get neither. */}
-          {props.thread.unread === true ? (
-            props.actions.onMarkThreadRead === undefined ? null : (
+          {threadMenuEntries(props.thread, props.actions).map((entry, index) =>
+            entry.kind === "label" ? (
+              <ContextMenuPrimitive.Group key={`label-${entry.label}`}>
+                <ContextMenuPrimitive.GroupLabel className="truncate px-2 py-1.5 text-xs text-muted-foreground">
+                  {entry.label}
+                </ContextMenuPrimitive.GroupLabel>
+              </ContextMenuPrimitive.Group>
+            ) : entry.kind === "separator" ? (
+              <ContextMenuPrimitive.Separator
+                className="my-1 h-px bg-border"
+                key={`sep-${index}`}
+              />
+            ) : (
               <ContextMenuPrimitive.Item
                 className={MENU_ITEM_CLASS}
                 closeOnClick
-                label="Mark as read"
-                onClick={() => props.actions.onMarkThreadRead?.(threadId)}
+                key={entry.label}
+                label={entry.label}
+                onClick={entry.onSelect}
               >
-                Mark as read
+                {entry.label}
               </ContextMenuPrimitive.Item>
-            )
-          ) : props.actions.onMarkThreadUnread === undefined ? null : (
-            <ContextMenuPrimitive.Item
-              className={MENU_ITEM_CLASS}
-              closeOnClick
-              label="Mark as unread"
-              onClick={() => props.actions.onMarkThreadUnread?.(threadId)}
-            >
-              Mark as unread
-            </ContextMenuPrimitive.Item>
-          )}
-          {/* The row offers the follow-up action that would change the thread,
-              the same rule the read-state pair above follows. This is the only
-              place the mark can be set now that the thread carries no header
-              band of its own. */}
-          {props.thread.followUp === true ? (
-            props.actions.onCompleteFollowUp === undefined ? null : (
-              <ContextMenuPrimitive.Item
-                className={MENU_ITEM_CLASS}
-                closeOnClick
-                label="Complete follow-up"
-                onClick={() => props.actions.onCompleteFollowUp?.(threadId)}
-              >
-                Complete follow-up
-              </ContextMenuPrimitive.Item>
-            )
-          ) : props.actions.onMarkFollowUp === undefined ? null : (
-            <ContextMenuPrimitive.Item
-              className={MENU_ITEM_CLASS}
-              closeOnClick
-              label="Mark for follow-up"
-              onClick={() => props.actions.onMarkFollowUp?.(threadId)}
-            >
-              Mark for follow-up
-            </ContextMenuPrimitive.Item>
-          )}
-          <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
-          <ContextMenuPrimitive.Item
-            className={MENU_ITEM_CLASS}
-            closeOnClick
-            label="Copy title"
-            onClick={() => void copyText(props.thread.title)}
-          >
-            Copy title
-          </ContextMenuPrimitive.Item>
-          <ContextMenuPrimitive.Item
-            className={MENU_ITEM_CLASS}
-            closeOnClick
-            label="Copy thread ID"
-            onClick={() => void copyText(String(props.thread.threadId))}
-          >
-            Copy thread ID
-          </ContextMenuPrimitive.Item>
-          {props.actions.onExportThread === undefined ? null : (
-            <ContextMenuPrimitive.Item
-              className={MENU_ITEM_CLASS}
-              closeOnClick
-              label="Export…"
-              onClick={() =>
-                props.actions.onExportThread?.(String(props.thread.threadId), props.thread.title)
-              }
-            >
-              Export…
-            </ContextMenuPrimitive.Item>
-          )}
-          {props.actions.onArchiveThread === undefined ? null : (
-            <>
-              <ContextMenuPrimitive.Separator className="my-1 h-px bg-border" />
-              <ContextMenuPrimitive.Item
-                className={MENU_ITEM_CLASS}
-                closeOnClick
-                label="Archive"
-                onClick={() => props.actions.onArchiveThread?.(threadId)}
-              >
-                Archive
-              </ContextMenuPrimitive.Item>
-            </>
+            ),
           )}
         </ContextMenuPrimitive.Popup>
       </ContextMenuPrimitive.Positioner>
     </ContextMenuPrimitive.Portal>
+  );
+}
+
+/**
+ * The same thread actions, opened from a keyboard-reachable control rather
+ * than only a right-click or a hover reveal.
+ */
+export function ThreadRowActionsMenu(props: {
+  readonly actions: ThreadRowActions;
+  readonly thread: ChatThreadNavigationItem;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  return (
+    <MenuPrimitive.Root>
+      <MenuPrimitive.Trigger
+        aria-label={`Thread actions for ${props.thread.title}`}
+        className="sidebar-navigation__thread-menu window-no-drag inline-flex items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={(event) => event.stopPropagation()}
+        ref={triggerRef}
+      >
+        <MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />
+      </MenuPrimitive.Trigger>
+      <MenuPrimitive.Portal>
+        <MenuPrimitive.Positioner align="end" className="z-50 window-no-drag" sideOffset={4}>
+          <MenuPrimitive.Popup
+            className="window-no-drag z-50 min-w-44 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none"
+            finalFocus={triggerRef}
+          >
+            {threadMenuEntries(props.thread, props.actions).map((entry, index) =>
+              entry.kind === "label" ? (
+                <div
+                  className="truncate px-2 py-1.5 text-xs text-muted-foreground"
+                  key={`label-${entry.label}`}
+                >
+                  {entry.label}
+                </div>
+              ) : entry.kind === "separator" ? (
+                <MenuPrimitive.Separator className="my-1 h-px bg-border" key={`sep-${index}`} />
+              ) : (
+                <MenuPrimitive.Item
+                  className={MENU_ITEM_CLASS}
+                  closeOnClick
+                  key={entry.label}
+                  label={entry.label}
+                  onClick={entry.onSelect}
+                >
+                  {entry.label}
+                </MenuPrimitive.Item>
+              ),
+            )}
+          </MenuPrimitive.Popup>
+        </MenuPrimitive.Positioner>
+      </MenuPrimitive.Portal>
+    </MenuPrimitive.Root>
   );
 }
 

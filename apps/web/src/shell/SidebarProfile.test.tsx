@@ -73,6 +73,61 @@ describe("SidebarProfile", () => {
     expect(screen.queryByRole("button", { name: "Zen mode" })).not.toBeInTheDocument();
   });
 
+  it("exposes secondary destinations from the keyboard-accessible app menu", async () => {
+    const user = userEvent.setup();
+    const onSelectDestination = vi.fn();
+    render(
+      <SidebarProfile
+        destinations={[
+          { id: "agents", label: "Agents" },
+          { id: "automations", label: "Automations" },
+          { id: "artifact-library", label: "Artifacts" },
+          { id: "plugins", label: "Plugins" },
+        ]}
+        navigatorAvailable
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectDestination={onSelectDestination}
+        profile={profile}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Agents" })).not.toBeInTheDocument();
+    const row = screen.getByRole("button", { name: "Set your name" });
+    await user.click(row);
+    expect(screen.getByRole("button", { name: "Agents" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: "Plugins" }));
+    expect(onSelectDestination).toHaveBeenCalledWith("plugins");
+    expect(screen.queryByRole("button", { name: "Plugins" })).not.toBeInTheDocument();
+
+    await user.click(row);
+    expect(screen.getByRole("button", { name: "Agents" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Automations" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Artifacts" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Navigator" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeVisible();
+  });
+
+  it("omits unavailable secondary destinations rather than showing them disabled", async () => {
+    const user = userEvent.setup();
+    render(
+      <SidebarProfile
+        destinations={[{ id: "plugins", label: "Plugins" }]}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectDestination={vi.fn()}
+        profile={profile}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Set your name" }));
+    expect(screen.getByRole("button", { name: "Plugins" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Agents" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Artifacts" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Navigator" })).not.toBeInTheDocument();
+  });
+
   it("closes on Escape and returns focus to the row it opened from", async () => {
     const user = userEvent.setup();
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
