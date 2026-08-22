@@ -3372,4 +3372,116 @@ describe("App", () => {
     );
     expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
   });
+
+  it("opens Review beside the active Code thread from View changes", async () => {
+    const user = userEvent.setup();
+    const projectApi = projects({
+      ...projectBootstrap(),
+      availability: [{ ...projectBootstrap().availability[0]!, status: "available" as const }],
+    });
+    vi.mocked(projectApi.environmentForThread).mockResolvedValue(readyEnvironment);
+    vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+    const codeApi = codes();
+    vi.mocked(codeApi.executeOperation).mockImplementation(async (command) => {
+      if (command.kind === "observe-git") {
+        return {
+          kind: "git-observed",
+          operationId: command.operationId,
+          gitOperationId: command.gitOperationId,
+          head: { kind: "branch", name: "feature/editor", oid: "a".repeat(40) },
+          stateToken: "b".repeat(64),
+          status: [{ path: "src/index.ts", index: " ", worktree: "M" }],
+          changedPaths: ["src/index.ts"],
+          diff: {
+            contentId: "20000000-0000-4000-8000-000000000002",
+            digest: "c".repeat(64),
+            byteLength: 64,
+          },
+          remotes: [],
+          upstream: null,
+          worktrees: [],
+        } as never;
+      }
+      return {
+        kind: "operation-failed",
+        operationId: command.operationId,
+        failure: { message: "no" },
+      } as never;
+    });
+    vi.mocked(codeApi.operationContent).mockResolvedValue(
+      new TextEncoder().encode(
+        [
+          "diff --git a/src/index.ts b/src/index.ts",
+          "--- a/src/index.ts",
+          "+++ b/src/index.ts",
+          "@@ -1 +1 @@",
+          "-old",
+          "+new",
+          "",
+        ].join("\n"),
+      ),
+    );
+
+    render(
+      <App
+        codeClient={codeApi}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    const thread = await screen.findByRole("region", {
+      name: "Workspace pane: Controller foundation",
+    });
+    await user.click(await screen.findByRole("button", { name: /Show environment for/ }));
+    await user.click(await screen.findByRole("button", { name: "View changes" }));
+
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(within(dock).getByRole("tab", { name: "Review" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(await within(dock).findByRole("navigation", { name: "Changed files" })).toBeVisible();
+    expect(thread).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "No Code Project open" })).not.toBeInTheDocument();
+  });
+
+  it("opens Review in the narrow dock drawer and restores focus when it closes", async () => {
+    const user = userEvent.setup();
+    const projectApi = projects({
+      ...projectBootstrap(),
+      availability: [{ ...projectBootstrap().availability[0]!, status: "available" as const }],
+    });
+    vi.mocked(projectApi.environmentForThread).mockResolvedValue(readyEnvironment);
+    vi.mocked(projectApi.environment).mockResolvedValue(readyEnvironment);
+
+    render(
+      <App
+        codeClient={codes()}
+        isNarrow
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projectApi}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    const overflow = screen.getByRole("button", { name: "More window actions" });
+    await user.click(overflow);
+    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    const drawer = await screen.findByRole("dialog", { name: "Right sidebar" });
+    await user.click(within(drawer).getByRole("button", { name: "Review" }));
+    expect(await screen.findByRole("dialog", { name: "Review" })).toBeVisible();
+    expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(overflow).toHaveFocus());
+    expect(screen.queryByRole("dialog", { name: "Review" })).toBeNull();
+    expect(
+      screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
+    ).toBeVisible();
+  });
 });

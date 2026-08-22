@@ -30,6 +30,7 @@ export default function CodeWorkspaceTab(props: {
   readonly onPinTerminal?: CodeWorkspaceProps["onPinTerminal"];
   /** Opens one changed repository file as a Code file tab, from the diff. */
   readonly onOpenFile?: (relativePath: string) => void;
+  readonly onOpenReview?: () => void;
   readonly onOpenSurface?: (
     kind: CodeOverviewSurfaceKind,
     options?: { readonly terminalId?: import("@octant/contracts/code").CodeTerminalId },
@@ -118,6 +119,7 @@ export default function CodeWorkspaceTab(props: {
         {...(props.onOpenBrowser === undefined ? {} : { onOpenBrowser: props.onOpenBrowser })}
         {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}
         {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
+        {...(props.onOpenReview === undefined ? {} : { onOpenReview: props.onOpenReview })}
         {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
         {...(props.providerGroups === undefined ? {} : { providerGroups: props.providerGroups })}
         {...(props.canvasClient === undefined ? {} : { canvasClient: props.canvasClient })}

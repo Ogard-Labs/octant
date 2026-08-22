@@ -120,6 +120,12 @@ describe("thread utility dock content", () => {
     expect(stop).not.toHaveBeenCalled();
   });
 
+  it("opens Review for the Code thread without a workspace diff tab", async () => {
+    render(<ThreadUtilityDockContent {...props()} surface="review" />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Git observation is unavailable");
+    expect(screen.queryByText(/code-diff/)).not.toBeInTheDocument();
+  });
+
   it("renders the live Terminal instance owned by the thread", async () => {
     render(<ThreadUtilityDockContent {...props()} surface="terminal" />);
     expect(await screen.findByText("code-terminal:none")).toBeVisible();

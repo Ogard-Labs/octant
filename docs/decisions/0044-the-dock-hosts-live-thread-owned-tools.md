@@ -45,9 +45,9 @@ switcher, and not a place for host-wide or Project-wide surfaces.
 - **Agents is conditional.** Compact child-run status stays in the thread
   header (0012). Agents opens as a dock tool when children exist or the user
   invokes Add agent.
-- **Review is the diff destination.** Local changes and pull-request detail
-  open in Review beside the main thread or a Project-level PR list. After
-  callers migrate, the full-window diff surface goes away.
+- **Review is the diff destination.** Local checkout changes and merge-back
+  run review open in Review beside the main thread. Pull-request detail remains
+  a later Review destination. The full-window Code diff surface is gone.
 - **Context usage is a composer meter.** A circular used-capacity control on
   the active thread's composer opens an authoritative breakdown popover. It is
   not a dock tab. Estimated or unavailable values say so; opening the popover
@@ -68,9 +68,10 @@ a Project overview, or a Project-level list.
 
 - Project memory now lives in Project Overview, and Navigator opens from the
   profile control. Files, Browser, Terminal, Canvas, Side chat, artifact-gated
-  Plan, conditional Delivery, and thread-level Agents are direct dock tools;
-  the generic Thread accordion is gone. Remaining callers must still migrate
-  Review and the full-window diff.
+  Plan, conditional Delivery, thread-level Agents, and Review are direct dock
+  tools; the generic Thread accordion is gone. Local checkout changes and
+  merge-back run diffs open in Review beside the thread; the full-window Code
+  diff surface is gone.
 - 0015 remains Accepted as the current implemented shell. This record, with
   0041 and 0042, is the approved migration of dock content, tool ownership,
   and placement. It does not change mode authority, journal ownership, or

@@ -1981,7 +1981,7 @@ function surfaceTab(
       sourceThreadId: sideChat.threadId,
     };
   }
-  // terminal, diff, git-review require an active Code thread context and are
+  // terminal and git-review require an active Code thread context and are
   // not advertised by the launcher catalog; they are opened via code surface
   // controls within a Code thread.
   return undefined;
@@ -1992,7 +1992,6 @@ function boundThreadId(surface: WorkspaceTab): BrowserThreadId | undefined {
     surface.kind !== "work-thread" &&
     surface.kind !== "code-overview" &&
     surface.kind !== "code-file" &&
-    surface.kind !== "code-diff" &&
     surface.kind !== "code-terminal" &&
     surface.kind !== "code-test" &&
     surface.kind !== "code-git" &&
@@ -2016,7 +2015,6 @@ function sideChatSource(surface: WorkspaceTab): SideChatSource | undefined {
     surface.kind !== "work-thread" &&
     surface.kind !== "code-overview" &&
     surface.kind !== "code-file" &&
-    surface.kind !== "code-diff" &&
     surface.kind !== "code-terminal" &&
     surface.kind !== "code-test" &&
     surface.kind !== "code-git" &&

@@ -217,6 +217,7 @@
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-file-explorer-panel),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .canvas-workspace-tab),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .dock-canvas-tool),
+.right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) .code-diff-pane),
 .right-utility-dock__content:has(.right-utility-dock__tool:not([hidden]) [data-code-tab-kind]) {
   padding: 0;
   overflow: hidden;

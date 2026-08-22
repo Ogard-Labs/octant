@@ -109,12 +109,11 @@ describe("workspace tab lifecycle", () => {
           projectPath: "Fixture.xcodeproj",
         }),
         second: pane(4, {
-          kind: "code-diff",
+          kind: "code-git",
           id: "00000000-0000-4000-8000-000000000641",
           threadId: threadB,
           mode: "code",
-          title: "Changes",
-          relativePath: "README.md",
+          title: "Git",
         }),
       },
     } as never;

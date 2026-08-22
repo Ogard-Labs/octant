@@ -1049,7 +1049,6 @@ export function resolveWorkspaceContext(
       tab.kind === "code-overview" ||
       tab.kind === "work-thread" ||
       tab.kind === "code-file" ||
-      tab.kind === "code-diff" ||
       tab.kind === "code-terminal" ||
       tab.kind === "code-test" ||
       tab.kind === "code-git" ||
@@ -1344,12 +1343,6 @@ export function sameWorkspaceSurface(a: WorkspaceTab, b: WorkspaceTab): boolean 
         b.kind === "code-file" &&
         String(a.threadId) === String(b.threadId) &&
         String(a.relativePath) === String(b.relativePath)
-      );
-    case "code-diff":
-      return (
-        b.kind === "code-diff" &&
-        String(a.threadId) === String(b.threadId) &&
-        sameOptionalId(a.relativePath, b.relativePath)
       );
     case "code-terminal":
       return (

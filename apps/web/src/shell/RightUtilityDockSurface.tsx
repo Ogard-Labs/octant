@@ -18,7 +18,7 @@ export interface RightUtilityDockSurfaceProps {
   readonly agents?: ReactNode;
   readonly browser?: ReactNode;
   readonly canvas?: ReactNode;
-  readonly changes?: ReactNode;
+  readonly review?: ReactNode;
   readonly closeButtonRef?: Ref<HTMLButtonElement>;
   readonly delivery?: ReactNode;
   readonly files?: ReactNode;
@@ -45,7 +45,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     agents: props.agents,
     browser: props.browser,
     canvas: props.canvas,
-    changes: props.changes,
+    review: props.review,
     delivery: props.delivery,
     files: props.files,
     "ios-simulator": props.iosSimulator,

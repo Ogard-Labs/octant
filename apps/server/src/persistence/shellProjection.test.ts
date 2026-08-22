@@ -409,6 +409,37 @@ describe("ShellProjection", () => {
     expect(restoredChat.surface).toMatchObject({ kind: "welcome", mode: "chat" });
   });
 
+  it("turns a restored full-window Code diff into the thread so Review can open beside it", () => {
+    const code = workspace.layouts.code;
+    if (code.kind !== "pane") throw new Error("fixture Code layout must be a pane");
+    const restored = decodePersistedWindowWorkspace({
+      ...workspace,
+      layouts: {
+        ...workspace.layouts,
+        code: {
+          ...code,
+          surface: {
+            kind: "code-diff",
+            id: code.surface.id,
+            threadId: "70000000-0000-4000-8000-000000000022",
+            mode: "code",
+            title: "README.md changes",
+            relativePath: "README.md",
+          },
+        },
+      },
+    });
+    const restoredCode = restored.layouts.code;
+    if (restoredCode.kind !== "pane") throw new Error("restored Code layout must be a pane");
+    expect(restoredCode.surface).toMatchObject({
+      kind: "code-overview",
+      id: code.surface.id,
+      threadId: "70000000-0000-4000-8000-000000000022",
+      mode: "code",
+    });
+    expect(restoredCode.surface).not.toHaveProperty("relativePath");
+  });
+
   it("recovers a malformed persisted Chat thread surface through the welcome-in-place path", () => {
     const chat = workspace.layouts.chat;
     if (chat.kind !== "pane") throw new Error("fixture chat layout must be a pane");
