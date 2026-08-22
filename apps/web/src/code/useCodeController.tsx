@@ -1384,6 +1384,14 @@ export function useCodeController(options: CodeControllerOptions) {
         activeTurnOperations.current.delete(String(input.threadId));
         setTurnStatus("failed");
         setTurnError(message);
+        // Activation is what usually restores this prompt, but a first turn can
+        // fail on a thread that is already open — the New Code composer opens
+        // the thread before starting — so put it back now or the composer stays
+        // empty in front of the error.
+        if (String(activeThreadId.current) === String(input.threadId)) {
+          setPendingDraft(prompt);
+          firstTurnFailures.current.delete(String(input.threadId));
+        }
       };
       try {
         const { operationId, started } = await beginProviderTurn({ ...input, prompt });
@@ -1397,6 +1405,13 @@ export function useCodeController(options: CodeControllerOptions) {
         }
         activeTurnOperations.current.set(String(input.threadId), operationId);
         setTurnStatus("running");
+        // Opening a newly created thread hydrates before this first turn is
+        // journaled, so the transcript reads empty. A provider turn does not
+        // emit thread events, so the already-running activation never hydrates
+        // or streams again unless we ask it to.
+        if (String(activeThreadId.current) === String(input.threadId)) {
+          void activateThread(input.threadId);
+        }
         return true;
       } catch (error) {
         const failure = codeFailure(error);
@@ -1405,8 +1420,15 @@ export function useCodeController(options: CodeControllerOptions) {
         return false;
       }
     },
-    [beginProviderTurn, clearFailure, fail],
+    [activateThread, beginProviderTurn, clearFailure, fail, setPendingDraft],
   );
+
+  const refreshConversation = useCallback((): boolean => {
+    const threadId = activeThreadId.current;
+    if (threadId === undefined) return false;
+    void activateThread(threadId);
+    return true;
+  }, [activateThread]);
 
   /**
    * Rename or pin one thread through the ordinary command path.
@@ -1940,6 +1962,7 @@ export function useCodeController(options: CodeControllerOptions) {
     renameThread,
     providerRequests,
     refreshFollowUp,
+    refreshConversation,
     restoreUndo,
     noteRestoreUndo,
     // A retry issued from a thread view is asking for that thread back, not
