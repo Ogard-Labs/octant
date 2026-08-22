@@ -160,20 +160,21 @@ server-authoritative workspace commands. One visible tree belongs to one
 authority context (host, mode, Project, and bound root); a cross-Project,
 cross-mode, or cross-host placement is refused or offered in a new window.
 Thread utilities live in the Right Utility Dock outside the split tree. The
-top-right control reveals the dock; its compact summary reports Context,
-Project memory, and Navigator state before any tool is opened. Add utility tab
-opens Side Chat, Browser, Files, Changes, Terminal, Tests, Thread tools, or iOS
-Simulator without replacing the active pane. The dock follows the active pane's
-thread and Project, restores that subject's open tabs, and presents an
-explicit unavailable state when the newly active pane cannot describe the
-selected tool — never the previous pane's content. At narrow widths the dock
-becomes an overlay drawer. Environment belongs to a thread and currently
-persists floating or hidden presentation. Work and Code have
-server-authoritative thread boards (Ready / In progress / Waiting / Done) that
-cannot be dragged between columns; Chat has no board. Context usage is exposed
-from the focused pane's status bar and Context inspector. Zen is a separate
-presentation aggregate inside the same window, not a split-tree tab and not a
-fourth authority mode.
+top-right control reveals the dock; its compact summary reports Project memory
+and Navigator state before any tool is opened. Add utility tab opens Side Chat,
+Browser, Files, Changes, Terminal, Tests, Thread tools, or iOS Simulator
+without replacing the active pane. The dock follows the active pane's thread
+and Project, restores that subject's open tabs, and presents an explicit
+unavailable state when the newly active pane cannot describe the selected
+tool — never the previous pane's content. At narrow widths the dock becomes an
+overlay drawer. Environment belongs to a thread and currently persists floating
+or hidden presentation. Work and Code have server-authoritative thread boards
+(Ready / In progress / Waiting / Done) that cannot be dragged between columns;
+Chat has no board. Context usage is a circular used-versus-available meter on
+the active thread's composer; opening it shows an authoritative breakdown
+popover without a further provider call. Zen is a separate presentation
+aggregate inside the same window, not a split-tree tab and not a fourth
+authority mode.
 
 **Approved migration, not yet the renderer.** Proposed records
 [0041](decisions/0041-panes-hold-one-surface.md),
@@ -183,10 +184,10 @@ interaction model for remaining renderer work. Environment becomes a compact
 header summary with a transient disclosure whose open state is not persisted.
 The dock hosts live thread-owned tool instances — Review, Files, Browser,
 Terminal, Canvas, Side chat, artifact-gated Plan, conditional Delivery, and
-conditional Agents — rather than generic category tabs. Context usage is a
-circular composer meter with an authoritative popover. Project memory belongs
-in Project Overview. Navigator is one host-wide chat popover from the
-bottom-left profile and Settings control. Simulator placement is already
+conditional Agents — rather than generic category tabs. Context usage already
+lives on the composer meter. Project memory belongs in Project Overview.
+Navigator is one host-wide chat popover from the bottom-left profile and
+Settings control. Simulator placement is already
 [0043](decisions/0043-simulator-follows-the-active-thread.md). 0015 remains the
 Accepted implemented shell until that migration is accepted.
 

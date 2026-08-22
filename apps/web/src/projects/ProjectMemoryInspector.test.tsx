@@ -14,6 +14,10 @@ import { RightUtilityDock } from "../shell/RightUtilityDock";
 import { RIGHT_UTILITY_DOCK_SURFACES } from "../shell/rightUtilityDockModel";
 import { ProjectMemoryInspector } from "./ProjectMemoryInspector";
 
+const projectMemorySurface = RIGHT_UTILITY_DOCK_SURFACES.find(
+  (surface) => surface.id === "project-memory",
+);
+if (projectMemorySurface === undefined) throw new Error("Missing Project memory dock surface.");
 const sourceProjectId = decodeProjectId("00000000-0000-4000-8000-000000000901");
 const destinationProjectId = decodeProjectId("00000000-0000-4000-8000-000000000902");
 const archivedProjectId = decodeProjectId("00000000-0000-4000-8000-000000000903");
@@ -137,7 +141,6 @@ describe("ProjectMemoryInspector", () => {
     inspector.unmount();
     render(
       <RightUtilityDock
-        context={null}
         isNarrow={false}
         launchableSurfaces={[]}
         navigator={null}
@@ -152,10 +155,10 @@ describe("ProjectMemoryInspector", () => {
         resolution={{
           kind: "surface",
           projectId: sourceProjectId,
-          surface: RIGHT_UTILITY_DOCK_SURFACES[1],
+          surface: projectMemorySurface,
         }}
         summary={null}
-        tabs={[RIGHT_UTILITY_DOCK_SURFACES[1]]}
+        tabs={[projectMemorySurface]}
         width={360}
       />,
     );

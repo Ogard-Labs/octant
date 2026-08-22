@@ -1185,64 +1185,158 @@ describe("App", () => {
     ).toBeVisible();
   });
 
-  it("follows the active Project with the live Context client and renders the authoritative inspector", async () => {
+  it("puts the active thread's context usage on the composer and keeps the dock free of Context", async () => {
     const user = userEvent.setup();
+    const inspect = vi.fn<ContextClient["inspect"]>(async ({ subject }) => {
+      const snapshot = contextFixture();
+      const latestSent = snapshot.latestSent;
+      const capacity = snapshot.capacity;
+      const displayLabel =
+        String(subject.aggregateId) === String(createdChatThreadId)
+          ? "Exact created chat"
+          : "Older chat";
+      return {
+        ...snapshot,
+        subject,
+        displayLabel,
+        next: {
+          ...snapshot.next,
+          manifest: { ...snapshot.next.manifest, subject },
+        },
+        ...(latestSent === undefined
+          ? {}
+          : { latestSent: { ...latestSent, manifest: { ...latestSent.manifest, subject } } }),
+        ...(capacity === undefined ? {} : { capacity: { ...capacity, subject } }),
+      };
+    });
     const contextApi: ContextClient = {
-      inspect: vi.fn(async ({ subject }) => {
-        const snapshot = contextFixture();
-        return {
-          ...snapshot,
-          subject,
-          displayLabel: "Octant",
-          next: {
-            ...snapshot.next,
-            manifest: { ...snapshot.next.manifest, subject },
-          },
-          latestSent: {
-            ...snapshot.latestSent!,
-            manifest: { ...snapshot.latestSent!.manifest, subject },
-          },
-          capacity: { ...snapshot.capacity!, subject },
-        } as never;
-      }),
+      inspect,
       execute: vi.fn(),
     };
-    const projectApi = projects({
-      ...projectBootstrap(),
-      availability: [{ ...projectBootstrap().availability[0]!, status: "available" }],
-    });
 
     render(
       <App
+        chatClient={chats()}
         contextClient={contextApi}
         isNarrow={false}
         launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
-        projectClient={projectApi}
+        projectClient={projects()}
         projectWindowCapability={projectWindowCapability}
-        shellClient={client()}
+        providerClient={providers()}
+        shellClient={client(splitChatShellBootstrap())}
       />,
     );
 
-    await openSidebarProject(user, "Octant");
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Exact created chat" }),
+    ).toBeVisible();
     await waitFor(() =>
       expect(contextApi.inspect).toHaveBeenCalledWith(
         {
-          subject: { aggregateType: "project", aggregateId: projectId },
+          subject: { aggregateType: "chat-thread", aggregateId: String(createdChatThreadId) },
         },
         expect.any(AbortSignal),
       ),
     );
-    const contextWindow = screen.getByRole("button", {
-      name: /Show context window for Octant/i,
+    const inspectCalls = inspect.mock.calls.length;
+    const created = screen.getByRole("region", { name: "Workspace pane: Exact created chat" });
+    const meter = await within(created).findByRole("button", {
+      name: /Show context usage for Exact created chat/i,
     });
-    expect(contextWindow).toBeVisible();
-    await user.click(contextWindow);
-    expect(screen.getByRole("dialog", { name: "Context window" })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Open full context inspector" }));
+    expect(meter).toBeVisible();
+    expect(
+      within(screen.getByRole("region", { name: "Workspace pane: Older chat" })).queryByRole(
+        "button",
+        { name: /context usage/i },
+      ),
+    ).toBeNull();
+
+    await user.click(meter);
+    const popover = screen.getByRole("dialog", { name: "Context usage" });
+    expect(popover).toHaveTextContent("Used104 · Provider reported");
+    expect(popover).toHaveTextContent("Maximum1,000");
+    expect(popover).toHaveTextContent("Percentage10%");
+    expect(popover).toHaveTextContent("Free space796");
+    expect(popover).toHaveTextContent(/Tools2 loaded· 6 deferred/);
+    expect(inspect.mock.calls.length).toBe(inspectCalls);
+
+    await user.keyboard("{Escape}");
+    await user.keyboard("{Control>}{Shift>}u{/Shift}{/Control}");
+    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+    expect(inspect.mock.calls.length).toBe(inspectCalls);
+
+    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("heading", { name: "Context inspector" })).toBeVisible();
-    expect(within(dock).getByText("Safe input budget")).toBeVisible();
-    expect(within(dock).getByText("Provider capacity")).toBeVisible();
+    expect(within(dock).queryByRole("tab", { name: "Context" })).toBeNull();
+    expect(within(dock).queryByRole("button", { name: /^Context$/ })).toBeNull();
+    expect(within(dock).queryByRole("heading", { name: "Context inspector" })).toBeNull();
+  });
+
+  it("closes the previous pane's context popover and retargets usage when the active pane changes", async () => {
+    const user = userEvent.setup();
+    const contextApi: ContextClient = {
+      inspect: vi.fn(async ({ subject }) => {
+        const snapshot = contextFixture();
+        const latestSent = snapshot.latestSent;
+        const capacity = snapshot.capacity;
+        const displayLabel =
+          String(subject.aggregateId) === String(createdChatThreadId)
+            ? "Exact created chat"
+            : "Older chat";
+        return {
+          ...snapshot,
+          subject,
+          displayLabel,
+          next: {
+            ...snapshot.next,
+            manifest: { ...snapshot.next.manifest, subject },
+          },
+          ...(latestSent === undefined
+            ? {}
+            : { latestSent: { ...latestSent, manifest: { ...latestSent.manifest, subject } } }),
+          ...(capacity === undefined ? {} : { capacity: { ...capacity, subject } }),
+        };
+      }),
+      execute: vi.fn(),
+    };
+
+    render(
+      <App
+        chatClient={chats()}
+        contextClient={contextApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(splitChatShellBootstrap())}
+      />,
+    );
+
+    const created = await screen.findByRole("region", {
+      name: "Workspace pane: Exact created chat",
+    });
+    await user.click(
+      await within(created).findByRole("button", {
+        name: /Show context usage for Exact created chat/i,
+      }),
+    );
+    expect(screen.getByRole("dialog", { name: "Context usage" })).toBeVisible();
+
+    await user.click(screen.getByRole("region", { name: "Workspace pane: Older chat" }));
+    expect(screen.queryByRole("dialog", { name: "Context usage" })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(contextApi.inspect).toHaveBeenCalledWith(
+        {
+          subject: { aggregateType: "chat-thread", aggregateId: String(oldChatThreadId) },
+        },
+        expect.any(AbortSignal),
+      ),
+    );
+    const older = screen.getByRole("region", { name: "Workspace pane: Older chat" });
+    expect(
+      await within(older).findByRole("button", { name: /Show context usage for Older chat/i }),
+    ).toBeVisible();
+    expect(within(created).queryByRole("button", { name: /context usage/i })).toBeNull();
   });
 
   it("previews and authoritatively commits a wide left-sidebar resize", async () => {

@@ -17,7 +17,6 @@ describe("the right sidebar surface", () => {
   it("keeps the summary and launcher visible with no utility tab open", () => {
     render(
       <RightUtilityDockSurface
-        context={null}
         launchableSurfaces={[browser, terminal]}
         navigator={null}
         onCloseTab={vi.fn()}
@@ -42,7 +41,6 @@ describe("the right sidebar surface", () => {
     render(
       <RightUtilityDockSurface
         browser={<p>Live Browser</p>}
-        context={null}
         launchableSurfaces={[browser, terminal]}
         navigator={null}
         onCloseTab={onCloseTab}
@@ -68,7 +66,6 @@ describe("the right sidebar surface", () => {
     render(
       <RightUtilityDockSurface
         browser={<p>Previous thread Browser</p>}
-        context={null}
         launchableSurfaces={[browser]}
         navigator={null}
         onCloseTab={vi.fn()}

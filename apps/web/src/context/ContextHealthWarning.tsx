@@ -15,14 +15,14 @@ export interface ContextHealthWarningProps {
  * This rode on the workspace tab strip until panes stopped holding tabs, which
  * left a rate-limited or blocked Project announcing itself to nobody while it
  * was not the pane's subject. It is a button rather than a badge because the
- * remedy lives in the context inspector, and it carries the health in words so
- * a reader who cannot see the colour still reads the state.
+ * remedy lives on that Project's composer meter, and it carries the health in
+ * words so a reader who cannot see the colour still reads the state.
  */
 export function ContextHealthWarning(props: ContextHealthWarningProps) {
   const health = contextHealthLabel(props.health);
   return (
     <OctantButton
-      aria-label={`${props.label}: ${health}. Open context inspector.`}
+      aria-label={`${props.label}: ${health}. Open this Project.`}
       className="context-health-warning"
       data-health={props.health}
       onClick={(event: React.MouseEvent<HTMLButtonElement>) => props.onOpen(event.currentTarget)}

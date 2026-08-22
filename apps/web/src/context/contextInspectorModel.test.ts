@@ -5,6 +5,7 @@ import {
   contextEntryControls,
   contextStatusModel,
   contextWindowModel,
+  contextWindowUsedSourceLabel,
   serviceLimitLabel,
   tokenMeasurementLabel,
 } from "./contextInspectorModel";
@@ -25,6 +26,14 @@ describe("context inspector presentation model", () => {
     const fixture = contextFixture({ unknownTokens: true });
     expect(contextStatusModel(fixture, { kind: "thread" }).usageLabel).toContain("unknown");
     expect(tokenMeasurementLabel(fixture.next.manifest.entries[1]!.tokens)).toBe("Unknown");
+    expect(
+      contextWindowModel({ ...fixture, latestSent: undefined, latestUsage: undefined }).usedSource,
+    ).toBe("unknown");
+  });
+
+  it("labels last-sent usage as provider reported when the host reconciled it", () => {
+    expect(contextWindowModel(contextFixture()).usedSource).toBe("provider-reported");
+    expect(contextWindowUsedSourceLabel("provider-reported")).toBe("Provider reported");
   });
 
   it("keeps pane focus explicit while preserving thread attention", () => {

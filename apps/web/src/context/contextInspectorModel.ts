@@ -37,6 +37,8 @@ export interface ContextWindowSegment {
   readonly tone: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 }
 
+export type ContextWindowUsedSource = "provider-reported" | "estimated" | "unknown" | "measured";
+
 export interface ContextWindowModel {
   readonly capabilities: ReadonlyArray<{
     readonly key: "tools" | "mcp";
@@ -50,6 +52,7 @@ export interface ContextWindowModel {
   readonly sourceLabel: "Last sent" | "Next turn";
   readonly totalTokens: number;
   readonly usageLabel: string;
+  readonly usedSource: ContextWindowUsedSource;
   readonly usedTokens: number;
 }
 
@@ -144,6 +147,20 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
   const content = [...byCategory.values()];
   const knownContentTokens = content.reduce((sum, entry) => sum + entry.tokens, 0);
   const hasUnknown = content.some((entry) => entry.unknown);
+  const hasEstimate = planSnapshot.plan.entries.some(
+    (entry) =>
+      entry.tokens.kind === "known" &&
+      entry.tokens.accuracy !== "provider-reported" &&
+      entry.tokens.accuracy !== "exact-tokenizer",
+  );
+  const usedSource: ContextWindowUsedSource =
+    snapshot.latestSent !== undefined && snapshot.latestUsage !== undefined
+      ? "provider-reported"
+      : hasUnknown
+        ? "unknown"
+        : hasEstimate
+          ? "estimated"
+          : "measured";
   const overheadTokens = hasUnknown ? 0 : Math.max(0, usedTokens - knownContentTokens);
   const reservedTokens = Object.values(planSnapshot.plan.reserves).reduce(
     (sum, tokens) => sum + tokens,
@@ -193,6 +210,7 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
     totalTokens,
     percent: percentOf(usedTokens, totalTokens),
     usageLabel: `${compact(usedTokens)} / ${compact(totalTokens)}`,
+    usedSource,
     hasUnknown,
     segments,
     capabilities: [
@@ -210,6 +228,15 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
       },
     ],
   };
+}
+
+export function contextWindowUsedSourceLabel(source: ContextWindowUsedSource): string {
+  return {
+    "provider-reported": "Provider reported",
+    estimated: "Estimated",
+    unknown: "Unknown",
+    measured: "Measured",
+  }[source];
 }
 
 export function contextHealthLabel(health: ContextHealth): string {
