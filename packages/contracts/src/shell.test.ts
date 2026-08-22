@@ -552,7 +552,6 @@ describe("Code workspace tabs", () => {
   it.each([
     { kind: "code-overview", threadId: ids.thread },
     { kind: "code-file", threadId: ids.thread, relativePath: "src/index.ts" },
-    { kind: "code-diff", threadId: ids.thread },
     { kind: "code-terminal", threadId: ids.thread },
     { kind: "code-test", threadId: ids.thread },
     { kind: "code-git", threadId: ids.thread },

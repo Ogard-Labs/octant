@@ -176,6 +176,8 @@ export interface WorkspaceViewProps {
     readonly threadId: import("@octant/contracts/code").CodeThreadId;
     readonly relativePath: import("@octant/contracts/code").CodeRelativePath;
   }) => void;
+  /** Opens Review in the dock for this Code thread, keeping the transcript in view. */
+  readonly onOpenReview?: (threadId: CodeThreadId) => void;
   readonly onOpenCodeSurface: (
     kind: CodeOverviewSurfaceKind,
     threadId: CodeThreadId,
@@ -589,6 +591,9 @@ function renderCodeTab(
         {...(props.onOpenSurface === undefined
           ? {}
           : { onOpenBrowser: () => props.onOpenSurface?.("browser", paneId) })}
+        {...(props.onOpenReview === undefined
+          ? {}
+          : { onOpenReview: () => props.onOpenReview?.(tab.threadId) })}
         onOpenSurface={(kind, options) =>
           options?.terminalId === undefined
             ? props.onOpenCodeSurface(kind, tab.threadId, codeSurfaceTitle(kind))
@@ -709,9 +714,9 @@ function renderCodeTab(
               })}
           tab={tab}
           onExecute={codeController.execute}
-          onOpenChanges={() =>
-            props.onOpenCodeSurface("code-diff", tab.threadId, codeSurfaceTitle("code-diff"))
-          }
+          {...(props.onOpenReview === undefined
+            ? {}
+            : { onOpenChanges: () => props.onOpenReview?.(tab.threadId) })}
         >
           {surface}
         </CodeThreadEnvironment>
@@ -1343,7 +1348,6 @@ function isCodeWorkspaceTab(
   return (
     tab.kind === "code-overview" ||
     tab.kind === "code-file" ||
-    tab.kind === "code-diff" ||
     tab.kind === "code-terminal" ||
     tab.kind === "code-test" ||
     tab.kind === "code-git" ||

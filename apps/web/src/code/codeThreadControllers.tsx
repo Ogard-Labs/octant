@@ -10,7 +10,7 @@ import {
 /**
  * The Code threads a window currently has open, each with its own controller.
  *
- * A Code thread's surfaces are spread across the split tree — overview, diff,
+ * A Code thread's surfaces are spread across the split tree — overview,
  * terminal, tests, Git — so the controller cannot live with any one of them.
  * It cannot live with the window either: one controller for the window means
  * one thread's transcript, runtime, and stream, and every other open Code

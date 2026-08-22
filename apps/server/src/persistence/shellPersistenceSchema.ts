@@ -266,6 +266,12 @@ function sanitizeSurface(value: unknown, mode: "chat" | "work" | "code"): unknow
   }
   if (value.kind.startsWith("code-")) {
     if (mode !== "code") return welcomeInPlace();
+    // Review now lives in the dock. A restored full-window diff becomes the
+    // thread itself so the transcript stays in the pane.
+    if (value.kind === "code-diff") {
+      const { relativePath: _relativePath, ...rest } = value;
+      return decodeOrWelcome({ ...rest, kind: "code-overview" }, welcomeInPlace);
+    }
     return decodeOrWelcome(value, welcomeInPlace);
   }
   if (value.kind === "browser" || value.kind === "files") {

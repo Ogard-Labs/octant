@@ -327,12 +327,6 @@ const CodeFileWorkspaceTab = Schema.Struct({
   relativePath: CodeRelativePath,
 }).annotations(strict);
 
-const CodeDiffWorkspaceTab = Schema.Struct({
-  kind: Schema.Literal("code-diff"),
-  ...CodeWorkspaceTabFields,
-  relativePath: Schema.optional(CodeRelativePath),
-}).annotations(strict);
-
 const codeThreadSurface = <K extends string>(kind: K) =>
   Schema.Struct({ kind: Schema.Literal(kind), ...CodeWorkspaceTabFields }).annotations(strict);
 
@@ -462,7 +456,6 @@ export const WorkspaceTab = Schema.Union(
   WorkThreadWorkspaceTab,
   CodeOverviewWorkspaceTab,
   CodeFileWorkspaceTab,
-  CodeDiffWorkspaceTab,
   CodeTerminalWorkspaceTab,
   CodeTestWorkspaceTab,
   CodeGitWorkspaceTab,

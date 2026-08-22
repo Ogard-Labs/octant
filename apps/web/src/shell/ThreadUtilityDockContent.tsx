@@ -33,6 +33,7 @@ import { ShipPanel } from "../ship/ShipPanel";
 import type { PickerGroup } from "@octant/domain";
 import type { ProviderController } from "../providers/useProviderController";
 import { DockCanvasTool } from "./DockCanvasTool";
+import { DockReviewTool } from "./DockReviewTool";
 import type { OctantHostBridge } from "./hostBridge";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 import { ShellState } from "./ShellState";
@@ -42,7 +43,6 @@ const CodeWorkspaceTab = lazy(() => import("../code/CodeWorkspaceTab"));
 const dockTabIds = {
   browser: decodeWorkspaceTabId("90000000-0000-4000-8000-000000000001"),
   "side-chat": decodeWorkspaceTabId("90000000-0000-4000-8000-000000000002"),
-  changes: decodeWorkspaceTabId("90000000-0000-4000-8000-000000000003"),
   terminal: decodeWorkspaceTabId("90000000-0000-4000-8000-000000000004"),
   tests: decodeWorkspaceTabId("90000000-0000-4000-8000-000000000005"),
   "ios-simulator": decodeWorkspaceTabId("90000000-0000-4000-8000-000000000006"),
@@ -194,8 +194,28 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
     );
   }
 
+  if (props.surface === "review") {
+    if (props.subject.mode !== "code") {
+      return unavailable("Review", "Review is not yet available for this thread type.");
+    }
+    return (
+      <DockReviewTool
+        {...(props.codeController === undefined ? {} : { controller: props.codeController })}
+        threadId={decodeCodeThreadId(props.subject.threadId)}
+        {...(props.subject.checkoutId === undefined
+          ? {}
+          : { checkoutId: props.subject.checkoutId })}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        onOpenFile={props.onOpenFile}
+        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+        {...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability })}
+      />
+    );
+  }
+
   if (
-    props.surface !== "changes" &&
     props.surface !== "terminal" &&
     props.surface !== "tests" &&
     props.surface !== "ios-simulator"
@@ -254,14 +274,11 @@ export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
 }
 
 function codeUtilityTab(
-  surface: "changes" | "terminal" | "tests" | "ios-simulator",
+  surface: "terminal" | "tests" | "ios-simulator",
   threadId: ReturnType<typeof decodeCodeThreadId>,
   appleProjectPath?: string,
 ): Extract<WorkspaceTab, { readonly mode: "code" }> {
   const title = surfaceLabel(surface);
-  if (surface === "changes") {
-    return { kind: "code-diff", id: dockTabIds.changes, mode: "code", threadId, title };
-  }
   if (surface === "terminal") {
     return { kind: "code-terminal", id: dockTabIds.terminal, mode: "code", threadId, title };
   }
@@ -281,8 +298,7 @@ function codeUtilityTab(
   return { kind: "code-test", id: dockTabIds.tests, mode: "code", threadId, title };
 }
 
-function surfaceLabel(surface: "changes" | "terminal" | "tests" | "ios-simulator"): string {
-  if (surface === "changes") return "Changes";
+function surfaceLabel(surface: "terminal" | "tests" | "ios-simulator"): string {
   if (surface === "terminal") return "Terminal";
   if (surface === "ios-simulator") return "iOS Simulator";
   return "Tests";

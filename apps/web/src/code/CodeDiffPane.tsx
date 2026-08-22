@@ -6,15 +6,21 @@ import type {
   CodeRelativePath,
   CodeThreadId,
 } from "@octant/contracts/code";
-import type { CodeOperationId, CodeOperationResult } from "@octant/contracts/code-operations";
+import type {
+  CodeEvidenceReference,
+  CodeOperationId,
+  CodeOperationResult,
+} from "@octant/contracts/code-operations";
 import type { ProviderExecutionPolicy } from "@octant/contracts/providers";
 import { decidesCodeEffectsByApproval } from "@octant/domain";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ShellState } from "../shell/ShellState";
 import { MonacoDiffAdapter } from "./MonacoDiffAdapter";
 import type { MonacoDiffRuntime } from "./MonacoEditorAdapter";
 import { parseUnifiedDiff, type ParsedDiffFile } from "./unifiedDiff";
 
 type GitObservation = Extract<CodeOperationResult, { readonly kind: "git-observed" }>;
+type RunReviewed = Extract<CodeOperationResult, { readonly kind: "run-reviewed" }>;
 
 export type CodeDiffProjection =
   | {
@@ -23,8 +29,15 @@ export type CodeDiffProjection =
       readonly threadId: CodeThreadId;
       readonly observation: GitObservation;
     }
+  | {
+      readonly state: "run";
+      readonly checkoutId: CodeCheckoutId;
+      readonly threadId: CodeThreadId;
+      readonly run: RunReviewed;
+    }
   | { readonly state: "loading" }
-  | { readonly state: "stale" | "unavailable"; readonly message: string };
+  | { readonly state: "stale"; readonly message: string }
+  | { readonly state: "unavailable"; readonly message: string };
 
 export interface CodeDiffPaneProps {
   readonly client: Pick<CodeClient, "operationContent" | "executeOperation">;
@@ -43,12 +56,27 @@ export interface CodeDiffPaneProps {
   readonly requestApproval?: (
     command: Parameters<CodeClient["executeOperation"]>[0],
   ) => Promise<CodeApprovalId | undefined>;
+  /**
+   * The checkout moved while this snapshot was on screen. Review keeps the
+   * files the user is looking at and asks them to refresh, rather than wiping
+   * the comparison the moment a watch notice arrives.
+   */
+  readonly staleNotice?: { readonly message: string; readonly onRefresh: () => void };
 }
 
 type ContentState =
   | { readonly kind: "loading" }
   | { readonly kind: "ready"; readonly text: string }
   | { readonly kind: "unavailable"; readonly message: string };
+
+type DiffSnapshot = {
+  readonly operationId: CodeOperationId;
+  readonly changedPaths: ReadonlyArray<string>;
+  readonly evidence: CodeEvidenceReference;
+  readonly status: GitObservation["status"];
+  readonly stateToken?: GitObservation["stateToken"];
+  readonly title: string;
+};
 
 const CHANGE_LABELS: Readonly<Record<ParsedDiffFile["change"], string>> = {
   created: "added",
@@ -58,16 +86,27 @@ const CHANGE_LABELS: Readonly<Record<ParsedDiffFile["change"], string>> = {
 };
 
 export function CodeDiffPane(props: CodeDiffPaneProps) {
-  if (props.diff.state === "loading") return <p role="status">Loading Git diff…</p>;
-  if (props.diff.state !== "available") {
-    return <p role="alert">{props.diff.message}</p>;
+  if (props.diff.state === "available" || props.diff.state === "run") {
+    const summary = snapshot(props.diff);
+    if (summary.changedPaths.length === 0) {
+      return (
+        <ShellState
+          message="This checkout has no local changes to review."
+          state="neutral"
+          title="Checkout is clean"
+        />
+      );
+    }
+    return <AvailableDiff {...props} diff={props.diff} snapshot={summary} />;
   }
-  return <AvailableDiff {...props} diff={props.diff} />;
+  if (props.diff.state === "loading") return <p role="status">Loading Git diff…</p>;
+  return <p role="alert">{props.diff.message}</p>;
 }
 
 function AvailableDiff(
   props: CodeDiffPaneProps & {
-    readonly diff: Extract<CodeDiffProjection, { readonly state: "available" }>;
+    readonly diff: Extract<CodeDiffProjection, { readonly state: "available" | "run" }>;
+    readonly snapshot: DiffSnapshot;
   },
 ) {
   const [content, setContent] = useState<ContentState>({ kind: "loading" });
@@ -77,41 +116,50 @@ function AvailableDiff(
   const [discarding, setDiscarding] = useState(false);
   const [discardMessage, setDiscardMessage] = useState<string>();
   const generation = useRef(0);
-  const evidence = props.diff.observation.diff;
-  const operationId = props.diff.observation.operationId;
+  const evidence = props.snapshot.evidence;
+  const operationId = props.snapshot.operationId;
   const threadId = props.diff.threadId;
   const policy = props.executionPolicy;
+  const createOperationId = props.createOperationId;
+  const createGitOperationId = props.createGitOperationId;
+  const stateToken = props.snapshot.stateToken;
   // Only a tracked change can be restored from HEAD, and only a thread that may
   // mutate this checkout — with a way to raise the approval its posture demands
-  // — is offered the control at all.
+  // — is offered the control at all. A run review has no checkout state token,
+  // so discard stays off: that snapshot is a branch comparison, not a working
+  // tree the host can restore from HEAD.
   const tracked = new Map(
-    props.diff.observation.status
+    props.snapshot.status
       .filter((entry) => entry.index !== "?" && entry.worktree !== "?")
       .map((entry) => [String(entry.path), entry.path] as const),
   );
   const mayDiscard =
     policy !== undefined &&
     policy !== "plan" &&
-    props.createOperationId !== undefined &&
-    props.createGitOperationId !== undefined &&
+    createOperationId !== undefined &&
+    createGitOperationId !== undefined &&
+    stateToken !== undefined &&
     (!decidesCodeEffectsByApproval(policy) || props.requestApproval !== undefined);
 
   async function discard(path: CodeRelativePath) {
+    if (createOperationId === undefined || createGitOperationId === undefined) return;
+    if (stateToken === undefined) return;
     setConfirmingDiscard(undefined);
     setDiscardMessage(undefined);
     const command = {
       kind: "discard-git-changes",
-      operationId: props.createOperationId!(),
-      gitOperationId: props.createGitOperationId!(),
+      operationId: createOperationId(),
+      gitOperationId: createGitOperationId(),
       paths: [path],
-      expectedStateToken: props.diff.observation.stateToken,
+      expectedStateToken: stateToken,
       threadId,
       checkoutId: props.diff.checkoutId,
     } as const;
     setDiscarding(true);
     try {
       if (
-        decidesCodeEffectsByApproval(policy!) &&
+        policy !== undefined &&
+        decidesCodeEffectsByApproval(policy) &&
         (await props.requestApproval?.(command)) === undefined
       ) {
         setDiscardMessage(`${path} was not discarded. The change is untouched.`);
@@ -169,15 +217,16 @@ function AvailableDiff(
     [content],
   );
   const selected = files.find((file) => file.id === selectedId) ?? files[0];
+  const trackedPath = selected === undefined ? undefined : tracked.get(selected.path);
 
   return (
-    <section aria-label="Code diff" className="code-diff-pane">
+    <section aria-label="Review" className="code-diff-pane">
       <header className="code-diff-pane__toolbar">
         <div>
-          <span>Git diff</span>
-          <h1>Checkout changes</h1>
+          <span>Review</span>
+          <h1>{props.snapshot.title}</h1>
         </div>
-        <p>{props.diff.observation.changedPaths.length.toLocaleString()} changed paths</p>
+        <p>{props.snapshot.changedPaths.length.toLocaleString()} changed paths</p>
         <div className="segmented" role="group" aria-label="Diff layout">
           <button
             aria-pressed={sideBySide}
@@ -197,6 +246,19 @@ function AvailableDiff(
           </button>
         </div>
       </header>
+
+      {props.staleNotice === undefined ? null : (
+        <div className="code-diff-pane__warning" role="alert">
+          <strong>{props.staleNotice.message}</strong>
+          <button
+            className="btn btn-secondary btn-sm"
+            onClick={props.staleNotice.onRefresh}
+            type="button"
+          >
+            Refresh
+          </button>
+        </div>
+      )}
 
       {evidence.truncated === true ? (
         <div className="code-diff-pane__warning" role="alert">
@@ -258,7 +320,7 @@ function AvailableDiff(
                   Open in editor
                 </button>
               )}
-              {mayDiscard && tracked.get(selected.path) !== undefined ? (
+              {mayDiscard && trackedPath !== undefined ? (
                 <button
                   className="btn btn-danger btn-sm"
                   disabled={discarding}
@@ -269,7 +331,7 @@ function AvailableDiff(
                 </button>
               ) : null}
             </div>
-            {confirmingDiscard === selected.path ? (
+            {confirmingDiscard === selected.path && trackedPath !== undefined ? (
               <div
                 className="code-diff-pane__confirm"
                 role="alertdialog"
@@ -283,7 +345,7 @@ function AvailableDiff(
                   <button
                     className="btn btn-danger btn-sm"
                     disabled={discarding}
-                    onClick={() => void discard(tracked.get(selected.path)!)}
+                    onClick={() => void discard(trackedPath)}
                     type="button"
                   >
                     Discard permanently
@@ -323,6 +385,28 @@ function AvailableDiff(
       )}
     </section>
   );
+}
+
+function snapshot(
+  diff: Extract<CodeDiffProjection, { readonly state: "available" | "run" }>,
+): DiffSnapshot {
+  if (diff.state === "run") {
+    return {
+      operationId: diff.run.operationId,
+      changedPaths: diff.run.outcome.changedPaths,
+      evidence: diff.run.outcome.diff,
+      status: [],
+      title: `Changes vs ${diff.run.outcome.baseRef}`,
+    };
+  }
+  return {
+    operationId: diff.observation.operationId,
+    changedPaths: diff.observation.changedPaths,
+    evidence: diff.observation.diff,
+    status: diff.observation.status,
+    stateToken: diff.observation.stateToken,
+    title: "Local changes",
+  };
 }
 
 function modelUriBase(checkoutId: CodeCheckoutId, contentId: string, fileId: string): string {

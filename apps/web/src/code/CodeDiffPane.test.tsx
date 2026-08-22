@@ -28,7 +28,7 @@ describe("CodeDiffPane", () => {
     const fixture = runtime();
     render(<CodeDiffPane client={code} diff={available()} loadRuntime={fixture.loadRuntime} />);
 
-    expect(await screen.findByRole("heading", { name: "Checkout changes" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Local changes" })).toBeVisible();
     expect(code.operationContent).toHaveBeenCalledWith(ids.thread, ids.operation, ids.content);
     expect(code.content).not.toHaveBeenCalled();
 
@@ -100,7 +100,7 @@ describe("CodeDiffPane", () => {
     render(
       <CodeDiffPane client={client()} diff={available()} loadRuntime={runtime().loadRuntime} />,
     );
-    expect(await screen.findByRole("heading", { name: "Checkout changes" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Local changes" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Open in editor" })).not.toBeInTheDocument();
   });
 
@@ -201,6 +201,51 @@ describe("CodeDiffPane", () => {
     ).toBeVisible();
   });
 
+  it("shows a compact clean state rather than an empty comparison", () => {
+    const code = client();
+    render(<CodeDiffPane client={code} diff={clean()} />);
+    expect(screen.getByRole("heading", { name: "Checkout is clean" })).toBeVisible();
+    expect(screen.getByText("This checkout has no local changes to review.")).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: "Changed files" })).not.toBeInTheDocument();
+    expect(code.operationContent).not.toHaveBeenCalled();
+  });
+
+  it("compares a run against its base without offering checkout discard", async () => {
+    render(
+      <CodeDiffPane
+        client={client()}
+        createGitOperationId={() => ids.git as never}
+        createOperationId={() => ids.operation as never}
+        diff={runReviewed()}
+        executionPolicy="full-access"
+        loadRuntime={runtime().loadRuntime}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Changes vs origin/development" }),
+    ).toBeVisible();
+    expect(await screen.findByRole("navigation", { name: "Changed files" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Discard changes" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the current comparison when Git state has moved and offers a refresh", async () => {
+    const onRefresh = vi.fn();
+    render(
+      <CodeDiffPane
+        client={client()}
+        diff={available()}
+        loadRuntime={runtime().loadRuntime}
+        staleNotice={{ message: "Git state changed; refresh the diff.", onRefresh }}
+      />,
+    );
+
+    expect(await screen.findByRole("navigation", { name: "Changed files" })).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("Git state changed; refresh the diff.");
+    await userEvent.setup().click(screen.getByRole("button", { name: "Refresh" }));
+    expect(onRefresh).toHaveBeenCalledOnce();
+  });
+
   it("offers no discard for Plan mode, for an untracked file, or without a way to approve", async () => {
     const user = userEvent.setup();
     const { rerender } = render(
@@ -254,6 +299,46 @@ const ids = {
   operation: "20000000-0000-4000-8000-000000000004",
   thread: "20000000-0000-4000-8000-000000000005",
 } as const;
+
+function clean(): Extract<CodeDiffProjection, { readonly state: "available" }> {
+  const dirty = available();
+  return {
+    ...dirty,
+    observation: {
+      ...dirty.observation,
+      status: [],
+      changedPaths: [],
+    },
+  };
+}
+
+function runReviewed(): Extract<CodeDiffProjection, { readonly state: "run" }> {
+  return {
+    state: "run",
+    checkoutId: ids.checkout as never,
+    threadId: ids.thread as never,
+    run: {
+      kind: "run-reviewed",
+      operationId: ids.operation,
+      gitOperationId: ids.git,
+      outcome: {
+        branch: "feature/editor",
+        baseRef: "origin/development",
+        head: "a".repeat(40),
+        ahead: 2,
+        behind: 0,
+        changedPaths: ["src/index.ts", "README.md"],
+        diff: {
+          contentId: ids.content,
+          digest: "c".repeat(64),
+          byteLength: 2_048,
+        },
+        uncommittedPaths: [],
+        mergeability: "clean",
+      },
+    } as never,
+  };
+}
 
 function available(
   truncated = false,

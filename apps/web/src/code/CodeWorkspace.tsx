@@ -36,9 +36,6 @@ import { LOCAL_TOOL_HOST_ID } from "@octant/contracts/tool-actions";
 import { AppleWorkbenchPane, type AppleWorkbenchIntent } from "../apple/AppleWorkbenchPane";
 import { useAppleWorkbench } from "../apple/useAppleWorkbench";
 
-const CodeDiffPane = lazy(() =>
-  import("./CodeDiffPane").then((module) => ({ default: module.CodeDiffPane })),
-);
 const MonacoEditorPane = lazy(() =>
   import("./MonacoEditorPane").then((module) => ({ default: module.MonacoEditorPane })),
 );
@@ -101,6 +98,7 @@ export interface CodeWorkspaceProps {
   readonly onOpenFile?: (relativePath: string) => void;
   /** Re-opens the file projection so the editor can leave a stale revision. */
   readonly onRequestFileRefresh?: () => void;
+  readonly onOpenReview?: () => void;
   readonly onOpenSurface?: (
     kind: CodeOverviewSurfaceKind,
     options?: { readonly terminalId?: CodeTerminalId },
@@ -138,6 +136,7 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
     return (
       <CodeOverview
         controller={props.controller}
+        {...(props.onOpenReview === undefined ? {} : { onOpenReview: props.onOpenReview })}
         {...(props.onOpenSurface === undefined ? {} : { onOpenSurface: props.onOpenSurface })}
         threadId={props.tab.threadId}
       />
@@ -203,7 +202,6 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           title={`${props.tab.relativePath} is unavailable`}
         />
       );
-    case "code-diff":
     case "code-git":
       return <GitWorkspaceSurface {...props} nextUuid={nextUuid} scope={scope} tab={props.tab} />;
     case "code-terminal":
@@ -541,7 +539,7 @@ function GitWorkspaceSurface(
       readonly checkoutId: NonNullable<CodeController["activeView"]>["checkout"]["id"];
       readonly threadId: NonNullable<CodeController["activeView"]>["thread"]["id"];
     };
-    readonly tab: Extract<CodeTab, { readonly kind: "code-diff" | "code-git" }>;
+    readonly tab: Extract<CodeTab, { readonly kind: "code-git" }>;
   },
 ) {
   const [observation, setObservation] = useState<GitObservation>();
@@ -593,17 +591,12 @@ function GitWorkspaceSurface(
   if (observation === undefined) {
     return <GitObservationLoading />;
   }
-  const policy = props.controller.activeView!.thread.executionPolicy;
-  if (props.tab.kind === "code-diff") {
+  const policy = props.controller.activeView?.thread.executionPolicy;
+  if (policy === undefined) {
     return (
-      <CodeDiffPane
-        client={refreshingClient}
-        createGitOperationId={() => props.nextUuid() as never}
-        createOperationId={() => props.nextUuid() as never}
-        diff={{ state: "available", observation, ...props.scope }}
-        executionPolicy={policy}
-        {...(props.onOpenFile === undefined ? {} : { onOpenFile: props.onOpenFile })}
-        {...(props.approvals?.git === undefined ? {} : { requestApproval: props.approvals.git })}
+      <UnavailableProjection
+        message="This thread's execution policy is not available yet."
+        title="Git is unavailable"
       />
     );
   }

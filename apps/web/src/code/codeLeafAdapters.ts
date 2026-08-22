@@ -20,7 +20,6 @@ const xtermAdapter: DeferredCodeAdapter = {
 export function deferredCodeAdapterFor(kind: CodeTabKind): DeferredCodeAdapter | undefined {
   switch (kind) {
     case "code-file":
-    case "code-diff":
       return monacoAdapter;
     case "code-terminal":
       return xtermAdapter;
