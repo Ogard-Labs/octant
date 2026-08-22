@@ -25,19 +25,19 @@ const validInput = {
   activeProject: projects.code,
   connectionState: "connected",
   presentationAvailability: "available",
-  savedSurface: "context",
+  savedSurface: "project-memory",
   surfaceProjectId: projectIds.current,
 } as const satisfies RightUtilityDockResolutionInput;
+
+function surface(id: (typeof RIGHT_UTILITY_DOCK_SURFACES)[number]["id"]) {
+  const found = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === id);
+  if (found === undefined) throw new Error(`Missing ${id} dock surface.`);
+  return found;
+}
 
 describe("resolving what the right utility dock shows", () => {
   it("publishes only the real surfaces in stable order", () => {
     expect(RIGHT_UTILITY_DOCK_SURFACES).toEqual([
-      {
-        id: "context",
-        label: "Context",
-        modes: ["chat", "work", "code"],
-        scope: "project",
-      },
       {
         id: "project-memory",
         label: "Project memory",
@@ -110,7 +110,7 @@ describe("resolving what the right utility dock shows", () => {
         presentationAvailability: "available",
         savedSurface: "browser",
       }),
-    ).toEqual({ kind: "surface", surface: RIGHT_UTILITY_DOCK_SURFACES[4] });
+    ).toEqual({ kind: "surface", surface: surface("browser") });
   });
 
   it("keeps a thread utility selected but empty-handed when the active pane holds no thread", () => {
@@ -152,14 +152,14 @@ describe("resolving what the right utility dock shows", () => {
           presentationAvailability: "available",
           savedSurface: "navigator",
         }),
-      ).toEqual({ kind: "surface", surface: RIGHT_UTILITY_DOCK_SURFACES[2] });
+      ).toEqual({ kind: "surface", surface: surface("navigator") });
     },
   );
 
   it("carries no Project identity on a host-owned surface even when one is active", () => {
     expect(resolveRightUtilityDockSurface({ ...validInput, savedSurface: "navigator" })).toEqual({
       kind: "surface",
-      surface: RIGHT_UTILITY_DOCK_SURFACES[2],
+      surface: surface("navigator"),
     });
   });
 
@@ -174,7 +174,7 @@ describe("resolving what the right utility dock shows", () => {
     ).toEqual({ kind: "closed", reason: "disconnected" });
   });
 
-  it.each(["context", "project-memory"] as const)(
+  it.each(["project-memory"] as const)(
     "reports Project-required surface %s unavailable rather than closed with no active Project",
     (savedSurface) => {
       expect(
@@ -209,24 +209,18 @@ describe("resolving what the right utility dock shows", () => {
       ).toEqual({
         kind: "surface",
         projectId: projectIds.current,
-        surface: RIGHT_UTILITY_DOCK_SURFACES[1],
+        surface: surface("project-memory"),
       });
     },
   );
 
-  it.each([
-    ["chat", projects.chat],
-    ["work", projects.work],
-    ["code", projects.code],
-  ] as const)("exposes Context for the active %s Project", (activeMode, activeProject) => {
+  it("refuses a restored Context tab and opens nothing", () => {
     expect(
       resolveRightUtilityDockSurface({
         ...validInput,
-        activeMode,
-        activeProject,
         savedSurface: "context",
       }),
-    ).toMatchObject({ kind: "surface", surface: { id: "context" } });
+    ).toEqual({ kind: "closed", reason: "unknown-surface" });
   });
 
   it.each([
@@ -280,20 +274,9 @@ describe("resolving what the right utility dock shows", () => {
           ...(activeProject === undefined ? {} : { activeProject }),
           ...(surfaceProjectId === undefined ? {} : { surfaceProjectId }),
         }),
-      ).toMatchObject({ kind: "unavailable", reason, surface: { id: "context" } });
+      ).toMatchObject({ kind: "unavailable", reason, surface: { id: "project-memory" } });
     },
   );
-
-  it("requires Context to have a truthful bound Code Project", () => {
-    const { binding: _binding, ...unboundCodeProject } = projects.code;
-
-    expect(
-      resolveRightUtilityDockSurface({
-        ...validInput,
-        activeProject: unboundCodeProject,
-      }),
-    ).toMatchObject({ kind: "unavailable", reason: "project-incompatible" });
-  });
 
   it.each(["work", "code"] as const)(
     "requires project memory to have a truthful bound %s Project",

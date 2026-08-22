@@ -9,9 +9,18 @@ import { RightUtilityDock, type RightUtilityDockProps } from "./RightUtilityDock
 
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
 
+function dockSurface(
+  id: (typeof RIGHT_UTILITY_DOCK_SURFACES)[number]["id"],
+): (typeof RIGHT_UTILITY_DOCK_SURFACES)[number] {
+  const found = RIGHT_UTILITY_DOCK_SURFACES.find((surface) => surface.id === id);
+  if (found === undefined) throw new Error(`Missing ${id} dock surface.`);
+  return found;
+}
+
+const projectMemory = dockSurface("project-memory");
+
 function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDockProps {
   return {
-    context: <p>Live context inspector</p>,
     isNarrow: false,
     launchableSurfaces: RIGHT_UTILITY_DOCK_SURFACES.filter(
       (surface) => surface.id === "browser" || surface.id === "terminal",
@@ -29,10 +38,10 @@ function props(overrides: Partial<RightUtilityDockProps> = {}): RightUtilityDock
     resolution: {
       kind: "surface",
       projectId,
-      surface: RIGHT_UTILITY_DOCK_SURFACES[1],
+      surface: projectMemory,
     },
     summary: <p>Thread context summary</p>,
-    tabs: [RIGHT_UTILITY_DOCK_SURFACES[1]],
+    tabs: [projectMemory],
     width: 360,
     ...overrides,
   };
@@ -136,7 +145,7 @@ describe("RightUtilityDock", () => {
           resolution: {
             kind: "unavailable",
             reason: "project-stale",
-            surface: RIGHT_UTILITY_DOCK_SURFACES[1],
+            surface: projectMemory,
           },
         })}
       />,

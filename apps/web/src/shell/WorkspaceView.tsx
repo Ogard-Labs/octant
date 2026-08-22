@@ -23,6 +23,7 @@ import type {
   CanvasContextSelectionId,
 } from "@octant/contracts/canvasContext";
 import { OctantButton } from "../ui/base/OctantButton";
+import { ComposerContextMeterGate } from "../context/composerContextMeterScope";
 import { SplitWorkspace } from "./SplitWorkspace";
 import { ProjectOverview } from "../projects/ProjectOverview";
 import type { OctantHostBridge } from "./hostBridge";
@@ -424,7 +425,16 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           onSplitPane={props.onSplitPane}
           activePaneId={props.workspace.activePaneIds[props.mode]}
           {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
-          renderSurface={(surface, paneId) => renderTab(surface, props, paneId, canvasContext)}
+          renderSurface={(surface, paneId) => (
+            <ComposerContextMeterGate
+              enabled={
+                paneId === props.workspace.activePaneIds[props.mode] &&
+                offersThreadComposer(surface)
+              }
+            >
+              {renderTab(surface, props, paneId, canvasContext)}
+            </ComposerContextMeterGate>
+          )}
           totalWorkspacePaneCount={Object.values(props.workspace.layouts).reduce(
             (count, layout) => count + countPanes(layout),
             0,
@@ -433,6 +443,14 @@ export function WorkspaceView(props: WorkspaceViewProps) {
         {props.statusBar}
       </main>
     </TabActivationProvider>
+  );
+}
+
+function offersThreadComposer(surface: WorkspaceTab): boolean {
+  return (
+    surface.kind === "chat-thread" ||
+    surface.kind === "work-thread" ||
+    surface.kind === "code-overview"
   );
 }
 

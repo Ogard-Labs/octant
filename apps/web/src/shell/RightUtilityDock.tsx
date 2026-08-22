@@ -12,7 +12,6 @@ import type {
 export interface RightUtilityDockProps {
   readonly browser?: ReactNode;
   readonly changes?: ReactNode;
-  readonly context: ReactNode;
   readonly files?: ReactNode;
   readonly iosSimulator?: ReactNode;
   readonly isNarrow: boolean;
@@ -50,7 +49,6 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
     <RightUtilityDockSurface
       {...(props.browser === undefined ? {} : { browser: props.browser })}
       {...(props.changes === undefined ? {} : { changes: props.changes })}
-      context={props.context}
       {...(props.files === undefined ? {} : { files: props.files })}
       {...(props.iosSimulator === undefined ? {} : { iosSimulator: props.iosSimulator })}
       launchableSurfaces={props.launchableSurfaces}

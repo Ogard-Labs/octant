@@ -55,22 +55,19 @@ material.
 
 ## Watching usage
 
-A persistent status bar follows the focused pane and shows a line like
-`Context 232K/400K · Headroom 112K · Tools 8/63 · Provider healthy`.
-When a thread needs attention the status bar shows **Watch**, **Optimizing**,
-**Action needed**, **Blocked**, or **Rate limited**, and opens the **Context
-inspector**.
+The active thread's composer shows a circular used-versus-available meter.
+Opening it — pointer, Enter, Space, or the configured keyboard shortcut —
+shows used tokens, the context-window maximum, the used percentage, free
+space, and only the categories the host actually measured. Estimated,
+deferred, unavailable, or provider-reported values say so. Provider account
+limits appear in a separate section, and only when the host reported them.
+Opening the popover does not make a further provider or network call.
+Inspect context opens the composition list so you can pin, exclude, or
+rebuild the next-turn plan. Switching the active pane closes a popover or
+inspector that belonged to the previous thread and retargets every value.
 
-That inspector is current product behavior. The approved later placement is a
-circular meter on the active thread's composer with an authoritative
-breakdown popover; context usage is not a right-dock tab. The planner,
-manifest, and limits on this page do not change with that migration.
-
-The Context inspector shows the planned and sent manifests, model limits,
-safe budget, every reserve, composition by category, health states, token
-accuracy labels, loaded-versus-available tools and MCP servers, compaction
-provenance, live service limits, and pin/exclude controls. Sensitive values
-are redacted in previews.
+The planner, manifest, and limits on this page do not change with that
+placement. Sensitive values are redacted in previews.
 
 ## When you are blocked
 

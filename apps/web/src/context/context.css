@@ -1,74 +1,53 @@
-.context-status-bar {
+.composer-context-meter {
   position: relative;
-  min-width: 0;
-  color: var(--octant-text-secondary);
-  background: var(--octant-chrome);
-  border-top: 1px solid var(--octant-border);
-}
-
-.context-status-bar__button {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  min-height: 28px;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 10px;
-  color: inherit;
-  cursor: pointer;
-  font-size: 10px;
-  text-align: left;
-}
-
-.context-status-bar__button:hover,
-.context-status-bar__button:focus-visible {
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-  outline: 2px solid var(--octant-focus-ring);
-  outline-offset: -2px;
-}
-
-.context-status-bar__scope {
-  overflow: hidden;
-  color: var(--octant-text-primary);
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.context-status-bar__window-label {
-  color: var(--octant-text-primary);
-}
-
-.context-status-bar__usage {
-  font-variant-numeric: tabular-nums;
-}
-
-.context-status-bar__health,
-.context-status-bar__attention {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-weight: 600;
-}
-
-.context-status-bar__attention {
-  margin-left: auto;
-}
-
-.context-status-bar__chevron {
   flex: 0 0 auto;
-  margin-left: auto;
 }
 
-.context-status-bar__attention + .context-status-bar__chevron {
-  margin-left: 0;
+.composer-context-meter__button {
+  width: 28px;
+  height: 28px;
+  min-height: 0;
+  padding: 0;
+  color: var(--octant-text-secondary);
+}
+
+.composer-context-meter__button:hover,
+.composer-context-meter__button:focus-visible {
+  color: var(--octant-text-primary);
+}
+
+.composer-context-meter__ring {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.composer-context-meter__track {
+  stroke: var(--octant-border-strong);
+  stroke-width: 2.5;
+}
+
+.composer-context-meter__used {
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.composer-context-meter[data-health="watch"] .composer-context-meter__used,
+.composer-context-meter[data-health="optimizing"] .composer-context-meter__used {
+  color: var(--octant-text-primary);
+}
+
+.composer-context-meter[data-health="action-needed"] .composer-context-meter__used,
+.composer-context-meter[data-health="blocked"] .composer-context-meter__used,
+.composer-context-meter[data-health="rate-limited"] .composer-context-meter__used {
+  color: var(--octant-text-primary);
 }
 
 .context-window-popover {
-  right: 10px;
+  right: 0;
   bottom: calc(100% + 8px);
-  width: min(420px, calc(100vw - 24px));
+  width: min(360px, calc(100vw - 24px));
   padding: 12px;
   color: var(--octant-text-primary);
 }
@@ -88,8 +67,32 @@
 }
 
 .context-window-popover__header strong,
+.context-window-popover__facts dd,
 .context-window-popover__breakdown dd {
   font-variant-numeric: tabular-nums;
+}
+
+.context-window-popover__facts {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 10px;
+}
+
+.context-window-popover__facts > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.context-window-popover__facts dt,
+.context-window-popover__facts dd {
+  margin: 0;
+  font-size: 10px;
+}
+
+.context-window-popover__facts dt {
+  color: var(--octant-text-secondary);
 }
 
 .context-window-popover__source {
@@ -212,6 +215,16 @@
   justify-content: space-between;
   margin-top: 10px;
   color: var(--octant-text-secondary);
+}
+
+.octant-dialog__popup.context-inspector-dialog {
+  --octant-dialog-width: 42rem;
+  --octant-dialog-height: min(86vh, 40rem);
+
+  display: grid;
+  height: min(var(--octant-dialog-height), calc(100vh - 48px));
+  padding: 0;
+  overflow: hidden;
 }
 
 .context-health-warning {
@@ -398,19 +411,9 @@
 }
 
 @media (max-width: 720px) {
-  .context-status-bar__button {
-    flex-wrap: wrap;
-    gap: 4px 10px;
-  }
-
-  .context-status-bar__attention {
-    width: 100%;
-    margin-left: 0;
-  }
-
   .context-window-popover {
-    right: 6px;
-    width: calc(100vw - 12px);
+    right: 0;
+    width: min(360px, calc(100vw - 12px));
   }
 
   .context-inspector__header {
@@ -425,14 +428,22 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .context-status-bar *,
+  .composer-context-meter *,
   .context-health-warning {
     transition: none;
   }
 }
 
 @media (prefers-contrast: more) {
-  .context-status-bar,
+  .composer-context-meter__track {
+    stroke: var(--octant-text-primary);
+  }
+
+  .composer-context-meter__button:focus-visible {
+    outline: 2px solid var(--octant-focus-ring);
+    outline-offset: 2px;
+  }
+
   .context-health-warning {
     border-color: var(--octant-border-strong);
   }
