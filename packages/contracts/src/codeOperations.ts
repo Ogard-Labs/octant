@@ -532,43 +532,6 @@ const ObservePullRequest = Schema.Struct({
   ...OperationScope,
   maxDiffBytes: Schema.Int.pipe(Schema.between(1, 1024 * 1024)),
 }).annotations(strict);
-const PullRequestMergeMethod = Schema.Literal("merge", "squash", "rebase");
-export type CodePullRequestMergeMethod = typeof PullRequestMergeMethod.Type;
-const MergePullRequestConfirmation = Schema.Struct({
-  number: Schema.Int.pipe(Schema.positive()),
-  baseRepository: boundedNonEmptyText(512),
-  baseBranch: GitBranchName,
-  headBranch: GitBranchName,
-  mergeMethod: PullRequestMergeMethod,
-  expectedHeadSha: GitObjectId,
-}).annotations(strict);
-/** Host-advertised merge facts for clean mobile/desktop merge sheets. */
-export const CodePullRequestMergePreview = Schema.Struct({
-  headSha: GitObjectId,
-  mergeable: Schema.NullOr(Schema.Boolean),
-  requiredChecksPassing: Schema.Boolean,
-  advertisedMergeMethods: Schema.Array(PullRequestMergeMethod).pipe(
-    Schema.filter((values) => values.length <= 3 && new Set(values).size === values.length),
-  ),
-}).annotations(strict);
-export type CodePullRequestMergePreview = typeof CodePullRequestMergePreview.Type;
-const MergePullRequest = Schema.Struct({
-  kind: Schema.Literal("merge-pull-request"),
-  ...OperationScope,
-  idempotencyKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._:-]{1,255}$/)),
-  expectedHeadSha: GitObjectId,
-  mergeMethod: PullRequestMergeMethod,
-  confirmation: MergePullRequestConfirmation,
-  authorization: GitAuthorization,
-})
-  .annotations(strict)
-  .pipe(
-    Schema.filter(
-      (command) =>
-        command.confirmation.mergeMethod === command.mergeMethod &&
-        command.confirmation.expectedHeadSha === command.expectedHeadSha,
-    ),
-  );
 const CreateReviewFinding = Schema.Struct({
   kind: Schema.Literal("create-review-finding"),
   ...OperationScope,
@@ -661,7 +624,6 @@ export const CODE_OPERATION_COMMAND_KINDS = [
   "push-git",
   "create-pull-request",
   "observe-pull-request",
-  "merge-pull-request",
   "create-review-finding",
   "update-review-finding",
   "start-provider-turn",
@@ -691,7 +653,6 @@ export const CodeOperationCommand = Schema.Union(
   RestoreGitCheckpoint,
   CreatePullRequest,
   ObservePullRequest,
-  MergePullRequest,
   CreateReviewFinding,
   UpdateReviewFinding,
   StartProviderTurn,
@@ -932,7 +893,7 @@ const boundedReviewArray = <A, I, R>(schema: Schema.Schema<A, I, R>) =>
  * `observed` carries every read-only review section; `none` means no matching PR
  * was found; `unavailable` means GitHub could not be observed at all. The
  * observation never mutates GitHub: commenting, approving, requesting changes,
- * merging, closing, and reopening remain on GitHub in v1. `ambiguous` is true
+ * closing, and reopening remain on GitHub in v1. `ambiguous` is true
  * whenever the observation is stale or otherwise cannot be presented as a
  * settled result, so the window shows `Waiting` rather than `Done`.
  */
@@ -961,7 +922,6 @@ const PullRequestReviewResult = Schema.Union(
     checks: boundedReviewArray(CodePullRequestReviewCheck),
     reviews: boundedReviewArray(CodePullRequestReviewOpinion),
     comments: boundedReviewArray(CodePullRequestReviewComment),
-    mergePreview: Schema.optional(CodePullRequestMergePreview),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("pull-request-review"),
@@ -1104,7 +1064,6 @@ const ApprovalEvent = Schema.Struct({
     "git-commit",
     "git-push",
     "pull-request-create",
-    "pull-request-merge",
     "provider-tool",
   ),
   summary: boundedNonEmptyText(2_048),
@@ -1730,7 +1689,6 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "commit-git",
   "push-git",
   "create-pull-request",
-  "merge-pull-request",
   "create-review-finding",
   "update-review-finding",
 ]);

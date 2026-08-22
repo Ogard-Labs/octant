@@ -95,7 +95,6 @@ export function hasVerifiedToolAuthority(model: ProviderModel): boolean {
 const nativeToolRuntimeDrivers: ReadonlySet<ProviderDriverKind> = new Set([
   "codex",
   "claude",
-  "cursor",
   "opencode",
   "kilo",
   "pi",

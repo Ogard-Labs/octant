@@ -52,18 +52,6 @@ const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
       </g>
     ),
   },
-  cursor: {
-    color: "var(--octant-text-primary)",
-    mark: (
-      <path
-        d="M3.5 2.5l10 5.2-4.4 1.4-1.6 4.4z"
-        fill="currentColor"
-        stroke="currentColor"
-        strokeLinejoin="round"
-        strokeWidth="1.2"
-      />
-    ),
-  },
   opencode: {
     color: "#7fa7c9",
     mark: (

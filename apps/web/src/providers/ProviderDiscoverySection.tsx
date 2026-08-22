@@ -16,7 +16,6 @@ export function ProviderDiscoverySection(props: ProviderDiscoverySectionProps) {
   const { snapshot, scanning, instances } = props;
 
   // One configured instance per driver family hides further detected candidates.
-  // Discovery may include deferred families (e.g. cursor) that ProviderInstance cannot yet create.
   const configuredDriverKinds = new Set<string>(instances.map((instance) => instance.driverKind));
   const configuredPaths = new Set(
     instances

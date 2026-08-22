@@ -59,7 +59,6 @@ export function isScanStale(snapshot: DiscoverySnapshot, maxAgeMs: number, now: 
 const AUTO_DETECTABLE_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set([
   "codex",
   "claude",
-  "cursor",
   "opencode",
   "kilo",
   "pi",

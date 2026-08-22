@@ -16,7 +16,6 @@ import {
 const driverLabels: Readonly<Record<ProviderDriverKind, string>> = {
   codex: "Codex CLI",
   claude: "Claude Agent SDK",
-  cursor: "Cursor",
   opencode: "OpenCode CLI",
   kilo: "Kilo ACP",
   pi: "Pi RPC",

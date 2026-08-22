@@ -19,7 +19,7 @@ describe("BiometricGate", () => {
     await expect(
       requireBiometricConfirmation({
         authenticator: authenticator(),
-        reason: "merge",
+        reason: "revoke",
       }),
     ).resolves.toEqual({ status: "confirmed" });
   });
@@ -40,10 +40,10 @@ describe("BiometricGate", () => {
       authenticator: authenticator({
         hasDeviceCredential: vi.fn(async () => false),
       }),
-      reason: "merge",
+      reason: "revoke",
     });
     expect(result.status).toBe("unavailable");
-    expect(() => assertBiometricConfirmed(result, "Merge")).toThrow(/blocked/);
+    expect(() => assertBiometricConfirmed(result, "Revoke")).toThrow(/blocked/);
   });
 
   it("marks app-owned high-risk authentication as active until the prompt settles", async () => {
@@ -55,7 +55,7 @@ describe("BiometricGate", () => {
     });
     const pending = requireBiometricConfirmation({
       authenticator: authenticator({ authenticate: vi.fn(() => authentication) }),
-      reason: "merge",
+      reason: "revoke",
     });
 
     expect(isMobileHighRiskPromptActive()).toBe(true);

@@ -1,21 +1,15 @@
 /**
  * Where high-risk mobile actions may settle. Host desktop approval challenges
  * remain local-host-only (`desktop.issue-local-approval`); the phone never
- * invents authority. Clean merge and self-revoke are phone-biometric paths.
+ * invents authority. Self-revoke is a phone-biometric path.
  */
 
-export type MobileHighRiskAction =
-  | "approve"
-  | "reject"
-  | "merge"
-  | "revoke"
-  | "elevate-full-access";
+export type MobileHighRiskAction = "approve" | "reject" | "revoke" | "elevate-full-access";
 
 export type MobileApprovalVenue = "phone-biometric" | "desktop-host-only";
 
 export function venueForHighRiskAction(action: MobileHighRiskAction): MobileApprovalVenue {
   switch (action) {
-    case "merge":
     case "revoke":
       return "phone-biometric";
     case "approve":

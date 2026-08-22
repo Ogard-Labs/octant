@@ -1,4 +1,4 @@
-export type DeviceAuthenticationReason = "unlock" | "approve" | "reject" | "merge" | "revoke";
+export type DeviceAuthenticationReason = "unlock" | "approve" | "reject" | "revoke";
 
 export interface DeviceAuthenticator {
   readonly hasDeviceCredential: () => Promise<boolean>;

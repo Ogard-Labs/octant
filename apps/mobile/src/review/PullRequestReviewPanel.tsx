@@ -7,23 +7,17 @@ import {
   type MobileRemoteTransport,
 } from "@octant/client-runtime";
 import type { CodePullRequestReview } from "@octant/contracts";
-import type { HostSessionHealthKind } from "@octant/domain";
-import type { BiometricAuthenticator } from "../security/BiometricGate";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme } from "../../design-system";
-import { MergeSheet } from "./MergeSheet";
 
 export interface PullRequestReviewPanelProps {
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
-  readonly authenticator: BiometricAuthenticator;
-  readonly hostHealth: HostSessionHealthKind;
 }
 
 export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
   const { colors } = useTheme();
-  const [checkoutId, setCheckoutId] = useState<string | undefined>();
   const [review, setReview] = useState<CodePullRequestReview | undefined>();
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
@@ -33,7 +27,6 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
     setError(undefined);
     try {
       const thread = await loadMobileCodeThread(props.transport, props.threadId);
-      setCheckoutId(thread.checkoutId);
       const next = await observeMobilePullRequest({
         transport: props.transport,
         threadId: thread.id,
@@ -173,17 +166,6 @@ export function PullRequestReviewPanel(props: PullRequestReviewPanelProps) {
       <Text style={styles.help}>
         Focused review on the phone. Conflict resolution stays on the desktop host.
       </Text>
-      {checkoutId !== undefined ? (
-        <MergeSheet
-          authenticator={props.authenticator}
-          checkoutId={checkoutId}
-          hostHealth={props.hostHealth}
-          onMerged={() => void refresh()}
-          review={review}
-          threadId={props.threadId}
-          transport={props.transport}
-        />
-      ) : null}
       {error !== undefined ? <Text style={styles.error}>{error}</Text> : null}
     </View>
   );

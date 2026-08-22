@@ -30,7 +30,7 @@ logs in, and never installs or updates CLIs. Auto-registered rows show
 **"Detected on this host — enable to use"**; enabling runs the Connection
 Check first.
 
-Local CLI and SDK providers include Codex CLI, Claude Agent SDK, Cursor,
+Local CLI and SDK providers include Codex CLI, Claude Agent SDK,
 OpenCode CLI, Kilo ACP, Pi RPC, Oh My Pi, Devin ACP, Mistral Vibe ACP,
 Ollama, Kimi Code ACP, and Grok Build ACP.
 

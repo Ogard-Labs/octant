@@ -29,22 +29,19 @@ const CODE_OUTCOMES = {
   "openai-compatible": "downgraded",
   "anthropic-compatible": "downgraded",
   "azure-foundry": "downgraded",
-  cursor: "unavailable",
 } as const satisfies Readonly<Record<ProviderDriverKind, CodeOutcome>>;
 
 describe("Code provider matrix", () => {
   it("classifies every declared provider kind with conformance or explicit unavailability", () => {
-    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(15);
+    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(14);
     for (const [providerKind, outcome] of Object.entries(CODE_OUTCOMES) as Array<
       [ProviderDriverKind, CodeOutcome]
     >) {
       if (outcome === "unavailable") {
-        expect(providerKind === "cursor" || providerKind === "oh-my-pi").toBe(true);
+        expect(providerKind).toBe("oh-my-pi");
         continue;
       }
-      const evidence = readProviderConformanceEvidence(
-        providerKind as Exclude<ProviderDriverKind, "cursor">,
-      );
+      const evidence = readProviderConformanceEvidence(providerKind);
       expect(evidence).toMatchObject({
         probed: true,
         capabilityHonest: true,
