@@ -72,6 +72,7 @@ const UNAVAILABLE_ATTACHMENT_CLIENT: CodeAttachmentClient = {
 
 export interface CodeThreadWorkspaceProps {
   readonly agentRunClient?: AgentRunClient;
+  readonly onAddAgent?: () => void;
   readonly controller: CodeController;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly threadId: CodeThreadId;
@@ -268,7 +269,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
 
   const childRunStatus =
     props.agentRunClient === undefined ? undefined : (
-      <ThreadChildRunStatusSlot client={props.agentRunClient} threadId={String(props.threadId)} />
+      <ThreadChildRunStatusSlot
+        client={props.agentRunClient}
+        {...(props.onAddAgent === undefined ? {} : { onAddAgent: props.onAddAgent })}
+        threadId={String(props.threadId)}
+      />
     );
 
   if (props.controller.status === "disconnected") {

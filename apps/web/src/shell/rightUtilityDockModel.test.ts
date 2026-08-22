@@ -61,6 +61,12 @@ describe("resolving what the right utility dock shows", () => {
         scope: "thread",
       },
       {
+        id: "agents",
+        label: "Agents",
+        modes: ["chat", "work", "code"],
+        scope: "thread",
+      },
+      {
         id: "changes",
         label: "Changes",
         modes: ["code"],

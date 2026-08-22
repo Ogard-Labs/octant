@@ -1,3 +1,5 @@
+import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type { AgentRunSettingsClient } from "@octant/client-runtime/agent-run-settings-client";
 import type { BrowserAutomationClient } from "@octant/client-runtime/browser-automation-client";
 import type { AppleToolchainClient } from "@octant/client-runtime/apple-toolchain-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -17,7 +19,9 @@ import {
   type SideChatSidecar,
   type WorkspaceTab,
 } from "@octant/contracts";
+import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { lazy, Suspense } from "react";
+import { AgentRunHierarchy } from "../agents/AgentRunHierarchy";
 import { BrowserWorkspace } from "../browser/BrowserWorkspace";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import type { ChatReadCursorStore } from "../chat/useChatController";
@@ -52,6 +56,8 @@ export interface ThreadUtilityDockSubject {
 }
 
 export interface ThreadUtilityDockContentProps {
+  readonly agentRunClient?: AgentRunClient;
+  readonly agentRunSettingsClient?: AgentRunSettingsClient;
   readonly appleProjectPath?: string;
   readonly appleToolchainClient?: AppleToolchainClient;
   readonly browserAutomationClient?: BrowserAutomationClient;
@@ -74,6 +80,22 @@ export interface ThreadUtilityDockContentProps {
 }
 
 export function ThreadUtilityDockContent(props: ThreadUtilityDockContentProps) {
+  if (props.surface === "agents") {
+    if (props.agentRunClient === undefined) {
+      return unavailable("Agents", "This thread has no AgentRun service available.");
+    }
+    return (
+      <AgentRunHierarchy
+        allowCreation
+        client={props.agentRunClient}
+        parentThreadId={decodeAgentRunParentThreadId(props.subject.threadId)}
+        {...(props.agentRunSettingsClient === undefined
+          ? {}
+          : { settingsClient: props.agentRunSettingsClient })}
+      />
+    );
+  }
+
   if (props.surface === "side-chat") {
     const tab: Extract<WorkspaceTab, { readonly kind: "side-chat" }> = {
       kind: "side-chat",

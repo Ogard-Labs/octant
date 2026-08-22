@@ -60,9 +60,11 @@ describe("buildAgentRunRequestCommand", () => {
     expect(command.routingReceipt.selectedModelId).toBe("gpt-4o");
     expect(command.routingReceipt.executionResolution.source).toBe("one-off-override");
     expect(command.routingReceipt.usageQuality).toBe("unavailable");
-    // execution kind always falls back to the portable managed baseline:
-    // provider-native child eligibility is not yet wired into creation.
     expect(command.routingReceipt.selectedExecutionKind).toBe("octant-managed");
+    expect(command.routingReceipt.attemptedExecutionKind).toBe("provider-native");
+    expect(
+      command.routingReceipt.capabilityDegradations.some((reason) => /native/i.test(reason)),
+    ).toBe(true);
   });
 
   it("journals the parent selection a child was admitted with under its snapshot id", () => {

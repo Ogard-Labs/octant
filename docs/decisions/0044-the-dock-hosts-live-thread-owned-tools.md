@@ -68,9 +68,9 @@ a Project overview, or a Project-level list.
 
 - Project memory now lives in Project Overview, and Navigator opens from the
   profile control. Files, Browser, Terminal, Canvas, Side chat, artifact-gated
-  Plan, and conditional Delivery are direct dock tools; the generic Thread
-  accordion is gone. Remaining callers must still migrate Review and
-  thread-level Agents, and the full-window diff.
+  Plan, conditional Delivery, and thread-level Agents are direct dock tools;
+  the generic Thread accordion is gone. Remaining callers must still migrate
+  Review and the full-window diff.
 - 0015 remains Accepted as the current implemented shell. This record, with
   0041 and 0042, is the approved migration of dock content, tool ownership,
   and placement. It does not change mode authority, journal ownership, or

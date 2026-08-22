@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import {
   buildAgentHierarchyModel,
   type AgentHierarchyFilter,
@@ -11,6 +11,9 @@ export function AgentHierarchyPanel(props: {
   readonly creationPosture?: "off" | "ask" | "automatic";
   readonly onAcknowledge?: (input: { runId: string; version: number }) => void;
   readonly onCancel?: (input: { runId: string }) => void;
+  readonly onSteer?: (input: { runId: string; version: number; message: string }) => void;
+  readonly onRetry?: (input: { runId: string; version: number }) => void;
+  readonly onResume?: (input: { runId: string; version: number }) => void;
   readonly reconnecting?: boolean;
 }) {
   const [filter, setFilter] = useState<AgentHierarchyFilter>("active");
@@ -109,6 +112,34 @@ export function AgentHierarchyPanel(props: {
                     Acknowledge result
                   </button>
                 ) : null}
+                {row.lifecycleStatus === "running" || row.lifecycleStatus === "waiting" ? (
+                  <SteerControl
+                    task={row.task}
+                    onSteer={(message) =>
+                      props.onSteer?.({ runId: row.runId, version: row.version, message })
+                    }
+                  />
+                ) : null}
+                {row.lifecycleStatus === "failed" || row.lifecycleStatus === "interrupted" ? (
+                  <button
+                    type="button"
+                    aria-label={`Retry ${row.task}`}
+                    onClick={() => props.onRetry?.({ runId: row.runId, version: row.version })}
+                  >
+                    Retry
+                  </button>
+                ) : null}
+                {row.lifecycleStatus === "waiting" ||
+                (row.lifecycleStatus === "interrupted" &&
+                  row.recoveryReason !== "restart-without-resumable-execution") ? (
+                  <button
+                    type="button"
+                    aria-label={`Resume ${row.task}`}
+                    onClick={() => props.onResume?.({ runId: row.runId, version: row.version })}
+                  >
+                    Resume
+                  </button>
+                ) : null}
                 {row.bucket === "active" ? (
                   <button
                     type="button"
@@ -124,5 +155,48 @@ export function AgentHierarchyPanel(props: {
         </ul>
       )}
     </section>
+  );
+}
+
+function SteerControl(props: {
+  readonly task: string;
+  readonly onSteer: (message: string) => void;
+}) {
+  const fieldId = useId();
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  if (!open) {
+    return (
+      <button type="button" aria-label={`Steer ${props.task}`} onClick={() => setOpen(true)}>
+        Steer
+      </button>
+    );
+  }
+  return (
+    <form
+      aria-label={`Steer ${props.task}`}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const next = message.trim();
+        if (next.length === 0) return;
+        props.onSteer(next);
+        setMessage("");
+        setOpen(false);
+      }}
+    >
+      <label htmlFor={fieldId}>
+        Steering instruction
+        <input
+          id={fieldId}
+          value={message}
+          onChange={(event) => setMessage(event.target.value)}
+          required
+        />
+      </label>
+      <button type="submit">Send steering</button>
+      <button type="button" onClick={() => setOpen(false)}>
+        Cancel steering
+      </button>
+    </form>
   );
 }

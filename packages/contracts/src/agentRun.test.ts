@@ -195,6 +195,21 @@ describe("agentRun contracts", () => {
       resultText: "The fallback is safe.",
     });
     expect(complete.kind).toBe("complete-agent-run");
+
+    expect(
+      decodeAgentRunCommand({
+        kind: "retry-agent-run",
+        runId: ids.run,
+        expectedVersion: 4,
+      }).kind,
+    ).toBe("retry-agent-run");
+    expect(
+      decodeAgentRunCommand({
+        kind: "resume-agent-run",
+        runId: ids.run,
+        expectedVersion: 4,
+      }).kind,
+    ).toBe("resume-agent-run");
   });
 
   it("decodes status-changed events and exports event names", () => {

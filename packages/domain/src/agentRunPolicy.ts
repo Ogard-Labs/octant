@@ -437,9 +437,9 @@ const allowedTransitions: Record<
   running: ["waiting", "completed", "failed", "cancelled", "interrupted"],
   waiting: ["starting", "running", "failed", "cancelled", "interrupted"],
   completed: [],
-  failed: [],
+  failed: ["queued"],
   cancelled: [],
-  interrupted: [],
+  interrupted: ["queued", "starting"],
 };
 
 export function assertAgentRunTransitionAllowed(
@@ -569,7 +569,9 @@ export function evaluateAgentRunCommand(
     case "complete-agent-run":
     case "fail-agent-run":
     case "cancel-agent-run":
-    case "interrupt-agent-run": {
+    case "interrupt-agent-run":
+    case "retry-agent-run":
+    case "resume-agent-run": {
       if (run === undefined) {
         reject("unsupported-transition", "AgentRun does not exist.");
       }
@@ -622,6 +624,14 @@ export function evaluateAgentRunCommand(
       return applyAgentRunLifecycleTransition(current, "interrupted", now, {
         expectedVersion: command.expectedVersion,
         recoveryReason: command.recoveryReason,
+      });
+    case "retry-agent-run":
+      return applyAgentRunLifecycleTransition(current, "queued", now, {
+        expectedVersion: command.expectedVersion,
+      });
+    case "resume-agent-run":
+      return applyAgentRunLifecycleTransition(current, "starting", now, {
+        expectedVersion: command.expectedVersion,
       });
     default:
       return current;

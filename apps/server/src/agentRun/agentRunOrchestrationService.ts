@@ -73,6 +73,14 @@ export interface AgentRunProcessSupervisorPort {
   readonly stop: (runId: AgentRunId) => Promise<void>;
   readonly reconcile?: () => Promise<void>;
   readonly subscribeToProcessDeath?: (listener: (runId: AgentRunId) => void) => () => void;
+  /**
+   * Deliver a steering instruction to a live child. Absent or returning
+   * `unsupported` means this host cannot steer that execution kind.
+   */
+  readonly steer?: (input: {
+    readonly runId: AgentRunId;
+    readonly message: string;
+  }) => Promise<"steered" | "unsupported">;
 }
 
 export interface AgentRunOrchestrationServiceOptions {
@@ -269,6 +277,69 @@ export class AgentRunOrchestrationService {
     } catch {
       return this.onProcessDeath(started.run.id, started.run.version);
     }
+  }
+
+  retry(
+    runId: AgentRunId,
+    expectedVersion: number,
+    liveAuthority: AgentRunAuthority,
+  ): AgentRunCommandResult {
+    const retried = this.#persistence.applyCommand({
+      kind: "retry-agent-run",
+      runId,
+      expectedVersion: expectedVersion as never,
+    });
+    if (retried.kind !== "run-updated") return retried;
+    return this.start(retried.run.id, retried.run.version, liveAuthority);
+  }
+
+  resume(
+    runId: AgentRunId,
+    expectedVersion: number,
+    liveAuthority: AgentRunAuthority,
+  ): AgentRunCommandResult {
+    return this.start(runId, expectedVersion, liveAuthority);
+  }
+
+  async steer(input: {
+    readonly runId: AgentRunId;
+    readonly expectedVersion: number;
+    readonly message: string;
+  }): Promise<AgentRunCommandResult> {
+    const current = this.#persistence.getById(input.runId);
+    if (current === undefined) {
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: "AgentRun does not exist.",
+      };
+    }
+    if (current.version !== (input.expectedVersion as never)) {
+      return {
+        kind: "run-command-failed",
+        reason: "stale-version",
+        message: `Expected version ${input.expectedVersion}, got ${current.version}`,
+      };
+    }
+    if (this.#processes?.steer === undefined) {
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: "This host cannot steer the selected child execution.",
+      };
+    }
+    const outcome = await this.#processes.steer({
+      runId: input.runId,
+      message: input.message,
+    });
+    if (outcome !== "steered") {
+      return {
+        kind: "run-command-failed",
+        reason: "unsupported-transition",
+        message: "The live child could not be steered.",
+      };
+    }
+    return { kind: "run-updated", run: current };
   }
 
   /**

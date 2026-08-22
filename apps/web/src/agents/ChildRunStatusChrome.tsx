@@ -11,6 +11,7 @@ export interface ChildRunStatusChromeProps {
   readonly entries: ReadonlyArray<AgentHierarchyInputEntry>;
   /** Cancels this parent thread's live children. Already confirmed when called. */
   readonly onStopChildren: () => void | Promise<unknown>;
+  readonly onAddAgent?: () => void;
   readonly onCancelRun?: (input: { readonly runId: string }) => void;
   readonly onAcknowledge?: (input: { readonly runId: string; readonly version: number }) => void;
   readonly creationPosture?: "off" | "ask" | "automatic";
@@ -51,6 +52,11 @@ export function ChildRunStatusChrome(props: ChildRunStatusChromeProps) {
         </p>
         <p className="child-run-status__detail">{summary.detail}</p>
         <div className="child-run-status__actions">
+          {props.onAddAgent === undefined ? null : (
+            <OctantButton onClick={props.onAddAgent} size="sm" type="button" variant="ghost">
+              Add agent
+            </OctantButton>
+          )}
           <OctantButton
             aria-controls={listId}
             aria-expanded={listOpen}

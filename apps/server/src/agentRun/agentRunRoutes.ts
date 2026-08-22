@@ -1,33 +1,50 @@
 import {
-  decodeAgentRunCreationRequest,
+  decodeAgentRunControlPreviewRequest,
+  decodeAgentRunControlRequest,
   decodeAgentRunId,
   decodeAgentRunParentThreadId,
+  decodeAgentRunResumeRequest,
+  decodeAgentRunRetryRequest,
+  decodeAgentRunSteerRequest,
   decodeAgentRunWorkspaceConfirmationRequest,
   decodeAgentRunWorkspacePreparationRequest,
   type AgentRun,
   type AgentRunAuthority,
+  type AgentRunControlRequest,
   type AgentRunCreationRequest,
   type AgentRunId,
   type AgentRunParentThreadId,
   type AgentRunPolicySettings,
-  type AgentRunWorkspaceConfirmationResult,
-  type AgentRunWorkspacePreparationResult,
   type AgentRunWorkspaceReceipt,
   type AgentRunWorkspaceRefusalReason,
+  type AggregateVersion,
   type MultiModelPool,
 } from "@octant/contracts";
-import type { AgentRunWorkspaceParentFacts } from "@octant/domain/agent-run-workspace-policy";
-import type { AgentRunCodeWorkspaceContext } from "./agentRunWorkspaceService";
+import {
+  assertAgentRunResumeAllowed,
+  assertAgentRunRetryAllowed,
+  assertAgentRunSteerAllowed,
+  AgentRunPolicyRejected,
+  type AgentRunNativeCapabilityEvidence,
+} from "@octant/domain/agent-run-control-policy";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
 import {
+  AgentRunControlRefused,
+  buildControlCreationRequest,
+  buildControlRequestCommand,
+  previewAgentRunControl,
+  prepareAdmittedControlWorkspace,
+  requestWorkspaceFor,
+  resolveAgentRunControlFacts,
+  type AgentRunControlParentFacts,
+  type AgentRunControlWorkspacePort,
+} from "./agentRunControlService";
+import {
   AgentRunCreationRejected,
-  agentRunRequestAuthorityDigest,
-  buildAgentRunRequestCommand,
   type AgentRunParentContextPort,
   type AgentRunPoolRoutingContext,
-  type AgentRunWorktreeReceiptPort,
   type ProviderReadinessPort,
 } from "./agentRunCreationService";
 import {
@@ -50,15 +67,7 @@ export interface AgentRunRouteDependencies {
   readonly authorizeCreation: (input: {
     readonly parentThreadId: AgentRunParentThreadId;
     readonly windowId: string;
-  }) =>
-    | {
-        readonly parentMode: "chat" | "work" | "code";
-        readonly parentAuthority: AgentRunAuthority;
-        readonly liveAuthority: AgentRunAuthority;
-        readonly workspaceParent: AgentRunWorkspaceParentFacts;
-        readonly codeWorkspace?: AgentRunCodeWorkspaceContext;
-      }
-    | undefined;
+  }) => AgentRunControlParentFacts | undefined;
   readonly authorizeCancellation: (input: {
     readonly run: AgentRun;
     readonly windowId: string;
@@ -87,38 +96,18 @@ export interface AgentRunRouteDependencies {
     readonly request: AgentRunCreationRequest;
   }) => AgentRunPoolRoutingContext | undefined | Promise<AgentRunPoolRoutingContext | undefined>;
   /**
-   * Resolves a verified Code worktree receipt for child creation. Absent means
-   * this host cannot admit Code children.
+   * Server-observed native-child capability evidence. Absent means native
+   * execution is ineligible and the child is Octant-managed with a reason.
    */
-  readonly resolveCodeWorktreeReceipt?: (input: {
-    readonly request: AgentRunCreationRequest;
-  }) => AgentRunWorktreeReceiptPort | undefined | Promise<AgentRunWorktreeReceiptPort | undefined>;
+  readonly nativeEvidence?: (input: {
+    readonly parent: AgentRunControlParentFacts;
+  }) => AgentRunNativeCapabilityEvidence;
   /**
    * Server-owned child workspace prepare/confirm/admit. Absent means this
    * host cannot issue mode-correct workspace grants, so Work/Code children
    * and explicit Chat receipts fail closed.
    */
-  readonly workspace?: {
-    readonly prepare: (input: {
-      readonly windowId: string;
-      readonly parent: AgentRunWorkspaceParentFacts;
-      readonly code?: AgentRunCodeWorkspaceContext;
-    }) => Promise<AgentRunWorkspacePreparationResult>;
-    readonly confirm: (input: {
-      readonly windowId: string;
-      readonly parent: AgentRunWorkspaceParentFacts;
-      readonly worktreeReceiptId: string;
-    }) => Promise<AgentRunWorkspaceConfirmationResult>;
-    readonly admit: (input: {
-      readonly windowId: string;
-      readonly requested: AgentRunCreationRequest["workspace"];
-      readonly role: AgentRunCreationRequest["role"];
-      readonly parent: AgentRunWorkspaceParentFacts;
-    }) => Promise<
-      | { readonly status: "admitted"; readonly workspace: AgentRunWorkspaceReceipt }
-      | { readonly status: "refused"; readonly reason: AgentRunWorkspaceRefusalReason }
-    >;
-  };
+  readonly workspace?: AgentRunControlWorkspacePort;
   /**
    * Reads the parent thread's own conversation for a child that asked to be
    * admitted with it. Consulted only after `authorizeCreation` proved this
@@ -314,6 +303,43 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
       return json(confirmed, confirmed.status === "refused" ? 400 : 200, origin);
     }
 
+    if (
+      (request.method === "GET" && url.pathname === "/api/agent-runs/control-preview") ||
+      (request.method === "POST" && url.pathname === "/api/agent-runs/control-preview")
+    ) {
+      let previewBody: unknown = {
+        parentThreadId: url.searchParams.get("parentThreadId") ?? "",
+        ...(url.searchParams.get("role") === null ? {} : { role: url.searchParams.get("role") }),
+      };
+      if (request.method === "POST") {
+        try {
+          previewBody = await request.json();
+        } catch {
+          return failure("AgentRun control preview body is invalid.", 400, origin);
+        }
+      }
+      let previewRequest: ReturnType<typeof decodeAgentRunControlPreviewRequest>;
+      try {
+        previewRequest = decodeAgentRunControlPreviewRequest(previewBody);
+      } catch {
+        return failure("AgentRun control preview request is invalid.", 400, origin);
+      }
+      const creationAuthority = dependencies.authorizeCreation({
+        parentThreadId: previewRequest.parentThreadId,
+        windowId: authenticatedWindowId,
+      });
+      if (creationAuthority === undefined) {
+        return refused("unauthorized", origin, 403);
+      }
+      const preview = previewAgentRunControl({
+        parent: creationAuthority,
+        ...(previewRequest.role === undefined ? {} : { role: previewRequest.role }),
+        creationPosture: dependencies.settings.current().creationPosture,
+        nativeEvidence: nativeEvidenceFor(dependencies, creationAuthority),
+      });
+      return json(preview, preview.status === "refused" ? 400 : 200, origin);
+    }
+
     if (request.method === "POST" && url.pathname === "/api/agent-runs/request") {
       let body: unknown;
       try {
@@ -321,30 +347,41 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
       } catch {
         return failure("AgentRun request body is invalid.", 400, origin);
       }
-      let creationRequest: ReturnType<typeof decodeAgentRunCreationRequest>;
+      let controlRequest: AgentRunControlRequest;
       try {
-        creationRequest = decodeAgentRunCreationRequest(body);
+        controlRequest = decodeAgentRunControlRequest(body);
       } catch {
         return failure("AgentRun creation request is invalid.", 400, origin);
       }
       const posture = dependencies.settings.current().creationPosture;
       const creationAuthority = dependencies.authorizeCreation({
-        parentThreadId: creationRequest.parentThreadId,
+        parentThreadId: controlRequest.parentThreadId,
         windowId: authenticatedWindowId,
       });
       if (creationAuthority === undefined) {
         return refused("unauthorized", origin, 403);
       }
-      if (creationRequest.mode !== creationAuthority.parentMode) {
-        return refused("unsupported", origin);
+      const nativeEvidence = nativeEvidenceFor(dependencies, creationAuthority);
+      try {
+        resolveAgentRunControlFacts({
+          parent: creationAuthority,
+          role: controlRequest.role,
+          creationPosture: posture,
+          nativeEvidence,
+        });
+      } catch (error) {
+        if (error instanceof AgentRunControlRefused) {
+          return refused(error.reason, origin);
+        }
+        throw error;
       }
       // Return an idempotent receipt before mutable provider readiness is
       // consulted. The receipt is only reusable for the exact authorized
       // request; an opaque request ID cannot be used to read or start another
       // thread's child.
-      const existing = dependencies.persistence.getByRequestId(creationRequest.requestId);
+      const existing = dependencies.persistence.getByRequestId(controlRequest.requestId);
       if (existing !== undefined) {
-        if (!matchesIdempotentCreationRequest(existing, creationRequest, creationAuthority)) {
+        if (!matchesIdempotentControlRequest(existing, controlRequest, creationAuthority)) {
           return failure(
             "AgentRun request ID cannot be reused for a different authorized request.",
             409,
@@ -358,44 +395,57 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
           origin,
         );
       }
-      const poolRoutingContext =
-        creationRequest.pool === undefined
-          ? undefined
-          : await dependencies.poolRouting?.({ request: creationRequest });
-      const worktreeReceipts =
-        creationRequest.workspace.kind === "code-worktree"
-          ? await dependencies.resolveCodeWorktreeReceipt?.({ request: creationRequest })
-          : undefined;
       let admittedWorkspace: AgentRunWorkspaceReceipt | undefined;
       if (dependencies.workspace !== undefined) {
-        const admitted = await dependencies.workspace.admit({
+        const admitted = await prepareAdmittedControlWorkspace({
           windowId: authenticatedWindowId,
-          requested: creationRequest.workspace,
-          role: creationRequest.role,
-          parent: creationAuthority.workspaceParent,
+          parent: creationAuthority,
+          role: controlRequest.role,
+          workspace: dependencies.workspace,
         });
         if (admitted.status === "refused") {
           return refused(admitted.reason, origin);
         }
         admittedWorkspace = admitted.workspace;
-      } else if (creationRequest.mode === "work") {
+      } else if (creationAuthority.parentMode === "chat") {
+        admittedWorkspace = { kind: "chat-virtual", mode: "chat" };
+      } else {
         return refused("unavailable", origin);
       }
-      let command: ReturnType<typeof buildAgentRunRequestCommand>;
+      let command: ReturnType<typeof buildControlRequestCommand>;
       try {
-        command = buildAgentRunRequestCommand({
-          request: creationRequest,
+        const facts = resolveAgentRunControlFacts({
+          parent: creationAuthority,
+          role: controlRequest.role,
           creationPosture: posture,
+          nativeEvidence,
+        });
+        const creationRequest = buildControlCreationRequest({
+          control: controlRequest,
+          facts,
+          workspace: requestWorkspaceFor(admittedWorkspace),
+        });
+        const poolRoutingContext =
+          controlRequest.pool === undefined
+            ? undefined
+            : await dependencies.poolRouting?.({ request: creationRequest });
+        command = buildControlRequestCommand({
+          control: controlRequest,
+          parent: creationAuthority,
+          creationPosture: posture,
+          nativeEvidence,
+          admittedWorkspace,
           providerReadiness: dependencies.providerReadiness,
           uuid: dependencies.uuid,
           ...(poolRoutingContext === undefined ? {} : { poolRouting: poolRoutingContext }),
-          ...(worktreeReceipts === undefined ? {} : { worktreeReceipts }),
-          ...(admittedWorkspace === undefined ? {} : { admittedWorkspace }),
           ...(dependencies.parentContext === undefined
             ? {}
             : { parentContext: dependencies.parentContext }),
         });
       } catch (error) {
+        if (error instanceof AgentRunControlRefused) {
+          return refused(error.reason, origin);
+        }
         if (error instanceof AgentRunCreationRejected) {
           if (isWorkspaceRefusal(error.reason)) {
             return refused(error.reason, origin);
@@ -412,8 +462,7 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
           // Posture Off is still rejected by domain policy below; Ask and
           // Automatic are both reached only through this explicit,
           // human-initiated creation route, so the act of calling it is the
-          // approval Ask requires (see the PR description's residual notes
-          // on the deferred autonomous propose/confirm two-phase flow).
+          // approval Ask requires.
           confirmed: posture !== "off",
         });
         return respondAfterAdmission(
@@ -472,6 +521,16 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
       return json({ results }, status, origin);
     }
 
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/steer") {
+      return mutateLiveRun(request, origin, authenticatedWindowId, dependencies, "steer");
+    }
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/retry") {
+      return mutateLiveRun(request, origin, authenticatedWindowId, dependencies, "retry");
+    }
+    if (request.method === "POST" && url.pathname === "/api/agent-runs/resume") {
+      return mutateLiveRun(request, origin, authenticatedWindowId, dependencies, "resume");
+    }
+
     return failure("AgentRun route not found.", 404, origin);
   };
 }
@@ -496,36 +555,131 @@ function respondAfterAdmission(
   return json(accepted, accepted.kind === "run-command-failed" ? 409 : 200, origin);
 }
 
-function matchesIdempotentCreationRequest(
+function matchesIdempotentControlRequest(
   existing: AgentRun,
-  request: ReturnType<typeof decodeAgentRunCreationRequest>,
-  authority: {
-    readonly parentAuthority: AgentRunAuthority;
-    readonly liveAuthority: AgentRunAuthority;
-  },
+  request: AgentRunControlRequest,
+  parent: AgentRunControlParentFacts,
 ): boolean {
   return (
     existing.parentThreadId === request.parentThreadId &&
     existing.parentRunId === request.parentRunId &&
     existing.role === request.role &&
     existing.task === request.task &&
-    existing.workspaceReceipt.kind === request.workspace.kind &&
-    existing.workspaceReceipt.mode === request.workspace.mode &&
-    existing.routingReceipt.mode === request.mode &&
-    existing.routingReceipt.selectedProviderInstanceId === request.providerInstanceId &&
-    existing.routingReceipt.selectedModelId === request.modelId &&
-    existing.routingReceipt.rawReasoning === request.reasoning &&
-    existing.routingReceipt.effectiveAuthorityDigest ===
-      agentRunRequestAuthorityDigest(request.requestedAuthority) &&
+    existing.routingReceipt.mode === parent.parentMode &&
+    existing.routingReceipt.selectedProviderInstanceId === parent.parentRoute.providerInstanceId &&
+    existing.routingReceipt.selectedModelId === parent.parentRoute.modelId &&
+    existing.routingReceipt.rawReasoning === parent.parentRoute.reasoning &&
     matchesIdempotentPool(existing.routingReceipt.poolRoute?.decision.request.pool, request.pool) &&
-    // A retried request ID must carry the same parent-context ask the stored
-    // child was admitted under; otherwise the receipt would answer for a child
-    // scoped to different context than the caller now asks for.
     (existing.routingReceipt.admittedContextBlocks !== undefined) ===
       (request.includeParentContext === true) &&
-    authorityIsWithin(existing.authority, authority.parentAuthority) &&
-    authorityIsWithin(existing.authority, authority.liveAuthority)
+    authorityIsWithin(existing.authority, parent.parentAuthority) &&
+    authorityIsWithin(existing.authority, parent.liveAuthority)
   );
+}
+
+function nativeEvidenceFor(
+  dependencies: AgentRunRouteDependencies,
+  parent: AgentRunControlParentFacts,
+): AgentRunNativeCapabilityEvidence {
+  return (
+    dependencies.nativeEvidence?.({ parent }) ?? {
+      claimedNativeSupport: "unsupported",
+      workspace: false,
+      authority: false,
+      observability: false,
+      cancellation: false,
+      steering: false,
+      recovery: false,
+    }
+  );
+}
+
+async function mutateLiveRun(
+  request: Request,
+  origin: string | null,
+  windowId: string,
+  dependencies: AgentRunRouteDependencies,
+  action: "steer" | "retry" | "resume",
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return failure(`AgentRun ${action} body is invalid.`, 400, origin);
+  }
+  let runId: AgentRunId;
+  let expectedVersion: number;
+  let message: string | undefined;
+  try {
+    if (action === "steer") {
+      const decoded = decodeAgentRunSteerRequest(body);
+      runId = decoded.runId;
+      expectedVersion = decoded.expectedVersion;
+      message = decoded.message;
+    } else if (action === "retry") {
+      const decoded = decodeAgentRunRetryRequest(body);
+      runId = decoded.runId;
+      expectedVersion = decoded.expectedVersion;
+    } else {
+      const decoded = decodeAgentRunResumeRequest(body);
+      runId = decoded.runId;
+      expectedVersion = decoded.expectedVersion;
+    }
+  } catch {
+    return failure(`AgentRun ${action} fields are invalid.`, 400, origin);
+  }
+  const run = dependencies.persistence.getById(runId);
+  if (
+    run === undefined ||
+    !(await dependencies.authorizeParentThread({
+      parentThreadId: run.parentThreadId,
+      windowId,
+    }))
+  ) {
+    return failure(`AgentRun ${action} is not authorized for this run.`, 403, origin);
+  }
+  try {
+    if (action === "steer") {
+      assertAgentRunSteerAllowed(run, expectedVersion as AggregateVersion);
+    } else if (action === "retry") {
+      assertAgentRunRetryAllowed(run, expectedVersion as AggregateVersion);
+    } else {
+      assertAgentRunResumeAllowed(run, expectedVersion as AggregateVersion);
+    }
+  } catch (error) {
+    if (error instanceof AgentRunPolicyRejected) {
+      return json(
+        {
+          kind: "run-command-failed",
+          reason: error.code === "stale-version" ? "stale-version" : "unsupported-transition",
+          message: error.message,
+        },
+        error.code === "stale-version" ? 409 : 400,
+        origin,
+      );
+    }
+    throw error;
+  }
+  const parent = dependencies.authorizeCreation({
+    parentThreadId: run.parentThreadId,
+    windowId,
+  });
+  if (parent === undefined) {
+    return failure(`AgentRun ${action} is not authorized for this run.`, 403, origin);
+  }
+  if (action === "steer") {
+    const result = await dependencies.orchestration.steer({
+      runId,
+      expectedVersion,
+      message: message ?? "",
+    });
+    return json(result, result.kind === "run-command-failed" ? 409 : 200, origin);
+  }
+  const result =
+    action === "retry"
+      ? dependencies.orchestration.retry(runId, expectedVersion, parent.liveAuthority)
+      : dependencies.orchestration.resume(runId, expectedVersion, parent.liveAuthority);
+  return json(result, result.kind === "run-command-failed" ? 409 : 200, origin);
 }
 
 /**

@@ -36,6 +36,8 @@ export interface DockToolCapabilities {
   readonly hasDelivery: boolean | "unknown";
   readonly hasCanvasDocument: boolean | "unknown";
   readonly hasAppleSimulator: boolean;
+  readonly hasChildRuns: boolean | "unknown";
+  readonly addAgentInvoked: boolean;
 }
 
 /**
@@ -50,6 +52,9 @@ export function isDockToolLaunchable(
   if (surface === "delivery") return capabilities.hasDelivery === true;
   if (surface === "canvas") return capabilities.hasCanvasDocument === true;
   if (surface === "ios-simulator") return capabilities.hasAppleSimulator;
+  if (surface === "agents") {
+    return capabilities.hasChildRuns === true || capabilities.addAgentInvoked;
+  }
   return true;
 }
 
@@ -61,5 +66,8 @@ export function isDockToolStillOpenable(
   if (surface === "delivery") return capabilities.hasDelivery !== false;
   if (surface === "canvas") return capabilities.hasCanvasDocument !== false;
   if (surface === "ios-simulator") return capabilities.hasAppleSimulator;
+  if (surface === "agents") {
+    return capabilities.hasChildRuns !== false || capabilities.addAgentInvoked;
+  }
   return true;
 }

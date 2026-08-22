@@ -15,6 +15,7 @@ function unavailableMessage(): string {
 }
 
 export interface RightUtilityDockSurfaceProps {
+  readonly agents?: ReactNode;
   readonly browser?: ReactNode;
   readonly canvas?: ReactNode;
   readonly changes?: ReactNode;
@@ -41,6 +42,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     (surface) => !props.tabs.some((tab) => tab.id === surface.id),
   );
   const contents: Readonly<Record<RightUtilityDockSurfaceId, ReactNode | undefined>> = {
+    agents: props.agents,
     browser: props.browser,
     canvas: props.canvas,
     changes: props.changes,

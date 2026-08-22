@@ -40,6 +40,7 @@ import {
 } from "@octant/contracts";
 import type { ExtensionProviderFamily, StandaloneSkillScope } from "@octant/contracts/extensions";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { AgentRunControlParentFacts } from "./agentRun/agentRunControlService";
 import { Data, Effect, Schema, Scope } from "effect";
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
 import { assistantTranscript } from "./chat/assistantTranscript";
@@ -252,7 +253,6 @@ import {
 import { AgentRunWorkspaceReceiptStore } from "./agentRun/agentRunWorkspaceReceiptStore";
 import { AgentRunWorkspaceService } from "./agentRun/agentRunWorkspaceService";
 import type { AgentRunChildWorktreePort } from "./agentRun/agentRunWorkspaceService";
-import { createVerifiedAgentRunWorktreeReceiptPort } from "./agentRun/agentRunWorktreeReceiptPort";
 import { AgentRunSettingsStore } from "./agentRun/agentRunSettingsStore";
 import { createAgentRunSettingsRouteHandler } from "./agentRun/agentRunSettingsRoutes";
 import {
@@ -1432,6 +1432,26 @@ export function startOctantServer(
           );
         },
       },
+      nativeEvidence: ({ parent }) => {
+        const observed = providerRuntimeRegistry.observedState(
+          parent.parentRoute.providerInstanceId as never,
+        );
+        const capabilities = observed?.capabilities;
+        return {
+          claimedNativeSupport: capabilities?.nativeChildAgents ?? "unavailable",
+          // Native execution is an optimization this host only honors when a
+          // native child adapter is wired. Workspace and authority still clamp
+          // on the managed path; they are not evidenced for provider-native
+          // children until that adapter exists.
+          workspace: false,
+          authority: false,
+          observability:
+            capabilities?.streaming === "supported" && capabilities?.toolActivity === "supported",
+          cancellation: capabilities?.interruption === "supported",
+          steering: capabilities?.userQuestions === "supported",
+          recovery: capabilities?.resume === "supported",
+        };
+      },
       authorizeCreation: ({ parentThreadId, windowId }) =>
         authorizeAgentRunCreation({
           persistence,
@@ -1490,37 +1510,6 @@ export function startOctantServer(
           }
         }
         return { parentCandidate, runtimeFacts: [...factsByKey.values()] };
-      },
-      resolveCodeWorktreeReceipt: async ({ request }) => {
-        if (request.workspace.kind !== "code-worktree") return undefined;
-        let receipt;
-        try {
-          receipt = await managedWorktreeReceipts.load(String(request.workspace.worktreeReceiptId));
-        } catch {
-          return createVerifiedAgentRunWorktreeReceiptPort({
-            request,
-            receipt: undefined,
-            projectId: undefined,
-          });
-        }
-        const thread =
-          receipt === undefined
-            ? undefined
-            : persistence.readCodeThread(decodeCodeThreadId(receipt.threadId));
-        return createVerifiedAgentRunWorktreeReceiptPort({
-          request,
-          receipt:
-            receipt === undefined
-              ? undefined
-              : {
-                  receiptId: receipt.receiptId,
-                  threadId: receipt.threadId,
-                  state: receipt.state,
-                  canonicalRepositoryPath: receipt.canonicalRepositoryPath,
-                  canonicalWorktreePath: receipt.canonicalWorktreePath,
-                },
-          projectId: thread === undefined ? undefined : String(thread.projectId),
-        });
       },
       workspace: {
         prepare: async ({ windowId, parent, code }) =>
@@ -5822,20 +5811,7 @@ function authorizeAgentRunCreation(input: {
   readonly parentThreadId: AgentRunParentThreadId;
   readonly windowId: string;
   readonly codeSessionAuthority: CodeSessionAuthorityStore;
-}):
-  | {
-      readonly parentMode: "chat" | "work" | "code";
-      readonly parentAuthority: ReturnType<typeof defaultAgentRunAuthorityCeilingForMode>;
-      readonly liveAuthority: ReturnType<typeof defaultAgentRunAuthorityCeilingForMode>;
-      readonly workspaceParent: {
-        readonly threadId: string;
-        readonly mode: "chat" | "work" | "code";
-        readonly projectId?: string;
-        readonly bindingRevisionId?: string;
-        readonly canonicalRoot?: string;
-      };
-    }
-  | undefined {
+}): AgentRunControlParentFacts | undefined {
   const workspace = input.persistence.readWindowWorkspace(input.windowId as WindowId)?.workspace;
   if (workspace === undefined) return undefined;
 
@@ -5874,6 +5850,12 @@ function authorizeAgentRunCreation(input: {
       parentAuthority,
       liveAuthority,
       workspaceParent: { threadId: String(input.parentThreadId), mode: "chat" },
+      parentRoute: {
+        providerInstanceId: chatThread.providerInstanceId,
+        modelId: chatThread.modelId,
+        ...(chatThread.projectId === undefined ? {} : { projectId: String(chatThread.projectId) }),
+        ...reasoningFromModelOptions(chatThread.modelOptionValues),
+      },
     };
   }
 
@@ -5921,6 +5903,11 @@ function authorizeAgentRunCreation(input: {
         projectId: String(project.id),
         bindingRevisionId: String(revision.revisionId),
         canonicalRoot: project.binding.canonicalRoot,
+      },
+      parentRoute: {
+        providerInstanceId: workThread.providerInstanceId,
+        modelId: workThread.modelId,
+        projectId: String(project.id),
       },
     };
   }
@@ -5970,10 +5957,24 @@ function authorizeAgentRunCreation(input: {
         projectId: String(codeThread.projectId),
         bindingRevisionId: String(codeThread.bindingRevisionId),
       },
+      parentRoute: {
+        providerInstanceId: codeThread.providerInstanceId,
+        modelId: codeThread.modelId,
+        projectId: String(codeThread.projectId),
+      },
     };
   }
 
   return undefined;
+}
+
+function reasoningFromModelOptions(
+  values: Readonly<Record<string, string>> | undefined,
+): { readonly reasoning: string } | Record<string, never> {
+  if (values === undefined) return {};
+  const value = values.reasoning ?? values.effort;
+  if (value === undefined || value.trim().length === 0) return {};
+  return { reasoning: value.trim().slice(0, 128) };
 }
 
 function layoutContainsAgentRunThread(
