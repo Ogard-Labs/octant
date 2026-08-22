@@ -295,6 +295,66 @@ describe("App", () => {
         expect.any(AbortSignal),
       );
     });
+    const older = screen.getByRole("region", { name: "Workspace pane: Older chat" });
+    const created = screen.getByRole("region", { name: "Workspace pane: Exact created chat" });
+    expect(created).toHaveAttribute("data-active", "true");
+    expect(created).toHaveAttribute("aria-current", "true");
+    expect(older).toHaveAttribute("data-active", "false");
+    expect(older).not.toHaveAttribute("aria-current");
+    expect(screen.queryByRole("tablist", { name: /tabs/i })).toBeNull();
+  });
+
+  it("pins a sidebar thread into a new split pane and keeps the list pin separate", async () => {
+    const user = userEvent.setup();
+    const chatApi = chats();
+    const originalBootstrap = chatApi.bootstrap;
+    chatApi.bootstrap = vi.fn(async () => {
+      const value = await originalBootstrap();
+      const first = value.threads[0];
+      if (first === undefined) throw new Error("Expected a Chat thread.");
+      return {
+        ...value,
+        threads: [
+          ...value.threads,
+          { ...first, id: createdChatThreadId, title: "Exact created chat" },
+        ],
+      };
+    });
+
+    render(
+      <App
+        chatClient={chatApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(chatShellBootstrap())}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /Older chat/ }));
+    expect(await screen.findByRole("region", { name: "Workspace pane: Older chat" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Workspace pane: Exact created chat" })).toBeNull();
+
+    await user.pointer({
+      target: screen.getByRole("button", { name: /Exact created chat/ }),
+      keys: "[MouseRight]",
+    });
+    await user.click(await screen.findByRole("menuitem", { name: "Pin in pane" }));
+
+    expect(
+      await screen.findByRole("region", { name: "Workspace pane: Exact created chat" }),
+    ).toBeVisible();
+    expect(screen.getByRole("region", { name: "Workspace pane: Older chat" })).toBeVisible();
+    const pinned = screen.getByRole("region", { name: "Workspace pane: Exact created chat" });
+    expect(pinned).toHaveAttribute("data-active", "true");
+    expect(pinned).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("region", { name: "Workspace pane: Older chat" })).toHaveAttribute(
+      "data-active",
+      "false",
+    );
+    expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull();
+    expect(document.querySelector(".workspace-pane-actions")).toBeNull();
   });
 
   it("opens one App-level command palette that runs a host-derived navigation command", async () => {
@@ -2891,12 +2951,23 @@ describe("App", () => {
       "true",
     );
 
+    expect(
+      screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
+    ).toHaveAttribute("data-active", "true");
     fireEvent.pointerDown(second);
     await waitFor(() =>
       expect(
         screen.getByRole("banner", { name: "Workspace actions for Second thread" }),
       ).toBeVisible(),
     );
+    expect(second).toHaveAttribute("aria-current", "true");
+    expect(
+      screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
+    ).not.toHaveAttribute("aria-current");
+    await waitFor(() =>
+      expect(within(dock).getByRole("heading", { name: "No utility open" })).toBeVisible(),
+    );
+    expect(within(dock).queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
     await user.click(within(dock).getByRole("button", { name: "Add utility tab" }));
     await user.click(screen.getByRole("button", { name: "Terminal" }));
     dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
@@ -2923,5 +2994,85 @@ describe("App", () => {
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
     expect(screen.getByRole("region", { name: "Workspace pane: Second thread" })).toBeVisible();
+  });
+
+  it("clears the previous thread's dock tool before a pane with no thread loads", async () => {
+    const user = userEvent.setup();
+    const initial = codeShellBootstrap();
+    const firstPane = initial.workspace.layouts.code;
+    if (firstPane.kind !== "pane") throw new Error("Expected the Code thread pane.");
+    const projectPaneId = "00000000-0000-4000-8000-000000000918" as never;
+    const split = applyWorkspaceOperation(initial.workspace, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: firstPane.paneId,
+      surface: {
+        kind: "project",
+        id: "00000000-0000-4000-8000-000000000919" as never,
+        projectId,
+        mode: "code",
+        title: "Octant",
+      },
+      splitNodeId: "00000000-0000-4000-8000-000000000920" as never,
+      newPaneNodeId: "00000000-0000-4000-8000-000000000921" as never,
+      newPaneId: projectPaneId,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5 as never,
+    });
+    const workspace = applyWorkspaceOperation(split, {
+      kind: "open-surface",
+      mode: "code",
+      paneId: firstPane.paneId,
+      surface: firstPane.surface,
+    });
+    const workspaceWithContext = {
+      ...workspace,
+      contextByMode: {
+        ...workspace.contextByMode,
+        code: {
+          ...workspace.contextByMode.code,
+          projectId,
+          boundRoot: "/Users/example/Dev/Repos/octant",
+        },
+      },
+    } as typeof workspace;
+
+    render(
+      <App
+        codeClient={codes()}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client({
+          ...initial,
+          workspace: workspaceWithContext,
+          workspaceVersion: workspaceWithContext.version,
+        })}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await user.click(screen.getByRole("button", { name: "Open Right sidebar" }));
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await user.click(within(dock).getByRole("button", { name: "Add utility tab" }));
+    await user.click(screen.getByRole("button", { name: "Terminal" }));
+    expect(within(dock).getByRole("tab", { name: "Terminal" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    fireEvent.pointerDown(screen.getByRole("region", { name: "Workspace pane: Octant" }));
+
+    expect(await within(dock).findByRole("heading", { name: "No utility open" })).toBeVisible();
+    expect(within(dock).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Workspace pane: Octant" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBeVisible();
   });
 });

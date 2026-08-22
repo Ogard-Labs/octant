@@ -89,6 +89,47 @@ describe("SplitWorkspace", () => {
     expect(handlers.onActivatePane).toHaveBeenCalledWith(secondPaneId);
   });
 
+  it("gives exactly one pane a visible and accessible active state", () => {
+    const handlers = splitCallbacks();
+    const { rerender } = render(
+      <SplitWorkspace
+        {...handlers}
+        activePaneId={firstPaneId}
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+
+    const first = screen.getByRole("region", { name: "Workspace pane: First" });
+    const second = screen.getByRole("region", { name: "Workspace pane: Second" });
+    expect(first).toHaveAttribute("data-active", "true");
+    expect(first).toHaveAttribute("aria-current", "true");
+    expect(second).toHaveAttribute("data-active", "false");
+    expect(second).not.toHaveAttribute("aria-current");
+    expect(
+      screen
+        .getAllByRole("region", { name: /Workspace pane:/ })
+        .filter((pane) => pane.getAttribute("aria-current")),
+    ).toHaveLength(1);
+
+    rerender(
+      <SplitWorkspace
+        {...handlers}
+        activePaneId={secondPaneId}
+        layout={splitLayout()}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Workspace pane: First" })).toHaveAttribute(
+      "data-active",
+      "false",
+    );
+    expect(screen.getByRole("region", { name: "Workspace pane: Second" })).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+  });
+
   it("activates whichever pane receives keyboard input", () => {
     const handlers = splitCallbacks();
     render(

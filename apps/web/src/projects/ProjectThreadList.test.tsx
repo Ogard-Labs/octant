@@ -49,6 +49,22 @@ describe("ProjectThreadRows", () => {
     expect(onPinThread).toHaveBeenCalledWith("thread-one", true);
   });
 
+  it("places a thread in a new split pane from its own right-click menu", async () => {
+    const onPinInPane = vi.fn();
+    render(
+      <ProjectThreadRows actions={{ onPinInPane }} onSelectThread={vi.fn()} threads={[thread]} />,
+    );
+
+    await userEvent.pointer({
+      target: screen.getByRole("button", { name: /Controller foundation/ }),
+      keys: "[MouseRight]",
+    });
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Pin in pane" }));
+
+    expect(onPinInPane).toHaveBeenCalledWith("thread-one");
+    expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull();
+  });
+
   it("renames a thread in place from its own right-click menu", async () => {
     const onRenameThread = vi.fn();
     render(

@@ -1,4 +1,5 @@
 import {
+  decodeChatThreadId,
   decodeEnvironmentPresentationState,
   decodeWorkThread,
   decodeWorkThreadId,
@@ -6,6 +7,7 @@ import {
   decodeShellCommand,
   decodeShellSettings,
   decodeWindowId,
+  type ChatThread,
   type ShellCommand,
   type Project,
   type WindowWorkspace,
@@ -1538,6 +1540,202 @@ describe("ShellService", () => {
     expect(append).toHaveBeenCalledOnce();
   });
 
+  it("journals a same-authority thread split as one workspace replacement", () => {
+    const base = { ...defaultWindowWorkspace(ids.window), activeMode: "chat" as const };
+    const chat = base.layouts.chat;
+    if (chat.kind !== "pane") throw new Error("expected pane");
+    const threadId = decodeChatThreadId("00000000-0000-4000-8000-000000000221");
+    const thread = {
+      id: threadId,
+      title: "Pinned chat",
+      projectId,
+      lifecycle: "active",
+      providerInstanceId: "80000000-0000-4000-8000-0000000000b1",
+      modelId: "model-one",
+      researchEnabled: false,
+      researchRouting: "automatic",
+      personalityInstructions: "Be calm.",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    } as ChatThread;
+    const fixture = persistenceStub({
+      workspace: { workspace: base, aggregateVersion: base.version },
+      project: projectFixture("chat"),
+      chatThread: thread,
+    });
+    const service = new ShellService({
+      persistence: fixture.persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+
+    const result = service.execute({
+      kind: "apply-workspace-operation",
+      windowId: ids.window,
+      expectedVersion: base.version,
+      operation: {
+        kind: "split-pane",
+        mode: "chat",
+        targetPaneId: chat.paneId,
+        surface: {
+          kind: "chat-thread",
+          id: "00000000-0000-4000-8000-000000000222" as never,
+          threadId,
+          mode: "chat",
+          title: thread.title,
+        },
+        splitNodeId: "00000000-0000-4000-8000-000000000223",
+        newPaneNodeId: "00000000-0000-4000-8000-000000000224",
+        newPaneId: "00000000-0000-4000-8000-000000000225",
+        orientation: "horizontal",
+        placement: "after",
+        ratio: 0.5,
+      },
+    });
+
+    expect(result).toMatchObject({
+      kind: "workspace-replaced",
+      workspace: {
+        layouts: {
+          chat: {
+            kind: "split",
+            second: { surface: { kind: "chat-thread", threadId } },
+          },
+        },
+        activePaneIds: { chat: "00000000-0000-4000-8000-000000000225" },
+      },
+    });
+    expect(fixture.append).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to split a thread from another Project into this window", () => {
+    const otherProject = decodeProjectId("00000000-0000-4000-8000-000000000210");
+    const base = { ...defaultWindowWorkspace(ids.window), activeMode: "chat" as const };
+    const anchored: WindowWorkspace = {
+      ...base,
+      contextByMode: {
+        ...base.contextByMode,
+        chat: {
+          host: base.contextByMode.chat.host,
+          mode: "chat",
+          projectId,
+          boundRoot: null,
+        },
+      },
+    };
+    const chat = anchored.layouts.chat;
+    if (chat.kind !== "pane") throw new Error("expected pane");
+    const threadId = decodeChatThreadId("00000000-0000-4000-8000-000000000226");
+    const thread = {
+      id: threadId,
+      title: "Other Project chat",
+      projectId: otherProject,
+      lifecycle: "active",
+      providerInstanceId: "80000000-0000-4000-8000-0000000000b1",
+      modelId: "model-one",
+      researchEnabled: false,
+      researchRouting: "automatic",
+      personalityInstructions: "Be calm.",
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    } as ChatThread;
+    const fixture = persistenceStub({
+      workspace: { workspace: anchored, aggregateVersion: 1 as never },
+      projectFor: (id) =>
+        String(id) === String(otherProject)
+          ? ({ ...projectFixture("chat"), id: otherProject } as never)
+          : (projectFixture("chat") as never),
+      chatThread: thread,
+    });
+    const service = new ShellService({
+      persistence: fixture.persistence,
+      uuid: uuidSequence(),
+      clock: () => now,
+    });
+    service.bootstrap(ids.window);
+
+    expect(() =>
+      service.execute({
+        kind: "apply-workspace-operation",
+        windowId: ids.window,
+        expectedVersion: 1,
+        operation: {
+          kind: "split-pane",
+          mode: "chat",
+          targetPaneId: chat.paneId,
+          surface: {
+            kind: "chat-thread",
+            id: "00000000-0000-4000-8000-000000000227" as never,
+            threadId,
+            mode: "chat",
+            title: thread.title,
+          },
+          splitNodeId: "00000000-0000-4000-8000-000000000228",
+          newPaneNodeId: "00000000-0000-4000-8000-000000000229",
+          newPaneId: "00000000-0000-4000-8000-000000000230",
+          orientation: "horizontal",
+          placement: "after",
+          ratio: 0.5,
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        failure: expect.objectContaining({
+          category: "cross-context",
+          offerNewWindow: true,
+        }),
+      }),
+    );
+    expect(fixture.append).not.toHaveBeenCalled();
+  });
+
+  it("refuses a split-pane command from an unregistered window", () => {
+    const base = defaultWindowWorkspace(ids.window);
+    const code = base.layouts.code;
+    if (code.kind !== "pane") throw new Error("expected pane");
+    const { persistence, append } = persistenceStub({
+      workspace: { workspace: base, aggregateVersion: 0 as never },
+    });
+    const service = new ShellService({ persistence, uuid: uuidSequence(), clock: () => now });
+    service.bootstrap(ids.window);
+
+    expect(() =>
+      service.execute({
+        kind: "apply-workspace-operation",
+        windowId: ids.otherWindow,
+        expectedVersion: 0,
+        operation: {
+          kind: "split-pane",
+          mode: "code",
+          targetPaneId: code.paneId,
+          surface: {
+            kind: "welcome",
+            id: "00000000-0000-4000-8000-000000000231" as never,
+            mode: "code",
+            title: "Welcome to Code",
+          },
+          splitNodeId: "00000000-0000-4000-8000-000000000232",
+          newPaneNodeId: "00000000-0000-4000-8000-000000000233",
+          newPaneId: "00000000-0000-4000-8000-000000000234",
+          orientation: "horizontal",
+          placement: "after",
+          ratio: 0.5,
+        },
+      }),
+    ).toThrowError(
+      expect.objectContaining({
+        failure: {
+          category: "invalid",
+          message: expect.stringMatching(/window.*not registered/i),
+        },
+      }),
+    );
+    expect(append).not.toHaveBeenCalled();
+  });
+
   it("rejects a fresh unregistered window identity", () => {
     const settings = decodeShellSettings({
       ...defaultShellSettings(),
@@ -1691,6 +1889,7 @@ function persistenceStub(
     readonly projectFor?: (
       projectId: Parameters<PersistenceService["readProject"]>[0],
     ) => ReturnType<PersistenceService["readProject"]>;
+    readonly chatThread?: ReturnType<PersistenceService["readChatThread"]>;
     readonly canvasProjection?: CanvasProjection;
     readonly appendError?: Error;
     readonly statusState?: "current" | "recovery-required";
@@ -1710,6 +1909,7 @@ function persistenceStub(
       options.workspaces ?? (options.workspace === undefined ? [] : [options.workspace]),
     readProject: (projectId: Parameters<PersistenceService["readProject"]>[0]) =>
       options.projectFor === undefined ? options.project : options.projectFor(projectId),
+    readChatThread: () => options.chatThread,
     readCodeThread: () => undefined,
     canvasProjection: options.canvasProjection ?? new CanvasProjection(),
     status: () => ({

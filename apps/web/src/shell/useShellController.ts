@@ -8,6 +8,7 @@ import {
   type EnvironmentPresentationState,
   type HostId,
   type ProjectId,
+  decodeProjectId,
   decodePaneId,
   decodeWorkspaceTabId,
   type LayoutNodeId,
@@ -235,6 +236,7 @@ type WorkspaceIntent =
       readonly kind: "replace-pane-surface";
       readonly paneId: PaneId;
       readonly surface: WorkspaceTab;
+      readonly projectId?: ProjectId;
     }
   | {
       readonly kind: "split-pane";
@@ -243,6 +245,12 @@ type WorkspaceIntent =
       readonly placement: "before" | "after";
       /** Omitted for an empty split: the new pane opens on the mode welcome. */
       readonly surface?: WorkspaceTab;
+      readonly projectId?: ProjectId;
+    }
+  | {
+      readonly kind: "pin-in-pane";
+      readonly surface: WorkspaceTab;
+      readonly projectId?: ProjectId;
     }
   | { readonly kind: "reset-layout" }
   | {
@@ -489,6 +497,7 @@ export function useShellController(options: ShellControllerOptions) {
       const introduced = operation === undefined ? undefined : introducedSurface(operation);
       const target =
         requestedTarget ??
+        newWindowTargetFromError(error) ??
         (introduced?.kind === "project"
           ? ({ kind: "project", projectId: introduced.projectId } as const)
           : undefined);
@@ -851,6 +860,7 @@ export function useShellController(options: ShellControllerOptions) {
     orientation: "horizontal" | "vertical",
     placement: "before" | "after" = "after",
     surface?: WorkspaceTab,
+    projectId?: ProjectId,
   ): Promise<void> {
     await enqueueMutation({
       kind: "workspace",
@@ -860,20 +870,51 @@ export function useShellController(options: ShellControllerOptions) {
         orientation,
         placement,
         ...(surface === undefined ? {} : { surface }),
+        ...(projectId === undefined ? {} : { projectId }),
       },
     });
   }
 
-  async function replacePaneSurface(paneId: PaneId, surface: WorkspaceTab): Promise<void> {
+  async function replacePaneSurface(
+    paneId: PaneId,
+    surface: WorkspaceTab,
+    projectId?: ProjectId,
+  ): Promise<void> {
     await enqueueMutation({
       kind: "workspace",
-      intent: { kind: "replace-pane-surface", paneId, surface },
+      intent: {
+        kind: "replace-pane-surface",
+        paneId,
+        surface,
+        ...(projectId === undefined ? {} : { projectId }),
+      },
+    });
+  }
+
+  /**
+   * Places a thread in a new split pane beside the one this window is about.
+   * A thread already visible is activated instead of duplicated. Cross-mode,
+   * cross-Project, and cross-host placement is refused so the server never
+   * journals a mixed-authority tree.
+   */
+  async function pinInPane(surface: WorkspaceTab, projectId?: ProjectId): Promise<void> {
+    if (committedShell.current?.workspace.focusedPaneId !== undefined) {
+      await enqueueMutation({ kind: "workspace", intent: { kind: "clear-focus" } });
+    }
+    await enqueueMutation({
+      kind: "workspace",
+      intent: {
+        kind: "pin-in-pane",
+        surface,
+        ...(projectId === undefined ? {} : { projectId }),
+      },
     });
   }
 
   async function dropSurface(
     surface: WorkspaceTab,
     destination: WorkspaceSurfaceDropDestination,
+    projectId?: ProjectId,
   ): Promise<void> {
     // Cross-Project denial for preview surfaces: a preview carries its own
     // opaque Project binding. Dropping it into a pane whose mode context is
@@ -902,14 +943,14 @@ export function useShellController(options: ShellControllerOptions) {
       }
     }
     if (destination.kind === "center") {
-      await replacePaneSurface(destination.targetPaneId, surface);
+      await replacePaneSurface(destination.targetPaneId, surface, projectId);
       return;
     }
     const orientation =
       destination.edge === "left" || destination.edge === "right" ? "horizontal" : "vertical";
     const placement =
       destination.edge === "left" || destination.edge === "top" ? "before" : "after";
-    await splitPane(destination.targetPaneId, orientation, placement, surface);
+    await splitPane(destination.targetPaneId, orientation, placement, surface, projectId);
   }
 
   function previewSplitResize(splitNodeId: LayoutNodeId, ratio: number): void {
@@ -997,6 +1038,7 @@ export function useShellController(options: ShellControllerOptions) {
     dropSurface,
     errorMessage,
     focusPane,
+    pinInPane,
     openDraftThread,
     openChatThread,
     openCodeThread,
@@ -1422,6 +1464,7 @@ function createWorkspaceMutation(
         message: "Pane closed.",
       };
     case "replace-pane-surface": {
+      refuseCrossAuthority(latest.workspace, mode, intent.surface, intent.projectId);
       const existing = findVisibleSurfacePane(layout, intent.surface);
       return {
         operation: {
@@ -1435,10 +1478,12 @@ function createWorkspaceMutation(
             ? `${intent.surface.title} opened.`
             : `${intent.surface.title} moved.`,
         activatedSurfaceId: existing?.surface.id ?? intent.surface.id,
+        ...windowTargetForSurface(intent.surface, intent.projectId),
       };
     }
     case "split-pane": {
       const surface = intent.surface ?? workspaceWelcomeSurface(mode, newTabId());
+      refuseCrossAuthority(latest.workspace, mode, surface, intent.projectId);
       const existing = findVisibleSurfacePane(layout, surface);
       return {
         operation: {
@@ -1455,6 +1500,41 @@ function createWorkspaceMutation(
         },
         message: `${intent.orientation === "horizontal" ? "Horizontal" : "Vertical"} split created.`,
         activatedSurfaceId: existing?.surface.id ?? surface.id,
+        ...windowTargetForSurface(surface, intent.projectId),
+      };
+    }
+    case "pin-in-pane": {
+      refuseCrossAuthority(latest.workspace, mode, intent.surface, intent.projectId);
+      const existing = findVisibleSurfacePane(layout, intent.surface);
+      if (existing !== undefined) {
+        return {
+          operation: {
+            kind: "open-surface",
+            mode,
+            paneId: existing.paneId,
+            surface: existing.surface,
+          },
+          message: `${intent.surface.title} selected.`,
+          activatedSurfaceId: existing.surface.id,
+        };
+      }
+      const targetPane = preferredPane(latest.workspace, mode);
+      return {
+        operation: {
+          kind: "split-pane",
+          mode,
+          targetPaneId: targetPane.paneId,
+          surface: intent.surface,
+          splitNodeId: newLayoutNodeId(),
+          newPaneNodeId: newLayoutNodeId(),
+          newPaneId: newPaneId(),
+          orientation: "horizontal",
+          placement: "after",
+          ratio: 0.5 as SplitRatio,
+        },
+        message: `${intent.surface.title} pinned.`,
+        activatedSurfaceId: intent.surface.id,
+        ...windowTargetForSurface(intent.surface, intent.projectId),
       };
     }
     case "resize-split":
@@ -1779,6 +1859,87 @@ function isDifferentProject(
     currentProjectId !== null &&
     String(currentProjectId) !== String(projectId)
   );
+}
+
+function refuseCrossAuthority(
+  workspace: WindowWorkspace,
+  mode: OctantMode,
+  surface: WorkspaceTab,
+  projectId: ProjectId | undefined,
+): void {
+  const offer = windowTargetForSurface(surface, projectId);
+  if ("mode" in surface && surface.mode !== mode) {
+    throw {
+      category: "cross-context",
+      message: "This surface belongs to a different mode. Open it in a new window to switch modes.",
+      ...offer,
+    };
+  }
+  if (
+    "hostId" in surface &&
+    surface.hostId !== undefined &&
+    String(surface.hostId) !== String(workspace.contextByMode[mode].host)
+  ) {
+    throw {
+      category: "cross-context",
+      message: "This surface belongs to a different host. Open it in a new window to switch hosts.",
+      ...offer,
+    };
+  }
+  if (isDifferentProject(workspace, mode, projectId)) {
+    throw {
+      category: "cross-context",
+      message:
+        "This surface belongs to a different Project. Open it in a new window to keep its authority.",
+      ...offer,
+    };
+  }
+}
+
+function windowTargetForSurface(
+  surface: WorkspaceTab,
+  projectId: ProjectId | undefined,
+): { readonly newWindowTarget: ProjectWindowTarget } | Record<string, never> {
+  if (projectId === undefined) return {};
+  if (surface.kind === "code-overview" || surface.kind === "work-thread") {
+    return {
+      newWindowTarget: {
+        kind: "project-thread",
+        projectId,
+        mode: surface.kind === "code-overview" ? "code" : "work",
+        threadId: String(surface.threadId),
+      },
+    };
+  }
+  return { newWindowTarget: { kind: "project", projectId } };
+}
+
+function newWindowTargetFromError(error: unknown): ProjectWindowTarget | undefined {
+  if (typeof error !== "object" || error === null || !("newWindowTarget" in error)) {
+    return undefined;
+  }
+  const target = error.newWindowTarget;
+  if (typeof target !== "object" || target === null || !("kind" in target)) return undefined;
+  if (target.kind === "project" && "projectId" in target && typeof target.projectId === "string") {
+    return { kind: "project", projectId: decodeProjectId(target.projectId) };
+  }
+  if (
+    target.kind === "project-thread" &&
+    "projectId" in target &&
+    typeof target.projectId === "string" &&
+    "mode" in target &&
+    (target.mode === "code" || target.mode === "work") &&
+    "threadId" in target &&
+    typeof target.threadId === "string"
+  ) {
+    return {
+      kind: "project-thread",
+      projectId: decodeProjectId(target.projectId),
+      mode: target.mode,
+      threadId: target.threadId,
+    };
+  }
+  return undefined;
 }
 
 function newTabId(): WorkspaceTabId {
