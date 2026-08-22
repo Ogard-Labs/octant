@@ -10,20 +10,11 @@ import type {
 } from "@octant/contracts/chat";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
-import {
-  Ban,
-  Check,
-  Circle,
-  CircleAlert,
-  CircleX,
-  Clock3,
-  GitBranch,
-  LoaderCircle,
-  Pencil,
-} from "lucide-react";
+import { Ban, Check, Circle, CircleAlert, CircleX, Clock3, LoaderCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ThreadCheckpointControls } from "../checkpoints/ThreadCheckpointControls";
+import { copyText, TurnActionMenu, type TurnAction } from "../transcript/TurnActionMenu";
 import { TranscriptWindow } from "../transcript/TranscriptWindow";
 import { ChatRichText } from "./ChatRichText";
 import { ChatTurnEditor } from "./ChatTurnEditor";
@@ -74,6 +65,9 @@ const attemptLabels: Record<ChatAttemptOutcome, string> = {
 
 export function ChatTranscript(props: ChatTranscriptProps) {
   const [editingTurnId, setEditingTurnId] = useState<string | undefined>(undefined);
+  const [checkpointDraft, setCheckpointDraft] = useState<
+    { readonly turnId: string; readonly kind: "mark" | "restore" } | undefined
+  >(undefined);
   // Revising a message appends a new turn rather than rewriting history, so the
   // transcript shows the conversation as it now stands and the superseded turns
   // stay in the journal behind it.
@@ -192,65 +186,111 @@ export function ChatTranscript(props: ChatTranscriptProps) {
             </ul>
           ) : null;
 
+        const turnCitations = turn.attempts.flatMap(
+          (attempt) => citationsByAttempt.get(String(attempt.id)) ?? [],
+        );
+        const assistantBodies = turn.attempts.flatMap((attempt) =>
+          attempt.responseRefs.flatMap((reference) => {
+            const content = resolvedContent(contentById, reference, "assistant");
+            return content === undefined ? [] : [content.body];
+          }),
+        );
+        const actions = editing
+          ? []
+          : chatTurnActions({
+              busy: props.busy === true,
+              canEdit: userContent !== undefined && props.onEditTurn !== undefined,
+              canBranch: props.onBranchTurn !== undefined,
+              checkpointsAvailable: checkpoints !== undefined,
+              checkpointBusy: checkpoints?.busy === true,
+              marked: marked !== undefined,
+            });
+
         return (
           <div className="chat-transcript__turn">
-            <article aria-label="Your message" className="turn-user">
-              {editing && userContent !== undefined && props.onEditTurn !== undefined ? (
-                <>
-                  <ChatTurnEditor
-                    busy={props.busy === true}
-                    initialPrompt={userContent.body}
-                    onCancel={() => setEditingTurnId(undefined)}
-                    onSubmit={(turnId, prompt) => {
-                      setEditingTurnId(undefined);
-                      props.onEditTurn?.(turnId, prompt);
+            <TurnActionMenu
+              actions={actions}
+              onAction={(value) => {
+                if (value === "edit") setEditingTurnId(String(turn.id));
+                else if (value === "branch") props.onBranchTurn?.(turn.id);
+                else if (value === "checkpoint-mark") {
+                  setCheckpointDraft({ turnId: String(turn.id), kind: "mark" });
+                } else if (value === "checkpoint-restore") {
+                  setCheckpointDraft({ turnId: String(turn.id), kind: "restore" });
+                } else if (value === "checkpoint-forget") {
+                  if (marked !== undefined) checkpoints?.onForget(marked);
+                } else if (value === "copy-references") {
+                  void copyText(
+                    chatTurnReferenceText({
+                      userBody: userContent?.body,
+                      attachments: attachments.map(
+                        (attachment) => attachment?.displayName ?? "Attachment is unavailable.",
+                      ),
+                      assistantBodies,
+                      citations: turnCitations.map((citation) => {
+                        const sourceUrl = safeCitationUrl(citation.sourceUrl);
+                        return sourceUrl === undefined
+                          ? citation.sourceTitle
+                          : `${citation.sourceTitle} · ${sourceUrl}`;
+                      }),
+                    }),
+                  );
+                }
+              }}
+            >
+              <article aria-label="Your message" className="turn-user">
+                {editing && userContent !== undefined && props.onEditTurn !== undefined ? (
+                  <>
+                    <ChatTurnEditor
+                      busy={props.busy === true}
+                      initialPrompt={userContent.body}
+                      onCancel={() => setEditingTurnId(undefined)}
+                      onSubmit={(turnId, prompt) => {
+                        setEditingTurnId(undefined);
+                        props.onEditTurn?.(turnId, prompt);
+                      }}
+                      turnId={turn.id}
+                    />
+                    {attachmentList}
+                  </>
+                ) : (
+                  <div className="bubble">
+                    <MessageBody content={userContent} missing="Message content is unavailable." />
+                    {attachmentList}
+                  </div>
+                )}
+                {editing || checkpoints === undefined ? null : (
+                  <ThreadCheckpointControls
+                    busy={props.busy === true || checkpoints.busy}
+                    {...(marked === undefined ? {} : { checkpoint: marked })}
+                    defaultLabel={`Message ${String(turn.sequence)}`}
+                    {...(checkpointDraft?.turnId === String(turn.id)
+                      ? { draft: checkpointDraft.kind }
+                      : {})}
+                    onCancelDraft={() => setCheckpointDraft(undefined)}
+                    onMark={(label) => {
+                      checkpoints.onMark(turn.id, label);
+                      setCheckpointDraft(undefined);
                     }}
-                    turnId={turn.id}
+                    onRestore={(title) => {
+                      if (marked !== undefined) checkpoints.onRestore(marked, title);
+                      setCheckpointDraft(undefined);
+                    }}
                   />
-                  {attachmentList}
-                </>
-              ) : (
-                <div className="bubble">
-                  <MessageBody content={userContent} missing="Message content is unavailable." />
-                  {attachmentList}
-                </div>
-              )}
-              {editing || checkpoints === undefined ? null : (
-                <ThreadCheckpointControls
-                  busy={props.busy === true || checkpoints.busy}
-                  {...(marked === undefined ? {} : { checkpoint: marked })}
-                  defaultLabel={`Message ${String(turn.sequence)}`}
-                  onForget={() => {
-                    if (marked !== undefined) checkpoints.onForget(marked);
-                  }}
-                  onMark={(label) => checkpoints.onMark(turn.id, label)}
-                  onRestore={(title) => {
-                    if (marked !== undefined) checkpoints.onRestore(marked, title);
-                  }}
+                )}
+              </article>
+              {routeDecision === undefined ? null : <RouteReceipt decision={routeDecision} />}
+              {turn.attempts.map((attempt, index) => (
+                <AttemptBlock
+                  attempt={attempt}
+                  contentById={contentById}
+                  key={attempt.id}
+                  onRetryAttempt={props.onRetryAttempt}
+                  previousAttempt={turn.attempts[index - 1]}
+                  citations={citationsByAttempt.get(String(attempt.id)) ?? []}
                 />
-              )}
-              {editing ? null : (
-                <TurnActions
-                  busy={props.busy === true}
-                  canEdit={userContent !== undefined && props.onEditTurn !== undefined}
-                  {...(props.onBranchTurn === undefined
-                    ? {}
-                    : { onBranch: () => props.onBranchTurn?.(turn.id) })}
-                  onEdit={() => setEditingTurnId(String(turn.id))}
-                />
-              )}
-            </article>
-            {routeDecision === undefined ? null : <RouteReceipt decision={routeDecision} />}
-            {turn.attempts.map((attempt, index) => (
-              <AttemptBlock
-                attempt={attempt}
-                contentById={contentById}
-                key={attempt.id}
-                onRetryAttempt={props.onRetryAttempt}
-                previousAttempt={turn.attempts[index - 1]}
-                citations={citationsByAttempt.get(String(attempt.id)) ?? []}
-              />
-            ))}
+              ))}
+            </TurnActionMenu>
           </div>
         );
       }}
@@ -265,45 +305,71 @@ export function ChatTranscript(props: ChatTranscriptProps) {
 }
 
 /**
- * Per-message actions. Both are proposals: the renderer never decides that an
- * edit or a branch is allowed, it asks the server, which re-checks the thread's
- * version, lifecycle, and Project scope before anything happens.
+ * Per-message secondary actions. Each is a proposal: the renderer never
+ * decides that an edit, branch, or checkpoint is allowed, it asks the
+ * server, which re-checks the thread's version, lifecycle, and Project
+ * scope before anything happens.
  */
-function TurnActions(props: {
+function chatTurnActions(input: {
   readonly busy: boolean;
   readonly canEdit: boolean;
-  readonly onBranch?: () => void;
-  readonly onEdit: () => void;
-}) {
-  if (!props.canEdit && props.onBranch === undefined) return null;
-  return (
-    <div aria-label="Message actions" className="chat-transcript__turn-actions" role="group">
-      {props.canEdit ? (
-        <OctantButton
-          disabled={props.busy}
-          onClick={props.onEdit}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <Pencil aria-hidden="true" size={12} strokeWidth={1.8} />
-          Edit
-        </OctantButton>
-      ) : null}
-      {props.onBranch === undefined ? null : (
-        <OctantButton
-          disabled={props.busy}
-          onClick={props.onBranch}
-          size="sm"
-          type="button"
-          variant="ghost"
-        >
-          <GitBranch aria-hidden="true" size={12} strokeWidth={1.8} />
-          Branch from here
-        </OctantButton>
-      )}
-    </div>
-  );
+  readonly canBranch: boolean;
+  readonly checkpointsAvailable: boolean;
+  readonly checkpointBusy: boolean;
+  readonly marked: boolean;
+}): ReadonlyArray<TurnAction> {
+  const checkpointDisabled = input.busy || input.checkpointBusy;
+  const actions: TurnAction[] = [];
+  if (input.canEdit) {
+    actions.push({
+      label: "Edit",
+      value: "edit",
+      ...(input.busy ? { disabled: true } : {}),
+    });
+  }
+  if (input.canBranch) {
+    actions.push({
+      label: "Branch from here",
+      value: "branch",
+      ...(input.busy ? { disabled: true } : {}),
+    });
+  }
+  if (input.checkpointsAvailable) {
+    if (input.marked) {
+      actions.push({
+        label: "Restore from here",
+        value: "checkpoint-restore",
+        ...(checkpointDisabled ? { disabled: true } : {}),
+      });
+      actions.push({
+        label: "Forget",
+        value: "checkpoint-forget",
+        ...(checkpointDisabled ? { disabled: true } : {}),
+      });
+    } else {
+      actions.push({
+        label: "Checkpoint",
+        value: "checkpoint-mark",
+        ...(checkpointDisabled ? { disabled: true } : {}),
+      });
+    }
+  }
+  actions.push({ label: "Copy references", value: "copy-references" });
+  return actions;
+}
+
+function chatTurnReferenceText(input: {
+  readonly userBody: string | undefined;
+  readonly attachments: ReadonlyArray<string>;
+  readonly assistantBodies: ReadonlyArray<string>;
+  readonly citations: ReadonlyArray<string>;
+}): string {
+  return [
+    ...(input.userBody === undefined ? [] : [input.userBody]),
+    ...input.attachments,
+    ...input.assistantBodies,
+    ...input.citations,
+  ].join("\n");
 }
 
 function branchOriginText(origin: NonNullable<ChatThreadView["thread"]["branchedFrom"]>): string {

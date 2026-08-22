@@ -54,6 +54,16 @@ A chip you can no longer open is marked unavailable and contributes no content. 
 
 Side Chat is a separate Chat conversation about one source thread. Open the right sidebar, use **Add utility tab**, and choose **Side Chat** while that thread is focused. It never replaces the source thread. Switching between visible threads restores each thread's own sidebar tabs and Side Chat conversation. Side Chat can answer questions using the same bounded excerpt; it cannot approve, steer, change criteria, or write to the source thread. If the source thread is deleted or no longer openable, Side Chat refuses rather than inventing an empty conversation.
 
+## Turn actions
+
+Edit, branch, checkpoint, and copy live in each turn's **More actions** menu
+(the ⋯ control that appears when the turn is hovered or focused). The same
+items are on the turn's context menu, so right-click is never the only route.
+Retrying a failed or interrupted response stays on the turn itself.
+
+A checkpoint marker stays on the turn only when that point is marked. Restoring
+it starts a second thread; it does not rewind this one.
+
 ## Export
 
 These actions live in the thread header's **Thread actions** menu (the ⋯
