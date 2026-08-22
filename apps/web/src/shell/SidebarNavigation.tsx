@@ -1,4 +1,12 @@
-import { Blocks, Bot, Code2, GitPullRequest, Kanban, Library, MessageSquarePlus } from "lucide-react";
+import {
+  Blocks,
+  Bot,
+  Code2,
+  GitPullRequest,
+  Kanban,
+  Library,
+  MessageSquarePlus,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import {
   buildSidebarNavigation,
