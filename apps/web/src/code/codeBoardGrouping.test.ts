@@ -43,6 +43,7 @@ function card(overrides: {
     worktree: { kind: "unavailable", checkoutId: "00000000-0000-4000-8000-0000000040ff" },
     changedFiles: { kind: "unavailable" },
     linkedPullRequest: { kind: "none", freshness: "fresh" },
+    pullRequestSummaries: { items: [], hiddenCount: 0 },
     checks: { freshness: "fresh", state: "unknown" },
     reviewState: { freshness: "fresh", state: "unknown" },
     childAgents: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },
@@ -55,7 +56,7 @@ function card(overrides: {
       overrides.activity === undefined
         ? null
         : (overrides.activity as CodeBoardCard["lastMeaningfulActivityAt"]),
-  } as CodeBoardCard;
+  } as unknown as CodeBoardCard;
 }
 
 const projects: readonly CodeBoardProjectRef[] = [

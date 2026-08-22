@@ -109,6 +109,11 @@ function service(input: {
     runtime: {
       observe: (threadId) => input.runtime?.(threadId) ?? idleRuntime(),
     },
+    pullRequests: {
+      snapshot: () => ({ rows: [], freshness: { status: "empty" }, githubRevoked: false }),
+    },
+    promotions: { snapshot: () => new Map() },
+    codeThreads: { list: () => [] },
     clock: () => now,
   });
 }

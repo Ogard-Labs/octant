@@ -4,6 +4,7 @@ import type {
   WorkBoardRecoveryReason,
   WorkBoardStatus,
   WorkBoardView,
+  ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { WorkThreadId } from "@octant/contracts/work-threads";
@@ -20,6 +21,7 @@ import {
   type WorkBoardGrouping,
   type WorkBoardProjectRef,
 } from "./workBoardGrouping";
+import { ThreadBoardPullRequestSummaries } from "../threadBoard/ThreadBoardPullRequestSummaries";
 
 const GROUPING_STORAGE_KEY = "octant.work.board.grouping";
 const SHOW_EMPTY_GROUPS_STORAGE_KEY = "octant.work.board.show-empty-groups";
@@ -35,6 +37,7 @@ export interface WorkThreadBoardProps {
   readonly loadBoard: (query: WorkBoardQuery) => Promise<WorkBoardView>;
   readonly projects: readonly WorkBoardProjectRef[];
   readonly onOpenThread?: (target: WorkThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly onClose?: () => void;
   readonly initialGrouping?: WorkBoardGrouping;
   readonly storage?: Pick<Storage, "getItem" | "setItem">;
@@ -400,6 +403,9 @@ export function WorkThreadBoard(props: WorkThreadBoardProps) {
         {...(props.providerLabels === undefined ? {} : { providerLabels: props.providerLabels })}
         {...(props.unreadThreadIds === undefined ? {} : { unreadThreadIds: props.unreadThreadIds })}
         {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
+        {...(props.onSelectPullRequest === undefined
+          ? {}
+          : { onSelectPullRequest: props.onSelectPullRequest })}
       />
     </section>
   );
@@ -416,6 +422,7 @@ function WorkBoardBody(props: {
   readonly showEmptyGroups: boolean;
   readonly isNarrow: boolean;
   readonly onOpenThread?: (target: WorkThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
   if (props.board.status === "loading") {
     return (
@@ -508,6 +515,7 @@ function WorkBoardListView(props: {
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly onOpenThread?: (target: WorkThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
   return (
     <div className="code-board__list">
@@ -555,6 +563,7 @@ function WorkBoardColumnView(props: {
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly onOpenThread?: (target: WorkThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
   const { column } = props;
   const statusPresentation = column.kind === "status" ? "screen-reader" : "visible";
@@ -605,6 +614,7 @@ function WorkBoardCardView(props: {
   readonly projectName?: string;
   readonly providerLabel?: string;
   readonly onOpen?: (target: WorkThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
   const { card } = props;
   const statusLabel = workBoardStatusLabel(card.status);
@@ -647,6 +657,12 @@ function WorkBoardCardView(props: {
           </span>
         ))}
       </span>
+      <ThreadBoardPullRequestSummaries
+        {...(props.onSelectPullRequest === undefined
+          ? {}
+          : { onSelect: props.onSelectPullRequest })}
+        summaries={card.pullRequestSummaries}
+      />
       {waitingReason === undefined ? null : (
         <span className="board-card-blocked">{waitingReason}</span>
       )}
@@ -672,15 +688,20 @@ function overlayProps(props: {
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly onOpenThread?: (target: WorkThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }): {
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly onOpenThread?: (target: WorkThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 } {
   return {
     ...(props.providerLabels === undefined ? {} : { providerLabels: props.providerLabels }),
     ...(props.unreadThreadIds === undefined ? {} : { unreadThreadIds: props.unreadThreadIds }),
     ...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread }),
+    ...(props.onSelectPullRequest === undefined
+      ? {}
+      : { onSelectPullRequest: props.onSelectPullRequest }),
   };
 }
 
@@ -696,11 +717,13 @@ function cardViewExtras(
     readonly projectNames: ReadonlyMap<string, string>;
     readonly providerLabels?: ReadonlyMap<string, string>;
     readonly onOpenThread?: (target: WorkThreadOpenTarget) => void;
+    readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   },
 ): {
   readonly projectName?: string;
   readonly providerLabel?: string;
   readonly onOpen?: (target: WorkThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 } {
   const projectName = props.projectNames.get(String(card.projectId));
   const providerLabel = props.providerLabels?.get(String(card.providerInstanceId));
@@ -708,6 +731,9 @@ function cardViewExtras(
     ...(projectName === undefined ? {} : { projectName }),
     ...(providerLabel === undefined ? {} : { providerLabel }),
     ...(props.onOpenThread === undefined ? {} : { onOpen: props.onOpenThread }),
+    ...(props.onSelectPullRequest === undefined
+      ? {}
+      : { onSelectPullRequest: props.onSelectPullRequest }),
   };
 }
 

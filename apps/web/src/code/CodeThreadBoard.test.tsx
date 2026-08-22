@@ -56,6 +56,7 @@ function card(overrides: {
     },
     changedFiles: overrides.changedFiles ?? { kind: "unavailable" },
     linkedPullRequest: overrides.linkedPullRequest ?? { kind: "none", freshness: "fresh" },
+    pullRequestSummaries: { items: [], hiddenCount: 0 },
     checks: overrides.checks ?? { freshness: "fresh", state: "unknown" },
     reviewState: overrides.reviewState ?? { freshness: "fresh", state: "unknown" },
     childAgents: {
@@ -71,7 +72,7 @@ function card(overrides: {
     ...(overrides.blockingReason === undefined ? {} : { blockingReason: overrides.blockingReason }),
     followUp: overrides.followUp ?? false,
     lastMeaningfulActivityAt: overrides.lastMeaningfulActivityAt ?? null,
-  } as CodeBoardCard;
+  } as unknown as CodeBoardCard;
 }
 
 function view(

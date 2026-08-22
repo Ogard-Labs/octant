@@ -3029,6 +3029,9 @@ export function startOctantServer(
             observe: (threadId) =>
               boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId)),
           },
+          pullRequests: {
+            snapshot: () => projectPullRequestService.boardSnapshot(windowId),
+          },
           clock: () => new Date().toISOString(),
         });
         return board.query(query);
@@ -5281,6 +5284,20 @@ export function startOctantServer(
                     decodeAgentRunParentThreadId(String(entry.thread.id)),
                   ),
                 }),
+            },
+            pullRequests: {
+              snapshot: () => projectPullRequestService.boardSnapshot(windowId),
+            },
+            promotions: {
+              snapshot: () => workPromotionProjection.snapshot(),
+            },
+            codeThreads: {
+              list: async () => {
+                const codeBootstrap = await baseRouteCodeService.bootstrap(windowId);
+                return codeBootstrap.threads
+                  .filter((thread) => thread.lifecycle !== "archived")
+                  .map((thread) => ({ id: thread.id, projectId: thread.projectId }));
+              },
             },
             runtime: {
               observe: (threadId) => {

@@ -4,6 +4,7 @@ import type {
   CodeBoardStatus,
   CodeBoardView,
   CodeThreadMetadataRecoveryReason,
+  ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
 import type { CodeThreadId } from "@octant/contracts/code";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -20,6 +21,7 @@ import {
   type CodeBoardGrouping,
   type CodeBoardProjectRef,
 } from "./codeBoardGrouping";
+import { ThreadBoardPullRequestSummaries } from "../threadBoard/ThreadBoardPullRequestSummaries";
 
 const GROUPING_STORAGE_KEY = "octant.code.board.grouping";
 const SHOW_EMPTY_GROUPS_STORAGE_KEY = "octant.code.board.show-empty-groups";
@@ -36,6 +38,7 @@ export interface CodeThreadBoardProps {
   /** Code Projects in the user's configured order (for grouping and filters). */
   readonly projects: readonly CodeBoardProjectRef[];
   readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   readonly onClose?: () => void;
   readonly initialGrouping?: CodeBoardGrouping;
   /** Injectable for tests; defaults to `window.localStorage` when available. */
@@ -443,6 +446,9 @@ export function CodeThreadBoard(props: CodeThreadBoardProps) {
         {...(props.providerLabels === undefined ? {} : { providerLabels: props.providerLabels })}
         {...(props.unreadThreadIds === undefined ? {} : { unreadThreadIds: props.unreadThreadIds })}
         {...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread })}
+        {...(props.onSelectPullRequest === undefined
+          ? {}
+          : { onSelectPullRequest: props.onSelectPullRequest })}
       />
     </section>
   );
@@ -459,6 +465,7 @@ function CodeBoardBody(props: {
   readonly showEmptyGroups: boolean;
   readonly isNarrow: boolean;
   readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
   if (props.board.status === "loading") {
     return (
@@ -554,6 +561,7 @@ function CodeBoardListView(props: {
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
   return (
     <div className="code-board__list">
@@ -601,6 +609,7 @@ function CodeBoardColumnView(props: {
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
   const { column } = props;
   // A Status column header already states the status visibly, so its cards only
@@ -655,6 +664,7 @@ function CodeBoardCardView(props: {
   readonly projectName?: string;
   readonly providerLabel?: string;
   readonly onOpen?: (target: CodeThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }) {
   const { card } = props;
   const statusLabel = codeBoardStatusLabel(card.status);
@@ -707,6 +717,12 @@ function CodeBoardCardView(props: {
           </span>
         ))}
       </span>
+      <ThreadBoardPullRequestSummaries
+        {...(props.onSelectPullRequest === undefined
+          ? {}
+          : { onSelect: props.onSelectPullRequest })}
+        summaries={card.pullRequestSummaries}
+      />
       {waitingReason === undefined ? null : (
         <span className="board-card-blocked">{waitingReason}</span>
       )}
@@ -732,15 +748,20 @@ function overlayProps(props: {
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 }): {
   readonly providerLabels?: ReadonlyMap<string, string>;
   readonly unreadThreadIds?: ReadonlySet<string>;
   readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 } {
   return {
     ...(props.providerLabels === undefined ? {} : { providerLabels: props.providerLabels }),
     ...(props.unreadThreadIds === undefined ? {} : { unreadThreadIds: props.unreadThreadIds }),
     ...(props.onOpenThread === undefined ? {} : { onOpenThread: props.onOpenThread }),
+    ...(props.onSelectPullRequest === undefined
+      ? {}
+      : { onSelectPullRequest: props.onSelectPullRequest }),
   };
 }
 
@@ -756,11 +777,13 @@ function cardViewExtras(
     readonly projectNames: ReadonlyMap<string, string>;
     readonly providerLabels?: ReadonlyMap<string, string>;
     readonly onOpenThread?: (target: CodeThreadOpenTarget) => void;
+    readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
   },
 ): {
   readonly projectName?: string;
   readonly providerLabel?: string;
   readonly onOpen?: (target: CodeThreadOpenTarget) => void;
+  readonly onSelectPullRequest?: (identity: ThreadBoardPullRequestIdentity) => void;
 } {
   const projectName = props.projectNames.get(String(card.projectId));
   const providerLabel = props.providerLabels?.get(String(card.providerInstanceId));
@@ -768,6 +791,9 @@ function cardViewExtras(
     ...(projectName === undefined ? {} : { projectName }),
     ...(providerLabel === undefined ? {} : { providerLabel }),
     ...(props.onOpenThread === undefined ? {} : { onOpen: props.onOpenThread }),
+    ...(props.onSelectPullRequest === undefined
+      ? {}
+      : { onSelectPullRequest: props.onSelectPullRequest }),
   };
 }
 
@@ -793,6 +819,8 @@ function cardFacts(
   providerLabel: string | undefined,
 ): ReadonlyArray<CardFact> {
   const facts: CardFact[] = [];
+  const hasPullRequestSummaries =
+    card.pullRequestSummaries.items.length > 0 || card.pullRequestSummaries.hiddenCount > 0;
   if (projectName !== undefined) facts.push({ key: "project", text: projectName });
   facts.push({
     key: "checkout",
@@ -832,7 +860,7 @@ function cardFacts(
     }
     facts.push({ key: "child-runs", text: parts.join(" · ") });
   }
-  if (card.linkedPullRequest.kind === "linked") {
+  if (!hasPullRequestSummaries && card.linkedPullRequest.kind === "linked") {
     facts.push({
       key: "pr",
       text: `#${card.linkedPullRequest.number}${
@@ -841,14 +869,18 @@ function cardFacts(
       icon: <GitPullRequest aria-hidden="true" className="icon" size={12} strokeWidth={1.8} />,
     });
   }
-  if (card.checks.state !== "unknown") {
+  if (!hasPullRequestSummaries && card.checks.state !== "unknown") {
     facts.push({
       key: "checks",
       text: card.checks.state === "failing" ? "Checks failing" : `Checks ${card.checks.state}`,
       className: card.checks.state === "failing" ? "fact bad" : "fact",
     });
   }
-  if (card.reviewState.state !== "unknown" && card.reviewState.state !== "none") {
+  if (
+    !hasPullRequestSummaries &&
+    card.reviewState.state !== "unknown" &&
+    card.reviewState.state !== "none"
+  ) {
     facts.push({
       key: "review",
       text: `Review ${card.reviewState.state.replace("-", " ")}`,

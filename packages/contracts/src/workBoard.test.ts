@@ -32,6 +32,7 @@ function boardCard(overrides: Record<string, unknown> = {}) {
     citations: { count: 0, staleCount: 0 },
     goal: { kind: "none" },
     childRuns: { active: 0, completed: 0, failed: 0, unacknowledgedResults: 0 },
+    pullRequestSummaries: { items: [], hiddenCount: 0 },
     recovery: { kind: "ok" },
     staleEvidence: false,
     followUp: false,

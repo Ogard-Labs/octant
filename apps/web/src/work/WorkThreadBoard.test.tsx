@@ -54,6 +54,7 @@ function card(overrides: {
       failed: 0,
       unacknowledgedResults: 0,
     },
+    pullRequestSummaries: { items: [], hiddenCount: 0 },
     recovery: overrides.recovering
       ? { kind: "recovering", reasons: ["project-projection-missing"] }
       : { kind: "ok" },
@@ -61,7 +62,7 @@ function card(overrides: {
     ...(overrides.blockingReason === undefined ? {} : { blockingReason: overrides.blockingReason }),
     followUp: overrides.followUp ?? false,
     lastMeaningfulActivityAt: overrides.lastMeaningfulActivityAt ?? null,
-  } as WorkBoardCard;
+  } as unknown as WorkBoardCard;
 }
 
 function view(

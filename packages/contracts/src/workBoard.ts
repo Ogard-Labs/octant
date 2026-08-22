@@ -3,6 +3,7 @@ import { ThreadGoalStatus } from "./goal";
 import { BindingRevisionId, ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ThreadBoardReason, ThreadBoardStatus } from "./threadBoard";
+import { ThreadBoardPullRequestSummaries } from "./threadBoardPullRequests";
 import { UtcTimestamp } from "./events";
 import { ThreadWorkingDirectory } from "./workingDirectory";
 import { WorkThreadId } from "./workThreads";
@@ -156,6 +157,7 @@ export const WorkBoardCard = Schema.Struct({
   citations: WorkBoardCitationSummary,
   goal: WorkBoardGoalState,
   childRuns: WorkBoardChildRunSummary,
+  pullRequestSummaries: ThreadBoardPullRequestSummaries,
   recovery: WorkBoardRecovery,
   staleEvidence: Schema.Boolean,
   blockingReason: Schema.optional(boundedNonEmptyText(MAX_WORK_BOARD_CARD_BLOCKING_REASON_BYTES)),
