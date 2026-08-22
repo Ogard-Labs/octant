@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { MoreHorizontal, PanelLeftOpen, PanelRight, Sparkles } from "lucide-react";
+import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight } from "lucide-react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
@@ -9,20 +9,21 @@ export interface WindowChromeProps {
   readonly dockAvailable: boolean;
   readonly dockExpanded: boolean;
   readonly dockLabel: string;
+  readonly bottomPanelAvailable?: boolean;
+  readonly bottomPanelExpanded?: boolean;
   readonly developmentAuthentication?: boolean;
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
   readonly material: ResolvedSidebarMaterial;
-  readonly onOpenZen?: () => void;
   readonly onRecoverZen?: () => void;
   readonly onToggleDock: (opener: HTMLElement) => void;
+  readonly onToggleBottomPanel?: (opener: HTMLElement) => void;
   /** Present only while the sidebar is hidden: the chrome takes over the leading edge. */
   readonly onExpandSidebar?: () => void;
   readonly zenRecoveryNeeded?: boolean;
 }
 
 export function WindowChrome(props: WindowChromeProps) {
-  const openZen = props.onOpenZen;
   const recoverZen = props.onRecoverZen;
   return (
     <header
@@ -65,25 +66,34 @@ export function WindowChrome(props: WindowChromeProps) {
         </div>
       ) : null}
       <div className="window-chrome__trailing window-no-drag">
+        <span className="window-chrome__environment-action" data-octant-environment-action />
         {props.isNarrow ? (
           <NarrowOverflow
             dockAvailable={props.dockAvailable}
             dockExpanded={props.dockExpanded}
             dockLabel={props.dockLabel}
+            bottomPanelAvailable={props.bottomPanelAvailable === true}
+            bottomPanelExpanded={props.bottomPanelExpanded === true}
+            {...(props.onToggleBottomPanel === undefined
+              ? {}
+              : { onToggleBottomPanel: props.onToggleBottomPanel })}
             onToggleDock={props.onToggleDock}
-            {...(openZen === undefined ? {} : { onOpenZen: openZen })}
             {...(recoverZen === undefined || !props.zenRecoveryNeeded
               ? {}
               : { onRecoverZen: recoverZen })}
           />
         ) : (
           <>
-            {openZen === undefined ? null : (
+            {props.bottomPanelAvailable !== true ||
+            props.onToggleBottomPanel === undefined ? null : (
               <IconButton
+                aria-controls="bottom-utility-panel"
+                aria-expanded={props.bottomPanelExpanded === true}
                 className="window-chrome__button"
-                icon={Sparkles}
-                label="Open Zen"
-                onClick={openZen}
+                data-bottom-panel-opener="true"
+                icon={PanelBottom}
+                label={`${props.bottomPanelExpanded === true ? "Close" : "Open"} bottom panel`}
+                onClick={(event) => props.onToggleBottomPanel?.(event.currentTarget)}
               />
             )}
             {props.dockAvailable ? (
@@ -105,15 +115,16 @@ export function WindowChrome(props: WindowChromeProps) {
 }
 
 function NarrowOverflow(props: {
+  readonly bottomPanelAvailable: boolean;
+  readonly bottomPanelExpanded: boolean;
   readonly dockAvailable: boolean;
   readonly dockExpanded: boolean;
   readonly dockLabel: string;
-  readonly onOpenZen?: () => void;
   readonly onRecoverZen?: () => void;
+  readonly onToggleBottomPanel?: (opener: HTMLElement) => void;
   readonly onToggleDock: (opener: HTMLElement) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const openZen = props.onOpenZen;
   const recoverZen = props.onRecoverZen;
   const disclosureId = useId();
   const trigger = useRef<HTMLButtonElement>(null);
@@ -159,12 +170,22 @@ function NarrowOverflow(props: {
           }}
           ref={disclosure}
         >
-          {openZen === undefined ? null : (
-            <DisclosureAction label="Open Zen" onClick={() => select(openZen)} />
-          )}
           {recoverZen === undefined ? null : (
             <DisclosureAction label="Recover Zen" onClick={() => select(recoverZen)} />
           )}
+          {props.bottomPanelAvailable && props.onToggleBottomPanel !== undefined ? (
+            <DisclosureAction
+              ariaControls="bottom-utility-panel"
+              expanded={props.bottomPanelExpanded}
+              label={`${props.bottomPanelExpanded ? "Close" : "Open"} bottom panel`}
+              logicalTarget="bottom-panel"
+              onClick={() =>
+                select(() => {
+                  if (trigger.current !== null) props.onToggleBottomPanel?.(trigger.current);
+                })
+              }
+            />
+          ) : null}
           {props.dockAvailable ? (
             <DisclosureAction
               ariaControls="right-utility-dock"
@@ -188,7 +209,7 @@ function DisclosureAction(props: {
   readonly ariaControls?: string;
   readonly expanded?: boolean;
   readonly label: string;
-  readonly logicalTarget?: "dock";
+  readonly logicalTarget?: "bottom-panel" | "dock";
   readonly onClick: () => Promise<void> | void;
 }) {
   return (
@@ -196,6 +217,7 @@ function DisclosureAction(props: {
       {...(props.ariaControls === undefined ? {} : { "aria-controls": props.ariaControls })}
       {...(props.expanded === undefined ? {} : { "aria-expanded": props.expanded })}
       className="window-chrome__disclosure-action"
+      data-bottom-panel-opener={props.logicalTarget === "bottom-panel" ? "true" : undefined}
       data-dock-opener={props.logicalTarget === "dock" ? "true" : undefined}
       onClick={props.onClick}
       type="button"

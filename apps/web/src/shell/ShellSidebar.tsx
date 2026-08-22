@@ -18,6 +18,7 @@ import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarProfile } from "./SidebarProfile";
 import { SidebarNavigation, type SidebarNavigationProps } from "./SidebarNavigation";
+import { buildSidebarAppMenu, type SidebarNavigationInput } from "./navigationModel";
 
 const MODE_SEARCH_LABEL: Record<OctantMode, string> = {
   chat: "Chat",
@@ -104,6 +105,38 @@ export function ShellSidebar(props: ShellSidebarProps) {
             : props.chatStatus === "disconnected"
               ? "Chat is disconnected."
               : undefined));
+  const navigationActions = {
+    ...(chatReady ? props.chatNavigation.actions : {}),
+    ...codeActions,
+    ...workActions,
+  };
+  const navigationInput: SidebarNavigationInput = {
+    activeMode,
+    artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
+    automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
+    agentsCenterEnabled: props.agentsCenterEnabled ?? AGENTS_CENTER_NAVIGATION_ENABLED,
+    createThread:
+      chatReady ||
+      codeActions["new-code-thread"] !== undefined ||
+      workActions["new-work-thread"] !== undefined
+        ? "available"
+        : "unavailable",
+    plugins: "available",
+    projects: "available",
+    pullRequests:
+      codeActions["pull-requests"] === undefined || !sidebarContributions.has("pull-requests")
+        ? "unavailable"
+        : "available",
+    threadBoard:
+      (codeActions["thread-board"] !== undefined || workActions["thread-board"] !== undefined) &&
+      sidebarContributions.has("thread-board")
+        ? "available"
+        : "unavailable",
+  };
+  const secondaryActions = buildSidebarAppMenu(navigationInput).flatMap((descriptor) => {
+    const action = navigationActions[descriptor.id];
+    return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
+  });
   return (
     <aside aria-label="Octant sidebar" className="sidebar" data-octant-sidebar>
       {props.resolvedSidebarBackground !== undefined && props.backgroundFetcher !== undefined ? (
@@ -175,40 +208,8 @@ export function ShellSidebar(props: ShellSidebarProps) {
           />
         ) : null}
         <SidebarNavigation
-          actions={{
-            ...(chatReady ? props.chatNavigation.actions : {}),
-            ...codeActions,
-            ...workActions,
-          }}
-          input={{
-            activeMode,
-            // The library is a host read, so it is offered wherever the shell
-            // can reach the host at all; an unreachable one shows no row rather
-            // than a destination that opens onto an error.
-            artifactLibrary: props.artifactLibraryAvailable === false ? "unavailable" : "available",
-            // Gated by A3/A4 integration: never expose a dead Automations destination.
-            automationsEnabled: props.automationsEnabled ?? AUTOMATION_CENTER_NAVIGATION_ENABLED,
-            agentsCenterEnabled: props.agentsCenterEnabled ?? AGENTS_CENTER_NAVIGATION_ENABLED,
-            createThread:
-              chatReady ||
-              codeActions["new-code-thread"] !== undefined ||
-              workActions["new-work-thread"] !== undefined
-                ? "available"
-                : "unavailable",
-            plugins: "available",
-            projects: "available",
-            pullRequests:
-              codeActions["pull-requests"] === undefined ||
-              !sidebarContributions.has("pull-requests")
-                ? "unavailable"
-                : "available",
-            threadBoard:
-              (codeActions["thread-board"] !== undefined ||
-                workActions["thread-board"] !== undefined) &&
-              sidebarContributions.has("thread-board")
-                ? "available"
-                : "unavailable",
-          }}
+          actions={navigationActions}
+          input={navigationInput}
           projectSection={props.projectSection}
         />
         {chatStatusMessage === undefined ? null : (
@@ -236,6 +237,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
           onOpenSettings={props.onOpenSettings}
           {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}
           profile={props.settings?.userProfile ?? defaultShellSettings().userProfile}
+          secondaryActions={secondaryActions}
         />
       </div>
     </aside>

@@ -42,16 +42,17 @@ import {
   createCodeProjectView,
   createCodeProjectViewId,
   deleteCodeProjectView,
-  readCodeProjectViewState,
+  readProjectViewState,
   selectCodeProjectView,
   updateCodeProjectView,
   visibleCodeProjects,
-  writeCodeProjectViewState,
+  writeProjectViewState,
   type CodeProjectView,
   type CodeProjectViewColor,
   type CodeProjectViewIcon,
   type CodeProjectViewInput,
   type CodeProjectViewState,
+  type ProjectViewMode,
 } from "../code/codeProjectViewModel";
 import {
   buildSidebarActivityView,
@@ -195,6 +196,7 @@ export interface ProjectSidebarSectionProps {
   readonly threadErrorMessage?: string;
   readonly onRetryThreads?: () => void;
   readonly projectViewsEnabled?: boolean;
+  readonly projectViewsMode?: ProjectViewMode;
   readonly projectViewSwitcherPresentation?: ProjectViewSwitcherPresentation;
   readonly now?: Date;
   readonly activityMode?: SidebarActivityMode;
@@ -209,7 +211,9 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   );
   const [focusedProjectThreads, setFocusedProjectThreads] = useState<ProjectId>();
   const [projectViewState, setProjectViewState] = useState(() =>
-    props.projectViewsEnabled === true ? readCodeProjectViewState() : undefined,
+    props.projectViewsEnabled === true
+      ? readProjectViewState(props.projectViewsMode ?? "code")
+      : undefined,
   );
   const [projectViewEditor, setProjectViewEditor] = useState<
     { readonly mode: "create" } | { readonly mode: "edit"; readonly viewId: string } | undefined
@@ -298,12 +302,12 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
 
   useEffect(() => {
     if (props.projectViewsEnabled === true) {
-      setProjectViewState((current) => current ?? readCodeProjectViewState());
+      setProjectViewState(readProjectViewState(props.projectViewsMode ?? "code"));
       return;
     }
     setProjectViewState(undefined);
     setProjectViewEditor(undefined);
-  }, [props.projectViewsEnabled]);
+  }, [props.projectViewsEnabled, props.projectViewsMode]);
 
   useEffect(() => {
     const request = props.expandProjectThreadsRequest;
@@ -335,7 +339,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
 
   function persistProjectViewState(next: CodeProjectViewState) {
     setProjectViewState(next);
-    writeCodeProjectViewState(next);
+    writeProjectViewState(props.projectViewsMode ?? "code", next);
   }
 
   const editingView =
@@ -653,6 +657,7 @@ function ProjectGroup(props: {
                     )
                   ) : null}
                 </span>
+                <ProjectFolderIcon project={project} />
                 <span className="project-row__copy">
                   <span>{project.name}</span>
                   {unavailable ? <small>Relink required</small> : null}
@@ -720,6 +725,19 @@ function ProjectGroup(props: {
         );
       })}
     </section>
+  );
+}
+
+function ProjectFolderIcon(props: { readonly project: ProjectSummary }) {
+  const Icon = props.project.type === "code" ? FolderGit : Folder;
+  return (
+    <span
+      aria-hidden="true"
+      className="project-row__folder-icon"
+      data-project-icon={props.project.type}
+    >
+      <Icon size={14} strokeWidth={1.65} />
+    </span>
   );
 }
 
@@ -1168,7 +1186,7 @@ function CodeProjectViewEditorDialog(props: {
         Choose which saved Code Projects appear in this sidebar view. Authority stays on each
         Project.
       </p>
-      <form onSubmit={submit}>
+      <form noValidate onSubmit={submit}>
         <label htmlFor="code-project-view-name">Project view name</label>
         <OctantInput
           id="code-project-view-name"

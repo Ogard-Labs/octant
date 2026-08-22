@@ -23,7 +23,7 @@ describe("SidebarProfile", () => {
     expect(container.querySelector(".sidebar-foot")).toContainElement(row);
 
     await user.click(row);
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("menuitem", { name: "Settings" }));
     expect(onOpenSettings).toHaveBeenCalledOnce();
     expect(onOpenSettings.mock.calls[0]?.[0]).toBeUndefined();
   });
@@ -44,17 +44,47 @@ describe("SidebarProfile", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Henrik" }));
-    await user.click(screen.getByRole("button", { name: "Usage" }));
+    await user.click(screen.getByRole("menuitem", { name: "Usage" }));
     expect(onOpenSettings).toHaveBeenCalledWith({ section: "usage" });
 
     await user.click(screen.getByRole("button", { name: "Henrik" }));
-    await user.click(screen.getByRole("button", { name: "Navigator" }));
+    await user.click(screen.getByRole("menuitem", { name: "Navigator" }));
     expect(onOpenNavigator).toHaveBeenCalledOnce();
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
 
     await user.click(screen.getByRole("button", { name: "Henrik" }));
-    await user.click(screen.getByRole("button", { name: "Zen mode" }));
+    await user.click(screen.getByRole("menuitem", { name: "Zen mode" }));
     expect(onOpenZen).toHaveBeenCalledOnce();
+  });
+
+  it("groups secondary workspace destinations in the app menu", async () => {
+    const user = userEvent.setup();
+    const agents = vi.fn();
+    const automations = vi.fn();
+    const artifacts = vi.fn();
+    const plugins = vi.fn();
+    render(
+      <SidebarProfile
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        profile={{ ...profile, displayName: "Henrik" }}
+        secondaryActions={[
+          { id: "agents", label: "Agents", onSelect: agents },
+          { id: "automations", label: "Automations", onSelect: automations },
+          { id: "artifact-library", label: "Artifacts", onSelect: artifacts },
+          { id: "plugins", label: "Plugins", onSelect: plugins },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByRole("menuitem", { name: "Agents" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Henrik" }));
+    expect(screen.getByRole("group", { name: "Workspace" })).toBeVisible();
+    for (const label of ["Agents", "Automations", "Artifacts", "Plugins"]) {
+      expect(screen.getByRole("menuitem", { name: label })).toBeVisible();
+    }
+    await user.click(screen.getByRole("menuitem", { name: "Agents" }));
+    expect(agents).toHaveBeenCalledOnce();
   });
 
   it("omits Navigator until the host has a model for it", async () => {
@@ -62,7 +92,7 @@ describe("SidebarProfile", () => {
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
     await user.click(screen.getByRole("button", { name: "Set your name" }));
-    expect(screen.queryByRole("button", { name: "Navigator" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Navigator" })).not.toBeInTheDocument();
   });
 
   it("offers no Zen row on a window that cannot enter Zen", async () => {
@@ -70,7 +100,7 @@ describe("SidebarProfile", () => {
     render(<SidebarProfile onOpenNavigator={vi.fn()} onOpenSettings={vi.fn()} profile={profile} />);
 
     await user.click(screen.getByRole("button", { name: "Set your name" }));
-    expect(screen.queryByRole("button", { name: "Zen mode" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Zen mode" })).not.toBeInTheDocument();
   });
 
   it("closes on Escape and returns focus to the row it opened from", async () => {
@@ -79,10 +109,10 @@ describe("SidebarProfile", () => {
 
     const row = screen.getByRole("button", { name: "Set your name" });
     await user.click(row);
-    expect(screen.getByRole("button", { name: "Settings" })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus();
 
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("button", { name: "Settings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Settings" })).not.toBeInTheDocument();
     expect(row).toHaveFocus();
   });
 });

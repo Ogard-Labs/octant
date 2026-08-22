@@ -67,6 +67,7 @@ export function AgentRunCreateForm(props: {
     <form
       aria-label="Create subagent"
       className="agent-run-create-form"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         props.onSubmit({
@@ -110,6 +111,7 @@ export function AgentRunCreateForm(props: {
       <label htmlFor={`${formId}-task`}>
         Task
         <textarea
+          className="agent-run-create-form__task resize-none"
           id={`${formId}-task`}
           required
           value={task}

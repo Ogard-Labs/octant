@@ -131,6 +131,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
             <span className="project-overview__type">{label(props.project.type)} Project</span>
           )}
           <form
+            noValidate
             onSubmit={(event) => {
               event.preventDefault();
               void commitName();

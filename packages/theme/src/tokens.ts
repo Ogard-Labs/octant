@@ -23,9 +23,9 @@ export interface ThemeTokenRoleDefinition {
 }
 
 export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
-  // The default palette is the Octant design system's own: warm charcoal
-  // grounds and cream ink in dark, warm paper in light, brass accent in
-  // both. The hex values flatten the system sheet's light-dark() pairs and
+  // The default palette is a neutral graphite workspace: soft black grounds,
+  // quiet grey hierarchy, and monochrome primary actions. The hex values flatten
+  // the system sheet's light-dark() pairs and
   // translucent inks (apps/web/src/styles/octant.css) onto the surface
   // each role actually renders over, because preset tokens are opaque
   // six-digit hex by contract.
@@ -33,8 +33,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     id: "app-background",
     displayName: "Application background",
     category: "foundation",
-    defaultLight: "#edece7",
-    defaultDark: "#0e0d0a",
+    defaultLight: "#f7f7f7",
+    defaultDark: "#171717",
   },
   {
     id: "chrome",
@@ -42,8 +42,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "foundation",
     contrastTarget: "app-background",
     contrastLevel: "ui",
-    defaultLight: "#e9e8e3",
-    defaultDark: "#12110d",
+    defaultLight: "#fafafa",
+    defaultDark: "#181818",
   },
   {
     id: "sidebar",
@@ -51,26 +51,26 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "foundation",
     contrastTarget: "app-background",
     contrastLevel: "ui",
-    defaultLight: "#eeede8",
-    defaultDark: "#11100c",
+    defaultLight: "#f0f0f0",
+    defaultDark: "#202020",
   },
   {
     id: "workspace",
     displayName: "Workspace surface",
     category: "surface",
-    defaultLight: "#f2f1ed",
-    defaultDark: "#14130f",
+    defaultLight: "#ffffff",
+    defaultDark: "#171717",
   },
   {
-    // In light mode the card is DARKER than the ground: the design system
-    // raises surfaces off cream by deepening them, not by going whiter.
+    // Raised surfaces move one neutral step away from the workspace. Static
+    // content remains flat; this role is for overlays and discrete objects.
     id: "floating",
     displayName: "Floating surface",
     category: "surface",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#e6e5e0",
-    defaultDark: "#1c1b16",
+    defaultLight: "#f3f3f3",
+    defaultDark: "#242424",
   },
   {
     id: "scrim",
@@ -85,8 +85,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#ebeae5",
-    defaultDark: "#232219",
+    defaultLight: "#efefef",
+    defaultDark: "#292929",
   },
   {
     id: "control-hover",
@@ -94,8 +94,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#e3e2dc",
-    defaultDark: "#2a2920",
+    defaultLight: "#e7e7e7",
+    defaultDark: "#303030",
   },
   {
     id: "control-pressed",
@@ -103,8 +103,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "control",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#dbdad3",
-    defaultDark: "#322f25",
+    defaultLight: "#dedede",
+    defaultDark: "#383838",
   },
   {
     // The design system's border is translucent ink (13-14% of the text
@@ -115,8 +115,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#d5d4d0",
-    defaultDark: "#312f2c",
+    defaultLight: "#dedede",
+    defaultDark: "#2d2d2d",
   },
   {
     id: "border-strong",
@@ -124,8 +124,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#bdbcb7",
-    defaultDark: "#494844",
+    defaultLight: "#c5c5c5",
+    defaultDark: "#454545",
   },
   {
     id: "divider-strong",
@@ -133,8 +133,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "border",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#8c8b86",
-    defaultDark: "#787773",
+    defaultLight: "#8a8a8a",
+    defaultDark: "#6b6b6b",
   },
   {
     id: "text-primary",
@@ -142,8 +142,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#26251e",
-    defaultDark: "#f2f1ed",
+    defaultLight: "#202020",
+    defaultDark: "#f2f2f2",
   },
   {
     // A step darker than the flattened 68% ink the system sheet uses:
@@ -154,8 +154,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#61605a",
-    defaultDark: "#959490",
+    defaultLight: "#5f5f5f",
+    defaultDark: "#b5b5b5",
   },
   {
     id: "text-muted",
@@ -163,19 +163,18 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "large-text",
-    defaultLight: "#74726d",
-    defaultDark: "#787773",
+    defaultLight: "#707070",
+    defaultDark: "#8a8a8a",
   },
   {
-    // Ink on the brass fill in BOTH modes: the fill stays brand-brass in
-    // light and dark, so the ink on it does not flip either.
+    // Primary actions invert against the monochrome accent in each mode.
     id: "primary-foreground",
     displayName: "Primary foreground",
     category: "text",
     contrastTarget: "accent",
     contrastLevel: "normal-text",
-    defaultLight: "#14130f",
-    defaultDark: "#14130f",
+    defaultLight: "#ffffff",
+    defaultDark: "#171717",
   },
   {
     id: "focus-ring",
@@ -183,8 +182,8 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "focus",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#8a6218",
-    defaultDark: "#d9a441",
+    defaultLight: "#202020",
+    defaultDark: "#f2f2f2",
   },
   {
     id: "selection",
@@ -192,19 +191,19 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "focus",
     contrastTarget: "workspace",
     contrastLevel: "non-text",
-    defaultLight: "#d9d8d4",
-    defaultDark: "#353430",
+    defaultLight: "#e7e7e7",
+    defaultDark: "#303030",
   },
   {
-    // The brand fill. Brass in both modes on purpose — the design system
-    // keeps the fill constant and moves only accent-as-text per mode.
+    // Primary action fill. Expressive colour is reserved for semantic state,
+    // Project View identity, and user-selected themes.
     id: "accent",
     displayName: "Accent",
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#d9a441",
-    defaultDark: "#d9a441",
+    defaultLight: "#202020",
+    defaultDark: "#f2f2f2",
   },
   {
     id: "accent-foreground",
@@ -212,22 +211,19 @@ export const THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "accent",
     contrastTarget: "accent",
     contrastLevel: "normal-text",
-    defaultLight: "#14130f",
-    defaultDark: "#14130f",
+    defaultLight: "#ffffff",
+    defaultDark: "#171717",
   },
   {
-    // Accent as TEXT, not as a fill. `accent` is held to 3:1 because it
-    // renders as a button; brass measures 2.0:1 as text on the cream
-    // ground, so light mode darkens the same hue to #8a6218 (4.8:1).
-    // This role carries the hue at the 4.5:1 bar so links, active tabs,
-    // and current rows stay policed like every other text role.
+    // Accent as text follows the foreground-strength monochrome role and is
+    // still policed at the normal-text contrast bar.
     id: "accent-text",
     displayName: "Accent text",
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#8a6218",
-    defaultDark: "#d9a441",
+    defaultLight: "#202020",
+    defaultDark: "#f2f2f2",
   },
   {
     id: "success-surface",

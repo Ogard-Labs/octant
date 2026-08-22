@@ -20,8 +20,10 @@ Environment is a compact thread summary with a transient disclosure. It is
 not a persisted panel, not an in-flow sibling of the transcript, and not a
 wall of cards.
 
-- The thread header always carries a compact, truthful summary: checkout
-  identity, clean or dirty state, running-server count, and working location.
+- The pane-title utility controls always carry a compact Environment reveal.
+  Its accessible name is the truthful summary: checkout identity, clean or
+  dirty state, running-server count, and working location. The visible control
+  may remain an icon so Environment does not create a second header band.
 - Opening the summary shows a popover or overlay anchored to the thread.
   Escape, an outside click, or activating another pane closes it.
 - Open or closed is renderer state. It is not persisted and is not a

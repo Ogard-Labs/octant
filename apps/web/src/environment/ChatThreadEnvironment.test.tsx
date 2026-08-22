@@ -140,9 +140,12 @@ describe("the Chat thread environment summary", () => {
       </ChatThreadEnvironment>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Show environment for Chat/ }));
+    const environment = screen.getByRole("button", {
+      name: /Show environment for Chat\. Project unavailable/,
+    });
+    expect(environment).toHaveAttribute("data-environment-status", "unavailable");
+    fireEvent.click(environment);
     expect(screen.getByRole("dialog", { name: "Environment for Chat" })).toBeVisible();
-    expect(screen.getByText("Project unavailable")).toBeVisible();
     expect(screen.getByText("Authoritative Chat context is unavailable.")).toBeVisible();
     expect(screen.queryByText("Unavailable for unfiled Chat")).not.toBeInTheDocument();
     expect(screen.queryByText("1 attachment")).not.toBeInTheDocument();

@@ -175,6 +175,7 @@ function SteerControl(props: {
   return (
     <form
       aria-label={`Steer ${props.task}`}
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         const next = message.trim();

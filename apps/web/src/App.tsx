@@ -143,6 +143,7 @@ import {
   type SidebarThreadDragTargets,
 } from "./shell/useWorkspaceTabDrag";
 import { WorkspaceRailLayers } from "./shell/WorkspaceRailLayers";
+import { BottomUtilityPanel } from "./shell/BottomUtilityPanel";
 import { ShellDialogHost } from "./shell/ShellDialogHost";
 import { ShellSettingsSurface } from "./shell/ShellSettingsSurface";
 import {
@@ -168,6 +169,7 @@ import {
   openLocalCodeThreadIds,
 } from "./shell/workspaceTabLifecycle";
 import {
+  readBottomPanelPresentation,
   readSidebarCollapsed,
   useAutomaticUpdateCheckSync,
   useHostReportedSidebarVibrancy,
@@ -176,6 +178,7 @@ import {
   useSidebarBackgroundFetcher,
   useSidebarVibrancyModeSync,
   useSidebarVibrancySupported,
+  writeBottomPanelPresentation,
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
 import {
@@ -614,6 +617,17 @@ function LaunchedShell(
     { readonly projectId: ProjectId; readonly sequence: number } | undefined
   >(undefined);
   const [dockVisible, setDockVisible] = useState(false);
+  const [bottomPanelPresentation, setBottomPanelPresentation] = useState(() =>
+    readBottomPanelPresentation(globalThis, String(props.launch.windowId)),
+  );
+  const [previewBottomPanelHeight, setPreviewBottomPanelHeight] = useState<number>();
+  const persistBottomPanelPresentation = useCallback(
+    (next: typeof bottomPanelPresentation) => {
+      setBottomPanelPresentation(next);
+      writeBottomPanelPresentation(globalThis, String(props.launch.windowId), next);
+    },
+    [props.launch.windowId],
+  );
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const navigatorOpener = useRef<HTMLElement | null>(null);
   const [fallbackDockState, setFallbackDockState] = useState<ThreadUtilityDockState>({ tabs: [] });
@@ -1492,18 +1506,26 @@ function LaunchedShell(
       }).map((surface) => surface.id),
     ),
   );
-  const dockSurface = retainedDockState.active;
+  const bottomPanelAvailable =
+    activeMode === "code" && isDockToolLaunchable("terminal", dockToolCapabilities);
+  const bottomPanelOpen = bottomPanelPresentation.open && bottomPanelAvailable && !isNarrow;
+  const displayedDockState = bottomPanelOpen
+    ? closeUtilityTabState(retainedDockState, "terminal")
+    : retainedDockState;
+  const dockSurface = displayedDockState.active;
   const dockResolution = resolveDockSurface(dockSurface);
   const launchableDockSurfaces = RIGHT_UTILITY_DOCK_SURFACES.filter(
     (surface) =>
       resolveDockSurface(surface.id).kind === "surface" &&
-      isDockToolLaunchable(surface.id, dockToolCapabilities),
+      isDockToolLaunchable(surface.id, dockToolCapabilities) &&
+      (!bottomPanelOpen || surface.id !== "terminal"),
   );
-  const dockTabs = retainedDockState.tabs.flatMap((surfaceId) => {
+  const dockTabs = displayedDockState.tabs.flatMap((surfaceId) => {
     const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
     return surface === undefined ? [] : [surface];
   });
   const dockOpen = dockVisible;
+  const bottomPanelHeight = previewBottomPanelHeight ?? bottomPanelPresentation.height;
   const providerController = useProviderController({
     ...(props.providerClient === undefined ? {} : { client: props.providerClient }),
     serverUrl: props.launch.serverUrl,
@@ -1990,6 +2012,9 @@ function LaunchedShell(
   function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
+    if (surface === "terminal" && bottomPanelPresentation.open) {
+      persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
+    }
     if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
     setDockVisible(true);
     if (dockThreadKey === undefined) {
@@ -2032,6 +2057,25 @@ function LaunchedShell(
   function closeDock() {
     pendingDockFocus.current = dockOpener.current;
     setDockVisible(false);
+  }
+  function closeBottomPanel(restoreFocus = true) {
+    persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
+    if (restoreFocus) {
+      queueMicrotask(() =>
+        document.querySelector<HTMLElement>('[data-bottom-panel-opener="true"]')?.focus(),
+      );
+    }
+  }
+  function toggleBottomPanel(opener: HTMLElement) {
+    if (bottomPanelOpen) {
+      closeBottomPanel(false);
+      opener.focus();
+      return;
+    }
+    if (!bottomPanelAvailable) return;
+    closeDockTab("terminal");
+    if (dockTabs.length === 1 && dockTabs[0]?.id === "terminal") setDockVisible(false);
+    persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
   }
   function toggleDock(opener: HTMLElement) {
     dockOpener.current = { element: opener, logicalTarget: "dock" };
@@ -3527,6 +3571,8 @@ function LaunchedShell(
         chrome={
           <WindowChrome
             activeSurface={activeSurface}
+            bottomPanelAvailable={bottomPanelAvailable && !isNarrow}
+            bottomPanelExpanded={bottomPanelOpen}
             {...(props.developmentAuthentication === undefined
               ? {}
               : { developmentAuthentication: props.developmentAuthentication })}
@@ -3539,13 +3585,15 @@ function LaunchedShell(
             {...(sidebarCollapsed && !isNarrow
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}
-            onOpenZen={() => void zen.enterZen()}
             onRecoverZen={() => void zen.recoverZen()}
+            onToggleBottomPanel={toggleBottomPanel}
             onToggleDock={toggleDock}
             zenRecoveryNeeded={zen.recoveryNeeded}
           />
         }
         contextSidebarWidth={contextSidebarWidth}
+        bottomPanelHeight={bottomPanelHeight}
+        bottomPanelOpen={bottomPanelOpen}
         material={material}
         onCommitSidebarWidth={(width) => {
           setPreviewSidebarWidth(width);
@@ -3675,9 +3723,10 @@ function LaunchedShell(
                 ) : (
                   <ProjectSidebarSection
                     searchQuery={sidebarSearchQuery}
-                    {...(activeMode === "code"
+                    {...(activeMode === "code" || activeMode === "work"
                       ? {
                           projectViewsEnabled: true,
+                          projectViewsMode: activeMode,
                           projectViewSwitcherPresentation: (
                             presentedShellSettings ?? controller.settings
                           ).projectViewSwitcherPresentation,
@@ -4254,11 +4303,27 @@ function LaunchedShell(
               plan={threadUtility("plan")}
               resolution={dockResolution}
               sideChat={threadUtility("side-chat")}
-              terminal={threadUtility("terminal")}
+              {...(bottomPanelOpen ? {} : { terminal: threadUtility("terminal") })}
               tests={threadUtility("tests")}
               tabs={dockTabs}
               width={contextSidebarWidth}
             />
+            {bottomPanelOpen ? (
+              <BottomUtilityPanel
+                height={bottomPanelHeight}
+                onClose={() => closeBottomPanel()}
+                onCommitHeight={(height) => {
+                  setPreviewBottomPanelHeight(undefined);
+                  persistBottomPanelPresentation({
+                    ...bottomPanelPresentation,
+                    height,
+                    open: true,
+                  });
+                }}
+                onPreviewHeight={setPreviewBottomPanelHeight}
+                terminal={threadUtility("terminal")}
+              />
+            ) : null}
           </>
         }
       >

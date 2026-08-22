@@ -23,6 +23,7 @@ describe("ModeSwitcher", () => {
     expect(buttons.map((button) => button.textContent)).toEqual(["Chat", "Code"]);
     expect(screen.queryByRole("button", { name: "Work" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByText("Octant")).toHaveClass("mode-switcher__brand");
     expect(screen.getByRole("button", { name: "Chat" })).not.toHaveAttribute("aria-current");
 
     await user.click(screen.getByRole("button", { name: "Code" }));
@@ -45,6 +46,7 @@ describe("ModeSwitcher", () => {
     );
 
     const trigger = screen.getByRole("button", { name: "Workspace mode, Code" });
+    expect(trigger).toHaveTextContent(/Octant.*Code/);
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(trigger).toHaveClass("mode-trigger", "window-no-drag");
     trigger.focus();

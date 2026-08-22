@@ -60,7 +60,7 @@ export function MemoryTransferDialog(props: MemoryTransferDialogProps) {
         changes do not alter it.
       </p>
       <blockquote className="memory-entry-dialog__original">{props.entry.content}</blockquote>
-      <form onSubmit={(event) => void submit(event)}>
+      <form noValidate onSubmit={(event) => void submit(event)}>
         <label>
           Destination Project
           <OctantNativeSelect

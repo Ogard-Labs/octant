@@ -1,5 +1,7 @@
 import type { EnvironmentCompactIdentity } from "@octant/contracts";
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { PanelsTopLeft } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface ThreadEnvironmentSummaryFacts {
@@ -33,10 +35,19 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   const onOpenChangeRef = useRef(props.onOpenChange);
   onOpenChangeRef.current = props.onOpenChange;
   const panelId = useId();
+  const [toolbarHost, setToolbarHost] = useState<Element | null>(() =>
+    typeof document === "undefined"
+      ? null
+      : document.querySelector("[data-octant-environment-action]"),
+  );
   const active = props.active !== false;
   const facts = summaryFacts(props.summary);
   const action = props.open ? "Hide" : "Show";
   const name = `${action} environment for ${props.summary.identity.label}. ${facts.join(" · ")}`;
+
+  useEffect(() => {
+    setToolbarHost(document.querySelector("[data-octant-environment-action]"));
+  }, []);
 
   useEffect(() => {
     if (active || !props.open) return;
@@ -68,7 +79,7 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
     };
   }, [props.open]);
 
-  return (
+  const environment = (
     <div className="thread-environment-summary">
       <OctantButton
         aria-controls={panelId}
@@ -76,23 +87,15 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
         aria-haspopup="dialog"
         aria-label={name}
         className="thread-environment-summary__button"
+        data-environment-status={props.summary.identity.status}
         onClick={() => props.onOpenChange(!props.open)}
         ref={triggerRef}
         title={name}
         type="button"
         variant="ghost"
       >
-        <span className="thread-environment-summary__label">{props.summary.identity.label}</span>
-        {facts.map((fact) => (
-          <span className="thread-environment-summary__fact" key={fact}>
-            {fact}
-          </span>
-        ))}
-        <span
-          className={`thread-environment-summary__status thread-environment-summary__status--${props.summary.identity.status}`}
-        >
-          {props.summary.identity.status}
-        </span>
+        <PanelsTopLeft aria-hidden="true" size={15} strokeWidth={1.7} />
+        <span className="sr-only">Environment</span>
       </OctantButton>
       {props.open ? (
         <div
@@ -108,6 +111,7 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
       ) : null}
     </div>
   );
+  return toolbarHost === null ? environment : createPortal(environment, toolbarHost);
 }
 
 function summaryFacts(summary: ThreadEnvironmentSummaryFacts): ReadonlyArray<string> {

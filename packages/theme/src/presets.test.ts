@@ -47,6 +47,14 @@ describe("built-in theme preset catalog", () => {
     expect(resolveThemePresetTokens("dark", "light")).toEqual(DEFAULT_LIGHT_TOKENS);
   });
 
+  it("keeps the original warm Octant palette available as an optional preset", () => {
+    expect(resolveThemePresetTokens("octant", "dark")).toMatchObject({
+      workspace: "#14130f",
+      accent: "#d9a441",
+    });
+    expect(resolveThemePresetTokens("octant", "dark")).not.toEqual(DEFAULT_DARK_TOKENS);
+  });
+
   it("fails closed to the approved defaults for unknown or invalid preset data", () => {
     expect(resolveThemePresetTokens("missing", "dark")).toEqual(DEFAULT_DARK_TOKENS);
     expect(
