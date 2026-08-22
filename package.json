@@ -46,6 +46,7 @@
     "smoke:packaged-openai-compatible": "bun scripts/smoke-packaged-openai-compatible.ts",
     "smoke:packaged-codex": "bun scripts/smoke-packaged-codex.ts",
     "smoke:packaged-code": "bun scripts/smoke-packaged-code.ts",
+    "smoke:packaged-code-project-pull-requests": "bun scripts/smoke-packaged-code-project-pull-requests.ts",
     "smoke:packaged-agent-runs": "bun scripts/smoke-packaged-agent-runs.ts",
     "smoke:apple-toolchain": "bun scripts/smoke-apple-toolchain.ts",
     "smoke:packaged-claude": "bun scripts/smoke-packaged-claude.ts",

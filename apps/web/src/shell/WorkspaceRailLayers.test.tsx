@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 describe("WorkspaceRailLayers", () => {
-  it("keeps Automations and GitHub destinations hidden when those host capabilities are absent", async () => {
+  it("keeps Automations hidden when that host capability is absent", async () => {
     render(
       <App
         chatClient={chats()}
@@ -60,7 +60,30 @@ describe("WorkspaceRailLayers", () => {
       await screen.findByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).toBeVisible();
     expect(screen.queryByRole("button", { name: "Automations" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Pull requests" })).toBeVisible();
+  });
+
+  it("opens the Code pull-request workspace from the sidebar without refreshing GitHub", async () => {
+    const user = userEvent.setup();
+    const codeApi = codes();
+    render(
+      <App
+        chatClient={chats()}
+        codeClient={codeApi}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providers()}
+        shellClient={client(codeShellBootstrap())}
+      />,
+    );
+
+    expect(await screen.findByRole("button", { name: "Pull requests" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Pull requests" }));
+    expect(await screen.findByRole("region", { name: "Pull requests" })).toBeVisible();
+    expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
+    expect(codeApi.queryProjectPullRequests).toHaveBeenCalledWith({ version: 1 });
+    expect(codeApi.refreshProjectPullRequests).not.toHaveBeenCalled();
   });
 
   it("opens the complete Automation Center from the sidebar once the release gate flips", async () => {
@@ -262,5 +285,6 @@ describe("WorkspaceRailLayers", () => {
       "page",
     );
     expect(screen.queryByRole("button", { name: "Thread board" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pull requests" })).not.toBeInTheDocument();
   });
 });

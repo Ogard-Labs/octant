@@ -98,6 +98,8 @@ export * from "./cursorAcpRuntimePolicy";
 export * from "./cursorAcpSettingsPolicy";
 export * from "./githubCapabilityPolicy";
 export * from "./githubRepositoryReadPolicy";
+export * from "./githubRemoteIdentity";
+export * from "./codeProjectPullRequestPolicy";
 export * from "./managedRepositoryPolicy";
 export * from "./canvasShareSnapshotPolicy";
 export * from "./canvasShareAccessLogPolicy";

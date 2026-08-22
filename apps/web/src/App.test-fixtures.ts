@@ -404,6 +404,32 @@ export function codes(): CodeClient {
     queryBoard: vi.fn(
       async () => ({ version: 1, query: { version: 1 }, cards: [], generatedAt: now }) as never,
     ),
+    queryProjectPullRequests: vi.fn(
+      async () =>
+        ({
+          version: 1,
+          query: { version: 1 },
+          projects: [],
+          rows: [],
+          repositoriesTruncated: false,
+          pullRequestsTruncated: false,
+          freshness: { status: "empty" },
+          generatedAt: now,
+        }) as never,
+    ),
+    refreshProjectPullRequests: vi.fn(
+      async () =>
+        ({
+          version: 1,
+          query: { version: 1 },
+          projects: [],
+          rows: [],
+          repositoriesTruncated: false,
+          pullRequestsTruncated: false,
+          freshness: { status: "empty" },
+          generatedAt: now,
+        }) as never,
+    ),
     conversation: vi.fn(async (threadId) => ({
       version: 3 as const,
       threadId,

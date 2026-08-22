@@ -541,3 +541,113 @@ describe("GhPullRequestPort.merge", () => {
     });
   });
 });
+
+describe("GhPullRequestPort active list", () => {
+  const activeRow = {
+    number: 12,
+    title: "List active pull requests",
+    isDraft: false,
+    author: { login: "octocat" },
+    updatedAt: "2026-08-22T07:00:00Z",
+    url: "https://github.com/octant/octant/pull/12",
+    baseRefName: "development",
+    headRefName: "feature/manual-refresh",
+    statusCheckRollup: [{ name: "ci", conclusion: "SUCCESS", status: "COMPLETED" }],
+    reviewDecision: "APPROVED",
+  };
+
+  it("lists open and draft pull requests for a server-resolved repository without mutating GitHub", async () => {
+    const { command, port } = fixture([
+      {
+        exitCode: 0,
+        stdout: JSON.stringify([activeRow, { ...activeRow, number: 13, isDraft: true }]),
+      },
+    ]);
+
+    await expect(
+      port.listActive(
+        { owner: "octant", name: "octant", limit: 100 },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({
+      status: "ok",
+      rows: [
+        {
+          number: 12,
+          title: "List active pull requests",
+          draft: false,
+          author: "octocat",
+          baseBranch: "development",
+          headBranch: "feature/manual-refresh",
+          updatedAt: "2026-08-22T07:00:00Z",
+          url: activeRow.url,
+          checks: "passing",
+          review: "approved",
+        },
+        {
+          number: 13,
+          title: "List active pull requests",
+          draft: true,
+          author: "octocat",
+          baseBranch: "development",
+          headBranch: "feature/manual-refresh",
+          updatedAt: "2026-08-22T07:00:00Z",
+          url: activeRow.url,
+          checks: "passing",
+          review: "approved",
+        },
+      ],
+    });
+    expect(vi.mocked(command.run).mock.calls[0]?.[0]).toEqual([
+      "pr",
+      "list",
+      "--repo",
+      "octant/octant",
+      "--state",
+      "open",
+      "--limit",
+      "100",
+      "--json",
+      "number,title,isDraft,author,updatedAt,url,baseRefName,headRefName,statusCheckRollup,reviewDecision",
+    ]);
+    expect(vi.mocked(command.run).mock.calls.some(([args]) => args.includes("merge"))).toBe(false);
+  });
+
+  it("classifies rate-limit, timeout, malformed output, and disconnect without inventing rows", async () => {
+    const rate = fixture([
+      { exitCode: 1, stdout: "", stderr: "HTTP 403: API rate limit exceeded; retry after 30" },
+    ]);
+    await expect(
+      rate.port.listActive(
+        { owner: "octant", name: "octant", limit: 10 },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ status: "rate-limited", retryAfterSeconds: 30 });
+
+    const timeout = fixture([{ exitCode: 1, stdout: "", timedOut: true }]);
+    await expect(
+      timeout.port.listActive(
+        { owner: "octant", name: "octant", limit: 10 },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ status: "timeout" });
+
+    const malformed = fixture([{ exitCode: 0, stdout: "{not-json" }]);
+    await expect(
+      malformed.port.listActive(
+        { owner: "octant", name: "octant", limit: 10 },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ status: "malformed" });
+
+    const disconnected = fixture([
+      { exitCode: 1, stdout: "", stderr: "dial tcp: lookup github.com: no such host" },
+    ]);
+    await expect(
+      disconnected.port.listActive(
+        { owner: "octant", name: "octant", limit: 10 },
+        new AbortController().signal,
+      ),
+    ).resolves.toEqual({ status: "disconnected" });
+  });
+});

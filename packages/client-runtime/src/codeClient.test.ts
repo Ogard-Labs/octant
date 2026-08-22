@@ -219,6 +219,65 @@ describe("code client", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("queries the cached project pull-request snapshot without a refresh flag", async () => {
+    const view = {
+      version: 1,
+      query: { version: 1 },
+      projects: [],
+      rows: [],
+      repositoriesTruncated: false,
+      pullRequestsTruncated: false,
+      freshness: { status: "empty" },
+      generatedAt: now,
+    } as const;
+    const fetch = vi.fn().mockResolvedValue(Response.json(view));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.queryProjectPullRequests({ version: 1 })).resolves.toEqual(view);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/project-pull-requests`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ version: 1 }),
+      }),
+    );
+  });
+
+  it("refreshes project pull requests through a distinct envelope and refuses owner credentials", async () => {
+    const view = {
+      version: 1,
+      query: { version: 1 },
+      projects: [],
+      rows: [],
+      repositoriesTruncated: false,
+      pullRequestsTruncated: false,
+      freshness: { status: "fresh", lastSuccessfulRefreshAt: now },
+      generatedAt: now,
+    } as const;
+    const fetch = vi.fn().mockResolvedValue(Response.json(view));
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.refreshProjectPullRequests({ kind: "refresh-all" })).resolves.toEqual(view);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/project-pull-requests/refresh`,
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ kind: "refresh-all" }),
+      }),
+    );
+    await expect(
+      client.refreshProjectPullRequests({
+        kind: "refresh-all",
+        owner: "octant",
+        credentials: "secret",
+      } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    await expect(
+      client.queryProjectPullRequests({ version: 1, refresh: true, owner: "octant" } as never),
+    ).rejects.toMatchObject({ category: "invalid" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("reads a Code thread follow-up view over the authenticated endpoint", async () => {
     const view = {
       threadId: ids.thread,
