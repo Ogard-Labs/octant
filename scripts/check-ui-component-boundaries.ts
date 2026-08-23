@@ -39,10 +39,9 @@ export function findUiComponentBoundaryViolations(
 }
 
 /**
- * Reports raw controls without making the repository-wide check red while the
- * incremental migration is in progress. Ordinary findings are the actionable
- * list; the only accepted exceptions are the native controls whose semantics
- * cannot be represented by an Octant adapter (file pickers and host surfaces).
+ * Reports raw controls in production feature code. Ordinary findings fail the
+ * repository check; the only accepted exceptions are native controls whose
+ * semantics cannot be represented by an Octant adapter.
  */
 export function findRawControlInventory(
   files: Readonly<Record<string, string>>,
@@ -65,7 +64,11 @@ export function findRawControlInventory(
       const tag = match[1] as RawControlFinding["tag"];
       const index = match.index ?? 0;
       const line = source.slice(0, index).split("\n").length;
-      const openingContext = source.slice(index, index + 600);
+      const selfClosingEnd = tag === "input" ? source.indexOf("/>", index) : -1;
+      const openingContext = source.slice(
+        index,
+        selfClosingEnd < 0 ? index + 600 : selfClosingEnd + 2,
+      );
       const category: RawControlFinding["category"] =
         tag === "input" && /\btype\s*=\s*["']file["']/.test(openingContext)
           ? "native-file-input"
@@ -121,12 +124,13 @@ async function main(): Promise<void> {
   const rawControls = findRawControlInventory(files);
   const ordinary = rawControls.filter((finding) => finding.category === "ordinary");
   if (ordinary.length > 0) {
-    console.warn(`Raw control inventory: ${String(ordinary.length)} ordinary controls remain.`);
+    console.error(`Raw control inventory: ${String(ordinary.length)} ordinary controls remain.`);
     for (const finding of ordinary) {
-      console.warn(
+      console.error(
         `  ${finding.file}:${String(finding.line)} <${finding.tag}> (migrate to ui/base)`,
       );
     }
+    process.exitCode = 1;
   }
 }
 

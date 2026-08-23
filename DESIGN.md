@@ -333,30 +333,29 @@ When adding or touching UI:
 
 - `apps/web/src/ui/shadcn` is the owned recipe source; `components.json` is CLI
   registry metadata and does not describe the product's complete shell.
-- Raw controls in production feature code are reported by
-  `scripts/check-ui-component-boundaries.ts` during the incremental migration.
-  Ordinary buttons, inputs, selects, and textareas must move behind
-  `apps/web/src/ui/base`; the report is intentionally non-blocking until the
-  remaining feature batches are complete. The only accepted categories are
+- `scripts/check-ui-component-boundaries.ts` is a blocking repository check.
+  Production feature code cannot import Base UI or shadcn recipes directly and
+  cannot render ordinary raw buttons, inputs, selects, or textareas. Controls
+  compose through `apps/web/src/ui/base`. The only accepted raw categories are
   hidden native file inputs, explicitly documented native platform surfaces,
   and specialized editor surfaces that cannot be represented by an adapter.
   Tests and the owned `ui/shadcn`/`ui/base` implementation are not feature
-  surfaces and are excluded from this inventory.
-- Legacy feature styles remain during incremental porting. A touched shared
-  control must move to an adapter and the replaced paint rules must be removed;
-  do not add another parallel recipe.
+  surfaces and are excluded from the inventory.
+- Feature styles position product surfaces; adapters paint shared controls.
+  When migrating an old control, remove the replaced paint rules rather than
+  keeping a parallel recipe.
 - Mobile visual tokens and glass surfaces are intentionally separate from the
   desktop renderer. Do not copy mobile atmosphere or phone radii into desktop
   panes.
 
 ## Evidence inspected
 
-This document was regenerated from the current implementation in the
-`feature/current-design-system` worktree: `packages/theme` token roles,
-`ThemeSettingsProvider` and `ThemeTypographyProvider`, the `octant.css` static
-system and bridge, shadcn/Tailwind projection, `apps/web/components.json`, all
-owned `ui/shadcn` recipes and `ui/base` adapters, shell/settings/project/dock
-styles, the task visualizer, context meter, usage surfaces, and decisions
-0016, 0027, 0038, 0044, 0045, and 0046. Values marked as defaults come directly
-from those files; layout guidance follows the rendered contracts encoded by
-their selectors and tests.
+This document is maintained against the current shared renderer:
+`packages/theme` token roles, `ThemeSettingsProvider` and
+`ThemeTypographyProvider`, the `octant.css` static system and bridge,
+shadcn/Tailwind projection, `apps/web/components.json`, all owned
+`ui/shadcn` recipes and `ui/base` adapters, the production control-boundary
+inventory, shell/settings/project/dock styles, the task visualizer, context
+meter, usage surfaces, and decisions 0016, 0027, 0038, 0044, 0045, and 0046.
+Values marked as defaults come directly from those files; layout guidance
+follows the rendered contracts encoded by their selectors and tests.

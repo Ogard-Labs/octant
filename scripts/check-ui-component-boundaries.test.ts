@@ -69,6 +69,13 @@ describe("UI component boundary check", () => {
         tag: "input",
       },
     ]);
+
+    const longHandler = "const value = event.currentTarget.files?.item(0);".repeat(20);
+    expect(
+      findRawControlBoundaryViolations({
+        "apps/web/src/work/WorkComposer.tsx": `<input onChange={(event) => { ${longHandler} }} type="file" />`,
+      }),
+    ).toEqual([]);
   });
 
   it("accepts an explicitly documented platform exception without hiding ordinary controls", () => {
