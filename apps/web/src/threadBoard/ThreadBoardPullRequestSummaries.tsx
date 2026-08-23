@@ -3,6 +3,7 @@ import type {
   ThreadBoardPullRequestSummaries as ThreadBoardPullRequestSummaryList,
 } from "@octant/contracts";
 import { GitPullRequest } from "lucide-react";
+import { OctantButton } from "../ui/base/OctantButton";
 
 export interface ThreadBoardPullRequestSummariesProps {
   readonly summaries: ThreadBoardPullRequestSummaryList;
@@ -77,7 +78,7 @@ export function ThreadBoardPullRequestSummaries(props: ThreadBoardPullRequestSum
         }`;
         return (
           <li key={`${String(summary.identity.projectId)}:${repo}#${summary.identity.number}`}>
-            <button
+            <OctantButton
               aria-label={label}
               className="board-card-pr"
               onClick={() => props.onSelect?.(summary.identity)}
@@ -89,7 +90,7 @@ export function ThreadBoardPullRequestSummaries(props: ThreadBoardPullRequestSum
                 {repo} #{summary.identity.number}
                 {details.length === 0 ? null : ` · ${details.join(" · ")}`}
               </span>
-            </button>
+            </OctantButton>
           </li>
         );
       })}

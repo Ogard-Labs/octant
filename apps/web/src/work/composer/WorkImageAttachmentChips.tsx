@@ -1,4 +1,5 @@
 import type { WorkComposerImages } from "./useWorkComposerImages";
+import { OctantButton } from "../../ui/base/OctantButton";
 
 /**
  * Staged image chips for a Work composer. The new-thread adapter and the Work
@@ -19,14 +20,14 @@ export function WorkImageAttachmentChips(props: { readonly images: WorkComposerI
             src={attachment.previewUrl}
           />
           <span className="work-composer-adapter__attachment-name">{attachment.displayName}</span>
-          <button
+          <OctantButton
             aria-label={`Remove ${attachment.displayName}`}
             className="chip-x window-no-drag"
             onClick={() => images.remove(attachment.id)}
             type="button"
           >
             ×
-          </button>
+          </OctantButton>
         </span>
       ))}
       {images.message === undefined ? null : (

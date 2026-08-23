@@ -272,7 +272,7 @@ function ProjectGroup(props: {
                 const selected = props.selectedRowKey === rowKey;
                 return (
                   <li key={rowKey}>
-                    <button
+                    <OctantButton
                       aria-pressed={selected}
                       className="code-project-pull-requests__row"
                       onClick={() => props.onSelectRow?.(row)}
@@ -315,7 +315,7 @@ function ProjectGroup(props: {
                             : `Linked: ${row.linkedThreads.map((thread) => thread.title).join(", ")}`}
                         </div>
                       </div>
-                    </button>
+                    </OctantButton>
                   </li>
                 );
               })}

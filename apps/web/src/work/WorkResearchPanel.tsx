@@ -401,7 +401,7 @@ function AddSourceForm(props: {
       <label className="work-research__source-form-label" htmlFor={excerptId}>
         Source excerpt
       </label>
-      <input
+      <OctantInput
         className="work-research__source-form-input"
         disabled={pending}
         id={excerptId}

@@ -23,6 +23,7 @@ import {
 } from "../composer/composerThreadDraftStore";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import type { CodeConversationMessage, CodeController, CodeTurnStatus } from "./useCodeController";
@@ -963,14 +964,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                     <span className="code-thread-workspace__attachment-name">
                       {reference.displayName}
                     </span>
-                    <button
+                    <OctantButton
                       aria-label={`Remove ${reference.displayName}`}
                       className="chip-x window-no-drag"
                       onClick={() => attachments.remove(reference.attachmentId)}
                       type="button"
                     >
                       ×
-                    </button>
+                    </OctantButton>
                   </span>
                 ))}
                 {attachments.message === undefined ? null : (
@@ -1436,7 +1437,7 @@ function ProviderInputPrompt(props: {
           {option}
         </OctantButton>
       ))}
-      <input
+      <OctantInput
         aria-label="Answer"
         onChange={(event) => setAnswer(event.target.value)}
         placeholder="Type an answer"

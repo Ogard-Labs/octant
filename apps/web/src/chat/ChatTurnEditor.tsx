@@ -1,6 +1,7 @@
 import type { ChatTurnId } from "@octant/contracts/chat";
 import { useEffect, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 export interface ChatTurnEditorProps {
   readonly turnId: ChatTurnId;
@@ -50,7 +51,7 @@ export function ChatTurnEditor(props: ChatTurnEditorProps) {
       <label className="sr-only" htmlFor={`chat-turn-editor-${props.turnId}`}>
         Edit your message
       </label>
-      <textarea
+      <OctantTextarea
         disabled={props.busy === true}
         id={`chat-turn-editor-${props.turnId}`}
         onChange={(event) => setDraft(event.target.value)}

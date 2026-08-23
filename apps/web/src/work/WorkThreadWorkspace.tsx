@@ -493,14 +493,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         {props.childRunStatus}
         <div aria-label="Work tools" className="work-thread-workspace__toolbar" role="toolbar">
           {props.onOpenBrowser === undefined ? null : (
-            <button
+            <OctantButton
               className="code-thread-workspace__tool window-no-drag"
               onClick={props.onOpenBrowser}
               type="button"
             >
               <Globe2 aria-hidden="true" size={14} strokeWidth={1.7} />
               <span>Browser</span>
-            </button>
+            </OctantButton>
           )}
           {thread?.lifecycle === "active" && thread.completionConfirmed !== true ? (
             <OctantButton
