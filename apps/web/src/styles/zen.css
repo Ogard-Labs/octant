@@ -552,7 +552,7 @@
   gap: var(--oct-space-2);
 }
 
-.zen-appearance__preset-grid > .btn {
+.zen-appearance__preset-grid > [data-slot="button"] {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;

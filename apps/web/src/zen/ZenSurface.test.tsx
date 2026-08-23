@@ -246,7 +246,7 @@ describe("ZenSurface", () => {
       /\.zen-appearance__preset-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/s,
     );
     expect(styles).toMatch(
-      /\.zen-appearance__preset-grid > \.btn\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
+      /\.zen-appearance__preset-grid > \[data-slot="button"\]\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
     );
 
     render(
@@ -264,9 +264,9 @@ describe("ZenSurface", () => {
     fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
     const dialog = screen.getByRole("dialog", { name: "Zen appearance" });
     expect(dialog.querySelector(".zen-appearance__preset-grid")).not.toBeNull();
-    expect(dialog.querySelectorAll(".zen-appearance__preset-grid > .btn").length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      dialog.querySelectorAll('.zen-appearance__preset-grid > [data-slot="button"]').length,
+    ).toBeGreaterThan(0);
   });
 
   it("forces readable opaque elements when transparency is reduced", () => {
