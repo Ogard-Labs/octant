@@ -6,6 +6,7 @@ import type {
   AppleSimulatorId,
   AppleSimulatorRecord,
 } from "@octant/contracts/apple-toolchain";
+import { OctantButton } from "../ui/base/OctantButton";
 
 export type AppleWorkbenchStatus =
   | "loading"
@@ -127,9 +128,9 @@ function AppleWorkbenchState(
       <h1>{title}</h1>
       <p role={props.status === "failed" ? "alert" : undefined}>{message}</p>
       {props.onRetry === undefined ? null : (
-        <button onClick={props.onRetry} type="button">
+        <OctantButton onClick={props.onRetry} type="button" variant="outline">
           Retry
-        </button>
+        </OctantButton>
       )}
     </section>
   );
@@ -168,22 +169,22 @@ function WorkspaceActions(props: {
     <section aria-labelledby="apple-actions-heading" className="apple-workbench__section">
       <h2 id="apple-actions-heading">Actions</h2>
       <div className="apple-workbench__actions">
-        <button
+        <OctantButton
           aria-label={`Build ${scheme}`}
           disabled={props.busy}
           onClick={() => props.onRun({ kind: "build" })}
           type="button"
         >
           Build
-        </button>
-        <button
+        </OctantButton>
+        <OctantButton
           aria-label={`Test ${scheme}`}
           disabled={props.busy}
           onClick={() => props.onRun({ kind: "test" })}
           type="button"
         >
           Test
-        </button>
+        </OctantButton>
       </div>
     </section>
   );
@@ -242,43 +243,43 @@ function SimulatorActions(props: {
   return (
     <span className="apple-workbench__actions">
       {booted ? null : (
-        <button
+        <OctantButton
           aria-label={`Boot ${simulator.name}`}
           disabled={disabled || simulator.state !== "shutdown"}
           onClick={() => props.onRun({ kind: "boot", simulatorId: simulator.simulatorId })}
           type="button"
         >
           Boot
-        </button>
+        </OctantButton>
       )}
       {!booted ? null : (
         <>
           {props.scheme === undefined ? null : (
-            <button
+            <OctantButton
               aria-label={`Run ${props.scheme} on ${simulator.name}`}
               disabled={disabled}
               onClick={() => props.onRun({ kind: "run", simulatorId: simulator.simulatorId })}
               type="button"
             >
               Run
-            </button>
+            </OctantButton>
           )}
-          <button
+          <OctantButton
             aria-label={`Capture the ${simulator.name} screen`}
             disabled={disabled}
             onClick={() => props.onRun({ kind: "screenshot", simulatorId: simulator.simulatorId })}
             type="button"
           >
             Capture screen
-          </button>
-          <button
+          </OctantButton>
+          <OctantButton
             aria-label={`Shut down ${simulator.name}`}
             disabled={disabled}
             onClick={() => props.onRun({ kind: "shutdown", simulatorId: simulator.simulatorId })}
             type="button"
           >
             Shut down
-          </button>
+          </OctantButton>
         </>
       )}
     </span>
@@ -302,14 +303,14 @@ function ProgressList(props: {
               <strong>{actionLabel(progress.kind)}</strong>
               <span>{stepLabel(progress.step)}</span>
               {props.onCancel === undefined || progress.state === "completed" ? null : (
-                <button
+                <OctantButton
                   aria-label={`Cancel ${actionLabel(progress.kind)}`}
                   disabled={props.busy}
                   onClick={() => props.onCancel?.(progress.actionId)}
                   type="button"
                 >
                   Cancel
-                </button>
+                </OctantButton>
               )}
             </li>
           ))}

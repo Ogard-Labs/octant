@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import "../styles.css";
 import { ValidationEvidencePane } from "./ValidationEvidencePane";
 import { useValidationEvidence } from "./useValidationEvidence";
+import { OctantButton } from "../ui/base/OctantButton";
 
 const DEFAULT_AUTHORITY = {
   hostId: "00000000-0000-4000-8000-000000000001",
@@ -43,9 +44,9 @@ function ValidationEvidenceQaHarness() {
     <main className="validation-qa">
       <header className="validation-qa__header">
         <h1>Validation evidence</h1>
-        <button onClick={state.retry} type="button">
+        <OctantButton onClick={state.retry} type="button" variant="outline">
           Reconnect
-        </button>
+        </OctantButton>
       </header>
       <div data-validation-status={state.status}>
         <ValidationEvidencePane

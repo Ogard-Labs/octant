@@ -2,6 +2,10 @@ import { useState } from "react";
 import type { WorkResearchBriefView } from "@octant/client-runtime/work-research-client";
 import { AlertTriangle, BookOpen, FileText, Quote } from "lucide-react";
 import type { WorkResearchMutationOutcome, WorkResearchStatus } from "./useWorkResearchController";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 
 export interface WorkResearchPanelProps {
   readonly briefs: ReadonlyArray<WorkResearchBriefView>;
@@ -70,9 +74,14 @@ export function WorkResearchPanel(props: WorkResearchPanelProps) {
           {STATUS_COPY[props.status]}
         </p>
         {props.onRetry !== undefined && props.status !== "loading" ? (
-          <button className="work-research__retry" onClick={props.onRetry} type="button">
+          <OctantButton
+            className="work-research__retry"
+            onClick={props.onRetry}
+            type="button"
+            variant="outline"
+          >
             Retry
-          </button>
+          </OctantButton>
         ) : null}
       </section>
     );
@@ -150,20 +159,20 @@ function NewBriefForm(props: {
       <label className="work-research__new-brief-label" htmlFor="work-research-new-brief">
         Research question
       </label>
-      <input
+      <OctantInput
         className="work-research__new-brief-input"
         disabled={pending}
         id="work-research-new-brief"
         onChange={(event) => setQuestion(event.currentTarget.value)}
         value={question}
       />
-      <button
+      <OctantButton
         className="work-research__new-brief-submit"
         disabled={pending || trimmed.length === 0}
         type="submit"
       >
         New research brief
-      </button>
+      </OctantButton>
       {message === undefined ? null : (
         <p className="work-research__new-brief-error" role="alert">
           {message}
@@ -381,7 +390,7 @@ function AddSourceForm(props: {
       <label className="work-research__source-form-label" htmlFor={fileId}>
         Source file (top level of the Project folder)
       </label>
-      <input
+      <OctantInput
         className="work-research__source-form-file"
         disabled={pending}
         id={fileId}
@@ -399,13 +408,13 @@ function AddSourceForm(props: {
         onChange={(event) => setExcerpt(event.currentTarget.value)}
         value={excerpt}
       />
-      <button
+      <OctantButton
         className="work-research__source-form-submit"
         disabled={pending || file === undefined || trimmed.length === 0}
         type="submit"
       >
         Add source
-      </button>
+      </OctantButton>
       {message === undefined ? null : (
         <p className="work-research__source-form-error" role="alert">
           {message}
@@ -441,7 +450,7 @@ function RevokeSourceButton(props: {
 
   return (
     <>
-      <button
+      <OctantButton
         aria-label={`Revoke ${props.displayName}`}
         className="work-research__source-revoke"
         disabled={pending}
@@ -449,7 +458,7 @@ function RevokeSourceButton(props: {
         type="button"
       >
         Revoke
-      </button>
+      </OctantButton>
       {message === undefined ? null : (
         <span className="work-research__source-revoke-error" role="alert">
           {message}
@@ -513,36 +522,34 @@ function EvidenceForm(props: {
       <label className="work-research__evidence-form-label" htmlFor={sourceSelectId}>
         Evidence source
       </label>
-      <select
+      <OctantSelectField
         className="work-research__evidence-form-source"
         disabled={pending}
         id={sourceSelectId}
-        onChange={(event) => setSourceId(event.currentTarget.value)}
+        onValueChange={setSourceId}
+        options={props.sources.map((source) => ({
+          id: String(source.sourceId),
+          label: source.displayName,
+        }))}
         value={selected}
-      >
-        {props.sources.map((source) => (
-          <option key={String(source.sourceId)} value={String(source.sourceId)}>
-            {source.displayName}
-          </option>
-        ))}
-      </select>
+      />
       <label className="work-research__evidence-form-label" htmlFor={excerptId}>
         Evidence excerpt
       </label>
-      <input
+      <OctantInput
         className="work-research__evidence-form-input"
         disabled={pending}
         id={excerptId}
         onChange={(event) => setExcerpt(event.currentTarget.value)}
         value={excerpt}
       />
-      <button
+      <OctantButton
         className="work-research__evidence-form-submit"
         disabled={pending || trimmed.length === 0}
         type="submit"
       >
         Record evidence
-      </button>
+      </OctantButton>
       {message === undefined ? null : (
         <p className="work-research__evidence-form-error" role="alert">
           {message}
@@ -602,7 +609,7 @@ function ClaimForm(props: {
       <label className="work-research__claim-form-label" htmlFor={inputId}>
         New claim
       </label>
-      <input
+      <OctantInput
         className="work-research__claim-form-input"
         disabled={pending}
         id={inputId}
@@ -616,7 +623,7 @@ function ClaimForm(props: {
             const anchor = String(entry.citationAnchor);
             return (
               <label key={String(entry.evidenceId)}>
-                <input
+                <OctantCheckbox
                   checked={anchors.includes(anchor)}
                   disabled={pending}
                   onChange={(event) => {
@@ -627,7 +634,6 @@ function ClaimForm(props: {
                         : current.filter((candidate) => candidate !== anchor),
                     );
                   }}
-                  type="checkbox"
                 />
                 {entry.excerpt}
               </label>
@@ -635,13 +641,13 @@ function ClaimForm(props: {
           })}
         </fieldset>
       )}
-      <button
+      <OctantButton
         className="work-research__claim-form-submit"
         disabled={pending || trimmed.length === 0}
         type="submit"
       >
         Add claim
-      </button>
+      </OctantButton>
       {message === undefined ? null : (
         <p className="work-research__claim-form-error" role="alert">
           {message}
@@ -676,14 +682,14 @@ function FinalizeReportButton(props: {
 
   return (
     <div className="work-research__finalize">
-      <button
+      <OctantButton
         className="work-research__finalize-submit"
         disabled={pending}
         onClick={() => void submit()}
         type="button"
       >
         Finalize report
-      </button>
+      </OctantButton>
       {message === undefined ? null : (
         <p className="work-research__finalize-error" role="alert">
           {message}

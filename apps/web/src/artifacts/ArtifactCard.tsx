@@ -1,6 +1,7 @@
 import type { ArtifactLibraryEntry } from "@octant/contracts/artifact-library";
 import { artifactEditedAgo } from "@octant/domain";
 import { Link2, Lock } from "lucide-react";
+import { OctantButton } from "../ui/base/OctantButton";
 
 export interface ArtifactCardProps {
   readonly entry: ArtifactLibraryEntry;
@@ -29,7 +30,12 @@ export function ArtifactCard(props: ArtifactCardProps) {
   const { entry } = props;
   return (
     <li className="artifact-card">
-      <button className="artifact-card__button" onClick={() => props.onOpen(entry)} type="button">
+      <OctantButton
+        className="artifact-card__button"
+        onClick={() => props.onOpen(entry)}
+        type="button"
+        variant="ghost"
+      >
         <span className="artifact-card__preview" aria-hidden="true">
           {entry.preview === undefined ? (
             <span className="artifact-card__preview-fallback">{KIND_LABEL[entry.kind]}</span>
@@ -66,7 +72,7 @@ export function ArtifactCard(props: ArtifactCardProps) {
             </span>
           </span>
         </span>
-      </button>
+      </OctantButton>
     </li>
   );
 }

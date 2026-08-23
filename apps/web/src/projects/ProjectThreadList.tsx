@@ -1,11 +1,11 @@
 import { useContext, useState } from "react";
-import { ContextMenu as ContextMenuPrimitive } from "@base-ui/react/context-menu";
 import type { ChatThreadNavigationItem, ThreadRowActivity } from "../shell/navigationModel";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantContextMenuRoot, OctantContextMenuTrigger } from "../ui/base/OctantContextMenu";
 
 /**
  * Thread rows and their honest states, shared by the Project sidebar and the
@@ -191,10 +191,10 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
         );
         if (!hasMenu) return <div key={rowId}>{row}</div>;
         return (
-          <ContextMenuPrimitive.Root key={rowId}>
-            <ContextMenuPrimitive.Trigger render={row} />
+          <OctantContextMenuRoot key={rowId}>
+            <OctantContextMenuTrigger render={row} />
             <ThreadRowMenu actions={actions} thread={thread} />
-          </ContextMenuPrimitive.Root>
+          </OctantContextMenuRoot>
         );
       })}
     </>
