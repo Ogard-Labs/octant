@@ -35,7 +35,7 @@ function chatControllerFixture(): ChatController {
 }
 
 function providerControllerFixture(): ProviderController {
-  return {
+  const controller = {
     status: "ready",
     snapshot: undefined,
     instances: [],
@@ -46,6 +46,7 @@ function providerControllerFixture(): ProviderController {
     credentialManagementAvailable: false,
     retry: vi.fn(async () => true),
   } as unknown as ProviderController;
+  return { ...controller, readInstances: () => controller.instances } as ProviderController;
 }
 
 function discoveryControllerFixture(): DiscoveryController {
@@ -242,26 +243,28 @@ describe("SettingsView", () => {
     const enabledId = "70000000-0000-4000-8000-000000000091" as never;
     const disabledId = "70000000-0000-4000-8000-000000000092" as never;
     const probe = vi.fn(async () => true);
+    const instances = [
+      {
+        id: enabledId,
+        displayName: "Enabled Codex",
+        driverKind: "codex",
+        enabled: true,
+        configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
+        version: 1,
+      },
+      {
+        id: disabledId,
+        displayName: "Disabled OpenCode",
+        driverKind: "opencode",
+        enabled: false,
+        configuration: { kind: "opencode-cli", binaryPath: "/usr/local/bin/opencode" },
+        version: 1,
+      },
+    ];
     const providerController = {
       ...providerControllerFixture(),
-      instances: [
-        {
-          id: enabledId,
-          displayName: "Enabled Codex",
-          driverKind: "codex",
-          enabled: true,
-          configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
-          version: 1,
-        },
-        {
-          id: disabledId,
-          displayName: "Disabled OpenCode",
-          driverKind: "opencode",
-          enabled: false,
-          configuration: { kind: "opencode-cli", binaryPath: "/usr/local/bin/opencode" },
-          version: 1,
-        },
-      ],
+      instances,
+      readInstances: () => instances,
       probe,
     } as unknown as ProviderController;
     const discoveryController = discoveryControllerFixture();
@@ -275,6 +278,56 @@ describe("SettingsView", () => {
     expect(probe).toHaveBeenCalledOnce();
     expect(probe).toHaveBeenCalledWith(enabledId);
     expect(probe).not.toHaveBeenCalledWith(disabledId);
+  });
+
+  it("probes providers that become available during the discovery refresh", async () => {
+    const user = userEvent.setup();
+    const existingId = "70000000-0000-4000-8000-000000000093" as never;
+    const discoveredId = "70000000-0000-4000-8000-000000000094" as never;
+    const probe = vi.fn(async () => true);
+    const discovered = {
+      id: discoveredId,
+      displayName: "Discovered Codex",
+      driverKind: "codex",
+      enabled: true,
+      configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+      version: 1,
+    };
+    const instances = [
+      {
+        id: existingId,
+        displayName: "Existing Codex",
+        driverKind: "codex",
+        enabled: true,
+        configuration: { kind: "codex-cli", binaryPath: "/usr/local/bin/codex" },
+        version: 1,
+      },
+    ];
+    const providerController = {
+      ...providerControllerFixture(),
+      instances,
+      readInstances: () => instances,
+      probe,
+    } as unknown as ProviderController;
+    let scanCount = 0;
+    const discoveryController = {
+      ...discoveryControllerFixture(),
+      scan: vi.fn(async () => {
+        scanCount += 1;
+        if (scanCount > 1) instances.push(discovered);
+        return undefined;
+      }),
+    } as unknown as DiscoveryController;
+
+    renderSettings({ providerController, discoveryController });
+    navigateTo("Providers & Models");
+    await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledOnce());
+
+    await user.click(screen.getByRole("button", { name: "Check again" }));
+
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(probe).toHaveBeenCalledWith(existingId);
+    expect(probe).toHaveBeenCalledWith(discoveredId);
   });
 
   it("integrates authoritative Chat defaults as a searchable section", () => {
