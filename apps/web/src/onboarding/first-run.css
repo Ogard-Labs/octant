@@ -112,8 +112,8 @@
   list-style: none;
 }
 
-/* The rail speaks the settings nav's language: quiet until hovered or
-   current, when it takes the same soft fill as `.setnav-item`. */
+/* The rail stays flat. Hover may tint a row, but the persistent current state
+   uses type and the progress marker rather than turning a step into a card. */
 .first-run__rail-step {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -139,14 +139,18 @@
   color: var(--oct-fg);
 }
 
-/*
- * The current step is marked by `aria-current` in the markup as well as by the
- * fill here, so it is not announced by appearance alone.
- */
+/* `aria-current` carries the semantic state; stronger type and one filled
+   marker carry the visual state without a selected-card callout. */
 .first-run__rail-step[aria-current="step"] {
+  background: transparent;
+  color: var(--oct-fg);
+  box-shadow: none;
+}
+
+.first-run__rail-step[aria-current="step"] .first-run__rail-marker {
+  border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-foreground);
-  box-shadow: inset 2px 0 0 var(--octant-focus-ring);
 }
 
 .first-run__rail-marker {
