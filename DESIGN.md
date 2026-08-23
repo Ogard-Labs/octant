@@ -1,175 +1,358 @@
----
-version: alpha
-name: "Octant"
-description: "A calm, local-first agent workspace with a graphite shell, thread-first hierarchy, and contextual tools."
-colors:
-  primary: "#202020"
-  dark-background: "#171717"
-  dark-sidebar: "#202020"
-  dark-raised: "#242424"
-  dark-control: "#292929"
-  dark-hover: "#303030"
-  dark-border: "#2D2D2D"
-  dark-border-strong: "#454545"
-  dark-text: "#F2F2F2"
-  dark-text-secondary: "#B5B5B5"
-  dark-text-muted: "#8A8A8A"
-  dark-accent: "#F2F2F2"
-  light-background: "#F7F7F7"
-  light-sidebar: "#F0F0F0"
-  light-workspace: "#FFFFFF"
-  light-raised: "#F3F3F3"
-  light-border: "#DEDEDE"
-  light-text: "#202020"
-  focus-dark: "#F2F2F2"
-  focus-light: "#202020"
-  success: "#6BB299"
-  warning: "#EDBC26"
-  danger: "#E17D96"
-typography:
-  sans:
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif"
-    fontSize: "13px"
-    lineHeight: "1.45"
-  mono:
-    fontFamily: "'JetBrains Mono', 'SF Mono', Menlo, monospace"
-    fontSize: "12px"
-    lineHeight: "1.45"
-rounded:
-  DEFAULT: "8px"
-  chip: "6px"
-  control: "8px"
-  panel: "10px"
-  composer: "14px"
-  pill: "999px"
-spacing:
-  xs: "4px"
-  sm: "8px"
-  md: "12px"
-  lg: "16px"
-  xl: "24px"
-  sidebar-width: "232px"
-  reading-width: "720px"
-components:
-  button:
-    height: "34px"
-    rounded: "8px"
-  sidebar:
-    width: "232px"
-    padding: "8px"
-  composer:
-    rounded: "14px"
-  panel:
-    rounded: "10px"
----
+# Octant design system
 
-# Octant Design System
+This is the implementation-authoritative visual contract for the shared
+renderer in `apps/web`. It describes the system that is in the repository now;
+it is not a proposal or a visual mood board. When this document and a touched
+surface disagree, update the surface or record the intentional exception in
+the same change.
 
-## Overview
+## Product character
 
-### Creative North Star
+Octant is a local-first desktop workspace for supervising Chat, Work, and Code
+threads, providers, Projects, agents, changes, and delivery. Its visual north
+star is a quiet graphite workbench:
 
-Octant should feel like a quiet professional workbench cut from graphite: one clear work surface, a shallow folder hierarchy at the left, and tools that appear beside the work only when needed. The interaction language favors restraint, Project and thread nesting, composer prominence, and contextual right-side tools.
+- One active thread, board, Project overview, or Project-level list is the
+  primary work surface.
+- Navigation is a compact Project and thread tree. Low-frequency actions live
+  in the bottom-left identity menu or an accessible overflow menu.
+- The right dock and bottom panel are contextual working regions for the active
+  pane. They are closed when they have no useful surface to show.
+- Hierarchy comes from typography, spacing, hairline borders, and selection
+  fills. Colour is scarce and semantic.
+- Controls are familiar, compact, keyboard reachable, and honest about
+  loading, stale, unavailable, permission, and error states.
 
-Controls follow the shadcn New York neutral recipe: compact rectangular buttons, quiet bordered inputs, opaque popovers, restrained cards, and clear focus rings. Octant keeps its own product structure and visual identity.
+Avoid dashboard walls, decorative gradients, neon developer styling, permanent
+low-frequency controls, oversized setup cards, pill-shaped everything, and
+invented data. A feature that is not available must explain why and offer the
+next useful action, or stay out of the primary layout.
 
-### Product context and register
+## Source of truth and CSS layers
 
-- **Audience and primary job:** developers and knowledge workers supervising several AI threads, agents, Projects, changes, and delivery states from one local-first application.
-- **Target market and evidence:** a general technical-preview audience; no market-specific visual shorthand is assumed.
-- **Locales:** owned interface copy is English today. Layouts must tolerate localization without fixed character-count assumptions.
-- **Usage scene:** a macOS desktop application used for long, high-attention sessions with dense technical content.
-- **Register:** product. Task clarity, state truth, and earned familiarity lead; brand expression stays restrained.
-- **Memorable signature:** a generous central transcript and composer framed by a compact Project tree and a thread-aware tool dock.
-- **Restraint:** navigation, forms, boards, review, terminals, and status surfaces use familiar desktop patterns and scarce accent.
-- **Anti-references:** no dashboard wall of cards, decorative gradients, neon developer styling, oversized setup panels, pill-shaped everything, or permanent low-frequency actions.
-- **Token ownership and runtime mapping:** `packages/theme/src/tokens.ts` is the canonical runtime color source. `apps/web/src/styles.css` supplies startup fallbacks; `apps/web/src/styles/octant-bridge.css` and `apps/web/src/styles/shadcn-theme.css` project the semantic roles into the owned CSS and component layers. This file records the durable intent and normative core values; code and this document change together.
+There is one runtime theme authority and one owned control layer:
 
-## Colors
+| Layer                 | Responsibility                                                                                                    | Files                                                                      |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Semantic theme        | Persisted theme settings, presets, contrast validation, typography, safe fallback, export/import                  | `packages/theme/src/`, `packages/contracts/src/theme.ts`                   |
+| Renderer fallback     | Startup values before the theme bootstrap is applied                                                              | `apps/web/src/styles.css` (`--octant-*`)                                   |
+| Static product system | Layout, shell geometry, type scale, spacing, motion, domain surface recipes, and `--oct-*` consumers              | `apps/web/src/styles/octant.css`                                           |
+| Runtime bridge        | Maps theme-resolvable `--octant-*` roles to the static system's `--oct-*` roles                                   | `apps/web/src/styles/octant-bridge.css`                                    |
+| shadcn projection     | Projects `--octant-*` roles into `--background`, `--primary`, `--border`, and the other shadcn/Tailwind variables | `apps/web/src/styles/shadcn-theme.css`, `apps/web/src/styles/tailwind.css` |
+| Owned recipes         | Editable shadcn New York recipes and the product-facing adapter API                                               | `apps/web/src/ui/shadcn/`, `apps/web/src/ui/base/`                         |
 
-The default system uses neutral graphite rather than warm brown. Dark mode keeps the workspace at `#171717`, lifts the sidebar to `#202020`, and reserves `#242424` and `#292929` for discrete raised surfaces and controls. Hierarchy comes from restrained tonal steps and hairlines, not multiple card backgrounds.
+The import order in `apps/web/src/styles.css` is load-bearing:
 
-Primary dark text is `#F2F2F2`; supporting information steps down through `#B5B5B5` and `#8A8A8A`. Light mode reverses the relationship with a white workspace, `#F0F0F0` sidebar, and `#202020` text. Monochrome primary actions invert against their surface. Semantic success, warning, danger, diff, runtime, and Project View colors remain available, but color never carries status alone.
+1. Tailwind v4 and its layered preflight.
+2. `octant.css` static system.
+3. `octant-bridge.css` runtime mapping.
+4. `shadcn-theme.css` semantic projection.
+5. Feature stylesheets, which may position a surface but must not repaint a
+   shared control.
 
-The original charcoal-and-brass palette remains an optional `Octant` theme preset. It is not the default system appearance.
+`--octant-*` roles own persistence and theme editing. `--oct-*` and shadcn
+variables are consumption aliases. Do not add a new raw colour, radius, shadow,
+or control recipe in a feature stylesheet.
+
+The shadcn registry metadata is in `apps/web/components.json` (`new-york`,
+Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
+and currently use `@base-ui/react` primitives behind the Octant adapters. This
+keeps the interaction backend accessible and editable while preserving the
+shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
+`ui/shadcn` or `@base-ui/react` directly. Existing specialized context menus in
+the Project and split-workspace drag surfaces are a documented migration
+exception because their nested/drag composition is not expressible by the
+small adapter yet; do not create new bypasses.
+
+## Colour system
+
+The default runtime palette is neutral graphite. The following values are the
+`System`/`Dark` defaults in `packages/theme/src/tokens.ts` and the matching
+renderer fallback. The `Light` defaults are the paired values shown below.
+
+### Semantic roles
+
+| Role                   | CSS variable                                        | Dark      | Light     | Use                                        |
+| ---------------------- | --------------------------------------------------- | --------- | --------- | ------------------------------------------ |
+| Application background | `--octant-app-background`                           | `#171717` | `#f7f7f7` | Host ground behind shell surfaces          |
+| Chrome                 | `--octant-chrome`                                   | `#181818` | `#fafafa` | Title bars and shell chrome                |
+| Sidebar                | `--octant-sidebar` / `--octant-sidebar-opaque`      | `#202020` | `#f0f0f0` | Navigation surface                         |
+| Workspace              | `--octant-workspace`                                | `#171717` | `#ffffff` | Main reading surface                       |
+| Floating               | `--octant-floating` / `--octant-surface-raised`     | `#242424` | `#f3f3f3` | Cards, menus, popovers, dialogs            |
+| Control                | `--octant-control` / `--octant-surface-muted`       | `#292929` | `#efefef` | Quiet control fill                         |
+| Control hover          | `--octant-control-hover` / `--octant-surface-hover` | `#303030` | `#e7e7e7` | Hover and highlighted rows                 |
+| Control pressed        | `--octant-control-pressed`                          | `#383838` | `#dedede` | Pressed state                              |
+| Border                 | `--octant-border`                                   | `#2d2d2d` | `#dedede` | Hairline separation                        |
+| Strong border          | `--octant-border-strong`                            | `#454545` | `#c5c5c5` | Focus-adjacent and draggable boundaries    |
+| Strong divider         | `--octant-divider-strong`                           | `#6b6b6b` | `#8a8a8a` | Rare structural divider                    |
+| Primary text           | `--octant-text-primary`                             | `#f2f2f2` | `#202020` | Body and control text                      |
+| Secondary text         | `--octant-text-secondary`                           | `#b5b5b5` | `#5f5f5f` | Supporting copy                            |
+| Muted text             | `--octant-text-muted`                               | `#8a8a8a` | `#707070` | Metadata and hints; not for essential text |
+| Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff` | Text on primary fill                       |
+| Focus ring             | `--octant-focus-ring`                               | `#f2f2f2` | `#202020` | Keyboard focus                             |
+| Selection              | `--octant-selection` / `--octant-surface-selected`  | `#303030` | `#e7e7e7` | Selected rows and active controls          |
+| Accent fill            | `--octant-accent`                                   | `#f2f2f2` | `#202020` | One primary action or active mark          |
+| Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff` | Text on accent fill                        |
+| Accent text            | `--octant-accent-text`                              | `#f2f2f2` | `#202020` | Accent used as text; normal-text contrast  |
+
+Status roles are paired to the surface where they render. Use the text role
+for labels and the surface role for a background; never rely on hue alone:
+
+| Meaning       | Surface                                                      | Text/border                                                                                 |
+| ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| Success       | `--octant-success-surface` (`#16281f` dark, `#bfd8cc` light) | `--octant-success-text` (`#6bb299` dark, `#0f6144` light)                                   |
+| Warning       | `--octant-warning-surface` (`#342b0e` dark, `#f0dea8` light) | `--octant-warning-text` (`#edbc26` dark, `#6f5300` light); border `--octant-warning-border` |
+| Danger        | No default surface                                           | `--octant-danger-text` (`#e17d96` dark, `#a8102f` light)                                    |
+| Diff addition | No default surface                                           | `--octant-addition-text`                                                                    |
+| Diff deletion | No default surface                                           | `--octant-deletion-text`                                                                    |
+
+The eight palette roles (`red`, `orange`, `yellow`, `green`, `teal`, `blue`,
+`purple`, `pink`) are for Project View identity, chart marks, and provider or
+runtime status where a categorical distinction is needed. Pair every mark with
+a label, icon, pattern, or border style. The static chart series and dash
+patterns live in `octant.css`.
+
+The original warm charcoal-and-brass `Octant` preset remains an optional
+theme. It is not the default neutral system. Custom themes may override only
+validated semantic roles; incomplete or low-contrast imports fall back safely.
 
 ## Typography
 
-Use the macOS system sans stack for shell, navigation, controls, and transcript chrome. Body chrome is 13px at approximately 1.45 line height; compact metadata may use 11–12px only when a nearby visible label provides context. Use 500–600 weight for selected rows, headings, and primary labels; avoid bold body paragraphs.
+Typography has distinct jobs:
 
-Use the configured editor/terminal monospace stack only for code, paths, identifiers, commands, diffs, and aligned technical data. Project names, thread titles, navigation labels, and ordinary status copy stay sans-serif.
+| Job        | Default                                                                    | Usage                                                                     |
+| ---------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Interface  | `-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif` | Shell, navigation, controls, settings, metadata                           |
+| Display    | bundled `Octant Display`, then system sans                                 | Wordmark, section headings, selected navigation labels; stable brand face |
+| Transcript | system UI sans stack                                                       | Long-running conversation and composer; readable at 13–16px               |
+| Editor     | `'JetBrains Mono', 'SF Mono', Menlo, monospace`                            | Code, diffs, paths, identifiers, aligned technical values                 |
+| Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                          | Terminal output and prompt glyphs                                         |
 
-Users may override the interface and code font stacks independently. Transcript text size uses Small, Medium, and Large presets. Transcript and composer width use centered Narrow, Medium, and Wide measures; Narrow is the default so a large window does not turn a conversation into full-width prose.
+The persisted typography schema supports independent UI, editor, and terminal
+family, size, weight, line height, and ligatures. Families are sanitized: no
+URLs, imports, remote assets, executable payloads, or control characters. Missing
+fonts fall back to the safe stack. UI/editor/terminal sizes are bounded to
+8–32px; weights to 300–700; line height to 1–2.5.
 
-## Layout
+Static type tokens in `octant.css` are:
 
-The persistent desktop shell has a 232px navigation sidebar, the central workspace, an optional thread-aware right dock, and an optional horizontal bottom panel. The central transcript and composer are always the primary reading surface.
+- `--oct-text-xs: 11px`, `--oct-text-sm: 14px`, `--oct-text-base: 16px`.
+- `--oct-text-lg: 19px`, `--oct-text-xl: 22px`, `--oct-text-2xl: 26px`,
+  `--oct-text-3xl: 36px`, `--oct-text-4xl: 72px`.
+- Body leading `1.5`, snug `1.3`, heading `1.14`, tight `1.1`, code `1.7`.
+- Strong labels use 600; display labels use 500. Avoid bolding whole paragraphs.
+- Mono metadata uses positive tracking (`--oct-tracking-wide`); display
+  headings use restrained negative tracking.
 
-Sidebar order is stable: compact mode identity, New thread, mode-valid Board and Pull requests, Project Views, the Project/thread tree, then the bottom-left name menu. Code and Work keep separate saved Project View sets; their compact-list versus icon presentation is one global preference. Project folders use explicit folder glyphs and child threads indent by 20px. Clicking the folder row toggles its children; Project Overview remains in its accessible actions menu.
+Transcript settings are explicit and centered: Small is 13px, Medium 14px,
+Large 16px; Narrow is 680px, Medium 800px, Wide 1040px. The default thread
+measure is 760px and the column uses `width: min(100% - 40px, measure)` with
+automatic horizontal margins. Canvas documents use a 62ch measure.
 
-The pane title is the only top bar. Its far-right edge may show Open in, Environment, bottom-panel, and right-dock toggles as capability allows. Zen belongs in the bottom-left name menu. Environment uses the sliders toggle with a short tooltip and a visible pressed state, then opens the existing transient window; Project, branch, clean/dirty state, working folder, listener count, availability, and a compact active-thread subagent summary live in that disclosure and its accessible description rather than a second header line. Subagent rows show task, lifecycle, resolved model, and retained final response when authoritative data exists; full control remains in the Agents dock.
+## Spacing, shapes, and depth
 
-At narrow widths the sidebar and dock follow their existing responsive contracts, and the bottom panel remains closed. Do not create a squeeze where navigation, workspace, Environment, and utility regions all demand permanent columns.
+Spacing is a 4px base scale: 4, 8, 12, 16, 20, 24, 32, and 48px. Use `gap-*`
+for stacks and groups; do not reintroduce `space-x-*` or `space-y-*` utility
+chains. The desktop radius scale is 8px compact control, 10px panel, 12px
+large panel, and 9999px only for a compact chip or meter. Composer radius is
+14px. Phone-only surfaces use the larger 22/26/30px mobile radii.
 
-## Elevation & Depth
+Controls are 44px by default and 34px compact. Icon sizes are 16/19/22px for
+small/medium/large actions; the pointer target is at least 24px on desktop and
+44px on touch surfaces. The sidebar defaults to 236px, supports 180–420px
+resizing, and collapses to 52px without removing accessible names. The right
+dock defaults to 320px. The title bar is 44px and the status bar 26px.
 
-Static panes are flat and separated by one-pixel semantic borders. Hover and selection use a single tonal step. Shadows belong only to popovers, dialogs, transient Environment, and other layers that genuinely float above content. Do not wrap every section, status, or empty state in a card.
+Panes are flat and separated by a one-pixel semantic border. Cards are for a
+discrete object or a grouped form, not for every row. Opaque shadcn popovers,
+menus, dialogs, Environment, and forms use the floating surface and overlay
+shadow. Frosted material is limited to native/optional sidebar translucency
+and the floating activity picture-in-picture; reduced transparency and
+unsupported `backdrop-filter` resolve to opaque surfaces.
 
-Native translucency may soften the sidebar when the host and accessibility settings permit it. The opaque fallback keeps identical geometry and hierarchy. Product menus, dialogs, Environment, and forms are opaque. Blur is reserved for native material and the floating activity overlay.
+Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-sm`,
+`--octant-shadow-md`, `--octant-shadow-lg`, `--octant-shadow-overlay`, and
+`--octant-shadow-pop`. Use the smallest level that establishes a genuine
+layer; ordinary in-flow content should have no shadow.
 
-## Shapes
+## Shell and layout
 
-Use 6px for compact chips and row-level controls, 8px for ordinary buttons and inputs, 10px for panels and popovers, and 14px for composers. Pills are reserved for compact categorical chips or prompt suggestions; rows, cards, and large controls are not pills.
+The shell is a CSS grid: sidebar, central workspace, optional right dock, and a
+full-width status bar. A horizontal bottom panel is an optional sibling below
+the central workspace. The central pane remains the thread, board, Project
+overview, or Project-level list. The title bar contains the pane title and
+capability-gated toggles for Open in, Environment, bottom panel, and right
+dock. Zen remains in the bottom-left identity menu.
 
-Lucide icons use 1.5–1.8px strokes and usually render at 14–16px. Icons clarify labels; they do not replace essential text unless the control has an accessible name and a familiar, repeatedly used placement.
+The app has three server-enforced modes—Chat, Work, and Code. Mode switching is
+available as a labeled selector, compact list, or icon presentation according
+to the user's setting. Code and Work keep separate Project View sets. Project
+rows and thread rows share one hierarchy: folders/Projects first, then indented
+threads; provider marks are fixed-size inline and can be hidden without changing
+row height or indentation. Project View and Project Overview are real features,
+not decorative shortcuts.
 
-## Components
+Primary sidebar destinations are New thread, Thread board, and Pull requests
+when valid for the active mode. The bottom-left identity menu owns Settings,
+Navigator, Agents, Providers, Usage, Plugins, Automations, Artifacts, and Zen
+entry points. Search is a compact in-place filter for the current mode's visible
+threads, with a command-style overlay available for broader actions.
 
-### Foundational visual states
+The right dock follows the active pane and never leaks another pane's content.
+It can host Review, Files, Browser, Terminal, Canvas, Plan (only for a real
+plan artifact), Delivery (only for a configured target), Agents (when children
+exist or explicitly invoked), Simulator, and Side chat. The dock launcher is
+not a second thread switcher. The bottom panel is terminal-first; moving one
+thread-owned terminal between regions preserves one server session.
 
-Default controls are quiet. Hover adds one neutral surface step. Selected navigation uses stronger text plus a restrained fill or one-pixel marker. Focus-visible uses the semantic focus ring without moving geometry. Disabled controls are visibly subdued and non-interactive. Busy, stale, unavailable, empty, and error are distinct states with concise copy and stable layout.
+Environment is a transient active-thread disclosure. It summarizes Project,
+branch, clean/dirty state, working folder, changes, local servers, pull-request
+identity, sources, and compact active/completed subagent rows with lifecycle,
+model, and retained final response when authoritative. It is not a permanent
+stack of cards and does not duplicate the Agents dock.
 
-Shared controls use the owned Base UI variant of shadcn New York through `ui/base` adapters. Feature styles may size and place them, but the recipe owns paint, focus, hover, disabled, and error states. Shell layout and domain workspaces remain Octant-owned.
+The context meter is a circular composer control, not a dock tab. It opens an
+opaque popover with attributed context segments, used/maximum/free values,
+estimate/source labels, loaded/deferred capabilities, provider service limits,
+quota state, and retry timing. Unknown or stale data is labeled as such and
+never rendered as zero. Inspecting context opens the authoritative inspector.
 
-### Buttons and actions
+The task visualizer is a compact composer-adjacent chip backed by the thread's
+journaled plan. It appears only when a real plan exists, shows proposed review
+or `Step n / total`, and opens a popover with title, step states, evidence, and
+start/finish/reopen/drop actions when approved. It must not invent progress from
+assistant prose or display an empty plan form.
 
-Keep one obvious primary action per local decision point. Secondary actions are neutral; destructive actions are separated and explicitly named. Low-frequency row actions appear on hover and focus, remain in flow to prevent layout shift, and are mirrored by keyboard-accessible menus. Right-click is never the only route.
+Responsive breakpoints are 560px, 720px, and 920px. Below 920px the right dock
+is removed rather than squeezing the transcript unreadably. Below 720px split
+layouts stack; below 560px compact spacing and single-column forms apply. The
+mobile app has a separate design system under `apps/mobile/design-system`.
 
-### Navigation and data display
+## Component ownership and composition
 
-Chat, Work, and Code remain permanent modes behind one compact labeled selector. Primary sidebar destinations are New thread, Thread board, and Pull requests as the active mode allows. Agents, Automations, Artifacts, Plugins, Navigator, Settings, Usage, Providers, and Zen live in the grouped bottom-left name menu when available.
+### shadcn/Base recipes
 
-Board and Pull-request destinations remain discoverable in supported modes. Their surfaces state setup, unavailable, stale, empty, refreshing, and loaded conditions honestly; they never display invented data or silently poll GitHub.
+Use the Octant adapter names in feature code. The owned recipe list includes
+Button, Card, Badge, Input, Textarea, Field/FieldGroup, Select, Combobox,
+Switch, Slider, Checkbox, ToggleGroup, Tabs, DropdownMenu, ContextMenu, Dialog,
+and Tooltip. Composition rules:
 
-Thread rows keep a compact provider mark immediately before the title. It is fixed-size, inline, and optional in Appearance settings; hiding it does not change Project indentation, row height, or any activity/status signal.
+- Buttons use `OctantButton` or `OctantIconButton`; variants are default,
+  destructive, outline, secondary, ghost, and link. Sizes are default, sm, lg,
+  and icon. Icon-only buttons always have an accessible label and tooltip/title.
+- Form layouts use `OctantFieldGroup` and `OctantField`; labels, descriptions,
+  and errors remain associated with their controls. Invalid state uses
+  `data-invalid` and `aria-invalid`.
+- Use `OctantSelectField`/Combobox for searchable or bounded choices, not a
+  custom dropdown. Option sets of 2–7 choices use `OctantToggleGroup`.
+- Use complete Card composition (`Header`, `Title`, `Description`, `Content`,
+  `Footer`) for discrete objects. Use flat rows and `Separator` for lists.
+- Menus, popovers, dialogs, and overlays are opaque, keyboard dismissible, and
+  titled for assistive technology. Use `OctantDialog` with a real label even
+  when the title is visually hidden.
+- Use Badge for status labels, Alert for callouts, Empty for empty states,
+  Skeleton for loading, and `sonner` for toasts. Do not recreate these with
+  styled spans or animated divs.
+- Use `cn()` for conditional classes, semantic Tailwind tokens (`bg-primary`,
+  `text-muted-foreground`, `border-border`), `size-*` for equal dimensions,
+  and `truncate` for clipping. Feature classes position; recipe classes paint.
 
-### Forms and overlays
+### Product-owned surfaces
 
-The new-thread surface is composer-first. One compact context row carries Project, provider/model, access, branch, and delivery controls; optional prompt suggestions sit below and never compete with the input. Configuration problems appear as compact inline recovery states rather than oversized setup cards.
+`octant.css` and the feature stylesheets own shell grid, Project/thread tree,
+composers, transcript measure, boards, review, terminal, Monaco, Canvas,
+Environment, context/task popovers, and dock geometry. These surfaces compose
+the adapters for controls instead of recreating their interaction behavior.
 
-The right dock is closed by default. Its toolbar opens a compact launcher; selected Browser, Terminal, Files, Review, Plan, Canvas, Agents, Delivery, Tests, Simulator, or Side Chat tools occupy the dock as live thread-owned surfaces. Empty dock chrome is not a full-page illustration or card.
+Thread and Project rows reserve stable gutters for status and provider marks;
+hover/focus actions remain in flow or use an overflow menu so the list does not
+jump. Right-click mirrors available actions but is never the sole route to an
+essential action.
 
-The bottom panel is also closed in a new window and restores open state and height per window. Terminal is its first tab. One thread-owned Terminal has one presentation: moving it between right and bottom regions preserves the session and never duplicates or rebinds it.
+Pull requests and usage surfaces use explicit loaded, refreshing, stale,
+rate-limited, empty, unavailable, and error states. GitHub refresh is user
+triggered; stale cached data is visibly stale. Provider usage follows the same
+provider-neutral context/limit model and preserves unavailable values.
 
-### Iconography
+## Iconography and provider marks
 
-Use Lucide for product actions, status, tools, folders, and mode identity. Provider identity is the one brand-icon exception: use bundled provider-owned marks from the approved MIT icon dependency, never a remote image or copied product asset, and fall back to a compact monogram when the endpoint has no truthful brand. Do not use emoji, text glyphs, or handcrafted SVG art as decorative furniture.
+Lucide is the product icon library. Use 14–16px for compact controls and
+1.5–1.8px strokes. In a Button, pass icons with the shadcn `data-icon`
+convention and let the recipe size them. Icons clarify labels and do not
+replace an essential label without an accessible name.
 
-### Motion
+Provider identity uses bundled, provider-owned marks from the MIT-licensed
+`@lobehub/icons-static-svg` dependency, selected by `ProviderGlyph`. Never
+fetch a remote logo, copy a product asset into Octant, use emoji, or draw an
+approximate brand mark. Unknown providers use a compact truthful monogram.
 
-Use 100–160ms feedback transitions for color, opacity, and small disclosure changes. Avoid decorative entrance motion. Running-state animation must stop under Reduced Motion and retain a non-animated textual or shape distinction.
+## Motion and interaction
 
-### Content and data visualization
+Functional feedback uses 120–160ms transitions; the base system duration is
+200ms. Use standard easing and no decorative entrance animation. Running state
+must have a textual or shape distinction in addition to motion. `prefers-reduced-
+motion` and the persisted reduced-motion setting disable transitions and
+animations without removing state information.
 
-Copy is direct and operational: state what happened, what is unavailable, why, and the next available action. Avoid implementation identifiers, marketing language, or repeated explanatory prose in routine flows. Technical values use tabular numerals where comparison matters.
+Native Electron title-bar regions are a hard boundary. Interactive controls
+must carry `window-no-drag` and remain outside any drag overlay. Test title-bar
+buttons in the packaged/native surface, not only with React/jsdom. Focus rings
+must be visible and must not move layout.
 
-## Do's and Don'ts
+## Accessibility and reliability
 
-- **Do:** keep the active thread and composer visually dominant.
-- **Do:** preserve real capabilities while moving low-frequency entry points into logical groups.
-- **Do:** use one Project/thread hierarchy and one thread-aware right dock.
-- **Do:** show honest stale, empty, unavailable, permission, and failure states.
-- **Don't:** turn every feature into a permanent sidebar row, tab, disclosure, or card.
-- **Don't:** use raw UUIDs, paths, provider internals, or backend capability names as primary UI copy.
-- **Don't:** hide essential actions exclusively behind hover or right-click.
-- **Don't:** use warm brass as the default system accent; it remains available through the original Octant theme preset.
+- Normal text targets 4.5:1 contrast; large text 3:1; non-text UI marks 3:1.
+- Status, diff, provider, and activity states always include text, shape,
+  pattern, or an accessible label in addition to colour.
+- Pointer targets are at least 24px on desktop and 44px on touch.
+- Keyboard users can reach every primary action, open/dismiss every overlay,
+  navigate menus/selects, and recover focus after closing a popover or dialog.
+- Loading, unavailable, stale, denied, empty, and error states keep stable
+  geometry and explain the next action. Never turn a refused server command
+  into a silent no-op.
+- Theme, typography, density, translucency, contrast, and reduced-motion
+  settings are persisted through the server-authoritative journal and applied
+  through the providers. Renderer state is presentation only.
+
+## Implementation checklist
+
+When adding or touching UI:
+
+1. Read this file and the owning decision record.
+2. Reuse an existing adapter and semantic token before adding CSS.
+3. Keep domain logic in its owning package; keep renderer components focused on
+   presentation and user interaction.
+4. Add a focused behavior test for meaningful interaction or accessibility.
+5. Run the nearest web test/typecheck/build and `git diff --check`; broaden to
+   the repository verification command for cross-package changes.
+6. For shell, title-bar, dock, Environment, context, or settings work, perform
+   rendered/native verification at the relevant viewport and capability state.
+7. Record a deliberate exception here or in the owning ADR when a surface
+   cannot yet use the shared recipe.
+
+### Current exceptions and known migration edges
+
+- `apps/web/src/ui/shadcn` is the owned recipe source; `components.json` is CLI
+  registry metadata and does not describe the product's complete shell.
+- Project row and split-workspace context menus still use Base UI primitives
+  directly because they combine nested context menus with drag/drop. They are
+  behaviourally covered and should migrate behind `OctantContextMenu` when its
+  API can represent that composition without a broad rewrite.
+- Legacy feature styles remain during incremental porting. A touched shared
+  control must move to an adapter and the replaced paint rules must be removed;
+  do not add another parallel recipe.
+- Mobile visual tokens and glass surfaces are intentionally separate from the
+  desktop renderer. Do not copy mobile atmosphere or phone radii into desktop
+  panes.
+
+## Evidence inspected
+
+This document was regenerated from the current implementation in the
+`feature/current-design-system` worktree: `packages/theme` token roles,
+`ThemeSettingsProvider` and `ThemeTypographyProvider`, the `octant.css` static
+system and bridge, shadcn/Tailwind projection, `apps/web/components.json`, all
+owned `ui/shadcn` recipes and `ui/base` adapters, shell/settings/project/dock
+styles, the task visualizer, context meter, usage surfaces, and decisions
+0016, 0027, 0038, 0044, 0045, and 0046. Values marked as defaults come directly
+from those files; layout guidance follows the rendered contracts encoded by
+their selectors and tests.

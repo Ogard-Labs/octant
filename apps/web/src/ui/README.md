@@ -10,16 +10,18 @@ them inside feature stylesheets.
 | ------------------------------------------------ | --------------------------------------------------- |
 | `OctantButton`                                   | All buttons (primary/secondary/ghost/icon variants) |
 | `OctantInput`, `OctantTextarea`                  | Text entry                                          |
-| `OctantSelect`                                   | Dropdown selection (portal popup is glass)          |
+| `OctantSelect`                                   | Dropdown selection (opaque semantic popover)        |
 | `OctantCheckbox`, `OctantSwitch`, `OctantSlider` | Toggles and ranges                                  |
 | `OctantTabs`                                     | Tab strips                                          |
-| `OctantMenu`                                     | Menus and disclosure popovers (glass)               |
+| `OctantMenu`                                     | Menus and disclosure popovers (opaque)              |
 | `OctantContextMenu`                              | Right-click menus mirroring the same items          |
-| `OctantDialog`                                   | Modal dialogs (glass)                               |
+| `OctantDialog`                                   | Modal dialogs (opaque)                              |
 | `OctantTooltip`                                  | Tooltips (opaque for legibility)                    |
 
-`ui/shadcn` contains the owned adapter implementations; import primitives
-from `ui/base`, not from `ui/shadcn`, inside features.
+`ui/shadcn` contains the owned shadcn recipe implementations; import product
+primitives from `ui/base`, not from `ui/shadcn`, inside features. The recipes
+use the repository's Base UI interaction primitives while retaining shadcn's
+New York composition and semantic Tailwind variables.
 
 ## Surface utilities (`styles/components.css`)
 
@@ -34,8 +36,11 @@ from `ui/base`, not from `ui/shadcn`, inside features.
   `apps/web/src/styles.css` (per-mode) and `packages/theme/src/tokens.ts`
   (theme-resolvable roles).
 - Glass: `--octant-glass-bg|border|highlight|blur|saturate` + `--octant-shadow-pop`.
-- Which surfaces are glass: the single group selector in
-  `styles/components.css`.
+  Use only for native/optional sidebar material and the floating activity
+  picture-in-picture. Menus, dialogs, forms, Environment, and ordinary
+  popovers are opaque semantic surfaces.
+- Which surfaces use glass: the explicit material selectors in
+  `styles/components.css`; do not add glass to a product control.
 
 Accessibility fallbacks (reduced transparency, no backdrop-filter,
 increased contrast) live beside the materials in `components.css`; keep them
