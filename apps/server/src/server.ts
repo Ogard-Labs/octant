@@ -205,7 +205,9 @@ import {
   type CodeRouteService,
 } from "./codeRoutes";
 import {
+  createCodeCheckoutOpenRouteHandler,
   createCodeExternalEditorRouteHandler,
+  isCodeCheckoutOpenTargetCurrent,
   isCodeExternalEditorTargetCurrent,
 } from "./codeExternalEditorRoutes";
 import { createCodeOperationApprovalRouteHandler } from "./codeOperationApprovalRoutes";
@@ -3256,6 +3258,30 @@ export function startOctantServer(
         }
       },
     });
+    const codeCheckoutOpenRoutes = createCodeCheckoutOpenRouteHandler({
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      resolve: async (input) => {
+        const windowId = decodeWindowId(input.windowId);
+        const thread = persistence.readCodeThread(decodeCodeThreadId(input.threadId));
+        if (thread === undefined) return undefined;
+        const checkout = persistence.readCodeCheckout(thread.checkoutId);
+        if (checkout === undefined || !isCodeCheckoutOpenTargetCurrent({ thread, checkout })) {
+          return undefined;
+        }
+        try {
+          const rooted = await roots.resolve(
+            windowId,
+            thread,
+            checkout,
+            codeWorkingDirectoryProbePath,
+          );
+          if (rooted === undefined) return undefined;
+          return { checkoutRoot: await realpath(rooted.rootPath) };
+        } catch {
+          return undefined;
+        }
+      },
+    });
     const researchRouter = new ResearchRouter({
       searxngClient: {
         search: async (input) => {
@@ -5363,6 +5389,7 @@ export function startOctantServer(
       (await folderBrowseRoutes(request)) ??
       (await linkedThreadRoutes(request)) ??
       (await codeOperationApprovalRoutes(request)) ??
+      (await codeCheckoutOpenRoutes(request)) ??
       (await codeExternalEditorRoutes(request)) ??
       (await previewHandoffBridgeRoutes(request)) ??
       (await codeRoutes(request)) ??

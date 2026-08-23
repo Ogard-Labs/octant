@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   app,
@@ -49,6 +49,11 @@ import {
 } from "./browserSurfaceHost";
 import { startBrowserRuntimeBroker, type BrowserRuntimeBroker } from "./browserRuntimeBroker";
 import { openCodeExternalEditorFromServer } from "./codeExternalEditor";
+import {
+  detectOpenInApplications,
+  launchOpenInApplication,
+  openCodeCheckoutInApplicationFromServer,
+} from "./openInApplications";
 import { createNativePreviewHandoffExecutor, openPreviewHandoffFromServer } from "./previewHandoff";
 import {
   requestCodeOperationApprovalFromServer,
@@ -156,6 +161,8 @@ const IPC_CHANNELS = {
   maximizeOrRestore: "octant:window:maximize-or-restore",
   minimize: "octant:window:minimize",
   openCodeExternalEditor: "octant:code:open-external-editor",
+  listOpenInApplications: "octant:code:list-open-in-applications",
+  openCodeCheckoutInApplication: "octant:code:open-checkout-in-application",
   openInNewWindow: "octant:window:open-project",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",
@@ -1825,6 +1832,31 @@ function installIpcHandlers(): void {
       request: request as never,
       fetch: globalThis.fetch,
       spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
+    });
+  });
+  ipcMain.handle(IPC_CHANNELS.listOpenInApplications, () =>
+    detectOpenInApplications({ exists: existsSync, homeDirectory: homedir() }),
+  );
+  ipcMain.handle(IPC_CHANNELS.openCodeCheckoutInApplication, async (event, request: unknown) => {
+    const context = ownedWindowContext(event);
+    if (activeServerUrl === undefined) {
+      throw new Error("Octant Open in is unavailable.");
+    }
+    await openCodeCheckoutInApplicationFromServer({
+      serverUrl: activeServerUrl,
+      desktopBridgeSecret,
+      windowId: context.windowId,
+      request: request as never,
+      fetch: globalThis.fetch,
+      launch: ({ applicationId, checkoutRoot }) =>
+        launchOpenInApplication({
+          applicationId,
+          checkoutRoot,
+          exists: existsSync,
+          homeDirectory: homedir(),
+          shell,
+          spawn: (executable, arguments_, options) => spawn(executable, [...arguments_], options),
+        }),
     });
   });
   const activePreviewHandoffs = new Map<string, AbortController>();

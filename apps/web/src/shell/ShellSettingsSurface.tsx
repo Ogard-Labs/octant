@@ -20,6 +20,7 @@ import { SettingsSurfaceErrorBoundary } from "./SettingsSurfaceErrorBoundary";
 import type { ImplementedSettingId } from "./useShellController";
 import { ShellState } from "./ShellState";
 import { ShellThemeRoot } from "./ShellFrame";
+import type { OctantHostBridge } from "./hostBridge";
 
 const LazySettingsView = lazy(async () => {
   const module = await import("./SettingsView");
@@ -56,6 +57,7 @@ export interface ShellSettingsSurfaceProps {
   readonly diagnosticsExportClient: DiagnosticsExportClient;
   readonly hostControlClient: HostControlClient;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
+  readonly hostBridge?: OctantHostBridge;
   readonly githubClient: GithubClient;
   readonly usageClient: UsageClient;
   readonly visibleSettings: ReadonlyArray<ImplementedSettingId>;
@@ -111,6 +113,7 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
             themeController={props.themeController}
             diagnosticsExportClient={props.diagnosticsExportClient}
             hostControlClient={props.hostControlClient}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             {...(props.hostFederationLifecycle === undefined
               ? {}
               : { hostFederationLifecycle: props.hostFederationLifecycle })}

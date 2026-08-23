@@ -17,6 +17,7 @@ export interface OctantMenuProps {
   readonly triggerClassName?: string;
   readonly triggerLabel: string;
   readonly value: string;
+  readonly selectionMode?: "radio" | "action";
 }
 
 /** Octant menu adapter over the owned shadcn/Base UI DropdownMenu recipe. */

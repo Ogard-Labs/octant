@@ -131,11 +131,37 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   pointer-events: auto;
 }
 
-.window-chrome__environment-action {
+.window-chrome__environment-action,
+.window-chrome__open-in-action {
   position: relative;
   display: inline-flex;
   flex: 0 0 auto;
   pointer-events: auto;
+}
+
+.open-in-menu {
+  display: inline-flex;
+}
+
+.open-in-menu__trigger {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface-muted);
+  color: var(--oct-fg-2);
+  cursor: pointer;
+}
+
+.open-in-menu__trigger:hover,
+.open-in-menu__trigger:focus-visible,
+.open-in-menu__trigger[data-popup-open] {
+  color: var(--oct-fg);
+  border-color: var(--oct-border-strong);
+  background: var(--oct-fg-soft);
 }
 
 .window-chrome__development-auth,
@@ -524,19 +550,17 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   }
 }
 
-/* The provider's mark closes the row where the model name used to sit. The
-   model changes inside a thread and read as noise on every line; the provider
-   is what a reader scanning the list is telling apart. */
+/* Provider identity sits immediately before the title, like a compact file
+   type mark. It is stable across the row and does not consume a trailing
+   action slot or change the title's indentation when the row is hovered. */
 .sidebar-navigation__thread-provider {
   display: inline-flex;
   flex: none;
   align-items: center;
-  opacity: 0;
-}
-
-.sidebar-navigation__thread:hover .sidebar-navigation__thread-provider,
-.sidebar-navigation__thread:focus-visible .sidebar-navigation__thread-provider {
-  opacity: 0.7;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  opacity: 0.78;
 }
 
 .sidebar-navigation__thread-title {
@@ -1220,7 +1244,7 @@ form > .work-composer-adapter__attachments {
 
 .work-thread-workspace__transcript {
   display: grid;
-  width: min(100% - 40px, 680px);
+  width: min(100% - 40px, var(--oct-thread-measure));
   gap: 18px;
   padding: clamp(20px, 3vh, 36px) 0 28px;
   margin: 0 auto;
@@ -1240,14 +1264,14 @@ form > .work-composer-adapter__attachments {
 .work-thread-workspace__message p {
   max-width: 62ch;
   margin: 0;
-  font-size: 13.5px;
+  font-size: var(--oct-transcript-font-size);
   line-height: 1.55;
   text-wrap: pretty;
 }
 
 .work-thread-workspace__composer {
   display: grid;
-  width: min(100%, 720px);
+  width: min(100%, var(--oct-thread-measure));
   gap: 7px;
   padding: 8px clamp(16px, 3vw, 28px) 12px;
   margin: 0 auto;

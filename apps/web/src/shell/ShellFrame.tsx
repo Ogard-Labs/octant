@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from "@octant/contracts/shell";
 import type { SidebarVibrancyMode, ThemeSettings, ThemeTypography } from "@octant/contracts/theme";
 import type { ResolvedSidebarMaterial } from "./hostBridge";
+import type { TranscriptTextSize, TranscriptWidth } from "@octant/contracts/shell";
 import { ShellResizeHandle } from "./ShellResizeHandle";
 import { ThemeTypographyProvider } from "../theme/TypographyProvider";
 import { ThemeSettingsProvider } from "../theme/ThemeSettingsProvider";
@@ -26,6 +27,9 @@ export interface ShellFrameProps {
   readonly bottomPanelOpen?: boolean;
   readonly bottomPanelHeight?: number;
   readonly workspace: ReactNode;
+  readonly transcriptTextSize?: TranscriptTextSize;
+  readonly transcriptWidth?: TranscriptWidth;
+  readonly showThreadProviderIcons?: boolean;
 }
 
 export interface ShellThemeRootProps {
@@ -71,6 +75,9 @@ export function ShellFrame(props: ShellFrameProps) {
             props.wideContextOpen ? " shell--wide-context-open" : ""
           }${props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""}`}
           data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
+          data-thread-provider-icons={props.showThreadProviderIcons === false ? "false" : "true"}
+          data-transcript-text-size={props.transcriptTextSize ?? "medium"}
+          data-transcript-width={props.transcriptWidth ?? "narrow"}
           style={
             {
               ...(props.bottomPanelHeight === undefined

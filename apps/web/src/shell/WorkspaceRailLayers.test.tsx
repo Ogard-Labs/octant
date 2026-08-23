@@ -261,7 +261,7 @@ describe("WorkspaceRailLayers", () => {
     expect(document.querySelector(".workspace")).toHaveAttribute("hidden");
 
     const board = screen.getByRole("region", { name: "Work Thread Board" });
-    await user.click(within(board).getByRole("button", { name: "Draft brief" }));
+    await user.click(await within(board).findByRole("button", { name: "Draft brief" }));
     await waitFor(() =>
       expect(screen.queryByRole("region", { name: "Work Thread Board" })).not.toBeInTheDocument(),
     );

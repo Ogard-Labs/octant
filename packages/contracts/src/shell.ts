@@ -219,6 +219,41 @@ export type EnvironmentSectionDescriptor = typeof EnvironmentSectionDescriptor.T
 export const FirstRunOnboardingStatus = Schema.Literal("pending", "completed", "skipped");
 export type FirstRunOnboardingStatus = typeof FirstRunOnboardingStatus.Type;
 
+export const OpenInApplicationId = Schema.Literal(
+  "vscode",
+  "cursor",
+  "zed",
+  "finder",
+  "terminal",
+  "ghostty",
+  "xcode",
+);
+export type OpenInApplicationId = typeof OpenInApplicationId.Type;
+
+export const DEFAULT_OPEN_IN_APPLICATIONS: ReadonlyArray<OpenInApplicationId> = [
+  "vscode",
+  "cursor",
+  "zed",
+  "finder",
+  "terminal",
+  "ghostty",
+  "xcode",
+];
+
+export const OpenInApplicationOrder = Schema.Array(OpenInApplicationId).pipe(
+  Schema.filter(
+    (applications) =>
+      applications.length <= DEFAULT_OPEN_IN_APPLICATIONS.length &&
+      new Set(applications).size === applications.length,
+  ),
+);
+export type OpenInApplicationOrder = typeof OpenInApplicationOrder.Type;
+
+export const TranscriptTextSize = Schema.Literal("small", "medium", "large");
+export type TranscriptTextSize = typeof TranscriptTextSize.Type;
+export const TranscriptWidth = Schema.Literal("narrow", "medium", "wide");
+export type TranscriptWidth = typeof TranscriptWidth.Type;
+
 export const ShellSettings = Schema.Struct({
   chatEnabled: Schema.Boolean,
   workEnabled: Schema.Boolean,
@@ -247,6 +282,17 @@ export const ShellSettings = Schema.Struct({
    * release notes describe.
    */
   automaticUpdateChecks: Schema.optionalWith(Schema.Boolean, { default: () => true }),
+  /** Enabled Open in applications, in the order shown by the native shell. */
+  openInApplications: Schema.optionalWith(OpenInApplicationOrder, {
+    default: () => [...DEFAULT_OPEN_IN_APPLICATIONS],
+  }),
+  transcriptTextSize: Schema.optionalWith(TranscriptTextSize, {
+    default: () => "medium" as const,
+  }),
+  transcriptWidth: Schema.optionalWith(TranscriptWidth, {
+    default: () => "narrow" as const,
+  }),
+  showThreadProviderIcons: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   // Navigator settings section. A store persisted before Navigator shipped
   // decodes to the empty section — both roles absent — which the snapshot
   // reports as `unconfigured` rather than inventing a default model.

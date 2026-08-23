@@ -1,4 +1,5 @@
 import {
+  DEFAULT_OPEN_IN_APPLICATIONS,
   DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,
   LOCAL_HOST_ID,
   MAX_CONTEXT_SIDEBAR_WIDTH,
@@ -151,6 +152,10 @@ export function defaultShellSettings(): ShellSettings {
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),
     firstRunOnboarding: "pending",
     automaticUpdateChecks: true,
+    openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
+    transcriptTextSize: "medium",
+    transcriptWidth: "narrow",
+    showThreadProviderIcons: true,
     navigatorAssistant: {},
     userProfile: { accent: DEFAULT_AVATAR_ACCENT, avatar: DEFAULT_USER_AVATAR },
   };

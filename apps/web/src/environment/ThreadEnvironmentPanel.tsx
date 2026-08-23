@@ -1,8 +1,9 @@
 import type { EnvironmentCompactIdentity } from "@octant/contracts";
-import { PanelsTopLeft } from "lucide-react";
+import { SlidersHorizontal, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 
 export interface ThreadEnvironmentSummaryFacts {
   readonly identity: EnvironmentCompactIdentity;
@@ -35,6 +36,8 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   const onOpenChangeRef = useRef(props.onOpenChange);
   onOpenChangeRef.current = props.onOpenChange;
   const panelId = useId();
+  const panelTitleId = useId();
+  const summaryId = useId();
   const [toolbarHost, setToolbarHost] = useState<Element | null>(() =>
     typeof document === "undefined"
       ? null
@@ -42,8 +45,7 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
   );
   const active = props.active !== false;
   const facts = summaryFacts(props.summary);
-  const action = props.open ? "Hide" : "Show";
-  const name = `${action} environment for ${props.summary.identity.label}. ${facts.join(" · ")}`;
+  const summary = `${props.summary.identity.label} · ${facts.join(" · ")}`;
 
   useEffect(() => {
     setToolbarHost(document.querySelector("[data-octant-environment-action]"));
@@ -81,31 +83,51 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
 
   const environment = (
     <div className="thread-environment-summary">
-      <OctantButton
-        aria-controls={panelId}
-        aria-expanded={props.open}
-        aria-haspopup="dialog"
-        aria-label={name}
-        className="thread-environment-summary__button"
-        data-environment-status={props.summary.identity.status}
-        onClick={() => props.onOpenChange(!props.open)}
-        ref={triggerRef}
-        title={name}
-        type="button"
-        variant="ghost"
-      >
-        <PanelsTopLeft aria-hidden="true" size={15} strokeWidth={1.7} />
-        <span className="sr-only">Environment</span>
-      </OctantButton>
+      <span className="sr-only" id={summaryId}>
+        {summary}
+      </span>
+      <OctantTooltip label="Toggle environment">
+        <OctantButton
+          aria-controls={panelId}
+          aria-describedby={summaryId}
+          aria-expanded={props.open}
+          aria-haspopup="dialog"
+          aria-label="Toggle environment"
+          aria-pressed={props.open}
+          className="thread-environment-summary__button"
+          data-environment-status={props.summary.identity.status}
+          onClick={() => props.onOpenChange(!props.open)}
+          ref={triggerRef}
+          type="button"
+          variant="ghost"
+        >
+          <SlidersHorizontal aria-hidden="true" size={15} strokeWidth={1.7} />
+        </OctantButton>
+      </OctantTooltip>
       {props.open ? (
         <div
-          aria-label={`Environment for ${props.summary.identity.label}`}
+          aria-labelledby={panelTitleId}
           className="popover-panel thread-environment-disclosure window-no-drag"
           id={panelId}
           ref={panelRef}
           role="dialog"
           tabIndex={-1}
         >
+          <header className="thread-environment-disclosure__header">
+            <div className="thread-environment-disclosure__heading">
+              <h2 id={panelTitleId}>Environment</h2>
+              <span>{props.summary.identity.label}</span>
+            </div>
+            <OctantButton
+              aria-label="Close environment"
+              className="thread-environment-disclosure__close"
+              onClick={() => props.onOpenChange(false)}
+              type="button"
+              variant="ghost"
+            >
+              <X aria-hidden="true" size={15} strokeWidth={1.7} />
+            </OctantButton>
+          </header>
           <div className="thread-environment-disclosure__body">{props.children}</div>
         </div>
       ) : null}

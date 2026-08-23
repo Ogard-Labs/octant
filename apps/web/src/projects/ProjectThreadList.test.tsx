@@ -20,6 +20,10 @@ describe("ProjectThreadRows", () => {
 
     expect(screen.getByTitle("Claude")).toBeVisible();
     expect(screen.queryByText("gpt-5.6-luna")).toBeNull();
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    const provider = row.querySelector(".sidebar-navigation__thread-provider");
+    const title = row.querySelector(".sidebar-navigation__thread-copy");
+    expect(provider?.nextElementSibling).toBe(title);
   });
 
   it("says a thread needs attention through a labelled dot rather than a badge", () => {

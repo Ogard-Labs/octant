@@ -3463,7 +3463,7 @@ describe("App", () => {
     const thread = await screen.findByRole("region", {
       name: "Workspace pane: Controller foundation",
     });
-    await user.click(await screen.findByRole("button", { name: /Show environment for/ }));
+    await user.click(await screen.findByRole("button", { name: "Toggle environment" }));
     await user.click(await screen.findByRole("button", { name: "View changes" }));
 
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });

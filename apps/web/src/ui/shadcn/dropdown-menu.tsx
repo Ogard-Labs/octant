@@ -58,6 +58,8 @@ export interface ShadcnDropdownMenuProps {
   readonly triggerClassName?: string;
   readonly triggerLabel: string;
   readonly value: string;
+  /** Action menus invoke every enabled item, including the current value. */
+  readonly selectionMode?: "radio" | "action";
 }
 
 export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
@@ -79,33 +81,16 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
           sideOffset={4}
         >
           <DropdownMenuPopup className="window-no-drag" finalFocus={triggerRef}>
-            <MenuPrimitive.RadioGroup
-              onValueChange={(value) => {
-                if (
-                  typeof value === "string" &&
-                  props.items.some((item) => item.value === value && item.disabled !== true)
-                ) {
-                  props.onValueChange(value);
-                }
-              }}
-              value={props.value}
-            >
-              {props.items.map((item) => (
-                <MenuPrimitive.RadioItem
+            {props.selectionMode === "action" ? (
+              props.items.map((item) => (
+                <MenuPrimitive.Item
                   className={cn(
                     "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
                   )}
                   closeOnClick
                   key={item.value}
-                  label={item.label}
                   {...(item.disabled === true ? { disabled: true } : {})}
-                  onKeyDown={(event) => {
-                    if (event.key === " ") {
-                      event.preventDefault();
-                      event.currentTarget.click();
-                    }
-                  }}
-                  value={item.value}
+                  onClick={() => props.onValueChange(item.value)}
                 >
                   <span aria-hidden="true" className="flex size-4 items-center justify-center">
                     {item.icon}
@@ -118,12 +103,55 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                       </span>
                     )}
                   </span>
-                  <MenuPrimitive.RadioItemIndicator className="octant-menu__indicator ml-auto text-foreground">
-                    <Check aria-hidden="true" size={14} strokeWidth={1.8} />
-                  </MenuPrimitive.RadioItemIndicator>
-                </MenuPrimitive.RadioItem>
-              ))}
-            </MenuPrimitive.RadioGroup>
+                </MenuPrimitive.Item>
+              ))
+            ) : (
+              <MenuPrimitive.RadioGroup
+                onValueChange={(value) => {
+                  if (
+                    typeof value === "string" &&
+                    props.items.some((item) => item.value === value && item.disabled !== true)
+                  ) {
+                    props.onValueChange(value);
+                  }
+                }}
+                value={props.value}
+              >
+                {props.items.map((item) => (
+                  <MenuPrimitive.RadioItem
+                    className={cn(
+                      "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
+                    )}
+                    closeOnClick
+                    key={item.value}
+                    label={item.label}
+                    {...(item.disabled === true ? { disabled: true } : {})}
+                    onKeyDown={(event) => {
+                      if (event.key === " ") {
+                        event.preventDefault();
+                        event.currentTarget.click();
+                      }
+                    }}
+                    value={item.value}
+                  >
+                    <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                      {item.icon}
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate font-medium">{item.label}</span>
+                      {item.description === undefined ? null : (
+                        <span className="truncate text-xs text-muted-foreground">
+                          {item.description}
+                        </span>
+                      )}
+                    </span>
+                    <MenuPrimitive.RadioItemIndicator className="octant-menu__indicator ml-auto text-foreground">
+                      <Check aria-hidden="true" size={14} strokeWidth={1.8} />
+                    </MenuPrimitive.RadioItemIndicator>
+                  </MenuPrimitive.RadioItem>
+                ))}
+              </MenuPrimitive.RadioGroup>
+            )}
           </DropdownMenuPopup>
         </MenuPrimitive.Positioner>
       </MenuPrimitive.Portal>

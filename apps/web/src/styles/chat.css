@@ -386,6 +386,7 @@
   display: grid;
   gap: var(--oct-space-3);
   max-width: 72ch;
+  font-size: var(--oct-transcript-font-size);
 }
 
 .chat-rich-text h2,

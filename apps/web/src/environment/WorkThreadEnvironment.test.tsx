@@ -71,8 +71,8 @@ function threadClient(result: "ready" | "failed" = "ready"): WorkThreadClient {
   };
 }
 
-async function openEnvironment(name = /Show environment for/): Promise<void> {
-  fireEvent.click(await screen.findByRole("button", { name }));
+async function openEnvironment(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: "Toggle environment" }));
 }
 
 describe("WorkThreadEnvironment", () => {
@@ -88,11 +88,11 @@ describe("WorkThreadEnvironment", () => {
     );
 
     expect(screen.getByTestId("work-workspace-content")).toBeVisible();
-    expect(
-      await screen.findByRole("button", {
-        name: /Show environment for Knowledge Base\. work-root/,
-      }),
-    ).toHaveAttribute("data-environment-status", "available");
+    expect(await screen.findByRole("button", { name: "Toggle environment" })).toHaveAttribute(
+      "data-environment-status",
+      "available",
+    );
+    expect(screen.getByText(/Knowledge Base · work-root/)).toHaveClass("sr-only");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -107,9 +107,11 @@ describe("WorkThreadEnvironment", () => {
       </WorkThreadEnvironment>,
     );
 
-    expect(
-      await screen.findByRole("button", { name: "Show environment for Work. No folder Project" }),
-    ).toHaveAttribute("data-environment-status", "unavailable");
+    expect(await screen.findByRole("button", { name: "Toggle environment" })).toHaveAttribute(
+      "data-environment-status",
+      "unavailable",
+    );
+    expect(screen.getByText("Work · No folder Project")).toHaveClass("sr-only");
   });
 
   it("submits a bounded relative working directory through the focused Change working folder flow", async () => {
@@ -122,6 +124,7 @@ describe("WorkThreadEnvironment", () => {
     );
     await openEnvironment();
     expect(screen.queryByLabelText("Working folder")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Working folder/ }));
     await user.click(screen.getByRole("button", { name: "Change working folder" }));
     const input = await screen.findByDisplayValue(".");
     await user.clear(input);
@@ -154,6 +157,7 @@ describe("WorkThreadEnvironment", () => {
       </WorkThreadEnvironment>,
     );
     await openEnvironment();
+    fireEvent.click(screen.getByRole("button", { name: /^Working folder/ }));
     fireEvent.click(screen.getByRole("button", { name: "Change working folder" }));
     await screen.findByDisplayValue(".");
     fireEvent.change(screen.getByLabelText("Working folder"), {

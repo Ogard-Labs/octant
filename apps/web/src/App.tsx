@@ -21,7 +21,6 @@ import { createShipClient, type ShipClient } from "@octant/client-runtime/ship-c
 import { createPlanClient, type PlanClient } from "@octant/client-runtime/plan-client";
 import { createUsageDashboardClient } from "@octant/client-runtime";
 import type { UsageQueryFilter } from "@octant/contracts/usage-rpc";
-import { UsageWorkspace } from "./usage/UsageWorkspace";
 import { createWorkMutationClient } from "@octant/client-runtime/work-mutation-client";
 import { createWorkRequestClient } from "@octant/client-runtime/work-request-client";
 import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
@@ -116,7 +115,16 @@ import {
 } from "@octant/domain";
 import type { CreateHostViewScope, ModelPickerSelection } from "@octant/domain";
 import { resolveSidebarBackground } from "@octant/theme/backgrounds";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import "./styles.css";
 import "./styles/shell.css";
 import "./styles/dock.css";
@@ -280,6 +288,10 @@ import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePane
 import { OctantCommandProvider } from "./palette/CommandRegistry";
 import { buildOctantCommands, type CommandProject } from "./palette/buildOctantCommands";
 import { useCommandSkills } from "./palette/useCommandSkills";
+
+const UsageWorkspace = lazy(() =>
+  import("./usage/UsageWorkspace").then((module) => ({ default: module.UsageWorkspace })),
+);
 
 export type { ShellLaunch } from "./shell/shellLaunch";
 export { launchFromLocation } from "./shell/shellLaunch";
@@ -3364,12 +3376,20 @@ function LaunchedShell(
   });
 
   const usageSurface = (
-    <UsageWorkspace
-      client={usageDashboardClient}
-      isNarrow={isNarrow}
-      onBack={() => setUsageOpen(false)}
-      {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
-    />
+    <Suspense
+      fallback={
+        <div aria-label="Opening usage" className="workspace-rail-loading" role="status">
+          Opening usage…
+        </div>
+      }
+    >
+      <UsageWorkspace
+        client={usageDashboardClient}
+        isNarrow={isNarrow}
+        onBack={() => setUsageOpen(false)}
+        {...(pendingUsageFilter === undefined ? {} : { initialFilter: pendingUsageFilter })}
+      />
+    </Suspense>
   );
   const settingsSurface = (
     <ShellSettingsSurface
@@ -3415,6 +3435,7 @@ function LaunchedShell(
       themeController={themeController}
       diagnosticsExportClient={diagnosticsExportClient}
       hostControlClient={hostControlClient}
+      {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
       githubClient={githubClient}
       usageClient={usageClient}
@@ -3602,6 +3623,9 @@ function LaunchedShell(
         onPreviewSidebarWidth={setPreviewSidebarWidth}
         sidebarCollapsed={sidebarCollapsed && !isNarrow}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
+        showThreadProviderIcons={controller.settings.showThreadProviderIcons}
+        transcriptTextSize={controller.settings.transcriptTextSize}
+        transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
           <ShellSidebar
             {...(activeMode === "chat"
@@ -4011,6 +4035,7 @@ function LaunchedShell(
                     appleToolchainClient={appleToolchainClient}
                     agentRunClient={agentRunClient}
                     onAddAgent={invokeAddAgent}
+                    onOpenAgents={() => openDockTab("agents")}
                     chatClient={chatClient}
                     chatController={chatController}
                     chatReadCursorStore={chatReadCursorStore}
@@ -4032,6 +4057,7 @@ function LaunchedShell(
                     extensionClient={extensionClient}
                     workPromotionController={workPromotionController}
                     codeProviderChoices={codeProviderChoices}
+                    openInApplications={controller.settings.openInApplications}
                     hosts={hosts}
                     selectedCreateHostId={createHostId}
                     createHostViewScope={createHostViewScope}

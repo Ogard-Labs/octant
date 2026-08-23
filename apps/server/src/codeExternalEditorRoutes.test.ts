@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createCodeCheckoutOpenRouteHandler,
   createCodeExternalEditorRouteHandler,
+  isCodeCheckoutOpenTargetCurrent,
   isCodeExternalEditorTargetCurrent,
 } from "./codeExternalEditorRoutes";
 
@@ -94,6 +96,42 @@ describe("Code external editor desktop route", () => {
   );
 });
 
+describe("Code checkout Open in desktop route", () => {
+  it("returns a confined checkout root only to the authenticated desktop", async () => {
+    const resolve = vi.fn(async () => ({ checkoutRoot: "/private/repo" }));
+    const handle = createCodeCheckoutOpenRouteHandler({ desktopBridgeSecret: secret, resolve });
+    const response = await handle(
+      checkoutRequest({ windowId: ids.windowId, threadId: ids.threadId }),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ checkoutRoot: "/private/repo" });
+    expect(resolve).toHaveBeenCalledWith({ windowId: ids.windowId, threadId: ids.threadId });
+  });
+
+  it("rejects renderer origins, excess target fields, and unavailable checkouts", async () => {
+    const resolve = vi.fn();
+    const handle = createCodeCheckoutOpenRouteHandler({ desktopBridgeSecret: secret, resolve });
+
+    expect((await handle(checkoutRequest(ids, secret, "file://")))?.status).toBe(401);
+    expect((await handle(checkoutRequest({ ...ids, path: "/private/repo" })))?.status).toBe(400);
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["active", "available", true],
+    ["archived", "available", false],
+    ["active", "waiting", false],
+  ] as const)("accepts only an active available checkout", (lifecycle, availability, expected) => {
+    expect(
+      isCodeCheckoutOpenTargetCurrent({
+        checkout: { id: ids.checkoutId, availability } as never,
+        thread: { checkoutId: ids.checkoutId, lifecycle } as never,
+      }),
+    ).toBe(expected);
+  });
+});
+
 function request(body: unknown, token = secret, origin?: string): Request {
   return new Request("http://127.0.0.1:13773/api/desktop/code-external-editor-target", {
     method: "POST",
@@ -103,5 +141,18 @@ function request(body: unknown, token = secret, origin?: string): Request {
       ...(origin === undefined ? {} : { origin }),
     },
     body: JSON.stringify({ ...(body as object), line: 12, column: 4 }),
+  });
+}
+
+function checkoutRequest(body: unknown, token = secret, origin?: string): Request {
+  const record = body as Record<string, unknown>;
+  return new Request("http://127.0.0.1:13773/api/desktop/code-checkout-open-target", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-octant-desktop-secret": token,
+      ...(origin === undefined ? {} : { origin }),
+    },
+    body: JSON.stringify({ windowId: record.windowId, threadId: record.threadId, ...record }),
   });
 }

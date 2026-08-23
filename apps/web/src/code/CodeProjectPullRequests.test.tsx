@@ -86,6 +86,8 @@ describe("CodeProjectPullRequests", () => {
 
     expect(await screen.findByRole("heading", { name: "Pull requests" })).toBeVisible();
     expect(await screen.findByText("List active pull requests")).toBeVisible();
+    expect(screen.getByRole("searchbox", { name: "Search pull requests" })).toBeVisible();
+    expect(screen.getByText("1 pull request")).toBeVisible();
     expect(load).toHaveBeenCalledWith({ version: 1 });
     expect(refresh).not.toHaveBeenCalled();
   });
@@ -195,5 +197,21 @@ describe("CodeProjectPullRequests", () => {
     expect(onSelectRow).toHaveBeenCalledWith(
       expect.objectContaining({ number: 12, title: "List active pull requests" }),
     );
+  });
+
+  it("filters the cached snapshot locally and clears the query without contacting GitHub", async () => {
+    const user = userEvent.setup();
+    const { load, refresh } = renderWorkspace();
+    await screen.findByText("List active pull requests");
+
+    const search = screen.getByRole("searchbox", { name: "Search pull requests" });
+    await user.type(search, "missing title");
+    expect(screen.getByText("No pull requests match “missing title”.")).toBeVisible();
+    expect(screen.queryByText("List active pull requests")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear pull-request search" }));
+    expect(await screen.findByText("List active pull requests")).toBeVisible();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(refresh).not.toHaveBeenCalled();
   });
 });

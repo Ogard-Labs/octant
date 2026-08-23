@@ -169,7 +169,7 @@ export function ThemeAppearanceEditor(props: {
           </OctantNativeSelect>
         </label>
       </section>
-      <details className="settings-theme-editor__disclosure">
+      <details className="settings-theme-editor__disclosure" open>
         <summary>
           <span>Typography</span>
           <ChevronDown
@@ -180,14 +180,14 @@ export function ThemeAppearanceEditor(props: {
         </summary>
         <div className="settings-theme-editor__disclosure-body">
           <TypographyControl
-            label="UI typography"
-            familyLabel="UI font family"
+            label="Interface typography"
+            familyLabel="Interface font"
             value={draft.typography.ui}
             onChange={(patch) => setTypography("ui", patch)}
           />
           <TypographyControl
-            label="Editor typography"
-            familyLabel="Editor font family"
+            label="Code typography"
+            familyLabel="Code font"
             value={draft.typography.editor}
             onChange={(patch) => setTypography("editor", patch)}
             extended

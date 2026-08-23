@@ -990,3 +990,71 @@
   font-size: 12px;
   color: var(--oct-muted);
 }
+.settings-code-stack {
+  display: grid;
+  gap: var(--oct-space-6);
+}
+
+.open-in-settings {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+
+.open-in-settings > legend {
+  padding: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-strong);
+}
+
+.open-in-settings > p,
+.open-in-settings__state {
+  margin: var(--oct-space-2) 0 var(--oct-space-4);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+}
+
+.open-in-settings__list {
+  border-block: 1px solid var(--oct-border);
+}
+
+.open-in-settings__row {
+  display: grid;
+  min-height: 44px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border);
+}
+
+.open-in-settings__row:last-child {
+  border-bottom: 0;
+}
+
+.open-in-settings__row > label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg);
+  cursor: pointer;
+}
+
+.open-in-settings__availability {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.open-in-settings__order-actions {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.open-in-settings__order-actions button {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+}

@@ -79,7 +79,7 @@ async function openEnvironment(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
   });
-  fireEvent.click(await screen.findByRole("button", { name: /Show environment for/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "Toggle environment" }));
 }
 
 describe("CodeThreadEnvironment", () => {
@@ -109,11 +109,8 @@ describe("CodeThreadEnvironment", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(
-      screen.getByRole("button", {
-        name: /Show environment for Octant\. feature\/issue-204 · Dirty · \./,
-      }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Toggle environment" })).toBeVisible();
+    expect(screen.getByText(/Octant · feature\/issue-204 · Dirty · \./)).toHaveClass("sr-only");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
@@ -174,6 +171,7 @@ describe("CodeThreadEnvironment", () => {
     );
 
     await openEnvironment();
+    fireEvent.click(screen.getByRole("button", { name: "Pull requests" }));
     expect(await screen.findByText("#42 Keep the environment useful")).toBeVisible();
     expect(githubClient.readCatalogue).toHaveBeenCalledWith({
       kind: "pull-requests",
@@ -227,9 +225,11 @@ describe("CodeThreadEnvironment", () => {
         <div />
       </CodeThreadEnvironment>,
     );
-    expect(
-      screen.getByRole("button", { name: "Show environment for Code. No project" }),
-    ).toHaveAttribute("data-environment-status", "unavailable");
+    expect(screen.getByRole("button", { name: "Toggle environment" })).toHaveAttribute(
+      "data-environment-status",
+      "unavailable",
+    );
+    expect(screen.getByText("Code · No project")).toHaveClass("sr-only");
   });
 
   it("keeps open state as renderer state and closes when the pane is no longer active", async () => {
@@ -243,7 +243,7 @@ describe("CodeThreadEnvironment", () => {
       </CodeThreadEnvironment>,
     );
     await openEnvironment();
-    expect(screen.getByRole("dialog", { name: "Environment for Octant" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Environment" })).toBeVisible();
 
     rerender(
       <CodeThreadEnvironment
@@ -276,6 +276,7 @@ describe("CodeThreadEnvironment", () => {
     );
     await openEnvironment();
     expect(screen.queryByLabelText("Working folder")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Working folder/ }));
     await user.click(screen.getByRole("button", { name: "Change working folder" }));
     await screen.findByDisplayValue(".");
     expect(screen.getByLabelText("Working folder")).toHaveFocus();
@@ -314,6 +315,7 @@ describe("CodeThreadEnvironment", () => {
       </CodeThreadEnvironment>,
     );
     await openEnvironment();
+    fireEvent.click(screen.getByRole("button", { name: /^Working folder/ }));
     fireEvent.click(screen.getByRole("button", { name: "Change working folder" }));
     await screen.findByDisplayValue(".");
     fireEvent.change(screen.getByLabelText("Working folder"), {

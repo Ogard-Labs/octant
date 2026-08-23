@@ -172,9 +172,6 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
                 busy and an idle title start on the same edge. It is never
                 colour alone: the label says the state in words. */}
             <ThreadStatusDot activity={activityOf(thread)} />
-            <span className="sidebar-navigation__thread-copy">
-              <span className="sidebar-navigation__thread-title">{thread.title}</span>
-            </span>
             {thread.provider === undefined ? null : (
               <span
                 className="sidebar-navigation__thread-provider"
@@ -183,10 +180,13 @@ export function ProjectThreadRows(props: ProjectThreadRowsProps) {
                 <ProviderGlyph
                   displayName={thread.provider.displayName}
                   driverKind={thread.provider.driverKind}
-                  size={15}
+                  size={14}
                 />
               </span>
             )}
+            <span className="sidebar-navigation__thread-copy">
+              <span className="sidebar-navigation__thread-title">{thread.title}</span>
+            </span>
           </OctantButton>
         );
         if (!hasMenu) return <div key={rowId}>{row}</div>;

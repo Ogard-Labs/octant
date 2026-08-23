@@ -184,6 +184,10 @@ describe("Journal", () => {
         modeSwitcherPresentation: "dropdown",
         navigatorAssistant: {},
         projectViewSwitcherPresentation: "dropdown",
+        transcriptTextSize: "medium",
+        transcriptWidth: "narrow",
+        showThreadProviderIcons: true,
+        openInApplications: ["vscode", "cursor", "zed", "finder", "terminal", "ghostty", "xcode"],
         userProfile: { accent: "indigo", avatar: { kind: "initials" } },
         sidebarBackground: {
           kind: "none",

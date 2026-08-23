@@ -88,6 +88,24 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "project view switcher icons dropdown sidebar code",
         },
         {
+          id: settingId("transcript-text-size"),
+          label: "Transcript text size",
+          scope: "app",
+          keywords: "transcript conversation text font size small medium large",
+        },
+        {
+          id: settingId("transcript-width"),
+          label: "Transcript width",
+          scope: "app",
+          keywords: "transcript conversation composer width narrow medium wide centered",
+        },
+        {
+          id: settingId("thread-provider-icons"),
+          label: "Provider icons in thread list",
+          scope: "app",
+          keywords: "thread provider icon avatar logo sidebar compact visibility",
+        },
+        {
           id: settingId("sidebar-background"),
           label: "Sidebar background",
           scope: "app",
@@ -152,7 +170,14 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       scope: "app",
       keywords:
         "code defaults access approvals plan read-only full access permission persistence current session external editor executable arguments new threads",
-      settings: [],
+      settings: [
+        {
+          id: settingId("open-in-applications"),
+          label: "Open in applications",
+          scope: "app",
+          keywords: "open in vscode cursor zed finder terminal ghostty xcode detected installed",
+        },
+      ],
     },
     {
       id: "navigator-assistant",

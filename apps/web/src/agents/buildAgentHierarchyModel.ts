@@ -25,6 +25,11 @@ export interface AgentHierarchyInputEntry {
   };
   readonly route?: AgentHierarchyInputRoute;
   readonly recoveryReason?: string;
+  readonly result?: {
+    readonly reference: string;
+    readonly text?: string;
+    readonly truncated: boolean;
+  };
   readonly version: number;
   readonly updatedAt: string;
 }
@@ -45,6 +50,7 @@ export interface AgentHierarchyRow {
   readonly routeLabel?: string;
   readonly routeReason?: string;
   readonly nativeReadOnly: boolean;
+  readonly result?: AgentHierarchyInputEntry["result"];
   readonly version: number;
   readonly updatedAt: string;
 }
@@ -136,6 +142,7 @@ function toRow(entry: AgentHierarchyInputEntry, depth: number): AgentHierarchyRo
       ? {}
       : { followUpReason: entry.resultAcknowledgement.followUpReason }),
     ...(entry.recoveryReason === undefined ? {} : { recoveryReason: entry.recoveryReason }),
+    ...(entry.result === undefined ? {} : { result: entry.result }),
     ...(entry.route === undefined ? {} : { routeLabel: routeLabel(entry.route) }),
     ...(entry.route?.routingReason === undefined ? {} : { routeReason: entry.route.routingReason }),
     nativeReadOnly: entry.executionKind === "provider-native",

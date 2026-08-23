@@ -230,7 +230,8 @@ describe("WindowChrome", () => {
     expect(cssRule('.sidebar-navigation__thread-status[data-activity="idle"]')).toContain(
       "opacity: 0;",
     );
-    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("opacity: 0;");
+    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("width: 14px;");
+    expect(cssRule(".sidebar-navigation__thread-provider")).toContain("opacity: 0.78;");
     expect(cssRule('.sidebar-navigation__thread[aria-current="page"]')).not.toContain(
       "var(--oct-accent)",
     );
@@ -538,7 +539,7 @@ describe("WindowChrome", () => {
     expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
   });
 
-  it("maps the whole chrome as draggable while controls carve out no-drag regions", () => {
+  it("keeps only the blank title-bar space draggable so pointer controls remain clickable", () => {
     const { container } = render(
       <WindowChrome
         activeSurface="Welcome to Code"
@@ -555,10 +556,8 @@ describe("WindowChrome", () => {
     );
 
     expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
-    expect(container.firstChild).toHaveClass("window-drag-region");
-    expect(container.querySelector(".window-chrome__drag-space")).not.toHaveClass(
-      "window-drag-region",
-    );
+    expect(container.firstChild).not.toHaveClass("window-drag-region");
+    expect(container.querySelector(".window-chrome__drag-space")).toHaveClass("window-drag-region");
     expect(container.querySelectorAll(".window-drag-region")).toHaveLength(1);
     for (const control of screen.getAllByRole("button")) {
       expect(control).toHaveClass("window-no-drag");

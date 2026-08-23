@@ -53,6 +53,10 @@ const settings = {
   sidebarMaterial: "system",
   modeSwitcherPresentation: "dropdown",
   projectViewSwitcherPresentation: "dropdown",
+  transcriptTextSize: "medium",
+  transcriptWidth: "narrow",
+  showThreadProviderIcons: true,
+  openInApplications: ["vscode", "cursor", "zed", "finder", "terminal", "ghostty", "xcode"],
   sidebarBackground: {
     kind: "none",
     overlayColor: "#1a1a1c",

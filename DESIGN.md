@@ -97,13 +97,15 @@ Use the macOS system sans stack for shell, navigation, controls, and transcript 
 
 Use the configured editor/terminal monospace stack only for code, paths, identifiers, commands, diffs, and aligned technical data. Project names, thread titles, navigation labels, and ordinary status copy stay sans-serif.
 
+Users may override the interface and code font stacks independently. Transcript text size uses Small, Medium, and Large presets. Transcript and composer width use centered Narrow, Medium, and Wide measures; Narrow is the default so a large window does not turn a conversation into full-width prose.
+
 ## Layout
 
 The persistent desktop shell has a 232px navigation sidebar, the central workspace, an optional thread-aware right dock, and an optional horizontal bottom panel. The central transcript and composer are always the primary reading surface.
 
 Sidebar order is stable: compact mode identity, New thread, mode-valid Board and Pull requests, Project Views, the Project/thread tree, then the bottom-left name menu. Code and Work keep separate saved Project View sets; their compact-list versus icon presentation is one global preference. Project folders use explicit folder glyphs and child threads indent by 20px. Clicking the folder row toggles its children; Project Overview remains in its accessible actions menu.
 
-The pane title is the only top bar. Its far-right edge may show Environment, bottom-panel, and right-dock toggles as capability allows. Zen belongs in the bottom-left name menu. Environment opens the existing transient window; Project, branch, clean/dirty state, working folder, listener count, and availability live in that disclosure and its accessible description rather than a second header line.
+The pane title is the only top bar. Its far-right edge may show Open in, Environment, bottom-panel, and right-dock toggles as capability allows. Zen belongs in the bottom-left name menu. Environment uses the sliders toggle with a short tooltip and a visible pressed state, then opens the existing transient window; Project, branch, clean/dirty state, working folder, listener count, availability, and a compact active-thread subagent summary live in that disclosure and its accessible description rather than a second header line. Subagent rows show task, lifecycle, resolved model, and retained final response when authoritative data exists; full control remains in the Agents dock.
 
 At narrow widths the sidebar and dock follow their existing responsive contracts, and the bottom panel remains closed. Do not create a squeeze where navigation, workspace, Environment, and utility regions all demand permanent columns.
 
@@ -135,6 +137,8 @@ Chat, Work, and Code remain permanent modes behind one compact labeled selector.
 
 Board and Pull-request destinations remain discoverable in supported modes. Their surfaces state setup, unavailable, stale, empty, refreshing, and loaded conditions honestly; they never display invented data or silently poll GitHub.
 
+Thread rows keep a compact provider mark immediately before the title. It is fixed-size, inline, and optional in Appearance settings; hiding it does not change Project indentation, row height, or any activity/status signal.
+
 ### Forms and overlays
 
 The new-thread surface is composer-first. One compact context row carries Project, provider/model, access, branch, and delivery controls; optional prompt suggestions sit below and never compete with the input. Configuration problems appear as compact inline recovery states rather than oversized setup cards.
@@ -145,7 +149,7 @@ The bottom panel is also closed in a new window and restores open state and heig
 
 ### Iconography
 
-Use Lucide only. Project folders, mode identity, status, tool type, and action intent receive semantic icons. Do not use emoji, text glyphs, handcrafted SVG art, or provider logos as decorative furniture.
+Use Lucide for product actions, status, tools, folders, and mode identity. Provider identity is the one brand-icon exception: use bundled provider-owned marks from the approved MIT icon dependency, never a remote image or copied product asset, and fall back to a compact monogram when the endpoint has no truthful brand. Do not use emoji, text glyphs, or handcrafted SVG art as decorative furniture.
 
 ### Motion
 

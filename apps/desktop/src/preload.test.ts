@@ -69,11 +69,13 @@ describe("desktop preload bridge", () => {
       "getRemoteHostIdentityRecovery",
       "initialProjectTarget",
       "installAppUpdate",
+      "listOpenInApplications",
       "listRemotePairingRequests",
       "maximizeOrRestore",
       "minimize",
       "notifyAttention",
       "openBrowserExternal",
+      "openCodeCheckoutInApplication",
       "openCodeExternalEditor",
       "openInNewWindow",
       "previewHandoff",
@@ -159,9 +161,13 @@ describe("desktop preload bridge", () => {
   });
 
   it("maps every operation to a fixed allowlisted channel", async () => {
-    const invoke = vi.fn(async (channel: string) =>
-      channel === IPC_CHANNELS.requestCodeOperationApproval ? undefined : { kind: "cancelled" },
-    );
+    const invoke = vi.fn(async (channel: string) => {
+      if (channel === IPC_CHANNELS.requestCodeOperationApproval) return undefined;
+      if (channel === IPC_CHANNELS.listOpenInApplications) {
+        return [{ id: "finder", label: "Finder", available: true }];
+      }
+      return { kind: "cancelled" };
+    });
     const bridge = createHostBridge(
       { invoke, on: vi.fn(), removeListener: vi.fn() },
       projectWindowCapability,
@@ -185,6 +191,11 @@ describe("desktop preload bridge", () => {
       fileId: "40000000-0000-4000-8000-000000000001",
       line: 12,
       column: 4,
+    });
+    await bridge.listOpenInApplications();
+    await bridge.openCodeCheckoutInApplication({
+      threadId: "20000000-0000-4000-8000-000000000001",
+      applicationId: "finder",
     });
     await bridge.openInNewWindow({ kind: "project", projectId });
     await bridge.requestCodeOperationApproval({
@@ -224,6 +235,14 @@ describe("desktop preload bridge", () => {
           fileId: "40000000-0000-4000-8000-000000000001",
           line: 12,
           column: 4,
+        },
+      ],
+      [IPC_CHANNELS.listOpenInApplications],
+      [
+        IPC_CHANNELS.openCodeCheckoutInApplication,
+        {
+          threadId: "20000000-0000-4000-8000-000000000001",
+          applicationId: "finder",
         },
       ],
       [IPC_CHANNELS.openInNewWindow, { kind: "project", projectId }],

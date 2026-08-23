@@ -253,6 +253,7 @@
      because a transcript interleaves code and tool output that wrap
      badly at prose width. */
   --oct-thread-measure: 760px;
+  --oct-transcript-font-size: 14px;
 
   /* app shell. The sidebar width is a token rather than a literal because
      the drag handle writes to it — resizing and the default come from the
@@ -900,6 +901,34 @@ h4 {
 .thread-column {
   width: min(100% - 40px, var(--oct-thread-measure));
   margin-inline: auto;
+}
+
+.shell[data-transcript-width="narrow"] {
+  --oct-thread-measure: 680px;
+}
+
+.shell[data-transcript-width="medium"] {
+  --oct-thread-measure: 800px;
+}
+
+.shell[data-transcript-width="wide"] {
+  --oct-thread-measure: 1040px;
+}
+
+.shell[data-transcript-text-size="small"] {
+  --oct-transcript-font-size: 13px;
+}
+
+.shell[data-transcript-text-size="medium"] {
+  --oct-transcript-font-size: 14px;
+}
+
+.shell[data-transcript-text-size="large"] {
+  --oct-transcript-font-size: 16px;
+}
+
+.shell[data-thread-provider-icons="false"] .sidebar-navigation__thread-provider {
+  display: none;
 }
 
 /* ─── form ──────────────────────────────────────────────────────────── */
@@ -2017,6 +2046,22 @@ input.switch:checked::after {
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
   box-shadow: var(--oct-elev-raised);
+}
+
+.octant-tooltip__positioner {
+  z-index: var(--oct-z-toast);
+}
+
+.octant-tooltip {
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--oct-fg) 12%, var(--oct-border));
+  border-radius: var(--oct-radius-sm);
+  background: var(--oct-fg);
+  color: var(--oct-surface);
+  box-shadow: var(--oct-elev-raised);
+  font-size: var(--oct-text-sm);
+  line-height: 1.25;
 }
 
 /* ─── modal ───────────────────────────────────────────────────────────

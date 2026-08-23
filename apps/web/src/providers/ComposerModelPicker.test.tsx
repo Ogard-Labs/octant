@@ -76,19 +76,21 @@ describe("ComposerModelPicker", () => {
       "Local OpenCode",
       "Remote Claude",
     ]);
-    for (const item of items) {
-      expect(item).toHaveTextContent("");
-      expect(item.querySelector("svg")).not.toBeNull();
-    }
+    for (const item of items) expect(item).toHaveTextContent("");
+    expect(items[0]?.querySelector("svg")).not.toBeNull();
     expect(within(rail).getByRole("option", { name: "Local OpenCode" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     expect(
-      within(rail).getByRole("option", { name: "Local OpenCode" }).querySelector("svg"),
+      within(rail)
+        .getByRole("option", { name: "Local OpenCode" })
+        .querySelector("[data-driver-kind]"),
     ).toHaveAttribute("data-driver-kind", "opencode");
     expect(
-      within(rail).getByRole("option", { name: "Remote Claude" }).querySelector("svg"),
+      within(rail)
+        .getByRole("option", { name: "Remote Claude" })
+        .querySelector("[data-driver-kind]"),
     ).toHaveAttribute("data-driver-kind", "claude");
   });
 

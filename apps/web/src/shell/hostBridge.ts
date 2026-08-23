@@ -1,3 +1,5 @@
+import type { OpenInApplicationId } from "@octant/contracts/shell";
+
 export type ResolvedSidebarMaterial = "opaque" | "translucent";
 export type BoundProjectType = "work" | "code";
 export type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
@@ -13,6 +15,15 @@ export interface CodeExternalEditorRequest {
   readonly fileId: string;
   readonly line: number;
   readonly column: number;
+}
+export interface OpenInApplicationDescriptor {
+  readonly id: OpenInApplicationId;
+  readonly label: string;
+  readonly available: boolean;
+}
+export interface CodeCheckoutOpenRequest {
+  readonly threadId: string;
+  readonly applicationId: OpenInApplicationId;
 }
 export type CodeDeepLink =
   | Readonly<{ kind: "project"; projectId: string }>
@@ -153,6 +164,8 @@ export interface OctantHostBridge {
   readonly maximizeOrRestore: () => Promise<void> | void;
   readonly minimize: () => Promise<void> | void;
   readonly openCodeExternalEditor?: (request: CodeExternalEditorRequest) => Promise<void>;
+  readonly listOpenInApplications?: () => Promise<ReadonlyArray<OpenInApplicationDescriptor>>;
+  readonly openCodeCheckoutInApplication?: (request: CodeCheckoutOpenRequest) => Promise<void>;
   readonly openInNewWindow?: (target: ProjectWindowTarget) => Promise<void> | void;
   readonly requestCodeOperationApproval?: (
     request: CodeOperationApprovalRequest,

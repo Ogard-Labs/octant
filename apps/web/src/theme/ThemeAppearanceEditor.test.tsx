@@ -34,10 +34,10 @@ describe("ThemeAppearanceEditor", () => {
     }
   });
 
-  it("keeps typography and theme transfer in deliberate advanced disclosures", () => {
+  it("keeps typography visible and theme transfer in an advanced disclosure", () => {
     render(<ThemeAppearanceEditor controller={controller()} />);
 
-    expect(screen.getByText("Typography").closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("Typography").closest("details")).toHaveAttribute("open");
     expect(screen.getByText("Import or export theme").closest("details")).not.toHaveAttribute(
       "open",
     );

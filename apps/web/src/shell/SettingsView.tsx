@@ -69,6 +69,7 @@ import { AgentRunSettingsPanel } from "../agents/AgentRunSettingsPanel";
 import type { AutomationNotificationClient } from "@octant/client-runtime/automation-notification-client";
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
+import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings";
 import type { OctantHostBridge } from "./hostBridge";
 import "../styles/settings.css";
 import "../styles/extensions-settings.css";
@@ -317,11 +318,16 @@ function ActiveSectionContent({
       ) : null;
     case "code":
       return props.codeController?.bootstrap !== undefined ? (
-        <div id="settings-code">
+        <div className="settings-code-stack" id="settings-code">
           <CodeSettingsView
             key={props.codeController.bootstrap.settings.version}
             onUpdate={props.codeController.updateSettings}
             settings={props.codeController.bootstrap.settings}
+          />
+          <OpenInApplicationSettings
+            applications={props.settings.openInApplications}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+            onChange={(openInApplications) => props.onSettingsChange({ openInApplications })}
           />
         </div>
       ) : null;
@@ -716,6 +722,72 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               <option value="dropdown">Dropdown</option>
               <option value="inline">Icon buttons</option>
             </OctantNativeSelect>
+          </SettingRow>
+        ) : null}
+        {isAvailable("transcript-text-size") ? (
+          <SettingRow
+            description="Conversation text in Chat, Work, and Code threads."
+            focused={focusedSetting === settingId("transcript-text-size")}
+            label="Transcript text size"
+            scope="app"
+            settingId="transcript-text-size"
+          >
+            <OctantNativeSelect
+              aria-label="Transcript text size"
+              className="settings-view__select"
+              onChange={(event) =>
+                props.onSettingsChange({
+                  transcriptTextSize: event.currentTarget
+                    .value as ShellSettings["transcriptTextSize"],
+                })
+              }
+              value={props.settings.transcriptTextSize}
+            >
+              <option value="small">Small</option>
+              <option value="medium">Medium</option>
+              <option value="large">Large</option>
+            </OctantNativeSelect>
+          </SettingRow>
+        ) : null}
+        {isAvailable("transcript-width") ? (
+          <SettingRow
+            description="Maximum width of transcript and composer columns."
+            focused={focusedSetting === settingId("transcript-width")}
+            label="Transcript width"
+            scope="app"
+            settingId="transcript-width"
+          >
+            <OctantNativeSelect
+              aria-label="Transcript width"
+              className="settings-view__select"
+              onChange={(event) =>
+                props.onSettingsChange({
+                  transcriptWidth: event.currentTarget.value as ShellSettings["transcriptWidth"],
+                })
+              }
+              value={props.settings.transcriptWidth}
+            >
+              <option value="narrow">Narrow</option>
+              <option value="medium">Medium</option>
+              <option value="wide">Wide</option>
+            </OctantNativeSelect>
+          </SettingRow>
+        ) : null}
+        {isAvailable("thread-provider-icons") ? (
+          <SettingRow
+            description="Show a compact provider mark before each thread title."
+            focused={focusedSetting === settingId("thread-provider-icons")}
+            label="Provider icons in thread list"
+            scope="app"
+            settingId="thread-provider-icons"
+          >
+            <OctantSwitch
+              checked={props.settings.showThreadProviderIcons}
+              label="Provider icons in thread list"
+              onCheckedChange={(showThreadProviderIcons) =>
+                props.onSettingsChange({ showThreadProviderIcons })
+              }
+            />
           </SettingRow>
         ) : null}
         {isAvailable("sidebar-background") ? (

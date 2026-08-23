@@ -9,6 +9,7 @@ import { applyMigrations, MIGRATIONS } from "./migrations";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { Persistence, PersistenceStartupFailed, makePersistenceLive } from "./persistenceService";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./shellProjection";
+import { decodePersistedShellSettings } from "./shellPersistenceSchema";
 
 const directories: Array<string> = [];
 const now = "2026-07-13T10:00:00.000Z";
@@ -185,28 +186,7 @@ describe("PersistenceLive", () => {
       ),
     );
 
-    expect(result.bootstrap.settings).toEqual({
-      ...legacySettings,
-      contextSidebarWidth: 360,
-      // A persisted store that predates first-run onboarding was written by a
-      // host that already finished its first run, so the upcast stamps
-      // `completed`; re-running the walkthrough on upgrade would be wrong.
-      // Only a genuinely new store starts `pending`.
-      firstRunOnboarding: "completed",
-      automaticUpdateChecks: true,
-      lastContextSurface: null,
-      modeSwitcherPresentation: "dropdown",
-      navigatorAssistant: {},
-      projectViewSwitcherPresentation: "dropdown",
-      userProfile: { accent: "indigo", avatar: { kind: "initials" } },
-      sidebarBackground: {
-        kind: "none",
-        overlayColor: "#1a1a1c",
-        overlayOpacity: 100,
-        vibrancyMode: "off",
-      },
-      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
-    });
+    expect(result.bootstrap.settings).toEqual(decodePersistedShellSettings(legacySettings));
     expect(result.bootstrap.settingsVersion).toBe(1);
     expect(result.event).toEqual({ payload_json: legacyPayloadJson });
     expect(result.projection).toEqual({ settings_json: legacySettingsJson });

@@ -16,6 +16,7 @@ import { ShellService } from "./shellService";
 import { Persistence, makePersistenceLive } from "./persistence/persistenceService";
 import { applyMigrations, MIGRATIONS } from "./persistence/migrations";
 import { SHELL_SETTINGS_AGGREGATE_ID } from "./persistence/shellProjection";
+import { decodePersistedShellSettings } from "./persistence/shellPersistenceSchema";
 import { openSqlite } from "./persistence/sqlitePort";
 
 const directories: Array<string> = [];
@@ -436,26 +437,7 @@ describe("database CLI runtime composition", () => {
         ),
       ),
     );
-    expect(settings).toEqual({
-      ...legacySettings,
-      contextSidebarWidth: 360,
-      // A pre-onboarding store already finished its first run, so the upcast
-      // stamps `completed` rather than re-running the walkthrough on upgrade.
-      firstRunOnboarding: "completed",
-      automaticUpdateChecks: true,
-      lastContextSurface: null,
-      modeSwitcherPresentation: "dropdown",
-      navigatorAssistant: {},
-      projectViewSwitcherPresentation: "dropdown",
-      userProfile: { accent: "indigo", avatar: { kind: "initials" } },
-      sidebarBackground: {
-        kind: "none",
-        overlayColor: "#1a1a1c",
-        overlayOpacity: 100,
-        vibrancyMode: "off",
-      },
-      environmentPresentationByMode: { chat: "hidden", work: "floating", code: "floating" },
-    });
+    expect(settings).toEqual(decodePersistedShellSettings(legacySettings));
   });
 });
 

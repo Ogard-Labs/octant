@@ -2,6 +2,8 @@ import type { ProjectSummary, WorkspaceTab } from "@octant/contracts";
 import { deriveChatEnvironmentProjection } from "@octant/domain/shell-policy";
 import { useState, type ReactNode } from "react";
 import type { ChatController } from "../chat/useChatController";
+import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { ThreadEnvironmentPanel } from "./ThreadEnvironmentPanel";
 
 type ChatThreadWorkspaceTab = Extract<WorkspaceTab, { readonly kind: "chat-thread" }>;
@@ -13,6 +15,8 @@ export interface ChatThreadEnvironmentProps {
   readonly projects: ReadonlyArray<ProjectSummary>;
   readonly tab: ChatThreadWorkspaceTab;
   readonly active?: boolean;
+  readonly agentRunClient?: AgentRunClient;
+  readonly onOpenAgents?: () => void;
 }
 
 /**
@@ -50,6 +54,13 @@ export function ChatThreadEnvironment(props: ChatThreadEnvironmentProps) {
           {...(project === undefined ? {} : { project })}
           unavailableMessage={projection.identity.detail}
         />
+        {props.agentRunClient === undefined ? null : (
+          <EnvironmentSubagents
+            client={props.agentRunClient}
+            {...(props.onOpenAgents === undefined ? {} : { onOpenAgents: props.onOpenAgents })}
+            threadId={String(props.tab.threadId)}
+          />
+        )}
       </ThreadEnvironmentPanel>
       <div className="thread-environment-wrapper__content">{props.children}</div>
     </div>
