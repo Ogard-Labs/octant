@@ -153,6 +153,7 @@ describe("useChatController", () => {
       expect(result.current.sidebar.navigation).toEqual([
         {
           followUp: true,
+          providerInstanceId: "10000000-0000-4000-8000-000000000001",
           threadId: String(threadId),
           title: "Planning",
           unread: false,
@@ -160,6 +161,7 @@ describe("useChatController", () => {
         },
         {
           followUp: true,
+          providerInstanceId: "10000000-0000-4000-8000-000000000001",
           threadId: String(otherThreadId),
           title: "Research",
           unread: false,
@@ -210,6 +212,7 @@ describe("useChatController", () => {
     expect(result.current.navigation).toEqual([
       {
         followUp: true,
+        providerInstanceId: "10000000-0000-4000-8000-000000000001",
         threadId: String(threadId),
         title: "Planning",
         unread: false,
@@ -217,6 +220,7 @@ describe("useChatController", () => {
       },
       {
         followUp: false,
+        providerInstanceId: "10000000-0000-4000-8000-000000000001",
         threadId: String(otherThreadId),
         title: "Research",
         unread: true,

@@ -201,6 +201,25 @@ describe("buildSidebarNavigation", () => {
     ]);
   });
 
+  it("forwards the source provider instance so the shared row can resolve its mark", () => {
+    expect(
+      buildChatThreadNavigation([
+        {
+          providerInstanceId: "00000000-0000-4000-8000-000000000901",
+          readSequence: 0,
+          threadId: "00000000-0000-4000-8000-000000000101",
+          title: "Provider thread",
+        },
+      ]),
+    ).toEqual([
+      {
+        providerInstanceId: "00000000-0000-4000-8000-000000000901",
+        threadId: "00000000-0000-4000-8000-000000000101",
+        title: "Provider thread",
+      },
+    ]);
+  });
+
   it("omits unread when lastSequence is absent", () => {
     expect(
       buildChatThreadNavigation([

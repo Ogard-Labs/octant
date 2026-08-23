@@ -526,6 +526,7 @@ export function useChatController(options: ChatControllerOptions) {
             ? {}
             : { lastSequence: sequenceByThread.get(String(thread.id))! }),
           ...(thread.projectId === undefined ? {} : { projectId: String(thread.projectId) }),
+          providerInstanceId: String(thread.providerInstanceId),
           readSequence: readCursors.get(String(thread.id)) ?? 0,
           threadId: String(thread.id),
           title: thread.title,

@@ -47,6 +47,8 @@ export interface ChatThreadNavigationSource {
   readonly followUpOpen?: boolean;
   readonly lastSequence?: number;
   readonly projectId?: string;
+  /** Provider identity carried from the host navigation projection. */
+  readonly providerInstanceId?: string;
   readonly readSequence: number;
   readonly threadId: string;
   readonly title: string;
@@ -99,6 +101,9 @@ export function buildChatThreadNavigation(
   return threads.map((thread) => ({
     ...(thread.followUpOpen === undefined ? {} : { followUp: thread.followUpOpen }),
     ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+    ...(thread.providerInstanceId === undefined
+      ? {}
+      : { providerInstanceId: thread.providerInstanceId }),
     threadId: thread.threadId,
     title: thread.title,
     ...(thread.lastSequence === undefined

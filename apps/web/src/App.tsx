@@ -2400,6 +2400,7 @@ function LaunchedShell(
           all: sidebarThreadGroups.all.map(withProviderMark),
           unfiled: sidebarThreadGroups.unfiled.map(withProviderMark),
         };
+  const markedChatNavigation = chatController.navigation.map(withProviderMark);
 
   // What a Code thread row offers on right-click. Each one carries the row's
   // navigation id, which for a Project-backed thread is its Code thread id;
@@ -2554,7 +2555,7 @@ function LaunchedShell(
         : { errorMessage: chatController.errorMessage }),
       onRetry: () => void chatController.retry(),
       onSelectThread: selectChatThread,
-      threads: chatController.navigation,
+      threads: markedChatNavigation,
     },
     code: {
       status: codeController.status,
@@ -3839,7 +3840,7 @@ function LaunchedShell(
                       ? {
                           onSelectThread: selectChatThread,
                           threadActions: chatThreadRowActions,
-                          threads: chatController.navigation,
+                          threads: markedChatNavigation,
                         }
                       : activeMode === "code"
                         ? {
