@@ -30,6 +30,17 @@ export function readinessLabel(value: ProviderObservedState["readiness"]): strin
   return value === "unauthenticated" ? "Authentication required" : titleCase(value);
 }
 
+export function providerRowReadinessLabel(
+  value: ProviderObservedState["readiness"],
+  modelCount: number,
+): string {
+  if (value === "unauthenticated") return "Sign in required";
+  if (value === "incompatible") return "Update required";
+  if (value === "degraded" && modelCount === 0) return "Needs setup";
+  if (value === "degraded") return "Limited";
+  return titleCase(value);
+}
+
 export function protocolLabel(
   value: OpenAiCompatibleProtocol | AnthropicCompatibleProtocol,
 ): string {

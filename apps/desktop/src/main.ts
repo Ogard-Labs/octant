@@ -40,6 +40,7 @@ import {
 import { startCredentialBroker, type CredentialBroker } from "./credentialBroker";
 import type { AppVersion } from "@octant/contracts/app-updates";
 import { createAppUpdateService } from "./appUpdateService";
+import { buildApplicationMenuTemplate } from "./applicationMenu";
 import { resolveUpdateFeedUrl } from "./appUpdateFeed";
 import {
   createBrowserSurfaceHost,
@@ -164,6 +165,7 @@ const IPC_CHANNELS = {
   listOpenInApplications: "octant:code:list-open-in-applications",
   openCodeCheckoutInApplication: "octant:code:open-checkout-in-application",
   openInNewWindow: "octant:window:open-project",
+  openSettings: "octant:menu:open-settings",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",
   startNewAgent: "octant:menu:start-new-agent",
@@ -2380,6 +2382,22 @@ const requestActiveWindow = () =>
     handleFailure: handleFatalStartup,
   });
 
+function installApplicationMenu(): void {
+  if (process.platform !== "darwin") return;
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      buildApplicationMenuTemplate({
+        appName: app.name,
+        onOpenSettings: () => {
+          const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+          if (window === undefined || window.isDestroyed()) return;
+          window.webContents.send(IPC_CHANNELS.openSettings);
+        },
+      }),
+    ),
+  );
+}
+
 function acceptCodeDeepLink(value: string): void {
   try {
     const target = parseCodeDeepLink(value);
@@ -2406,7 +2424,13 @@ else {
   });
   for (const argument of process.argv)
     if (argument.startsWith("octant://")) acceptCodeDeepLink(argument);
-  void app.whenReady().then(requestActiveWindow).catch(handleFatalStartup);
+  void app
+    .whenReady()
+    .then(() => {
+      installApplicationMenu();
+      return requestActiveWindow();
+    })
+    .catch(handleFatalStartup);
 }
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

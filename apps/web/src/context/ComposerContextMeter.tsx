@@ -11,7 +11,10 @@ import {
   contextWindowUsedSourceLabel,
   type ContextWindowSegment,
 } from "./contextInspectorModel";
-import { useComposerContextMeterScope } from "./composerContextMeterScope";
+import {
+  useComposerContextMeterScope,
+  type ComposerContextUsageFallback,
+} from "./composerContextMeterScope";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import "./context.css";
@@ -38,6 +41,7 @@ export function ComposerContextMeterShortcut() {
 export function ComposerContextMeter() {
   const scope = useComposerContextMeterScope();
   const snapshot = scope.snapshot;
+  const fallback = snapshot === undefined ? scope.fallback : undefined;
   const [open, setOpen] = useState(false);
   const [inspecting, setInspecting] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -95,6 +99,7 @@ export function ComposerContextMeter() {
     open,
     status: scope.status,
     windowModel,
+    ...(fallback === undefined ? {} : { fallback }),
     ...(snapshot === undefined ? {} : { snapshotLabel: snapshot.displayLabel }),
     ...(health === undefined ? {} : { healthLabel: contextHealthLabel(health) }),
   });
@@ -142,6 +147,7 @@ export function ComposerContextMeter() {
         {liveLabel({
           status: scope.status,
           windowModel,
+          ...(fallback === undefined ? {} : { fallback }),
           ...(snapshot === undefined ? {} : { snapshotLabel: snapshot.displayLabel }),
           ...(health === undefined ? {} : { healthLabel: contextHealthLabel(health) }),
         })}
@@ -155,7 +161,11 @@ export function ComposerContextMeter() {
           role="dialog"
         >
           {windowModel === undefined || snapshot === undefined ? (
-            <p>{emptyMessage(scope.status)}</p>
+            fallback === undefined ? (
+              <p>{emptyMessage(scope.status)}</p>
+            ) : (
+              <ContextUsageFallback fallback={fallback} />
+            )
           ) : (
             <ContextUsagePopover
               onInspect={() => {
@@ -187,6 +197,55 @@ export function ComposerContextMeter() {
         </OctantDialog>
       ) : null}
     </div>
+  );
+}
+
+function ContextUsageFallback(props: { readonly fallback: ComposerContextUsageFallback }) {
+  return (
+    <>
+      <header className="context-window-popover__header">
+        <span>Provider usage</span>
+        <strong>{formatTokens(props.fallback.inputTokens)} input</strong>
+      </header>
+      <p className="context-window-popover__source">
+        The provider reported usage, but not an authoritative context-window maximum.
+      </p>
+      <dl className="context-window-popover__facts">
+        <Fact label="Input" value={formatTokens(props.fallback.inputTokens)} />
+        <Fact label="Output" value={formatTokens(props.fallback.outputTokens)} />
+        <Fact label="Context maximum" value="Unavailable" />
+        <Fact
+          label="Cost"
+          value={
+            props.fallback.costUsd === undefined
+              ? "Not reported"
+              : new Intl.NumberFormat(undefined, {
+                  style: "currency",
+                  currency: "USD",
+                  maximumFractionDigits: 4,
+                }).format(props.fallback.costUsd)
+          }
+        />
+      </dl>
+      <section aria-label="Provider account limits" className="context-window-popover__limits">
+        <div className="context-window-popover__limits-heading">
+          <h3>Provider account limits</h3>
+        </div>
+        {props.fallback.limits.length === 0 ? (
+          <p className="context-window-popover__limit-state">
+            <span>Usage windows</span>
+            <span>Not reported</span>
+          </p>
+        ) : (
+          props.fallback.limits.map((limit) => (
+            <p className="context-window-popover__limit-state" key={limit.window}>
+              <span>{limit.window.replaceAll("_", " ")}</span>
+              <span>{codeProviderLimitLabel(limit)}</span>
+            </p>
+          ))
+        )}
+      </section>
+    </>
   );
 }
 
@@ -351,6 +410,7 @@ function Fact(props: { readonly label: string; readonly value: string }) {
 }
 
 function meterLabel(input: {
+  readonly fallback?: ComposerContextUsageFallback;
   readonly healthLabel?: string;
   readonly open: boolean;
   readonly snapshotLabel?: string;
@@ -359,6 +419,9 @@ function meterLabel(input: {
 }): string {
   const action = input.open ? "Hide" : "Show";
   if (input.windowModel === undefined) {
+    if (input.fallback !== undefined) {
+      return `${action} context usage. Provider reported ${compactTokens(input.fallback.inputTokens)} input and ${compactTokens(input.fallback.outputTokens)} output. Context window maximum unavailable.`;
+    }
     return `${action} context usage. ${emptyMessage(input.status)}`;
   }
   const unknown = input.windowModel.hasUnknown ? ", plus unknown" : "";
@@ -368,13 +431,34 @@ function meterLabel(input: {
   return `${action} context usage${scope}. ${input.windowModel.usageLabel} (${String(Math.round(input.windowModel.percent))}%)${unknown}. ${source}.${health}`;
 }
 
+function codeProviderLimitLabel(limit: ComposerContextUsageFallback["limits"][number]): string {
+  const share =
+    limit.utilization === undefined ? undefined : `${Math.round(limit.utilization * 100)}% used`;
+  const reset =
+    limit.resetsAt === undefined
+      ? undefined
+      : `resets ${new Date(limit.resetsAt).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}`;
+  const state =
+    limit.status === "exhausted" ? "Spent" : limit.status === "warning" ? "Low" : "Available";
+  return [state, share, reset].filter((part): part is string => part !== undefined).join(" · ");
+}
+
 function liveLabel(input: {
+  readonly fallback?: ComposerContextUsageFallback;
   readonly healthLabel?: string;
   readonly snapshotLabel?: string;
   readonly status: string;
   readonly windowModel: ReturnType<typeof contextWindowModel> | undefined;
 }): string {
-  if (input.windowModel === undefined) return emptyMessage(input.status);
+  if (input.windowModel === undefined) {
+    if (input.fallback !== undefined) {
+      return `Provider reported ${compactTokens(input.fallback.inputTokens)} input and ${compactTokens(input.fallback.outputTokens)} output. Context window maximum unavailable.`;
+    }
+    return emptyMessage(input.status);
+  }
   const unknown = input.windowModel.hasUnknown ? " plus unknown" : "";
   const source = contextWindowUsedSourceLabel(input.windowModel.usedSource);
   const health = input.healthLabel === undefined ? "" : ` ${input.healthLabel}.`;

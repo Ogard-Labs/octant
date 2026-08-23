@@ -157,8 +157,11 @@ describe("SplitWorkspace", () => {
     const header = screen
       .getByRole("region", { name: "Workspace pane: First" })
       .querySelector(".workspace-pane__header")!;
-    expect(header).toHaveClass("window-drag-region");
+    expect(header).not.toHaveClass("window-drag-region");
     expect(header.querySelector(".workspace-pane__grip")).toHaveClass("window-no-drag");
+    expect(header.querySelector(".workspace-pane__window-drag-space")).toHaveClass(
+      "window-drag-region",
+    );
   });
 
   it("keeps the splitter keyboard-operable inside a quiet hit target", () => {

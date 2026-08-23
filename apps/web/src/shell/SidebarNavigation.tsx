@@ -44,7 +44,7 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
         if (Icon === undefined) return null;
         return (
           <OctantButton
-            className="sidebar-item window-no-drag"
+            className="sidebar-item window-no-drag justify-start"
             data-navigation-id={descriptor.id}
             key={descriptor.id}
             // Invoked without arguments: some handlers take an optional payload

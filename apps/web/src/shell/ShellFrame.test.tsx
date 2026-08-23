@@ -176,6 +176,9 @@ describe("ShellFrame", () => {
     expect(chrome).toContain("background: transparent;");
     expect(chrome).toContain("border-bottom: 0;");
     expect(chrome).toContain("pointer-events: none;");
+    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
+      "top: var(--octant-native-hidden-inset-titlebar-height);",
+    );
     expect(workspace).toContain("grid-row: 1 / -1;");
     expect(trailing).toContain("pointer-events: auto;");
     expect(shellStyles).toMatch(

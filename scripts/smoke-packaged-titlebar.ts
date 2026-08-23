@@ -61,9 +61,9 @@ export function assertNativeTitlebarTargetsBelowInset(
     const frame = element?.frame;
     if (frame === undefined) throw new Error(`Packaged titlebar target ${label} has no frame.`);
     const centerY = frame.y - snapshot.window_bounds.y + frame.h / 2;
-    if (centerY < inset) {
+    if (centerY <= inset) {
       throw new Error(
-        `Packaged titlebar target ${label} is inside the native movement strip (${centerY}px < ${inset}px).`,
+        `Packaged titlebar target ${label} is inside the native movement strip (${centerY}px <= ${inset}px).`,
       );
     }
   }

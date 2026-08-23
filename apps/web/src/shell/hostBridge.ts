@@ -194,6 +194,7 @@ export interface OctantHostBridge {
     listener: (vibrancy: "sidebar" | null) => void,
   ) => () => void;
   readonly subscribeCodeDeepLinks?: (listener: (target: CodeDeepLink) => void) => () => void;
+  readonly subscribeOpenSettings?: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent?: (listener: () => void) => () => void;
 }
 

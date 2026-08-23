@@ -32,7 +32,7 @@ import {
   driverLabel,
   formatProbeTimestamp,
   protocolLabel,
-  readinessLabel,
+  providerRowReadinessLabel,
   titleCase,
 } from "./providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "./ProviderSettingsView";
@@ -445,13 +445,16 @@ function ProviderRow(props: ProviderRowProps) {
         </span>
       </span>
       <span className="prov-models">
-        {props.observed === undefined
+        {props.observed === undefined ||
+        (props.observed.models.length === 0 && props.observed.readiness !== "ready")
           ? null
           : `${props.observed.models.length} ${props.observed.models.length === 1 ? "model" : "models"}`}
       </span>
       <span className="prov-status">
         <span className={readinessBadgeClass(readiness)}>
-          {readiness === undefined ? "Not checked" : readinessLabel(readiness)}
+          {readiness === undefined
+            ? "Not checked"
+            : providerRowReadinessLabel(readiness, props.observed?.models.length ?? 0)}
         </span>
       </span>
       <span className="prov-actions">

@@ -97,7 +97,6 @@ describe("Project window BrowserWindow construction", () => {
         preloadPath: "/app/preload.mjs",
         browserWindow: {
           backgroundColor: "#00000000",
-          frame: false,
           titleBarStyle: "hiddenInset",
           trafficLightPosition: { x: 16, y: 18 },
           transparent: true,
@@ -112,7 +111,6 @@ describe("Project window BrowserWindow construction", () => {
       minWidth: 900,
       minHeight: 600,
       backgroundColor: "#00000000",
-      frame: false,
       titleBarStyle: "hiddenInset",
       trafficLightPosition: { x: 16, y: 18 },
       transparent: true,
@@ -134,7 +132,6 @@ describe("Project window BrowserWindow construction", () => {
         preloadPath: "/app/preload.mjs",
         browserWindow: {
           backgroundColor: "#00000000",
-          frame: false,
           titleBarStyle: "hiddenInset",
           trafficLightPosition: { x: 16, y: 18 },
           transparent: true,
@@ -157,7 +154,6 @@ describe("Project window BrowserWindow construction", () => {
         preloadPath: "/app/preload.mjs",
         browserWindow: {
           backgroundColor: "#00000000",
-          frame: false,
           titleBarStyle: "hiddenInset",
           trafficLightPosition: { x: 16, y: 18 },
           transparent: true,
@@ -181,7 +177,6 @@ describe("Project window BrowserWindow construction", () => {
         preloadPath: "/app/preload.mjs",
         browserWindow: {
           backgroundColor: "#00000000",
-          frame: false,
           titleBarStyle: "hiddenInset",
           trafficLightPosition: { x: 16, y: 18 },
           transparent: true,

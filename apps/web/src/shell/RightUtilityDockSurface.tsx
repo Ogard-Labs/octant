@@ -59,7 +59,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
     <div className="right-utility-dock__surface" data-dock-surface={activeSurface?.id ?? "empty"}>
       <header className="dock-head right-utility-dock__toolbar">
         {props.tabs.length === 0 ? (
-          <p className="right-utility-dock__identity">Tools</p>
+          <span aria-hidden="true" className="right-utility-dock__title-spacer" />
         ) : (
           <DockToolStrip
             {...(activeSurface === undefined ? {} : { active: activeSurface.id })}

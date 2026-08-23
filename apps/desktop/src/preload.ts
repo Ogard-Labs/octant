@@ -28,6 +28,7 @@ export const IPC_CHANNELS = {
   listOpenInApplications: "octant:code:list-open-in-applications",
   openCodeCheckoutInApplication: "octant:code:open-checkout-in-application",
   openInNewWindow: "octant:window:open-project",
+  openSettings: "octant:menu:open-settings",
   previewHandoff: "octant:preview:handoff",
   requestCodeOperationApproval: "octant:code:request-operation-approval",
   startNewAgent: "octant:menu:start-new-agent",
@@ -231,6 +232,7 @@ export interface RemoteHostIdentityRotationResult {
 type MaterialListener = (event: unknown, material: unknown) => void;
 type DeepLinkListener = (event: unknown, target: unknown) => void;
 type AgentStartListener = (event: unknown) => void;
+type SettingsOpenListener = (event: unknown) => void;
 type BoundProjectType = "work" | "code";
 type ProviderCredentialStatus = "stored" | "missing" | "unavailable";
 const MAX_PROVIDER_CREDENTIAL_BYTES = 12 * 1_024;
@@ -356,6 +358,7 @@ export interface OctantHostBridge {
     listener: (vibrancy: "sidebar" | null) => void,
   ) => () => void;
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
+  readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   readonly getPrivateListenerStatus: () => Promise<PrivateListenerPublicStatus>;
   readonly enablePrivateListener: (
@@ -649,6 +652,11 @@ export function createHostBridge(
       const receive: DeepLinkListener = (_event, target) => listener(target);
       ipc.on(IPC_CHANNELS.codeDeepLink, receive);
       return () => ipc.removeListener(IPC_CHANNELS.codeDeepLink, receive);
+    },
+    subscribeOpenSettings: (listener: () => void) => {
+      const receive: SettingsOpenListener = () => listener();
+      ipc.on(IPC_CHANNELS.openSettings, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.openSettings, receive);
     },
     subscribeStartNewAgent: (listener: () => void) => {
       const receive: AgentStartListener = () => listener();

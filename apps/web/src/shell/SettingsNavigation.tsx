@@ -81,7 +81,7 @@ export function SettingsNavigation({ sections, activeSection, onSelect }: Settin
                   <li key={section.id}>
                     <OctantButton
                       aria-current={isActive ? "page" : undefined}
-                      className="setnav-item window-no-drag"
+                      className="setnav-item window-no-drag justify-start"
                       onClick={() => onSelect(section.id)}
                       type="button"
                       variant="ghost"

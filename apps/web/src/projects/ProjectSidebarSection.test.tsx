@@ -70,11 +70,18 @@ describe("ProjectSidebarSection chat thread nesting", () => {
     expect(screen.queryByRole("navigation", { name: "Recent chats" })).not.toBeInTheDocument();
 
     const disclosure = screen.getByRole("button", { name: "Collapse Test" });
-    expect(disclosure.querySelector('[data-project-icon="chat"]')).toBeInTheDocument();
+    expect(disclosure.querySelector('[data-project-icon="chat"]')).toHaveAttribute(
+      "data-folder-state",
+      "open",
+    );
     expect(disclosure).toHaveAttribute("aria-expanded", "true");
     await user.click(disclosure);
     expect(screen.queryByRole("button", { name: /Planning/i })).not.toBeInTheDocument();
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(disclosure.querySelector('[data-project-icon="chat"]')).toHaveAttribute(
+      "data-folder-state",
+      "closed",
+    );
     await user.click(disclosure);
     expect(screen.getByRole("button", { name: /Planning/i })).toBeVisible();
 

@@ -1426,6 +1426,14 @@ function LaunchedShell(
     });
   }, [controller, props.hostBridge]);
   useEffect(() => {
+    const subscribe = props.hostBridge?.subscribeOpenSettings;
+    if (subscribe === undefined) return;
+    return subscribe(() => {
+      if (controller.status !== "ready") return;
+      void controller.openSettings();
+    });
+  }, [controller, props.hostBridge]);
+  useEffect(() => {
     const target = pendingCodeDeepLink;
     if (target === undefined || controller.status !== "ready") return;
     if (target.kind === "project" || target.kind === "new-thread") {
@@ -4033,6 +4041,9 @@ function LaunchedShell(
                     void contextController.setPinned(entryId, pinned)
                   }
                   status={contextController.status}
+                  {...(activeMode !== "code" || activeCodeThreadController === undefined
+                    ? {}
+                    : { fallback: activeCodeThreadController.threadUsage })}
                   {...(contextController.snapshot === undefined
                     ? {}
                     : { snapshot: contextController.snapshot })}

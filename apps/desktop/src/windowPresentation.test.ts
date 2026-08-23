@@ -24,12 +24,11 @@ function system(overrides: Partial<Parameters<typeof resolveWindowPresentation>[
 }
 
 describe("resolveWindowPresentation", () => {
-  it("uses a genuine macOS frameless window with inset native traffic-light placement", () => {
+  it("uses the supported macOS hidden-inset window with native traffic-light placement", () => {
     expect(resolveWindowPresentation(system())).toEqual({
       interactiveTitlebarInset: NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
       browserWindow: {
         backgroundColor: "#00000000",
-        frame: false,
         titleBarStyle: "hiddenInset",
         trafficLightPosition: { x: 16, y: 18 },
         transparent: true,

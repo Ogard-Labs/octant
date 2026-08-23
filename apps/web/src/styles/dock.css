@@ -42,7 +42,7 @@
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: visible;
   background: var(--oct-bg);
 }
@@ -52,18 +52,23 @@
 .right-utility-dock__toolbar {
   min-width: 0;
   justify-content: space-between;
+  padding-inline: 8px var(--octant-window-chrome-reserved-width, 96px);
+  background: transparent;
+  border-bottom: 0;
+  font-family: var(--oct-font-ui);
+  letter-spacing: normal;
+  text-transform: none;
 }
 
-/* An h2 so the surface stays a landmark heading, dressed as the dock label
-   .dock-head already paints — the UA's heading size and weight would shout
-   over a 34px rail. */
-.right-utility-dock__identity {
+.right-utility-dock__title-spacer {
   min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  font: inherit;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+html[data-octant-native-host="true"] .right-utility-dock__toolbar {
+  min-height: 58px;
+  padding-top: 24px;
+  padding-bottom: 0;
 }
 
 .right-utility-dock__actions {

@@ -184,7 +184,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 0;");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: 0;",
+      "top: var(--octant-native-hidden-inset-titlebar-height);",
     );
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
@@ -384,6 +384,11 @@ describe("WindowChrome", () => {
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
       "background: var(--octant-control);",
     );
+    expect(
+      cssRule(
+        'html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header',
+      ),
+    ).toContain("padding-left: 110px;");
     expect(cssRule('.workspace-pane[data-active="true"]')).toContain(
       "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
     );
@@ -584,13 +589,11 @@ describe("WindowChrome", () => {
     );
 
     expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
-    expect(container.firstChild).toHaveClass("window-drag-region");
+    expect(container.firstChild).not.toHaveClass("window-drag-region");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: 0;",
+      "top: var(--octant-native-hidden-inset-titlebar-height);",
     );
-    expect(container.querySelector(".window-chrome__drag-space")).not.toHaveClass(
-      "window-drag-region",
-    );
+    expect(container.querySelector(".window-chrome__drag-space")).toHaveClass("window-drag-region");
     expect(container.querySelectorAll(".window-drag-region")).toHaveLength(1);
     for (const control of screen.getAllByRole("button")) {
       expect(control).toHaveClass("window-no-drag");

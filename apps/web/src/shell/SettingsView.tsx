@@ -209,7 +209,7 @@ export function SettingsView(props: SettingsViewProps) {
         <div className="settings-view__sidebar-content">
           {props.onBack === undefined ? null : (
             <OctantButton
-              className="setnav-item window-no-drag settings-view__back"
+              className="setnav-item window-no-drag settings-view__back justify-start"
               onClick={props.onBack}
               type="button"
               variant="ghost"

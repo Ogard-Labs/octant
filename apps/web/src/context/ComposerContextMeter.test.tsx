@@ -224,4 +224,42 @@ describe("ComposerContextMeter", () => {
       "No context plan yet.",
     );
   });
+
+  it("keeps provider usage and account limits useful when no context plan exists", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{
+          inputTokens: 25_500,
+          outputTokens: 38,
+          limits: [
+            {
+              window: "five_hour",
+              status: "warning",
+              utilization: 0.91,
+              resetsAt: "2026-08-24T01:00:00.000Z" as never,
+            },
+          ],
+        }}
+        status="not-planned"
+        subjectKey="code-thread:a"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+
+    const button = screen.getByRole("button", {
+      name: /Provider reported 25\.5K input and 38 output/i,
+    });
+    await user.click(button);
+    const popover = screen.getByRole("dialog", { name: "Context usage" });
+    expect(popover).toHaveTextContent("Provider usage");
+    expect(popover).toHaveTextContent("Input25,500");
+    expect(popover).toHaveTextContent("Output38");
+    expect(popover).toHaveTextContent("Context maximumUnavailable");
+    expect(popover).toHaveTextContent("Provider account limits");
+    expect(popover).toHaveTextContent(/five hourLow · 91% used · resets/i);
+  });
 });

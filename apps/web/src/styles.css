@@ -776,15 +776,91 @@ button:focus-visible {
   overflow: auto;
 }
 
+.project-view-filter-popover__content {
+  display: grid;
+  gap: 8px;
+}
+
+.project-view-filter-popover__header {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--octant-text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.project-view-filter-popover__active-count {
+  color: var(--octant-text-muted);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+
+.project-view-filter-popover__field-grid,
+.project-view-filter-popover__date-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.project-view-filter-popover__field {
+  min-width: 0;
+  gap: 4px;
+}
+
+.project-view-filter-popover__field > [data-slot="field-label"],
+.project-view-filter-popover__checks > legend {
+  color: var(--octant-text-muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.project-view-filter-popover__checks {
+  min-width: 0;
+  margin: 0;
+  padding: 7px 0 5px;
+  border: 0;
+  border-top: 1px solid var(--octant-border);
+}
+
+.project-view-filter-popover__environment-options {
+  display: grid;
+  max-height: 112px;
+  gap: 1px;
+  margin-top: 3px;
+  overflow-y: auto;
+}
+
+.project-view-filter-popover__check {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 7px;
+  color: var(--octant-text-secondary);
+  font-size: 12px;
+}
+
 .project-view-filter-popover [data-slot="select-trigger"] {
-  min-height: 32px;
-  height: 32px;
+  min-height: 30px;
+  height: 30px;
+  padding-inline: 8px;
+  font-size: 12px;
 }
 
 .project-view-filter-popover input[type="date"] {
-  min-height: 32px;
-  height: 32px;
+  min-height: 30px;
+  height: 30px;
   padding-inline: 8px;
+  font-size: 11px;
+}
+
+.project-view-filter-popover__date-error {
+  grid-column: 1 / -1;
+  margin: -2px 0 0;
+  font-size: 10.5px;
 }
 
 .code-project-views__row {
@@ -1029,13 +1105,12 @@ button:focus-visible {
   margin-top: 2px;
 }
 
-/* Child threads are visibly nested under their folder. The title still aligns
-   with the Project label after accounting for the chevron and folder glyph. */
+/* Child threads stay one compact step inside their folder row. */
 .project-threads {
   display: grid;
   gap: 2px;
   margin: 2px 0 0;
-  padding-left: 20px;
+  padding-left: 8px;
 }
 
 /* The container carries the system's .sidebar-section label treatment; the h2
@@ -1130,7 +1205,7 @@ button:focus-visible {
 .project-row__select {
   display: grid;
   min-width: 0;
-  grid-template-columns: 12px 15px minmax(0, 1fr);
+  grid-template-columns: 15px minmax(0, 1fr);
   gap: 5px;
   align-items: center;
   min-height: 24px;
@@ -1149,12 +1224,6 @@ button:focus-visible {
 
 .project-row[data-active="true"] .project-row__folder-icon {
   color: var(--oct-fg);
-}
-
-.project-row__disclosure {
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .project-row__copy {
@@ -1308,6 +1377,7 @@ button:focus-visible {
 .sidebar-profile__action {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   width: 100%;
   min-height: 32px;
   gap: 8px;
@@ -1315,6 +1385,7 @@ button:focus-visible {
   color: var(--octant-text-secondary);
   border-radius: 7px;
   font-size: 12.5px;
+  text-align: left;
 }
 
 .sidebar-profile__action:hover {
@@ -1569,6 +1640,19 @@ button:focus-visible {
   padding: 2px var(--octant-window-chrome-reserved-width, 148px) 2px 4px;
 }
 
+/* Native hiddenInset owns the first 24px of the window. Use one shared visual
+   centerline for the pane tab and the trailing window controls: enough top air
+   to read as a title bar, but never inside macOS's dead drag strip. */
+html[data-octant-native-host="true"] .workspace-pane__header {
+  min-height: 58px;
+  padding-top: 24px;
+  padding-bottom: 0;
+}
+
+html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__header {
+  padding-left: 110px;
+}
+
 /* The grip carries the pane's surface title and is its one drag handle, in
    the same quiet meta ink the header rail has always used — pointing at it
    takes fg ink over the soft fill, exactly the dock-tab precedent.
@@ -1604,6 +1688,12 @@ button:focus-visible {
 
 .workspace-pane__grip > svg {
   flex: 0 0 auto;
+}
+
+.workspace-pane__window-drag-space {
+  min-width: 12px;
+  align-self: stretch;
+  flex: 1 1 auto;
 }
 
 .workspace-pane__title {

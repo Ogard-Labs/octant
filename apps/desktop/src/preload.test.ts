@@ -100,6 +100,7 @@ describe("desktop preload bridge", () => {
       "subscribeAppUpdateState",
       "subscribeBrowserSurfaceState",
       "subscribeCodeDeepLinks",
+      "subscribeOpenSettings",
       "subscribeResolvedMaterial",
       "subscribeResolvedSidebarVibrancy",
       "subscribeStartNewAgent",
@@ -543,6 +544,28 @@ describe("desktop preload bridge", () => {
     expect(listener).toHaveBeenCalledOnce();
     expect(ipc.on).toHaveBeenCalledWith(IPC_CHANNELS.startNewAgent, registered);
     expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.startNewAgent, registered);
+  });
+
+  it("forwards native Settings menu events without exposing IPC", () => {
+    let registered: ((event: unknown) => void) | undefined;
+    const ipc: IpcRendererPort = {
+      invoke: vi.fn(),
+      on: vi.fn((_channel, listener) => {
+        registered = listener as (event: unknown) => void;
+      }),
+      removeListener: vi.fn(),
+    };
+    const listener = vi.fn();
+    const unsubscribe = createHostBridge(ipc, projectWindowCapability).subscribeOpenSettings(
+      listener,
+    );
+
+    registered?.({});
+    unsubscribe();
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(ipc.on).toHaveBeenCalledWith(IPC_CHANNELS.openSettings, registered);
+    expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.openSettings, registered);
   });
 
   it("maps private listener status and enable/disable through fixed channels without secrets", async () => {

@@ -279,10 +279,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
           the launcher do not claim has to stay a native drag region: with the
           grip stretched across it the window could not be moved at all. */}
       <OctantContextMenuRoot>
-        <OctantContextMenuTrigger
-          className="workspace-pane__header window-drag-region"
-          render={<div />}
-        >
+        <OctantContextMenuTrigger className="workspace-pane__header" render={<div />}>
           <span
             className="workspace-pane__grip window-no-drag"
             onPointerCancel={props.drag.onPointerCancel}
@@ -301,6 +298,10 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
             <GripVertical aria-hidden="true" size={13} strokeWidth={1.8} />
             <span className="workspace-pane__title">{surface.title}</span>
           </span>
+          <span
+            aria-hidden="true"
+            className="workspace-pane__window-drag-space window-drag-region"
+          />
         </OctantContextMenuTrigger>
         <PaneMenu
           canSplit={canSplit}

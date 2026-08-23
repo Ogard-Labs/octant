@@ -298,6 +298,12 @@ must carry `window-no-drag` and remain outside any drag overlay. Test title-bar
 buttons in the packaged/native surface, not only with React/jsdom. Focus rings
 must be visible and must not move layout.
 
+On macOS the desktop window keeps Electron's native frame and uses
+`titleBarStyle: hiddenInset`; `frame: false` is not combined with that mode.
+Only explicit blank spans are draggable. Pane headers and window-chrome parents
+are ordinary layout containers so their interactive descendants never have to
+carve unreliable holes out of an overlapping native drag region.
+
 ## Accessibility and reliability
 
 - Normal text targets 4.5:1 contrast; large text 3:1; non-text UI marks 3:1.

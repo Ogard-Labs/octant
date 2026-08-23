@@ -19,7 +19,6 @@ export interface WindowPresentation {
   readonly browserWindow:
     | {
         readonly backgroundColor: "#00000000";
-        readonly frame: false;
         readonly titleBarStyle: "hiddenInset";
         readonly trafficLightPosition: { readonly x: 16; readonly y: 18 };
         readonly transparent: true;
@@ -101,7 +100,6 @@ export function resolveWindowPresentation(input: WindowPresentationInput): Windo
       input.platform === "darwin"
         ? {
             backgroundColor: "#00000000",
-            frame: false,
             titleBarStyle: "hiddenInset",
             trafficLightPosition: { x: 16, y: 18 },
             transparent: true,

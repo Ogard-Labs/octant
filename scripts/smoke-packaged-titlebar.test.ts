@@ -34,6 +34,19 @@ describe("packaged native titlebar smoke geometry", () => {
     ).not.toThrow();
   });
 
+  it("rejects controls centered exactly on the native strip boundary", () => {
+    expect(() =>
+      assertNativeTitlebarTargetsBelowInset(
+        {
+          window_bounds: bounds,
+          elements: [button("Open bottom panel", 200 + 11)],
+        },
+        24,
+        ["Open bottom panel"],
+      ),
+    ).toThrow("inside the native movement strip");
+  });
+
   it("matches the dynamic default application suffix on Open in", () => {
     expect(() =>
       assertNativeTitlebarTargetsBelowInset(

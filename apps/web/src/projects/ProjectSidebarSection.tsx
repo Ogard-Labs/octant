@@ -5,12 +5,11 @@ import {
   Box,
   Briefcase,
   Bug,
-  ChevronDown,
-  ChevronRight,
   Clock3,
   Code,
   Flag,
   Folder,
+  FolderOpen,
   FolderGit,
   Inbox,
   Layers,
@@ -30,6 +29,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantContextMenu } from "../ui/base/OctantContextMenu";
 import { OctantDialog } from "../ui/base/OctantDialog";
+import { OctantField, OctantFieldGroup, OctantFieldLabel } from "../ui/base/OctantField";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 import { OctantPopover } from "../ui/base/OctantPopover";
@@ -705,16 +705,7 @@ function ProjectGroup(props: {
                 type="button"
                 variant="ghost"
               >
-                <span className="project-row__disclosure" aria-hidden="true">
-                  {showNested ? (
-                    expanded ? (
-                      <ChevronDown size={12} strokeWidth={1.8} />
-                    ) : (
-                      <ChevronRight size={12} strokeWidth={1.8} />
-                    )
-                  ) : null}
-                </span>
-                <ProjectFolderIcon project={project} />
+                <ProjectFolderIcon expanded={showNested && expanded} project={project} />
                 <span className="project-row__copy">
                   <span>{project.name}</span>
                   {unavailable ? <small>Relink required</small> : null}
@@ -785,12 +776,16 @@ function ProjectGroup(props: {
   );
 }
 
-function ProjectFolderIcon(props: { readonly project: ProjectSummary }) {
-  const Icon = props.project.type === "code" ? FolderGit : Folder;
+function ProjectFolderIcon(props: {
+  readonly expanded: boolean;
+  readonly project: ProjectSummary;
+}) {
+  const Icon = props.expanded ? FolderOpen : props.project.type === "code" ? FolderGit : Folder;
   return (
     <span
       aria-hidden="true"
       className="project-row__folder-icon"
+      data-folder-state={props.expanded ? "open" : "closed"}
       data-project-icon={props.project.type}
     >
       <Icon size={14} strokeWidth={1.65} />
@@ -1232,7 +1227,7 @@ function ProjectViewFilterPopover(props: {
 
   return (
     <OctantPopover
-      className="project-view-filter-popover w-72 max-w-[calc(100vw-24px)]"
+      className="project-view-filter-popover w-64 max-w-[calc(100vw-24px)]"
       description="Filter and organize the Projects in this view."
       onOpenChange={setOpen}
       open={open}
@@ -1242,96 +1237,101 @@ function ProjectViewFilterPopover(props: {
         activeCount === 0 ? "Project view filters" : `Project view filters, ${activeCount} active`
       }
     >
-      <div className="flex flex-col gap-3" data-project-view-filter-content>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-sm font-medium text-foreground">Filters</span>
+      <div className="project-view-filter-popover__content" data-project-view-filter-content>
+        <div className="project-view-filter-popover__header">
+          <span>Filters</span>
           {activeCount === 0 ? null : (
-            <span className="text-xs text-muted-foreground">{activeCount} active</span>
+            <span className="project-view-filter-popover__active-count">{activeCount} active</span>
           )}
         </div>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Lifecycle
-          <OctantSelectField
-            options={PROJECT_VIEW_LIFECYCLE_OPTIONS}
-            onValueChange={(value) => {
-              if (value === "active" || value === "archived" || value === "all") {
-                update({ lifecycle: value as ProjectViewLifecycle });
-              }
-            }}
-            value={props.filters.lifecycle}
-          />
-        </label>
-        <fieldset className="flex flex-col gap-1.5 border-0 p-0">
-          <legend className="text-xs text-muted-foreground">Environment</legend>
-          <label className="flex min-h-7 items-center gap-2 text-sm text-foreground">
-            <OctantCheckbox
-              checked={environmentSelection.length === 0}
-              onChange={() => update({ environmentIds: [] })}
+        <OctantFieldGroup className="project-view-filter-popover__field-grid">
+          <OctantField className="project-view-filter-popover__field">
+            <OctantFieldLabel>Lifecycle</OctantFieldLabel>
+            <OctantSelectField
+              options={PROJECT_VIEW_LIFECYCLE_OPTIONS}
+              onValueChange={(value) => {
+                if (value === "active" || value === "archived" || value === "all") {
+                  update({ lifecycle: value as ProjectViewLifecycle });
+                }
+              }}
+              value={props.filters.lifecycle}
             />
-            All environments
-          </label>
-          {options.map((option) => (
-            <label
-              className="flex min-h-7 items-center gap-2 text-sm text-foreground"
-              key={option.id}
-            >
+          </OctantField>
+          <OctantField className="project-view-filter-popover__field">
+            <OctantFieldLabel>Thread activity</OctantFieldLabel>
+            <OctantSelectField
+              options={PROJECT_VIEW_ACTIVITY_OPTIONS}
+              onValueChange={(value) => {
+                if (
+                  ["all", "today", "3-days", "7-days", "14-days", "30-days", "custom"].includes(
+                    value,
+                  )
+                ) {
+                  update({ activity: value as ProjectViewActivityPeriod });
+                }
+              }}
+              value={props.filters.activity}
+            />
+          </OctantField>
+        </OctantFieldGroup>
+        <fieldset className="project-view-filter-popover__checks">
+          <legend>Environment</legend>
+          <div className="project-view-filter-popover__environment-options">
+            <label className="project-view-filter-popover__check">
               <OctantCheckbox
-                checked={environmentSelection.includes(option.id)}
-                onChange={() => toggleEnvironment(option.id)}
+                checked={environmentSelection.length === 0}
+                onChange={() => update({ environmentIds: [] })}
               />
-              {option.name}
+              All environments
             </label>
-          ))}
+            {options.map((option) => (
+              <label className="project-view-filter-popover__check" key={option.id}>
+                <OctantCheckbox
+                  checked={environmentSelection.includes(option.id)}
+                  onChange={() => toggleEnvironment(option.id)}
+                />
+                {option.name}
+              </label>
+            ))}
+          </div>
         </fieldset>
-        <label className="flex min-h-7 items-center gap-2 text-sm text-foreground">
+        <label className="project-view-filter-popover__check">
           <OctantCheckbox
             checked={props.filters.showEmptyProjects}
             onChange={(event) => update({ showEmptyProjects: event.currentTarget.checked })}
           />
           Show empty Projects
         </label>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Group by
-          <OctantSelectField
-            options={PROJECT_VIEW_GROUPING_OPTIONS}
-            onValueChange={(value) => {
-              if (["project", "environment", "status", "none"].includes(value)) {
-                update({ grouping: value as ProjectViewGrouping });
-              }
-            }}
-            value={props.filters.grouping}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Sort by
-          <OctantSelectField
-            options={PROJECT_VIEW_SORTING_OPTIONS}
-            onValueChange={(value) => {
-              if (["recency", "alphabetical", "created"].includes(value)) {
-                update({ sorting: value as ProjectViewSort });
-              }
-            }}
-            value={props.filters.sorting}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-          Thread activity
-          <OctantSelectField
-            options={PROJECT_VIEW_ACTIVITY_OPTIONS}
-            onValueChange={(value) => {
-              if (
-                ["all", "today", "3-days", "7-days", "14-days", "30-days", "custom"].includes(value)
-              ) {
-                update({ activity: value as ProjectViewActivityPeriod });
-              }
-            }}
-            value={props.filters.activity}
-          />
-        </label>
+        <OctantFieldGroup className="project-view-filter-popover__field-grid">
+          <OctantField className="project-view-filter-popover__field">
+            <OctantFieldLabel>Group by</OctantFieldLabel>
+            <OctantSelectField
+              options={PROJECT_VIEW_GROUPING_OPTIONS}
+              onValueChange={(value) => {
+                if (["project", "environment", "status", "none"].includes(value)) {
+                  update({ grouping: value as ProjectViewGrouping });
+                }
+              }}
+              value={props.filters.grouping}
+            />
+          </OctantField>
+          <OctantField className="project-view-filter-popover__field">
+            <OctantFieldLabel>Sort by</OctantFieldLabel>
+            <OctantSelectField
+              options={PROJECT_VIEW_SORTING_OPTIONS}
+              onValueChange={(value) => {
+                if (["recency", "alphabetical", "created"].includes(value)) {
+                  update({ sorting: value as ProjectViewSort });
+                }
+              }}
+              value={props.filters.sorting}
+            />
+          </OctantField>
+        </OctantFieldGroup>
         {props.filters.activity === "custom" ? (
-          <div className="grid grid-cols-2 gap-2">
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              From
+          <OctantFieldGroup className="project-view-filter-popover__date-grid">
+            <OctantField className="project-view-filter-popover__field">
+              <OctantFieldLabel>From</OctantFieldLabel>
               <OctantInput
                 aria-describedby={
                   activityRangeError === undefined ? undefined : activityRangeErrorId
@@ -1351,9 +1351,9 @@ function ProjectViewFilterPopover(props: {
                 type="date"
                 value={props.filters.activityRange?.from ?? ""}
               />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-              To
+            </OctantField>
+            <OctantField className="project-view-filter-popover__field">
+              <OctantFieldLabel>To</OctantFieldLabel>
               <OctantInput
                 aria-describedby={
                   activityRangeError === undefined ? undefined : activityRangeErrorId
@@ -1373,13 +1373,17 @@ function ProjectViewFilterPopover(props: {
                 type="date"
                 value={props.filters.activityRange?.to ?? ""}
               />
-            </label>
+            </OctantField>
             {activityRangeError === undefined ? null : (
-              <p className="field-error col-span-2" id={activityRangeErrorId} role="alert">
+              <p
+                className="field-error project-view-filter-popover__date-error"
+                id={activityRangeErrorId}
+                role="alert"
+              >
                 {activityRangeError}
               </p>
             )}
-          </div>
+          </OctantFieldGroup>
         ) : null}
       </div>
     </OctantPopover>

@@ -88,7 +88,7 @@ export function SidebarProfile(props: SidebarProfileProps) {
       <OctantButton
         aria-controls={disclosureId}
         aria-expanded={open}
-        className="sidebar-item window-no-drag"
+        className="sidebar-item window-no-drag justify-start"
         onClick={() => setOpen((current) => !current)}
         ref={trigger}
         type="button"
@@ -192,7 +192,7 @@ function ProfileAction(props: {
     // A plain button whose visible text is its accessible name — nothing but
     // the aria-hidden icon sits beside it, so no wrapper can swallow the label.
     <OctantButton
-      className="sidebar-profile__action window-no-drag"
+      className="sidebar-profile__action window-no-drag justify-start"
       onClick={props.onClick}
       role="menuitem"
       type="button"
