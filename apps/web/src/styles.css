@@ -1337,10 +1337,10 @@ button:focus-visible {
 .sidebar-profile__disclosure {
   position: absolute;
   bottom: calc(100% + 6px);
-  left: 0;
+  left: 50%;
   z-index: 40;
   display: grid;
-  width: min(248px, calc(100vw - 24px));
+  width: min(248px, calc(100vw - 24px), calc(100% - 8px));
   max-width: none;
   gap: 3px;
   padding: 6px;
@@ -1348,6 +1348,7 @@ button:focus-visible {
   border: 1px solid var(--octant-border-strong);
   border-radius: 10px;
   box-shadow: var(--octant-shadow-overlay);
+  transform: translateX(-50%);
 }
 
 .sidebar-profile__chevron {

@@ -446,6 +446,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
         label={label}
         onArchive={props.onArchive}
         onMove={props.onMove}
+        onRestore={props.onRestore}
         {...(onNewThread === undefined ? {} : { newThreadVerb, onNewThreadInProject: onNewThread })}
         onReorder={props.onReorder}
         onProjectOpen={props.onProjectOpen}
@@ -607,6 +608,7 @@ function ProjectGroup(props: {
   readonly addProjectLabel?: "chat-project" | "folder";
   readonly onArchive: (projectId: ProjectId) => void;
   readonly onMove: (projectId: ProjectId, pinned: boolean) => void;
+  readonly onRestore: (projectId: ProjectId) => void;
   readonly newThreadVerb?: "chat" | "thread";
   readonly onNewThreadInProject?: (projectId: ProjectId) => void;
   readonly onReorder: (
@@ -728,6 +730,7 @@ function ProjectGroup(props: {
                 onMove={props.onMove}
                 onOpen={props.onProjectOpen}
                 onReorder={props.onReorder}
+                onRestore={props.onRestore}
                 project={project}
                 {...(props.projects[index - 1] === undefined
                   ? {}
@@ -806,6 +809,7 @@ function ProjectActionsMenu(props: {
     beforeProjectId?: ProjectId,
     afterProjectId?: ProjectId,
   ) => void;
+  readonly onRestore: (projectId: ProjectId) => void;
   readonly previousProjectId?: ProjectId;
   readonly project: ProjectSummary;
 }) {
@@ -814,7 +818,10 @@ function ProjectActionsMenu(props: {
     { label: props.project.pinned ? "Unpin Project" : "Pin Project", value: "pin" },
     { disabled: !props.canMoveUp, label: "Move up", value: "up" },
     { disabled: !props.canMoveDown, label: "Move down", value: "down" },
-    { label: "Archive Project", value: "archive" },
+    {
+      label: props.project.lifecycle === "archived" ? "Restore Project" : "Archive Project",
+      value: props.project.lifecycle === "archived" ? "restore" : "archive",
+    },
   ];
   return (
     <OctantMenu
@@ -829,6 +836,7 @@ function ProjectActionsMenu(props: {
           props.onReorder(props.project.id, props.project.pinned, undefined, props.nextProjectId);
         }
         if (value === "archive") props.onArchive(props.project.id);
+        if (value === "restore") props.onRestore(props.project.id);
       }}
       trigger={<MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />}
       triggerClassName="project-row__action project-row__action--icon inline-flex items-center justify-center"

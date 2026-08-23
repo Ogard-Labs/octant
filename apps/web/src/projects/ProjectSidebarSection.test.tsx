@@ -371,6 +371,41 @@ describe("ProjectSidebarSection archive", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Archive Project" }));
     expect(onArchive).toHaveBeenCalledWith(chatProjectA.id);
   });
+
+  it("offers Restore Project for archived rows in an Archived Project View", async () => {
+    const user = userEvent.setup();
+    const onArchive = vi.fn();
+    const onRestore = vi.fn();
+    const archivedProject = { ...chatProjectA, lifecycle: "archived" as const };
+    window.localStorage.setItem(
+      "octant.code.project-view-preferences.v1",
+      JSON.stringify({ filters: { lifecycle: "archived" } }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[archivedProject]}
+        availabilityByProject={new Map()}
+        onArchive={onArchive}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={onRestore}
+        projectViewsEnabled
+        projects={[]}
+      />,
+    );
+
+    const actions = screen.getByRole("button", {
+      name: `Project actions for ${archivedProject.name}`,
+    });
+    actions.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.queryByRole("menuitem", { name: "Archive Project" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("menuitem", { name: "Restore Project" }));
+    expect(onRestore).toHaveBeenCalledWith(archivedProject.id);
+    expect(onArchive).not.toHaveBeenCalled();
+  });
 });
 
 describe("ProjectSidebarSection activity view", () => {

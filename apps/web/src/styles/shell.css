@@ -105,6 +105,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   align-self: stretch;
   flex: 1 1 auto;
   min-width: 12px;
+  pointer-events: auto;
 }
 
 /* The badge recipe carries the warning palette and type; the chrome only
