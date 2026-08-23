@@ -9,6 +9,7 @@ import type {
 import { GitPullRequest, RefreshCw, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
+import { OctantBadge, type OctantBadgeProps } from "../ui/base/OctantBadge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
@@ -330,11 +331,15 @@ function StatusChip(props: {
   readonly label: string;
   readonly status: "positive" | "warning" | "negative" | "neutral";
 }) {
-  return (
-    <span className="code-project-pull-requests__chip" data-status={props.status}>
-      {props.label}
-    </span>
-  );
+  const variant: OctantBadgeProps["variant"] =
+    props.status === "positive"
+      ? "success"
+      : props.status === "warning"
+        ? "warning"
+        : props.status === "negative"
+          ? "destructive"
+          : "secondary";
+  return <OctantBadge variant={variant}>{props.label}</OctantBadge>;
 }
 
 function pullRequestMatches(row: CodeProjectPullRequestRow, query: string): boolean {

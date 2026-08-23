@@ -45,7 +45,7 @@ distilled successor of the earlier long-form design specifications.
 | [0035](0035-thread-retention-and-purge.md)                    | Thread retention and explicit purge                               | Accepted           |
 | [0036](0036-thread-export.md)                                 | Thread export                                                     | Accepted           |
 | [0037](0037-a-thread-starts-in-a-project.md)                  | A thread starts in a Project                                      | Accepted           |
-| [0038](0038-owned-design-system-stylesheet.md)                | The owned design system stylesheet                                | Accepted           |
+| [0038](0038-owned-design-system-stylesheet.md)                | The owned design system stylesheet                                | Superseded by 0046 |
 | [0039](0039-journal-compaction-of-superseded-observations.md) | Journal compaction of superseded checkout observations            | Accepted           |
 | [0040](0040-share-a-host-or-a-git-remote.md)                  | Collaboration: share a host or a git remote                       | Proposed           |
 | [0041](0041-panes-hold-one-surface.md)                        | Panes hold one surface; the sidebar is the only switcher          | Proposed           |
@@ -53,6 +53,7 @@ distilled successor of the earlier long-form design specifications.
 | [0043](0043-simulator-follows-the-active-thread.md)           | Simulator follows the active thread in the right sidebar          | Accepted           |
 | [0044](0044-the-dock-hosts-live-thread-owned-tools.md)        | The dock hosts live thread-owned tools                            | Proposed           |
 | [0045](0045-environment-summarizes-the-active-thread.md)      | Environment summarizes the active thread                          | Accepted           |
+| [0046](0046-shadcn-recipes-own-product-controls.md)           | shadcn recipes own product controls                               | Accepted           |
 
 ## Adding an ADR
 

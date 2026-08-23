@@ -3111,7 +3111,9 @@ describe("App", () => {
     modeListbox.focus();
     fireEvent.keyDown(modeListbox, { key: "ArrowDown" });
     fireEvent.keyDown(modeListbox, { key: "Enter" });
-    await user.selectOptions(screen.getByLabelText("Mode switcher"), "dropdown");
+    const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
+    await user.click(within(modeSwitcher).getByRole("button", { name: "Buttons" }));
+    await user.click(within(modeSwitcher).getByRole("button", { name: "Dropdown" }));
     await user.click(screen.getByRole("button", { name: "Back to app" }));
     expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     await openSettingsFromSidebar(user);

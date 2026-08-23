@@ -472,7 +472,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 
 .sidebar-navigation__thread:hover {
   color: var(--oct-fg);
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
 }
 
 /* The open thread reads louder than a hovered one.
@@ -485,8 +485,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
    rail is an inset shadow rather than a border, which would move the title. */
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
-  background: var(--oct-fg-soft);
-  box-shadow: inset 1px 0 0 var(--octant-border-strong);
+  background: var(--sidebar-accent);
+  box-shadow: none;
   font-weight: 500;
 }
 

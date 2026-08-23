@@ -5,7 +5,7 @@ import { useRef } from "react";
 import { cn } from "./utils";
 
 export function DropdownMenu(props: ComponentProps<typeof MenuPrimitive.Root>) {
-  return <MenuPrimitive.Root {...props} />;
+  return <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
 }
 
 export function DropdownMenuTrigger({
@@ -15,9 +15,10 @@ export function DropdownMenuTrigger({
   return (
     <MenuPrimitive.Trigger
       className={cn(
-        "inline-flex items-center justify-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "inline-flex cursor-pointer items-center justify-center rounded-md outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50",
         className,
       )}
+      data-slot="dropdown-menu-trigger"
       {...props}
     />
   );
@@ -30,9 +31,10 @@ export function DropdownMenuPopup({
   return (
     <MenuPrimitive.Popup
       className={cn(
-        "octant-glass octant-glass--overlay z-50 min-w-48 rounded-md p-1 text-popover-foreground outline-none",
+        "z-50 min-w-48 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md outline-none data-ending-style:opacity-0 data-starting-style:opacity-0",
         className,
       )}
+      data-slot="dropdown-menu-content"
       {...props}
     />
   );
@@ -85,7 +87,7 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
               props.items.map((item) => (
                 <MenuPrimitive.Item
                   className={cn(
-                    "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
+                    "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
                   )}
                   closeOnClick
                   key={item.value}
@@ -120,7 +122,7 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                 {props.items.map((item) => (
                   <MenuPrimitive.RadioItem
                     className={cn(
-                      "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
+                      "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag",
                     )}
                     closeOnClick
                     key={item.value}

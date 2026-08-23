@@ -455,16 +455,18 @@ describe("SettingsView", () => {
     expect(onSearchChange).toHaveBeenCalledWith("translucent");
     // With a query active, the search results panel replaces section content.
     expect(screen.getByRole("listbox", { name: "Settings search results" })).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Mode switcher" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Mode switcher" })).not.toBeInTheDocument();
   });
 
   it("changes the project view switcher presentation", () => {
     const { props } = renderSettings();
     navigateTo("Appearance");
 
-    fireEvent.change(screen.getByRole("combobox", { name: "Project view switcher" }), {
-      target: { value: "inline" },
-    });
+    fireEvent.click(
+      within(screen.getByRole("group", { name: "Project view switcher" })).getByRole("button", {
+        name: "Buttons",
+      }),
+    );
     expect(props.onSettingsChange).toHaveBeenCalledWith({
       projectViewSwitcherPresentation: "inline",
     });
@@ -483,15 +485,20 @@ describe("SettingsView", () => {
     fireEvent.keyDown(listbox, { key: "Enter" });
     // Selecting the result clears the search and focuses the control.
     expect(onSearchChange).toHaveBeenLastCalledWith("");
-    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveFocus();
+    const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
+    expect(modeSwitcher).toBeInTheDocument();
+    expect(within(modeSwitcher).getByRole("button", { name: "Buttons" })).toHaveFocus();
   });
 
   it("applies an initial deep link on mount to open a section and focus a setting", () => {
     renderSettings({ initialDeepLink: { section: "appearance", setting: "mode-switcher" } });
 
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveFocus();
+    expect(
+      within(screen.getByRole("group", { name: "Mode switcher" })).getByRole("button", {
+        name: "Buttons",
+      }),
+    ).toHaveFocus();
   });
 
   it("applies a pending deep link from another app surface and reports it consumed", () => {
@@ -810,10 +817,12 @@ describe("SettingsView", () => {
     expect(screen.getByRole("switch", { name: "Translucent sidebar" })).toHaveClass(
       "octant-switch",
     );
-    expect(screen.getByRole("combobox", { name: "Mode switcher" })).toHaveValue("dropdown");
-    fireEvent.change(screen.getByRole("combobox", { name: "Mode switcher" }), {
-      target: { value: "buttons" },
-    });
+    const modeSwitcher = screen.getByRole("group", { name: "Mode switcher" });
+    expect(within(modeSwitcher).getByRole("button", { name: "Dropdown" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent.click(within(modeSwitcher).getByRole("button", { name: "Buttons" }));
     expect(onSettingsChange).toHaveBeenCalledWith({ modeSwitcherPresentation: "buttons" });
     fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
     expect(screen.getByRole("button", { name: "Reset active mode layout" })).toHaveClass(

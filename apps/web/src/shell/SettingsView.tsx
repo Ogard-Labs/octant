@@ -23,6 +23,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantSlider } from "../ui/base/OctantSlider";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
   isSettingsSectionAvailable,
@@ -684,20 +685,19 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
             scope="app"
             settingId="mode-switcher"
           >
-            <OctantNativeSelect
+            <OctantToggleGroup<ShellSettings["modeSwitcherPresentation"]>
               aria-label="Mode switcher"
-              className="settings-view__select"
-              onChange={(event) =>
-                props.onSettingsChange({
-                  modeSwitcherPresentation: event.currentTarget
-                    .value as ShellSettings["modeSwitcherPresentation"],
-                })
-              }
-              value={props.settings.modeSwitcherPresentation}
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) {
+                  props.onSettingsChange({ modeSwitcherPresentation: selected });
+                }
+              }}
+              value={[props.settings.modeSwitcherPresentation]}
             >
-              <option value="buttons">Compact buttons</option>
-              <option value="dropdown">Dropdown</option>
-            </OctantNativeSelect>
+              <OctantToggleGroupItem value="buttons">Buttons</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="dropdown">Dropdown</OctantToggleGroupItem>
+            </OctantToggleGroup>
           </SettingRow>
         ) : null}
         {isAvailable("project-view-switcher") ? (
@@ -708,20 +708,19 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
             scope="app"
             settingId="project-view-switcher"
           >
-            <OctantNativeSelect
+            <OctantToggleGroup<ShellSettings["projectViewSwitcherPresentation"]>
               aria-label="Project view switcher"
-              className="settings-view__select"
-              onChange={(event) =>
-                props.onSettingsChange({
-                  projectViewSwitcherPresentation: event.currentTarget
-                    .value as ShellSettings["projectViewSwitcherPresentation"],
-                })
-              }
-              value={props.settings.projectViewSwitcherPresentation}
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) {
+                  props.onSettingsChange({ projectViewSwitcherPresentation: selected });
+                }
+              }}
+              value={[props.settings.projectViewSwitcherPresentation]}
             >
-              <option value="dropdown">Dropdown</option>
-              <option value="inline">Icon buttons</option>
-            </OctantNativeSelect>
+              <OctantToggleGroupItem value="dropdown">Dropdown</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="inline">Buttons</OctantToggleGroupItem>
+            </OctantToggleGroup>
           </SettingRow>
         ) : null}
         {isAvailable("transcript-text-size") ? (
@@ -732,21 +731,19 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
             scope="app"
             settingId="transcript-text-size"
           >
-            <OctantNativeSelect
+            <OctantToggleGroup<ShellSettings["transcriptTextSize"]>
               aria-label="Transcript text size"
-              className="settings-view__select"
-              onChange={(event) =>
-                props.onSettingsChange({
-                  transcriptTextSize: event.currentTarget
-                    .value as ShellSettings["transcriptTextSize"],
-                })
-              }
-              value={props.settings.transcriptTextSize}
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined)
+                  props.onSettingsChange({ transcriptTextSize: selected });
+              }}
+              value={[props.settings.transcriptTextSize]}
             >
-              <option value="small">Small</option>
-              <option value="medium">Medium</option>
-              <option value="large">Large</option>
-            </OctantNativeSelect>
+              <OctantToggleGroupItem value="small">Small</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="large">Large</OctantToggleGroupItem>
+            </OctantToggleGroup>
           </SettingRow>
         ) : null}
         {isAvailable("transcript-width") ? (
@@ -757,20 +754,18 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
             scope="app"
             settingId="transcript-width"
           >
-            <OctantNativeSelect
+            <OctantToggleGroup<ShellSettings["transcriptWidth"]>
               aria-label="Transcript width"
-              className="settings-view__select"
-              onChange={(event) =>
-                props.onSettingsChange({
-                  transcriptWidth: event.currentTarget.value as ShellSettings["transcriptWidth"],
-                })
-              }
-              value={props.settings.transcriptWidth}
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) props.onSettingsChange({ transcriptWidth: selected });
+              }}
+              value={[props.settings.transcriptWidth]}
             >
-              <option value="narrow">Narrow</option>
-              <option value="medium">Medium</option>
-              <option value="wide">Wide</option>
-            </OctantNativeSelect>
+              <OctantToggleGroupItem value="narrow">Narrow</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="medium">Medium</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="wide">Wide</OctantToggleGroupItem>
+            </OctantToggleGroup>
           </SettingRow>
         ) : null}
         {isAvailable("thread-provider-icons") ? (

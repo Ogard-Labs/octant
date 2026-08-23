@@ -719,7 +719,6 @@ button:focus-visible {
 }
 
 .new-project:active,
-.settings-view__action:active,
 .shell-boundary__action:active {
   background: var(--octant-control-pressed);
 }
@@ -1699,9 +1698,8 @@ button:focus-visible {
   background: var(--octant-workspace);
 }
 
-/* Drawn to the system's .btn btn-secondary btn-sm recipe until these
-   surfaces adopt the classes themselves. */
-.settings-view__action,
+/* Native boundary fallback. Settings actions use OctantButton, so shadcn owns
+   their paint and interaction states. */
 .shell-boundary__action {
   min-height: var(--oct-control-height-sm);
   padding: 0 var(--oct-space-4);
@@ -1718,22 +1716,19 @@ button:focus-visible {
     color var(--oct-motion-fast) var(--oct-ease-standard);
 }
 
-.settings-view__action:hover,
 .shell-boundary__action:hover {
   color: var(--oct-fg);
   background: var(--oct-surface-warm);
   border-color: var(--oct-fg);
 }
 
-/* Reads as a .setgroup-head so in-pane subheadings match group heads. */
 .settings-view__section-heading {
   margin: var(--oct-space-6) 0 var(--oct-space-2);
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  font-weight: 500;
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
 .settings-view__field,
@@ -1777,19 +1772,10 @@ button:focus-visible {
   cursor: pointer;
 }
 
-/* Drawn to the system's .input/.select recipe at the small control height. */
 .settings-view__text-input,
 .settings-view__select {
   width: auto;
   min-width: 150px;
-  min-height: var(--oct-control-height-sm);
-  padding: 0 var(--oct-space-3);
-  color: var(--oct-fg);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  font: inherit;
-  font-size: var(--oct-text-sm);
 }
 
 .settings-view__field--search .settings-view__text-input {
@@ -1802,13 +1788,6 @@ button:focus-visible {
   padding: 2px;
 }
 
-.settings-view__text-input:hover,
-.settings-view__select:hover {
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
-}
-
-.settings-view__text-input:focus-visible,
-.settings-view__select:focus-visible,
 .settings-view__checkbox:focus-visible,
 .settings-view__range:focus-visible {
   outline: 2px solid var(--octant-focus-ring);
@@ -1837,8 +1816,6 @@ button:focus-visible {
 
 .settings-view__action {
   justify-self: start;
-  min-height: 32px;
-  margin-top: 8px;
 }
 
 .provider-settings {
@@ -3249,7 +3226,7 @@ button:focus-visible {
   top: calc(100% + 7px);
   right: 0;
   left: auto;
-  width: min(348px, calc(100vw - 24px));
+  width: min(380px, calc(100vw - 24px));
   max-height: min(680px, calc(100vh - 96px));
   padding: 0;
 }
@@ -3259,13 +3236,13 @@ button:focus-visible {
   z-index: 1;
   top: 0;
   display: flex;
-  min-height: 46px;
+  min-height: 52px;
   align-items: center;
   justify-content: space-between;
   gap: var(--oct-space-3);
-  padding: 0 var(--oct-space-3);
+  padding: 0 var(--oct-space-4);
   border-bottom: 1px solid var(--oct-border);
-  background: var(--oct-surface);
+  background: var(--popover);
 }
 
 .thread-environment-disclosure__heading {
@@ -3278,8 +3255,8 @@ button:focus-visible {
 .thread-environment-disclosure__heading h2 {
   margin: 0;
   color: var(--oct-fg);
-  font-size: var(--oct-text-md);
-  font-weight: var(--oct-weight-strong);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
 }
 
 .thread-environment-disclosure__heading span {
@@ -3302,12 +3279,12 @@ button:focus-visible {
 .thread-environment-disclosure__body {
   display: grid;
   gap: 0;
-  padding: var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-space-4) var(--oct-space-4);
 }
 
 .thread-environment-disclosure__body > * + * {
-  margin-top: var(--oct-space-2);
-  padding-top: var(--oct-space-2);
+  margin-top: var(--oct-space-3);
+  padding-top: var(--oct-space-3);
   border-top: 1px solid var(--oct-border);
 }
 
@@ -3329,7 +3306,7 @@ button:focus-visible {
 }
 
 .thread-environment-disclosure .environment-group__header {
-  min-height: 32px;
+  min-height: 36px;
   padding: 0;
   color: var(--oct-fg);
   font-family: var(--oct-font-sans);
@@ -3427,9 +3404,9 @@ button:focus-visible {
   grid-template-columns: 18px minmax(0, 1fr) 14px;
   align-items: center;
   gap: var(--oct-space-2);
-  padding: 6px;
+  padding: 7px 8px;
   border: 0;
-  border-radius: var(--oct-radius-sm);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--oct-fg-2);
   text-align: left;
@@ -3475,7 +3452,9 @@ button:focus-visible {
   display: grid;
   gap: var(--oct-space-3);
   padding: var(--oct-space-3);
-  border-top: 1px solid var(--oct-border);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--radius-md);
+  background: var(--octant-surface-inset);
   color: var(--oct-fg-2);
 }
 
@@ -3675,14 +3654,8 @@ button:focus-visible {
   font-size: 11px;
 }
 
-/* Collapsible groups of the thread Environment panel and the dock's Thread
-   panel. One definition serves both, so a group looks the same wherever it is
-   mounted. Only the open group mounts its body, so collapsed groups cost
-   nothing.
-
-   Every group title wears the system's section-label type — mono, uppercase,
-   tracked — so a stack of groups reads as labelled sections rather than as a
-   list of buttons in body text. */
+/* Collapsible groups are ordinary product rows. Their icon and disclosure state
+   provide enough hierarchy, so the title stays in sentence-case interface type. */
 .environment-group + .environment-group {
   border-top: 1px solid var(--oct-border);
 }
@@ -3696,12 +3669,12 @@ button:focus-visible {
   padding: 0 2px;
   border: none;
   background: transparent;
-  color: var(--oct-muted);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
+  color: var(--oct-fg-2);
+  font-family: var(--oct-font-sans);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  letter-spacing: normal;
   text-align: left;
-  text-transform: uppercase;
   cursor: pointer;
 }
 
@@ -7960,8 +7933,16 @@ p.board-col-empty {
   display: flex;
   width: min(900px, 100%);
   flex-direction: column;
-  gap: var(--oct-space-6);
+  gap: var(--oct-space-4);
   min-width: 0;
+}
+
+.code-project-pull-requests__project {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  box-shadow: var(--octant-shadow-sm);
 }
 
 .code-project-pull-requests__project-header,
@@ -7975,9 +7956,10 @@ p.board-col-empty {
 }
 
 .code-project-pull-requests__project-header {
-  min-height: 34px;
+  min-height: 48px;
   align-items: center;
   justify-content: space-between;
+  padding: 0 var(--oct-space-4);
   border-bottom: 1px solid var(--oct-border);
 }
 
@@ -7993,7 +7975,7 @@ p.board-col-empty {
 }
 
 .code-project-pull-requests__repository h3 {
-  padding: var(--oct-space-3) 0 var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-4) var(--oct-space-2);
   color: var(--oct-muted);
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
@@ -8003,12 +7985,13 @@ p.board-col-empty {
 .code-project-pull-requests__unconnected,
 .code-project-pull-requests__empty {
   margin: 0;
+  padding: var(--oct-space-5) var(--oct-space-4);
   color: var(--oct-muted);
 }
 
 .code-project-pull-requests__list {
   display: grid;
-  gap: 2px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -8019,9 +8002,10 @@ p.board-col-empty {
   grid-template-columns: 20px minmax(0, 1fr);
   width: 100%;
   gap: var(--oct-space-3);
-  padding: 13px 12px;
-  border: 1px solid transparent;
-  border-radius: var(--oct-radius-md);
+  padding: var(--oct-space-4);
+  border: 0;
+  border-top: 1px solid var(--oct-border-soft);
+  border-radius: 0;
   background: transparent;
   color: inherit;
   text-align: left;
@@ -8029,8 +8013,7 @@ p.board-col-empty {
 }
 
 .code-project-pull-requests__row[aria-pressed="true"] {
-  background: var(--oct-surface-muted);
-  border-color: var(--oct-border-strong);
+  background: var(--accent);
 }
 
 .code-project-pull-requests__row:hover,
@@ -8072,34 +8055,6 @@ p.board-col-empty {
 
 .code-project-pull-requests__meta {
   gap: 5px;
-}
-
-.code-project-pull-requests__chip {
-  display: inline-flex;
-  min-height: 20px;
-  align-items: center;
-  padding: 1px 7px;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-pill);
-  color: var(--oct-muted);
-  background: var(--oct-surface-muted);
-  font-size: var(--oct-text-xs);
-  line-height: 1.2;
-}
-
-.code-project-pull-requests__chip[data-status="positive"] {
-  color: var(--oct-success-fg);
-  border-color: color-mix(in srgb, var(--oct-success-fg) 28%, var(--oct-border));
-}
-
-.code-project-pull-requests__chip[data-status="warning"] {
-  color: var(--oct-warn-fg);
-  border-color: color-mix(in srgb, var(--oct-warn-fg) 28%, var(--oct-border));
-}
-
-.code-project-pull-requests__chip[data-status="negative"] {
-  color: var(--oct-danger-fg);
-  border-color: color-mix(in srgb, var(--oct-danger-fg) 28%, var(--oct-border));
 }
 
 .code-project-pull-requests[data-narrow="true"] .code-project-pull-requests__meta {

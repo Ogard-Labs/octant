@@ -210,11 +210,11 @@ describe("WindowChrome", () => {
 
   it("keeps ordinary navigation selection neutral", () => {
     // The mode switcher's active state moved to the design system sheet,
-    // where .mode[aria-current="page"] uses the neutral soft fill.
+    // where .mode[aria-current="page"] uses the shadcn-projected neutral fill.
     const systemStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
     const activeMode = systemStyles.match(/\.mode\[aria-current="page"\]\s*{[^}]*}/)?.[0] ?? "";
-    expect(activeMode).toContain("var(--oct-fg-soft)");
-    expect(activeMode).not.toMatch(/accent|purple/i);
+    expect(activeMode).toContain("var(--sidebar-accent)");
+    expect(activeMode).not.toMatch(/--octant-accent|purple/i);
     // The Project header is a quiet section label, so its active state is
     // carried by ink alone rather than a filled pill.
     expect(cssRule('.project-row[data-active="true"]')).toContain("color: var(--oct-fg);");

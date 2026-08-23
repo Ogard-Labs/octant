@@ -34,7 +34,9 @@ describe("OctantButton", () => {
     render(<OctantButton type="button">Save Project</OctantButton>);
 
     const button = screen.getByRole("button", { name: "Save Project" });
-    expect(button).toHaveClass("btn", "btn-primary");
+    expect(button).toHaveAttribute("data-slot", "button");
+    expect(button).toHaveAttribute("data-variant", "default");
+    expect(button).toHaveClass("bg-primary", "text-primary-foreground");
     expect(button.className).not.toContain("project-button");
   });
 
@@ -50,12 +52,10 @@ describe("OctantButton", () => {
       </>,
     );
 
-    expect(screen.getByRole("button", { name: "Cancel" })).toHaveClass("btn", "btn-ghost");
-    expect(screen.getByRole("button", { name: "Cancel" }).className).not.toContain("btn-primary");
-    expect(screen.getByRole("button", { name: "Close dock" })).toHaveClass(
-      "btn-icon",
-      "shell-icon-button",
-    );
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveAttribute("data-variant", "ghost");
+    expect(screen.getByRole("button", { name: "Cancel" }).className).not.toContain("bg-primary");
+    expect(screen.getByRole("button", { name: "Close dock" })).toHaveClass("shell-icon-button");
+    expect(screen.getByRole("button", { name: "Close dock" })).toHaveAttribute("data-size", "icon");
     expect(screen.getByRole("button", { name: "Close dock" }).className).not.toContain("btn-send");
   });
 

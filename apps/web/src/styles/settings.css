@@ -144,11 +144,7 @@
 }
 
 .settings-view__field--search .settings-view__text-input {
-  height: var(--oct-control-height-sm);
   padding-left: 27px;
-  background: var(--oct-surface);
-  border-color: var(--oct-border);
-  border-radius: var(--oct-radius-md);
 }
 
 /* The nav items are .setnav-item, but the column itself is the app's
@@ -182,10 +178,7 @@
 /* Scope reads as quiet metadata inside the hint line, not a badge. */
 .settings-scope-indicator {
   color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
 }
 
 /* SettingGroup's optional description; the divider under it comes from the
@@ -402,18 +395,15 @@
   border-top: 1px solid var(--oct-border);
 }
 
-/* Card headings speak the settings vocabulary's mono group label, the same
-   voice as `.setgroup-head` on the rows around this editor. */
 .settings-theme-editor__card > h3,
 .settings-theme-editor__accessibility legend {
   margin: 0;
   padding: 0 0 8px;
-  color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  font-weight: 500;
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
 /* Color scheme cards: mini previews for System, Light, and Dark. */

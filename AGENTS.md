@@ -50,7 +50,7 @@ Read the record that owns your change before editing, not all of them:
 | Collaboration, shared host, git-mediated sharing    | `docs/decisions/0040`                                              |
 | Apple build and validation                          | `docs/decisions/0014`                                              |
 | Shell, navigation, workspace layout                 | `docs/decisions/0015`, `docs/decisions/0041`–`docs/decisions/0045` |
-| Components and theme                                | `docs/decisions/0016`                                              |
+| Components and theme                                | `docs/decisions/0016`, `docs/decisions/0046`                       |
 
 A change that contradicts an `Accepted` record is not a code change. Supersede
 the record first, in the same pull request, per `docs/decisions/README.md`. A

@@ -1,14 +1,12 @@
 /*
  * Octant component layer.
  *
- * This file is the single tuning point for shared surface materials and
- * compact component silhouettes. It is imported last (see App.tsx) so its
- * assignments win over feature stylesheets, and every value is derived from
- * the semantic `--octant-*` tokens defined in styles.css and packages/theme.
+ * This file owns the few product materials that are not shadcn recipes. It is
+ * imported last (see App.tsx), and every value is derived from the semantic
+ * `--octant-*` tokens defined in styles.css and packages/theme.
  *
  * How to tune the whole app from here:
  * - Materials: adjust `--octant-glass-*` and `--octant-shadow-*` in styles.css.
- * - Which surfaces are glass: edit the glass surface group below.
  * - Chips/cards: adjust `.octant-chip` / `.octant-card` once; consumers inherit.
  *
  * Interactive primitives (buttons, inputs, selects, menus, dialogs, tabs,
@@ -26,7 +24,7 @@
   backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
 }
 
-/* Floating glass: menus, popovers, dialogs, pips. */
+/* Floating glass is reserved for the thread activity picture-in-picture. */
 .octant-glass--overlay {
   box-shadow: var(--octant-glass-highlight), var(--octant-shadow-pop);
 }
@@ -71,17 +69,25 @@
   box-shadow: var(--octant-shadow-hairline);
 }
 
-/* ── Glass surface group ───────────────────────────────────────────── */
+/* ── Floating surfaces ─────────────────────────────────────────────── */
 
-/* Every floating layer adopts the glass material here, in one place. */
+/* Product menus and dialogs use the opaque shadcn popover recipe. */
 .octant-menu__popup,
 .octant-dialog__popup,
 .window-chrome__disclosure,
 .composer-folder-selector__menu,
-.thread-activity-pip,
-.thread-activity-pip__collapsed-controls,
 .project-dialog,
 .folder-picker {
+  background: var(--popover);
+  border: 1px solid var(--border);
+  box-shadow: var(--octant-shadow-pop);
+  backdrop-filter: none;
+}
+
+/* The native activity overlay may keep translucency because it floats above
+   the workspace instead of behaving like an application menu or form. */
+.thread-activity-pip,
+.thread-activity-pip__collapsed-controls {
   background: var(--octant-glass-bg);
   border: 1px solid var(--octant-glass-border);
   box-shadow: var(--octant-glass-highlight), var(--octant-shadow-pop);
@@ -92,14 +98,8 @@
 
 /* Reduced transparency (app setting or OS): opaque floating surface. */
 html[data-octant-reduced-transparency="true"] .octant-glass,
-html[data-octant-reduced-transparency="true"] .octant-menu__popup,
-html[data-octant-reduced-transparency="true"] .octant-dialog__popup,
-html[data-octant-reduced-transparency="true"] .window-chrome__disclosure,
-html[data-octant-reduced-transparency="true"] .composer-folder-selector__menu,
 html[data-octant-reduced-transparency="true"] .thread-activity-pip,
-html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-controls,
-html[data-octant-reduced-transparency="true"] .project-dialog,
-html[data-octant-reduced-transparency="true"] .folder-picker {
+html[data-octant-reduced-transparency="true"] .thread-activity-pip__collapsed-controls {
   background: var(--octant-floating);
   border-color: var(--octant-border-strong);
   box-shadow: var(--octant-shadow-overlay);
@@ -108,14 +108,8 @@ html[data-octant-reduced-transparency="true"] .folder-picker {
 
 @media (prefers-reduced-transparency: reduce) {
   .octant-glass,
-  .octant-menu__popup,
-  .octant-dialog__popup,
-  .window-chrome__disclosure,
-  .composer-folder-selector__menu,
   .thread-activity-pip,
-  .thread-activity-pip__collapsed-controls,
-  .project-dialog,
-  .folder-picker {
+  .thread-activity-pip__collapsed-controls {
     background: var(--octant-floating);
     border-color: var(--octant-border-strong);
     box-shadow: var(--octant-shadow-overlay);
@@ -126,14 +120,8 @@ html[data-octant-reduced-transparency="true"] .folder-picker {
 /* No backdrop-filter support: keep surfaces readable with an opaque fill. */
 @supports not (backdrop-filter: blur(1px)) {
   .octant-glass,
-  .octant-menu__popup,
-  .octant-dialog__popup,
-  .window-chrome__disclosure,
-  .composer-folder-selector__menu,
   .thread-activity-pip,
-  .thread-activity-pip__collapsed-controls,
-  .project-dialog,
-  .folder-picker {
+  .thread-activity-pip__collapsed-controls {
     background: var(--octant-floating);
   }
 }

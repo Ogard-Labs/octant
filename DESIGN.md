@@ -71,6 +71,8 @@ components:
 
 Octant should feel like a quiet professional workbench cut from graphite: one clear work surface, a shallow folder hierarchy at the left, and tools that appear beside the work only when needed. ChatGPT/Codex and reference app are interaction references for restraint, project/thread nesting, composer prominence, and contextual right-side tools. They are direction, not source material to copy.
 
+Controls follow the shadcn New York neutral recipe: compact rectangular buttons, quiet bordered inputs, opaque popovers, restrained cards, and clear focus rings. Vercel, Codex, and reference app guide hierarchy and density. Octant keeps its own product structure and visual identity.
+
 ### Product context and register
 
 - **Audience and primary job:** developers and knowledge workers supervising several AI threads, agents, Projects, changes, and delivery states from one local-first application.
@@ -113,7 +115,7 @@ At narrow widths the sidebar and dock follow their existing responsive contracts
 
 Static panes are flat and separated by one-pixel semantic borders. Hover and selection use a single tonal step. Shadows belong only to popovers, dialogs, transient Environment, and other layers that genuinely float above content. Do not wrap every section, status, or empty state in a card.
 
-Native translucency may soften the sidebar when the host and accessibility settings permit it. The opaque fallback keeps identical geometry and hierarchy. Blur is material, not decoration.
+Native translucency may soften the sidebar when the host and accessibility settings permit it. The opaque fallback keeps identical geometry and hierarchy. Product menus, dialogs, Environment, and forms are opaque. Blur is reserved for native material and the floating activity overlay.
 
 ## Shapes
 
@@ -126,6 +128,8 @@ Lucide icons use 1.5–1.8px strokes and usually render at 14–16px. Icons clar
 ### Foundational visual states
 
 Default controls are quiet. Hover adds one neutral surface step. Selected navigation uses stronger text plus a restrained fill or one-pixel marker. Focus-visible uses the semantic focus ring without moving geometry. Disabled controls are visibly subdued and non-interactive. Busy, stale, unavailable, empty, and error are distinct states with concise copy and stable layout.
+
+Shared controls use the owned Base UI variant of shadcn New York through `ui/base` adapters. Feature styles may size and place them, but the recipe owns paint, focus, hover, disabled, and error states. Shell layout and domain workspaces remain Octant-owned.
 
 ### Buttons and actions
 

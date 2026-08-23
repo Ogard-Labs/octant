@@ -2042,10 +2042,11 @@ input.switch:checked::after {
   max-height: calc(100vh - 96px);
   overflow: auto;
   padding: var(--oct-space-3);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface);
-  box-shadow: var(--oct-elev-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: var(--octant-shadow-pop);
 }
 
 .octant-tooltip__positioner {
@@ -3610,10 +3611,10 @@ input.switch:checked::after {
 .sidebar-section {
   margin-top: var(--oct-space-4);
   padding: var(--oct-space-1) var(--oct-space-2);
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: normal;
   color: var(--oct-meta);
   white-space: nowrap;
 }
@@ -3635,11 +3636,11 @@ input.switch:checked::after {
   white-space: nowrap;
 }
 .sidebar-item:hover {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 .sidebar-item[aria-current="page"] {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 .sidebar-item .count {
@@ -3728,11 +3729,11 @@ input.switch:checked::after {
   flex: 0 0 auto;
 }
 .mode:hover {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 .mode[aria-current="page"] {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 .mode .count {
@@ -3841,7 +3842,7 @@ input.switch:checked::after {
   text-align: left;
 }
 .mode-trigger:hover {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
 }
 .mode-trigger .mode-caret {
   margin-left: auto;
@@ -6717,10 +6718,10 @@ input.switch:checked::after {
 .setnav-section {
   margin-top: var(--oct-space-4);
   padding: var(--oct-space-1) var(--oct-space-2);
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: normal;
   color: var(--oct-meta);
   white-space: nowrap;
 }
@@ -6748,11 +6749,11 @@ input.switch:checked::after {
   flex: 0 0 auto;
 }
 .setnav-item:hover {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 .setnav-item[aria-current="page"] {
-  background: var(--oct-fg-soft);
+  background: var(--sidebar-accent);
   color: var(--oct-fg);
 }
 
@@ -6779,8 +6780,8 @@ input.switch:checked::after {
 
 .setgroup {
   border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-lg);
-  background: var(--oct-surface);
+  border-radius: var(--radius-lg);
+  background: var(--card);
   overflow: hidden;
 }
 .setgroup + .setgroup {
@@ -6790,14 +6791,15 @@ input.switch:checked::after {
   display: flex;
   align-items: center;
   gap: var(--oct-space-3);
-  padding: var(--oct-space-3) var(--oct-space-4);
+  min-height: 48px;
+  padding: var(--oct-space-3) var(--oct-space-5);
   border-bottom: 1px solid var(--oct-border);
-  background: var(--oct-surface-warm);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
-  color: var(--oct-meta);
+  background: transparent;
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
+  letter-spacing: normal;
+  color: var(--oct-fg);
 }
 .setgroup-head .setgroup-gap {
   flex: 1;
@@ -6828,7 +6830,7 @@ input.switch:checked::after {
   grid-template-rows: auto auto;
   align-items: center;
   column-gap: var(--oct-space-6);
-  padding: var(--oct-space-4);
+  padding: var(--oct-space-4) var(--oct-space-5);
   border-top: 1px solid var(--oct-border-soft);
 }
 .setrow:first-child {
@@ -6836,6 +6838,7 @@ input.switch:checked::after {
 }
 .setrow-label {
   font-size: var(--oct-text-sm);
+  font-weight: 500;
   color: var(--oct-fg);
 }
 .setrow-hint {

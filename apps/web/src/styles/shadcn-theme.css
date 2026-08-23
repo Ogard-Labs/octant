@@ -17,15 +17,23 @@
   --primary: var(--octant-accent);
   --primary-foreground: var(--octant-primary-foreground);
   --secondary: var(--octant-control);
-  --secondary-foreground: var(--octant-text-secondary);
+  --secondary-foreground: var(--octant-text-primary);
   --muted: var(--octant-control);
   --muted-foreground: var(--octant-text-muted);
   --accent: var(--octant-control-hover);
   --accent-foreground: var(--octant-text-primary);
   --destructive: var(--octant-danger-text);
   --border: var(--octant-border);
-  --input: var(--octant-border-strong);
+  --input: var(--octant-border);
   --ring: var(--octant-focus-ring);
+  --sidebar: var(--octant-sidebar-opaque);
+  --sidebar-foreground: var(--octant-text-primary);
+  --sidebar-primary: var(--octant-accent);
+  --sidebar-primary-foreground: var(--octant-primary-foreground);
+  --sidebar-accent: var(--octant-surface-selected);
+  --sidebar-accent-foreground: var(--octant-text-primary);
+  --sidebar-border: var(--octant-border);
+  --sidebar-ring: var(--octant-focus-ring);
 }
 
 html[data-octant-theme-mode="light"],
@@ -42,13 +50,21 @@ html[data-appearance="light"] :root,
   --primary: var(--octant-accent);
   --primary-foreground: var(--octant-primary-foreground);
   --secondary: var(--octant-control);
-  --secondary-foreground: var(--octant-text-secondary);
+  --secondary-foreground: var(--octant-text-primary);
   --muted: var(--octant-control);
   --muted-foreground: var(--octant-text-muted);
   --accent: var(--octant-control-hover);
   --accent-foreground: var(--octant-text-primary);
   --destructive: var(--octant-danger-text);
   --border: var(--octant-border);
-  --input: var(--octant-border-strong);
+  --input: var(--octant-border);
   --ring: var(--octant-focus-ring);
+  --sidebar: var(--octant-sidebar-opaque);
+  --sidebar-foreground: var(--octant-text-primary);
+  --sidebar-primary: var(--octant-accent);
+  --sidebar-primary-foreground: var(--octant-primary-foreground);
+  --sidebar-accent: var(--octant-surface-selected);
+  --sidebar-accent-foreground: var(--octant-text-primary);
+  --sidebar-border: var(--octant-border);
+  --sidebar-ring: var(--octant-focus-ring);
 }
