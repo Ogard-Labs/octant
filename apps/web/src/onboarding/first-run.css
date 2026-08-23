@@ -20,7 +20,7 @@
  */
 .first-run {
   --octant-dialog-width: 52rem;
-  --octant-dialog-height: min(86vh, 46rem);
+  --octant-dialog-height: min(92vh, 48rem);
 
   container-type: inline-size;
   container-name: first-run;
@@ -115,9 +115,12 @@
 .first-run__rail-step {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   column-gap: var(--oct-space-2);
+  row-gap: 2px;
   inline-size: 100%;
+  min-block-size: 3.25rem;
+  block-size: auto;
   padding: var(--oct-space-2);
   border: 0;
   border-radius: var(--radius-md);
@@ -125,6 +128,7 @@
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   text-align: start;
+  white-space: normal;
   cursor: pointer;
 }
 
@@ -167,7 +171,9 @@
 .first-run__rail-summary {
   grid-column: 2;
   font-size: var(--oct-text-xs);
+  line-height: var(--oct-leading-snug);
   color: var(--oct-muted);
+  overflow-wrap: anywhere;
 }
 
 /* The step's own scroller. The footer stays put beside it; the rail scrolls
@@ -176,14 +182,21 @@
   grid-area: panel;
   min-width: 0;
   min-height: 0;
+  padding-inline-end: var(--oct-space-2);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .first-run__step {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-4);
+  gap: var(--oct-space-3);
   min-width: 0;
+}
+
+.first-run__step .profile-editor {
+  gap: var(--oct-space-3);
 }
 
 /* Non-row content inside a `.setgroup` card supplies the padding `.setrow`
