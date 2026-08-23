@@ -2,6 +2,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ModeSwitcherPresentation } from "@octant/contracts/shell";
 import { ChevronDown, Code2, FolderKanban, MessageSquare, type LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
 
 const modeOrder: ReadonlyArray<OctantMode> = ["chat", "work", "code"];
@@ -64,7 +65,7 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
           const ModeIcon = modeIcons[mode];
           const active = props.activeMode === mode;
           return (
-            <button
+            <OctantButton
               {...(active ? { "aria-current": "page" as const } : {})}
               className="mode window-no-drag"
               key={mode}
@@ -73,10 +74,11 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
               // presentation, so the tooltip carries it for sighted hovers.
               title={modeLabels[mode]}
               type="button"
+              variant="ghost"
             >
               <ModeIcon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
               <span className="mode-label">{modeLabels[mode]}</span>
-            </button>
+            </OctantButton>
           );
         })}
       </div>

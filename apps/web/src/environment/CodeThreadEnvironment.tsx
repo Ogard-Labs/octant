@@ -24,6 +24,7 @@ import { ChangeWorkingFolder } from "./WorkingDirectoryControl";
 import { OpenInMenu } from "./OpenInMenu";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
+import { OctantButton } from "../ui/base/OctantButton";
 
 type CodeThreadWorkspaceTab = Extract<WorkspaceTab, { readonly mode: "code" }>;
 
@@ -151,16 +152,17 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
           status={controller.status}
         />
         {props.onOpenChanges === undefined || readyObservation === undefined ? null : (
-          <button
+          <OctantButton
             className="environment-group__action window-no-drag"
             onClick={() => {
               setDisclosureOpen(false);
               props.onOpenChanges?.();
             }}
             type="button"
+            variant="ghost"
           >
             View changes
-          </button>
+          </OctantButton>
         )}
         {props.agentRunClient === undefined ? null : (
           <EnvironmentSubagents

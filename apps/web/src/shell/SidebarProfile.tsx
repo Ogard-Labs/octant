@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
+import { OctantButton } from "../ui/base/OctantButton";
 import type { SidebarAppMenuDescriptorId } from "./navigationModel";
 
 export interface SidebarSecondaryAction {
@@ -84,18 +85,19 @@ export function SidebarProfile(props: SidebarProfileProps) {
 
   return (
     <div className="sidebar-foot sidebar-profile">
-      <button
+      <OctantButton
         aria-controls={disclosureId}
         aria-expanded={open}
         className="sidebar-item window-no-drag"
         onClick={() => setOpen((current) => !current)}
         ref={trigger}
         type="button"
+        variant="ghost"
       >
         <UserAvatar profile={props.profile} size={22} />
         <span className="sidebar-label">{name === "" ? "Set your name" : name}</span>
         <ChevronUp aria-hidden="true" className="sidebar-profile__chevron" size={14} />
-      </button>
+      </OctantButton>
       {open ? (
         <div
           aria-label="Octant menu"
@@ -189,14 +191,15 @@ function ProfileAction(props: {
   return (
     // A plain button whose visible text is its accessible name — nothing but
     // the aria-hidden icon sits beside it, so no wrapper can swallow the label.
-    <button
+    <OctantButton
       className="sidebar-profile__action window-no-drag"
       onClick={props.onClick}
       role="menuitem"
       type="button"
+      variant="ghost"
     >
       <Icon aria-hidden={true} className="icon" size={16} strokeWidth={1.5} />
       <span>{props.label}</span>
-    </button>
+    </OctantButton>
   );
 }

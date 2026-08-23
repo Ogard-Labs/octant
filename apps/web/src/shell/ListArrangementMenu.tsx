@@ -7,6 +7,7 @@ import {
   type ListSort,
   type ListStatusFilter,
 } from "@octant/client-runtime/list-arrangement";
+import { OctantNativeSelect } from "../ui/base/OctantSelect";
 
 const STATUSES: ReadonlyArray<ListStatusFilter> = ["any", "active", "needs-attention", "finished"];
 const GROUPINGS: ReadonlyArray<ListGrouping> = ["none", "environment", "project"];
@@ -29,7 +30,7 @@ export function ListArrangementMenu(props: {
     <div aria-label="Arrange" className="list-arrangement" role="group">
       <label className="list-arrangement__field">
         <span className="sr-only">Status</span>
-        <select
+        <OctantNativeSelect
           onChange={(event) =>
             props.onChange({ ...props.arrangement, status: event.target.value as ListStatusFilter })
           }
@@ -40,12 +41,12 @@ export function ListArrangementMenu(props: {
               {LIST_STATUS_LABELS[status]}
             </option>
           ))}
-        </select>
+        </OctantNativeSelect>
       </label>
 
       <label className="list-arrangement__field">
         <span className="sr-only">Group</span>
-        <select
+        <OctantNativeSelect
           onChange={(event) =>
             props.onChange({ ...props.arrangement, grouping: event.target.value as ListGrouping })
           }
@@ -56,12 +57,12 @@ export function ListArrangementMenu(props: {
               {LIST_GROUPING_LABELS[grouping]}
             </option>
           ))}
-        </select>
+        </OctantNativeSelect>
       </label>
 
       <label className="list-arrangement__field">
         <span className="sr-only">Sort</span>
-        <select
+        <OctantNativeSelect
           onChange={(event) =>
             props.onChange({ ...props.arrangement, sort: event.target.value as ListSort })
           }
@@ -72,7 +73,7 @@ export function ListArrangementMenu(props: {
               {LIST_SORT_LABELS[sort]}
             </option>
           ))}
-        </select>
+        </OctantNativeSelect>
       </label>
     </div>
   );

@@ -2,6 +2,7 @@ import { Plus } from "lucide-react";
 import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { DockToolIcon } from "./dockToolIcons";
 import { IconButton } from "./IconButton";
+import { OctantButton } from "../ui/base/OctantButton";
 import type { RightUtilityDockSurfaceId } from "./rightUtilityDockModel";
 
 export interface DockUtilityLauncherSurface {
@@ -72,16 +73,17 @@ export function DockToolLaunchList(props: {
   return (
     <>
       {props.surfaces.map((surface, index) => (
-        <button
+        <OctantButton
           className="workspace-disclosure__action window-no-drag"
           key={surface.id}
           onClick={() => props.onOpen(surface.id)}
           ref={index === 0 ? props.firstAction : undefined}
           type="button"
+          variant="ghost"
         >
           <DockToolIcon surface={surface.id} />
           <span>{surface.label}</span>
-        </button>
+        </OctantButton>
       ))}
     </>
   );
