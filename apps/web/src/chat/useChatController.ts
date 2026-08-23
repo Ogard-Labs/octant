@@ -37,6 +37,11 @@ const MAX_RECONNECT_DELAY_MS = 10_000;
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_RECONNECT_BACKOFF_MS = 100;
 
+/** Background windows do not need to poll every thread while hidden. */
+function documentIsVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
 export interface ChatControllerOptions {
   readonly activeThreadId?: ChatThreadId;
   readonly client?: ChatClient;
@@ -421,8 +426,9 @@ export function useChatController(options: ChatControllerOptions) {
     if (bootstrap === undefined) return;
     let cancelled = false;
     let inFlight = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
     const refresh = async () => {
-      if (inFlight) return;
+      if (!documentIsVisible() || inFlight) return;
       inFlight = true;
       try {
         const refreshes: Array<Promise<void>> = [];
@@ -448,11 +454,23 @@ export function useChatController(options: ChatControllerOptions) {
         inFlight = false;
       }
     };
-    void refresh();
-    const timer = setInterval(() => void refresh(), Math.max(10, navigationRefreshMs));
+    const schedule = () => {
+      if (timer !== undefined) clearInterval(timer);
+      timer = documentIsVisible()
+        ? setInterval(() => void refresh(), Math.max(10, navigationRefreshMs))
+        : undefined;
+    };
+    const onVisibilityChange = () => {
+      schedule();
+      if (documentIsVisible()) void refresh();
+    };
+    schedule();
+    if (documentIsVisible()) void refresh();
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer !== undefined) clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [bootstrap, client, navigationRefreshMs, recordFollowUp, recordSequence, recordUpdatedAt]);
 

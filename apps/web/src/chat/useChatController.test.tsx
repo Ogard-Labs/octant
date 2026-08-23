@@ -272,6 +272,53 @@ describe("useChatController", () => {
     );
   });
 
+  it("pauses inactive-thread polling while the document is hidden", async () => {
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value: "hidden",
+    });
+    try {
+      const client = createMockClient({
+        bootstrap: vi.fn(async () => bootstrap()),
+        thread: vi.fn(async (requestedThreadId) =>
+          decodeChatThreadView({
+            ...threadView(1),
+            thread:
+              String(requestedThreadId) === String(threadId)
+                ? bootstrap().threads[0]!
+                : bootstrap().threads[1]!,
+          }),
+        ),
+        subscribe: vi.fn(async function* () {}),
+      });
+      const { unmount } = renderHook(() =>
+        useChatController({
+          client,
+          navigationRefreshMs: 10,
+          serverUrl: "http://127.0.0.1",
+          windowCapability: capability,
+        }),
+      );
+
+      await waitFor(() => expect(client.bootstrap).toHaveBeenCalledOnce());
+      expect(client.thread).not.toHaveBeenCalled();
+
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "visible",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+      await waitFor(() => expect(client.thread.mock.calls.length).toBeGreaterThanOrEqual(2));
+      unmount();
+    } finally {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: originalVisibility,
+      });
+    }
+  });
+
   it("holds a thread the user marked unread until they explicitly read it again", async () => {
     // With no sequence advanced this sitting, dropping the cursor alone leaves
     // the comparison at zero-over-zero and the click does visibly nothing.

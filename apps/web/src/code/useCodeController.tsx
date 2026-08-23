@@ -233,6 +233,11 @@ const HISTORY_UNAVAILABLE_MESSAGE = "Conversation history could not be loaded.";
 /** The first wait after a failed catch-up, before the delay starts doubling. */
 const MIN_CODE_RECONNECT_BACKOFF_MS = 100;
 
+/** Hidden windows should not spend a request cycle keeping a background list hot. */
+function documentIsVisible(): boolean {
+  return typeof document === "undefined" || document.visibilityState !== "hidden";
+}
+
 /**
  * What a Code thread has consumed, and the provider usage windows it last
  * heard about. Every figure comes from the provider: a provider that reports
@@ -1255,7 +1260,9 @@ export function useCodeController(options: CodeControllerOptions) {
   useEffect(() => {
     if (navigationRefreshMs <= 0) return;
     let cancelled = false;
-    const timer = setInterval(() => {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const refresh = () => {
+      if (!documentIsVisible()) return;
       void (async () => {
         try {
           const next = await client.bootstrap();
@@ -1266,10 +1273,21 @@ export function useCodeController(options: CodeControllerOptions) {
           // the retry path are what report a host that has actually gone away.
         }
       })();
-    }, navigationRefreshMs);
+    };
+    const schedule = () => {
+      if (timer !== undefined) clearInterval(timer);
+      timer = documentIsVisible() ? setInterval(refresh, navigationRefreshMs) : undefined;
+    };
+    const onVisibilityChange = () => {
+      schedule();
+      if (documentIsVisible()) refresh();
+    };
+    schedule();
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      if (timer !== undefined) clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [applyNavigationRefresh, client, navigationRefreshMs]);
 
