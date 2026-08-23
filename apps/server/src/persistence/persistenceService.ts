@@ -115,7 +115,7 @@ import {
 } from "./codeProjection";
 import { readProductFeedbackNote, readProductFeedbackNotes } from "./productFeedbackProjection";
 import { readThreadCheckpoint, readThreadCheckpoints } from "./threadCheckpointProjection";
-import { databaseStatus, type DatabaseStatus } from "./recovery";
+import { databaseStatus, rebuildAll, type DatabaseStatus } from "./recovery";
 import {
   readProviderDefaults,
   readProviderCatalog,
@@ -329,7 +329,16 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     }
     reconcileCodeRestart({ connection, journal, reconciledAt: clock() });
 
-    const status = databaseStatus({ connection, journal, projections, compatibility });
+    let status = databaseStatus({ connection, journal, projections, compatibility });
+    // A previously quarantined event can become readable after a compatible
+    // persisted-event upcast ships. Quarantine is projection state, not journal
+    // authority, so retry the atomic rebuild once before requiring operator
+    // recovery. A genuinely invalid event quarantines again during replay and
+    // the status check below still fails closed without changing the journal.
+    if (status.state === "quarantined" && status.integrity === "ok" && compatibility.compatible) {
+      rebuildAll({ connection, journal, projections, clock });
+      status = databaseStatus({ connection, journal, projections, compatibility });
+    }
     if (status.state !== "current" || status.integrity !== "ok") {
       throw new PersistenceStartupFailed({
         category: "recovery-required",

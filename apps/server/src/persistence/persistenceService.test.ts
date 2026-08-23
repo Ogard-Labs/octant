@@ -255,9 +255,10 @@ describe("PersistenceLive", () => {
     expect(closed).toBe(true);
   });
 
-  it("fails closed when startup finds quarantined state", async () => {
+  it("rebuilds projections when a historical quarantine is now decodable", async () => {
     const directory = temporaryDirectory();
-    const seeded = openSqlite(join(directory, "octant.sqlite3"));
+    const databasePath = join(directory, "octant.sqlite3");
+    const seeded = openSqlite(databasePath);
     applyMigrations(seeded, MIGRATIONS, () => now);
     insertFixtureEvent(seeded);
     seeded
@@ -275,22 +276,23 @@ describe("PersistenceLive", () => {
       );
     seeded.close();
 
-    const result = await Effect.runPromise(
-      Effect.either(
-        Effect.scoped(
-          Effect.provide(
-            Persistence,
-            makePersistenceLive({ dataDirectory: directory, clock: () => now }),
-          ),
+    const status = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          return persistence.status();
+        }).pipe(
+          Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
         ),
       ),
     );
 
-    expect(Either.isLeft(result)).toBe(true);
-    if (Either.isLeft(result)) {
-      expect(result.left).toBeInstanceOf(PersistenceStartupFailed);
-      expect(result.left).toMatchObject({ category: "recovery-required" });
-    }
+    expect(status).toMatchObject({ state: "current", integrity: "ok", quarantineCount: 0 });
+    const inspected = openSqlite(databasePath);
+    expect(inspected.prepare("SELECT count(*) AS count FROM event_quarantine").get()).toEqual({
+      count: 0,
+    });
+    inspected.close();
   });
 
   it("fails closed when a projection checkpoint is ahead of the journal", async () => {
