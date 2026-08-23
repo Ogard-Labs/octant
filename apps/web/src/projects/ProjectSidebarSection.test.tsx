@@ -595,6 +595,59 @@ describe("ProjectSidebarSection code project views", () => {
     expect(screen.queryByRole("menuitem", { name: "Edit view" })).not.toBeInTheDocument();
   });
 
+  it("keeps activity rows inside the selected Project View", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-views.v1",
+      JSON.stringify({
+        activeViewId: "view-main",
+        views: [
+          {
+            id: "view-main",
+            name: "Main",
+            projectIds: [codeProjectA.id],
+            filters: { activity: "all" },
+          },
+        ],
+      }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        now={new Date("2026-08-23T12:00:00.000Z")}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectA, codeProjectB]}
+        threads={[
+          {
+            projectId: String(codeProjectA.id),
+            threadId: "thread-octant",
+            title: "Octant task",
+            updatedAt: "2026-08-23T10:00:00.000Z",
+          },
+          {
+            projectId: String(codeProjectB.id),
+            threadId: "thread-aurora",
+            title: "Aurora task",
+            updatedAt: "2026-08-23T11:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Turn on activity view" }));
+    expect(screen.getByRole("button", { name: /Octant task/i })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Aurora task/i })).not.toBeInTheDocument();
+  });
+
   it("tells a right-clicked view how many Projects it holds, and offers its two edits", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
@@ -789,6 +842,56 @@ describe("ProjectSidebarSection code project views", () => {
     expect(screen.queryByText("Devbox")).not.toBeInTheDocument();
     expect(screen.getByText("Show empty Projects")).toBeVisible();
     expect(screen.getByText("Thread activity")).toBeVisible();
+  });
+
+  it("explains and preserves results for a reversed custom activity range", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "octant.code.project-view-preferences.v1",
+      JSON.stringify({
+        filters: {
+          lifecycle: "active",
+          environmentIds: [],
+          showEmptyProjects: true,
+          grouping: "project",
+          sorting: "recency",
+          activity: "custom",
+          activityRange: { from: "2026-08-23", to: "2026-08-22" },
+        },
+      }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectA]}
+        threads={[
+          {
+            projectId: String(codeProjectA.id),
+            threadId: "thread-a",
+            title: "Planning",
+            updatedAt: "2026-08-22T10:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /Planning/i })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: /Project view filters/i }));
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Start date must be on or before end date.",
+    );
+    expect(screen.getByLabelText("Activity from")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Activity to")).toHaveAttribute("aria-invalid", "true");
   });
 });
 

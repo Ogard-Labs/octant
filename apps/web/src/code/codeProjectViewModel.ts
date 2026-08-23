@@ -371,6 +371,7 @@ export function projectViewActivityRange(
 ): { readonly from: Date; readonly to: Date } | undefined {
   if (filters.activity === "all") return undefined;
   if (filters.activity === "custom") {
+    if (projectViewActivityRangeError(filters) !== undefined) return undefined;
     const from = parseLocalDateStart(filters.activityRange?.from);
     const to = parseLocalDateEnd(filters.activityRange?.to);
     if (from === undefined && to === undefined) return undefined;
@@ -396,12 +397,41 @@ export function projectViewActivityRange(
   };
 }
 
+export function projectViewActivityRangeError(filters: ProjectViewFilters): string | undefined {
+  if (filters.activity !== "custom") return undefined;
+  const fromValue = filters.activityRange?.from;
+  const toValue = filters.activityRange?.to;
+  const from = parseLocalDateStart(fromValue);
+  const to = parseLocalDateStart(toValue);
+  if (fromValue !== undefined && fromValue !== "" && from === undefined) {
+    return "Choose a valid start date.";
+  }
+  if (toValue !== undefined && toValue !== "" && to === undefined) {
+    return "Choose a valid end date.";
+  }
+  if (from !== undefined && to !== undefined && from.getTime() > to.getTime()) {
+    return "Start date must be on or before end date.";
+  }
+  return undefined;
+}
+
 function parseLocalDateStart(value: string | undefined): Date | undefined {
   if (value === undefined) return undefined;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (match === null) return undefined;
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-  return Number.isNaN(date.getTime()) ? undefined : date;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return undefined;
+  }
+  return date;
 }
 
 function parseLocalDateEnd(value: string | undefined): Date | undefined {
@@ -579,7 +609,6 @@ function normalizeActivityRange(value: unknown): ProjectViewActivityRange | unde
 }
 
 function normalizeDateOnly(value: unknown): string | undefined {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
-  const parsed = new Date(`${value}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? undefined : value;
+  if (typeof value !== "string") return undefined;
+  return parseLocalDateStart(value) === undefined ? undefined : value;
 }

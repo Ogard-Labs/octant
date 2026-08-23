@@ -47,6 +47,7 @@ import {
   filterProjectViewThreads,
   filterProjectsForView,
   normalizeProjectViewFilters,
+  projectViewActivityRangeError,
   projectViewFiltersFor,
   readProjectViewPreferences,
   readProjectViewState,
@@ -71,7 +72,6 @@ import {
 } from "../code/codeProjectViewModel";
 import {
   buildSidebarActivityView,
-  filterSidebarActivityView,
   matchesSidebarSearch,
   readActivityViewEnabled,
   writeActivityViewEnabled,
@@ -83,7 +83,7 @@ import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { groupThreadsByProject } from "./projectThreadGrouping";
 import { ProjectThreadList, ProjectThreadRows, ProjectThreadStatus } from "./ProjectThreadList";
 import type { ThreadRowActions } from "./ThreadRowMenu";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
@@ -266,16 +266,10 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           projectViewState.activeViewId,
           allProjectsPreferences,
         );
-  const activityFilteredThreads =
+  const timeFilteredThreads =
     currentFilters === undefined || listedThreads === undefined
       ? listedThreads
       : filterProjectViewThreads(listedThreads, currentFilters, props.now);
-  const threads =
-    activityFilteredThreads === undefined || !searching
-      ? activityFilteredThreads
-      : activityFilteredThreads.filter((thread) =>
-          matchesSidebarSearch(searchQuery, thread.title, folderLabelFor(thread)),
-        );
   const projectCandidates =
     props.projectViewsEnabled === true && projectViewState !== undefined
       ? filterProjectsForView(
@@ -296,10 +290,20 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const visibleProjects =
     currentFilters === undefined
       ? projectCandidates
-      : sortProjectsByView(
-          projectCandidates,
-          currentFilters.sorting,
-          activityFilteredThreads ?? [],
+      : sortProjectsByView(projectCandidates, currentFilters.sorting, timeFilteredThreads ?? []);
+  const visibleProjectIds = new Set(visibleProjects.map((project) => String(project.id)));
+  const viewScopedThreads =
+    currentFilters === undefined || timeFilteredThreads === undefined
+      ? timeFilteredThreads
+      : timeFilteredThreads.filter(
+          (thread) =>
+            thread.projectId !== undefined && visibleProjectIds.has(String(thread.projectId)),
+        );
+  const threads =
+    viewScopedThreads === undefined || !searching
+      ? viewScopedThreads
+      : viewScopedThreads.filter((thread) =>
+          matchesSidebarSearch(searchQuery, thread.title, folderLabelFor(thread)),
         );
   const onNewThread = props.onNewThreadInProject ?? props.onNewChatInProject;
   const newThreadVerb = props.newThreadVerb ?? "chat";
@@ -329,15 +333,15 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const activity = useMemo(() => {
     const view = buildSidebarActivityView({
       ...(props.now === undefined ? {} : { now: props.now }),
-      projects: props.projects.map((project) => ({
+      projects: visibleProjects.map((project) => ({
         id: String(project.id),
         name: project.name,
       })),
       unfiledLabel,
-      threads: listedThreads ?? [],
+      threads: threads ?? [],
     });
-    return searching ? filterSidebarActivityView(view, searchQuery) : view;
-  }, [listedThreads, props.now, props.projects, unfiledLabel, searchQuery, searching]);
+    return view;
+  }, [threads, props.now, visibleProjects, unfiledLabel]);
   const hasVisibleThreads =
     (threadsByProject !== undefined &&
       (unfiled.length > 0 ||
@@ -1193,6 +1197,7 @@ function ProjectViewFilterPopover(props: {
   readonly onChange: (filters: ProjectViewFilters) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const activityRangeErrorId = useId();
   const options = useMemo(() => {
     const local = { id: "local", name: "Local" };
     return [local, ...props.environmentOptions.filter((option) => option.id !== local.id)].filter(
@@ -1200,6 +1205,7 @@ function ProjectViewFilterPopover(props: {
     );
   }, [props.environmentOptions]);
   const environmentSelection = props.filters.environmentIds;
+  const activityRangeError = projectViewActivityRangeError(props.filters);
   const activeCount =
     (props.filters.lifecycle === "active" ? 0 : 1) +
     (environmentSelection.length > 0 ? 1 : 0) +
@@ -1326,6 +1332,10 @@ function ProjectViewFilterPopover(props: {
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               From
               <OctantInput
+                aria-describedby={
+                  activityRangeError === undefined ? undefined : activityRangeErrorId
+                }
+                aria-invalid={activityRangeError === undefined ? undefined : true}
                 aria-label="Activity from"
                 onChange={(event) =>
                   update({
@@ -1344,6 +1354,10 @@ function ProjectViewFilterPopover(props: {
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               To
               <OctantInput
+                aria-describedby={
+                  activityRangeError === undefined ? undefined : activityRangeErrorId
+                }
+                aria-invalid={activityRangeError === undefined ? undefined : true}
                 aria-label="Activity to"
                 onChange={(event) =>
                   update({
@@ -1359,6 +1373,11 @@ function ProjectViewFilterPopover(props: {
                 value={props.filters.activityRange?.to ?? ""}
               />
             </label>
+            {activityRangeError === undefined ? null : (
+              <p className="field-error col-span-2" id={activityRangeErrorId} role="alert">
+                {activityRangeError}
+              </p>
+            )}
           </div>
         ) : null}
       </div>
