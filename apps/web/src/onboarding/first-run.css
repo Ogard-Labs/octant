@@ -90,6 +90,8 @@
   flex-direction: column;
   gap: var(--oct-space-3);
   min-width: 0;
+  padding-inline-end: var(--oct-space-4);
+  border-inline-end: 1px solid var(--oct-border-soft);
 
   /*
    * Five steps and a title can outgrow the row they share with the panel when
@@ -144,6 +146,7 @@
 .first-run__rail-step[aria-current="step"] {
   background: var(--accent);
   color: var(--accent-foreground);
+  box-shadow: inset 2px 0 0 var(--octant-focus-ring);
 }
 
 .first-run__rail-marker {
@@ -188,6 +191,30 @@
   scrollbar-gutter: stable;
 }
 
+.first-run__step-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+  margin-block-end: var(--oct-space-3);
+  padding-block-end: var(--oct-space-3);
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.first-run__step-title {
+  margin: 0;
+  color: var(--oct-fg);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-lg);
+  font-weight: var(--oct-weight-strong);
+}
+
+.first-run__step-count {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
 .first-run__step {
   display: flex;
   flex-direction: column;
@@ -197,6 +224,13 @@
 
 .first-run__step .profile-editor {
   gap: var(--oct-space-3);
+}
+
+@container first-run (max-width: 40rem) {
+  .first-run__rail {
+    padding-inline-end: 0;
+    border-inline-end: 0;
+  }
 }
 
 /* Non-row content inside a `.setgroup` card supplies the padding `.setrow`
@@ -265,6 +299,11 @@
   max-width: 64ch;
   font-size: var(--oct-text-sm);
   color: var(--oct-muted);
+}
+
+.first-run__loading-value {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
 }
 
 /* The readiness summary is a row inside the readiness `.setgroup`. */
@@ -358,6 +397,14 @@ button.first-run__fact-action {
 
 .first-run__notice[data-tone="attention"] {
   border-left-color: var(--oct-warn-fg);
+}
+
+.first-run__empty {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: var(--oct-space-3);
+  padding-block: var(--oct-space-2);
 }
 
 .first-run__actions {

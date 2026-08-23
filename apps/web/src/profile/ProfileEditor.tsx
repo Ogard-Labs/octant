@@ -40,6 +40,8 @@ export interface ProfileEditorProps {
   readonly environment?: AvatarImageEnvironment;
   /** Lets a dialog put initial focus on the first field the user should fill. */
   readonly nameRef?: RefObject<HTMLInputElement | null>;
+  /** Makes the shared name field required for flows that cannot continue unnamed. */
+  readonly requiredNameMessage?: string;
 }
 
 const ACCENT_NAMES: Record<AvatarAccent, string> = {
@@ -56,11 +58,12 @@ const ACCENT_NAMES: Record<AvatarAccent, string> = {
 /**
  * Name, address, and avatar for the person using this host.
  *
- * Everything here is optional and stays on this Mac. The one exception is the
- * Gravatar button, which contacts gravatar.com — so it says so in the surface
- * itself, is offered only once an address has been typed, and never runs on
- * its own. A failed import leaves the previous avatar alone and reports why,
- * rather than quietly falling back to initials.
+ * Everything here is optional by default and stays on this Mac. A flow that
+ * cannot continue unnamed may require the shared name field without changing
+ * the profile contract. The one external action is the Gravatar button, which
+ * says that it contacts gravatar.com, is offered only once an address has been
+ * typed, and never runs on its own. A failed import leaves the previous avatar
+ * alone and reports why, rather than quietly falling back to initials.
  */
 export function ProfileEditor(props: ProfileEditorProps) {
   const nameId = useId();
@@ -98,7 +101,11 @@ export function ProfileEditor(props: ProfileEditorProps) {
   }
 
   const disabled = props.disabled === true || busy !== undefined;
-  const nameProblem = nameValidationMessage(nameDraft);
+  const nameProblem =
+    nameValidationMessage(nameDraft) ??
+    (props.requiredNameMessage !== undefined && nameDraft.trim() === ""
+      ? props.requiredNameMessage
+      : undefined);
   const emailProblem = emailValidationMessage(emailDraft);
   const gravatarReady = emailProblem === undefined && canImportGravatar({ email: emailDraft });
 
@@ -275,6 +282,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
           onBlur={(event) => setName(event.target.value, true)}
           onChange={(event) => setName(event.target.value, false)}
           placeholder="How Octant should address you"
+          required={props.requiredNameMessage !== undefined}
           {...(props.nameRef === undefined ? {} : { ref: props.nameRef })}
           value={nameDraft}
         />

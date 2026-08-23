@@ -47,13 +47,13 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
       <p className="first-run__intro">{props.intro}</p>
 
       {empty ? (
-        <div className="first-run__notice callout" data-tone="attention" role="status">
+        <div className="first-run__empty" role="status">
           <p className="first-run__intro">
             {listed
               ? "No provider on this Mac offered a model, so there is nothing to choose from yet."
               : "No provider on this Mac is ready, so there is nothing to choose from yet."}
           </p>
-          <OctantButton onClick={props.onOpenProviderSettings} type="button" variant="ghost">
+          <OctantButton onClick={props.onOpenProviderSettings} type="button" variant="outline">
             Open provider settings
           </OctantButton>
         </div>
@@ -71,7 +71,7 @@ export function FirstRunModelStep(props: FirstRunModelStepProps) {
         />
       )}
 
-      {chosen ? null : (
+      {empty || chosen ? null : (
         <p className="first-run__caveat" role="note">
           {props.unsetNote}
         </p>

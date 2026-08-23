@@ -1,6 +1,6 @@
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
-import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import type { WorkspaceChoices } from "./firstRunStepModel";
 
 export interface FirstRunWorkspaceStepProps {
@@ -12,7 +12,7 @@ export interface FirstRunWorkspaceStepProps {
 }
 
 const SCHEMES = [
-  { value: "system", label: "Match the system" },
+  { value: "system", label: "System" },
   { value: "light", label: "Light" },
   { value: "dark", label: "Dark" },
 ] as const;
@@ -37,38 +37,42 @@ export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
   return (
     <div className="first-run__step">
       <p className="first-run__intro">
-        How Octant looks, and which modes appear in the sidebar. Every one of these can be changed
-        later in Settings.
+        Choose the defaults you want to see on first launch. They remain available in Settings.
       </p>
 
-      <div aria-label="Colour scheme" className="setgroup" role="group">
-        <div className="setgroup-head">Colour scheme</div>
-        {schemeUnknown ? (
-          <p className="first-run__caveat" role="status">
-            Octant is still loading its appearance settings, so it cannot say which scheme is in use
-            yet.
-          </p>
-        ) : (
-          <div aria-label="Colour scheme" className="first-run__choices" role="radiogroup">
-            {SCHEMES.map((scheme) => (
-              <OctantButton
-                aria-checked={choices.colorScheme === scheme.value}
-                className="first-run__choice"
-                key={scheme.value}
-                onClick={() => props.onSelectColorScheme(scheme.value)}
-                role="radio"
-                type="button"
-                variant="ghost"
+      <div aria-label="Workspace defaults" className="setgroup" role="group">
+        <div className="setgroup-head">Workspace defaults</div>
+        <div className="setrow">
+          <span className="setrow-label">Colour scheme</span>
+          <div className="setrow-control">
+            {schemeUnknown ? (
+              <span className="first-run__loading-value" role="status">
+                Loading…
+              </span>
+            ) : (
+              <OctantToggleGroup<NonNullable<WorkspaceChoices["colorScheme"]>>
+                aria-label="Colour scheme"
+                onValueChange={(value) => {
+                  const selected = value[0];
+                  if (selected !== undefined) props.onSelectColorScheme(selected);
+                }}
+                role="radiogroup"
+                value={[choices.colorScheme]}
               >
-                {scheme.label}
-              </OctantButton>
-            ))}
+                {SCHEMES.map((scheme) => (
+                  <OctantToggleGroupItem
+                    aria-checked={choices.colorScheme === scheme.value}
+                    key={scheme.value}
+                    role="radio"
+                    value={scheme.value}
+                  >
+                    {scheme.label}
+                  </OctantToggleGroupItem>
+                ))}
+              </OctantToggleGroup>
+            )}
           </div>
-        )}
-      </div>
-
-      <div aria-label="Modes" className="setgroup" role="group">
-        <div className="setgroup-head">Modes</div>
+        </div>
         <div className="setrow">
           <span className="setrow-label">Chat</span>
           <div className="setrow-control">
@@ -89,13 +93,6 @@ export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
             />
           </div>
         </div>
-        <p className="first-run__caveat" role="note">
-          Code is always available. Turning Chat or Work off only hides the mode — its threads and
-          data stay exactly where they are, and come back if you turn it on again.
-        </p>
-      </div>
-
-      <div className="setgroup">
         <div className="setrow">
           <label className="setrow-label" htmlFor="first-run-mode-switcher">
             Mode switcher
@@ -114,6 +111,9 @@ export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
             </OctantNativeSelect>
           </div>
         </div>
+        <p className="first-run__caveat" role="note">
+          Code is always available. Hiding Chat or Work never deletes its threads or data.
+        </p>
       </div>
     </div>
   );

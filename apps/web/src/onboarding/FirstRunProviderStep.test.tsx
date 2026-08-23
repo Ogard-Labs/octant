@@ -37,7 +37,7 @@ describe("FirstRunProviderStep", () => {
     expect(providers.getByText("Ollama")).toBeVisible();
     expect(providers.getByText("Not checked")).toBeVisible();
     expect(screen.getByRole("status")).toHaveTextContent("No provider is ready yet");
-    expect(screen.getByText(/No provider is ready, so Chat cannot answer yet/)).toBeVisible();
+    expect(screen.queryByText(/No provider is ready, so Chat cannot answer yet/)).toBeNull();
   });
 
   it("reports an unreachable registry without claiming anything is ready", () => {
@@ -83,7 +83,7 @@ describe("FirstRunProviderStep", () => {
     });
 
     expect(screen.getByRole("status")).toHaveTextContent("No provider is configured");
-    expect(screen.getByText(/No provider is ready, so Chat cannot answer yet/)).toBeVisible();
+    expect(screen.queryByText(/No provider is ready, so Chat cannot answer yet/)).toBeNull();
   });
 
   it("surfaces an incomplete scan as an actionable alert", () => {
