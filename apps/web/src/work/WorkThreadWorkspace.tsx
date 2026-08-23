@@ -52,6 +52,7 @@ import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
 import { useWorkFileMentions } from "./useWorkFileMentions";
+import { InlineThreadPlan } from "../plan/InlineThreadPlan";
 
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
@@ -598,6 +599,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
       </div>
 
       <div className="work-thread-workspace__composer">
+        <InlineThreadPlan />
         {thread === undefined ? null : (
           <div className="work-thread-workspace__context" aria-label="Thread context">
             <span aria-label="Bound provider and model">

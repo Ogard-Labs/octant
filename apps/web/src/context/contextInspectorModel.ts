@@ -174,15 +174,22 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
       ? "provider-reported"
       : hasUnknown
         ? "unknown"
-        : hasEstimate
+        : snapshot.latestSent !== undefined
           ? "estimated"
-          : "measured";
+          : hasEstimate
+            ? "estimated"
+            : "measured";
   const overheadTokens = hasUnknown ? 0 : Math.max(0, usedTokens - knownContentTokens);
   const reservedTokens = Object.values(planSnapshot.plan.reserves).reduce(
     (sum, tokens) => sum + tokens,
     0,
   );
-  const freeTokens = Math.max(0, totalTokens - usedTokens - reservedTokens);
+  // Unknown entries mean the remaining capacity cannot be proven. Keep the
+  // segment visible for orientation, but omit its number rather than showing
+  // a fabricated free-space total.
+  const freeTokens = hasUnknown
+    ? undefined
+    : Math.max(0, totalTokens - usedTokens - reservedTokens);
   const segments: Array<ContextWindowSegment> = content.map((entry, index) => ({
     key: entry.key,
     kind: "content",
@@ -215,8 +222,8 @@ export function contextWindowModel(snapshot: ContextInspectorSnapshot): ContextW
       key: "free",
       kind: "free",
       label: "Free space",
-      percent: percentOf(freeTokens, totalTokens),
-      tokens: freeTokens,
+      percent: freeTokens === undefined ? 0 : percentOf(freeTokens, totalTokens),
+      ...(freeTokens === undefined ? {} : { tokens: freeTokens }),
       tone: 8,
     },
   );

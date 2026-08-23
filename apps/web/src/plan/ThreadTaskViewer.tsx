@@ -1,5 +1,12 @@
 import type { ThreadPlanStepId, ThreadPlanStepStatus } from "@octant/contracts";
-import { CheckCircle2, Circle, CircleDot, CircleSlash, LoaderCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  CircleDot,
+  CircleSlash,
+  ListChecks,
+  LoaderCircle,
+} from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { useThreadPlan } from "./ThreadPlanContext";
@@ -8,6 +15,18 @@ import type { PlanController } from "./usePlanController";
 export interface ThreadTaskViewerProps {
   /** Injected in tests; ordinary thread surfaces use their shared controller. */
   readonly controller?: PlanController;
+  /**
+   * Server-derived checkout evidence for this thread. The viewer deliberately
+   * accepts this as an optional projection: when the host has not observed a
+   * checkout it omits the summary instead of deriving a count in the browser.
+   */
+  readonly changedFiles?: ThreadTaskChangedFiles;
+}
+
+export interface ThreadTaskChangedFiles {
+  readonly kind: "observed";
+  readonly changedPathCount: number;
+  readonly freshness: "fresh" | "stale";
 }
 
 const STEP_LABELS: Record<ThreadPlanStepStatus, string> = {
@@ -63,6 +82,14 @@ export function ThreadTaskViewer(props: ThreadTaskViewerProps) {
     plan.status === "proposed"
       ? `Review ${String(counted.length)}-step plan`
       : `Step ${String(currentStep)} / ${String(counted.length)}`;
+  const ProgressIcon =
+    plan.status === "proposed" ? ListChecks : activeIndex === -1 ? CheckCircle2 : LoaderCircle;
+  const changedFilesLabel =
+    props.changedFiles === undefined
+      ? undefined
+      : `${String(props.changedFiles.changedPathCount)} ${
+          props.changedFiles.changedPathCount === 1 ? "file" : "files"
+        } changed${props.changedFiles.freshness === "stale" ? " · stale" : ""}`;
 
   return (
     <div className="thread-task-viewer">
@@ -76,8 +103,11 @@ export function ThreadTaskViewer(props: ThreadTaskViewerProps) {
         type="button"
         variant="ghost"
       >
-        <LoaderCircle aria-hidden="true" size={14} strokeWidth={1.8} />
+        <ProgressIcon aria-hidden="true" size={14} strokeWidth={1.8} />
         {progressLabel}
+        {changedFilesLabel === undefined ? null : (
+          <span className="thread-task-viewer__evidence">{changedFilesLabel}</span>
+        )}
       </OctantButton>
       {open ? (
         <div
@@ -95,6 +125,11 @@ export function ThreadTaskViewer(props: ThreadTaskViewerProps) {
                 : `${String(done)} of ${String(counted.length)} done`}
             </span>
           </header>
+          {changedFilesLabel === undefined ? null : (
+            <p className="thread-task-viewer__evidence-detail" role="status">
+              {changedFilesLabel}
+            </p>
+          )}
           <ol className="thread-task-viewer__steps">
             {plan.steps.map((step) => (
               <li data-step-status={step.status} key={step.stepId}>

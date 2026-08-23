@@ -54,6 +54,7 @@ import { CanvasCreatePanel } from "../canvas/CanvasCreatePanel";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
 import { buildCanvasCreationContext } from "../canvas/buildCanvasCreationContext";
 import { OctantButton } from "../ui/base/OctantButton";
+import { InlineThreadPlan } from "../plan/InlineThreadPlan";
 
 export interface ChatWorkspaceProps {
   readonly controller: ChatController;
@@ -746,6 +747,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           </div>
         </section>
       )}
+      <InlineThreadPlan />
       <ChatComposer
         attachment={attachmentCapability}
         attachmentBusy={uploadingMessage !== undefined || attachmentStatus.kind === "removing"}

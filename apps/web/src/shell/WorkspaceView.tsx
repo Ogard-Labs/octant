@@ -835,7 +835,11 @@ function renderNonCodeTab(
   }
   if (tab.kind === "chat-thread") {
     return (
-      <ChatThreadWorkspace
+      <ThreadPlanProvider
+        {...(props.planClient === undefined ? {} : { client: props.planClient })}
+        threadId={String(tab.threadId)}
+      >
+        <ChatThreadWorkspace
         chatClient={props.chatClient}
         chatReadCursorStore={props.chatReadCursorStore}
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
@@ -871,7 +875,8 @@ function renderNonCodeTab(
             threadId={String(tab.threadId)}
           />
         }
-      />
+        />
+      </ThreadPlanProvider>
     );
   }
   if (tab.kind === "work-thread") {
@@ -886,6 +891,10 @@ function renderNonCodeTab(
       );
     }
     return (
+      <ThreadPlanProvider
+        {...(props.planClient === undefined ? {} : { client: props.planClient })}
+        threadId={String(tab.threadId)}
+      >
       <WorkThreadEnvironment
         active={paneIsActive(props, paneId)}
         {...(props.agentRunClient === undefined ? {} : { agentRunClient: props.agentRunClient })}
@@ -960,6 +969,7 @@ function renderNonCodeTab(
           />
         </ThreadActivityPictureInPicture>
       </WorkThreadEnvironment>
+      </ThreadPlanProvider>
     );
   }
   if (tab.kind === "settings") {
