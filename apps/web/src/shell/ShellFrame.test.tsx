@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
+import { NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT } from "@octant/contracts/shell";
 import { describe, expect, it, vi } from "vitest";
 import { ShellFrame } from "./ShellFrame";
 
@@ -46,6 +47,7 @@ describe("ShellFrame", () => {
     expect(shell).toHaveAttribute("data-octant-sidebar-vibrancy", "strong");
     expect(shell).toHaveStyle({
       "--octant-context-sidebar-width": "360px",
+      "--octant-native-hidden-inset-titlebar-height": `${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px`,
       "--octant-sidebar-width": "244px",
     });
     expect(shell).not.toHaveAttribute("data-client-frame");
@@ -173,7 +175,7 @@ describe("ShellFrame", () => {
 
     expect(chrome).toContain("background: transparent;");
     expect(chrome).toContain("border-bottom: 0;");
-    expect(chrome).toContain("pointer-events: auto;");
+    expect(chrome).toContain("pointer-events: none;");
     expect(workspace).toContain("grid-row: 1 / -1;");
     expect(trailing).toContain("pointer-events: auto;");
     expect(shellStyles).toMatch(

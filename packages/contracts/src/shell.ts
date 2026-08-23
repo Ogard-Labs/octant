@@ -26,6 +26,12 @@ export const MIN_SIDEBAR_WIDTH = 220;
 export const MAX_SIDEBAR_WIDTH = 420;
 export const MIN_CONTEXT_SIDEBAR_WIDTH = 280;
 export const MAX_CONTEXT_SIDEBAR_WIDTH = 640;
+/**
+ * Native macOS `hiddenInset` leaves this many CSS pixels above the renderer
+ * before pointer events reach web content. Interactive window chrome is
+ * rendered below it; remote/web clients keep the zero-offset presentation.
+ */
+export const NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT = 24;
 export const MIN_SPLIT_RATIO = 0.2;
 export const MAX_SPLIT_RATIO = 0.8;
 
