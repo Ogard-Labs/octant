@@ -137,17 +137,18 @@ export function ExecutionProfileWorkflow(props: {
             ) : (
               controller.profiles.map((profile) => (
                 <article className="execution-profile-workflow__profile" key={String(profile.id)}>
-                  <button
+                  <OctantButton
                     aria-pressed={String(controller.selectedProfile?.id) === String(profile.id)}
                     className="execution-profile-workflow__profile-select"
                     onClick={() => controller.selectProfile(profile.id)}
                     type="button"
+                    variant="ghost"
                   >
                     <strong>{profile.displayName}</strong>
                     <span>
                       {profile.description ?? `${profile.defaultExecutionPolicy} defaults`}
                     </span>
-                  </button>
+                  </OctantButton>
                   <span className="execution-profile-workflow__profile-actions">
                     <OctantButton
                       aria-label={`Edit ${profile.displayName}`}

@@ -329,13 +329,14 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
           <ol className="first-run__rail-list">
             {steps.map((descriptor) => (
               <li key={descriptor.id}>
-                <button
+                <OctantButton
                   aria-current={descriptor.current ? "step" : undefined}
                   className="first-run__rail-step"
                   data-configured={descriptor.configured}
                   disabled={importing || (unnamed && descriptor.id !== "profile")}
                   onClick={() => goTo(descriptor.id)}
                   type="button"
+                  variant="ghost"
                 >
                   <span className="first-run__rail-marker" aria-hidden>
                     {descriptor.configured ? <Check size={13} /> : null}
@@ -343,7 +344,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
                   <span className="first-run__rail-title">{descriptor.title}</span>
                   <span className="first-run__rail-summary">{descriptor.summary}</span>
                   {descriptor.configured ? <span className="sr-only">Configured</span> : null}
-                </button>
+                </OctantButton>
               </li>
             ))}
           </ol>

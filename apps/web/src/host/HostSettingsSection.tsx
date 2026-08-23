@@ -15,6 +15,7 @@ import type {
 } from "@octant/contracts/thread-retention";
 import { purgeComposerThreadDrafts } from "../composer/composerThreadDraftStore";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantInput } from "../ui/base/OctantInput";
 import {
@@ -499,10 +500,9 @@ function ThreadRetentionPanel({ client }: { readonly client: HostControlClient }
         </OctantButton>
       </div>
       <label className="host-settings__note">
-        <input
+        <OctantCheckbox
           checked={confirmPurge}
           onChange={(event) => setConfirmPurge(event.currentTarget.checked)}
-          type="checkbox"
         />{" "}
         I understand this permanently erases the selected thread history.
       </label>

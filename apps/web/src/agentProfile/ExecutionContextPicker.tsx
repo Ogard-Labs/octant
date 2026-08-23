@@ -1,6 +1,7 @@
 import type { ExecutionContextPickerEntry } from "@octant/contracts/agent-profile";
 import { Shield, ShieldCheck, ShieldAlert, Monitor, Cpu, User } from "lucide-react";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 
 export interface ExecutionContextPickerProps {
@@ -96,7 +97,7 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
               // non-wrapping label at a fixed control height, which clipped
               // model names against the card's bottom border. This row is
               // content-sized so provider, model, and facts always fit.
-              <button
+              <OctantButton
                 aria-disabled={!isAvailable}
                 aria-selected={isSelected}
                 className={`execution-context-picker__option${isActive ? " execution-context-picker__option--active" : ""}${isSelected ? " execution-context-picker__option--selected" : ""}`}
@@ -105,6 +106,7 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
                 onClick={() => isAvailable && props.onSelect(entry)}
                 role="option"
                 type="button"
+                variant="ghost"
               >
                 <span className="execution-context-picker__option-main">
                   <Cpu aria-hidden="true" size={12} strokeWidth={1.8} />
@@ -132,7 +134,7 @@ export function ExecutionContextPicker(props: ExecutionContextPickerProps) {
                     {entry.unavailableReason}
                   </span>
                 ) : null}
-              </button>
+              </OctantButton>
             );
           })}
         </div>

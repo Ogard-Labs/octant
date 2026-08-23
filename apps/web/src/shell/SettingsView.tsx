@@ -208,14 +208,15 @@ export function SettingsView(props: SettingsViewProps) {
         </div>
         <div className="settings-view__sidebar-content">
           {props.onBack === undefined ? null : (
-            <button
+            <OctantButton
               className="setnav-item window-no-drag settings-view__back"
               onClick={props.onBack}
               type="button"
+              variant="ghost"
             >
               <ArrowLeft aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
               <span>Back to app</span>
-            </button>
+            </OctantButton>
           )}
           <label className="settings-view__field settings-view__field--search">
             <span className="settings-view__search-label">Search settings</span>

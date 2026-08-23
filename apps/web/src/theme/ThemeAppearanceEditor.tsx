@@ -7,6 +7,7 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { FontFamilyPicker } from "./FontFamilyPicker";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
@@ -84,13 +85,14 @@ export function ThemeAppearanceEditor(props: {
               { value: "dark", label: "Dark" },
             ] as const
           ).map((option) => (
-            <button
+            <OctantButton
               aria-checked={draft.mode === option.value}
               className="settings-scheme__card window-no-drag"
               key={option.value}
               onClick={() => theme.updateDraft({ mode: option.value })}
               role="radio"
               type="button"
+              variant="ghost"
             >
               <span
                 aria-hidden="true"
@@ -114,7 +116,7 @@ export function ThemeAppearanceEditor(props: {
                 </span>
               </span>
               <span className="settings-scheme__label">{option.label}</span>
-            </button>
+            </OctantButton>
           ))}
         </div>
         <label className="settings-view__field">
@@ -347,7 +349,7 @@ function ThemeTransfer(props: { readonly controller: ThemeController }) {
       )}
       <label className="settings-view__field">
         <span>Theme JSON</span>
-        <textarea
+        <OctantTextarea
           aria-label="Theme JSON"
           className="textarea settings-view__textarea"
           onChange={(event) => setValue(event.currentTarget.value)}
