@@ -4,6 +4,7 @@ import {
   decodeAgentRunControlPreviewResult,
   decodeAgentRunControlRequest,
   decodeAgentRunCenterResponse,
+  decodeAgentRunConversationResponse,
   decodeAgentRunParentThreadId,
   decodeAgentRunResumeRequest,
   decodeAgentRunRetryRequest,
@@ -14,6 +15,7 @@ import {
   decodeAgentRunWorkspacePreparationResult,
   type AgentRunCenterQuery,
   type AgentRunCenterResponse,
+  type AgentRunConversationResponse,
   type AgentRunCommandResult,
   type AgentRunControlPreviewRequest,
   type AgentRunControlPreviewResult,
@@ -119,6 +121,7 @@ export interface AgentRunCenterQueryInput {
 
 export interface AgentRunClient {
   center(input?: AgentRunCenterQueryInput): Promise<AgentRunCenterResponse>;
+  conversation(runId: AgentRunId, afterSequence?: number): Promise<AgentRunConversationResponse>;
   parentSummary(parentThreadId: AgentRunParentThreadId): Promise<AgentRunParentSummaryResponse>;
   acknowledge(input: {
     readonly runId: AgentRunId;
@@ -181,6 +184,20 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
         return decodeAgentRunCenterResponse(body);
       } catch {
         throw new AgentRunClientFailure("unavailable", "AgentRun center response is malformed.");
+      }
+    },
+    async conversation(runId, afterSequence) {
+      const url = new URL("/api/agent-runs/conversation", options.baseUrl);
+      url.searchParams.set("runId", String(runId));
+      if (afterSequence !== undefined) url.searchParams.set("afterSequence", String(afterSequence));
+      const body = await requestJson(options.fetch, url.toString(), { method: "GET", headers });
+      try {
+        return decodeAgentRunConversationResponse(body);
+      } catch {
+        throw new AgentRunClientFailure(
+          "unavailable",
+          "AgentRun conversation response is malformed.",
+        );
       }
     },
     async parentSummary(parentThreadId) {

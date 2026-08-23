@@ -543,6 +543,50 @@ export const AgentRunCenterResponse = Schema.Struct({
 }).annotations(strict);
 export type AgentRunCenterResponse = typeof AgentRunCenterResponse.Type;
 
+/**
+ * Ephemeral child-conversation read limits. Live text is a server snapshot,
+ * not journal content; these bounds keep a reconnect or a hostile provider
+ * from turning a small Environment disclosure into an unbounded stream.
+ */
+export const MAX_AGENT_RUN_CONVERSATION_ENTRIES = 128;
+export const MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS = 4_096;
+export const MAX_AGENT_RUN_CONVERSATION_BYTES = 32 * 1024;
+export const MAX_AGENT_RUN_CONVERSATION_CURSOR_LENGTH = 64;
+
+export const AgentRunConversationReadStatus = Schema.Literal(
+  "live",
+  "complete",
+  "stale",
+  "unavailable",
+);
+export type AgentRunConversationReadStatus = typeof AgentRunConversationReadStatus.Type;
+
+export const AgentRunConversationEntry = Schema.Struct({
+  sequence: Schema.Int.pipe(Schema.greaterThanOrEqualTo(1)),
+  kind: Schema.Literal("assistant", "status"),
+  text: Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CONVERSATION_ENTRY_CHARACTERS)),
+  occurredAt: UtcTimestamp,
+}).annotations(strict);
+export type AgentRunConversationEntry = typeof AgentRunConversationEntry.Type;
+
+export const AgentRunConversationResponse = Schema.Struct({
+  runId: AgentRunId,
+  parentThreadId: AgentRunParentThreadId,
+  executionKind: AgentRunExecutionKind,
+  modelId: ProviderModelId,
+  lifecycleStatus: AgentRunLifecycleStatus,
+  status: AgentRunConversationReadStatus,
+  entries: Schema.Array(AgentRunConversationEntry).pipe(
+    Schema.maxItems(MAX_AGENT_RUN_CONVERSATION_ENTRIES),
+  ),
+  truncated: Schema.Boolean,
+  nextCursor: Schema.optional(
+    Schema.String.pipe(Schema.maxLength(MAX_AGENT_RUN_CONVERSATION_CURSOR_LENGTH)),
+  ),
+  staleReason: Schema.optional(Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512))),
+}).annotations(strict);
+export type AgentRunConversationResponse = typeof AgentRunConversationResponse.Type;
+
 export const AGENT_RUN_EVENT_NAMES = [
   "agent.run-requested@1",
   "agent.run-status-changed@1",
@@ -592,3 +636,10 @@ export const decodeAgentRunCenterRoute = Schema.decodeUnknownSync(AgentRunCenter
 export const decodeAgentRunCenterSummary = Schema.decodeUnknownSync(AgentRunCenterSummary);
 export const decodeAgentRunCenterQuery = Schema.decodeUnknownSync(AgentRunCenterQuery);
 export const decodeAgentRunCenterResponse = Schema.decodeUnknownSync(AgentRunCenterResponse);
+export const decodeAgentRunConversationReadStatus = Schema.decodeUnknownSync(
+  AgentRunConversationReadStatus,
+);
+export const decodeAgentRunConversationEntry = Schema.decodeUnknownSync(AgentRunConversationEntry);
+export const decodeAgentRunConversationResponse = Schema.decodeUnknownSync(
+  AgentRunConversationResponse,
+);

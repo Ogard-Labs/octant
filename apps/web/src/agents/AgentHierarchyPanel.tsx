@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from "react";
+import type { AgentRunConversationResponse } from "@octant/contracts";
 import {
   buildAgentHierarchyModel,
   type AgentHierarchyFilter,
@@ -15,6 +16,8 @@ export function AgentHierarchyPanel(props: {
   readonly onRetry?: (input: { runId: string; version: number }) => void;
   readonly onResume?: (input: { runId: string; version: number }) => void;
   readonly reconnecting?: boolean;
+  readonly conversation?: AgentRunConversationResponse;
+  readonly onInspectConversation?: (runId: string) => void;
 }) {
   const [filter, setFilter] = useState<AgentHierarchyFilter>("active");
   const [query, setQuery] = useState("");
@@ -98,6 +101,16 @@ export function AgentHierarchyPanel(props: {
                 </span>
               </div>
               <div className="agent-hierarchy__row-meta">
+                <button
+                  type="button"
+                  aria-label={`View conversation for ${row.task}`}
+                  onClick={() => props.onInspectConversation?.(row.runId)}
+                >
+                  {props.conversation?.runId === row.runId ? "Hide transcript" : "View transcript"}
+                </button>
+                {props.conversation?.runId === row.runId ? (
+                  <AgentConversation conversation={props.conversation} />
+                ) : null}
                 <span>usage: {row.usageQuality}</span>
                 {row.routeLabel ? <span>route: {row.routeLabel}</span> : null}
                 {row.routeReason ? <span>{row.routeReason}</span> : null}
@@ -155,6 +168,27 @@ export function AgentHierarchyPanel(props: {
         </ul>
       )}
     </section>
+  );
+}
+
+function AgentConversation(props: { readonly conversation: AgentRunConversationResponse }) {
+  if (props.conversation.status === "unavailable") {
+    return <span role="status">Live transcript is unavailable for this execution.</span>;
+  }
+  if (props.conversation.entries.length === 0) {
+    return (
+      <span role="status">
+        {props.conversation.status === "stale"
+          ? "The child session is stale."
+          : "No visible response text yet."}
+      </span>
+    );
+  }
+  return (
+    <span aria-label="Child conversation">
+      {props.conversation.entries.map((entry) => entry.text).join("\n")}
+      {props.conversation.truncated ? " (earlier text truncated)" : ""}
+    </span>
   );
 }
 

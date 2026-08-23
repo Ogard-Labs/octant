@@ -10,6 +10,8 @@ import {
   decodeAgentRunWorkspaceConfirmationRequest,
   decodeAgentRunWorkspacePreparationRequest,
   MAX_AGENT_RUN_CENTER_QUERY_LIMIT,
+  type AgentRunConversationEntry,
+  type AgentRunConversationResponse,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunCenterSummary,
@@ -36,6 +38,7 @@ import {
   AgentRunPolicyRejected,
   type AgentRunNativeCapabilityEvidence,
 } from "@octant/domain/agent-run-control-policy";
+import { effectiveAgentRunExecutionTarget } from "@octant/domain";
 import { authenticateRouteWindowId } from "../principalRouteContext";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
@@ -61,6 +64,7 @@ import {
   type AgentRunOrchestrationService,
 } from "./agentRunOrchestrationService";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
+import type { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
 import type { AgentRunParentSummaryEntry } from "./agentRunProjection";
 import {
   clampCenterLimit,
@@ -75,6 +79,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 export interface AgentRunRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly persistence: AgentRunPersistenceService;
+  readonly liveConversations: AgentRunLiveConversationStore;
   readonly orchestration: AgentRunOrchestrationService;
   readonly settings: { readonly current: () => AgentRunPolicySettings };
   readonly providerReadiness: ProviderReadinessPort;
@@ -228,6 +233,10 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
       }
       const entries = dependencies.persistence.parentSummary(parentThreadId);
       return json({ parentThreadId, entries: serializeEntries(entries) }, 200, origin);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/agent-runs/conversation") {
+      return handleConversation(dependencies, authenticatedWindowId, url, origin);
     }
 
     if (request.method === "POST" && url.pathname === "/api/agent-runs/acknowledge") {
@@ -564,6 +573,117 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
 
     return failure("AgentRun route not found.", 404, origin);
   };
+}
+
+async function handleConversation(
+  dependencies: AgentRunRouteDependencies,
+  windowId: string,
+  url: URL,
+  origin: string | null,
+): Promise<Response> {
+  if (
+    ![...url.searchParams.keys()].every((key) => key === "runId" || key === "afterSequence") ||
+    !url.searchParams.has("runId")
+  ) {
+    return failure("AgentRun conversation query is invalid.", 400, origin);
+  }
+  let runId: AgentRunId;
+  try {
+    runId = decodeAgentRunId(url.searchParams.get("runId") ?? "");
+  } catch {
+    return failure("AgentRun conversation runId is invalid.", 400, origin);
+  }
+  const afterRaw = url.searchParams.get("afterSequence");
+  let afterSequence: number | undefined;
+  if (afterRaw !== null) {
+    const parsed = Number(afterRaw);
+    if (!Number.isSafeInteger(parsed) || parsed < 0) {
+      return failure("AgentRun conversation cursor is invalid.", 400, origin);
+    }
+    afterSequence = parsed;
+  }
+  const run = dependencies.persistence.getById(runId);
+  if (
+    run === undefined ||
+    !(await dependencies.authorizeParentThread({
+      parentThreadId: run.parentThreadId,
+      windowId,
+    }))
+  ) {
+    return failure("AgentRun conversation is not authorized for this run.", 403, origin);
+  }
+
+  const base = {
+    runId: run.id,
+    parentThreadId: run.parentThreadId,
+    executionKind: run.executionKind,
+    modelId: effectiveAgentRunExecutionTarget(run.routingReceipt).modelId,
+    lifecycleStatus: run.lifecycleStatus,
+  } satisfies Omit<AgentRunConversationResponse, "status" | "entries" | "truncated">;
+
+  if (run.executionKind === "provider-native") {
+    return json(
+      {
+        ...base,
+        status: "unavailable",
+        entries: [],
+        truncated: false,
+        staleReason: "Provider-native child transcript is not available through this host.",
+      },
+      200,
+      origin,
+    );
+  }
+
+  const snapshot = dependencies.liveConversations.read({
+    runId,
+    ...(afterSequence === undefined ? {} : { afterSequence }),
+  });
+  if (snapshot !== undefined) {
+    return json({ ...base, ...snapshot }, 200, origin);
+  }
+
+  const result = run.result;
+  const resultText = result === undefined ? undefined : dependencies.persistence.resultText(run.id);
+  if (result !== undefined && resultText !== undefined) {
+    const entry: AgentRunConversationEntry = {
+      sequence: 1,
+      kind: "assistant",
+      text: resultText,
+      occurredAt: run.updatedAt,
+    };
+    return json(
+      {
+        ...base,
+        status: "complete",
+        entries: afterSequence !== undefined && afterSequence >= entry.sequence ? [] : [entry],
+        truncated: result.truncated,
+      },
+      200,
+      origin,
+    );
+  }
+
+  const active =
+    run.lifecycleStatus === "queued" ||
+    run.lifecycleStatus === "starting" ||
+    run.lifecycleStatus === "running";
+  const restarted =
+    run.lifecycleStatus === "interrupted" &&
+    run.recoveryReason === "restart-without-resumable-execution";
+  return json(
+    {
+      ...base,
+      status: active || restarted ? "stale" : "unavailable",
+      entries: [],
+      truncated: false,
+      ...(active || restarted
+        ? { staleReason: "The child session is no longer connected to this host." }
+        : { staleReason: "No retained child conversation is available." }),
+    },
+    200,
+    origin,
+  );
 }
 
 async function handleCenter(

@@ -120,6 +120,42 @@ describe("agentRunClient", () => {
     });
   });
 
+  it("loads a bounded child conversation snapshot and cursor", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      expect(url).toContain("/api/agent-runs/conversation");
+      expect(url).toContain(`runId=${runId}`);
+      expect(url).toContain("afterSequence=2");
+      return new Response(
+        JSON.stringify({
+          runId,
+          parentThreadId,
+          executionKind: "octant-managed",
+          modelId: "gpt-5.6-luna",
+          lifecycleStatus: "running",
+          status: "live",
+          entries: [
+            {
+              sequence: 3,
+              kind: "assistant",
+              text: "partial",
+              occurredAt: "2026-08-01T15:00:00.000Z",
+            },
+          ],
+          truncated: false,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    });
+    const client = createAgentRunClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "cap",
+    });
+    const response = await client.conversation(runId as never, 2);
+    expect(response.entries[0]?.text).toBe("partial");
+  });
+
   it("acknowledges a completed child result", async () => {
     // decode will fail because run is incomplete; use a full minimal shape? For client we can
     // only assert failure class if decode fails. Instead mock decode-compatible payload is hard.

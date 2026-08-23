@@ -1,7 +1,8 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type { AgentRunConversationResponse } from "@octant/contracts";
 import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { Bot, ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useChildRunStatus } from "../agents/useChildRunStatus";
 import { OctantButton } from "../ui/base/OctantButton";
 
@@ -17,6 +18,26 @@ export function EnvironmentSubagents(props: {
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
   const [selectedRunId, setSelectedRunId] = useState<string>();
+  const [conversation, setConversation] = useState<AgentRunConversationResponse>();
+  useEffect(() => {
+    if (selectedRunId === undefined) {
+      setConversation(undefined);
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const next = await props.client.conversation(selectedRunId as never);
+        if (!cancelled) setConversation(next);
+      } catch {
+        if (!cancelled) setConversation(undefined);
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.client, selectedRunId]);
   if (controller.status !== "ready" || controller.entries.length === 0) return null;
   const active = controller.entries.filter((entry) => ACTIVE.has(entry.lifecycleStatus));
   const history = controller.entries.filter((entry) => !ACTIVE.has(entry.lifecycleStatus));
@@ -39,12 +60,14 @@ export function EnvironmentSubagents(props: {
       <AgentGroup
         entries={active}
         label="Active"
+        {...(conversation === undefined ? {} : { conversation })}
         {...(selectedRunId === undefined ? {} : { selectedRunId })}
         onSelect={setSelectedRunId}
       />
       <AgentGroup
         entries={history}
         label="Done"
+        {...(conversation === undefined ? {} : { conversation })}
         {...(selectedRunId === undefined ? {} : { selectedRunId })}
         onSelect={setSelectedRunId}
       />
@@ -55,6 +78,7 @@ export function EnvironmentSubagents(props: {
 function AgentGroup(props: {
   readonly entries: ReturnType<typeof useChildRunStatus>["entries"];
   readonly label: string;
+  readonly conversation?: AgentRunConversationResponse;
   readonly selectedRunId?: string;
   readonly onSelect: (runId: string | undefined) => void;
 }) {
@@ -94,12 +118,12 @@ function AgentGroup(props: {
                   </div>
                   <div>
                     <span>Response</span>
-                    <p>
-                      {entry.result?.text ??
-                        (ACTIVE.has(entry.lifecycleStatus)
-                          ? "The subagent is still working. Live response text is not available yet."
-                          : "No retained response is available.")}
-                    </p>
+                    <ConversationBody
+                      conversation={
+                        props.conversation?.runId === entry.runId ? props.conversation : undefined
+                      }
+                      entry={entry}
+                    />
                     {entry.result?.truncated === true ? <small>Response truncated</small> : null}
                   </div>
                 </div>
@@ -109,5 +133,45 @@ function AgentGroup(props: {
         })}
       </ul>
     </section>
+  );
+}
+
+function ConversationBody(props: {
+  readonly conversation: AgentRunConversationResponse | undefined;
+  readonly entry: ReturnType<typeof useChildRunStatus>["entries"][number];
+}) {
+  if (props.conversation === undefined) {
+    return (
+      <p>
+        {props.entry.result?.text ??
+          (ACTIVE.has(props.entry.lifecycleStatus)
+            ? "The subagent is still working. Reconnecting to its live response…"
+            : "No retained response is available.")}
+      </p>
+    );
+  }
+  if (props.conversation.status === "unavailable") {
+    return <p>Live response text is unavailable for this execution.</p>;
+  }
+  if (props.conversation.entries.length === 0) {
+    return (
+      <p>
+        {props.conversation.status === "stale"
+          ? (props.conversation.staleReason ??
+            "The child session is stale; no more transcript is available.")
+          : "The subagent has not produced visible response text yet."}
+      </p>
+    );
+  }
+  return (
+    <div>
+      {props.conversation.entries.map((entry) => (
+        <p key={entry.sequence}>{entry.text}</p>
+      ))}
+      {props.conversation.truncated ? <small>Earlier response text was truncated.</small> : null}
+      {props.conversation.status === "stale" ? (
+        <small>{props.conversation.staleReason ?? "The live response is stale."}</small>
+      ) : null}
+    </div>
   );
 }

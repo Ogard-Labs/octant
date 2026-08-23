@@ -38,6 +38,16 @@ const chatFacts = {
 function emptyClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
   return {
     center: vi.fn(async () => ({ items: [] })),
+    conversation: vi.fn(async () => ({
+      runId: "00000000-0000-4000-8000-000000000001" as never,
+      parentThreadId,
+      executionKind: "octant-managed" as const,
+      modelId: "test-model" as never,
+      lifecycleStatus: "running" as const,
+      status: "live" as const,
+      entries: [],
+      truncated: false,
+    })),
     parentSummary: vi.fn(async () => ({ parentThreadId, entries: [] })),
     acknowledge: vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never })),
     preview: vi.fn(async () => chatFacts),
