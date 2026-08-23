@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import type { ZenAssistantSnapshot, ZenElementPayload, ZenSpace } from "@octant/contracts/zen";
 import {
@@ -183,7 +184,8 @@ describe("ZenSurface", () => {
     expect(surface.querySelector(".zen-surface__overlay")).not.toBeNull();
   });
 
-  it("lets the appearance panel choose a built-in, a custom gradient, and a local image", () => {
+  it("lets the appearance panel choose a built-in, a custom gradient, and a local image", async () => {
+    const user = userEvent.setup();
     const onUpdateAppearance = vi.fn();
     const onUploadBackground = vi.fn();
     render(
@@ -213,8 +215,9 @@ describe("ZenSurface", () => {
     });
     fireEvent.change(screen.getByLabelText("Gradient start"), { target: { value: "#112233" } });
     fireEvent.change(screen.getByLabelText("Gradient end"), { target: { value: "#445566" } });
-    fireEvent.change(screen.getByLabelText("Gradient style"), { target: { value: "radial" } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply custom gradient" }));
+    await user.click(screen.getByRole("combobox", { name: "Gradient style" }));
+    await user.click(await screen.findByRole("option", { name: "Radial" }));
+    await user.click(screen.getByRole("button", { name: "Apply custom gradient" }));
     expect(onUpdateAppearance).toHaveBeenLastCalledWith({
       dimming: 0,
       elementOpacity: 1,

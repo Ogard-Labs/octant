@@ -1,5 +1,6 @@
 import type { ZenNotesElementPayload } from "@octant/contracts/zen";
 import { useEffect, useRef, useState } from "react";
+import { OctantTextarea } from "../../ui/base/OctantTextarea";
 
 const AUTOSAVE_DELAY_MS = 400;
 
@@ -48,7 +49,7 @@ export function ZenNotes({ element, onSave }: ZenNotesProps) {
 
   return (
     <div className="zen-notes">
-      <textarea
+      <OctantTextarea
         aria-label={`${title} content`}
         className="window-no-drag"
         disabled={element.locked}

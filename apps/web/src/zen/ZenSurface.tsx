@@ -687,14 +687,16 @@ export function ZenSurface(props: ZenSurfaceProps) {
                       "Unsupported Zen element"
                     )}
                   </div>
-                  <button
+                  <OctantButton
                     aria-label={`Resize ${title}`}
                     className="zen-el-grip window-no-drag"
                     disabled={element.locked}
                     onMouseDown={(event) => event.stopPropagation()}
                     onPointerDown={(event) => beginElementInteraction(event, element, "resize")}
+                    size="icon"
                     style={{ zIndex: 3 }}
                     type="button"
+                    variant="ghost"
                   />
                 </>
               )}

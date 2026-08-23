@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState, type PointerEvent } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import {
   makeBrowserToolAction,
   normalizeBrowserUrl,
@@ -253,25 +254,29 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
     >
       <header className="zen-research__header" onPointerDown={beginMove}>
         <span className="zen-research__title">Research</span>
-        <button
+        <OctantButton
           aria-label="Collapse research browser"
           className="btn-icon"
           onClick={() => props.onCollapse(true)}
+          size="icon"
           type="button"
+          variant="ghost"
         >
           <ChevronRight aria-hidden="true" size={13} />
-        </button>
-        <button
+        </OctantButton>
+        <OctantButton
           aria-label="Undock research browser"
           className="btn-icon"
           onClick={() => {
             void close();
             props.onUndock();
           }}
+          size="icon"
           type="button"
+          variant="ghost"
         >
           <X aria-hidden="true" size={13} />
-        </button>
+        </OctantButton>
       </header>
       {!nativeSupported ? (
         <p className="zen-research__notice" role="status">
@@ -281,7 +286,7 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
         <div className="zen-research__empty">
           <ShieldCheck aria-hidden="true" size={18} />
           <p>The page belongs to this thread and is shared with its agent.</p>
-          <input
+          <OctantInput
             aria-label="Research address"
             onChange={(event) => setAddress(event.target.value)}
             spellCheck={false}
@@ -306,69 +311,80 @@ export function ZenResearchDock(props: ZenResearchDockProps) {
               : tabs
             ).map((tab) => (
               <span className="zen-research__tab" key={tab.tabId}>
-                <button
+                <OctantButton
                   aria-selected={tab.tabId === state?.activeTabId}
                   onClick={() => void tabCommand("select", tab.tabId)}
                   role="tab"
                   title={tab.url}
                   type="button"
+                  variant="ghost"
                 >
                   {tab.title === "" ? "New tab" : tab.title}
-                </button>
+                </OctantButton>
                 {tabs.length > 1 ? (
-                  <button
+                  <OctantButton
                     aria-label={`Close ${tab.title === "" ? "new tab" : tab.title}`}
                     className="btn-icon"
                     onClick={() => void tabCommand("close", tab.tabId)}
+                    size="icon"
                     type="button"
+                    variant="ghost"
                   >
                     <X aria-hidden="true" size={11} />
-                  </button>
+                  </OctantButton>
                 ) : null}
               </span>
             ))}
             {canOpenTab ? (
-              <button
+              <OctantButton
                 aria-label="Open a new research tab"
                 className="btn-icon"
                 onClick={() => void tabCommand("open")}
+                size="icon"
                 type="button"
+                variant="ghost"
               >
                 <Plus aria-hidden="true" size={13} />
-              </button>
+              </OctantButton>
             ) : null}
           </div>
           <div className="zen-research__chrome">
-            <button
+            <OctantButton
               aria-label="Back"
               className="btn-icon"
               disabled={state?.canGoBack !== true}
               onClick={() => void command("back")}
+              size="icon"
               type="button"
+              variant="ghost"
             >
               <ArrowLeft aria-hidden="true" size={13} />
-            </button>
-            <button
+            </OctantButton>
+            <OctantButton
               aria-label="Forward"
               className="btn-icon"
               disabled={state?.canGoForward !== true}
               onClick={() => void command("forward")}
+              size="icon"
               type="button"
+              variant="ghost"
             >
               <ArrowRight aria-hidden="true" size={13} />
-            </button>
-            <button
+            </OctantButton>
+            <OctantButton
               aria-label={state?.loading === true ? "Stop loading" : "Reload"}
               className="btn-icon"
               onClick={() => void command(state?.loading === true ? "stop" : "reload")}
+              size="icon"
               type="button"
+              variant="ghost"
             >
               {state?.loading === true ? (
                 <LoaderCircle aria-hidden="true" size={13} />
               ) : (
                 <RotateCw aria-hidden="true" size={13} />
               )}
-            </button>
+            </OctantButton>
             <span className="zen-research__address" title={state?.url}>
               {state?.url ?? address}
             </span>
