@@ -107,6 +107,35 @@ describe("context contracts", () => {
     ).toThrow();
   });
 
+  it("keeps provider-reported rolling windows separate from numeric quotas", () => {
+    const limits = decodeProviderServiceLimits({
+      providerInstanceId: ids.provider,
+      scope: "account",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      concurrency: { status: "unavailable" },
+      retry: { status: "inactive" },
+      quota: "unknown",
+      source: "runtime-reported",
+      confidence: "high",
+      updatedAt: timestamp,
+      rateLimitWindows: [
+        {
+          window: "five_hour",
+          status: "warning",
+          utilization: 0.87,
+          resetsAt: "2026-07-18T19:30:00.000Z",
+          observedAt: timestamp,
+        },
+      ],
+    });
+
+    expect(limits.rateLimitWindows).toEqual([
+      expect.objectContaining({ window: "five_hour", utilization: 0.87 }),
+    ]);
+    expect(limits.requests).toEqual({ status: "unavailable" });
+  });
+
   it("represents absent service limits as unavailable rather than unlimited", () => {
     const limits = {
       providerInstanceId: ids.provider,

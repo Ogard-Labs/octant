@@ -30,6 +30,7 @@ import {
   type CodeCheckoutIdentity,
   type PermissionPersistence,
   type ProviderInstance,
+  type ProviderRuntimeEvent,
   type WindowId,
   type CanvasRefreshRequest,
   type CanvasRefreshSkill,
@@ -360,6 +361,8 @@ import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import { ProviderService } from "./providers/providerService";
 import { ProviderUsageLimitsService } from "./providers/providerUsageLimitsService";
 import { createProviderUsageLimitsRouteHandler } from "./providers/providerUsageLimitsRoutes";
+import { ProviderRuntimeUsageLimitsStore } from "./providers/providerRuntimeUsageLimitsStore";
+import { attachProviderRuntimeUsageLimits } from "./providers/providerRuntimeUsageLimitsDriver";
 import {
   createShellRouteHandler,
   isAllowedRendererOrigin,
@@ -646,6 +649,7 @@ interface ConfiguredProviderDriverOptions {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly ollamaHistoryStore?: OllamaHistoryStore;
+  readonly onRuntimeEvent?: (event: ProviderRuntimeEvent) => void;
 }
 
 export function makeConfiguredProviderDriver(
@@ -655,8 +659,9 @@ export function makeConfiguredProviderDriver(
   if (!instance.enabled) {
     throw new Error("Provider instance is disabled.");
   }
+  let driver: ProviderDriver;
   if (instance.driverKind === "openai-compatible") {
-    return makeOpenAiCompatibleDriver({
+    driver = makeOpenAiCompatibleDriver({
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
@@ -665,9 +670,8 @@ export function makeConfiguredProviderDriver(
         : { credentialResolver: options.credentialResolver }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-  }
-  if (instance.driverKind === "anthropic-compatible") {
-    return makeAnthropicCompatibleDriver({
+  } else if (instance.driverKind === "anthropic-compatible") {
+    driver = makeAnthropicCompatibleDriver({
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
@@ -676,9 +680,8 @@ export function makeConfiguredProviderDriver(
         : { credentialResolver: options.credentialResolver }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-  }
-  if (instance.driverKind === "azure-foundry") {
-    return makeAzureFoundryDriver({
+  } else if (instance.driverKind === "azure-foundry") {
+    driver = makeAzureFoundryDriver({
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
@@ -687,33 +690,37 @@ export function makeConfiguredProviderDriver(
         : { credentialResolver: options.credentialResolver }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
+  } else {
+    driver = makeProviderDriver(instance, {
+      openCodeProcess: options.openCodeProcess,
+      codexProcess: options.codexProcess,
+      runtimeRegistry: options.runtimeRegistry,
+      permissionPersistence: options.permissionPersistence,
+      ...(options.acpProcess === undefined ? {} : { acpProcess: options.acpProcess }),
+      ...(options.acpHome === undefined ? {} : { acpHome: options.acpHome }),
+      ...(options.piProcess === undefined ? {} : { piProcess: options.piProcess }),
+      ...(options.piHome === undefined ? {} : { piHome: options.piHome }),
+      ...(options.ohMyPiProcess === undefined ? {} : { ohMyPiProcess: options.ohMyPiProcess }),
+      ...(options.ohMyPiHome === undefined ? {} : { ohMyPiHome: options.ohMyPiHome }),
+      ...(options.claudeProcess === undefined ? {} : { claudeProcess: options.claudeProcess }),
+      ...(options.claudeSdk === undefined ? {} : { claudeSdk: options.claudeSdk }),
+      ...(options.claudeResumeIdentityPort === undefined
+        ? {}
+        : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
+      ...(options.isProjectConfinedPath === undefined
+        ? {}
+        : { isProjectConfinedPath: options.isProjectConfinedPath }),
+      ...(options.credentialResolver === undefined
+        ? {}
+        : { credentialResolver: options.credentialResolver }),
+      ...(options.ollamaHistoryStore === undefined
+        ? {}
+        : { ollamaHistoryStore: options.ollamaHistoryStore }),
+    });
   }
-  return makeProviderDriver(instance, {
-    openCodeProcess: options.openCodeProcess,
-    codexProcess: options.codexProcess,
-    runtimeRegistry: options.runtimeRegistry,
-    permissionPersistence: options.permissionPersistence,
-    ...(options.acpProcess === undefined ? {} : { acpProcess: options.acpProcess }),
-    ...(options.acpHome === undefined ? {} : { acpHome: options.acpHome }),
-    ...(options.piProcess === undefined ? {} : { piProcess: options.piProcess }),
-    ...(options.piHome === undefined ? {} : { piHome: options.piHome }),
-    ...(options.ohMyPiProcess === undefined ? {} : { ohMyPiProcess: options.ohMyPiProcess }),
-    ...(options.ohMyPiHome === undefined ? {} : { ohMyPiHome: options.ohMyPiHome }),
-    ...(options.claudeProcess === undefined ? {} : { claudeProcess: options.claudeProcess }),
-    ...(options.claudeSdk === undefined ? {} : { claudeSdk: options.claudeSdk }),
-    ...(options.claudeResumeIdentityPort === undefined
-      ? {}
-      : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
-    ...(options.isProjectConfinedPath === undefined
-      ? {}
-      : { isProjectConfinedPath: options.isProjectConfinedPath }),
-    ...(options.credentialResolver === undefined
-      ? {}
-      : { credentialResolver: options.credentialResolver }),
-    ...(options.ollamaHistoryStore === undefined
-      ? {}
-      : { ollamaHistoryStore: options.ollamaHistoryStore }),
-  });
+  return options.onRuntimeEvent === undefined
+    ? driver
+    : attachProviderRuntimeUsageLimits(driver, { record: options.onRuntimeEvent });
 }
 
 export interface StartOctantServerOptions {
@@ -2285,6 +2292,7 @@ export function startOctantServer(
       new ProviderRuntimeRegistry({
         receiptDirectory: join(providerDataDirectory, "providers", "runtime-receipts"),
       });
+    const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
     const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive();
     const codexProcess = options.codexProcess ?? makeCodexProcessLive({ octantVersion: version });
     const acpProcess = options.acpProcess ?? makeAcpProcessLive();
@@ -2633,6 +2641,7 @@ export function startOctantServer(
             isProjectConfinedPath,
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
+            onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
           }),
           () => workRequestRuntime,
@@ -2676,7 +2685,7 @@ export function startOctantServer(
       },
     });
     const chatDataDirectory = join(providerDataDirectory, "chat");
-    const configuredDriverOptions = {
+    const configuredDriverOptions: ConfiguredProviderDriverOptions = {
       openCodeProcess,
       codexProcess,
       acpProcess,
@@ -2692,6 +2701,7 @@ export function startOctantServer(
       isProjectConfinedPath,
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
+      onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
     };
     const providerUsageLimitsService = new ProviderUsageLimitsService({
@@ -2714,6 +2724,8 @@ export function startOctantServer(
         );
         return { source: "provider-runtime", limits };
       },
+      runtimeLimits: (instanceId, observedAt) =>
+        providerRuntimeUsageLimitsStore.serviceLimits(instanceId, observedAt),
     });
     providerUsageLimitsService.start();
     void providerUsageLimitsService.refresh().catch(() => undefined);

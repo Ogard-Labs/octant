@@ -5,6 +5,7 @@ import {
   type ProviderUsageLimitsEntry,
   type ProviderUsageLimitsSnapshot,
   type ProviderUsageLimitsSource,
+  type ProviderInstanceId,
   type ProviderServiceLimits,
   type UtcTimestamp,
 } from "@octant/contracts";
@@ -28,6 +29,11 @@ export interface ProviderUsageLimitsServiceOptions {
     instance: ProviderInstance,
     signal: AbortSignal,
   ) => Promise<ProviderUsageLimitsObservation | undefined>;
+  /** Latest normalized runtime evidence, if a live session has reported it. */
+  readonly runtimeLimits?: (
+    instanceId: ProviderInstanceId,
+    observedAt: UtcTimestamp,
+  ) => ProviderServiceLimits | undefined;
   readonly now: () => UtcTimestamp;
   readonly refreshIntervalMs?: number;
   readonly refreshTimeoutMs?: number;
@@ -136,15 +142,31 @@ export class ProviderUsageLimitsService {
           }
         }),
       ]);
+      const runtimeLimits = this.#options.runtimeLimits?.(instance.id, observedAt);
       if (observation === undefined) {
-        return this.#unavailable(instance, observedAt, "unsupported");
+        if (runtimeLimits === undefined) {
+          return this.#unavailable(instance, observedAt, "unsupported");
+        }
+        return {
+          providerInstanceId: instance.id,
+          status: "available",
+          source: "provider-runtime",
+          observedAt,
+          limits: runtimeLimits,
+        };
       }
       return {
         providerInstanceId: instance.id,
         status: "available",
         source: observation.source,
         observedAt,
-        limits: observation.limits,
+        limits:
+          runtimeLimits?.rateLimitWindows === undefined
+            ? observation.limits
+            : {
+                ...observation.limits,
+                rateLimitWindows: runtimeLimits.rateLimitWindows,
+              },
       };
     } catch (error) {
       if (error instanceof ProviderUsageLimitsStopped) {
@@ -227,10 +249,30 @@ export class ProviderUsageLimitsService {
   }
 
   #snapshot(refreshedAt: UtcTimestamp): ProviderUsageLimitsSnapshot {
+    const entries = new Map(this.#entries);
+    const runtimeLimits = this.#options.runtimeLimits;
+    if (runtimeLimits !== undefined) {
+      for (const instance of this.#options.listInstances()) {
+        if (!instance.enabled) continue;
+        const limits = runtimeLimits(instance.id, refreshedAt);
+        if (limits === undefined) continue;
+        const previous = entries.get(String(instance.id));
+        entries.set(String(instance.id), {
+          providerInstanceId: instance.id,
+          status: "available",
+          source: "provider-runtime",
+          observedAt: limits.updatedAt,
+          limits:
+            previous?.status === "available" && limits.rateLimitWindows !== undefined
+              ? { ...previous.limits, rateLimitWindows: limits.rateLimitWindows }
+              : limits,
+        });
+      }
+    }
     return decodeProviderUsageLimitsSnapshot({
       version: 1,
       refreshedAt,
-      entries: [...this.#entries.values()].sort((left, right) =>
+      entries: [...entries.values()].sort((left, right) =>
         String(left.providerInstanceId).localeCompare(String(right.providerInstanceId)),
       ),
     });

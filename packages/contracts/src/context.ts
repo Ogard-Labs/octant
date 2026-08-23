@@ -234,6 +234,20 @@ export const ServiceRetryState = Schema.Union(
 );
 export type ServiceRetryState = typeof ServiceRetryState.Type;
 
+/**
+ * A provider-reported rolling usage window. Providers do not all expose an
+ * absolute request/token quota; utilization is therefore optional and is
+ * never converted into a fabricated limit or remaining count.
+ */
+export const ProviderRateLimitWindow = Schema.Struct({
+  window: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  status: Schema.Literal("allowed", "warning", "exhausted"),
+  utilization: Schema.optional(Schema.Number.pipe(Schema.between(0, 1))),
+  resetsAt: Schema.optional(UtcTimestamp),
+  observedAt: UtcTimestamp,
+}).annotations(strict);
+export type ProviderRateLimitWindow = typeof ProviderRateLimitWindow.Type;
+
 export const ProviderServiceLimits = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   scope: Schema.Literal("provider-instance", "model", "account", "unknown"),
@@ -245,6 +259,9 @@ export const ProviderServiceLimits = Schema.Struct({
   source: ContextMetadataSource,
   confidence: ContextConfidence,
   updatedAt: UtcTimestamp,
+  rateLimitWindows: Schema.optional(
+    Schema.Array(ProviderRateLimitWindow).pipe(Schema.maxItems(32)),
+  ),
 }).annotations(strict);
 export type ProviderServiceLimits = typeof ProviderServiceLimits.Type;
 
