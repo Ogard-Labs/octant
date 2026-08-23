@@ -4,6 +4,7 @@ import type {
   AgentProfileId,
   AgentProfileScope,
   ChatThread,
+  ChatNavigationThread,
   ChatThreadId,
   ChatThreadView,
   CodeCheckoutId,
@@ -86,6 +87,7 @@ import {
   readChatSettings,
   readChatThread,
   readChatThreads,
+  readChatNavigation,
   readChatThreadView,
   readPendingChatPurges,
   searchChatThreads,
@@ -184,6 +186,7 @@ export interface PersistenceService {
   readonly readChatSettings: () => ProjectedChatSettings | undefined;
   readonly readChatThread: (threadId: ChatThreadId) => ChatThread | undefined;
   readonly readChatThreads: () => ReadonlyArray<ChatThread>;
+  readonly readChatNavigation: () => ReadonlyArray<ChatNavigationThread>;
   readonly readChatThreadView: (threadId: ChatThreadId) => ChatThreadView | undefined;
   readonly readChatContent: (contentId: string) => ProjectedChatContent | undefined;
   readonly searchChatThreads: (query: string) => ReadonlyArray<ChatThread>;
@@ -371,6 +374,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readChatSettings: () => readChatSettings(connection),
       readChatThread: (threadId) => readChatThread(connection, threadId),
       readChatThreads: () => readChatThreads(connection),
+      readChatNavigation: () => readChatNavigation(connection),
       readChatThreadView: (threadId) => readChatThreadView(connection, threadId),
       readChatContent: (contentId) => readChatContent(connection, contentId),
       searchChatThreads: (query) => searchChatThreads(connection, query),

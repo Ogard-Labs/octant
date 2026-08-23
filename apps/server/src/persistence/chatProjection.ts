@@ -10,6 +10,7 @@ import {
   decodeChatSettings,
   decodeChatSettingsUpdated,
   decodeChatThread,
+  decodeChatNavigationThread,
   decodeChatThreadCreated,
   decodeChatThreadId,
   decodeChatThreadUpdated,
@@ -24,6 +25,7 @@ import {
   ThreadFollowUp as ThreadFollowUpSchema,
   ThreadWorkItem as ThreadWorkItemSchema,
   type ChatSettings,
+  type ChatNavigationThread,
   type ChatThread,
   type ChatThreadId,
   type ChatThreadView,
@@ -485,6 +487,62 @@ export function readChatThreads(connection: SqliteConnection): ReadonlyArray<Cha
   return rows.map(({ schema_version, thread_json }) => {
     assertChatProjectionSchema(schema_version);
     return decodeChatThread(JSON.parse(thread_json));
+  });
+}
+
+/**
+ * Read the complete sidebar projection in one bounded-metadata query. The
+ * thread view intentionally remains the transcript read; using it here would
+ * load every turn, attachment, citation, and work item once per row.
+ */
+export function readChatNavigation(
+  connection: SqliteConnection,
+): ReadonlyArray<ChatNavigationThread> {
+  const rows = connection
+    .prepare(`
+      WITH activity AS (
+        SELECT thread_id, last_sequence FROM chat_thread_projection
+        UNION ALL SELECT thread_id, last_sequence FROM chat_turn_projection
+        UNION ALL SELECT thread_id, last_sequence FROM chat_attempt_projection
+        UNION ALL SELECT thread_id, last_sequence FROM chat_attachment_projection
+        UNION ALL SELECT thread_id, last_sequence FROM chat_citation_projection
+        UNION ALL SELECT thread_id, last_sequence FROM thread_work_item_projection
+        UNION ALL SELECT thread_id, last_sequence FROM thread_follow_up_projection
+        UNION ALL SELECT thread_id, last_sequence FROM chat_purge_projection
+        UNION ALL SELECT thread_id, last_sequence FROM chat_turn_route_projection
+      ), activity_by_thread AS (
+        SELECT thread_id, max(last_sequence) AS last_sequence
+        FROM activity
+        GROUP BY thread_id
+      )
+      SELECT thread.schema_version, thread.thread_json,
+             activity.last_sequence,
+             coalesce(follow_up.state = 'open', 0) AS follow_up_open
+      FROM chat_thread_projection AS thread
+      INNER JOIN activity_by_thread AS activity ON activity.thread_id = thread.thread_id
+      LEFT JOIN thread_follow_up_projection AS follow_up
+        ON follow_up.thread_id = thread.thread_id
+      WHERE thread.lifecycle = 'active'
+      ORDER BY thread.updated_at DESC, thread.thread_id ASC
+    `)
+    .all() as ReadonlyArray<{
+    readonly schema_version: number;
+    readonly thread_json: string;
+    readonly last_sequence: number;
+    readonly follow_up_open: number;
+  }>;
+  return rows.map((row) => {
+    assertChatProjectionSchema(row.schema_version);
+    const thread = decodeChatThread(JSON.parse(row.thread_json));
+    return decodeChatNavigationThread({
+      id: thread.id,
+      ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+      title: thread.title,
+      providerInstanceId: thread.providerInstanceId,
+      updatedAt: thread.updatedAt,
+      lastSequence: row.last_sequence,
+      followUpOpen: row.follow_up_open === 1,
+    });
   });
 }
 

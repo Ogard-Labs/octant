@@ -755,6 +755,41 @@ describe("ProjectSidebarSection code project views", () => {
     await user.click(await screen.findByRole("menuitem", { name: "New view" }));
     expect(screen.getByRole("dialog", { name: "New project view" })).toBeVisible();
   });
+
+  it("opens an accessible Project View filter popover with only truthful environments", async () => {
+    const user = userEvent.setup();
+    window.localStorage.clear();
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projectViewsEnabled
+        projects={[codeProjectA, codeProjectB]}
+        threads={[
+          {
+            projectId: String(codeProjectA.id),
+            threadId: "thread-a",
+            title: "Planning",
+            updatedAt: "2026-08-23T10:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Project view filters" }));
+    expect(screen.getByRole("heading", { name: "Project view filters" })).toBeInTheDocument();
+    expect(screen.getByText("All environments")).toBeVisible();
+    expect(screen.getByText("Local")).toBeVisible();
+    expect(screen.queryByText("Devbox")).not.toBeInTheDocument();
+    expect(screen.getByText("Show empty Projects")).toBeVisible();
+    expect(screen.getByText("Thread activity")).toBeVisible();
+  });
 });
 
 describe("ProjectSidebarSection Code and Work recents", () => {
