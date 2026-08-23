@@ -83,4 +83,23 @@ describe("AgentRunLiveConversationStore", () => {
     store.appendText(runId, "after abort", occurredAt);
     await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
+
+  it("marks a slow consumer stale instead of retaining an unbounded update queue", async () => {
+    const store = new AgentRunLiveConversationStore();
+    store.begin(runId);
+    const controller = new AbortController();
+    const stream = store.subscribe({ runId, signal: controller.signal });
+    await stream.next();
+    for (let index = 0; index < 40; index += 1) {
+      store.appendText(runId, `chunk ${index}`, occurredAt);
+    }
+    await expect(stream.next()).resolves.toMatchObject({
+      value: {
+        status: "stale",
+        staleReason: "Live child transcript consumer fell behind; reconnect to continue.",
+      },
+      done: false,
+    });
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+  });
 });

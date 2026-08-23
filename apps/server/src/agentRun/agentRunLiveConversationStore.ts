@@ -37,6 +37,7 @@ interface ConversationSubscriber {
 }
 
 const MAX_SUBSCRIBERS_PER_RUN = 8;
+const MAX_PENDING_SUBSCRIBER_UPDATES = 32;
 
 /**
  * Process-local live child transcript. It is deliberately not a projection or
@@ -179,7 +180,7 @@ export class AgentRunLiveConversationStore {
     input.signal.addEventListener("abort", subscriber.onAbort, { once: true });
     try {
       for (;;) {
-        if (subscriber.closed || input.signal.aborted) return;
+        if ((subscriber.closed && subscriber.queue.length === 0) || input.signal.aborted) return;
         const next = subscriber.queue.shift();
         if (next !== undefined) {
           yield next;
@@ -225,6 +226,17 @@ export class AgentRunLiveConversationStore {
         // Do not queue empty live deltas. Terminal snapshots are meaningful
         // even without entries and are therefore always delivered.
         if (snapshot.entries.length > 0 || snapshot.status !== "live") {
+          if (subscriber.queue.length >= MAX_PENDING_SUBSCRIBER_UPDATES) {
+            subscriber.queue.length = 0;
+            subscriber.queue.push({
+              ...snapshot,
+              status: "stale",
+              staleReason: "Live child transcript consumer fell behind; reconnect to continue.",
+            });
+            subscriber.closed = true;
+            subscriber.resolve?.();
+            continue;
+          }
           subscriber.queue.push(snapshot);
         }
       }
