@@ -2623,6 +2623,7 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       clearResumeIdentities: (instanceId) =>
         claudeResumeIdentityStore.removeProvider(instanceId, new AbortController().signal),
+      clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       driver: (instance) =>
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {

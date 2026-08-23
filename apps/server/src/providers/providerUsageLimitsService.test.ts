@@ -140,7 +140,8 @@ describe("ProviderUsageLimitsService", () => {
   });
 
   it("keeps runtime evidence visible when an active observer fails", async () => {
-    const observedAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
+    const runtimeObservedAt = "2026-08-23T01:00:00.000Z" as UtcTimestamp;
+    const refreshStartedAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
     const runtime = decodeProviderServiceLimits({
       providerInstanceId: firstId,
       scope: "provider-instance",
@@ -151,8 +152,8 @@ describe("ProviderUsageLimitsService", () => {
       quota: "unknown",
       source: "runtime-reported",
       confidence: "high",
-      updatedAt: observedAt,
-      rateLimitWindows: [{ window: "weekly", status: "allowed", observedAt }],
+      updatedAt: runtimeObservedAt,
+      rateLimitWindows: [{ window: "weekly", status: "allowed", observedAt: runtimeObservedAt }],
     });
     const service = new ProviderUsageLimitsService({
       listInstances: () => [instance(firstId)],
@@ -160,11 +161,25 @@ describe("ProviderUsageLimitsService", () => {
         throw new Error("observer unavailable");
       }),
       runtimeLimits: () => runtime,
-      now: () => observedAt,
+      now: () => refreshStartedAt,
     });
 
     await expect(service.refresh()).resolves.toMatchObject({
-      entries: [{ status: "available", limits: { rateLimitWindows: [{ window: "weekly" }] } }],
+      entries: [
+        {
+          status: "failed",
+          staleLimits: { rateLimitWindows: [{ window: "weekly" }] },
+          lastSuccessfulAt: runtimeObservedAt,
+        },
+      ],
+    });
+    const refreshed = await service.refresh();
+    expect(refreshed.entries[0]).toMatchObject({
+      status: "failed",
+      staleLimits: { rateLimitWindows: [{ window: "weekly" }] },
+    });
+    expect(refreshed.entries[0]).not.toMatchObject({
+      lastSuccessfulAt: refreshStartedAt,
     });
   });
 

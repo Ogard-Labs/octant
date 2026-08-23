@@ -53,6 +53,7 @@ describe("ProviderRuntimeUsageLimitsStore", () => {
       providerInstanceId: instanceId,
       source: "runtime-reported",
       confidence: "high",
+      quota: "unknown",
       rateLimitWindows: [expect.objectContaining({ window: "five_hour", status: "exhausted" })],
     });
   });
@@ -117,5 +118,15 @@ describe("ProviderRuntimeUsageLimitsStore", () => {
 
     expect(store.windows(instanceId)).toEqual([]);
     expect(store.windows(otherInstanceId)).toHaveLength(1);
+  });
+
+  it("clears all evidence for a provider identity when its configuration is invalidated", () => {
+    const store = new ProviderRuntimeUsageLimitsStore();
+    store.record(windowEvent());
+
+    store.clear(instanceId);
+
+    expect(store.windows(instanceId)).toEqual([]);
+    expect(store.serviceLimits(instanceId, timestamp("2026-08-24T01:02:00.000Z"))).toBeUndefined();
   });
 });

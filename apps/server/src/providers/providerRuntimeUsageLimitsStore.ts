@@ -87,7 +87,6 @@ export class ProviderRuntimeUsageLimitsStore {
   ): ProviderServiceLimits | undefined {
     const rateLimitWindows = this.windows(instanceId, updatedAt);
     if (rateLimitWindows.length === 0) return undefined;
-    const exhausted = rateLimitWindows.some((window) => window.status === "exhausted");
     return decodeProviderServiceLimits({
       providerInstanceId: instanceId,
       scope: "provider-instance",
@@ -95,7 +94,9 @@ export class ProviderRuntimeUsageLimitsStore {
       tokens: { status: "unavailable" },
       concurrency: { status: "unavailable" },
       retry: { status: "inactive" },
-      quota: exhausted ? "exhausted" : "unknown",
+      // A window being exhausted is not evidence that the provider account
+      // quota is exhausted; providers may expose several independent windows.
+      quota: "unknown",
       source: "runtime-reported",
       confidence: "high",
       updatedAt,

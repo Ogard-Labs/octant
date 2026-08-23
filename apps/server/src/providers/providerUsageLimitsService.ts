@@ -173,27 +173,22 @@ export class ProviderUsageLimitsService {
         return previous ?? this.#unavailable(instance, observedAt, "not-ready");
       }
       const runtimeLimits = this.#options.runtimeLimits?.(instance.id, observedAt);
-      if (runtimeLimits !== undefined) {
-        return {
-          providerInstanceId: instance.id,
-          status: "available",
-          source: "provider-runtime",
-          observedAt,
-          limits: runtimeLimits,
-        };
-      }
-      const staleLimits =
+      const priorStaleLimits =
         previous?.status === "available"
           ? previous.limits
           : previous?.status === "failed"
-            ? previous.staleLimits
-            : undefined;
+            ? (previous.staleLimits ?? runtimeLimits)
+            : runtimeLimits;
+      const staleLimits =
+        priorStaleLimits === undefined || runtimeLimits?.rateLimitWindows === undefined
+          ? priorStaleLimits
+          : { ...priorStaleLimits, rateLimitWindows: runtimeLimits.rateLimitWindows };
       const lastSuccessfulAt =
         previous?.status === "available"
           ? previous.observedAt
           : previous?.status === "failed"
-            ? previous.lastSuccessfulAt
-            : undefined;
+            ? (previous.lastSuccessfulAt ?? runtimeLimits?.updatedAt)
+            : runtimeLimits?.updatedAt;
       const providerFailure = this.#providerFailure(error);
       const retryAfterMs = providerFailure?.retryAfterMs;
       const failureRetryAt =
@@ -267,6 +262,20 @@ export class ProviderUsageLimitsService {
         const limits = runtimeLimits(instance.id, refreshedAt);
         if (limits === undefined) continue;
         const previous = entries.get(String(instance.id));
+        if (previous?.status === "failed") {
+          const staleLimits =
+            previous.staleLimits === undefined || limits.rateLimitWindows === undefined
+              ? (previous.staleLimits ?? limits)
+              : { ...previous.staleLimits, rateLimitWindows: limits.rateLimitWindows };
+          entries.set(String(instance.id), {
+            ...previous,
+            staleLimits,
+            ...(previous.lastSuccessfulAt === undefined
+              ? { lastSuccessfulAt: limits.updatedAt }
+              : {}),
+          });
+          continue;
+        }
         entries.set(String(instance.id), {
           providerInstanceId: instance.id,
           status: "available",
