@@ -7,6 +7,7 @@ import type { GithubClient } from "@octant/client-runtime/github-client";
 import type { HostControlClient } from "@octant/client-runtime/host-control-client";
 import type { HostFederationLifecycle } from "@octant/client-runtime/host-federation-lifecycle";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
+import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import type { SettingsDeepLink } from "@octant/contracts";
 import type { ShellSettings } from "@octant/contracts/shell";
 import type { ThemeTypography } from "@octant/contracts/theme";
@@ -60,6 +61,7 @@ export interface ShellSettingsSurfaceProps {
   readonly hostBridge?: OctantHostBridge;
   readonly githubClient: GithubClient;
   readonly usageClient: UsageClient;
+  readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly visibleSettings: ReadonlyArray<ImplementedSettingId>;
   readonly announcement: string;
   readonly announcementSequence: number;
@@ -119,6 +121,9 @@ export function ShellSettingsSurface(props: ShellSettingsSurfaceProps) {
               : { hostFederationLifecycle: props.hostFederationLifecycle })}
             githubClient={props.githubClient}
             usageClient={props.usageClient}
+            {...(props.providerUsageLimitsClient === undefined
+              ? {}
+              : { providerUsageLimitsClient: props.providerUsageLimitsClient })}
             visibleSettings={props.visibleSettings}
           />
         </Suspense>

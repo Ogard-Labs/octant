@@ -36,6 +36,7 @@ import type { CodeController } from "../code/useCodeController";
 import { CodeSettingsView } from "../code/CodeSettingsView";
 import { UsageDashboard } from "../usage/UsageDashboard";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
+import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { DiagnosticsExportControl } from "../support/DiagnosticsExportControl";
 import type { DiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
@@ -71,6 +72,7 @@ import type { AutomationNotificationClient } from "@octant/client-runtime/automa
 import { ThemeAppearanceEditor } from "../theme/ThemeAppearanceEditor";
 import { AppUpdateSettings } from "../settings/AppUpdateSettings";
 import { OpenInApplicationSettings } from "../settings/OpenInApplicationSettings";
+import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import type { OctantHostBridge } from "./hostBridge";
 import "../styles/settings.css";
 import "../styles/extensions-settings.css";
@@ -96,6 +98,7 @@ export interface SettingsViewProps {
   readonly providerController?: ProviderController;
   readonly discoveryController?: DiscoveryController;
   readonly usageClient?: UsageClient;
+  readonly providerUsageLimitsClient?: ProviderUsageLimitsClient;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
   readonly hostFederationLifecycle?: HostFederationLifecycle;
@@ -367,7 +370,13 @@ function ActiveSectionContent({
       );
     case "usage":
       return props.usageClient !== undefined ? (
-        <div id="settings-usage">
+        <div className="settings-usage-stack" id="settings-usage">
+          {props.providerUsageLimitsClient === undefined ? null : (
+            <ProviderUsageLimitsPanel
+              client={props.providerUsageLimitsClient}
+              instances={props.providerController?.instances ?? []}
+            />
+          )}
           <UsageDashboard
             client={props.usageClient}
             {...(props.isNarrow === undefined ? {} : { isNarrow: props.isNarrow })}

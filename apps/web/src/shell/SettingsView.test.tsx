@@ -618,6 +618,39 @@ describe("SettingsView", () => {
     expect(screen.getAllByRole("heading", { name: "Usage" })).toHaveLength(1);
   });
 
+  it("mounts provider limits beside the local usage dashboard", async () => {
+    const usageClient = {
+      query: vi.fn(async () => {
+        throw new Error("No local usage records.");
+      }),
+      export: vi.fn(),
+      reset: vi.fn(),
+      retain: vi.fn(),
+    };
+    const providerUsageLimitsClient = {
+      list: vi.fn(async () => ({
+        version: 1 as const,
+        refreshedAt: now,
+        entries: [],
+      })),
+      refresh: vi.fn(async () => ({
+        version: 1 as const,
+        refreshedAt: now,
+        entries: [],
+      })),
+    };
+
+    renderSettings({
+      usageClient: usageClient as never,
+      providerUsageLimitsClient: providerUsageLimitsClient as never,
+      initialDeepLink: { section: "usage" },
+    });
+
+    expect(screen.getByRole("heading", { name: "Provider limits" })).toBeVisible();
+    expect(await screen.findByText("No configured providers have reported limits.")).toBeVisible();
+    expect(providerUsageLimitsClient.list).toHaveBeenCalledOnce();
+  });
+
   it("hides the diagnostics export control in Advanced when no client is provided", () => {
     renderSettings();
     navigateTo("Advanced");

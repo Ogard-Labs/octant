@@ -25,6 +25,7 @@ import { createWorkMutationClient } from "@octant/client-runtime/work-mutation-c
 import { createWorkRequestClient } from "@octant/client-runtime/work-request-client";
 import { createFolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import { createUsageClient } from "@octant/client-runtime/usage-client";
+import { createProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { createDiagnosticsExportClient } from "@octant/client-runtime/diagnostics-export-client";
 import { createHostControlClient } from "@octant/client-runtime/host-control-client";
 import { createGithubClient } from "@octant/client-runtime/github-client";
@@ -1046,6 +1047,19 @@ function LaunchedShell(
       }),
     [props.launch.serverUrl, props.projectWindowCapability],
   );
+  const providerUsageLimitsClient = useMemo(() => {
+    try {
+      return createProviderUsageLimitsClient({
+        baseUrl: props.launch.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: props.projectWindowCapability,
+      });
+    } catch {
+      // Provider limit facts are a local-host capability. Remote clients keep
+      // the rest of Settings usable and omit this optional panel.
+      return undefined;
+    }
+  }, [props.launch.serverUrl, props.projectWindowCapability]);
   const diagnosticsExportClient = useMemo(
     () =>
       createDiagnosticsExportClient({
@@ -3438,6 +3452,7 @@ function LaunchedShell(
       {...(hostFederationLifecycle === undefined ? {} : { hostFederationLifecycle })}
       githubClient={githubClient}
       usageClient={usageClient}
+      {...(providerUsageLimitsClient === undefined ? {} : { providerUsageLimitsClient })}
       visibleSettings={controller.visibleSettings}
       announcement={controller.announcement}
       announcementSequence={controller.announcementSequence}

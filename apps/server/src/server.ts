@@ -357,6 +357,8 @@ import { createProviderFromDiscoveryCandidate } from "./providers/discoveryProvi
 import { makeDiscoveryService } from "./providers/discoveryService";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import { ProviderService } from "./providers/providerService";
+import { ProviderUsageLimitsService } from "./providers/providerUsageLimitsService";
+import { createProviderUsageLimitsRouteHandler } from "./providers/providerUsageLimitsRoutes";
 import {
   createShellRouteHandler,
   isAllowedRendererOrigin,
@@ -2674,6 +2676,33 @@ export function startOctantServer(
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
     };
+    const providerUsageLimitsService = new ProviderUsageLimitsService({
+      listInstances: () => persistence.readProviderInstances(),
+      now: () => new Date().toISOString() as UtcTimestamp,
+      observe: async (instance, signal) => {
+        let driver: ProviderDriver;
+        try {
+          driver = makeConfiguredProviderDriver(instance, {
+            ...configuredDriverOptions,
+          });
+        } catch {
+          return undefined;
+        }
+        const facts = driver.contextFacts;
+        if (facts === undefined) return undefined;
+        const limits = await Effect.runPromise(
+          Effect.scoped(facts.observeServiceLimits({ instanceId: instance.id })),
+          { signal },
+        );
+        return { source: "provider-runtime", limits };
+      },
+    });
+    providerUsageLimitsService.start();
+    void providerUsageLimitsService.refresh().catch(() => undefined);
+    const providerUsageLimitsRoutes = createProviderUsageLimitsRouteHandler({
+      service: providerUsageLimitsService,
+      windowAuthorityStore,
+    });
     const browserAuthority = new ServerBrowserAuthorityResolver({
       hostId: deriveToolHostId(providerDataDirectory),
       persistence,
@@ -5395,6 +5424,7 @@ export function startOctantServer(
       (await codeRoutes(request)) ??
       (await appleToolchainRoutes(request)) ??
       (await providerRoutes(request)) ??
+      (await providerUsageLimitsRoutes(request)) ??
       (await discoveryRoutes(request)) ??
       (await chatRoutes(request)) ??
       (await threadCheckpointRoutes(request)) ??
@@ -5721,6 +5751,7 @@ export function startOctantServer(
           } catch (error) {
             shutdownFailure ??= error;
           }
+          providerUsageLimitsService.stop();
           try {
             managedCloneService.close();
           } catch (error) {

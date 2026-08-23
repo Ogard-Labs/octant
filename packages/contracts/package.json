@@ -71,6 +71,7 @@
     "./projects": "./src/projects.ts",
     "./providers": "./src/providers.ts",
     "./provider-discovery": "./src/providerDiscovery.ts",
+    "./provider-usage-limits": "./src/providerUsageLimits.ts",
     "./shell": "./src/shell.ts",
     "./thread-draft": "./src/threadDraft.ts",
     "./theme": "./src/theme.ts",
