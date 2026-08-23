@@ -29,6 +29,9 @@ import { useEffect, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { ListArrangementMenu } from "../shell/ListArrangementMenu";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { AutomationDefinitionEditor } from "./AutomationDefinitionEditor";
 import {
   automationAuthoritySummary,
@@ -295,7 +298,7 @@ export function AutomationCenter(props: AutomationCenterProps) {
               <label className="automation-center__search">
                 <span className="sr-only">Search automations</span>
                 <Search aria-hidden="true" size={14} strokeWidth={1.8} />
-                <input
+                <OctantInput
                   onChange={(event) => controller.setSearch(event.target.value)}
                   placeholder="Search automations"
                   type="search"
@@ -303,44 +306,48 @@ export function AutomationCenter(props: AutomationCenterProps) {
                 />
               </label>
               <ListArrangementMenu arrangement={arrangement} onChange={setArrangement} />
-              <fieldset className="automation-center__views segmented">
-                <legend className="sr-only">Choose a view</legend>
-                {(["list", "calendar"] as const).map((candidate) => (
-                  <label className="automation-center__view segment" key={candidate}>
-                    <input
-                      checked={view === candidate}
-                      name="automation-center-view"
-                      onChange={() => setView(candidate)}
-                      type="radio"
-                      value={candidate}
-                    />
-                    <span>{candidate === "list" ? "List" : "Calendar"}</span>
-                  </label>
-                ))}
-              </fieldset>
+              <OctantToggleGroup<typeof view>
+                aria-label="Choose a view"
+                className="automation-center__views segmented"
+                onValueChange={(value) => {
+                  const next = value[0];
+                  if (next !== undefined) setView(next);
+                }}
+                value={[view]}
+              >
+                <OctantToggleGroupItem className="automation-center__view segment" value="list">
+                  List
+                </OctantToggleGroupItem>
+                <OctantToggleGroupItem className="automation-center__view segment" value="calendar">
+                  Calendar
+                </OctantToggleGroupItem>
+              </OctantToggleGroup>
               <label className="automation-center__completed check">
-                <input
+                <OctantCheckbox
                   checked={includeCompleted}
                   onChange={(event) => setIncludeCompleted(event.target.checked)}
-                  type="checkbox"
                 />
                 <span>Show completed</span>
               </label>
-              <fieldset className="automation-center__filters segmented">
-                <legend className="sr-only">Filter by mode</legend>
+              <OctantToggleGroup<AutomationCenterFilter>
+                aria-label="Filter by mode"
+                className="automation-center__filters segmented"
+                onValueChange={(value) => {
+                  const next = value[0];
+                  if (next !== undefined) controller.setFilter(next);
+                }}
+                value={[controller.filter]}
+              >
                 {FILTERS.map((filter) => (
-                  <label className="automation-center__filter segment" key={filter.value}>
-                    <input
-                      checked={controller.filter === filter.value}
-                      name="automation-center-filter"
-                      onChange={() => controller.setFilter(filter.value)}
-                      type="radio"
-                      value={filter.value}
-                    />
-                    <span>{filter.label}</span>
-                  </label>
+                  <OctantToggleGroupItem
+                    className="automation-center__filter segment"
+                    key={filter.value}
+                    value={filter.value}
+                  >
+                    {filter.label}
+                  </OctantToggleGroupItem>
                 ))}
-              </fieldset>
+              </OctantToggleGroup>
               <OctantButton
                 className="automation-center__create"
                 onClick={() => {
@@ -514,14 +521,15 @@ function AutomationListBody(props: {
                 className="automation-row"
                 key={String(summary.id)}
               >
-                <button
+                <OctantButton
                   className="automation-row__open"
                   data-automation-row={String(summary.id)}
                   onClick={() => props.onSelect(String(summary.id))}
                   type="button"
+                  variant="ghost"
                 >
                   <span className="automation-row__name">{summary.displayName}</span>
-                </button>
+                </OctantButton>
                 <div className="automation-row__meta">
                   <span className="automation-row__project">
                     {props.projectNames.get(String(summary.projectId)) ?? "Project"}

@@ -7,6 +7,11 @@ import type {
 import { environmentLabel } from "@octant/client-runtime/environment-selection";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   automationAuthoritySummary,
   automationModeLabel,
@@ -376,7 +381,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.name}>Name</label>
-        <input
+        <OctantInput
           className="input"
           id={ids.name}
           onChange={(event) => setDisplayName(event.target.value)}
@@ -388,7 +393,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.task}>Task for each run</label>
-        <textarea
+        <OctantTextarea
           className="textarea"
           id={ids.task}
           onChange={(event) => setTaskPrompt(event.target.value)}
@@ -407,7 +412,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           the filter and on a row.
         */}
         <label htmlFor={ids.host}>Environment</label>
-        <select
+        <OctantNativeSelect
           className="select"
           id={ids.host}
           onChange={(event) => setHostId(event.target.value)}
@@ -423,28 +428,34 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
               })}
             </option>
           ))}
-        </select>
+        </OctantNativeSelect>
       </div>
 
-      <fieldset className="automation-editor__field automation-editor__mode">
-        <legend>Mode</legend>
-        {(["work", "code"] as const).map((option) => (
-          <label className="automation-editor__mode-option check" key={option}>
-            <input
-              checked={mode === option}
-              name="automation-editor-mode"
-              onChange={() => changeMode(option)}
-              type="radio"
+      <div className="automation-editor__field automation-editor__mode">
+        <span>Mode</span>
+        <OctantToggleGroup<AutomationMode>
+          aria-label="Mode"
+          onValueChange={(value) => {
+            const next = value[0];
+            if (next !== undefined) changeMode(next);
+          }}
+          value={[mode]}
+        >
+          {(["work", "code"] as const).map((option) => (
+            <OctantToggleGroupItem
+              className="automation-editor__mode-option"
+              key={option}
               value={option}
-            />
-            <span>{automationModeLabel(option)}</span>
-          </label>
-        ))}
-      </fieldset>
+            >
+              {automationModeLabel(option)}
+            </OctantToggleGroupItem>
+          ))}
+        </OctantToggleGroup>
+      </div>
 
       <div className="automation-editor__field">
         <label htmlFor={ids.project}>Project</label>
-        <select
+        <OctantNativeSelect
           className="select"
           id={ids.project}
           onChange={(event) => {
@@ -459,7 +470,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
               {project.name}
             </option>
           ))}
-        </select>
+        </OctantNativeSelect>
         {projectOptions.length === 0 ? (
           <p className="automation-editor__note" role="status">
             No {automationModeLabel(mode)} Projects are available on this host.
@@ -469,7 +480,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.execution}>Execution profile</label>
-        <select
+        <OctantNativeSelect
           className="select"
           id={ids.execution}
           onChange={(event) => setExecutionProfileId(event.target.value)}
@@ -481,7 +492,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
               {option.label}
             </option>
           ))}
-        </select>
+        </OctantNativeSelect>
         {executionOptions.length === 0 ? (
           <p className="automation-editor__note" role="status">
             No eligible execution profiles are available for this selection.
@@ -491,7 +502,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.authority}>Authority profile</label>
-        <select
+        <OctantNativeSelect
           className="select"
           id={ids.authority}
           onChange={(event) => setAuthorityProfileId(event.target.value)}
@@ -503,7 +514,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
               {option.label}
             </option>
           ))}
-        </select>
+        </OctantNativeSelect>
         {selectedAuthority === undefined ? null : (
           <p className="automation-editor__note">
             {automationAuthoritySummary(selectedAuthority.receipt)}
@@ -521,7 +532,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.schedule}>Schedule</label>
-        <select
+        <OctantNativeSelect
           className="select"
           id={ids.schedule}
           onChange={(event) =>
@@ -535,13 +546,13 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           <option value="once">Run once</option>
           <option value="interval">Repeat on an interval</option>
           <option value="weekly-local">Weekly on chosen days</option>
-        </select>
+        </OctantNativeSelect>
       </div>
 
       {trigger.kind === "once" ? (
         <div className="automation-editor__field">
           <label htmlFor={ids.onceAt}>Run at</label>
-          <input
+          <OctantInput
             className="input"
             id={ids.onceAt}
             onChange={(event) =>
@@ -557,7 +568,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         <>
           <div className="automation-editor__field">
             <label htmlFor={ids.anchorAt}>Starts at</label>
-            <input
+            <OctantInput
               className="input"
               id={ids.anchorAt}
               onChange={(event) =>
@@ -569,7 +580,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           </div>
           <div className="automation-editor__field">
             <label htmlFor={ids.interval}>Repeat every (minutes)</label>
-            <input
+            <OctantInput
               className="input"
               id={ids.interval}
               min={15}
@@ -590,7 +601,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
             <legend>Weekdays</legend>
             {weekdayOptions.map((weekday) => (
               <label className="automation-editor__weekday check" key={weekday.value}>
-                <input
+                <OctantCheckbox
                   checked={trigger.weekdays.has(weekday.value)}
                   onChange={(event) =>
                     setTrigger((previous) => {
@@ -600,7 +611,6 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
                       return { ...previous, weekdays };
                     })
                   }
-                  type="checkbox"
                 />
                 <span>{weekday.label}</span>
               </label>
@@ -608,7 +618,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           </fieldset>
           <div className="automation-editor__field">
             <label htmlFor={ids.time}>Time of day</label>
-            <input
+            <OctantInput
               className="input"
               id={ids.time}
               onChange={(event) =>
@@ -620,7 +630,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           </div>
           <div className="automation-editor__field">
             <label htmlFor={ids.timeZone}>Timezone</label>
-            <input
+            <OctantInput
               className="input"
               id={ids.timeZone}
               list={ids.timeZoneList}
@@ -642,7 +652,7 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
 
       <div className="automation-editor__field">
         <label htmlFor={ids.missed}>Missed runs</label>
-        <select
+        <OctantNativeSelect
           className="select"
           id={ids.missed}
           onChange={(event) => setMissedRunPolicy(event.target.value as AutomationMissedRunPolicy)}
@@ -650,12 +660,12 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
         >
           <option value="skip">Skip missed runs</option>
           <option value="run-once">Run the newest missed occurrence once</option>
-        </select>
+        </OctantNativeSelect>
       </div>
 
       <div className="automation-editor__field">
         <label htmlFor={ids.target}>Delivery target</label>
-        <textarea
+        <OctantTextarea
           className="textarea"
           id={ids.target}
           onChange={(event) => setTargetSummary(event.target.value)}
@@ -668,11 +678,10 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
       </div>
 
       <div className="automation-editor__field automation-editor__confirmation">
-        <input
+        <OctantCheckbox
           checked={targetConfirmed}
           id={ids.confirm}
           onChange={(event) => setTargetConfirmed(event.target.checked)}
-          type="checkbox"
         />
         <label htmlFor={ids.confirm}>I confirm this delivery target for every scheduled run</label>
       </div>

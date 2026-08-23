@@ -1,7 +1,7 @@
 import type { AutomationSummary } from "@octant/contracts";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo } from "react";
-import { OctantIconButton } from "../ui/base/OctantButton";
+import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { buildRoutineCalendarMonth, stepRoutineCalendarMonth } from "./routineCalendarModel";
 
 const WEEKDAY_HEADINGS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -75,14 +75,15 @@ export function RoutineCalendar(props: {
             <ul className="routine-calendar__entries">
               {day.entries.map((entry) => (
                 <li key={`${entry.automationId}-${entry.at ?? day.date}`}>
-                  <button
+                  <OctantButton
                     className="routine-calendar__entry"
                     onClick={() => props.onSelect(entry.automationId)}
                     type="button"
+                    variant="ghost"
                   >
                     <span className="routine-calendar__entry-time">{entry.label}</span>
                     <span className="routine-calendar__entry-name">{entry.displayName}</span>
-                  </button>
+                  </OctantButton>
                 </li>
               ))}
             </ul>

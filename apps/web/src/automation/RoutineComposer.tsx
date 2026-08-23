@@ -1,6 +1,7 @@
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
 import {
   ROUTINE_REQUEST_SUGGESTIONS,
   draftRoutineFromRequest,
@@ -43,7 +44,7 @@ export function RoutineComposer(props: RoutineComposerProps) {
         <Sparkles aria-hidden="true" size={13} strokeWidth={1.8} />
         What do you want automated?
       </label>
-      <textarea
+      <OctantTextarea
         className="routine-composer__input textarea"
         id="routine-composer-request"
         onChange={(event) => read(event.target.value)}
@@ -55,13 +56,14 @@ export function RoutineComposer(props: RoutineComposerProps) {
       <ul aria-label="Routine suggestions" className="routine-composer__suggestions">
         {ROUTINE_REQUEST_SUGGESTIONS.map((suggestion) => (
           <li key={suggestion.label}>
-            <button
+            <OctantButton
               className="routine-composer__chip"
               onClick={() => read(suggestion.request)}
               type="button"
+              variant="ghost"
             >
               {suggestion.label}
-            </button>
+            </OctantButton>
           </li>
         ))}
       </ul>
