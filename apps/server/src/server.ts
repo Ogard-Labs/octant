@@ -280,6 +280,7 @@ import {
   createRecordedAgentRunContextSnapshotPort,
 } from "./agentRun/agentRunSessionRuntime";
 import { AgentRunSessionSupervisor } from "./agentRun/agentRunSessionSupervisor";
+import { AgentRunLiveConversationStore } from "./agentRun/agentRunLiveConversationStore";
 import { createFolderBrowseRouteHandler } from "./folderBrowseRoutes";
 import { createLinkedThreadRouteHandler } from "./linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "./linkedThread/linkedThreadRuntime";
@@ -1394,6 +1395,7 @@ export function startOctantServer(
       maxRetryJitterMs: 250,
       ambiguousReservationTtlMs: 60_000,
     });
+    const agentRunLiveConversations = new AgentRunLiveConversationStore();
     // Managed subagent execution. A managed child runs as an in-process
     // provider session, not a spawned process, so authority is re-derived from
     // the run rather than inherited from the parent thread at execution time.
@@ -1435,6 +1437,21 @@ export function startOctantServer(
           scheduler: capacityScheduler,
           now: () => new Date().toISOString() as UtcTimestamp,
         }),
+        onSessionStarted: ({ runId }) => agentRunLiveConversations.begin(runId),
+        onTextDelta: ({ runId, text, occurredAt }) =>
+          agentRunLiveConversations.appendText(runId, text, occurredAt as UtcTimestamp),
+        onSessionSettled: ({ runId, outcome }) => {
+          if (outcome.kind === "completed") {
+            agentRunLiveConversations.complete(runId);
+          } else {
+            agentRunLiveConversations.markStale(
+              runId,
+              outcome.kind === "failed"
+                ? outcome.failure.message
+                : "The child session ended before a complete transcript was retained.",
+            );
+          }
+        },
       }),
       // A settled managed session is the only signal that a child finished, so
       // orchestration records its terminal state durably. `agentRunOrchestration`
@@ -1473,6 +1490,7 @@ export function startOctantServer(
     const agentRunRoutes = createAgentRunRouteHandler({
       windowAuthorityStore,
       persistence: agentRunPersistence,
+      liveConversations: agentRunLiveConversations,
       orchestration: agentRunOrchestration,
       settings: agentRunSettingsStore,
       providerReadiness: {

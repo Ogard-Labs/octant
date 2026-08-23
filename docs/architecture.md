@@ -174,7 +174,11 @@ becomes an overlay drawer. Environment belongs to a thread as a compact header
 summary with a transient disclosure whose open state is renderer-only. It may
 summarize the active thread's server-authored child AgentRuns, including their
 lifecycle, resolved model, and retained final result; full AgentRun control
-stays in the Agents dock. Work and Code
+stays in the Agents dock. The host also exposes a bounded, process-local child
+conversation read for managed runs: entries are cursor-readable and byte- and
+count-bounded, with explicit complete, stale, and unavailable states. Provider-
+native children remain transcript-unavailable unless their normalized provider
+capability supplies an equivalent host-authorized read. Work and Code
 have server-authoritative thread boards
 (Ready / In progress / Waiting / Done) that cannot be dragged between columns;
 Chat has no board. Code also has a Project-scoped Pull requests workspace that

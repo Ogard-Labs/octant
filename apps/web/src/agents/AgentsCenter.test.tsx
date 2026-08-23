@@ -43,6 +43,7 @@ const summary = decodeAgentRunCenterSummary({
 function createClient(overrides: Partial<AgentRunClient> = {}): AgentRunClient {
   return {
     center: vi.fn(async () => ({ items: [summary] })),
+    conversation: vi.fn(),
     parentSummary: vi.fn(),
     acknowledge: vi.fn(),
     prepareWorkspace: vi.fn(),

@@ -131,6 +131,17 @@ export interface AgentRunSessionRuntimeOptions {
   readonly timeoutMs?: number;
   /** Bound on one teardown attempt; see {@link DEFAULT_SHUTDOWN_TIMEOUT_MS}. */
   readonly shutdownTimeoutMs?: number;
+  /** Publishes ephemeral managed-child transcript facts to the host read model. */
+  readonly onSessionStarted?: (input: { readonly runId: AgentRunId }) => void;
+  readonly onTextDelta?: (input: {
+    readonly runId: AgentRunId;
+    readonly text: string;
+    readonly occurredAt: string;
+  }) => void;
+  readonly onSessionSettled?: (input: {
+    readonly runId: AgentRunId;
+    readonly outcome: AgentRunSessionOutcome;
+  }) => void;
   readonly reconcile?: () => Promise<void>;
 }
 
@@ -234,6 +245,11 @@ export function createAgentRunSessionRuntime(
       const settle = (outcome: AgentRunSessionOutcome): void => {
         if (settledOutcome !== undefined) return;
         settledOutcome = outcome;
+        try {
+          options.onSessionSettled?.({ runId: run.id, outcome });
+        } catch {
+          // A transient observer must never prevent lifecycle settlement.
+        }
         sessions.delete(run.id);
         for (const listener of listeners) listener(outcome);
       };
@@ -263,6 +279,11 @@ export function createAgentRunSessionRuntime(
           if (endedOutcome !== undefined) settle(endedOutcome);
         },
       });
+      try {
+        options.onSessionStarted?.({ runId: run.id });
+      } catch {
+        // A transient observer must never prevent provider startup.
+      }
 
       void Effect.runPromiseExit(
         Effect.scoped(
@@ -281,6 +302,7 @@ export function createAgentRunSessionRuntime(
             timeoutMs,
             shutdownTimeoutMs,
             shutdown,
+            onTextDelta: options.onTextDelta,
           }),
         ),
         { signal: controller.signal },
@@ -470,6 +492,7 @@ interface ManagedSessionInput {
   readonly timeoutMs: number;
   readonly shutdownTimeoutMs: number;
   readonly shutdown: SessionShutdown;
+  readonly onTextDelta?: AgentRunSessionRuntimeOptions["onTextDelta"];
 }
 
 interface ManagedSessionState {
@@ -737,6 +760,15 @@ function collectSessionEvents(
         }
         if (event.kind === "text-delta") {
           state.responseText = (state.responseText + event.text).slice(0, MAX_RESPONSE_CHARACTERS);
+          try {
+            input.onTextDelta?.({
+              runId: input.run.id,
+              text: event.text,
+              occurredAt: event.occurredAt,
+            });
+          } catch {
+            // A transient observer must never interrupt provider collection.
+          }
           return;
         }
         if (event.kind === "usage") {
