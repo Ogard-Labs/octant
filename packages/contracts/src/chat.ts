@@ -664,6 +664,29 @@ export const ChatBootstrap = Schema.Struct({
 }).annotations(strict);
 export type ChatBootstrap = typeof ChatBootstrap.Type;
 
+/**
+ * The bounded read used to keep the Chat sidebar current. It deliberately
+ * carries only row metadata and aggregate activity; transcript turns,
+ * attachments, citations, and work items belong to the thread read.
+ */
+export const ChatNavigationThread = Schema.Struct({
+  id: ChatThreadId,
+  projectId: Schema.optional(ProjectId),
+  title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(512)),
+  providerInstanceId: ProviderInstanceId,
+  updatedAt: UtcTimestamp,
+  lastSequence: GlobalSequence,
+  followUpOpen: Schema.Boolean,
+}).annotations(strict);
+export type ChatNavigationThread = typeof ChatNavigationThread.Type;
+
+/** Keep a pathological number of archived/recent rows from becoming a hot read payload. */
+export const MAX_CHAT_NAVIGATION_THREADS = 1_000;
+export const ChatNavigation = Schema.Struct({
+  threads: Schema.Array(ChatNavigationThread).pipe(Schema.maxItems(MAX_CHAT_NAVIGATION_THREADS)),
+}).annotations(strict);
+export type ChatNavigation = typeof ChatNavigation.Type;
+
 export const ChatSettingsUpdated = Schema.Struct({
   kind: Schema.Literal("settings-updated"),
   settings: ChatSettings,
@@ -803,6 +826,8 @@ export const decodeChatThread = Schema.decodeUnknownSync(ChatThread);
 export const decodeChatThreadBranchOrigin = Schema.decodeUnknownSync(ChatThreadBranchOrigin);
 export const decodeChatThreadView = Schema.decodeUnknownSync(ChatThreadView);
 export const decodeChatBootstrap = Schema.decodeUnknownSync(ChatBootstrap);
+export const decodeChatNavigationThread = Schema.decodeUnknownSync(ChatNavigationThread);
+export const decodeChatNavigation = Schema.decodeUnknownSync(ChatNavigation);
 export const decodeChatSettings = Schema.decodeUnknownSync(ChatSettings);
 export const decodeChatCommand = Schema.decodeUnknownSync(ChatCommand);
 export const decodeChatFailure = Schema.decodeUnknownSync(ChatFailure);

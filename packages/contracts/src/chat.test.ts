@@ -16,6 +16,7 @@ import {
   decodeChatPublicEvent,
   decodeChatResearchRouting,
   decodeChatBootstrap,
+  decodeChatNavigation,
   decodeChatSettings,
   decodeChatThread,
   decodeChatThreadView,
@@ -315,6 +316,38 @@ describe("chat contracts", () => {
       settings: settingsFixture,
       threads: [threadFixture],
     });
+  });
+
+  it("decodes navigation rows without admitting transcript-shaped fields", () => {
+    expect(
+      decodeChatNavigation({
+        threads: [
+          {
+            id: ids.thread,
+            title: "Planning",
+            providerInstanceId: ids.provider,
+            updatedAt: now,
+            lastSequence: 7,
+            followUpOpen: true,
+          },
+        ],
+      }),
+    ).toMatchObject({ threads: [{ id: ids.thread, lastSequence: 7, followUpOpen: true }] });
+    expect(() =>
+      decodeChatNavigation({
+        threads: [
+          {
+            id: ids.thread,
+            title: "Planning",
+            providerInstanceId: ids.provider,
+            updatedAt: now,
+            lastSequence: 7,
+            followUpOpen: true,
+            turns: [],
+          },
+        ],
+      }),
+    ).toThrow();
   });
 
   it("decodes ChatThreadView with decoded transcript content, attachments, citations, work, and follow-up", () => {

@@ -122,6 +122,35 @@ describe("chat client", () => {
     await expect(client.thread(threadId as never)).rejects.toBeInstanceOf(ChatClientFailure);
   });
 
+  it("reads bounded navigation metadata through one authenticated request", async () => {
+    const fetch = vi.fn().mockResolvedValue(
+      Response.json({
+        threads: [
+          {
+            id: threadId,
+            title: "Replay",
+            providerInstanceId: "10000000-0000-4000-8000-000000000001",
+            updatedAt: now,
+            lastSequence: 7,
+            followUpOpen: true,
+          },
+        ],
+      }),
+    );
+    const client = createChatClient({ baseUrl, fetch, windowCapability: capability });
+
+    await expect(client.navigation()).resolves.toMatchObject({
+      threads: [{ id: threadId, lastSequence: 7, followUpOpen: true }],
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/chat/navigation`,
+      expect.objectContaining({
+        method: "GET",
+        headers: { "x-octant-window-capability": capability },
+      }),
+    );
+  });
+
   it("rejects malformed oversized cross-thread and regressed NDJSON frames", async () => {
     const frames = [
       `${JSON.stringify({

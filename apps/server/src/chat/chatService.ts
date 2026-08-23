@@ -30,6 +30,8 @@ import {
   type ChatAttachment,
   type ChatAttempt,
   type ChatBootstrap,
+  type ChatNavigation,
+  MAX_CHAT_NAVIGATION_THREADS,
   type ChatCommandResult,
   type ChatContentReference,
   type ChatEventFrame,
@@ -784,6 +786,17 @@ export class ChatService {
         .readChatThreads()
         .filter((thread) => thread.lifecycle === "active" && !hidden.has(String(thread.id)))
         .map((thread) => this.#withAggregateHeadVersion(thread)),
+    };
+  }
+
+  navigation(): ChatNavigation {
+    this.#assertReady();
+    const hidden = this.#hiddenThreadIds();
+    return {
+      threads: this.#persistence
+        .readChatNavigation()
+        .filter((thread) => !hidden.has(String(thread.id)))
+        .slice(0, MAX_CHAT_NAVIGATION_THREADS),
     };
   }
 
