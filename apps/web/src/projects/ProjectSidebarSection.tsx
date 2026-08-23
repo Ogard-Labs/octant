@@ -431,6 +431,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   ): React.ReactNode {
     return (
       <ProjectGroup
+        key={label}
         {...(props.activeProjectId === undefined ? {} : { activeProjectId: props.activeProjectId })}
         {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
         availabilityByProject={props.availabilityByProject}
