@@ -11,6 +11,7 @@ import type {
   CodeProjectPullRequestRow,
   CodeProjectPullRequestStaleReason,
   CodeProjectPullRequestView,
+  ConnectedGitHubRepository,
   ProjectId,
   UtcTimestamp,
   WindowId,
@@ -30,8 +31,8 @@ import {
   matchLinkedThreadsToPullRequest,
   type CodeProjectLinkedThreadFact,
 } from "@octant/domain/code-project-pull-request-policy";
-import { parseGithubRemote } from "@octant/domain/github-remote-identity";
 import { Schema } from "effect";
+import { resolveConnectedGitHubRepository } from "./connectedRepository";
 import type {
   GhActivePullRequestListResult,
   GhActivePullRequestRow,
@@ -46,6 +47,7 @@ export interface CodeProjectPullRequestAuthorizedProject {
   readonly type: "chat" | "work" | "code";
   readonly lifecycle: "active" | "archived";
   readonly binding?: { readonly canonicalRoot: string };
+  readonly connectedRepository?: ConnectedGitHubRepository | undefined;
 }
 
 export interface CodeProjectPullRequestProjectSource {
@@ -55,9 +57,15 @@ export interface CodeProjectPullRequestProjectSource {
 }
 
 export interface CodeProjectPullRequestRemoteSource {
-  remotes(
-    root: string,
-  ): Promise<ReadonlyArray<{ readonly name: string; readonly fetchUrl: string }> | undefined>;
+  remotes(root: string): Promise<
+    | ReadonlyArray<{
+        readonly name: string;
+        readonly fetchUrl: string;
+        readonly pushUrl?: string;
+        readonly credentialed?: boolean;
+      }>
+    | undefined
+  >;
 }
 
 export interface CodeProjectPullRequestListPort {
@@ -403,10 +411,16 @@ export class CodeProjectPullRequestService {
     for (const project of bootstrap.active) {
       if (project.type !== "code" || project.lifecycle !== "active") continue;
       const remotes =
-        project.binding === undefined
+        project.connectedRepository !== undefined || project.binding === undefined
           ? undefined
           : await this.#remotes.remotes(project.binding.canonicalRoot);
-      const identity = githubIdentityFromRemotes(remotes ?? []);
+      const identity =
+        project.connectedRepository === undefined
+          ? githubIdentityFromRemotes(remotes ?? [])
+          : {
+              owner: project.connectedRepository.owner,
+              name: project.connectedRepository.repository,
+            };
       connections.push(
         identity === undefined
           ? { kind: "unconnected", projectId: project.id, projectName: project.name }
@@ -758,12 +772,22 @@ export class CodeProjectPullRequestService {
 }
 
 function githubIdentityFromRemotes(
-  remotes: ReadonlyArray<{ readonly name: string; readonly fetchUrl: string }>,
+  remotes: ReadonlyArray<{
+    readonly name: string;
+    readonly fetchUrl: string;
+    readonly pushUrl?: string;
+    readonly credentialed?: boolean;
+  }>,
 ): { readonly owner: string; readonly name: string } | undefined {
-  const preferred = remotes.find((remote) => remote.name === "origin") ?? remotes[0];
-  if (preferred === undefined) return undefined;
-  const parsed = parseGithubRemote(preferred.fetchUrl);
-  return parsed.status === "resolved" ? parsed.identity : undefined;
+  const identity = resolveConnectedGitHubRepository(
+    remotes.map((remote) => ({
+      name: remote.name,
+      fetchUrl: remote.fetchUrl,
+      pushUrl: remote.pushUrl ?? remote.fetchUrl,
+      ...(remote.credentialed === undefined ? {} : { credentialed: remote.credentialed }),
+    })),
+  );
+  return identity === undefined ? undefined : { owner: identity.owner, name: identity.repository };
 }
 
 function repositoryKey(projectId: ProjectId, owner: string, name: string): string {

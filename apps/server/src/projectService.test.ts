@@ -27,6 +27,39 @@ const transferId = decodeMemoryEntryId("00000000-0000-4000-8000-000000000612");
 const now = "2026-07-14T10:00:00.000Z";
 
 describe("ProjectService", () => {
+  it("projects a credential-free GitHub identity for an available Code Project", async () => {
+    const project = codeProject();
+    const observeCodeProjectRepository = vi.fn(async (root: string) => {
+      expect(root).toBe(project.binding.canonicalRoot);
+      return { host: "github.com" as const, owner: "acme", repository: "octant" };
+    });
+    const fixture = fixtureService({ projects: [project], observeCodeProjectRepository });
+
+    const bootstrap = await fixture.service.bootstrap(windowId);
+
+    expect(bootstrap.active).toEqual([
+      expect.objectContaining({
+        id: project.id,
+        type: "code",
+        connectedRepository: { host: "github.com", owner: "acme", repository: "octant" },
+      }),
+    ]);
+    expect(JSON.stringify(bootstrap)).not.toContain("https://");
+    expect(observeCodeProjectRepository).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the Code Project usable when remote identity is ambiguous", async () => {
+    const project = codeProject();
+    const fixture = fixtureService({
+      projects: [project],
+      observeCodeProjectRepository: async () => undefined,
+    });
+
+    const bootstrap = await fixture.service.bootstrap(windowId);
+
+    expect(bootstrap.active[0]).not.toHaveProperty("connectedRepository");
+  });
+
   it("checks active Project identity for route authorization without probing the filesystem", () => {
     const validate = vi.fn(async (_type: "work" | "code", path: string) => ({
       canonicalRoot: path,
@@ -858,6 +891,9 @@ function fixtureService(
     sortProjects?: boolean;
     memory?: MemoryEntry[];
     validate?: (type: "work" | "code", path: string) => Promise<{ canonicalRoot: string }>;
+    observeCodeProjectRepository?: (
+      canonicalRoot: string,
+    ) => Promise<{ host: "github.com"; owner: string; repository: string } | undefined>;
   } = {},
 ) {
   const projects = [...(options.projects ?? [])];
@@ -932,6 +968,9 @@ function fixtureService(
       uuid: uuidSequence(),
       clock: () => now,
       now: () => options.nowMs ?? 0,
+      ...(options.observeCodeProjectRepository === undefined
+        ? {}
+        : { observeCodeProjectRepository: options.observeCodeProjectRepository }),
     }),
   };
 }

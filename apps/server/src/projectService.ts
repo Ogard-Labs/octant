@@ -15,6 +15,7 @@ import {
   decodeProjectMemoryView,
   type ActiveMemoryEntry,
   type BoundProject,
+  type ConnectedGitHubRepository,
   type MemoryCommandResult,
   type MemoryEntry,
   type Project,
@@ -78,6 +79,10 @@ export interface ProjectServiceOptions {
   readonly uuid: () => string;
   readonly clock: () => string;
   readonly now?: () => number;
+  /** Server-owned, credential-free GitHub identity observation for Code Projects. */
+  readonly observeCodeProjectRepository?: (
+    canonicalRoot: string,
+  ) => Promise<ConnectedGitHubRepository | undefined>;
 }
 
 export class ProjectServiceError extends Error {
@@ -94,6 +99,9 @@ export class ProjectService implements ProjectServiceApi {
   readonly #uuid: () => string;
   readonly #clock: () => string;
   readonly #now: () => number;
+  readonly #observeCodeProjectRepository:
+    | ((canonicalRoot: string) => Promise<ConnectedGitHubRepository | undefined>)
+    | undefined;
   readonly #archiveListeners = new Set<
     (project: Extract<Project, { readonly type: "work" }>) => void
   >();
@@ -105,6 +113,7 @@ export class ProjectService implements ProjectServiceApi {
     this.#uuid = options.uuid;
     this.#clock = options.clock;
     this.#now = options.now ?? Date.now;
+    this.#observeCodeProjectRepository = options.observeCodeProjectRepository;
   }
 
   hasActiveProject(projectId: ProjectId, requiredType: ProjectType): boolean {
@@ -156,9 +165,33 @@ export class ProjectService implements ProjectServiceApi {
             }
           }),
       );
+      const summaries = await Promise.all(
+        projects.map(async (project) => {
+          const summary = toSummary(project);
+          if (
+            project.type !== "code" ||
+            project.lifecycle !== "active" ||
+            this.#observeCodeProjectRepository === undefined
+          ) {
+            return summary;
+          }
+          try {
+            const connectedRepository = await this.#observeCodeProjectRepository(
+              project.binding.canonicalRoot,
+            );
+            return connectedRepository === undefined
+              ? summary
+              : { ...summary, connectedRepository };
+          } catch {
+            // Repository observation is optional and read-only. A failed or
+            // ambiguous remote must not make an otherwise usable Project fail.
+            return summary;
+          }
+        }),
+      );
       return decodeProjectBootstrap({
-        active: projects.filter((project) => project.lifecycle === "active").map(toSummary),
-        archived: projects.filter((project) => project.lifecycle === "archived").map(toSummary),
+        active: summaries.filter((project) => project.lifecycle === "active"),
+        archived: summaries.filter((project) => project.lifecycle === "archived"),
         availability,
         memory: projects.map((project) => this.#persistence.readProjectMemory(project.id)),
       });

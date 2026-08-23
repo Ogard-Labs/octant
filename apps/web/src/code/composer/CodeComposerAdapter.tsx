@@ -193,12 +193,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     defaultDeliveryBranchIntent(initialBaseBranch, shortId),
   );
   const [remoteName, setRemoteName] = useState(props.remoteName ?? "origin");
-  const [baseRepository, setBaseRepository] = useState(
+  const defaultBaseRepository =
     props.baseRepository ??
-      (props.projectName === undefined || props.projectName.trim() === ""
-        ? ""
-        : `local/${props.projectName}`),
-  );
+    (props.projectName === undefined || props.projectName.trim() === ""
+      ? ""
+      : `local/${props.projectName}`);
+  const [baseRepository, setBaseRepository] = useState(defaultBaseRepository);
+  const [baseRepositoryEdited, setBaseRepositoryEdited] = useState(false);
   const [baseBranch, setBaseBranch] = useState(initialBaseBranch);
   // The delivery outcome is suggested from the prompt and confirmed by the
   // user. Until the user overrides it, it tracks the live prompt suggestion.
@@ -261,7 +262,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     setWorktreeRefs(undefined);
     setRefsLoading(false);
     setWorkspaceOverride(undefined);
+    setBaseRepositoryEdited(false);
   }, [projectId]);
+  useEffect(() => {
+    if (!baseRepositoryEdited) setBaseRepository(defaultBaseRepository);
+  }, [baseRepositoryEdited, defaultBaseRepository]);
   const loadWorktreeRefs = useCallback(() => {
     if (projectId === undefined || execute === undefined) return;
     const requestedProjectId = projectId;
@@ -662,7 +667,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       <span>Base repository</span>
                       <OctantInput
                         aria-label="Base repository"
-                        onChange={(e) => setBaseRepository(e.target.value)}
+                        onChange={(e) => {
+                          setBaseRepositoryEdited(true);
+                          setBaseRepository(e.target.value);
+                        }}
                         placeholder="owner/repository"
                         value={baseRepository}
                       />

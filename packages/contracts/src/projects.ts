@@ -47,6 +47,24 @@ export const CodeAccessPersistence = Schema.Literal("current-session", "project-
 export type CodeAccessPersistence = typeof CodeAccessPersistence.Type;
 
 /**
+ * A credential-free identity observed from a Code Project's Git remotes.
+ *
+ * This is deliberately narrower than a remote URL: no scheme, username,
+ * token, host alias, or path is ever sent to the renderer. Only an exact
+ * github.com owner/repository pair may be projected here.
+ */
+export const ConnectedGitHubRepository = Schema.Struct({
+  host: Schema.Literal("github.com"),
+  owner: Schema.NonEmptyTrimmedString.pipe(
+    Schema.pattern(/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/),
+  ),
+  repository: Schema.NonEmptyTrimmedString.pipe(
+    Schema.pattern(/^(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/),
+  ),
+}).annotations(strict);
+export type ConnectedGitHubRepository = typeof ConnectedGitHubRepository.Type;
+
+/**
  * How a Code Project prefers new threads to start: in a managed
  * worktree Octant creates and owns, or in the Project's current checkout.
  *
@@ -151,6 +169,7 @@ const CodeProjectSummary = Schema.Struct({
   bindingRevisionId: BindingRevisionId,
   codeAccessPersistence: CodeAccessPersistence,
   newThreadWorkspace: Schema.optional(CodeNewThreadWorkspace),
+  connectedRepository: Schema.optional(ConnectedGitHubRepository),
 }).annotations(strict);
 
 export const ProjectSummary = Schema.Union(ChatProject, WorkProjectSummary, CodeProjectSummary);
@@ -489,6 +508,7 @@ export const decodeBindingReceiptId = Schema.decodeUnknownSync(BindingReceiptId)
 export const decodeProjectRank = Schema.decodeUnknownSync(ProjectRank);
 export const decodeProject = Schema.decodeUnknownSync(Project);
 export const decodeProjectSummary = Schema.decodeUnknownSync(ProjectSummary);
+export const decodeConnectedGitHubRepository = Schema.decodeUnknownSync(ConnectedGitHubRepository);
 export const decodeProjectAvailability = Schema.decodeUnknownSync(ProjectAvailability);
 export const decodeProjectBootstrap = Schema.decodeUnknownSync(ProjectBootstrap);
 export const decodeProjectCommand = Schema.decodeUnknownSync(ProjectCommand);

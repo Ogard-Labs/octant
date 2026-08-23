@@ -173,6 +173,24 @@ describe("CodeProjectPullRequestService", () => {
     ]);
   });
 
+  it("does not guess a Project repository from conflicting remotes", async () => {
+    const { service } = serviceFixture({
+      projects: [codeProject({ id: projectA, name: "Ambiguous", root: "/ambiguous" })],
+      remotes: {
+        "/ambiguous": [
+          { name: "origin", fetchUrl: "https://github.com/acme/one.git" },
+          { name: "upstream", fetchUrl: "https://github.com/acme/two.git" },
+        ],
+      },
+    });
+
+    const view = await service.query(windowId, { version: 1 });
+
+    expect(view.projects).toEqual([
+      { kind: "unconnected", projectId: projectA, projectName: "Ambiguous" },
+    ]);
+  });
+
   it("refreshes repositories sequentially and keeps an unconnected project visible", async () => {
     const order: string[] = [];
     const { service, listActive, journal } = serviceFixture({

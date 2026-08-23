@@ -38,6 +38,14 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain('aria-expanded="false"');
   });
 
+  it("uses the server-observed GitHub repository as the delivery default", () => {
+    render(<CodeComposerAdapter {...defaultProps} baseRepository="acme/octant" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delivery target" }));
+
+    expect(screen.getByRole("textbox", { name: "Base repository" })).toHaveValue("acme/octant");
+  });
+
   it("renders disabled send button when empty", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
     expect(html).toContain('aria-label="Create thread"');

@@ -88,6 +88,7 @@ describe("GitObservationPort", () => {
       name: "origin",
       fetchUrl: "https://example.test/owner/repo.git",
       pushUrl: "https://example.test/owner/repo.git",
+      credentialed: true,
     });
   });
 

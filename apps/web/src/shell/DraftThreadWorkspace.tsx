@@ -205,6 +205,10 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       : selectedProject === undefined || selectedProject.type === "chat"
         ? props.projectRoot
         : selectedProject.binding.canonicalRoot;
+  const connectedBaseRepository =
+    selectedProject?.type === "code" && selectedProject.connectedRepository !== undefined
+      ? `${selectedProject.connectedRepository.owner}/${selectedProject.connectedRepository.repository}`
+      : undefined;
 
   // The selected Code Project's remembered habit preselects the
   // composer's Workspace control. A Project with no stored habit resolves to
@@ -273,6 +277,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
           {...(selectedProjectRoot === undefined ? {} : { projectRoot: selectedProjectRoot })}
+          {...(connectedBaseRepository === undefined
+            ? {}
+            : { baseRepository: connectedBaseRepository })}
           {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
           newThreadWorkspace={newThreadWorkspace}
           {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}

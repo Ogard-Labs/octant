@@ -45,6 +45,8 @@ export interface GitObservation {
     readonly name: string;
     readonly fetchUrl: string;
     readonly pushUrl: string;
+    /** True only when Git's URL contained userinfo that was redacted. */
+    readonly credentialed?: boolean;
   }[];
   readonly upstream: {
     readonly remote: string;
@@ -241,10 +243,15 @@ export class GitObservationPort {
         const fetch = await run(["remote", "get-url", "--", name]);
         const push = await run(["remote", "get-url", "--push", "--", name]);
         if (fetch.exitCode !== 0 || push.exitCode !== 0) return { status: "failed" };
+        const fetchUrl = fetch.stdout.trim();
+        const pushUrl = push.stdout.trim();
+        const credentialed =
+          containsRemoteCredentials(fetchUrl) || containsRemoteCredentials(pushUrl);
         remotes.push({
           name,
-          fetchUrl: redactUrl(fetch.stdout.trim()),
-          pushUrl: redactUrl(push.stdout.trim()),
+          fetchUrl: redactUrl(fetchUrl),
+          pushUrl: redactUrl(pushUrl),
+          ...(credentialed ? { credentialed: true } : {}),
         });
       }
       let upstream: GitObservation["upstream"] = null;
@@ -558,5 +565,19 @@ function redactUrl(value: string): string {
     return url.toString();
   } catch {
     return value.replace(/^(https?:\/\/)[^/@]+@/i, "$1");
+  }
+}
+
+function containsRemoteCredentials(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.password !== "") return true;
+    return url.protocol === "https:"
+      ? url.username !== ""
+      : url.username !== "" && url.username !== "git";
+  } catch {
+    // SCP-style git@github.com remotes are conventional transport syntax, not
+    // credentials. Unknown forms are left to the identity parser to reject.
+    return false;
   }
 }
