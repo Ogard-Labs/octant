@@ -752,8 +752,39 @@ button:focus-visible {
    rather than floating midway between the navigation and the first heading. */
 .code-project-views {
   display: grid;
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
   margin: 0 4px 4px;
+}
+
+.code-project-views > [data-slot="popover-trigger"] {
+  width: 28px;
+  min-height: 28px;
+  color: var(--octant-text-muted);
+  border-radius: 8px;
+}
+
+.code-project-views > [data-slot="popover-trigger"]:hover,
+.code-project-views > [data-slot="popover-trigger"][aria-expanded="true"] {
+  color: var(--octant-text-primary);
+  background: var(--octant-control-hover);
+}
+
+.project-view-filter-popover {
+  max-height: min(80vh, 640px);
+  overflow: auto;
+}
+
+.project-view-filter-popover [data-slot="select-trigger"] {
+  min-height: 32px;
+  height: 32px;
+}
+
+.project-view-filter-popover input[type="date"] {
+  min-height: 32px;
+  height: 32px;
+  padding-inline: 8px;
 }
 
 .code-project-views__row {

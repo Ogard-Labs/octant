@@ -4,10 +4,16 @@ import {
   CODE_PROJECT_VIEWS_STORAGE_KEY,
   WORK_PROJECT_VIEWS_STORAGE_KEY,
   createCodeProjectView,
+  defaultProjectViewPreferences,
   deleteCodeProjectView,
+  filterProjectViewThreads,
+  filterProjectsForView,
+  projectViewActivityRange,
   readCodeProjectViewState,
+  readProjectViewPreferences,
   readProjectViewState,
   selectCodeProjectView,
+  updateCodeProjectViewFilters,
   visibleCodeProjects,
   writeCodeProjectViewState,
   writeProjectViewState,
@@ -182,5 +188,99 @@ describe("codeProjectViewModel", () => {
     expect(storage.getItem(CODE_PROJECT_VIEWS_STORAGE_KEY)).toBeNull();
     expect(readProjectViewState("work", storage).activeViewId).toBe("view-work");
     expect(readProjectViewState("code", storage).activeViewId).toBe(ALL_CODE_PROJECTS_VIEW_ID);
+  });
+
+  it("migrates filters and keeps All Projects preferences separate from saved views", () => {
+    const storage = memoryStorage({
+      [CODE_PROJECT_VIEWS_STORAGE_KEY]: JSON.stringify({
+        activeViewId: "view-main",
+        views: [
+          {
+            id: "view-main",
+            name: "Main",
+            projectIds: [alpha.id],
+            filters: {
+              lifecycle: "all",
+              environmentIds: ["local", "devbox", "local"],
+              showEmptyProjects: false,
+              grouping: "environment",
+              sorting: "created",
+              activity: "3-days",
+            },
+          },
+        ],
+      }),
+    });
+
+    const state = readCodeProjectViewState(storage);
+    expect(state.views[0]?.filters).toEqual({
+      lifecycle: "all",
+      environmentIds: ["local", "devbox"],
+      showEmptyProjects: false,
+      grouping: "environment",
+      sorting: "created",
+      activity: "3-days",
+    });
+    expect(readProjectViewPreferences("code", storage)).toEqual(defaultProjectViewPreferences());
+  });
+
+  it("filters Projects by lifecycle and only passed environment metadata", () => {
+    const state = updateCodeProjectViewFilters(
+      createCodeProjectView(readCodeProjectViewState(), {
+        id: "view-main",
+        name: "Main",
+        projectIds: [alpha.id, beta.id],
+      }),
+      "view-main",
+      {
+        ...defaultProjectViewPreferences().filters,
+        lifecycle: "archived",
+        environmentIds: ["devbox"],
+      },
+    );
+    const projects = [
+      { ...alpha, lifecycle: "active" as const },
+      { ...beta, lifecycle: "archived" as const },
+      { id: "33333333-3333-4333-8333-333333333333", lifecycle: "archived" as const },
+    ];
+    expect(
+      filterProjectsForView(
+        projects,
+        state,
+        defaultProjectViewPreferences(),
+        new Map([[beta.id, { id: "devbox", name: "Devbox" }]]),
+      ),
+    ).toEqual([projects[1]]);
+  });
+
+  it("uses inclusive server updatedAt windows for activity filters", () => {
+    const now = new Date("2026-08-23T15:00:00.000Z");
+    const filters = {
+      ...defaultProjectViewPreferences().filters,
+      activity: "3-days" as const,
+    };
+    expect(
+      filterProjectViewThreads(
+        [
+          { id: "today", updatedAt: "2026-08-23T00:00:00.000Z" },
+          { id: "boundary", updatedAt: "2026-08-21T00:00:00.000Z" },
+          { id: "old", updatedAt: "2026-08-20T21:59:59.000Z" },
+          { id: "unknown" },
+        ],
+        filters,
+        now,
+      ),
+    ).toEqual([
+      { id: "today", updatedAt: "2026-08-23T00:00:00.000Z" },
+      { id: "boundary", updatedAt: "2026-08-21T00:00:00.000Z" },
+    ]);
+    expect(
+      projectViewActivityRange(
+        { ...filters, activity: "custom", activityRange: { from: "2026-08-22", to: "2026-08-23" } },
+        now,
+      ),
+    ).toMatchObject({
+      from: new Date("2026-08-22T00:00:00"),
+    });
   });
 });

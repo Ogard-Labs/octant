@@ -13,7 +13,7 @@ them inside feature stylesheets.
 | `OctantSelect`                                   | Dropdown selection (portal popup is glass)          |
 | `OctantCheckbox`, `OctantSwitch`, `OctantSlider` | Toggles and ranges                                  |
 | `OctantTabs`                                     | Tab strips                                          |
-| `OctantMenu`                                     | Menus and disclosure popovers (glass)               |
+| `OctantMenu`, `OctantPopover`                    | Menus and disclosure popovers (opaque)              |
 | `OctantContextMenu`                              | Right-click menus mirroring the same items          |
 | `OctantDialog`                                   | Modal dialogs (glass)                               |
 | `OctantTooltip`                                  | Tooltips (opaque for legibility)                    |
