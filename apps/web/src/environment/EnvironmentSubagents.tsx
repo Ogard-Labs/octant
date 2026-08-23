@@ -1,9 +1,10 @@
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunConversationResponse } from "@octant/contracts";
-import { decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
+import { decodeAgentRunId, decodeAgentRunParentThreadId } from "@octant/contracts/agent-run";
 import { Bot, ChevronRight } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useChildRunStatus } from "../agents/useChildRunStatus";
+import { useAgentRunConversation } from "../agents/useAgentRunConversation";
 import { OctantButton } from "../ui/base/OctantButton";
 
 const ACTIVE = new Set(["queued", "starting", "running", "waiting"]);
@@ -18,26 +19,10 @@ export function EnvironmentSubagents(props: {
     parentThreadId: decodeAgentRunParentThreadId(props.threadId),
   });
   const [selectedRunId, setSelectedRunId] = useState<string>();
-  const [conversation, setConversation] = useState<AgentRunConversationResponse>();
-  useEffect(() => {
-    if (selectedRunId === undefined) {
-      setConversation(undefined);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const next = await props.client.conversation(selectedRunId as never);
-        if (!cancelled) setConversation(next);
-      } catch {
-        if (!cancelled) setConversation(undefined);
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [props.client, selectedRunId]);
+  const conversationState = useAgentRunConversation(
+    props.client,
+    selectedRunId === undefined ? undefined : decodeAgentRunId(selectedRunId),
+  );
   if (controller.status !== "ready" || controller.entries.length === 0) return null;
   const active = controller.entries.filter((entry) => ACTIVE.has(entry.lifecycleStatus));
   const history = controller.entries.filter((entry) => !ACTIVE.has(entry.lifecycleStatus));
@@ -60,14 +45,28 @@ export function EnvironmentSubagents(props: {
       <AgentGroup
         entries={active}
         label="Active"
-        {...(conversation === undefined ? {} : { conversation })}
+        {...(conversationState.conversation === undefined
+          ? {}
+          : { conversation: conversationState.conversation })}
+        reconnecting={conversationState.reconnecting}
+        loading={conversationState.loading}
+        {...(conversationState.errorMessage === undefined
+          ? {}
+          : { errorMessage: conversationState.errorMessage })}
         {...(selectedRunId === undefined ? {} : { selectedRunId })}
         onSelect={setSelectedRunId}
       />
       <AgentGroup
         entries={history}
         label="Done"
-        {...(conversation === undefined ? {} : { conversation })}
+        {...(conversationState.conversation === undefined
+          ? {}
+          : { conversation: conversationState.conversation })}
+        reconnecting={conversationState.reconnecting}
+        loading={conversationState.loading}
+        {...(conversationState.errorMessage === undefined
+          ? {}
+          : { errorMessage: conversationState.errorMessage })}
         {...(selectedRunId === undefined ? {} : { selectedRunId })}
         onSelect={setSelectedRunId}
       />
@@ -79,6 +78,9 @@ function AgentGroup(props: {
   readonly entries: ReturnType<typeof useChildRunStatus>["entries"];
   readonly label: string;
   readonly conversation?: AgentRunConversationResponse;
+  readonly reconnecting: boolean;
+  readonly loading: boolean;
+  readonly errorMessage?: string;
   readonly selectedRunId?: string;
   readonly onSelect: (runId: string | undefined) => void;
 }) {
@@ -123,6 +125,11 @@ function AgentGroup(props: {
                         props.conversation?.runId === entry.runId ? props.conversation : undefined
                       }
                       entry={entry}
+                      reconnecting={props.reconnecting}
+                      loading={props.loading}
+                      {...(props.errorMessage === undefined
+                        ? {}
+                        : { errorMessage: props.errorMessage })}
                     />
                     {entry.result?.truncated === true ? <small>Response truncated</small> : null}
                   </div>
@@ -139,14 +146,21 @@ function AgentGroup(props: {
 function ConversationBody(props: {
   readonly conversation: AgentRunConversationResponse | undefined;
   readonly entry: ReturnType<typeof useChildRunStatus>["entries"][number];
+  readonly reconnecting: boolean;
+  readonly loading: boolean;
+  readonly errorMessage?: string;
 }) {
+  const fallback =
+    props.entry.result?.text ??
+    (ACTIVE.has(props.entry.lifecycleStatus)
+      ? "The subagent is still working. Reconnecting to its live response…"
+      : "No retained response is available.");
   if (props.conversation === undefined) {
     return (
       <p>
-        {props.entry.result?.text ??
-          (ACTIVE.has(props.entry.lifecycleStatus)
-            ? "The subagent is still working. Reconnecting to its live response…"
-            : "No retained response is available.")}
+        {props.loading
+          ? "Connecting to the subagent’s live response…"
+          : (props.errorMessage ?? fallback)}
       </p>
     );
   }
@@ -171,6 +185,9 @@ function ConversationBody(props: {
       {props.conversation.truncated ? <small>Earlier response text was truncated.</small> : null}
       {props.conversation.status === "stale" ? (
         <small>{props.conversation.staleReason ?? "The live response is stale."}</small>
+      ) : null}
+      {props.reconnecting ? (
+        <small>Live response disconnected; reconnect to continue.</small>
       ) : null}
     </div>
   );

@@ -17,6 +17,9 @@ export function AgentHierarchyPanel(props: {
   readonly onResume?: (input: { runId: string; version: number }) => void;
   readonly reconnecting?: boolean;
   readonly conversation?: AgentRunConversationResponse;
+  readonly conversationReconnecting?: boolean;
+  readonly conversationLoading?: boolean;
+  readonly conversationError?: string;
   readonly onInspectConversation?: (runId: string) => void;
 }) {
   const [filter, setFilter] = useState<AgentHierarchyFilter>("active");
@@ -109,7 +112,14 @@ export function AgentHierarchyPanel(props: {
                   {props.conversation?.runId === row.runId ? "Hide transcript" : "View transcript"}
                 </button>
                 {props.conversation?.runId === row.runId ? (
-                  <AgentConversation conversation={props.conversation} />
+                  <AgentConversation
+                    conversation={props.conversation}
+                    reconnecting={props.conversationReconnecting === true}
+                    loading={props.conversationLoading === true}
+                    {...(props.conversationError === undefined
+                      ? {}
+                      : { errorMessage: props.conversationError })}
+                  />
                 ) : null}
                 <span>usage: {row.usageQuality}</span>
                 {row.routeLabel ? <span>route: {row.routeLabel}</span> : null}
@@ -171,7 +181,13 @@ export function AgentHierarchyPanel(props: {
   );
 }
 
-function AgentConversation(props: { readonly conversation: AgentRunConversationResponse }) {
+function AgentConversation(props: {
+  readonly conversation: AgentRunConversationResponse;
+  readonly reconnecting: boolean;
+  readonly loading: boolean;
+  readonly errorMessage?: string;
+}) {
+  if (props.loading) return <span role="status">Connecting to live transcript…</span>;
   if (props.conversation.status === "unavailable") {
     return <span role="status">Live transcript is unavailable for this execution.</span>;
   }
@@ -179,7 +195,7 @@ function AgentConversation(props: { readonly conversation: AgentRunConversationR
     return (
       <span role="status">
         {props.conversation.status === "stale"
-          ? "The child session is stale."
+          ? (props.conversation.staleReason ?? "The child session is stale.")
           : "No visible response text yet."}
       </span>
     );
@@ -188,6 +204,8 @@ function AgentConversation(props: { readonly conversation: AgentRunConversationR
     <span aria-label="Child conversation">
       {props.conversation.entries.map((entry) => entry.text).join("\n")}
       {props.conversation.truncated ? " (earlier text truncated)" : ""}
+      {props.reconnecting ? " Live transcript disconnected; reconnect to continue." : ""}
+      {props.errorMessage === undefined ? "" : ` ${props.errorMessage}`}
     </span>
   );
 }

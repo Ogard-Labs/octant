@@ -1,7 +1,6 @@
 import {
   decodeAgentRunId,
   decodeAgentRunRequestId,
-  type AgentRunConversationResponse,
   type AgentRunControlResolvedFacts,
   type AgentRunCreationPosture,
   type AgentRunParentThreadId,
@@ -19,6 +18,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { AgentHierarchyPanel } from "./AgentHierarchyPanel";
 import { AgentRunCreateForm, type AgentRunCreateFormValues } from "./AgentRunCreateForm";
+import { useAgentRunConversation } from "./useAgentRunConversation";
 
 export function AgentRunHierarchy(props: {
   readonly client: AgentRunClient;
@@ -42,8 +42,11 @@ export function AgentRunHierarchy(props: {
   const [facts, setFacts] = useState<AgentRunControlResolvedFacts>();
   const [factsStatus, setFactsStatus] = useState<"loading" | "ready" | "error">("loading");
   const [role, setRole] = useState<AgentRunRole>();
-  const [conversation, setConversation] = useState<AgentRunConversationResponse>();
   const [conversationRunId, setConversationRunId] = useState<string>();
+  const conversationState = useAgentRunConversation(
+    props.client,
+    conversationRunId === undefined ? undefined : decodeAgentRunId(conversationRunId),
+  );
 
   const refresh = useCallback(async () => {
     setStatus((current) => (current === "ready" ? "refreshing" : "loading"));
@@ -95,26 +98,6 @@ export function AgentRunHierarchy(props: {
   useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  useEffect(() => {
-    if (conversationRunId === undefined) {
-      setConversation(undefined);
-      return;
-    }
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const next = await props.client.conversation(conversationRunId as never);
-        if (!cancelled) setConversation(next);
-      } catch {
-        if (!cancelled) setConversation(undefined);
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [conversationRunId, props.client]);
 
   useEffect(() => {
     void loadFacts(role);
@@ -296,7 +279,14 @@ export function AgentRunHierarchy(props: {
         onRetry={(input) => void command("retry", input)}
         onResume={(input) => void command("resume", input)}
         reconnecting={status === "refreshing"}
-        {...(conversation === undefined ? {} : { conversation })}
+        {...(conversationState.conversation === undefined
+          ? {}
+          : { conversation: conversationState.conversation })}
+        conversationReconnecting={conversationState.reconnecting}
+        conversationLoading={conversationState.loading}
+        {...(conversationState.errorMessage === undefined
+          ? {}
+          : { conversationError: conversationState.errorMessage })}
         onInspectConversation={(runId) =>
           setConversationRunId((current) => (current === runId ? undefined : runId))
         }

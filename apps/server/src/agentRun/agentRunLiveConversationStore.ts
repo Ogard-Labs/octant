@@ -26,6 +26,18 @@ interface ConversationState {
   staleReason?: string;
 }
 
+interface ConversationSubscriber {
+  readonly runId: AgentRunId;
+  afterSequence: number;
+  readonly queue: AgentRunLiveConversationSnapshot[];
+  readonly signal: AbortSignal;
+  readonly onAbort: () => void;
+  resolve: (() => void) | undefined;
+  closed: boolean;
+}
+
+const MAX_SUBSCRIBERS_PER_RUN = 8;
+
 /**
  * Process-local live child transcript. It is deliberately not a projection or
  * journal: provider output is transient, purgeable, and never authoritative.
@@ -33,8 +45,10 @@ interface ConversationState {
  */
 export class AgentRunLiveConversationStore {
   readonly #runs = new Map<AgentRunId, ConversationState>();
+  readonly #subscribers = new Map<AgentRunId, Set<ConversationSubscriber>>();
 
   begin(runId: AgentRunId): void {
+    this.clear(runId);
     this.#runs.set(runId, {
       status: "live",
       entries: [],
@@ -60,11 +74,15 @@ export class AgentRunLiveConversationStore {
     state.entries.push(entry);
     state.bytes += entryBytes(entry);
     this.#trim(state);
+    this.#publish(runId);
   }
 
   complete(runId: AgentRunId): void {
     const state = this.#runs.get(runId);
-    if (state?.status === "live") state.status = "complete";
+    if (state?.status === "live") {
+      state.status = "complete";
+      this.#publish(runId);
+    }
   }
 
   markStale(runId: AgentRunId, reason: string): void {
@@ -82,6 +100,7 @@ export class AgentRunLiveConversationStore {
     }
     state.status = "stale";
     state.staleReason = boundReason(reason);
+    this.#publish(runId);
   }
 
   read(input: {
@@ -107,6 +126,77 @@ export class AgentRunLiveConversationStore {
 
   clear(runId: AgentRunId): void {
     this.#runs.delete(runId);
+    const subscribers = this.#subscribers.get(runId);
+    if (subscribers === undefined) return;
+    for (const subscriber of subscribers) {
+      subscriber.closed = true;
+      subscriber.resolve?.();
+    }
+    this.#subscribers.delete(runId);
+  }
+
+  /**
+   * Subscribe to one process-local child transcript. The first yielded value
+   * is a bounded snapshot after the requested cursor; later values are
+   * incremental snapshots published by append/terminal transitions. The
+   * subscriber is removed on abort, completion, or generator cancellation.
+   */
+  async *subscribe(input: {
+    readonly runId: AgentRunId;
+    readonly afterSequence?: number;
+    readonly signal: AbortSignal;
+  }): AsyncGenerator<AgentRunLiveConversationSnapshot> {
+    const state = this.#runs.get(input.runId);
+    if (state === undefined || input.signal.aborted) return;
+    const subscribers = this.#subscribers.get(input.runId) ?? new Set();
+    if (subscribers.size >= MAX_SUBSCRIBERS_PER_RUN) {
+      yield {
+        status: "stale",
+        entries: [],
+        truncated: false,
+        staleReason: "Live child transcript has reached its subscriber limit; reconnect later.",
+      };
+      return;
+    }
+    const initial = this.read(input);
+    if (initial === undefined) return;
+    const subscriber: ConversationSubscriber = {
+      runId: input.runId,
+      afterSequence: input.afterSequence ?? 0,
+      queue: [initial],
+      signal: input.signal,
+      onAbort: () => {
+        subscriber.closed = true;
+        subscriber.resolve?.();
+      },
+      resolve: undefined,
+      closed: false,
+    };
+    const lastInitialSequence = initial.entries.at(-1)?.sequence;
+    if (lastInitialSequence !== undefined) subscriber.afterSequence = lastInitialSequence;
+    subscribers.add(subscriber);
+    this.#subscribers.set(input.runId, subscribers);
+    input.signal.addEventListener("abort", subscriber.onAbort, { once: true });
+    try {
+      for (;;) {
+        if (subscriber.closed || input.signal.aborted) return;
+        const next = subscriber.queue.shift();
+        if (next !== undefined) {
+          yield next;
+          if (next.status !== "live") return;
+          continue;
+        }
+        await new Promise<void>((resolve) => {
+          subscriber.resolve = resolve;
+        });
+        subscriber.resolve = undefined;
+      }
+    } finally {
+      input.signal.removeEventListener("abort", subscriber.onAbort);
+      subscriber.closed = true;
+      subscribers.delete(subscriber);
+      if (subscribers.size === 0) this.#subscribers.delete(input.runId);
+    }
   }
 
   #trim(state: ConversationState): void {
@@ -118,6 +208,27 @@ export class AgentRunLiveConversationStore {
       if (removed === undefined) break;
       state.bytes -= entryBytes(removed);
       state.truncated = true;
+    }
+  }
+
+  #publish(runId: AgentRunId): void {
+    const subscribers = this.#subscribers.get(runId);
+    if (subscribers === undefined || subscribers.size === 0) return;
+    for (const subscriber of subscribers) {
+      if (subscriber.closed) continue;
+      const snapshot = this.read({ runId, afterSequence: subscriber.afterSequence });
+      if (snapshot === undefined) {
+        subscriber.closed = true;
+      } else {
+        const lastSequence = snapshot.entries.at(-1)?.sequence;
+        if (lastSequence !== undefined) subscriber.afterSequence = lastSequence;
+        // Do not queue empty live deltas. Terminal snapshots are meaningful
+        // even without entries and are therefore always delivered.
+        if (snapshot.entries.length > 0 || snapshot.status !== "live") {
+          subscriber.queue.push(snapshot);
+        }
+      }
+      subscriber.resolve?.();
     }
   }
 }

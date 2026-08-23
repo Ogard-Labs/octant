@@ -9,9 +9,12 @@ import {
   decodeAgentRunSteerRequest,
   decodeAgentRunWorkspaceConfirmationRequest,
   decodeAgentRunWorkspacePreparationRequest,
+  decodeAgentRunConversationStreamFrame,
+  MAX_AGENT_RUN_CONVERSATION_NDJSON_LINE_BYTES,
   MAX_AGENT_RUN_CENTER_QUERY_LIMIT,
   type AgentRunConversationEntry,
   type AgentRunConversationResponse,
+  type AgentRunConversationStreamFrame,
   type AgentRun,
   type AgentRunAuthority,
   type AgentRunCenterSummary,
@@ -237,6 +240,16 @@ export function createAgentRunRouteHandler(dependencies: AgentRunRouteDependenci
 
     if (request.method === "GET" && url.pathname === "/api/agent-runs/conversation") {
       return handleConversation(dependencies, authenticatedWindowId, url, origin);
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/agent-runs/conversation/stream") {
+      return handleConversationStream(
+        dependencies,
+        authenticatedWindowId,
+        url,
+        origin,
+        request.signal,
+      );
     }
 
     if (request.method === "POST" && url.pathname === "/api/agent-runs/acknowledge") {
@@ -684,6 +697,184 @@ async function handleConversation(
     200,
     origin,
   );
+}
+
+async function handleConversationStream(
+  dependencies: AgentRunRouteDependencies,
+  windowId: string,
+  url: URL,
+  origin: string | null,
+  signal: AbortSignal,
+): Promise<Response> {
+  if (
+    ![...url.searchParams.keys()].every((key) => key === "runId" || key === "afterSequence") ||
+    !url.searchParams.has("runId")
+  ) {
+    return failure("AgentRun conversation stream query is invalid.", 400, origin);
+  }
+  let runId: AgentRunId;
+  try {
+    runId = decodeAgentRunId(url.searchParams.get("runId") ?? "");
+  } catch {
+    return failure("AgentRun conversation stream runId is invalid.", 400, origin);
+  }
+  const afterRaw = url.searchParams.get("afterSequence");
+  let afterSequence = 0;
+  if (afterRaw !== null) {
+    const parsed = Number(afterRaw);
+    if (!Number.isSafeInteger(parsed) || parsed < 0) {
+      return failure("AgentRun conversation stream cursor is invalid.", 400, origin);
+    }
+    afterSequence = parsed;
+  }
+  const run = dependencies.persistence.getById(runId);
+  if (
+    run === undefined ||
+    !(await dependencies.authorizeParentThread({
+      parentThreadId: run.parentThreadId,
+      windowId,
+    }))
+  ) {
+    return failure("AgentRun conversation stream is not authorized for this run.", 403, origin);
+  }
+
+  const frames = conversationStreamFrames(dependencies, run, afterSequence, signal);
+  return conversationStreamResponse(frames, signal, origin);
+}
+
+async function* conversationStreamFrames(
+  dependencies: AgentRunRouteDependencies,
+  run: AgentRun,
+  afterSequence: number,
+  signal: AbortSignal,
+): AsyncGenerator<AgentRunConversationStreamFrame> {
+  const baseFor = (): Omit<
+    AgentRunConversationStreamFrame,
+    "kind" | "status" | "entries" | "truncated" | "nextCursor" | "staleReason"
+  > => {
+    const latestRun = dependencies.persistence.getById(run.id) ?? run;
+    return {
+      runId: latestRun.id,
+      parentThreadId: latestRun.parentThreadId,
+      executionKind: latestRun.executionKind,
+      modelId: effectiveAgentRunExecutionTarget(latestRun.routingReceipt).modelId,
+      lifecycleStatus: latestRun.lifecycleStatus,
+    };
+  };
+
+  if (run.executionKind === "provider-native") {
+    yield {
+      kind: "snapshot",
+      ...baseFor(),
+      status: "unavailable",
+      entries: [],
+      truncated: false,
+      staleReason: "Provider-native child transcript is not available through this host.",
+    };
+    return;
+  }
+
+  const liveSnapshot = dependencies.liveConversations.read({
+    runId: run.id,
+    afterSequence,
+  });
+  if (liveSnapshot !== undefined) {
+    let first = true;
+    for await (const snapshot of dependencies.liveConversations.subscribe({
+      runId: run.id,
+      afterSequence,
+      signal,
+    })) {
+      const lastSequence = snapshot.entries.at(-1)?.sequence;
+      yield {
+        kind: first ? "snapshot" : "delta",
+        ...baseFor(),
+        ...snapshot,
+        ...(lastSequence === undefined ? {} : { nextCursor: String(lastSequence) }),
+      };
+      first = false;
+    }
+    return;
+  }
+
+  const result = run.result;
+  const resultText = result === undefined ? undefined : dependencies.persistence.resultText(run.id);
+  if (result !== undefined && resultText !== undefined) {
+    const entry: AgentRunConversationEntry = {
+      sequence: 1,
+      kind: "assistant",
+      text: resultText,
+      occurredAt: run.updatedAt,
+    };
+    yield {
+      kind: "snapshot",
+      ...baseFor(),
+      status: "complete",
+      entries: afterSequence >= entry.sequence ? [] : [entry],
+      truncated: result.truncated,
+      nextCursor: String(entry.sequence),
+    };
+    return;
+  }
+
+  const active =
+    run.lifecycleStatus === "queued" ||
+    run.lifecycleStatus === "starting" ||
+    run.lifecycleStatus === "running";
+  yield {
+    kind: "snapshot",
+    ...baseFor(),
+    status: active ? "stale" : "unavailable",
+    entries: [],
+    truncated: false,
+    staleReason: active
+      ? "The child session is no longer connected to this host; reconnect to resume viewing."
+      : "No retained child conversation is available.",
+  };
+}
+
+function conversationStreamResponse(
+  frames: AsyncIterable<AgentRunConversationStreamFrame>,
+  signal: AbortSignal,
+  origin: string | null,
+): Response {
+  const encoder = new TextEncoder();
+  const iterator = frames[Symbol.asyncIterator]();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        if (signal.aborted) {
+          controller.close();
+          return;
+        }
+        const next = await iterator.next();
+        if (next.done === true) {
+          controller.close();
+          return;
+        }
+        const decoded = decodeAgentRunConversationStreamFrame(next.value);
+        const line = `${JSON.stringify(decoded)}\n`;
+        if (encoder.encode(line).byteLength > MAX_AGENT_RUN_CONVERSATION_NDJSON_LINE_BYTES) {
+          controller.error(new Error("AgentRun conversation stream frame is too large."));
+          return;
+        }
+        controller.enqueue(encoder.encode(line));
+      } catch {
+        controller.close();
+      }
+    },
+    async cancel() {
+      await iterator.return?.(undefined);
+    },
+  });
+  return new Response(body, {
+    status: 200,
+    headers: {
+      ...corsHeaders(origin),
+      "content-type": "application/x-ndjson",
+      "cache-control": "no-store",
+    },
+  });
 }
 
 async function handleCenter(

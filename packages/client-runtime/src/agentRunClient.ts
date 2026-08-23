@@ -5,6 +5,8 @@ import {
   decodeAgentRunControlRequest,
   decodeAgentRunCenterResponse,
   decodeAgentRunConversationResponse,
+  decodeAgentRunConversationStreamFrame,
+  MAX_AGENT_RUN_CONVERSATION_NDJSON_LINE_BYTES,
   decodeAgentRunParentThreadId,
   decodeAgentRunResumeRequest,
   decodeAgentRunRetryRequest,
@@ -16,6 +18,7 @@ import {
   type AgentRunCenterQuery,
   type AgentRunCenterResponse,
   type AgentRunConversationResponse,
+  type AgentRunConversationStreamFrame,
   type AgentRunCommandResult,
   type AgentRunControlPreviewRequest,
   type AgentRunControlPreviewResult,
@@ -122,6 +125,17 @@ export interface AgentRunCenterQueryInput {
 export interface AgentRunClient {
   center(input?: AgentRunCenterQueryInput): Promise<AgentRunCenterResponse>;
   conversation(runId: AgentRunId, afterSequence?: number): Promise<AgentRunConversationResponse>;
+  /**
+   * Opens one authenticated NDJSON subscription. The first frame is a bounded
+   * snapshot and later frames are cursor-safe deltas until completion, stale,
+   * abort, or disconnect. The caller owns the AbortSignal and must close it
+   * when the selected pane unmounts or changes.
+   */
+  subscribeConversation?(
+    runId: AgentRunId,
+    afterSequence: number | undefined,
+    signal: AbortSignal,
+  ): AsyncGenerator<AgentRunConversationStreamFrame>;
   parentSummary(parentThreadId: AgentRunParentThreadId): Promise<AgentRunParentSummaryResponse>;
   acknowledge(input: {
     readonly runId: AgentRunId;
@@ -199,6 +213,23 @@ export function createAgentRunClient(options: AgentRunClientOptions): AgentRunCl
           "AgentRun conversation response is malformed.",
         );
       }
+    },
+    subscribeConversation(runId, afterSequence, signal) {
+      const url = new URL("/api/agent-runs/conversation/stream", options.baseUrl);
+      url.searchParams.set("runId", String(runId));
+      if (afterSequence !== undefined) {
+        url.searchParams.set("afterSequence", String(afterSequence));
+      }
+      return parseConversationStream(
+        requestRaw(options.fetch, url.toString(), {
+          method: "GET",
+          headers,
+          signal,
+        }),
+        runId,
+        afterSequence ?? 0,
+        signal,
+      );
     },
     async parentSummary(parentThreadId) {
       const validated = decodeAgentRunParentThreadId(parentThreadId);
@@ -441,6 +472,164 @@ async function requestJson(
     throw new AgentRunClientFailure("invalid", message ?? "AgentRun request is invalid.");
   }
   return body;
+}
+
+async function requestRaw(
+  fetchImpl: typeof globalThis.fetch,
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  try {
+    const response = await fetchImpl(url, init);
+    if (response.status === 401) {
+      throw new AgentRunClientFailure("unauthorized", "AgentRun request is unauthorized.");
+    }
+    if (!response.ok) {
+      throw new AgentRunClientFailure(
+        "unavailable",
+        "AgentRun conversation stream is unavailable.",
+      );
+    }
+    return response;
+  } catch (error) {
+    if (error instanceof AgentRunClientFailure) throw error;
+    throw new AgentRunClientFailure("unavailable", "AgentRun conversation stream is unavailable.");
+  }
+}
+
+async function* parseConversationStream(
+  responsePromise: Promise<Response>,
+  runId: AgentRunId,
+  afterSequence: number,
+  signal: AbortSignal,
+): AsyncGenerator<AgentRunConversationStreamFrame> {
+  let response: Response;
+  try {
+    response = await responsePromise;
+  } catch (error) {
+    if (signal.aborted) return;
+    throw error;
+  }
+  if (response.headers.get("content-type")?.split(";", 1)[0] !== "application/x-ndjson") {
+    throw new AgentRunClientFailure(
+      "unavailable",
+      "AgentRun conversation stream content type is malformed.",
+    );
+  }
+  if (response.body === null) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let lastSequence = afterSequence;
+  let frameCount = 0;
+  let first = true;
+  const decodeLine = (line: string): AgentRunConversationStreamFrame => {
+    if (new TextEncoder().encode(line).byteLength > MAX_AGENT_RUN_CONVERSATION_NDJSON_LINE_BYTES) {
+      throw new AgentRunClientFailure(
+        "unavailable",
+        "AgentRun conversation stream frame is too large.",
+      );
+    }
+    let frame: AgentRunConversationStreamFrame;
+    try {
+      frame = decodeAgentRunConversationStreamFrame(JSON.parse(line));
+    } catch {
+      throw new AgentRunClientFailure(
+        "unavailable",
+        "AgentRun conversation stream frame is malformed.",
+      );
+    }
+    if (String(frame.runId) !== String(runId) || (first && frame.kind !== "snapshot")) {
+      throw new AgentRunClientFailure(
+        "unavailable",
+        "AgentRun conversation stream frame is malformed.",
+      );
+    }
+    for (const entry of frame.entries) {
+      if (entry.sequence <= lastSequence) {
+        throw new AgentRunClientFailure(
+          "unavailable",
+          "AgentRun conversation stream cursor regressed.",
+        );
+      }
+      lastSequence = entry.sequence;
+    }
+    first = false;
+    frameCount += 1;
+    if (frameCount > 256) {
+      throw new AgentRunClientFailure(
+        "unavailable",
+        "AgentRun conversation stream exceeded its frame budget.",
+      );
+    }
+    return frame;
+  };
+  try {
+    for (;;) {
+      if (signal.aborted) return;
+      const next = await readConversationStreamChunk(reader, signal);
+      if (next.done) break;
+      buffer += decoder.decode(next.value, { stream: true });
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line.trim().length > 0) yield decodeLine(line);
+        newlineIndex = buffer.indexOf("\n");
+      }
+      if (
+        new TextEncoder().encode(buffer).byteLength > MAX_AGENT_RUN_CONVERSATION_NDJSON_LINE_BYTES
+      ) {
+        throw new AgentRunClientFailure(
+          "unavailable",
+          "AgentRun conversation stream frame is too large.",
+        );
+      }
+    }
+    const trailing = buffer.trim();
+    if (trailing.length > 0) yield decodeLine(trailing);
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Ignore cancellation races while tearing down the stream.
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      // Ignore a reader already released by cancellation.
+    }
+  }
+}
+
+async function readConversationStreamChunk(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  signal: AbortSignal,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  if (signal.aborted) {
+    await reader.cancel();
+    return { done: true, value: undefined as undefined };
+  }
+  return new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+    const onAbort = () => {
+      signal.removeEventListener("abort", onAbort);
+      reader.cancel().then(
+        () => resolve({ done: true, value: undefined as undefined }),
+        (error) => reject(error),
+      );
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    reader.read().then(
+      (result) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(result);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function validateLoopbackBaseUrl(baseUrl: string): void {

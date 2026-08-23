@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  MAX_AGENT_RUN_CONVERSATION_BYTES,
-  decodeAgentRunId,
-} from "@octant/contracts";
+import { MAX_AGENT_RUN_CONVERSATION_BYTES, decodeAgentRunId } from "@octant/contracts";
 import { AgentRunLiveConversationStore } from "./agentRunLiveConversationStore";
 
 const runId = decodeAgentRunId("11111111-1111-4111-8111-111111111111");
@@ -45,5 +42,45 @@ describe("AgentRunLiveConversationStore", () => {
     const bytes = new TextEncoder().encode(JSON.stringify(snapshot?.entries)).byteLength;
     expect(bytes).toBeLessThanOrEqual(MAX_AGENT_RUN_CONVERSATION_BYTES);
     expect(snapshot?.truncated).toBe(true);
+  });
+
+  it("publishes an initial snapshot, cursor-safe deltas, and a terminal state", async () => {
+    const store = new AgentRunLiveConversationStore();
+    store.begin(runId);
+    const controller = new AbortController();
+    const stream = store.subscribe({ runId, signal: controller.signal });
+    const initial = await stream.next();
+    expect(initial.value).toMatchObject({ status: "live", entries: [] });
+
+    store.appendText(runId, "first", occurredAt);
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { status: "live", entries: [{ sequence: 1, text: "first" }] },
+      done: false,
+    });
+
+    store.appendText(runId, "second", occurredAt);
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { status: "live", entries: [{ sequence: 2, text: "second" }] },
+      done: false,
+    });
+
+    store.complete(runId);
+    await expect(stream.next()).resolves.toMatchObject({
+      value: { status: "complete", entries: [] },
+      done: false,
+    });
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+  });
+
+  it("removes an aborted subscriber and does not retain its listener", async () => {
+    const store = new AgentRunLiveConversationStore();
+    store.begin(runId);
+    const controller = new AbortController();
+    const stream = store.subscribe({ runId, signal: controller.signal });
+    await stream.next();
+    controller.abort();
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
+    store.appendText(runId, "after abort", occurredAt);
+    await expect(stream.next()).resolves.toMatchObject({ done: true });
   });
 });

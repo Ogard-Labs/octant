@@ -156,6 +156,101 @@ describe("agentRunClient", () => {
     expect(response.entries[0]?.text).toBe("partial");
   });
 
+  it("consumes an abortable conversation snapshot and live delta stream", async () => {
+    const frame = (kind: "snapshot" | "delta", sequence?: number) => ({
+      kind,
+      runId,
+      parentThreadId,
+      executionKind: "octant-managed",
+      modelId: "gpt-5.6-luna",
+      lifecycleStatus: "running",
+      status: "live",
+      entries:
+        sequence === undefined
+          ? []
+          : [
+              {
+                sequence,
+                kind: "assistant",
+                text: `chunk ${sequence}`,
+                occurredAt: "2026-08-01T15:00:00.000Z",
+              },
+            ],
+      truncated: false,
+      ...(sequence === undefined ? {} : { nextCursor: String(sequence) }),
+    });
+    const body = [JSON.stringify(frame("snapshot")), JSON.stringify(frame("delta", 1))].join("\n");
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      expect(init?.signal).toBeInstanceOf(AbortSignal);
+      return new Response(`${body}\n`, {
+        status: 200,
+        headers: { "content-type": "application/x-ndjson" },
+      });
+    });
+    const client = createAgentRunClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "cap",
+    });
+    const controller = new AbortController();
+    const subscribe = client.subscribeConversation;
+    expect(subscribe).toBeDefined();
+    if (subscribe === undefined) return;
+    const frames = [];
+    for await (const next of subscribe(runId as never, undefined, controller.signal)) {
+      frames.push(next);
+    }
+    expect(frames.map((next) => next.kind)).toEqual(["snapshot", "delta"]);
+    expect(frames[1]?.entries[0]?.text).toBe("chunk 1");
+  });
+
+  it("rejects a conversation stream with duplicate cursors", async () => {
+    const payload = {
+      kind: "snapshot",
+      runId,
+      parentThreadId,
+      executionKind: "octant-managed",
+      modelId: "gpt-5.6-luna",
+      lifecycleStatus: "running",
+      status: "live",
+      entries: [
+        {
+          sequence: 1,
+          kind: "assistant",
+          text: "first",
+          occurredAt: "2026-08-01T15:00:00.000Z",
+        },
+      ],
+      truncated: false,
+    };
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          `${JSON.stringify(payload)}\n${JSON.stringify({ ...payload, kind: "delta" })}\n`,
+          {
+            status: 200,
+            headers: { "content-type": "application/x-ndjson" },
+          },
+        ),
+    );
+    const client = createAgentRunClient({
+      baseUrl: "http://127.0.0.1:8787",
+      fetch: fetchImpl as unknown as typeof fetch,
+      windowCapability: "cap",
+    });
+    const subscribe = client.subscribeConversation;
+    expect(subscribe).toBeDefined();
+    if (subscribe === undefined) return;
+    const stream = subscribe(runId as never, undefined, new AbortController().signal);
+    await expect(
+      (async () => {
+        for await (const _frame of stream) {
+          // consume until the cursor check rejects
+        }
+      })(),
+    ).rejects.toBeInstanceOf(AgentRunClientFailure);
+  });
+
   it("acknowledges a completed child result", async () => {
     // decode will fail because run is incomplete; use a full minimal shape? For client we can
     // only assert failure class if decode fails. Instead mock decode-compatible payload is hard.
