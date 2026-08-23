@@ -7,6 +7,9 @@ import type {
 } from "@octant/contracts/zen";
 import { ZEN_BUILTIN_BACKGROUNDS } from "@octant/contracts/zen";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSelectField } from "../ui/base/OctantSelect";
+import { OctantSlider } from "../ui/base/OctantSlider";
 
 export interface ZenAppearancePanelProps {
   readonly appearance: ZenAppearance;
@@ -65,7 +68,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
     <>
       <label>
         Background opacity
-        <input
+        <OctantSlider
           aria-label="Zen dimming"
           max="90"
           min="0"
@@ -75,13 +78,12 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
               elementOpacity: props.appearance.elementOpacity,
             })
           }
-          type="range"
           value={props.appearance.dimming}
         />
       </label>
       <label>
         Card opacity
-        <input
+        <OctantSlider
           aria-label="Zen element opacity"
           max="1"
           min="0.1"
@@ -92,7 +94,6 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
             })
           }
           step="0.1"
-          type="range"
           value={props.appearance.elementOpacity}
         />
       </label>
@@ -100,7 +101,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
         <>
           <label>
             Image overlay
-            <input
+            <OctantSlider
               aria-label="Zen image overlay"
               max="90"
               min="0"
@@ -109,25 +110,25 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
                 setOverlay(nextOverlay);
                 commit({ ...background, overlay: nextOverlay });
               }}
-              type="range"
               value={overlay}
             />
           </label>
           <label>
             Image fill
-            <select
+            <OctantSelectField
               aria-label="Zen image fill"
-              onChange={(event) => {
-                const nextFill = event.currentTarget.value as ZenBackgroundFill;
+              onValueChange={(value) => {
+                const nextFill = value as ZenBackgroundFill;
                 setFill(nextFill);
                 commit({ ...background, fill: nextFill });
               }}
+              options={[
+                { id: "cover", label: "Fill" },
+                { id: "contain", label: "Fit" },
+                { id: "tile", label: "Tile" },
+              ]}
               value={fill}
-            >
-              <option value="cover">Fill</option>
-              <option value="contain">Fit</option>
-              <option value="tile">Tile</option>
-            </select>
+            />
           </label>
         </>
       ) : null}
@@ -165,7 +166,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
         <legend>Custom fill</legend>
         <label>
           Solid color
-          <input
+          <OctantInput
             aria-label="Solid color"
             onChange={(event) => setSolidColor(event.currentTarget.value)}
             type="color"
@@ -184,19 +185,20 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
         </OctantButton>
         <label>
           Gradient style
-          <select
+          <OctantSelectField
             aria-label="Gradient style"
-            onChange={(event) => setGradientStyle(event.currentTarget.value as ZenGradientStyle)}
+            onValueChange={(value) => setGradientStyle(value as ZenGradientStyle)}
+            options={[
+              { id: "linear", label: "Linear" },
+              { id: "radial", label: "Radial" },
+              { id: "conic", label: "Conic" },
+            ]}
             value={gradientStyle}
-          >
-            <option value="linear">Linear</option>
-            <option value="radial">Radial</option>
-            <option value="conic">Conic</option>
-          </select>
+          />
         </label>
         <label>
           Gradient start
-          <input
+          <OctantInput
             aria-label="Gradient start"
             onChange={(event) => setGradientFrom(event.currentTarget.value)}
             type="color"
@@ -205,7 +207,7 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
         </label>
         <label>
           Gradient end
-          <input
+          <OctantInput
             aria-label="Gradient end"
             onChange={(event) => setGradientTo(event.currentTarget.value)}
             type="color"
@@ -214,12 +216,11 @@ export function ZenAppearancePanel(props: ZenAppearancePanelProps) {
         </label>
         <label>
           Gradient angle
-          <input
+          <OctantSlider
             aria-label="Gradient angle"
             max="360"
             min="0"
             onChange={(event) => setGradientAngle(Number(event.currentTarget.value))}
-            type="range"
             value={gradientAngle}
           />
         </label>

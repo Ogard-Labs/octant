@@ -1,6 +1,7 @@
 import type { ZenChecklistElementPayload, ZenChecklistItemId } from "@octant/contracts/zen";
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
+import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
 import { OctantInput } from "../../ui/base/OctantInput";
 
 export interface ZenChecklistProps {
@@ -108,7 +109,7 @@ export function ZenChecklist(props: ZenChecklistProps) {
             onKeyDown={(event) => handleItemKeyDown(event, item.itemId, index)}
           >
             <label className="check zen-checklist__label">
-              <input
+              <OctantCheckbox
                 checked={item.done}
                 disabled={element.locked || props.onSetCompleted === undefined}
                 onChange={(event) =>
@@ -125,7 +126,6 @@ export function ZenChecklist(props: ZenChecklistProps) {
                   if (node === null) checkboxRefs.current.delete(String(item.itemId));
                   else checkboxRefs.current.set(String(item.itemId), node);
                 }}
-                type="checkbox"
               />
               <span>{item.text}</span>
             </label>

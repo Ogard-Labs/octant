@@ -278,13 +278,14 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           <p className="project-dialog__field-label" id="project-folder-label">
             Folder
           </p>
-          <button
+          <OctantButton
             aria-describedby="project-folder-label"
             className="project-dialog__folder"
             data-chosen={folder === undefined ? "false" : "true"}
             disabled={choosing || submitting}
             onClick={() => void chooseFolder()}
             type="button"
+            variant="ghost"
           >
             <FolderOpen aria-hidden="true" size={18} strokeWidth={1.6} />
             <span className="project-dialog__folder-name">
@@ -294,7 +295,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             {folder === undefined ? null : (
               <span className="project-dialog__folder-change">Change</span>
             )}
-          </button>
+          </OctantButton>
           <div className="project-dialog__actions">
             <OctantButton onClick={requestClose} type="button" variant="ghost">
               Cancel
