@@ -575,7 +575,8 @@ describe("ProjectSidebarSection code project views", () => {
     expect(screen.getByRole("button", { name: "Collapse octant" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Collapse auroradocs" })).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "New project view" }));
+    await user.click(screen.getByRole("button", { name: "Project view" }));
+    await user.click(await screen.findByRole("menuitem", { name: "New view" }));
     await user.type(screen.getByLabelText("Project view name"), "Main");
     await user.click(screen.getByRole("checkbox", { name: "octant" }));
     await user.click(screen.getByRole("button", { name: "Rocket" }));
@@ -709,10 +710,15 @@ describe("ProjectSidebarSection code project views", () => {
 
     rerender(<ProjectSidebarSection {...sharedProps} projectViewSwitcherPresentation="dropdown" />);
     expect(screen.queryByRole("group", { name: "Project views" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Project view" })).toHaveTextContent("Main");
+    const dropdown = screen.getByRole("button", { name: "Project view" });
+    expect(dropdown).toHaveTextContent("Main");
+    expect(screen.queryByRole("button", { name: "New project view" })).not.toBeInTheDocument();
+    await user.click(dropdown);
+    expect(await screen.findByRole("menuitem", { name: "New view" })).toBeVisible();
   });
 
   it("initializes project views when Code becomes enabled after Chat", async () => {
+    const user = userEvent.setup();
     window.localStorage.clear();
     const { rerender } = render(
       <ProjectSidebarSection
@@ -744,7 +750,10 @@ describe("ProjectSidebarSection code project views", () => {
     );
 
     expect(screen.getByRole("button", { name: "Project view" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "New project view" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "New project view" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Project view" }));
+    await user.click(await screen.findByRole("menuitem", { name: "New view" }));
+    expect(screen.getByRole("dialog", { name: "New project view" })).toBeVisible();
   });
 });
 

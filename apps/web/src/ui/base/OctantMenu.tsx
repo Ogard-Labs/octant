@@ -9,7 +9,15 @@ export interface OctantMenuItem {
   readonly value: string;
 }
 
+export interface OctantMenuAction {
+  readonly disabled?: boolean;
+  readonly icon?: ReactNode;
+  readonly label: string;
+  readonly onSelect: () => void;
+}
+
 export interface OctantMenuProps {
+  readonly actions?: ReadonlyArray<OctantMenuAction>;
   readonly items: ReadonlyArray<OctantMenuItem>;
   readonly onValueChange: (value: string) => void;
   readonly trigger: ReactNode;

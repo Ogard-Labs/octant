@@ -31,7 +31,7 @@ export function WindowChrome(props: WindowChromeProps) {
       className={`window-chrome window-chrome--material-${props.material}`}
     >
       {props.onExpandSidebar === undefined ? null : (
-        <div className="window-chrome__leading">
+        <div className="window-chrome__leading window-no-drag">
           <span aria-hidden="true" className="window-chrome__traffic-light-space" />
           <IconButton
             className="window-chrome__button"

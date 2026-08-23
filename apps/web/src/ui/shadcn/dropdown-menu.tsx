@@ -48,7 +48,15 @@ export interface ShadcnMenuItem {
   readonly value: string;
 }
 
+export interface ShadcnMenuAction {
+  readonly disabled?: boolean;
+  readonly icon?: ReactNode;
+  readonly label: string;
+  readonly onSelect: () => void;
+}
+
 export interface ShadcnDropdownMenuProps {
+  readonly actions?: ReadonlyArray<ShadcnMenuAction>;
   readonly items: ReadonlyArray<ShadcnMenuItem>;
   readonly onValueChange: (value: string) => void;
   readonly trigger: ReactNode;
@@ -153,6 +161,25 @@ export function ShadcnDropdownMenu(props: ShadcnDropdownMenuProps) {
                   </MenuPrimitive.RadioItem>
                 ))}
               </MenuPrimitive.RadioGroup>
+            )}
+            {props.actions === undefined || props.actions.length === 0 ? null : (
+              <>
+                <MenuPrimitive.Separator className="-mx-1 my-1 h-px bg-border" />
+                {props.actions.map((action) => (
+                  <MenuPrimitive.Item
+                    className="relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none data-disabled:pointer-events-none data-disabled:opacity-50 data-highlighted:bg-accent data-highlighted:text-accent-foreground window-no-drag"
+                    closeOnClick
+                    key={action.label}
+                    {...(action.disabled === true ? { disabled: true } : {})}
+                    onClick={action.onSelect}
+                  >
+                    <span aria-hidden="true" className="flex size-4 items-center justify-center">
+                      {action.icon}
+                    </span>
+                    <span className="truncate font-medium">{action.label}</span>
+                  </MenuPrimitive.Item>
+                ))}
+              </>
             )}
           </DropdownMenuPopup>
         </MenuPrimitive.Positioner>

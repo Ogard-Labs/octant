@@ -2739,7 +2739,9 @@ describe("App", () => {
       "window-no-drag",
     );
     expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass("window-no-drag");
-    expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass("btn-icon");
+    expect(within(sidebar).getByRole("button", { name: "Search" })).toHaveClass(
+      "shell-icon-button",
+    );
     expect(within(sidebar).getByRole("button", { name: "Set your name" })).toHaveClass(
       "window-no-drag",
     );
@@ -2803,16 +2805,14 @@ describe("App", () => {
     });
     expect(document.body).not.toHaveTextContent("/private/unvalidated-selection");
 
-    // Sidebar Search is in-place: it names the active mode so a user can
-    // never mistake which set is listed. The overlay is a separate palette
-    // finder, not this control.
+    // Sidebar Search opens one centered, mode-scoped thread finder.
     await user.click(screen.getByRole("button", { name: "Search" }));
-    const search = screen.getByRole("searchbox", { name: "Search Code threads" });
+    const search = screen.getByRole("combobox", { name: "Search Code threads" });
     expect(search).toBeVisible();
-    expect(search).toHaveFocus();
-    expect(screen.queryByRole("dialog", { name: "Search Code threads" })).toBeNull();
+    await waitFor(() => expect(search).toHaveFocus());
+    expect(screen.getByRole("dialog", { name: "Search Code threads" })).toBeVisible();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("searchbox", { name: "Search Code threads" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Search Code threads" })).toBeNull();
   }, 15_000);
 
   it("lists an archived Chat thread the host search reports in the Archived group", async () => {

@@ -28,7 +28,7 @@ export interface SettingsNavigationProps {
   readonly onSelect: (sectionId: SettingsSectionId) => void;
 }
 
-const SETTINGS_GROUPS = ["Personal", "Modes", "Integrations", "System"] as const;
+const SETTINGS_GROUPS = ["Personal", "Modes", "Agents", "Integrations", "System"] as const;
 
 const SETTINGS_NAVIGATION_META: Readonly<
   Record<
@@ -42,10 +42,10 @@ const SETTINGS_NAVIGATION_META: Readonly<
   work: { group: "Modes", icon: Bot },
   code: { group: "Modes", icon: Code2 },
   "navigator-assistant": { group: "Personal", icon: Compass },
-  providers: { group: "Integrations", icon: Bot },
-  profiles: { group: "Personal", icon: UserRound },
-  agents: { group: "Personal", icon: Bot },
-  skills: { group: "Integrations", icon: Blocks },
+  providers: { group: "Agents", icon: Bot },
+  profiles: { group: "Agents", icon: UserRound },
+  agents: { group: "Agents", icon: Bot },
+  skills: { group: "Agents", icon: Blocks },
   usage: { group: "System", icon: ChartNoAxesColumnIncreasing },
   host: { group: "System", icon: Server },
   github: { group: "Integrations", icon: FolderGit2 },

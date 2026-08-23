@@ -51,7 +51,7 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     executableNames: ["codex"],
     approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
     versionProbeArgs: ["--version"],
-    authProbeArgs: ["account", "read", "--json"],
+    authProbeArgs: ["login", "status"],
     onboardingGuidance:
       "Run codex login in your terminal to authenticate, then check the connection again.",
     isDirectEndpoint: false,

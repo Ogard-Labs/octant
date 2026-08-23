@@ -466,6 +466,7 @@ describe("WindowChrome", () => {
       "Workspace actions for Welcome to Code",
     );
     expect(container.querySelector(".window-chrome__trailing")).toHaveClass("window-no-drag");
+    expect(cssRule(".shell-frame > .window-chrome")).toContain("pointer-events: auto;");
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
@@ -537,6 +538,20 @@ describe("WindowChrome", () => {
     overflow.focus();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("button", { name: "Open bottom panel" })).toHaveFocus();
+  });
+
+  it("carves the collapsed sidebar opener out of the native drag region", async () => {
+    const user = userEvent.setup();
+    const onExpandSidebar = vi.fn();
+    const { container } = renderChrome({ onExpandSidebar });
+
+    const leading = container.querySelector(".window-chrome__leading");
+    const opener = screen.getByRole("button", { name: "Show sidebar" });
+
+    expect(leading).toHaveClass("window-no-drag");
+    expect(leading).toContainElement(opener);
+    await user.click(opener);
+    expect(onExpandSidebar).toHaveBeenCalledOnce();
   });
 
   it("keeps only the blank title-bar space draggable so pointer controls remain clickable", () => {

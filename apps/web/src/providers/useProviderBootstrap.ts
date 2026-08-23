@@ -16,32 +16,34 @@ export interface ProviderBootstrapOptions {
 }
 
 export function useProviderBootstrap(options: ProviderBootstrapOptions): void {
-  const attempted = useRef(false);
+  const attemptedKey = useRef<string | undefined>(undefined);
   const inFlight = useRef(false);
   const hasSelectableModels = hasSelectableProviderModels(options.providerGroups);
+  const unobservedProviderIds = listAutoProbeInstanceIds(
+    options.providerController.instances,
+    new Set(options.providerController.observedByInstance.keys()),
+  );
+  const bootstrapKey =
+    unobservedProviderIds.length === 0
+      ? "discover"
+      : `probe:${unobservedProviderIds.map(String).join(",")}`;
 
   useEffect(() => {
-    if (
-      !options.enabled ||
-      hasSelectableModels ||
-      (options.providerController.status === "disconnected" && !inFlight.current)
-    ) {
-      attempted.current = false;
-    }
     if (
       !shouldRunProviderBootstrap({
         enabled: options.enabled,
         providerStatus: options.providerController.status,
         scanning: options.discoveryController.scanning,
-        attempted: attempted.current,
+        attempted: attemptedKey.current === bootstrapKey,
         hasSelectableModels,
+        hasUnobservedProviders: unobservedProviderIds.length > 0,
       })
     ) {
       return;
     }
     if (inFlight.current) return;
     inFlight.current = true;
-    attempted.current = true;
+    attemptedKey.current = bootstrapKey;
 
     void (async () => {
       try {
@@ -51,7 +53,7 @@ export function useProviderBootstrap(options: ProviderBootstrapOptions): void {
           new Set(options.providerController.observedByInstance.keys()),
         );
         for (const instanceId of autoProbeInstanceIds) {
-          if (await options.providerController.probe(instanceId)) return;
+          await options.providerController.probe(instanceId);
         }
       } finally {
         inFlight.current = false;
@@ -59,6 +61,8 @@ export function useProviderBootstrap(options: ProviderBootstrapOptions): void {
     })();
   }, [
     hasSelectableModels,
+    bootstrapKey,
+    unobservedProviderIds.length,
     options.enabled,
     options.discoveryController,
     options.providerController,

@@ -5,7 +5,7 @@
   height: 100vh;
   min-width: 0;
   min-height: 0;
-  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-columns: 232px minmax(0, 1fr);
   overflow: hidden;
   color: var(--octant-text-primary);
   background: var(--octant-workspace);
@@ -66,25 +66,13 @@
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  padding: 4px 10px 16px;
+  padding: 4px 8px 16px;
   overflow-y: auto;
 }
 
 /* "Back to app" borrows the .setnav-item recipe; it only needs its slot. */
 .settings-view__back {
   margin-bottom: var(--oct-space-2);
-}
-
-.settings-view__all-settings {
-  display: flex;
-  width: 100%;
-  min-height: var(--oct-control-height-sm);
-  align-items: center;
-  gap: var(--oct-space-3);
-  padding: 0 var(--oct-space-2);
-  color: var(--oct-fg);
-  font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
 }
 
 .settings-view__workspace {
@@ -118,7 +106,7 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  margin: 6px 0 14px;
+  margin: 2px 0 16px;
   padding: 0;
   border: 0;
 }
@@ -154,7 +142,7 @@
    the grid gap does it instead. */
 .settings-navigation {
   display: grid;
-  gap: var(--oct-space-4);
+  gap: var(--oct-space-3);
 }
 
 .settings-navigation .setnav-section {
@@ -296,8 +284,8 @@
 }
 
 .settings-view__content-inner {
-  width: min(100% - 56px, 680px);
-  padding: 32px 0 72px;
+  width: min(100% - 48px, 680px);
+  padding: 28px 0 72px;
   margin: 0 auto;
 }
 
@@ -307,8 +295,8 @@
 }
 
 .settings-view__content-inner > section {
-  padding: 0 0 28px;
-  margin: 0 0 28px;
+  padding: 0 0 24px;
+  margin: 0 0 24px;
 }
 
 .settings-view__content-inner > section > h2 {
@@ -316,6 +304,24 @@
   color: var(--octant-text-primary);
   font-size: 13px;
   font-weight: 600;
+}
+
+.settings-section-stack {
+  display: grid;
+  gap: var(--oct-space-6);
+}
+
+.settings-card-section {
+  display: grid;
+  gap: var(--oct-space-2);
+}
+
+.settings-card-section > h2 {
+  margin: 0;
+  padding: 0 var(--oct-space-1);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  font-weight: 500;
 }
 
 .settings-view__field,
@@ -376,9 +382,9 @@
 
 .settings-theme-editor {
   display: grid;
-  gap: 20px;
-  padding: 0 0 24px;
-  margin-bottom: 4px;
+  gap: var(--oct-space-4);
+  padding: 0;
+  margin: 0;
 }
 
 .settings-theme-editor__card,
@@ -386,19 +392,19 @@
   overflow: hidden;
   padding: 0;
   margin: 0;
-  background: transparent;
-  border: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
 }
 
 .settings-theme-editor__disclosure {
-  padding-top: 12px;
-  border-top: 1px solid var(--oct-border);
+  padding-top: 0;
 }
 
 .settings-theme-editor__card > h3,
 .settings-theme-editor__accessibility legend {
   margin: 0;
-  padding: 0 0 8px;
+  padding: var(--oct-space-4) var(--oct-space-4) var(--oct-space-2);
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
@@ -410,8 +416,9 @@
 .settings-scheme {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: var(--oct-space-2);
   max-width: 480px;
+  padding: 0 var(--oct-space-4) var(--oct-space-4);
 }
 
 .settings-scheme__card {
@@ -445,7 +452,7 @@
 .settings-scheme__preview {
   position: relative;
   display: flex;
-  height: 64px;
+  height: 54px;
   overflow: hidden;
 }
 
@@ -536,9 +543,15 @@
   border-bottom: 0;
 }
 
+.settings-theme-editor__card > .settings-view__field {
+  margin: 0 var(--oct-space-4);
+  padding: var(--oct-space-3) 0;
+  border-top: 1px solid var(--oct-border-soft);
+}
+
 .settings-theme-editor__disclosure > summary {
   display: flex;
-  min-height: 42px;
+  min-height: 46px;
   align-items: center;
   justify-content: space-between;
   color: var(--oct-fg-2);
@@ -547,6 +560,7 @@
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
   list-style: none;
+  padding: 0 var(--oct-space-4);
 }
 
 .settings-theme-editor__disclosure > summary::-webkit-details-marker {
@@ -564,11 +578,21 @@
 }
 
 .settings-theme-editor__disclosure-body {
-  padding-bottom: 10px;
+  padding: 0 var(--oct-space-4) var(--oct-space-3);
+  border-top: 1px solid var(--oct-border-soft);
 }
 
 .settings-theme-editor__accessibility {
-  padding-top: 8px;
+  padding: 0 var(--oct-space-4) var(--oct-space-2);
+}
+
+.settings-theme-editor__accessibility legend {
+  padding: var(--oct-space-4) 0 var(--oct-space-2);
+}
+
+.settings-theme-editor__accessibility > .settings-view__field {
+  margin: 0;
+  padding: var(--oct-space-3) 0;
 }
 
 /* Unsaved-changes bar: note on the left, Apply/Cancel/Reset on the right.
@@ -614,6 +638,94 @@
   color: var(--oct-fg-2);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-strong);
+}
+
+.settings-font-picker {
+  width: min(280px, 100%);
+}
+
+.settings-font-picker__preview {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: var(--oct-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-font-picker__sample {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: var(--oct-text-xs);
+}
+
+.settings-font-picker__custom {
+  padding: 0 0 var(--oct-space-2);
+}
+
+.settings-font-picker__custom summary {
+  width: fit-content;
+  color: var(--muted-foreground);
+  font-size: var(--oct-text-xs);
+  cursor: pointer;
+}
+
+.settings-font-picker__custom > input {
+  max-width: 100%;
+  margin-top: var(--oct-space-2);
+}
+
+.octant-number-stepper {
+  display: inline-grid;
+  grid-template-columns: 30px minmax(44px, 58px) auto 30px;
+  align-items: center;
+  overflow: hidden;
+  background: var(--background);
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  box-shadow: var(--octant-shadow-xs);
+}
+
+.octant-number-stepper:focus-within {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
+}
+
+.octant-number-stepper__button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 0;
+}
+
+.octant-number-stepper__input {
+  width: 100%;
+  height: 30px;
+  padding: 0 2px;
+  appearance: textfield;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: var(--oct-text-sm);
+  text-align: center;
+}
+
+.octant-number-stepper__input:focus-visible {
+  border: 0;
+  box-shadow: none;
+}
+
+.octant-number-stepper__input::-webkit-inner-spin-button,
+.octant-number-stepper__input::-webkit-outer-spin-button {
+  margin: 0;
+  appearance: none;
+}
+
+.octant-number-stepper__suffix {
+  color: var(--muted-foreground);
+  font-size: var(--oct-text-xs);
+  padding-right: 2px;
 }
 
 /* Rides the `.textarea` recipe. Theme JSON is code, so the face is mono and
@@ -699,7 +811,7 @@
 
 @media (max-width: 680px) {
   .settings-view {
-    grid-template-columns: 208px minmax(0, 1fr);
+    grid-template-columns: 196px minmax(0, 1fr);
   }
 
   .settings-view__sidebar-content {

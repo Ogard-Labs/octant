@@ -53,7 +53,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   color: var(--oct-fg);
   background: transparent;
   border-bottom: 0;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {
@@ -74,6 +74,15 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   gap: 2px;
   padding-right: 4px;
   pointer-events: auto;
+}
+
+.window-chrome__leading .window-chrome__button {
+  position: relative;
+  top: 8px;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
 }
 
 /* Same reserve the sidebar keeps for the macOS traffic lights (see
@@ -258,6 +267,17 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   height: 100%;
 }
 
+.sidebar__native-collapse {
+  position: relative;
+  top: 8px;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  flex: 0 0 auto;
+  margin-left: 2px;
+}
+
 .sidebar__native-leading .sidebar__drag-surface {
   display: block;
   align-self: stretch;
@@ -386,9 +406,8 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   min-width: 0;
 }
 
-/* The activity toggle is contributed by the Project section pass and still
-   wears the 28px shell-icon-button metric; its neighbors in this row are
-   var(--oct-control-height-sm) .btn-icon squares. One row, one size. */
+/* Search and Activity use the same compact shell icon recipe. */
+.sidebar__chrome-actions .shell-icon-button,
 .sidebar__chrome-activity .shell-icon-button {
   width: var(--oct-control-height-sm);
   min-width: var(--oct-control-height-sm);
@@ -402,23 +421,6 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   flex: 0 0 auto;
   align-items: center;
   gap: 2px;
-}
-
-.sidebar__search {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  margin: 6px 0 0;
-  padding: 0 4px;
-}
-
-.sidebar__search input {
-  min-width: 0;
-  height: 28px;
-  border-color: transparent;
-  background: var(--oct-fg-soft);
-  font-size: 12px;
 }
 
 /* Space separates the navigation actions from the Project tree. A rule here

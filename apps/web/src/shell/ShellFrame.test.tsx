@@ -173,7 +173,7 @@ describe("ShellFrame", () => {
 
     expect(chrome).toContain("background: transparent;");
     expect(chrome).toContain("border-bottom: 0;");
-    expect(chrome).toContain("pointer-events: none;");
+    expect(chrome).toContain("pointer-events: auto;");
     expect(workspace).toContain("grid-row: 1 / -1;");
     expect(trailing).toContain("pointer-events: auto;");
     expect(shellStyles).toMatch(

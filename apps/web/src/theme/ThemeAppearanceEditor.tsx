@@ -4,9 +4,10 @@ import { ChevronDown } from "lucide-react";
 import type { ThemeController } from "./useThemeController";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { OctantNumberStepper } from "../ui/base/OctantNumberStepper";
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
-import { OctantSlider } from "../ui/base/OctantSlider";
+import { FontFamilyPicker } from "./FontFamilyPicker";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
   isAppearancePresetAvailable,
@@ -182,12 +183,14 @@ export function ThemeAppearanceEditor(props: {
           <TypographyControl
             label="Interface typography"
             familyLabel="Interface font"
+            surface="ui"
             value={draft.typography.ui}
             onChange={(patch) => setTypography("ui", patch)}
           />
           <TypographyControl
             label="Code typography"
             familyLabel="Code font"
+            surface="editor"
             value={draft.typography.editor}
             onChange={(patch) => setTypography("editor", patch)}
             extended
@@ -195,6 +198,7 @@ export function ThemeAppearanceEditor(props: {
           <TypographyControl
             label="Terminal typography"
             familyLabel="Terminal font family"
+            surface="terminal"
             value={draft.typography.terminal}
             onChange={(patch) => setTypography("terminal", patch)}
             extended
@@ -252,6 +256,7 @@ export function ThemeAppearanceEditor(props: {
 function TypographyControl(props: {
   readonly label: string;
   readonly familyLabel: string;
+  readonly surface: "ui" | "editor" | "terminal";
   readonly value: {
     readonly family: string;
     readonly size: number;
@@ -267,21 +272,29 @@ function TypographyControl(props: {
       <legend>{props.label}</legend>
       <label className="settings-view__field">
         <span>{props.familyLabel}</span>
-        <OctantInput
-          aria-label={props.familyLabel}
-          className="settings-view__text-input"
-          onChange={(event) => props.onChange({ family: event.currentTarget.value })}
+        <FontFamilyPicker
+          label={props.familyLabel}
+          onChange={(family) => props.onChange({ family })}
+          surface={props.surface}
           value={props.value.family}
         />
       </label>
+      <details className="settings-font-picker__custom">
+        <summary>Custom font stack</summary>
+        <OctantInput
+          aria-label={`${props.familyLabel} custom stack`}
+          onChange={(event) => props.onChange({ family: event.currentTarget.value })}
+          value={props.value.family}
+        />
+      </details>
       <label className="settings-view__field">
         <span>Font size</span>
-        <OctantSlider
-          aria-label={`${props.label} font size`}
-          className="settings-view__range"
-          min={8}
+        <OctantNumberStepper
+          label={`${props.label} font size`}
           max={32}
-          onChange={(event) => props.onChange({ size: Number(event.currentTarget.value) })}
+          min={8}
+          onChange={(size) => props.onChange({ size })}
+          suffix="px"
           value={props.value.size}
         />
       </label>
@@ -289,15 +302,12 @@ function TypographyControl(props: {
         <>
           <label className="settings-view__field">
             <span>Line height</span>
-            <OctantSlider
-              aria-label={`${props.label} line height`}
-              className="settings-view__range"
-              min={1}
+            <OctantNumberStepper
+              label={`${props.label} line height`}
               max={2.5}
+              min={1}
+              onChange={(lineHeight) => props.onChange({ lineHeight })}
               step={0.1}
-              onChange={(event) =>
-                props.onChange({ lineHeight: Number(event.currentTarget.value) })
-              }
               value={props.value.lineHeight ?? 1.4}
             />
           </label>

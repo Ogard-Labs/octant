@@ -69,9 +69,9 @@ components:
 
 ### Creative North Star
 
-Octant should feel like a quiet professional workbench cut from graphite: one clear work surface, a shallow folder hierarchy at the left, and tools that appear beside the work only when needed. ChatGPT/Codex and reference app are interaction references for restraint, project/thread nesting, composer prominence, and contextual right-side tools. They are direction, not source material to copy.
+Octant should feel like a quiet professional workbench cut from graphite: one clear work surface, a shallow folder hierarchy at the left, and tools that appear beside the work only when needed. The interaction language favors restraint, Project and thread nesting, composer prominence, and contextual right-side tools.
 
-Controls follow the shadcn New York neutral recipe: compact rectangular buttons, quiet bordered inputs, opaque popovers, restrained cards, and clear focus rings. Vercel, Codex, and reference app guide hierarchy and density. Octant keeps its own product structure and visual identity.
+Controls follow the shadcn New York neutral recipe: compact rectangular buttons, quiet bordered inputs, opaque popovers, restrained cards, and clear focus rings. Octant keeps its own product structure and visual identity.
 
 ### Product context and register
 

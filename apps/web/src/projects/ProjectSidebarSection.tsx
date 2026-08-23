@@ -991,6 +991,13 @@ function CodeProjectViewSwitcher(props: {
               render={<span className="code-project-views__trigger-wrap" />}
             >
               <OctantMenu
+                actions={[
+                  {
+                    icon: <Plus aria-hidden="true" size={14} strokeWidth={1.7} />,
+                    label: "New view",
+                    onSelect: props.onCreate,
+                  },
+                ]}
                 items={options.map((option) => ({
                   icon: <CodeProjectViewGlyph color={option.color} icon={option.icon} />,
                   label: option.name,
@@ -1014,7 +1021,6 @@ function CodeProjectViewSwitcher(props: {
               view={active}
             />
           </ContextMenuPrimitive.Root>
-          {newViewButton}
         </div>
       )}
     </div>

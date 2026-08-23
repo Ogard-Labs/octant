@@ -20,13 +20,14 @@ export function shouldRunProviderBootstrap(input: {
   readonly scanning: boolean;
   readonly attempted: boolean;
   readonly hasSelectableModels: boolean;
+  readonly hasUnobservedProviders: boolean;
 }): boolean {
   return (
     input.enabled &&
     input.providerStatus === "ready" &&
     !input.scanning &&
     !input.attempted &&
-    !input.hasSelectableModels
+    (!input.hasSelectableModels || input.hasUnobservedProviders)
   );
 }
 

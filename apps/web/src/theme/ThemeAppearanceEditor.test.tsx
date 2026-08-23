@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { ThemeAppearanceEditor } from "./ThemeAppearanceEditor";
@@ -41,6 +42,34 @@ describe("ThemeAppearanceEditor", () => {
     expect(screen.getByText("Import or export theme").closest("details")).not.toHaveAttribute(
       "open",
     );
+  });
+
+  it("searches friendly font names and keeps raw stacks behind an advanced disclosure", async () => {
+    const updateDraft = vi.fn();
+    render(<ThemeAppearanceEditor controller={{ ...controller(), updateDraft }} />);
+
+    const user = userEvent.setup();
+    const picker = screen.getByRole("combobox", { name: "Interface font" });
+    await user.click(picker);
+    await user.clear(picker);
+    await user.type(picker, "Inter");
+
+    const option = await screen.findByRole("option", { name: /Inter/ });
+    expect(option).toHaveTextContent("Aa 01");
+    await user.click(option);
+    expect(updateDraft).toHaveBeenCalledWith({
+      typography: {
+        ...DEFAULT_THEME_SETTINGS.typography,
+        ui: {
+          ...DEFAULT_THEME_SETTINGS.typography.ui,
+          family: "Inter, system-ui, sans-serif",
+        },
+      },
+    });
+    expect(screen.getAllByText("Custom font stack")[0]?.closest("details")).not.toHaveAttribute(
+      "open",
+    );
+    expect(screen.getByRole("textbox", { name: "Interface font custom stack" })).not.toBeVisible();
   });
 
   it("offers the Octant appearance pack while that plugin is effective", () => {
