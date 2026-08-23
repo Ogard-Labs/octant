@@ -387,7 +387,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   flex-wrap: wrap;
 }
 
-.code-thread-workspace__plan {
+.thread-task-viewer__placement {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -414,6 +414,19 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .thread-task-viewer__trigger[aria-expanded="true"] {
   color: var(--octant-text-primary);
   background: var(--octant-control-hover);
+}
+
+.thread-task-viewer__evidence {
+  color: var(--octant-text-secondary);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-task-viewer__evidence-detail {
+  margin: 8px 2px 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
 }
 
 .thread-task-viewer__popover {

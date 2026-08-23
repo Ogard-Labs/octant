@@ -1,5 +1,9 @@
 import type { CSSProperties, ReactNode } from "react";
-import { MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH } from "@octant/contracts/shell";
+import {
+  MAX_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
+} from "@octant/contracts/shell";
 import type { SidebarVibrancyMode, ThemeSettings, ThemeTypography } from "@octant/contracts/theme";
 import type { ResolvedSidebarMaterial } from "./hostBridge";
 import type { TranscriptTextSize, TranscriptWidth } from "@octant/contracts/shell";
@@ -84,6 +88,7 @@ export function ShellFrame(props: ShellFrameProps) {
                 ? {}
                 : { "--octant-bottom-panel-height": `${props.bottomPanelHeight}px` }),
               "--octant-context-sidebar-width": `${props.contextSidebarWidth}px`,
+              "--octant-native-hidden-inset-titlebar-height": `${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px`,
               "--octant-sidebar-width": `${props.sidebarWidth}px`,
             } as CSSProperties
           }

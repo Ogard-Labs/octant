@@ -53,7 +53,15 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   color: var(--oct-fg);
   background: transparent;
   border-bottom: 0;
-  pointer-events: auto;
+  pointer-events: none;
+}
+
+/* `hiddenInset` reserves the top strip for native window movement. Keep the
+   interactive chrome below that strip so macOS delivers pointer events to the
+   controls instead of treating them as window-drag gestures. Remote/web
+   clients do not have the native inset and keep the zero-offset row above. */
+html[data-octant-native-host="true"] .shell-frame > .window-chrome {
+  top: var(--octant-native-hidden-inset-titlebar-height);
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {

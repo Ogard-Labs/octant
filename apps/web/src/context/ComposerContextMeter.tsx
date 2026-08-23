@@ -197,13 +197,11 @@ function ContextUsagePopover(props: {
 }) {
   const { windowModel } = props;
   const free = windowModel.segments.find((segment) => segment.kind === "free");
-  const availableLimits = (
-    [
-      { label: "Requests", limit: props.snapshot.serviceLimits.requests },
-      { label: "Tokens", limit: props.snapshot.serviceLimits.tokens },
-      { label: "Concurrent turns", limit: props.snapshot.serviceLimits.concurrency },
-    ] as const
-  ).flatMap((row) => (isAvailableLimit(row.limit) ? [{ label: row.label, limit: row.limit }] : []));
+  const limitRows = [
+    { label: "Requests", limit: props.snapshot.serviceLimits.requests },
+    { label: "Tokens", limit: props.snapshot.serviceLimits.tokens },
+    { label: "Concurrent turns", limit: props.snapshot.serviceLimits.concurrency },
+  ] as const;
 
   return (
     <>
@@ -259,14 +257,27 @@ function ContextUsagePopover(props: {
           </p>
         ))}
       </div>
-      {availableLimits.length === 0 ? null : (
-        <section aria-label="Provider account limits" className="context-window-popover__limits">
+      <section aria-label="Provider account limits" className="context-window-popover__limits">
+        <div className="context-window-popover__limits-heading">
           <h3>Provider account limits</h3>
-          {availableLimits.map((row) => (
-            <CapacityRow key={row.label} label={row.label} limit={row.limit} />
-          ))}
-        </section>
-      )}
+          <time dateTime={props.snapshot.serviceLimits.updatedAt}>
+            Updated {formatRelativeTime(props.snapshot.serviceLimits.updatedAt)}
+          </time>
+        </div>
+        {limitRows.map((row) => (
+          <CapacityRow key={row.label} label={row.label} limit={row.limit} />
+        ))}
+        <p className="context-window-popover__limit-state">
+          <span>Quota</span>
+          <span>{quotaLabel(props.snapshot.serviceLimits.quota)}</span>
+        </p>
+        {props.snapshot.serviceLimits.retry.status === "active" ? (
+          <p className="context-window-popover__limit-state" data-state="rate-limited">
+            <span>Retry</span>
+            <span>Rate limited until {formatTime(props.snapshot.serviceLimits.retry.until)}</span>
+          </p>
+        ) : null}
+      </section>
       <OctantButton
         className="context-window-popover__inspect"
         onClick={props.onInspect}
@@ -303,10 +314,15 @@ function ContextMeter(props: {
   );
 }
 
-function CapacityRow(props: {
-  readonly label: string;
-  readonly limit: Extract<ServiceLimitBucket, { readonly status: "available" }>;
-}) {
+function CapacityRow(props: { readonly label: string; readonly limit: ServiceLimitBucket }) {
+  if (props.limit.status === "unavailable") {
+    return (
+      <p data-state="unavailable">
+        <span>{props.label}</span>
+        <span>Unavailable</span>
+      </p>
+    );
+  }
   const used = props.limit.limit - props.limit.remaining;
   const percent = props.limit.limit === 0 ? 0 : Math.round((used / props.limit.limit) * 100);
   return (
@@ -316,6 +332,11 @@ function CapacityRow(props: {
         {compactTokens(props.limit.remaining)} of {compactTokens(props.limit.limit)} left ·{" "}
         {String(percent)}% used
       </span>
+      {props.limit.resetsAt === undefined ? null : (
+        <span className="context-window-popover__reset">
+          Resets {formatTime(props.limit.resetsAt)}
+        </span>
+      )}
     </p>
   );
 }
@@ -361,12 +382,6 @@ function liveLabel(input: {
   return `${scope}. ${input.windowModel.sourceLabel} ${input.windowModel.usageLabel} (${String(Math.round(input.windowModel.percent))}%)${unknown}. ${source}.${health}`;
 }
 
-function isAvailableLimit(
-  limit: ServiceLimitBucket,
-): limit is Extract<ServiceLimitBucket, { readonly status: "available" }> {
-  return limit.status === "available";
-}
-
 function emptyMessage(status: string): string {
   if (status === "not-planned") return "No context plan yet.";
   if (status === "disconnected") return "Context is unavailable.";
@@ -390,4 +405,33 @@ function formatTokens(tokens: number): string {
 
 function formatPercent(percent: number): string {
   return `${percent.toFixed(percent < 1 && percent > 0 ? 1 : 0)}%`;
+}
+
+function quotaLabel(quota: ContextInspectorSnapshot["serviceLimits"]["quota"]): string {
+  return quota === "available"
+    ? "Available"
+    : quota === "exhausted"
+      ? "Exhausted"
+      : quota === "unavailable"
+        ? "Unavailable"
+        : "Unknown";
+}
+
+const dateTimeFormat = new Intl.DateTimeFormat(undefined, {
+  dateStyle: "short",
+  timeStyle: "short",
+});
+
+function formatTime(timestamp: string): string {
+  return dateTimeFormat.format(new Date(timestamp));
+}
+
+function formatRelativeTime(timestamp: string): string {
+  const elapsedMs = Math.max(0, Date.now() - new Date(timestamp).getTime());
+  if (elapsedMs < 60_000) return "just now";
+  const minutes = Math.floor(elapsedMs / 60_000);
+  if (minutes < 60) return `${String(minutes)}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${String(hours)}h ago`;
+  return formatTime(timestamp);
 }

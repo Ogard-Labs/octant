@@ -183,6 +183,9 @@ describe("WindowChrome", () => {
   it("keeps compact native chrome geometry and neutral tool controls", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 0;");
+    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
+      "top: var(--octant-native-hidden-inset-titlebar-height);",
+    );
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
     expect(cssRule(".window-chrome__button")).toContain("width: 26px;");
@@ -466,7 +469,7 @@ describe("WindowChrome", () => {
       "Workspace actions for Welcome to Code",
     );
     expect(container.querySelector(".window-chrome__trailing")).toHaveClass("window-no-drag");
-    expect(cssRule(".shell-frame > .window-chrome")).toContain("pointer-events: auto;");
+    expect(cssRule(".shell-frame > .window-chrome")).toContain("pointer-events: none;");
     expect(screen.queryByText("Connected")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
@@ -571,8 +574,13 @@ describe("WindowChrome", () => {
     );
 
     expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
-    expect(container.firstChild).not.toHaveClass("window-drag-region");
-    expect(container.querySelector(".window-chrome__drag-space")).toHaveClass("window-drag-region");
+    expect(container.firstChild).toHaveClass("window-drag-region");
+    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
+      "top: var(--octant-native-hidden-inset-titlebar-height);",
+    );
+    expect(container.querySelector(".window-chrome__drag-space")).not.toHaveClass(
+      "window-drag-region",
+    );
     expect(container.querySelectorAll(".window-drag-region")).toHaveLength(1);
     for (const control of screen.getAllByRole("button")) {
       expect(control).toHaveClass("window-no-drag");

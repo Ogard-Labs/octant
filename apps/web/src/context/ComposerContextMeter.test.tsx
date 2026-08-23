@@ -90,8 +90,11 @@ describe("ComposerContextMeter", () => {
     expect(popover).toHaveTextContent(/MCP0 loaded· 3 deferred/);
     expect(popover).toHaveTextContent("Provider account limits");
     expect(popover).toHaveTextContent("Concurrent turns");
-    expect(popover).not.toHaveTextContent("Requests");
-    expect(popover).not.toHaveTextContent("Not reported");
+    expect(popover).toHaveTextContent("Requests");
+    expect(popover).toHaveTextContent("Tokens");
+    expect(popover).toHaveTextContent("Unavailable");
+    expect(popover).toHaveTextContent("Quota");
+    expect(popover).toHaveTextContent("Unknown");
     expect(inspect).not.toHaveBeenCalled();
 
     await user.keyboard("{Escape}");
@@ -119,8 +122,23 @@ describe("ComposerContextMeter", () => {
     expect(screen.getByRole("dialog", { name: "Context usage" })).toHaveTextContent(
       "Octant toolsUnknown",
     );
+    expect(screen.getByRole("dialog", { name: "Context usage" })).toHaveTextContent(
+      "Free spaceUnknown",
+    );
     await user.keyboard("{Escape}");
     expect(button).toHaveFocus();
+  });
+
+  it("keeps rate limits and reset windows explicit", async () => {
+    const user = userEvent.setup();
+    render(<Harness snapshot={contextFixture({ health: "rate-limited" })} />);
+    await user.click(screen.getByRole("button", { name: /Show context usage/i }));
+    const popover = screen.getByRole("dialog", { name: "Context usage" });
+    expect(popover).toHaveTextContent("Quota");
+    expect(popover).toHaveTextContent("Unknown");
+    expect(popover).toHaveTextContent("Retry");
+    expect(popover).toHaveTextContent("Rate limited until");
+    expect(popover).toHaveTextContent("Resets");
   });
 
   it("closes on an outside pointer press", async () => {
