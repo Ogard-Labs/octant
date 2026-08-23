@@ -4,6 +4,7 @@ import { NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT } from "../packages/contracts/src/s
 
 const packagedBundle = resolve("out/Octant.app");
 const REQUIRED_CONTROL_LABELS = [
+  "Open checkout in an application.",
   "Toggle environment",
   "Open bottom panel",
   "Open Right sidebar",
@@ -43,12 +44,12 @@ export function assertNativeTitlebarTargetsBelowInset(
   inset = NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
   requiredLabels: ReadonlyArray<string> = REQUIRED_CONTROL_LABELS,
 ): void {
-  const available = new Map(
-    snapshot.elements
-      .filter((element) => element.role === "AXButton" && element.label !== undefined)
-      .map((element) => [element.label as string, element]),
+  const available = snapshot.elements.filter(
+    (element) => element.role === "AXButton" && element.label !== undefined,
   );
-  const missing = requiredLabels.filter((label) => !available.has(label));
+  const targetFor = (label: string) =>
+    available.find((element) => element.label === label || element.label?.startsWith(label));
+  const missing = requiredLabels.filter((label) => targetFor(label) === undefined);
   if (missing.length > 0) {
     throw new Error(
       `Packaged titlebar smoke needs an active Code surface exposing: ${missing.join(", ")}.`,
@@ -56,7 +57,7 @@ export function assertNativeTitlebarTargetsBelowInset(
   }
 
   for (const label of requiredLabels) {
-    const element = available.get(label);
+    const element = targetFor(label);
     const frame = element?.frame;
     if (frame === undefined) throw new Error(`Packaged titlebar target ${label} has no frame.`);
     const centerY = frame.y - snapshot.window_bounds.y + frame.h / 2;

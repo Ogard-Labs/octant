@@ -33,4 +33,19 @@ describe("packaged native titlebar smoke geometry", () => {
       ),
     ).not.toThrow();
   });
+
+  it("matches the dynamic default application suffix on Open in", () => {
+    expect(() =>
+      assertNativeTitlebarTargetsBelowInset(
+        {
+          window_bounds: bounds,
+          elements: [
+            button("Open checkout in an application. Default Visual Studio Code", 200 + 24),
+          ],
+        },
+        24,
+        ["Open checkout in an application."],
+      ),
+    ).not.toThrow();
+  });
 });
