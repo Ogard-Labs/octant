@@ -28,6 +28,7 @@ export interface OctantSelectOption {
 }
 
 export interface OctantSelectFieldProps {
+  readonly "aria-label"?: string;
   readonly className?: string;
   readonly disabled?: boolean;
   readonly id?: string;
@@ -55,6 +56,7 @@ export function OctantSelectField(props: OctantSelectFieldProps) {
       value={props.value}
     >
       <SelectTrigger
+        aria-label={props["aria-label"]}
         className={cn("window-no-drag", props.triggerClassName, props.className)}
         id={props.id}
       >

@@ -5,6 +5,9 @@ import {
   type AgentHierarchyFilter,
   type AgentHierarchyInputEntry,
 } from "./buildAgentHierarchyModel";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantSelectField } from "../ui/base/OctantSelect";
 import "./agent-hierarchy.css";
 
 export function AgentHierarchyPanel(props: {
@@ -57,19 +60,21 @@ export function AgentHierarchyPanel(props: {
       <div className="agent-hierarchy__controls">
         <label>
           Filter
-          <select
+          <OctantSelectField
             aria-label="Agent hierarchy filter"
+            className="agent-hierarchy__filter"
+            onValueChange={(value) => setFilter(value as AgentHierarchyFilter)}
+            options={[
+              { id: "active", label: "Active" },
+              { id: "history", label: "History" },
+              { id: "all", label: "All" },
+            ]}
             value={filter}
-            onChange={(event) => setFilter(event.target.value as AgentHierarchyFilter)}
-          >
-            <option value="active">Active</option>
-            <option value="history">History</option>
-            <option value="all">All</option>
-          </select>
+          />
         </label>
         <label>
           Search
-          <input
+          <OctantInput
             aria-label="Search child agents"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -104,13 +109,13 @@ export function AgentHierarchyPanel(props: {
                 </span>
               </div>
               <div className="agent-hierarchy__row-meta">
-                <button
+                <OctantButton
                   type="button"
                   aria-label={`View conversation for ${row.task}`}
                   onClick={() => props.onInspectConversation?.(row.runId)}
                 >
                   {props.conversation?.runId === row.runId ? "Hide transcript" : "View transcript"}
-                </button>
+                </OctantButton>
                 {props.conversation?.runId === row.runId ? (
                   <AgentConversation
                     conversation={props.conversation}
@@ -126,14 +131,14 @@ export function AgentHierarchyPanel(props: {
                 {row.routeReason ? <span>{row.routeReason}</span> : null}
                 {row.recoveryReason ? <span>recovery: {row.recoveryReason}</span> : null}
                 {row.needsAcknowledgement ? (
-                  <button
+                  <OctantButton
                     type="button"
                     onClick={() =>
                       props.onAcknowledge?.({ runId: row.runId, version: row.version })
                     }
                   >
                     Acknowledge result
-                  </button>
+                  </OctantButton>
                 ) : null}
                 {row.lifecycleStatus === "running" || row.lifecycleStatus === "waiting" ? (
                   <SteerControl
@@ -144,33 +149,33 @@ export function AgentHierarchyPanel(props: {
                   />
                 ) : null}
                 {row.lifecycleStatus === "failed" || row.lifecycleStatus === "interrupted" ? (
-                  <button
+                  <OctantButton
                     type="button"
                     aria-label={`Retry ${row.task}`}
                     onClick={() => props.onRetry?.({ runId: row.runId, version: row.version })}
                   >
                     Retry
-                  </button>
+                  </OctantButton>
                 ) : null}
                 {row.lifecycleStatus === "waiting" ||
                 (row.lifecycleStatus === "interrupted" &&
                   row.recoveryReason !== "restart-without-resumable-execution") ? (
-                  <button
+                  <OctantButton
                     type="button"
                     aria-label={`Resume ${row.task}`}
                     onClick={() => props.onResume?.({ runId: row.runId, version: row.version })}
                   >
                     Resume
-                  </button>
+                  </OctantButton>
                 ) : null}
                 {row.bucket === "active" ? (
-                  <button
+                  <OctantButton
                     type="button"
                     aria-label={`Cancel ${row.task}`}
                     onClick={() => props.onCancel?.({ runId: row.runId })}
                   >
                     Cancel
-                  </button>
+                  </OctantButton>
                 ) : null}
               </div>
             </li>
@@ -219,9 +224,9 @@ function SteerControl(props: {
   const [message, setMessage] = useState("");
   if (!open) {
     return (
-      <button type="button" aria-label={`Steer ${props.task}`} onClick={() => setOpen(true)}>
+      <OctantButton type="button" aria-label={`Steer ${props.task}`} onClick={() => setOpen(true)}>
         Steer
-      </button>
+      </OctantButton>
     );
   }
   return (
@@ -239,17 +244,17 @@ function SteerControl(props: {
     >
       <label htmlFor={fieldId}>
         Steering instruction
-        <input
+        <OctantInput
           id={fieldId}
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           required
         />
       </label>
-      <button type="submit">Send steering</button>
-      <button type="button" onClick={() => setOpen(false)}>
+      <OctantButton type="submit">Send steering</OctantButton>
+      <OctantButton type="button" onClick={() => setOpen(false)}>
         Cancel steering
-      </button>
+      </OctantButton>
     </form>
   );
 }

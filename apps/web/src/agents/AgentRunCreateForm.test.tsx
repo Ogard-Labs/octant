@@ -92,13 +92,14 @@ describe("AgentRunCreateForm", () => {
         onSubmit={vi.fn()}
       />,
     );
-    expect(screen.getByRole("option", { name: "Implement" })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Review" })).toBeInTheDocument();
+    await user.click(screen.getByRole("combobox", { name: "Role" }));
+    expect(await screen.findByRole("option", { name: "Implement" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Review" })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "Research" })).not.toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Resolved child facts" })).toHaveTextContent(
       "Confirmed isolated worktree",
     );
-    await user.selectOptions(screen.getByLabelText("Role"), "review");
+    await user.click(screen.getByRole("option", { name: "Review" }));
     expect(onRoleChange).toHaveBeenCalledWith("review");
   });
 

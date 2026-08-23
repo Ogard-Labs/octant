@@ -59,10 +59,9 @@ Tailwind v4, CSS variables, Lucide). The checked-in recipes are owned source
 and currently use `@base-ui/react` primitives behind the Octant adapters. This
 keeps the interaction backend accessible and editable while preserving the
 shadcn composition and visual vocabulary. Feature code imports `ui/base`, not
-`ui/shadcn` or `@base-ui/react` directly. Existing specialized context menus in
-the Project and split-workspace drag surfaces are a documented migration
-exception because their nested/drag composition is not expressible by the
-small adapter yet; do not create new bypasses.
+`ui/shadcn` or `@base-ui/react` directly. Project and split-workspace context
+menus now use the shared `OctantContextMenu` adapter; do not add a new direct
+primitive import.
 
 ## Colour system
 
@@ -334,10 +333,15 @@ When adding or touching UI:
 
 - `apps/web/src/ui/shadcn` is the owned recipe source; `components.json` is CLI
   registry metadata and does not describe the product's complete shell.
-- Project row and split-workspace context menus still use Base UI primitives
-  directly because they combine nested context menus with drag/drop. They are
-  behaviourally covered and should migrate behind `OctantContextMenu` when its
-  API can represent that composition without a broad rewrite.
+- Raw controls in production feature code are reported by
+  `scripts/check-ui-component-boundaries.ts` during the incremental migration.
+  Ordinary buttons, inputs, selects, and textareas must move behind
+  `apps/web/src/ui/base`; the report is intentionally non-blocking until the
+  remaining feature batches are complete. The only accepted categories are
+  hidden native file inputs, explicitly documented native platform surfaces,
+  and specialized editor surfaces that cannot be represented by an adapter.
+  Tests and the owned `ui/shadcn`/`ui/base` implementation are not feature
+  surfaces and are excluded from this inventory.
 - Legacy feature styles remain during incremental porting. A touched shared
   control must move to an adapter and the replaced paint rules must be removed;
   do not add another parallel recipe.

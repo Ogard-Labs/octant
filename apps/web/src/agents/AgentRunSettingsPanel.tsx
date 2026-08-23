@@ -5,6 +5,7 @@ import {
   AgentRunSettingsClientFailure,
   type AgentRunSettingsClient,
 } from "@octant/client-runtime/agent-run-settings-client";
+import { OctantButton } from "../ui/base/OctantButton";
 import "./agent-hierarchy.css";
 
 const POSTURES: ReadonlyArray<{
@@ -112,21 +113,22 @@ export function AgentRunSettingsPanel(props: { readonly client: AgentRunSettings
           </p>
         )}
         {POSTURES.map((posture) => (
-          <label key={posture.value} className="agent-run-settings-panel__option">
-            <input
-              checked={settings?.creationPosture === posture.value}
-              disabled={saving}
-              name="agent-run-creation-posture"
-              onChange={() => void choose(posture.value)}
-              type="radio"
-              value={posture.value}
-            />
+          <OctantButton
+            aria-checked={settings?.creationPosture === posture.value}
+            className="agent-run-settings-panel__option"
+            disabled={saving}
+            key={posture.value}
+            onClick={() => void choose(posture.value)}
+            role="radio"
+            type="button"
+            variant="ghost"
+          >
             <span>
               <strong>{posture.label}</strong>
               <br />
               {posture.description}
             </span>
-          </label>
+          </OctantButton>
         ))}
       </fieldset>
     </section>

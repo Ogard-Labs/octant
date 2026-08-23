@@ -131,7 +131,14 @@ describe("AgentRunHierarchy", () => {
     await waitFor(() =>
       expect(screen.getByRole("heading", { name: "Active / History" })).toBeVisible(),
     );
-    await user.selectOptions(screen.getByLabelText("Agent hierarchy filter"), "history");
+    await user.click(screen.getByRole("combobox", { name: "Agent hierarchy filter" }));
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Agent hierarchy filter" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      ),
+    );
+    await user.click(screen.getByRole("option", { name: "History" }));
     expect(screen.getByText("Verify the packaged child")).toBeVisible();
     await user.click(screen.getByRole("button", { name: /acknowledge result/i }));
 

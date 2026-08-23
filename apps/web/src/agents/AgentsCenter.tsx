@@ -4,6 +4,8 @@ import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ShellState } from "../shell/ShellState";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import {
   agentRunAcknowledgementLabel,
   agentRunAuthoritySummary,
@@ -124,43 +126,51 @@ function AgentsCenterToolbar(props: { readonly controller: AgentsCenterControlle
       <label className="agents-center__search">
         <span className="sr-only">Search agent runs</span>
         <Search aria-hidden="true" size={14} strokeWidth={1.8} />
-        <input
+        <OctantInput
           onChange={(event) => controller.setSearch(event.target.value)}
           placeholder="Search tasks, roles, threads"
           type="search"
           value={controller.search}
         />
       </label>
-      <fieldset className="agents-center__filters segmented">
-        <legend className="sr-only">Filter by status</legend>
+      <OctantToggleGroup<(typeof STATUS_FILTERS)[number]["value"]>
+        aria-label="Filter by status"
+        className="agents-center__filters segmented"
+        onValueChange={(value) => {
+          const selected = value[0];
+          if (selected !== undefined) controller.setStatusFilter(selected);
+        }}
+        value={[controller.statusFilter]}
+      >
         {STATUS_FILTERS.map((filter) => (
-          <label className="agents-center__filter segment" key={filter.value}>
-            <input
-              checked={controller.statusFilter === filter.value}
-              name="agents-center-status"
-              onChange={() => controller.setStatusFilter(filter.value)}
-              type="radio"
-              value={filter.value}
-            />
-            <span>{filter.label}</span>
-          </label>
+          <OctantToggleGroupItem
+            className="agents-center__filter segment"
+            key={filter.value}
+            value={filter.value}
+          >
+            {filter.label}
+          </OctantToggleGroupItem>
         ))}
-      </fieldset>
-      <fieldset className="agents-center__filters segmented">
-        <legend className="sr-only">Filter by mode</legend>
+      </OctantToggleGroup>
+      <OctantToggleGroup<(typeof MODE_FILTERS)[number]["value"]>
+        aria-label="Filter by mode"
+        className="agents-center__filters segmented"
+        onValueChange={(value) => {
+          const selected = value[0];
+          if (selected !== undefined) controller.setModeFilter(selected);
+        }}
+        value={[controller.modeFilter]}
+      >
         {MODE_FILTERS.map((filter) => (
-          <label className="agents-center__filter segment" key={filter.value}>
-            <input
-              checked={controller.modeFilter === filter.value}
-              name="agents-center-mode"
-              onChange={() => controller.setModeFilter(filter.value)}
-              type="radio"
-              value={filter.value}
-            />
-            <span>{filter.label}</span>
-          </label>
+          <OctantToggleGroupItem
+            className="agents-center__filter segment"
+            key={filter.value}
+            value={filter.value}
+          >
+            {filter.label}
+          </OctantToggleGroupItem>
         ))}
-      </fieldset>
+      </OctantToggleGroup>
     </div>
   );
 }
@@ -208,14 +218,15 @@ function AgentsCenterListBody(props: {
     <ul aria-label="Agent runs" className="agents-center__rows">
       {controller.visibleItems.map((summary) => (
         <li className="agents-center-row" key={String(summary.runId)}>
-          <button
+          <OctantButton
             className="agents-center-row__open"
             data-agent-run-row={String(summary.runId)}
             onClick={() => props.onSelect(String(summary.runId))}
             type="button"
+            variant="ghost"
           >
             <span className="agents-center-row__task">{summary.task}</span>
-          </button>
+          </OctantButton>
           <div className="agents-center-row__meta">
             <span className="agents-center-row__parent">{summary.parentThreadTitle}</span>
             <span className="agents-center-row__mode">{agentRunModeLabel(summary.mode)}</span>
@@ -384,7 +395,10 @@ function AgentsCenterDetail(props: {
 
       <label className="agents-center-detail__steer">
         <span>Steer message</span>
-        <input onChange={(event) => setSteerMessage(event.target.value)} value={steerMessage} />
+        <OctantInput
+          onChange={(event) => setSteerMessage(event.target.value)}
+          value={steerMessage}
+        />
         <OctantButton
           onClick={() =>
             void props.controls

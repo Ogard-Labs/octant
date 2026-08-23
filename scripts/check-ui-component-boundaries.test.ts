@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { findUiComponentBoundaryViolations } from "./check-ui-component-boundaries";
+import {
+  findRawControlBoundaryViolations,
+  findRawControlInventory,
+  findUiComponentBoundaryViolations,
+} from "./check-ui-component-boundaries";
 
 describe("UI component boundary check", () => {
   it("keeps Base UI inside the owned UI layer", () => {
@@ -31,5 +35,61 @@ describe("UI component boundary check", () => {
           'import { Button } from "../shadcn/button";\nexport const value = Button;',
       }),
     ).toEqual([]);
+  });
+
+  it("reports ordinary raw controls in production feature files", () => {
+    expect(
+      findRawControlBoundaryViolations({
+        "apps/web/src/agents/AgentPanel.tsx":
+          'export function AgentPanel() { return <><button type="button">Run</button><input /></>; }',
+      }),
+    ).toEqual([
+      "apps/web/src/agents/AgentPanel.tsx:1 renders raw <button>; import the corresponding Octant adapter.",
+      "apps/web/src/agents/AgentPanel.tsx:1 renders raw <input>; import the corresponding Octant adapter.",
+    ]);
+  });
+
+  it("keeps ui internals and native file inputs out of the ordinary inventory", () => {
+    expect(
+      findRawControlBoundaryViolations({
+        "apps/web/src/ui/shadcn/input.tsx": "export const Input = () => <input />;",
+        "apps/web/src/profile/ProfileEditor.tsx":
+          'export const ProfileEditor = () => <input type="file" />;',
+      }),
+    ).toEqual([]);
+    expect(
+      findRawControlInventory({
+        "apps/web/src/profile/ProfileEditor.tsx": '<input type="file" />',
+      }),
+    ).toEqual([
+      {
+        category: "native-file-input",
+        file: "apps/web/src/profile/ProfileEditor.tsx",
+        line: 1,
+        tag: "input",
+      },
+    ]);
+  });
+
+  it("accepts an explicitly documented platform exception without hiding ordinary controls", () => {
+    expect(
+      findRawControlInventory({
+        "apps/web/src/browser/BrowserWorkspace.tsx":
+          "/* ui-boundary-exception: native-platform-control */\n<button />\n<input />",
+      }),
+    ).toEqual([
+      {
+        category: "native-platform-control",
+        file: "apps/web/src/browser/BrowserWorkspace.tsx",
+        line: 2,
+        tag: "button",
+      },
+      {
+        category: "native-platform-control",
+        file: "apps/web/src/browser/BrowserWorkspace.tsx",
+        line: 3,
+        tag: "input",
+      },
+    ]);
   });
 });

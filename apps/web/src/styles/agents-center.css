@@ -79,16 +79,10 @@
   align-items: center;
   gap: 0.4rem;
   min-width: min(100%, 16rem);
-  padding: 0.35rem 0.55rem;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--oct-surface-1);
 }
 
 .agents-center__search input {
-  width: 100%;
-  border: 0;
-  background: transparent;
+  flex: 1;
 }
 
 .agents-center__rows {
@@ -110,11 +104,7 @@
 
 .agents-center-row__open {
   text-align: left;
-  border: 0;
-  background: transparent;
   padding: 0;
-  font: inherit;
-  cursor: pointer;
 }
 
 .agents-center-row__task {

@@ -5,6 +5,20 @@ const WEB_SOURCE = "apps/web/src";
 const SOURCE_EXTENSION = /\.(?:ts|tsx)$/;
 const BASE_UI_IMPORT = /from\s+["']@base-ui\/react(?:\/[^"']+)?["']/;
 const SHADCN_IMPORT = /from\s+["'][^"']*ui\/shadcn(?:\/[^"']+)?["']/;
+const RAW_CONTROL_OPENING_TAG = /<\s*(button|select|textarea|input)(?=\s|>)/g;
+const RAW_CONTROL_EXCEPTION = /ui-boundary-exception:\s*([a-z-]+)/i;
+
+export type RawControlException =
+  | "native-file-input"
+  | "native-platform-control"
+  | "specialized-editor-surface";
+
+export interface RawControlFinding {
+  readonly category: "ordinary" | RawControlException;
+  readonly file: string;
+  readonly line: number;
+  readonly tag: "button" | "select" | "textarea" | "input";
+}
 
 export function findUiComponentBoundaryViolations(
   files: Readonly<Record<string, string>>,
@@ -22,6 +36,59 @@ export function findUiComponentBoundaryViolations(
     }
   }
   return violations;
+}
+
+/**
+ * Reports raw controls without making the repository-wide check red while the
+ * incremental migration is in progress. Ordinary findings are the actionable
+ * list; the only accepted exceptions are the native controls whose semantics
+ * cannot be represented by an Octant adapter (file pickers and host surfaces).
+ */
+export function findRawControlInventory(
+  files: Readonly<Record<string, string>>,
+): ReadonlyArray<RawControlFinding> {
+  const findings: RawControlFinding[] = [];
+  for (const [file, source] of Object.entries(files).sort(([left], [right]) =>
+    left.localeCompare(right),
+  )) {
+    const normalized = file.split(sep).join("/");
+    if (
+      !normalized.startsWith(`${WEB_SOURCE}/`) ||
+      normalized.startsWith(`${WEB_SOURCE}/ui/`) ||
+      normalized.includes(".test.")
+    ) {
+      continue;
+    }
+    const marker = source.match(RAW_CONTROL_EXCEPTION)?.[1]?.toLowerCase();
+    RAW_CONTROL_OPENING_TAG.lastIndex = 0;
+    for (const match of source.matchAll(RAW_CONTROL_OPENING_TAG)) {
+      const tag = match[1] as RawControlFinding["tag"];
+      const index = match.index ?? 0;
+      const line = source.slice(0, index).split("\n").length;
+      const openingContext = source.slice(index, index + 600);
+      const category: RawControlFinding["category"] =
+        tag === "input" && /\btype\s*=\s*["']file["']/.test(openingContext)
+          ? "native-file-input"
+          : marker === "native-file-input" ||
+              marker === "native-platform-control" ||
+              marker === "specialized-editor-surface"
+            ? (marker as RawControlException)
+            : "ordinary";
+      findings.push({ category, file: normalized, line, tag });
+    }
+  }
+  return findings;
+}
+
+export function findRawControlBoundaryViolations(
+  files: Readonly<Record<string, string>>,
+): ReadonlyArray<string> {
+  return findRawControlInventory(files)
+    .filter((finding) => finding.category === "ordinary")
+    .map(
+      (finding) =>
+        `${finding.file}:${String(finding.line)} renders raw <${finding.tag}>; import the corresponding Octant adapter.`,
+    );
 }
 
 async function sourceFiles(root: string): Promise<Readonly<Record<string, string>>> {
@@ -43,13 +110,24 @@ async function sourceFiles(root: string): Promise<Readonly<Record<string, string
 
 async function main(): Promise<void> {
   const root = resolve(import.meta.dir, "..");
-  const violations = findUiComponentBoundaryViolations(await sourceFiles(root));
+  const files = await sourceFiles(root);
+  const violations = findUiComponentBoundaryViolations(files);
   if (violations.length > 0) {
     for (const violation of violations) console.error(violation);
     process.exitCode = 1;
     return;
   }
   console.log("UI component boundaries are valid.");
+  const rawControls = findRawControlInventory(files);
+  const ordinary = rawControls.filter((finding) => finding.category === "ordinary");
+  if (ordinary.length > 0) {
+    console.warn(`Raw control inventory: ${String(ordinary.length)} ordinary controls remain.`);
+    for (const finding of ordinary) {
+      console.warn(
+        `  ${finding.file}:${String(finding.line)} <${finding.tag}> (migrate to ui/base)`,
+      );
+    }
+  }
 }
 
 if (import.meta.main) await main();
