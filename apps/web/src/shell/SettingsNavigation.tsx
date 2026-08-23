@@ -14,6 +14,7 @@ import {
   UserRound,
   type LucideIcon,
 } from "lucide-react";
+import { OctantButton } from "../ui/base/OctantButton";
 
 export type { SettingsSectionId } from "@octant/contracts";
 
@@ -78,15 +79,16 @@ export function SettingsNavigation({ sections, activeSection, onSelect }: Settin
                 const Icon = SETTINGS_NAVIGATION_META[section.id].icon;
                 return (
                   <li key={section.id}>
-                    <button
+                    <OctantButton
                       aria-current={isActive ? "page" : undefined}
                       className="setnav-item window-no-drag"
                       onClick={() => onSelect(section.id)}
                       type="button"
+                      variant="ghost"
                     >
                       <Icon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
                       <span>{section.label}</span>
-                    </button>
+                    </OctantButton>
                   </li>
                 );
               })}

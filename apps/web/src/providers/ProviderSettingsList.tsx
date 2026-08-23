@@ -9,6 +9,7 @@ import type {
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { ProviderGlyph } from "./ProviderGlyph";
@@ -239,13 +240,14 @@ function AgentEligibleModelsControls(props: {
       className="agent-eligible-models"
       data-expanded={open}
     >
-      <button
+      <OctantButton
         aria-controls="agent-eligible-models-list"
         aria-expanded={open}
         aria-label="Agent-eligible models"
         className="agent-eligible-models__trigger window-no-drag"
         onClick={() => setOpen((current) => !current)}
         type="button"
+        variant="ghost"
       >
         <span>Agent-eligible models</span>
         <span className="agent-eligible-models__count">{selected.length}</span>
@@ -254,7 +256,7 @@ function AgentEligibleModelsControls(props: {
           className="agent-eligible-models__disclosure-icon"
           size={15}
         />
-      </button>
+      </OctantButton>
       {open ? (
         <div className="agent-eligible-models__body" id="agent-eligible-models-list">
           <p className="provider-settings__hint">
@@ -278,13 +280,12 @@ function AgentEligibleModelsControls(props: {
                 return (
                   <li className="agent-eligible-models__item" key={key}>
                     <label className="agent-eligible-models__option">
-                      <input
+                      <OctantCheckbox
                         aria-label={`${row.providerName} — ${row.modelName}`}
                         checked={selectedKeys.has(key)}
                         className="window-no-drag"
                         disabled={props.busy}
                         onChange={(event) => toggle(ref, event.currentTarget.checked)}
-                        type="checkbox"
                       />
                       <span>
                         {row.providerName} — {row.modelName}
@@ -301,13 +302,12 @@ function AgentEligibleModelsControls(props: {
                 return (
                   <li className="agent-eligible-models__item" key={key}>
                     <label className="agent-eligible-models__option agent-eligible-models__option--unavailable">
-                      <input
+                      <OctantCheckbox
                         aria-label={`${providerName} — ${ref.modelId} (unavailable)`}
                         checked
                         className="window-no-drag"
                         disabled={props.busy}
                         onChange={() => toggle(ref, false)}
-                        type="checkbox"
                       />
                       <span>
                         {providerName} — {String(ref.modelId)} (unavailable)
@@ -412,24 +412,28 @@ function ProviderRow(props: ProviderRowProps) {
       data-enabled={props.instance.enabled ? "true" : "false"}
     >
       <span className="prov-grip-slot">
-        <button
+        <OctantButton
           aria-label={`Move ${name} up`}
           className="prov-grip window-no-drag"
           disabled={props.busy || props.index === 0}
           onClick={() => props.onMove(props.index, -1)}
+          size="icon"
           type="button"
+          variant="ghost"
         >
           <ChevronUp aria-hidden="true" size={13} />
-        </button>
-        <button
+        </OctantButton>
+        <OctantButton
           aria-label={`Move ${name} down`}
           className="prov-grip window-no-drag"
           disabled={props.busy || props.index === props.count - 1}
           onClick={() => props.onMove(props.index, 1)}
+          size="icon"
           type="button"
+          variant="ghost"
         >
           <ChevronDown aria-hidden="true" size={13} />
-        </button>
+        </OctantButton>
       </span>
       <span className="icon-mark">
         <ProviderGlyph displayName={name} driverKind={props.instance.driverKind} size={16} />
@@ -451,16 +455,18 @@ function ProviderRow(props: ProviderRowProps) {
         </span>
       </span>
       <span className="prov-actions">
-        <button
+        <OctantButton
           aria-controls={`provider-details-${props.instance.id}`}
           aria-expanded={detailsOpen}
           aria-label={`Details for ${name}`}
           className="btn-icon prov-details-trigger window-no-drag"
           onClick={() => setDetailsOpen((current) => !current)}
+          size="icon"
           type="button"
+          variant="ghost"
         >
           <ChevronDown aria-hidden="true" className="prov-details-icon" size={14} />
-        </button>
+        </OctantButton>
         <OctantSwitch
           checked={props.instance.enabled}
           disabled={disabled}

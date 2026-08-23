@@ -8,6 +8,8 @@ import {
   toggleModelFavorite,
   writeModelFavorites,
 } from "./modelFavorites";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import { ProviderGlyph } from "./ProviderGlyph";
 
 export interface ComposerModelPickerProps {
@@ -73,7 +75,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
   if (props.groups.length === 0) {
     return (
       <div className="composer-model-picker composer-model-picker--empty">
-        <button
+        <OctantButton
           aria-label={ariaLabel}
           className="composer-model-picker__trigger window-no-drag"
           disabled={props.disabled || props.onOpenSettings === undefined}
@@ -84,10 +86,11 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               : "Open provider settings"
           }
           type="button"
+          variant="ghost"
         >
           <span className="composer-model-picker__trigger-label">No provider ready</span>
           <ChevronDown aria-hidden="true" className="composer-model-picker__chevron" size={12} />
-        </button>
+        </OctantButton>
       </div>
     );
   }
@@ -131,7 +134,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
       className={`composer-model-picker${open ? " composer-model-picker--open" : ""}`}
       ref={rootRef}
     >
-      <button
+      <OctantButton
         aria-controls={menuId}
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -145,10 +148,11 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           })
         }
         type="button"
+        variant="ghost"
       >
         <span className="composer-model-picker__trigger-label">{selectedLabel}</span>
         <ChevronDown aria-hidden="true" className="composer-model-picker__chevron" size={12} />
-      </button>
+      </OctantButton>
       {!open ? null : (
         <div
           aria-label="Choose provider and model"
@@ -157,7 +161,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
           role="dialog"
         >
           <div aria-label="Providers" className="composer-model-picker__rail" role="listbox">
-            <button
+            <OctantButton
               aria-label="Favorites"
               aria-selected={favoritesActive}
               className={`composer-model-picker__rail-item composer-model-picker__rail-item--favorites${favoritesActive ? " composer-model-picker__rail-item--active" : ""}`}
@@ -168,15 +172,16 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
               role="option"
               title="Favorites"
               type="button"
+              variant="ghost"
             >
               <Star aria-hidden="true" fill="currentColor" size={16} strokeWidth={1.75} />
-            </button>
+            </OctantButton>
             <span aria-hidden="true" className="composer-model-picker__rail-divider" />
             {props.groups.map((group) => {
               const active = !searching && group.instance.id === activeRailId;
               const status = readinessStatus(group.readiness);
               return (
-                <button
+                <OctantButton
                   aria-label={group.instance.displayName}
                   aria-selected={active}
                   className={`composer-model-picker__rail-item${active ? " composer-model-picker__rail-item--active" : ""}`}
@@ -191,6 +196,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                   role="option"
                   title={group.instance.displayName}
                   type="button"
+                  variant="ghost"
                 >
                   <ProviderGlyph
                     displayName={group.instance.displayName}
@@ -205,14 +211,14 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                       <span className="sr-only">{status}</span>
                     </span>
                   )}
-                </button>
+                </OctantButton>
               );
             })}
           </div>
           <div className="composer-model-picker__pane">
             <label className="composer-model-picker__search">
               <Search aria-hidden="true" size={14} />
-              <input
+              <OctantInput
                 aria-label="Search models"
                 onChange={(event) => setQuery(event.currentTarget.value)}
                 placeholder="Search models…"
@@ -249,7 +255,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                       className={`composer-model-picker__row${selected ? " composer-model-picker__row--selected" : ""}`}
                       key={`${String(group.instance.id)}:${sectionLabel}:${String(modelId)}`}
                     >
-                      <button
+                      <OctantButton
                         aria-label={picker.model.displayName}
                         aria-selected={selected}
                         className={`composer-model-picker__model${selected ? " composer-model-picker__model--selected" : ""}${unavailable ? " composer-model-picker__model--unavailable" : ""}`}
@@ -265,6 +271,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                         role="option"
                         title={picker.unavailableReason}
                         type="button"
+                        variant="ghost"
                       >
                         <span className="composer-model-picker__model-copy">
                           <span className="composer-model-picker__model-name">
@@ -284,8 +291,8 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                             {compactUnavailableLabel(picker.unavailableReason)}
                           </span>
                         ) : null}
-                      </button>
-                      <button
+                      </OctantButton>
+                      <OctantButton
                         aria-label={favorited ? "Remove from favorites" : "Add to favorites"}
                         aria-pressed={favorited}
                         className={`composer-model-picker__star${favorited ? " composer-model-picker__star--on" : ""}`}
@@ -295,6 +302,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                         }}
                         title={favorited ? "Remove from favorites" : "Add to favorites"}
                         type="button"
+                        variant="ghost"
                       >
                         <Star
                           aria-hidden="true"
@@ -302,7 +310,7 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
                           size={14}
                           strokeWidth={1.75}
                         />
-                      </button>
+                      </OctantButton>
                     </div>
                   );
                 })

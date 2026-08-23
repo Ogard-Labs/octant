@@ -1,4 +1,5 @@
 import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
 import type { WorkspaceChoices } from "./firstRunStepModel";
 
@@ -50,16 +51,17 @@ export function FirstRunWorkspaceStep(props: FirstRunWorkspaceStepProps) {
         ) : (
           <div aria-label="Colour scheme" className="first-run__choices" role="radiogroup">
             {SCHEMES.map((scheme) => (
-              <button
+              <OctantButton
                 aria-checked={choices.colorScheme === scheme.value}
                 className="first-run__choice"
                 key={scheme.value}
                 onClick={() => props.onSelectColorScheme(scheme.value)}
                 role="radio"
                 type="button"
+                variant="ghost"
               >
                 {scheme.label}
-              </button>
+              </OctantButton>
             ))}
           </div>
         )}

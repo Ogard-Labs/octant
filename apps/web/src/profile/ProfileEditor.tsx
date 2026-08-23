@@ -316,7 +316,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
           <legend className="profile-editor__label">Avatar colour</legend>
           <div className="profile-editor__accents" role="radiogroup">
             {AVATAR_ACCENTS.map((accent) => (
-              <button
+              <OctantButton
                 aria-checked={props.profile.accent === accent}
                 aria-label={ACCENT_NAMES[accent]}
                 className="profile-editor__accent user-avatar"
@@ -325,6 +325,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
                 onClick={() => apply({ ...props.profile, accent }, true)}
                 role="radio"
                 type="button"
+                variant="ghost"
               />
             ))}
           </div>
