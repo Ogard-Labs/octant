@@ -1,6 +1,7 @@
 import { ChatClientFailure, type ChatClient } from "@octant/client-runtime/chat-client";
 import {
   decodeChatBootstrap,
+  decodeChatNavigation,
   decodeChatCommandResult,
   decodeChatEventFrame,
   decodeChatThreadId,
@@ -117,6 +118,18 @@ describe("useChatController", () => {
     const readCursorStore = createChatReadCursorStore();
     const client = createMockClient({
       bootstrap: vi.fn(async () => bootstrap()),
+      navigation: vi.fn(async () =>
+        decodeChatNavigation({
+          threads: bootstrap().threads.map((thread, index) => ({
+            id: thread.id,
+            title: thread.title,
+            providerInstanceId: thread.providerInstanceId,
+            updatedAt: thread.updatedAt,
+            lastSequence: index === 0 ? 5 : 7,
+            followUpOpen: true,
+          })),
+        }),
+      ),
       thread: vi.fn(async (requestedThreadId) =>
         decodeChatThreadView({
           ...threadView(String(requestedThreadId) === String(threadId) ? 5 : 7, true),
@@ -161,6 +174,18 @@ describe("useChatController", () => {
   it("bootstraps once and exposes unread separately from durable follow-up", async () => {
     const client = createMockClient({
       bootstrap: vi.fn(async () => bootstrap()),
+      navigation: vi.fn(async () =>
+        decodeChatNavigation({
+          threads: bootstrap().threads.map((thread, index) => ({
+            id: thread.id,
+            title: thread.title,
+            providerInstanceId: thread.providerInstanceId,
+            updatedAt: thread.updatedAt,
+            lastSequence: index === 0 ? 2 : 3,
+            followUpOpen: index === 0,
+          })),
+        }),
+      ),
       thread: vi.fn(async (requestedThreadId) =>
         String(requestedThreadId) === String(threadId)
           ? threadView(2, true)
@@ -204,6 +229,18 @@ describe("useChatController", () => {
     const later = "2026-08-14T16:00:00.000Z";
     const client = createMockClient({
       bootstrap: vi.fn(async () => bootstrap()),
+      navigation: vi.fn(async () =>
+        decodeChatNavigation({
+          threads: bootstrap().threads.map((thread, index) => ({
+            id: thread.id,
+            title: thread.title,
+            providerInstanceId: thread.providerInstanceId,
+            updatedAt: index === 0 ? later : thread.updatedAt,
+            lastSequence: index === 0 ? 4 : 3,
+            followUpOpen: index === 0,
+          })),
+        }),
+      ),
       thread: vi.fn(async (requestedThreadId) =>
         String(requestedThreadId) === String(threadId)
           ? decodeChatThreadView({
@@ -244,6 +281,18 @@ describe("useChatController", () => {
     let otherFollowUp = false;
     const client = createMockClient({
       bootstrap: vi.fn(async () => bootstrap()),
+      navigation: vi.fn(async () =>
+        decodeChatNavigation({
+          threads: bootstrap().threads.map((thread, index) => ({
+            id: thread.id,
+            title: thread.title,
+            providerInstanceId: thread.providerInstanceId,
+            updatedAt: thread.updatedAt,
+            lastSequence: index === 0 ? 0 : otherSequence,
+            followUpOpen: index === 0 ? false : otherFollowUp,
+          })),
+        }),
+      ),
       thread: vi.fn(async (requestedThreadId) =>
         String(requestedThreadId) === String(threadId)
           ? threadView(0)
@@ -263,6 +312,7 @@ describe("useChatController", () => {
       }),
     );
     await waitFor(() => expect(result.current.navigation[1]?.unread).toBe(false));
+    expect(client.thread).not.toHaveBeenCalled();
 
     otherSequence = 3;
     otherFollowUp = true;
@@ -270,6 +320,7 @@ describe("useChatController", () => {
     await waitFor(() =>
       expect(result.current.navigation[1]).toMatchObject({ followUp: true, unread: true }),
     );
+    expect(client.thread).not.toHaveBeenCalled();
   });
 
   it("pauses inactive-thread polling while the document is hidden", async () => {
@@ -290,6 +341,18 @@ describe("useChatController", () => {
       );
       const client = createMockClient({
         bootstrap: vi.fn(async () => bootstrap()),
+        navigation: vi.fn(async () =>
+          decodeChatNavigation({
+            threads: bootstrap().threads.map((thread) => ({
+              id: thread.id,
+              title: thread.title,
+              providerInstanceId: thread.providerInstanceId,
+              updatedAt: thread.updatedAt,
+              lastSequence: 1,
+              followUpOpen: false,
+            })),
+          }),
+        ),
         thread: threadRead,
         subscribe: vi.fn(async function* () {}),
       });
@@ -310,7 +373,7 @@ describe("useChatController", () => {
         value: "visible",
       });
       document.dispatchEvent(new Event("visibilitychange"));
-      await waitFor(() => expect(threadRead.mock.calls.length).toBeGreaterThanOrEqual(2));
+      await waitFor(() => expect(client.navigation).toHaveBeenCalled());
       unmount();
     } finally {
       Object.defineProperty(document, "visibilityState", {
@@ -320,12 +383,65 @@ describe("useChatController", () => {
     }
   });
 
+  it("keeps the last authoritative navigation facts when a refresh fails", async () => {
+    const navigation = vi
+      .fn()
+      .mockResolvedValueOnce(
+        decodeChatNavigation({
+          threads: [
+            {
+              id: threadId,
+              title: "Planning",
+              providerInstanceId: "10000000-0000-4000-8000-000000000001",
+              updatedAt: now,
+              lastSequence: 2,
+              followUpOpen: true,
+            },
+          ],
+        }),
+      )
+      .mockRejectedValue(new Error("navigation unavailable"));
+    const client = createMockClient({
+      bootstrap: vi.fn(async () =>
+        decodeChatBootstrap({ ...bootstrap(), threads: [bootstrap().threads[0]!] }),
+      ),
+      navigation,
+      thread: vi.fn(async () => threadView(0)),
+      subscribe: vi.fn(async function* () {}),
+    });
+    const { result, unmount } = renderHook(() =>
+      useChatController({
+        client,
+        navigationRefreshMs: 10,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.navigation[0]).toMatchObject({ followUp: true }));
+    await waitFor(() => expect(navigation.mock.calls.length).toBeGreaterThan(1));
+    expect(result.current.navigation[0]).toMatchObject({ followUp: true, unread: true });
+    unmount();
+  });
+
   it("holds a thread the user marked unread until they explicitly read it again", async () => {
     // With no sequence advanced this sitting, dropping the cursor alone leaves
     // the comparison at zero-over-zero and the click does visibly nothing.
     const readCursorStore = createChatReadCursorStore();
     const client = createMockClient({
       bootstrap: vi.fn(async () => bootstrap()),
+      navigation: vi.fn(async () =>
+        decodeChatNavigation({
+          threads: bootstrap().threads.map((thread) => ({
+            id: thread.id,
+            title: thread.title,
+            providerInstanceId: thread.providerInstanceId,
+            updatedAt: thread.updatedAt,
+            lastSequence: 0,
+            followUpOpen: false,
+          })),
+        }),
+      ),
       thread: vi.fn(async () => threadView(0)),
       subscribe: vi.fn(async function* () {}),
     });
@@ -347,6 +463,20 @@ describe("useChatController", () => {
         bootstrap: vi.fn(async () =>
           decodeChatBootstrap({ ...bootstrap(), threads: [bootstrap().threads[0]!] }),
         ),
+        navigation: vi.fn(async () =>
+          decodeChatNavigation({
+            threads: [
+              {
+                id: threadId,
+                title: "Planning",
+                providerInstanceId: "10000000-0000-4000-8000-000000000001",
+                updatedAt: now,
+                lastSequence: 0,
+                followUpOpen: false,
+              },
+            ],
+          }),
+        ),
         thread: vi.fn(() => pending.promise),
         subscribe: vi.fn(async function* () {}),
       });
@@ -359,11 +489,11 @@ describe("useChatController", () => {
         }),
       );
       await act(async () => Promise.resolve());
-      expect(client.thread).toHaveBeenCalledTimes(1);
+      expect(client.navigation).toHaveBeenCalledTimes(1);
 
       unmount();
       await act(async () => vi.advanceTimersByTimeAsync(100));
-      expect(client.thread).toHaveBeenCalledTimes(1);
+      expect(client.navigation).toHaveBeenCalledTimes(1);
       pending.resolve(threadView(1));
     } finally {
       vi.useRealTimers();
@@ -1528,6 +1658,7 @@ function createMockClient(
 ): ChatClient {
   return {
     search: vi.fn(async () => []),
+    navigation: vi.fn(async () => ({ threads: [] })),
     execute: vi.fn(async () => ({
       kind: "thread-updated" as const,
       thread: bootstrap().threads[0]!,

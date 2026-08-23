@@ -21,6 +21,7 @@ import {
   readChatThread,
   readChatThreads,
   readChatThreadView,
+  readChatNavigation,
   readPendingChatPurges,
   readThreadFollowUp,
   readThreadWorkList,
@@ -208,6 +209,16 @@ describe("ChatProjection", () => {
       "Provider-neutral Chat",
     );
     expect(readChatThreads(connection)).toHaveLength(1);
+    expect(readChatNavigation(connection)).toEqual([
+      {
+        id: decodeChatThreadId(ids.thread),
+        title: "Provider-neutral Chat",
+        providerInstanceId: ids.provider,
+        updatedAt: now,
+        lastSequence: expect.any(Number),
+        followUpOpen: false,
+      },
+    ]);
     expect(readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns).toHaveLength(1);
     expect(readChatContent(connection, ids.content)).toMatchObject({
       body,

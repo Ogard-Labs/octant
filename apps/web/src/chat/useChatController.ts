@@ -11,6 +11,7 @@ import type {
   ChatCommand,
   ChatCommandResult,
   ChatEventFrame,
+  ChatNavigationThread,
   ChatThread,
   ChatThreadId,
   ChatThreadView,
@@ -249,6 +250,45 @@ export function useChatController(options: ChatControllerOptions) {
     });
   }, []);
 
+  const applyNavigation = useCallback((threads: ReadonlyArray<ChatNavigationThread>) => {
+    setSequenceByThread((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const thread of threads) {
+        const key = String(thread.id);
+        if (!current.has(key) || thread.lastSequence > (current.get(key) ?? 0)) {
+          next.set(key, thread.lastSequence);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+    setFollowUpByThread((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const thread of threads) {
+        const key = String(thread.id);
+        if (current.get(key) !== thread.followUpOpen) {
+          next.set(key, thread.followUpOpen);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+    setUpdatedAtByThread((current) => {
+      let changed = false;
+      const next = new Map(current);
+      for (const thread of threads) {
+        const key = String(thread.id);
+        if (current.get(key) !== thread.updatedAt) {
+          next.set(key, thread.updatedAt);
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, []);
+
   const applyAuthoritativeView = useCallback(
     (view: ChatThreadView, markRead: boolean) => {
       recordSequence(view.thread.id, view.lastSequence);
@@ -431,25 +471,13 @@ export function useChatController(options: ChatControllerOptions) {
       if (!documentIsVisible() || inFlight) return;
       inFlight = true;
       try {
-        const refreshes: Array<Promise<void>> = [];
-        for (const thread of bootstrap.threads) {
-          if (thread.lifecycle === "active") {
-            refreshes.push(
-              (async () => {
-                try {
-                  const view = await client.thread(thread.id);
-                  if (cancelled || !mounted.current) return;
-                  recordSequence(view.thread.id, view.lastSequence);
-                  recordFollowUp(view.thread.id, view.followUp?.state === "open");
-                  recordUpdatedAt(view.thread.id, view.thread.updatedAt);
-                } catch {
-                  // Keep the indicator unknown or at its last authoritative value until refresh works.
-                }
-              })(),
-            );
-          }
+        try {
+          const next = await client.navigation();
+          if (cancelled || !mounted.current) return;
+          applyNavigation(next.threads);
+        } catch {
+          // Keep the indicator unknown or at its last authoritative value until refresh works.
         }
-        await Promise.all(refreshes);
       } finally {
         inFlight = false;
       }
@@ -472,7 +500,7 @@ export function useChatController(options: ChatControllerOptions) {
       if (timer !== undefined) clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [bootstrap, client, navigationRefreshMs, recordFollowUp, recordSequence, recordUpdatedAt]);
+  }, [applyNavigation, bootstrap, client, navigationRefreshMs]);
 
   useEffect(() => {
     activeThreadIdRef.current = options.activeThreadId;

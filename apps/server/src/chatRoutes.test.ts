@@ -52,6 +52,47 @@ describe("Chat routes", () => {
     expect(response?.status).toBe(401);
   });
 
+  it("returns the authenticated bounded navigation projection", async () => {
+    const navigation = vi.fn(() => ({
+      threads: [
+        {
+          id: threadId,
+          title: "Replay",
+          providerInstanceId: threadFixture.providerInstanceId,
+          updatedAt: now,
+          lastSequence: 7,
+          followUpOpen: true,
+        },
+      ],
+    }));
+    const route = routeFixture({ navigation });
+    const response = await route(request("/api/chat/navigation"));
+
+    expect(response?.status).toBe(200);
+    await expect(response?.json()).resolves.toEqual({
+      threads: [
+        {
+          id: threadId,
+          title: "Replay",
+          providerInstanceId: threadFixture.providerInstanceId,
+          updatedAt: now,
+          lastSequence: 7,
+          followUpOpen: true,
+        },
+      ],
+    });
+    expect(navigation).toHaveBeenCalledOnce();
+  });
+
+  it("rejects navigation queries instead of widening the read surface", async () => {
+    const navigation = vi.fn(() => ({ threads: [] }));
+    const route = routeFixture({ navigation });
+    const response = await route(request("/api/chat/navigation?include=turns"));
+
+    expect(response?.status).toBe(400);
+    expect(navigation).not.toHaveBeenCalled();
+  });
+
   it("rejects oversized command bodies with 413", async () => {
     const route = routeFixture({}, 16);
     const response = await route(
@@ -239,6 +280,7 @@ function routeFixture(overrides: Record<string, unknown> = {}, maxJsonBodySize?:
       },
       threads: [],
     })),
+    navigation: vi.fn(() => ({ threads: [] })),
     search: vi.fn(() => []),
     read: vi.fn(() => ({
       thread: threadFixture,

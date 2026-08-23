@@ -41,6 +41,7 @@ import { type SplitWorkspaceProps } from "./shell/SplitWorkspace";
 import type { WorkspaceSurfaceDragHandle } from "./shell/useWorkspaceTabDrag";
 import {
   decodeChatBootstrap,
+  decodeChatNavigation,
   decodeChatCommandResult,
   decodeChatThread,
   decodeChatThreadId,
@@ -314,6 +315,19 @@ export function chats(options: { readonly threadProjectId?: string } = {}): Chat
       created = true;
       return decodeChatCommandResult({ kind: "thread-created", thread: createdThread });
     }),
+    navigation: vi.fn(async () =>
+      decodeChatNavigation({
+        threads: (created ? [createdThread, oldThread] : [oldThread]).map((thread) => ({
+          id: thread.id,
+          ...(thread.projectId === undefined ? {} : { projectId: thread.projectId }),
+          title: thread.title,
+          providerInstanceId: thread.providerInstanceId,
+          updatedAt: thread.updatedAt,
+          lastSequence: 0,
+          followUpOpen: false,
+        })),
+      }),
+    ),
     search: vi.fn(async () => []),
     subscribe: vi.fn(async function* () {}),
     thread: vi.fn(async (threadId) =>

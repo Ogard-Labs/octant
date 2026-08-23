@@ -1,6 +1,7 @@
 import {
   decodeChatAttachment,
   decodeChatBootstrap,
+  decodeChatNavigation,
   decodeChatCommand,
   decodeChatCommandResult,
   decodeChatFailure,
@@ -9,6 +10,7 @@ import {
   MAX_CHAT_NDJSON_LINE_BYTES,
   type ChatAttachment,
   type ChatBootstrap,
+  type ChatNavigation,
   type ChatCommand,
   type ChatCommandResult,
   type ChatEventFrame,
@@ -42,6 +44,7 @@ export interface ChatClientOptions {
 
 export interface ChatClient {
   bootstrap(): Promise<ChatBootstrap>;
+  navigation(): Promise<ChatNavigation>;
   search(query: string): Promise<ReadonlyArray<ChatBootstrap["threads"][number]>>;
   thread(threadId: ChatThreadId): Promise<ChatThreadView>;
   execute(command: ChatCommand): Promise<ChatCommandResult>;
@@ -74,6 +77,14 @@ export function createChatClient(options: ChatClientOptions): ChatClient {
         new URL("/api/chat/bootstrap", options.baseUrl).toString(),
         { method: "GET", headers },
         decodeChatBootstrap,
+      );
+    },
+    navigation() {
+      return request(
+        fetch,
+        new URL("/api/chat/navigation", options.baseUrl).toString(),
+        { method: "GET", headers },
+        decodeChatNavigation,
       );
     },
     search(query) {
