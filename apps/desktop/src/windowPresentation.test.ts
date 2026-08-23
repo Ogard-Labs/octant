@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT } from "@octant/contracts/shell";
 import {
   INITIAL_SIDEBAR_MATERIAL_PREFERENCE,
   createWindowPresentationController,
@@ -25,6 +26,7 @@ function system(overrides: Partial<Parameters<typeof resolveWindowPresentation>[
 describe("resolveWindowPresentation", () => {
   it("uses a genuine macOS frameless window with inset native traffic-light placement", () => {
     expect(resolveWindowPresentation(system())).toEqual({
+      interactiveTitlebarInset: NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT,
       browserWindow: {
         backgroundColor: "#00000000",
         frame: false,
@@ -48,6 +50,9 @@ describe("resolveWindowPresentation", () => {
     expect(resolveWindowPresentation(system({ platform: "linux" })).browserWindow).toEqual({
       backgroundColor: "#101013",
       frame: true,
+    });
+    expect(resolveWindowPresentation(system({ platform: "linux" }))).toMatchObject({
+      interactiveTitlebarInset: 0,
     });
   });
 
