@@ -8,6 +8,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { ProviderUsageLimitsService } from "./providerUsageLimitsService";
+import { ProviderRuntimeUsageLimitsStore } from "./providerRuntimeUsageLimitsStore";
 
 const firstId = "11111111-1111-4111-8111-111111111111" as ProviderInstanceId;
 const secondId = "22222222-2222-4222-8222-222222222222" as ProviderInstanceId;
@@ -181,6 +182,50 @@ describe("ProviderUsageLimitsService", () => {
     expect(refreshed.entries[0]).not.toMatchObject({
       lastSuccessfulAt: refreshStartedAt,
     });
+  });
+
+  it("prunes a runtime window that expires while a refresh is still observing", async () => {
+    const runtimeObservedAt = "2026-08-23T00:00:00.000Z" as UtcTimestamp;
+    const refreshCompletedAt = "2026-08-23T02:00:00.000Z" as UtcTimestamp;
+    const store = new ProviderRuntimeUsageLimitsStore();
+    store.record({
+      instanceId: firstId,
+      sessionId: "00000000-0000-4000-8000-000000000003" as never,
+      sequence: 1,
+      correlationId: "00000000-0000-4000-8000-000000000004" as never,
+      occurredAt: runtimeObservedAt,
+      kind: "rate-limit-window",
+      window: "five_hour",
+      status: "warning",
+      utilization: 0.9,
+      resetsAt: "2026-08-23T01:00:00.000Z" as UtcTimestamp,
+    });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let nowCalls = 0;
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: async () => {
+        await gate;
+        return undefined;
+      },
+      runtimeLimits: (instanceId, observedAt) => store.serviceLimits(instanceId, observedAt),
+      now: () => {
+        nowCalls += 1;
+        return nowCalls === 1 ? runtimeObservedAt : refreshCompletedAt;
+      },
+    });
+
+    const refresh = service.refresh();
+    await vi.waitFor(() => expect(nowCalls).toBeGreaterThan(0));
+    release?.();
+    const snapshot = await refresh;
+
+    expect(snapshot.refreshedAt).toBe(refreshCompletedAt);
+    expect(snapshot.entries[0]).toMatchObject({ status: "unavailable" });
+    expect(JSON.stringify(snapshot)).not.toContain("five_hour");
   });
 
   it("retains the last successful result as stale after a failed refresh", async () => {

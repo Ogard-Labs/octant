@@ -99,7 +99,7 @@ export class ProviderUsageLimitsService {
     if (signal.aborted) return this.#snapshot(this.#options.now());
     this.#entries.clear();
     for (const entry of next) this.#entries.set(String(entry.providerInstanceId), entry);
-    return this.#snapshot(observedAt);
+    return this.#snapshot(this.#options.now());
   }
 
   async #observe(
@@ -260,8 +260,33 @@ export class ProviderUsageLimitsService {
       for (const instance of this.#options.listInstances()) {
         if (!instance.enabled) continue;
         const limits = runtimeLimits(instance.id, refreshedAt);
-        if (limits === undefined) continue;
         const previous = entries.get(String(instance.id));
+        if (limits === undefined) {
+          if (
+            previous?.status === "available" &&
+            previous.source === "provider-runtime" &&
+            previous.limits.rateLimitWindows !== undefined
+          ) {
+            const { rateLimitWindows: _expiredWindows, ...withoutWindows } = previous.limits;
+            const hasOtherEvidence =
+              withoutWindows.requests.status === "available" ||
+              withoutWindows.tokens.status === "available" ||
+              withoutWindows.concurrency.status === "available" ||
+              withoutWindows.retry.status === "active" ||
+              withoutWindows.quota === "available" ||
+              withoutWindows.quota === "exhausted";
+            entries.set(
+              String(instance.id),
+              hasOtherEvidence
+                ? {
+                    ...previous,
+                    limits: withoutWindows,
+                  }
+                : this.#unavailable(instance, refreshedAt, "unsupported"),
+            );
+          }
+          continue;
+        }
         if (previous?.status === "failed") {
           const staleLimits =
             previous.staleLimits === undefined || limits.rateLimitWindows === undefined
