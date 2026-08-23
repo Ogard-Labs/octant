@@ -1,31 +1,20 @@
 import type { LucideIcon } from "lucide-react";
-import { forwardRef, type ButtonHTMLAttributes } from "react";
-import { Button } from "../ui/shadcn/button";
-import { cn } from "../ui/shadcn/utils";
+import { forwardRef } from "react";
+import { OctantIconButton, type OctantIconButtonProps } from "../ui/base/OctantButton";
 
-export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
+export interface IconButtonProps extends Omit<OctantIconButtonProps, "children" | "label"> {
   readonly icon: LucideIcon;
   readonly label: string;
 }
 
 /** Shell icon control backed by the Octant/shadcn button recipe. */
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
-  { className, icon: Icon, label, onClick, title = label, type = "button", ...buttonProps },
+  { className, icon: Icon, label, title = label, ...buttonProps },
   ref,
 ) {
   return (
-    <Button
-      {...buttonProps}
-      aria-label={label}
-      className={cn("shell-icon-button", "window-no-drag", className)}
-      onClick={onClick}
-      ref={ref}
-      size="icon"
-      title={title}
-      type={type}
-      variant="ghost"
-    >
+    <OctantIconButton {...buttonProps} className={className} label={label} ref={ref} title={title}>
       <Icon aria-hidden="true" size={15} strokeWidth={1.7} />
-    </Button>
+    </OctantIconButton>
   );
 });
