@@ -172,6 +172,16 @@ export class ProviderUsageLimitsService {
       if (error instanceof ProviderUsageLimitsStopped) {
         return previous ?? this.#unavailable(instance, observedAt, "not-ready");
       }
+      const runtimeLimits = this.#options.runtimeLimits?.(instance.id, observedAt);
+      if (runtimeLimits !== undefined) {
+        return {
+          providerInstanceId: instance.id,
+          status: "available",
+          source: "provider-runtime",
+          observedAt,
+          limits: runtimeLimits,
+        };
+      }
       const staleLimits =
         previous?.status === "available"
           ? previous.limits

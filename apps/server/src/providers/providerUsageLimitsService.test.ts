@@ -139,6 +139,35 @@ describe("ProviderUsageLimitsService", () => {
     ]);
   });
 
+  it("keeps runtime evidence visible when an active observer fails", async () => {
+    const observedAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
+    const runtime = decodeProviderServiceLimits({
+      providerInstanceId: firstId,
+      scope: "provider-instance",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      concurrency: { status: "unavailable" },
+      retry: { status: "inactive" },
+      quota: "unknown",
+      source: "runtime-reported",
+      confidence: "high",
+      updatedAt: observedAt,
+      rateLimitWindows: [{ window: "weekly", status: "allowed", observedAt }],
+    });
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => {
+        throw new Error("observer unavailable");
+      }),
+      runtimeLimits: () => runtime,
+      now: () => observedAt,
+    });
+
+    await expect(service.refresh()).resolves.toMatchObject({
+      entries: [{ status: "available", limits: { rateLimitWindows: [{ window: "weekly" }] } }],
+    });
+  });
+
   it("retains the last successful result as stale after a failed refresh", async () => {
     const observe = vi
       .fn()
