@@ -102,4 +102,20 @@ describe("ProviderRuntimeUsageLimitsStore", () => {
     expect(store.serviceLimits(instanceId, timestamp("2026-08-24T02:00:00.000Z"))).toBeUndefined();
     expect(store.windows(instanceId)).toEqual([]);
   });
+
+  it("bounds retained provider identities as well as windows per provider", () => {
+    const otherInstanceId = decodeProviderInstanceId("00000000-0000-4000-8000-000000000004");
+    const store = new ProviderRuntimeUsageLimitsStore({ maxProviders: 1 });
+    store.record(windowEvent());
+    store.record(
+      windowEvent({
+        instanceId: otherInstanceId,
+        sequence: 2,
+        occurredAt: timestamp("2026-08-24T01:01:00.000Z"),
+      }),
+    );
+
+    expect(store.windows(instanceId)).toEqual([]);
+    expect(store.windows(otherInstanceId)).toHaveLength(1);
+  });
 });

@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 
 const DEFAULT_MAX_WINDOWS_PER_PROVIDER = 32;
+const DEFAULT_MAX_PROVIDERS = 128;
 
 /**
  * Holds bounded, process-local provider window evidence observed on live
@@ -16,14 +17,25 @@ const DEFAULT_MAX_WINDOWS_PER_PROVIDER = 32;
  */
 export class ProviderRuntimeUsageLimitsStore {
   readonly #maxWindowsPerProvider: number;
+  readonly #maxProviders: number;
   readonly #windows = new Map<string, Map<string, ProviderRateLimitWindow>>();
 
-  constructor(options: { readonly maxWindowsPerProvider?: number } = {}) {
+  constructor(
+    options: {
+      readonly maxWindowsPerProvider?: number;
+      readonly maxProviders?: number;
+    } = {},
+  ) {
     const maximum = options.maxWindowsPerProvider ?? DEFAULT_MAX_WINDOWS_PER_PROVIDER;
     if (!Number.isSafeInteger(maximum) || maximum <= 0) {
       throw new Error("Provider runtime window retention must be a positive safe integer.");
     }
     this.#maxWindowsPerProvider = maximum;
+    const maxProviders = options.maxProviders ?? DEFAULT_MAX_PROVIDERS;
+    if (!Number.isSafeInteger(maxProviders) || maxProviders <= 0) {
+      throw new Error("Provider runtime retention must allow a positive safe number of providers.");
+    }
+    this.#maxProviders = maxProviders;
   }
 
   record(event: ProviderRuntimeEvent): void {
@@ -50,6 +62,13 @@ export class ProviderRuntimeUsageLimitsStore {
       windows.delete(oldest[0]);
     }
     this.#windows.set(key, windows);
+    while (this.#windows.size > this.#maxProviders) {
+      const oldest = [...this.#windows.entries()].sort(
+        (left, right) => latestObservedAt(left[1]) - latestObservedAt(right[1]),
+      )[0];
+      if (oldest === undefined) break;
+      this.#windows.delete(oldest[0]);
+    }
   }
 
   windows(
@@ -96,4 +115,8 @@ export class ProviderRuntimeUsageLimitsStore {
       }
     }
   }
+}
+
+function latestObservedAt(windows: Map<string, ProviderRateLimitWindow>): number {
+  return Math.max(...[...windows.values()].map((window) => Date.parse(window.observedAt)));
 }
