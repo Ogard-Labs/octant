@@ -71,7 +71,6 @@ import {
 } from "../code/codeProjectViewModel";
 import {
   buildSidebarActivityView,
-  filterSidebarActivityView,
   matchesSidebarSearch,
   readActivityViewEnabled,
   writeActivityViewEnabled,
@@ -266,16 +265,10 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
           projectViewState.activeViewId,
           allProjectsPreferences,
         );
-  const activityFilteredThreads =
+  const timeFilteredThreads =
     currentFilters === undefined || listedThreads === undefined
       ? listedThreads
       : filterProjectViewThreads(listedThreads, currentFilters, props.now);
-  const threads =
-    activityFilteredThreads === undefined || !searching
-      ? activityFilteredThreads
-      : activityFilteredThreads.filter((thread) =>
-          matchesSidebarSearch(searchQuery, thread.title, folderLabelFor(thread)),
-        );
   const projectCandidates =
     props.projectViewsEnabled === true && projectViewState !== undefined
       ? filterProjectsForView(
@@ -296,10 +289,20 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const visibleProjects =
     currentFilters === undefined
       ? projectCandidates
-      : sortProjectsByView(
-          projectCandidates,
-          currentFilters.sorting,
-          activityFilteredThreads ?? [],
+      : sortProjectsByView(projectCandidates, currentFilters.sorting, timeFilteredThreads ?? []);
+  const visibleProjectIds = new Set(visibleProjects.map((project) => String(project.id)));
+  const viewScopedThreads =
+    currentFilters === undefined || timeFilteredThreads === undefined
+      ? timeFilteredThreads
+      : timeFilteredThreads.filter(
+          (thread) =>
+            thread.projectId !== undefined && visibleProjectIds.has(String(thread.projectId)),
+        );
+  const threads =
+    viewScopedThreads === undefined || !searching
+      ? viewScopedThreads
+      : viewScopedThreads.filter((thread) =>
+          matchesSidebarSearch(searchQuery, thread.title, folderLabelFor(thread)),
         );
   const onNewThread = props.onNewThreadInProject ?? props.onNewChatInProject;
   const newThreadVerb = props.newThreadVerb ?? "chat";
@@ -329,15 +332,15 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const activity = useMemo(() => {
     const view = buildSidebarActivityView({
       ...(props.now === undefined ? {} : { now: props.now }),
-      projects: props.projects.map((project) => ({
+      projects: visibleProjects.map((project) => ({
         id: String(project.id),
         name: project.name,
       })),
       unfiledLabel,
-      threads: listedThreads ?? [],
+      threads: threads ?? [],
     });
-    return searching ? filterSidebarActivityView(view, searchQuery) : view;
-  }, [listedThreads, props.now, props.projects, unfiledLabel, searchQuery, searching]);
+    return view;
+  }, [threads, props.now, visibleProjects, unfiledLabel]);
   const hasVisibleThreads =
     (threadsByProject !== undefined &&
       (unfiled.length > 0 ||
