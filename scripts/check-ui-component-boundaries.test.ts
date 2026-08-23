@@ -78,7 +78,7 @@ describe("UI component boundary check", () => {
     ).toEqual([]);
   });
 
-  it("accepts an explicitly documented platform exception without hiding ordinary controls", () => {
+  it("scopes an explicitly documented platform exception to the next control", () => {
     expect(
       findRawControlInventory({
         "apps/web/src/browser/BrowserWorkspace.tsx":
@@ -92,11 +92,19 @@ describe("UI component boundary check", () => {
         tag: "button",
       },
       {
-        category: "native-platform-control",
+        category: "ordinary",
         file: "apps/web/src/browser/BrowserWorkspace.tsx",
         line: 3,
         tag: "input",
       },
+    ]);
+    expect(
+      findRawControlBoundaryViolations({
+        "apps/web/src/browser/BrowserWorkspace.tsx":
+          "/* ui-boundary-exception: native-platform-control */\n<button />\n<input />",
+      }),
+    ).toEqual([
+      "apps/web/src/browser/BrowserWorkspace.tsx:3 renders raw <input>; import the corresponding Octant adapter.",
     ]);
   });
 });

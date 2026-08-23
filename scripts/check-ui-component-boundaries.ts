@@ -6,7 +6,7 @@ const SOURCE_EXTENSION = /\.(?:ts|tsx)$/;
 const BASE_UI_IMPORT = /from\s+["']@base-ui\/react(?:\/[^"']+)?["']/;
 const SHADCN_IMPORT = /from\s+["'][^"']*ui\/shadcn(?:\/[^"']+)?["']/;
 const RAW_CONTROL_OPENING_TAG = /<\s*(button|select|textarea|input)(?=\s|>)/g;
-const RAW_CONTROL_EXCEPTION = /ui-boundary-exception:\s*([a-z-]+)/i;
+const RAW_CONTROL_EXCEPTION = /\{?\/\*\s*ui-boundary-exception:\s*([a-z-]+)\s*\*\/\}?\s*$/i;
 
 export type RawControlException =
   | "native-file-input"
@@ -58,12 +58,15 @@ export function findRawControlInventory(
     ) {
       continue;
     }
-    const marker = source.match(RAW_CONTROL_EXCEPTION)?.[1]?.toLowerCase();
     RAW_CONTROL_OPENING_TAG.lastIndex = 0;
     for (const match of source.matchAll(RAW_CONTROL_OPENING_TAG)) {
       const tag = match[1] as RawControlFinding["tag"];
       const index = match.index ?? 0;
       const line = source.slice(0, index).split("\n").length;
+      const marker = source
+        .slice(Math.max(0, index - 240), index)
+        .match(RAW_CONTROL_EXCEPTION)?.[1]
+        ?.toLowerCase();
       const selfClosingEnd = tag === "input" ? source.indexOf("/>", index) : -1;
       const openingContext = source.slice(
         index,
