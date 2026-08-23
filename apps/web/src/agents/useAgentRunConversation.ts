@@ -9,6 +9,10 @@ import {
 } from "@octant/client-runtime/agent-run-client";
 import { useEffect, useState } from "react";
 
+const RECONNECT_BASE_DELAY_MS = 100;
+const RECONNECT_MAX_DELAY_MS = 2_000;
+const MAX_RECONNECT_ATTEMPTS = 6;
+
 export interface AgentRunConversationController {
   readonly conversation: AgentRunConversationResponse | undefined;
   readonly loading: boolean;
@@ -53,6 +57,11 @@ export function useAgentRunConversation(
     }
     const controller = new AbortController();
     let cancelled = false;
+    let terminal = false;
+    let connecting = false;
+    let reconnectAttempt = 0;
+    let cursor = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     setState({
       runId,
       conversation: undefined,
@@ -90,51 +99,46 @@ export function useAgentRunConversation(
       };
     }
     const subscribe = client.subscribeConversation;
-    void (async () => {
-      try {
-        for await (const frame of subscribe(runId, undefined, controller.signal)) {
-          if (cancelled) return;
-          setState((previous) => {
-            if (previous.runId !== runId) return previous;
-            if (frame.kind === "snapshot" || previous.conversation === undefined) {
-              const { kind: _kind, ...conversation } = frame;
-              return {
-                runId,
-                conversation,
-                loading: false,
-                reconnecting: false,
-                errorMessage: undefined,
-              };
-            }
-            const previousSequence = previous.conversation.entries.at(-1)?.sequence ?? 0;
-            const entries = [
-              ...previous.conversation.entries,
-              ...frame.entries.filter((entry) => entry.sequence > previousSequence),
-            ];
-            return {
-              runId,
-              conversation: { ...withoutKind(frame), entries },
-              loading: false,
-              reconnecting: false,
-              errorMessage: undefined,
-            };
-          });
+    const updateFrame = (frame: AgentRunConversationStreamFrame): void => {
+      if (cancelled) return;
+      const lastSequence = frame.entries.at(-1)?.sequence;
+      if (lastSequence !== undefined) cursor = Math.max(cursor, lastSequence);
+      const parsedCursor = frame.nextCursor === undefined ? undefined : Number(frame.nextCursor);
+      if (parsedCursor !== undefined && Number.isSafeInteger(parsedCursor)) {
+        cursor = Math.max(cursor, parsedCursor);
+      }
+      reconnectAttempt = 0;
+      terminal = frame.status !== "live";
+      setState((previous) => {
+        if (previous.runId !== runId) return previous;
+        if (previous.conversation === undefined) {
+          const { kind: _kind, ...conversation } = frame;
+          return {
+            runId,
+            conversation,
+            loading: false,
+            reconnecting: false,
+            errorMessage: undefined,
+          };
         }
-        if (!cancelled) {
-          setState((previous) =>
-            previous.runId !== runId || previous.conversation?.status !== "live"
-              ? previous
-              : {
-                  ...previous,
-                  loading: false,
-                  reconnecting: true,
-                  errorMessage:
-                    "Live child transcript disconnected; reconnect to continue viewing.",
-                },
-          );
-        }
-      } catch (error) {
-        if (cancelled || controller.signal.aborted) return;
+        const previousSequence = previous.conversation.entries.at(-1)?.sequence ?? 0;
+        const entries = [
+          ...previous.conversation.entries,
+          ...frame.entries.filter((entry) => entry.sequence > previousSequence),
+        ];
+        return {
+          runId,
+          conversation: { ...withoutKind(frame), entries },
+          loading: false,
+          reconnecting: false,
+          errorMessage: undefined,
+        };
+      });
+    };
+    const scheduleReconnect = (message: string): void => {
+      if (cancelled || terminal || controller.signal.aborted || reconnectTimer !== undefined)
+        return;
+      if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) {
         setState((previous) =>
           previous.runId !== runId
             ? previous
@@ -143,15 +147,72 @@ export function useAgentRunConversation(
                 loading: false,
                 reconnecting: true,
                 errorMessage:
-                  error instanceof AgentRunClientFailure
-                    ? error.message
-                    : "Live child transcript is unavailable. Reconnect and retry.",
+                  "Live child transcript could not reconnect. Retry by selecting it again.",
               },
         );
+        return;
       }
-    })();
+      reconnectAttempt += 1;
+      const delay = Math.min(
+        RECONNECT_MAX_DELAY_MS,
+        RECONNECT_BASE_DELAY_MS * 2 ** (reconnectAttempt - 1),
+      );
+      setState((previous) =>
+        previous.runId !== runId
+          ? previous
+          : {
+              ...previous,
+              loading: false,
+              reconnecting: true,
+              errorMessage: message,
+            },
+      );
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        void consume();
+      }, delay);
+    };
+    const consume = async (): Promise<void> => {
+      if (cancelled || terminal || controller.signal.aborted || connecting) return;
+      connecting = true;
+      try {
+        for await (const frame of subscribe(
+          runId,
+          cursor === 0 ? undefined : cursor,
+          controller.signal,
+        )) {
+          if (cancelled) return;
+          updateFrame(frame);
+          if (terminal) return;
+        }
+        if (!cancelled && !terminal) {
+          scheduleReconnect("Live child transcript disconnected; reconnecting…");
+        }
+      } catch (error) {
+        if (cancelled || controller.signal.aborted || terminal) return;
+        if (error instanceof AgentRunClientFailure && error.code !== "unavailable") {
+          terminal = true;
+          setState((previous) =>
+            previous.runId !== runId
+              ? previous
+              : { ...previous, loading: false, reconnecting: false, errorMessage: error.message },
+          );
+          return;
+        }
+        scheduleReconnect(
+          error instanceof AgentRunClientFailure
+            ? error.message
+            : "Live child transcript is unavailable. Reconnecting…",
+        );
+      } finally {
+        connecting = false;
+      }
+    };
+    void consume();
     return () => {
       cancelled = true;
+      terminal = true;
+      if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
       controller.abort();
     };
   }, [client, runId]);
