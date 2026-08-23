@@ -3,6 +3,9 @@ import type {
   ArtifactMirrorSettings as MirrorSettings,
 } from "@octant/contracts/artifact-mirror";
 import { useState } from "react";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 
 export interface ArtifactMirrorSettingsProps {
   readonly settings: MirrorSettings | undefined;
@@ -54,40 +57,45 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
         import it, which adds a new version.
       </p>
 
-      {TIERS.map((tier) => (
-        <label className="artifact-mirror__tier check" key={tier.kind}>
-          <input
-            checked={current === tier.kind}
-            disabled={props.busy}
-            name="artifact-mirror-tier"
-            onChange={() => {
-              if (tier.kind === "internal-only")
-                props.onChangeDestination({ kind: "internal-only" });
-              if (tier.kind === "global-folder" && folder.trim().length > 0) {
-                props.onChangeDestination({
-                  kind: "global-folder",
-                  canonicalRoot: folder.trim() as never,
-                });
-              }
-              if (tier.kind === "project-repository" && directory.trim().length > 0) {
-                props.onChangeDestination({
-                  kind: "project-repository",
-                  relativeDirectory: directory.trim() as never,
-                });
-              }
-            }}
-            type="radio"
-          />
-          <span className="artifact-mirror__tier-body">
-            <span className="artifact-mirror__tier-label">{tier.label}</span>
-            <span className="artifact-mirror__tier-detail">{tier.detail}</span>
-          </span>
-        </label>
-      ))}
+      <OctantToggleGroup<ArtifactMirrorDestination["kind"]>
+        aria-label="Artifact file destination"
+        className="artifact-mirror__tiers"
+        disabled={props.busy}
+        onValueChange={(value) => {
+          const next = value[0];
+          if (next === "internal-only") props.onChangeDestination({ kind: "internal-only" });
+          if (next === "global-folder" && folder.trim().length > 0) {
+            props.onChangeDestination({
+              kind: "global-folder",
+              canonicalRoot: folder.trim() as never,
+            });
+          }
+          if (next === "project-repository" && directory.trim().length > 0) {
+            props.onChangeDestination({
+              kind: "project-repository",
+              relativeDirectory: directory.trim() as never,
+            });
+          }
+        }}
+        value={[current]}
+      >
+        {TIERS.map((tier) => (
+          <OctantToggleGroupItem
+            className="artifact-mirror__tier"
+            key={tier.kind}
+            value={tier.kind}
+          >
+            <span className="artifact-mirror__tier-body">
+              <span className="artifact-mirror__tier-label">{tier.label}</span>
+              <span className="artifact-mirror__tier-detail">{tier.detail}</span>
+            </span>
+          </OctantToggleGroupItem>
+        ))}
+      </OctantToggleGroup>
 
       <label className="artifact-mirror__field">
         <span>Folder</span>
-        <input
+        <OctantInput
           className="input"
           disabled={props.busy}
           onChange={(event) => setFolder(event.target.value)}
@@ -98,7 +106,7 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
 
       <label className="artifact-mirror__field">
         <span>Folder inside the repository</span>
-        <input
+        <OctantInput
           className="input"
           disabled={props.busy}
           onChange={(event) => setDirectory(event.target.value)}
@@ -108,11 +116,10 @@ export function ArtifactMirrorSettings(props: ArtifactMirrorSettingsProps) {
       </label>
 
       <label className="artifact-mirror__auto-commit check">
-        <input
+        <OctantCheckbox
           checked={props.settings?.autoCommit === true}
           disabled={props.busy || current !== "project-repository"}
           onChange={(event) => props.onChangeAutoCommit(event.target.checked)}
-          type="checkbox"
         />
         <span>
           Commit mirrored files automatically. Off by default. It commits the artifact files and

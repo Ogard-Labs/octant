@@ -20,6 +20,9 @@ import type {
 import { Ban, Check, Eye, Share2, TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantNativeSelect } from "../ui/base/OctantSelect";
 import { CanvasBlockRenderer } from "./blocks/CanvasBlock";
 
 /**
@@ -220,7 +223,7 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
         <div className="canvas-share__form">
           <label className="canvas-share__field">
             <span>Audience label</span>
-            <input
+            <OctantInput
               data-testid="canvas-share-label"
               disabled={working}
               maxLength={128}
@@ -231,7 +234,7 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
           </label>
           <label className="canvas-share__field">
             <span>Expires after</span>
-            <select
+            <OctantNativeSelect
               data-testid="canvas-share-expiry"
               disabled={working}
               onChange={(event) => setExpiry(event.target.value)}
@@ -242,27 +245,25 @@ export function CanvasSharePanel(props: CanvasSharePanelProps) {
                   {choice.label}
                 </option>
               ))}
-            </select>
+            </OctantNativeSelect>
           </label>
           <p className="canvas-share__note">
             This host can only authenticate you right now, so this snapshot is addressed to you on
             this device.
           </p>
           <label className="canvas-share__consent">
-            <input
+            <OctantCheckbox
               checked={acknowledgedSnapshot}
               data-testid="canvas-share-consent-snapshot"
               onChange={(event) => setAcknowledgedSnapshot(event.target.checked)}
-              type="checkbox"
             />
             <span>This copies this canvas version into a snapshot that outlives the canvas.</span>
           </label>
           <label className="canvas-share__consent">
-            <input
+            <OctantCheckbox
               checked={acknowledgedAudience}
               data-testid="canvas-share-consent-audience"
               onChange={(event) => setAcknowledgedAudience(event.target.checked)}
-              type="checkbox"
             />
             <span>Everyone in the audience above can open it until it expires or I revoke it.</span>
           </label>

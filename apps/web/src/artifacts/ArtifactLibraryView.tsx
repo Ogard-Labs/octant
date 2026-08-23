@@ -7,6 +7,9 @@ import type {
 import type { OctantMode, ProjectId } from "@octant/contracts";
 import { Plus, Search } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
+import { OctantNativeSelect } from "../ui/base/OctantSelect";
+import { OctantTabs, OctantTabsList, OctantTabsTab } from "../ui/base/OctantTabs";
 import { ArtifactCard } from "./ArtifactCard";
 import type { ArtifactLibraryFilters } from "./useArtifactLibrary";
 
@@ -88,7 +91,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
           <label className="sr-only" htmlFor="artifact-library-search">
             Search artifacts
           </label>
-          <input
+          <OctantInput
             className="artifact-library__search-input"
             id="artifact-library-search"
             onChange={(event) => change({ query: event.target.value })}
@@ -101,7 +104,7 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
         <label className="sr-only" htmlFor="artifact-library-kind">
           Filter by kind
         </label>
-        <select
+        <OctantNativeSelect
           className="artifact-library__select select"
           id="artifact-library-kind"
           onChange={(event) =>
@@ -118,12 +121,12 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               {kind.slice(1)}
             </option>
           ))}
-        </select>
+        </OctantNativeSelect>
 
         <label className="sr-only" htmlFor="artifact-library-project">
           Filter by Project
         </label>
-        <select
+        <OctantNativeSelect
           className="artifact-library__select select"
           id="artifact-library-project"
           onChange={(event) =>
@@ -139,12 +142,12 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               {project.name} ({String(project.artifactCount)})
             </option>
           ))}
-        </select>
+        </OctantNativeSelect>
 
         <label className="sr-only" htmlFor="artifact-library-mode">
           Filter by mode
         </label>
-        <select
+        <OctantNativeSelect
           className="artifact-library__select select"
           id="artifact-library-mode"
           onChange={(event) =>
@@ -161,23 +164,25 @@ export function ArtifactLibraryView(props: ArtifactLibraryViewProps) {
               {mode.slice(1)}
             </option>
           ))}
-        </select>
+        </OctantNativeSelect>
       </div>
 
-      <div aria-label="Artifact groups" className="artifact-library__tabs tabs" role="tablist">
-        {TABS.map((tab) => (
-          <button
-            aria-selected={filters.tab === tab.id}
-            className="artifact-library__tab tab"
-            key={tab.id}
-            onClick={() => change({ tab: tab.id })}
-            role="tab"
-            type="button"
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <OctantTabs
+        onValueChange={(value) => {
+          if (TABS.some((tab) => tab.id === value)) {
+            change({ tab: value as ArtifactLibraryTab });
+          }
+        }}
+        value={filters.tab}
+      >
+        <OctantTabsList aria-label="Artifact groups" className="artifact-library__tabs tabs">
+          {TABS.map((tab) => (
+            <OctantTabsTab className="artifact-library__tab tab" key={tab.id} value={tab.id}>
+              {tab.label}
+            </OctantTabsTab>
+          ))}
+        </OctantTabsList>
+      </OctantTabs>
 
       {props.message === undefined ? null : (
         <p className="artifact-library__message" role="status">
