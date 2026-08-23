@@ -86,11 +86,19 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 
 .window-chrome__leading .window-chrome__button {
   position: relative;
-  top: 8px;
+  top: 0;
   width: 22px;
   height: 22px;
   min-width: 22px;
   min-height: 22px;
+}
+
+/* The trailing actions sit below hiddenInset so native dragging cannot swallow
+   them. The collapsed-sidebar recovery belongs beside the traffic lights
+   instead, so lift only that one control back into the native leading row. */
+html[data-octant-native-host="true"] .window-chrome__leading .window-chrome__button {
+  top: calc(7px - var(--octant-native-hidden-inset-titlebar-height));
+  color: var(--oct-fg-2);
 }
 
 /* Same reserve the sidebar keeps for the macOS traffic lights (see

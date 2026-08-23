@@ -553,6 +553,17 @@ describe("WindowChrome", () => {
 
     expect(leading).toHaveClass("window-no-drag");
     expect(leading).toContainElement(opener);
+    expect(cssRule(".window-chrome__leading .window-chrome__button")).toContain("top: 0;");
+    expect(
+      cssRule(
+        'html[data-octant-native-host="true"] .window-chrome__leading .window-chrome__button',
+      ),
+    ).toContain("top: calc(7px - var(--octant-native-hidden-inset-titlebar-height));");
+    expect(
+      cssRule(
+        'html[data-octant-native-host="true"] .window-chrome__leading .window-chrome__button',
+      ),
+    ).toContain("color: var(--oct-fg-2);");
     await user.click(opener);
     expect(onExpandSidebar).toHaveBeenCalledOnce();
   });
