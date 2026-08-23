@@ -184,7 +184,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 0;");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: var(--octant-native-hidden-inset-titlebar-height);",
+      "top: 0;",
     );
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("border-bottom: 0;");
@@ -373,10 +373,16 @@ describe("WindowChrome", () => {
       "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
     );
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__header')).toContain(
-      "box-shadow: inset 0 -1px 0 var(--octant-border);",
+      "box-shadow: none;",
     );
     expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
       "color: var(--oct-fg);",
+    );
+    expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
+      "border-color: var(--octant-border-strong);",
+    );
+    expect(cssRule('.workspace-pane[data-active="true"] .workspace-pane__grip')).toContain(
+      "background: var(--octant-control);",
     );
     expect(cssRule('.workspace-pane[data-active="true"]')).toContain(
       "box-shadow: inset 0 0 0 1px var(--octant-border-strong);",
@@ -554,16 +560,9 @@ describe("WindowChrome", () => {
     expect(leading).toHaveClass("window-no-drag");
     expect(leading).toContainElement(opener);
     expect(cssRule(".window-chrome__leading .window-chrome__button")).toContain("top: 0;");
-    expect(
-      cssRule(
-        'html[data-octant-native-host="true"] .window-chrome__leading .window-chrome__button',
-      ),
-    ).toContain("top: calc(7px - var(--octant-native-hidden-inset-titlebar-height));");
-    expect(
-      cssRule(
-        'html[data-octant-native-host="true"] .window-chrome__leading .window-chrome__button',
-      ),
-    ).toContain("color: var(--oct-fg-2);");
+    expect(cssRule(".window-chrome__leading .window-chrome__button")).toContain(
+      "color: var(--oct-fg-2);",
+    );
     await user.click(opener);
     expect(onExpandSidebar).toHaveBeenCalledOnce();
   });
@@ -587,7 +586,7 @@ describe("WindowChrome", () => {
     expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
     expect(container.firstChild).toHaveClass("window-drag-region");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: var(--octant-native-hidden-inset-titlebar-height);",
+      "top: 0;",
     );
     expect(container.querySelector(".window-chrome__drag-space")).not.toHaveClass(
       "window-drag-region",

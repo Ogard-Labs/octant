@@ -1549,11 +1549,13 @@ button:focus-visible {
 }
 
 .workspace-pane[data-active="true"] .workspace-pane__header {
-  box-shadow: inset 0 -1px 0 var(--octant-border);
+  box-shadow: none;
 }
 
 .workspace-pane[data-active="true"] .workspace-pane__grip {
   color: var(--oct-fg);
+  background: var(--octant-control);
+  border-color: var(--octant-border-strong);
 }
 
 .workspace-pane__header {
@@ -1585,6 +1587,8 @@ button:focus-visible {
   padding: 0 7px;
   overflow: hidden;
   color: var(--oct-meta);
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 6px;
   cursor: grab;
   font-size: var(--oct-text-xs);

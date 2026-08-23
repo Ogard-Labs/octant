@@ -61,7 +61,7 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
    controls instead of treating them as window-drag gestures. Remote/web
    clients do not have the native inset and keep the zero-offset row above. */
 html[data-octant-native-host="true"] .shell-frame > .window-chrome {
-  top: var(--octant-native-hidden-inset-titlebar-height);
+  top: 0;
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {
@@ -91,13 +91,6 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   height: 22px;
   min-width: 22px;
   min-height: 22px;
-}
-
-/* The trailing actions sit below hiddenInset so native dragging cannot swallow
-   them. The collapsed-sidebar recovery belongs beside the traffic lights
-   instead, so lift only that one control back into the native leading row. */
-html[data-octant-native-host="true"] .window-chrome__leading .window-chrome__button {
-  top: calc(7px - var(--octant-native-hidden-inset-titlebar-height));
   color: var(--oct-fg-2);
 }
 
