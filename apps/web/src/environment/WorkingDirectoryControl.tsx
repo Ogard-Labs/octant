@@ -1,6 +1,7 @@
 import { decodeThreadWorkingDirectory, type ThreadWorkingDirectory } from "@octant/contracts";
 import { useEffect, useId, useRef, useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 
 export function ChangeWorkingFolder(props: {
   readonly value: ThreadWorkingDirectory | ".";
@@ -70,7 +71,7 @@ export function WorkingDirectoryControl(props: {
     >
       <label htmlFor={inputId}>Working folder</label>
       <div className="working-directory-control__row">
-        <input
+        <OctantInput
           autoFocus
           id={inputId}
           value={draft}

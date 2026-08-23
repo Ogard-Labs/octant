@@ -248,17 +248,19 @@ function LocalServerRow(props: {
           </OctantButton>
         ) : null}
 
-        <button
+        <OctantButton
           aria-expanded={menuOpen}
           aria-haspopup="menu"
           aria-label={`More actions for ${name} on port ${String(listener.port)}`}
           className="local-servers__more"
           onClick={() => setMenuOpen((current) => !current)}
+          size="sm"
           type="button"
+          variant="ghost"
         >
           <Ellipsis aria-hidden="true" size={14} strokeWidth={1.8} />
           <span>More</span>
-        </button>
+        </OctantButton>
 
         {feedback === undefined ? null : (
           <span

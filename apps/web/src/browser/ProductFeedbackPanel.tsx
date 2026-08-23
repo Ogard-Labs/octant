@@ -2,6 +2,7 @@ import type { ProductFeedbackNote } from "@octant/contracts/product-feedback";
 import { MessageSquare, X } from "lucide-react";
 import { useState } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantTextarea } from "../ui/base/OctantTextarea";
 
 export interface ProductFeedbackPanelProps {
   readonly pending: ReadonlyArray<ProductFeedbackNote>;
@@ -52,7 +53,7 @@ export function ProductFeedbackPanel(props: ProductFeedbackPanelProps) {
 
       {props.pendingPoint === undefined ? null : (
         <div className="product-feedback__composer">
-          <textarea
+          <OctantTextarea
             aria-label="What is wrong with this?"
             className="product-feedback__input"
             maxLength={2000}

@@ -9,6 +9,8 @@ import {
 import type { FederatedHostState } from "@octant/client-runtime";
 import { Check, ChevronDown } from "lucide-react";
 import { useState } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
+import { OctantCheckbox } from "../ui/base/OctantCheckbox";
 
 export interface EnvironmentFilterProps {
   readonly hostStates: ReadonlyArray<FederatedHostState>;
@@ -49,39 +51,38 @@ export function EnvironmentFilter(props: EnvironmentFilterProps) {
 
   return (
     <div className="environment-filter">
-      <button
+      <OctantButton
         aria-expanded={open}
         aria-haspopup="true"
         className="environment-filter__toggle"
         onClick={() => setOpen((current) => !current)}
         type="button"
+        variant="ghost"
       >
         <span>{environmentSelectionSummary(rows, props.selection)}</span>
         <ChevronDown aria-hidden="true" size={12} strokeWidth={1.8} />
-      </button>
+      </OctantButton>
 
       {open ? (
         <fieldset className="environment-filter__menu">
           <legend className="sr-only">Environment</legend>
           <label className="environment-filter__row">
-            <input
+            <OctantCheckbox
               checked={allChecked}
               onChange={() => props.onSelectionChange(toggleAllEnvironments(props.selection))}
-              type="checkbox"
             />
             <span className="environment-filter__label">All environments</span>
           </label>
 
           {rows.map((row) => (
             <label className="environment-filter__row" key={row.hostId}>
-              <input
+              <OctantCheckbox
                 checked={row.checked}
                 onChange={() =>
                   props.onSelectionChange(
                     toggleEnvironment(props.selection, row.hostId, knownHostIds),
                   )
                 }
-                type="checkbox"
               />
               <span className="environment-filter__label">{row.label}</span>
               <span className="environment-filter__count">{String(row.itemCount)}</span>

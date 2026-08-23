@@ -1,5 +1,6 @@
 import { ChevronRight } from "lucide-react";
 import { useState, type ReactNode } from "react";
+import { OctantButton } from "../ui/base/OctantButton";
 
 export interface EnvironmentGroupProps {
   readonly title: string;
@@ -26,11 +27,12 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
   };
   return (
     <section className={`environment-group${open ? " environment-group--open" : ""}`}>
-      <button
+      <OctantButton
         aria-expanded={open}
         className="environment-group__header window-no-drag"
         onClick={toggle}
         type="button"
+        variant="ghost"
       >
         <ChevronRight
           aria-hidden="true"
@@ -42,7 +44,7 @@ export function EnvironmentGroup(props: EnvironmentGroupProps) {
         {props.summary === undefined ? null : (
           <span className="environment-group__summary">{props.summary}</span>
         )}
-      </button>
+      </OctantButton>
       {open ? <div className="environment-group__body">{props.children}</div> : null}
     </section>
   );

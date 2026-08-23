@@ -97,11 +97,12 @@ function AgentGroup(props: {
             entry.route?.executionModelId ?? entry.route?.requestedModelId ?? "Model unavailable";
           return (
             <li key={entry.runId}>
-              <button
+              <OctantButton
                 aria-expanded={selected}
                 className="environment-subagents__row"
                 onClick={() => props.onSelect(selected ? undefined : entry.runId)}
                 type="button"
+                variant="ghost"
               >
                 <Bot aria-hidden="true" size={15} strokeWidth={1.7} />
                 <span>
@@ -111,7 +112,7 @@ function AgentGroup(props: {
                   </small>
                 </span>
                 <ChevronRight aria-hidden="true" size={14} strokeWidth={1.7} />
-              </button>
+              </OctantButton>
               {selected ? (
                 <div className="environment-subagents__conversation">
                   <div>

@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { DockToolIcon } from "./dockToolIcons";
 import { partitionDockTools } from "./dockToolStripModel";
 import { IconButton } from "./IconButton";
+import { OctantButton } from "../ui/base/OctantButton";
 import type {
   RightUtilityDockSurfaceDescriptor,
   RightUtilityDockSurfaceId,
@@ -91,17 +92,19 @@ export function DockToolStrip(props: DockToolStripProps) {
     >
       {visible.map((tool) => (
         <span className="dock-tool-strip__tab" key={tool.id}>
-          <button
+          <OctantButton
             aria-selected={tool.id === props.active}
             className="dock-tool-strip__select window-no-drag"
             onClick={() => props.onSelect(tool.id)}
             role="tab"
+            size="sm"
             tabIndex={tool.id === props.active ? 0 : -1}
             type="button"
+            variant="ghost"
           >
             <DockToolIcon surface={tool.id} />
             <span>{tool.label}</span>
-          </button>
+          </OctantButton>
           <IconButton
             className="dock-tool-strip__close"
             icon={X}
@@ -133,17 +136,18 @@ export function DockToolStrip(props: DockToolStripProps) {
             >
               {overflow.map((tool) => (
                 <span className="dock-tool-strip__overflow-row" key={tool.id}>
-                  <button
+                  <OctantButton
                     className="workspace-disclosure__action window-no-drag"
                     onClick={() => {
                       props.onSelect(tool.id);
                       setOverflowOpen(false);
                     }}
                     type="button"
+                    variant="ghost"
                   >
                     <DockToolIcon surface={tool.id} />
                     <span>{tool.label}</span>
-                  </button>
+                  </OctantButton>
                   <IconButton
                     icon={X}
                     label={`Hide ${tool.label}`}
