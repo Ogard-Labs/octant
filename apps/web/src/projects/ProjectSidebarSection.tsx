@@ -47,6 +47,7 @@ import {
   filterProjectViewThreads,
   filterProjectsForView,
   normalizeProjectViewFilters,
+  projectViewActivityRangeError,
   projectViewFiltersFor,
   readProjectViewPreferences,
   readProjectViewState,
@@ -82,7 +83,7 @@ import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { groupThreadsByProject } from "./projectThreadGrouping";
 import { ProjectThreadList, ProjectThreadRows, ProjectThreadStatus } from "./ProjectThreadList";
 import type { ThreadRowActions } from "./ThreadRowMenu";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
@@ -1196,6 +1197,7 @@ function ProjectViewFilterPopover(props: {
   readonly onChange: (filters: ProjectViewFilters) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const activityRangeErrorId = useId();
   const options = useMemo(() => {
     const local = { id: "local", name: "Local" };
     return [local, ...props.environmentOptions.filter((option) => option.id !== local.id)].filter(
@@ -1203,6 +1205,7 @@ function ProjectViewFilterPopover(props: {
     );
   }, [props.environmentOptions]);
   const environmentSelection = props.filters.environmentIds;
+  const activityRangeError = projectViewActivityRangeError(props.filters);
   const activeCount =
     (props.filters.lifecycle === "active" ? 0 : 1) +
     (environmentSelection.length > 0 ? 1 : 0) +
@@ -1329,6 +1332,10 @@ function ProjectViewFilterPopover(props: {
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               From
               <OctantInput
+                aria-describedby={
+                  activityRangeError === undefined ? undefined : activityRangeErrorId
+                }
+                aria-invalid={activityRangeError === undefined ? undefined : true}
                 aria-label="Activity from"
                 onChange={(event) =>
                   update({
@@ -1347,6 +1354,10 @@ function ProjectViewFilterPopover(props: {
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
               To
               <OctantInput
+                aria-describedby={
+                  activityRangeError === undefined ? undefined : activityRangeErrorId
+                }
+                aria-invalid={activityRangeError === undefined ? undefined : true}
                 aria-label="Activity to"
                 onChange={(event) =>
                   update({
@@ -1362,6 +1373,11 @@ function ProjectViewFilterPopover(props: {
                 value={props.filters.activityRange?.to ?? ""}
               />
             </label>
+            {activityRangeError === undefined ? null : (
+              <p className="field-error col-span-2" id={activityRangeErrorId} role="alert">
+                {activityRangeError}
+              </p>
+            )}
           </div>
         ) : null}
       </div>

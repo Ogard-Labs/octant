@@ -8,6 +8,7 @@ import {
   deleteCodeProjectView,
   filterProjectViewThreads,
   filterProjectsForView,
+  projectViewActivityRangeError,
   projectViewActivityRange,
   readCodeProjectViewState,
   readProjectViewPreferences,
@@ -282,5 +283,37 @@ describe("codeProjectViewModel", () => {
     ).toMatchObject({
       from: new Date("2026-08-22T00:00:00"),
     });
+  });
+
+  it("refuses rollover dates and reversed custom activity ranges", () => {
+    const defaults = defaultProjectViewPreferences().filters;
+    const rollover = {
+      ...defaults,
+      activity: "custom" as const,
+      activityRange: { from: "2026-02-31", to: "2026-03-03" },
+    };
+    const reversed = {
+      ...defaults,
+      activity: "custom" as const,
+      activityRange: { from: "2026-08-23", to: "2026-08-22" },
+    };
+
+    expect(projectViewActivityRangeError(rollover)).toBe("Choose a valid start date.");
+    expect(projectViewActivityRange(rollover)).toBeUndefined();
+    expect(
+      readProjectViewPreferences(
+        "code",
+        memoryStorage({
+          "octant.code.project-view-preferences.v1": JSON.stringify({ filters: rollover }),
+        }),
+      ).filters.activityRange,
+    ).toEqual({ to: "2026-03-03" });
+    expect(projectViewActivityRangeError(reversed)).toBe(
+      "Start date must be on or before end date.",
+    );
+    expect(projectViewActivityRange(reversed)).toBeUndefined();
+    expect(
+      filterProjectViewThreads([{ id: "kept", updatedAt: "2026-08-22T10:00:00.000Z" }], reversed),
+    ).toEqual([{ id: "kept", updatedAt: "2026-08-22T10:00:00.000Z" }]);
   });
 });
