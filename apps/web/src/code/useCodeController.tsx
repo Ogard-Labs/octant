@@ -1260,27 +1260,31 @@ export function useCodeController(options: CodeControllerOptions) {
   useEffect(() => {
     if (navigationRefreshMs <= 0) return;
     let cancelled = false;
+    let inFlight = false;
     let timer: ReturnType<typeof setInterval> | undefined;
-    const refresh = () => {
-      if (!documentIsVisible()) return;
-      void (async () => {
-        try {
-          const next = await client.bootstrap();
-          if (cancelled || !mounted.current) return;
-          applyNavigationRefresh(next);
-        } catch {
-          // A refresh that fails leaves the last list on screen; the stream and
-          // the retry path are what report a host that has actually gone away.
-        }
-      })();
+    const refresh = async () => {
+      if (!documentIsVisible() || inFlight) return;
+      inFlight = true;
+      try {
+        const next = await client.bootstrap();
+        if (cancelled || !mounted.current) return;
+        applyNavigationRefresh(next);
+      } catch {
+        // A refresh that fails leaves the last list on screen; the stream and
+        // the retry path are what report a host that has actually gone away.
+      } finally {
+        inFlight = false;
+      }
     };
     const schedule = () => {
       if (timer !== undefined) clearInterval(timer);
-      timer = documentIsVisible() ? setInterval(refresh, navigationRefreshMs) : undefined;
+      timer = documentIsVisible()
+        ? setInterval(() => void refresh(), navigationRefreshMs)
+        : undefined;
     };
     const onVisibilityChange = () => {
       schedule();
-      if (documentIsVisible()) refresh();
+      if (documentIsVisible()) void refresh();
     };
     schedule();
     document.addEventListener("visibilitychange", onVisibilityChange);

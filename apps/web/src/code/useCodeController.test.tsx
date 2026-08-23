@@ -1897,6 +1897,28 @@ describe("useCodeController", () => {
     }
   });
 
+  it("does not overlap slow navigation refreshes", async () => {
+    const slowRefresh = deferred<ReturnType<typeof bootstrap>>();
+    let calls = 0;
+    const bootstrapRead = vi.fn(async () => {
+      calls += 1;
+      return calls === 2 ? slowRefresh.promise : bootstrap(1, calls + 3);
+    });
+    const client = fakeClient({ bootstrap: bootstrapRead });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ client, navigationRefreshMs: 10 }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await waitFor(() => expect(bootstrapRead).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(bootstrapRead).toHaveBeenCalledTimes(2);
+
+    slowRefresh.resolve(bootstrap(1, 9));
+    await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(2));
+    unmount();
+  });
+
   it("keeps a turn that finished on screen read when the user leaves before the next refresh", async () => {
     const readCursorStore = createCodeReadCursorStore();
     const promptId = "60000000-0000-4000-8000-000000000040";

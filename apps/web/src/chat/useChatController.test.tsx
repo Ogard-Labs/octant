@@ -6,7 +6,7 @@ import {
   decodeChatThreadId,
   decodeChatThreadView,
 } from "@octant/contracts/chat";
-import type { ChatEventFrame, ChatThreadView } from "@octant/contracts";
+import type { ChatEventFrame, ChatThreadId, ChatThreadView } from "@octant/contracts";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -279,17 +279,18 @@ describe("useChatController", () => {
       value: "hidden",
     });
     try {
+      const threadRead = vi.fn(async (requestedThreadId: ChatThreadId) =>
+        decodeChatThreadView({
+          ...threadView(1),
+          thread:
+            String(requestedThreadId) === String(threadId)
+              ? bootstrap().threads[0]!
+              : bootstrap().threads[1]!,
+        }),
+      );
       const client = createMockClient({
         bootstrap: vi.fn(async () => bootstrap()),
-        thread: vi.fn(async (requestedThreadId) =>
-          decodeChatThreadView({
-            ...threadView(1),
-            thread:
-              String(requestedThreadId) === String(threadId)
-                ? bootstrap().threads[0]!
-                : bootstrap().threads[1]!,
-          }),
-        ),
+        thread: threadRead,
         subscribe: vi.fn(async function* () {}),
       });
       const { unmount } = renderHook(() =>
@@ -302,14 +303,14 @@ describe("useChatController", () => {
       );
 
       await waitFor(() => expect(client.bootstrap).toHaveBeenCalledOnce());
-      expect(client.thread).not.toHaveBeenCalled();
+      expect(threadRead).not.toHaveBeenCalled();
 
       Object.defineProperty(document, "visibilityState", {
         configurable: true,
         value: "visible",
       });
       document.dispatchEvent(new Event("visibilitychange"));
-      await waitFor(() => expect(client.thread.mock.calls.length).toBeGreaterThanOrEqual(2));
+      await waitFor(() => expect(threadRead.mock.calls.length).toBeGreaterThanOrEqual(2));
       unmount();
     } finally {
       Object.defineProperty(document, "visibilityState", {
