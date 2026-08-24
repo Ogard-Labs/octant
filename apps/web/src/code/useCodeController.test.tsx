@@ -1919,6 +1919,21 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("keeps the bootstrap reference when navigation refresh data is unchanged", async () => {
+    const bootstrapRead = vi.fn(async () => bootstrap(1, 4));
+    const client = fakeClient({ bootstrap: bootstrapRead });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ client, navigationRefreshMs: 10 }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    const initial = result.current.bootstrap;
+    await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(2));
+
+    expect(result.current.bootstrap).toBe(initial);
+    unmount();
+  });
+
   it("keeps a turn that finished on screen read when the user leaves before the next refresh", async () => {
     const readCursorStore = createCodeReadCursorStore();
     const promptId = "60000000-0000-4000-8000-000000000040";

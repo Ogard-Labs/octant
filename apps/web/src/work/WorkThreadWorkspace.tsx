@@ -52,6 +52,7 @@ import { PathMentionTypeahead } from "../code/CodePathMentionPicker";
 import { selectedModelReadsImages, useWorkComposerImages } from "./composer/useWorkComposerImages";
 import { WorkImageAttachmentChips } from "./composer/WorkImageAttachmentChips";
 import { useWorkFileMentions } from "./useWorkFileMentions";
+import { samePollingData } from "../polling/samePollingData";
 
 export interface WorkThreadWorkspaceProps {
   readonly title: string;
@@ -105,6 +106,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const [completing, setCompleting] = useState(false);
   const [completionFormOpen, setCompletionFormOpen] = useState(false);
   const [completionEvidence, setCompletionEvidence] = useState("");
+  const transcriptGeneration = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendQueuedRef = useRef<() => Promise<boolean>>(async () => false);
   const mentionListId = useId();
@@ -156,11 +158,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   }, [completionLocked, queued.discard]);
 
   useEffect(() => {
+    const requestGeneration = ++transcriptGeneration.current;
     let cancelled = false;
     void (async () => {
       try {
         const bootstrap = await props.threadClient.bootstrap();
-        if (cancelled) return;
+        if (cancelled || requestGeneration !== transcriptGeneration.current) return;
         const thread = bootstrap.threads.find((candidate) => candidate.id === props.threadId);
         if (thread === undefined) {
           composerDraft.purge(String(props.threadId));
@@ -171,12 +174,19 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
         setProjectId(thread.projectId);
         if (props.turnClient !== undefined) {
           const transcript = await props.turnClient.transcript(props.threadId);
-          if (!cancelled) setTurns(transcript.turns);
+          if (!cancelled && requestGeneration === transcriptGeneration.current) {
+            setTurns((current) =>
+              samePollingData(current, transcript.turns) ? current : transcript.turns,
+            );
+          }
         }
         if (props.requestClient !== undefined) {
           const requests = await props.requestClient.list(thread.projectId, props.threadId);
-          if (!cancelled) {
-            setPendingRequests(requests.requests.filter((request) => request.status === "pending"));
+          if (!cancelled && requestGeneration === transcriptGeneration.current) {
+            const pending = requests.requests.filter((request) => request.status === "pending");
+            setPendingRequests((current) =>
+              samePollingData(current, pending) ? current : pending,
+            );
           }
         }
       } catch {
@@ -185,6 +195,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     })();
     return () => {
       cancelled = true;
+      transcriptGeneration.current += 1;
     };
   }, [
     composerDraft.purge,
@@ -195,19 +206,27 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   ]);
 
   useEffect(() => {
-    if (props.turnClient === undefined) return;
+    const turnClient = props.turnClient;
+    if (turnClient === undefined) return;
     let cancelled = false;
     const timer = globalThis.setInterval(() => {
-      void props.turnClient?.transcript(props.threadId).then((transcript) => {
-        if (!cancelled) setTurns(transcript.turns);
+      if (cancelled) return;
+      const requestGeneration = ++transcriptGeneration.current;
+      const transcript = turnClient.transcript(props.threadId).then((next) => {
+        if (cancelled || requestGeneration !== transcriptGeneration.current) return;
+        setTurns((current) => (samePollingData(current, next.turns) ? current : next.turns));
       });
-      if (props.requestClient !== undefined && projectId !== undefined) {
-        void props.requestClient.list(projectId, props.threadId).then((requests) => {
-          if (!cancelled) {
-            setPendingRequests(requests.requests.filter((request) => request.status === "pending"));
-          }
-        });
-      }
+      const requests =
+        props.requestClient === undefined || projectId === undefined
+          ? Promise.resolve()
+          : props.requestClient.list(projectId, props.threadId).then((next) => {
+              if (cancelled || requestGeneration !== transcriptGeneration.current) return;
+              const pending = next.requests.filter((request) => request.status === "pending");
+              setPendingRequests((current) =>
+                samePollingData(current, pending) ? current : pending,
+              );
+            });
+      void Promise.allSettled([transcript, requests]);
     }, 1_000);
     return () => {
       cancelled = true;

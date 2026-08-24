@@ -3,6 +3,7 @@ import { decodeWorkThread, decodeWorkThreadId } from "@octant/contracts";
 import type { PickerGroup } from "@octant/domain";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Profiler } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkThreadWorkspace } from "./WorkThreadWorkspace";
 import { createComposerThreadDraftStore } from "../composer/composerThreadDraftStore";
@@ -277,6 +278,89 @@ describe("WorkThreadWorkspace", () => {
       "20000000-0000-4000-8000-000000000101",
       threadId,
     );
+  });
+
+  it("does not let an older transcript poll replace newer data", async () => {
+    const older = deferred<ReadonlyArray<ReturnType<typeof workTurn>>>();
+    const newer = deferred<ReadonlyArray<ReturnType<typeof workTurn>>>();
+    let reads = 0;
+    const turnClient = {
+      transcript: vi.fn(async () => {
+        reads += 1;
+        if (reads === 1) return { threadId, turns: [workTurn({ prompt: "Initial" })] };
+        if (reads === 2) return { threadId, turns: await older.promise };
+        return { threadId, turns: await newer.promise };
+      }),
+    };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+
+    render(
+      <WorkThreadWorkspace
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    await waitFor(() => expect(turnClient.transcript).toHaveBeenCalledOnce());
+    await waitFor(() => expect(turnClient.transcript).toHaveBeenCalledTimes(2), {
+      timeout: 2_500,
+    });
+    await waitFor(() => expect(turnClient.transcript).toHaveBeenCalledTimes(3), {
+      timeout: 2_500,
+    });
+
+    newer.resolve([
+      workTurn({
+        prompt: "Newest transcript",
+        transcript: [{ role: "user", text: "Newest transcript" }],
+      }),
+    ]);
+    older.resolve([
+      workTurn({
+        prompt: "Stale transcript",
+        transcript: [{ role: "user", text: "Stale transcript" }],
+      }),
+    ]);
+
+    expect(await screen.findByText("Newest transcript")).toBeInTheDocument();
+    expect(screen.queryByText("Stale transcript")).not.toBeInTheDocument();
+  });
+
+  it("does not commit again when transcript polling returns the same data", async () => {
+    const turns = [workTurn()];
+    const transcript = vi.fn(async () => ({ threadId, turns }));
+    const turnClient = {
+      transcript,
+    };
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const commits: Array<string> = [];
+
+    render(
+      <Profiler id="work-thread-workspace" onRender={(_, phase) => commits.push(phase)}>
+        <WorkThreadWorkspace
+          threadClient={threadClient}
+          threadId={threadId}
+          title="Draft brief"
+          turnClient={turnClient as never}
+        />
+      </Profiler>,
+    );
+
+    await waitFor(() => expect(transcript.mock.calls.length).toBeGreaterThan(2), {
+      timeout: 2_500,
+    });
+    const commitsAfterPolling = commits.length;
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+
+    expect(commits.length).toBe(commitsAfterPolling);
   });
 
   it("queues a follow-up while a turn is running and sends it once the turn completes", async () => {
@@ -795,4 +879,12 @@ function alternateProviderGroup(): PickerGroup {
       },
     ],
   } as never;
+}
+
+function deferred<T>(): { readonly promise: Promise<T>; readonly resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
 }

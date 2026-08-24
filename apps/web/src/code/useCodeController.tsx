@@ -37,6 +37,7 @@ import {
   applyActivityEvent,
   type CodeTurnActivity,
 } from "./transcriptActivity";
+import { samePollingData } from "../polling/samePollingData";
 
 export type CodeControllerStatus = "loading" | "ready" | "disconnected" | "conflict-reload";
 export type CodeTurnStatus = "idle" | "sending" | "running" | "failed";
@@ -574,11 +575,16 @@ export function useCodeController(options: CodeControllerOptions) {
 
   const applyNavigationRefresh = useCallback(
     (next: CodeBootstrap) => {
-      setBootstrap((current) =>
-        current === undefined
-          ? next
-          : { ...current, threads: next.threads, activity: next.activity },
-      );
+      setBootstrap((current) => {
+        if (current === undefined) return next;
+        if (
+          samePollingData(current.threads, next.threads) &&
+          samePollingData(current.activity, next.activity)
+        ) {
+          return current;
+        }
+        return { ...current, threads: next.threads, activity: next.activity };
+      });
       reconcileDrafts(next.threads.map((thread) => String(thread.id)));
     },
     [reconcileDrafts],
