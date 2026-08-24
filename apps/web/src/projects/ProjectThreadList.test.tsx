@@ -38,6 +38,20 @@ describe("ProjectThreadRows", () => {
     expect(screen.queryByText("active")).toBeNull();
   });
 
+  it("exposes context-menu semantics on the thread row trigger", () => {
+    render(
+      <ProjectThreadRows
+        actions={{ onPinThread: vi.fn() }}
+        onSelectThread={vi.fn()}
+        threads={[thread]}
+      />,
+    );
+
+    const row = screen.getByRole("button", { name: /Controller foundation/ });
+    expect(row).toHaveAttribute("aria-haspopup", "menu");
+    expect(row).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("pins a thread from its own right-click menu", async () => {
     const onPinThread = vi.fn();
     render(

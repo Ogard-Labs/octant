@@ -11,7 +11,14 @@ export function ContextMenuTrigger({
   className,
   ...props
 }: ComponentProps<typeof ContextMenuPrimitive.Trigger>) {
-  return <ContextMenuPrimitive.Trigger className={cn(className)} {...props} />;
+  return (
+    <ContextMenuPrimitive.Trigger
+      aria-expanded={false}
+      aria-haspopup="menu"
+      className={cn(className)}
+      {...props}
+    />
+  );
 }
 
 export function ContextMenuContent({
