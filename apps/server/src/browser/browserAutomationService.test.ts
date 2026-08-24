@@ -7,8 +7,12 @@ import type {
   ToolActionRequest,
   WindowId,
 } from "@octant/contracts";
+import { decodeToolActionRequest } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { BrowserAutomationService } from "./browserAutomationService";
+import {
+  BrowserAutomationService,
+  createBrowserToolCallAuthorityService,
+} from "./browserAutomationService";
 import { BrowserNavigationBlockedError, type BrowserRuntimePort } from "./browserRuntimePort";
 
 const windowId = "10000000-0000-4000-8000-000000000001" as WindowId;
@@ -133,6 +137,38 @@ function harness(
 }
 
 describe("BrowserAutomationService", () => {
+  it("fails closed when the default authority cannot read thread taint", () => {
+    const authorityService = createBrowserToolCallAuthorityService(
+      { resolve: () => authorityOne },
+      () => "2026-08-24T00:00:00.000Z",
+    );
+    const request = decodeToolActionRequest({
+      actionId: action().actionId,
+      correlationId: action().correlationId,
+      capability: { id: "computer-use", version: 1 },
+      authority: authorityOne,
+      intent: "Observe the external application.",
+      approval: { kind: "not-required" },
+    });
+
+    const decision = authorityService.authorize({
+      threadId: String(threadOne),
+      request,
+      arguments: {
+        allowlist: [{ actionKind: "screenshot", requiresApproval: false }],
+        sensitiveFieldProtection: true,
+        visibleStopControl: true,
+        maxSessionDurationMs: 60_000,
+        processOwnershipRequired: true,
+      },
+    });
+
+    expect(decision).toMatchObject({
+      kind: "prompt",
+      reason: "taint-requires-fresh-confirmation",
+    });
+  });
+
   it("projects the runtime presentation selected for the owning window", async () => {
     const { runtime, service } = harness();
     vi.mocked(runtime.createContext).mockResolvedValueOnce("headless");
