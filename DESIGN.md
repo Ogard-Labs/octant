@@ -284,10 +284,9 @@ Lucide is the product icon library. Use 14–16px for compact controls and
 convention and let the recipe size them. Icons clarify labels and do not
 replace an essential label without an accessible name.
 
-Provider identity uses bundled, provider-owned marks from the MIT-licensed
-`@lobehub/icons-static-svg` dependency, selected by `ProviderGlyph`. Never
-fetch a remote logo, copy a product asset into Octant, use emoji, or draw an
-approximate brand mark. Unknown providers use a compact truthful monogram.
+Provider identity uses Octant-owned, bundled marks selected by `ProviderGlyph`.
+Never fetch a remote logo, copy a product asset into Octant, use emoji, or draw
+an approximate brand mark. Unknown providers use a compact truthful monogram.
 
 ## Motion and interaction
 

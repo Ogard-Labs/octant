@@ -3,22 +3,22 @@ import { describe, expect, it } from "vitest";
 import { ProviderGlyph } from "./ProviderGlyph";
 
 describe("ProviderGlyph", () => {
-  it("renders the bundled provider-owned mark without a network image", () => {
+  it("renders an Octant-owned bundled mark without a network image", () => {
     const { container } = render(
       <span title="Codex">
         <ProviderGlyph displayName="Codex" driverKind="codex" size={14} />
       </span>,
     );
 
-    const glyph = container.querySelector(".provider-glyph--brand");
+    const glyph = container.querySelector("svg.provider-glyph");
     expect(glyph).toHaveAttribute("data-driver-kind", "codex");
-    expect(glyph).toHaveStyle({ width: "14px", height: "14px" });
-    expect(glyph?.getAttribute("style")).toContain("mask-image: url(");
+    expect(glyph).toHaveAttribute("width", "14");
+    expect(glyph).toHaveAttribute("height", "14");
     expect(container.querySelector("img")).toBeNull();
   });
 
   it("uses a compact monogram when a compatible endpoint has no truthful brand", () => {
-    render(<ProviderGlyph displayName="Internal Gateway" driverKind="openai-compatible" />);
+    render(<ProviderGlyph displayName="Internal Gateway" driverKind="future-provider" />);
 
     expect(screen.getByText("IG")).toHaveClass("provider-glyph--monogram");
   });
