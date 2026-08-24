@@ -32,13 +32,20 @@ scheduled.
   value and expose the conflict. An absent service limit is `unavailable`,
   never `unlimited`. User-supplied limits for generic endpoints stay visibly
   user-supplied.
+- Provider runtime rate-limit windows are retained as bounded, process-local
+  evidence on `ProviderServiceLimits`. A window may report utilization and a
+  reset instant without an absolute quota; Octant keeps those facts separate
+  and does not derive a numeric limit or remaining count from a percentage.
 - Hosts may expose provider service-limit facts through an authenticated,
   loopback-only usage-limits read and an explicit refresh command. Refreshes
   are coalesced, bounded by cancellation-aware timeouts, and honor provider
   retry windows. A failed refresh preserves the last successful limits as
   visibly stale; drivers without `contextFacts.observeServiceLimits` report
-  `unavailable` rather than causing a guessed network request. The surface
-  never stores cookies, credentials, raw provider payloads, or account data.
+  `unavailable` when no independently observed runtime evidence exists rather
+  than causing a guessed network request. Normalized runtime rate-limit
+  windows are valid evidence on their own and remain visibly scoped to those
+  windows. The surface never stores cookies, credentials, raw provider
+  payloads, or account data.
 - Safe input budget is the context window minus reserved response budget,
   reasoning reserve where applicable, provider framing estimate,
   observed-variance reserve, and safety margin. No turn is sent when planned

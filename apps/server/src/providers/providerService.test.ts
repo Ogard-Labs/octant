@@ -1445,9 +1445,11 @@ describe("ProviderService", () => {
 
   it("clears Claude resume identities only after durable provider removal succeeds", async () => {
     const clearResumeIdentities = vi.fn(async () => undefined);
+    const clearRuntimeUsageLimits = vi.fn();
     const fixture = serviceFixture({
       instances: [claudeProvider()],
       clearResumeIdentities,
+      clearRuntimeUsageLimits,
     });
 
     await expect(
@@ -1460,6 +1462,7 @@ describe("ProviderService", () => {
 
     expect(fixture.persistence.readProviderInstance(instanceId)).toBeUndefined();
     expect(clearResumeIdentities).toHaveBeenCalledWith(instanceId);
+    expect(clearRuntimeUsageLimits).toHaveBeenCalledWith(instanceId);
   });
 
   it("preserves Claude resume identities when durable provider removal fails", async () => {
@@ -1482,7 +1485,11 @@ describe("ProviderService", () => {
   });
 
   it("changes HTTP configuration, invalidates runtime, and clears stale discovery", async () => {
-    const fixture = serviceFixture({ instances: [httpProvider()] });
+    const clearRuntimeUsageLimits = vi.fn();
+    const fixture = serviceFixture({
+      instances: [httpProvider()],
+      clearRuntimeUsageLimits,
+    });
     fixture.runtime.setObservedState(observation());
     fixture.runtime.setCompatibleProtocol(instanceId, "chat-completions");
 
@@ -1520,6 +1527,7 @@ describe("ProviderService", () => {
     );
     expect(fixture.runtime.observedState(instanceId)).toBeUndefined();
     expect(fixture.runtime.compatibleProtocol(instanceId)).toBeUndefined();
+    expect(clearRuntimeUsageLimits).toHaveBeenCalledWith(instanceId);
   });
 
   it("keeps binary and HTTP configuration commands variant-specific", async () => {
@@ -2074,6 +2082,7 @@ function serviceFixture(
     readonly probeResult?: ReturnType<typeof observation>;
     readonly probe?: (instance: ProviderInstance) => Promise<unknown>;
     readonly clearResumeIdentities?: (providerId: typeof instanceId) => Promise<void>;
+    readonly clearRuntimeUsageLimits?: (providerId: typeof instanceId) => void;
     readonly withCatalogPersistence?: boolean;
     readonly initialCatalog?: ProviderCatalogSnapshot;
   } = {},
@@ -2147,6 +2156,9 @@ function serviceFixture(
       ...(options.clearResumeIdentities === undefined
         ? {}
         : { clearResumeIdentities: options.clearResumeIdentities }),
+      ...(options.clearRuntimeUsageLimits === undefined
+        ? {}
+        : { clearRuntimeUsageLimits: options.clearRuntimeUsageLimits }),
       uuid: () => crypto.randomUUID(),
       clock: () => now,
     }),

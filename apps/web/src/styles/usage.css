@@ -371,13 +371,19 @@
   text-align: center;
 }
 
-.provider-limits__bucket progress {
+.provider-limits__bucket progress,
+.provider-limits__window progress {
   width: 100%;
   height: 4px;
   overflow: hidden;
   accent-color: var(--oct-accent);
   border: 0;
   border-radius: var(--oct-radius-pill);
+}
+
+.provider-limits__window {
+  display: grid;
+  gap: 4px;
 }
 
 .provider-limits__warning {
