@@ -992,6 +992,48 @@ describe("useChatController", () => {
     expect(result.current.pendingDraft).toBe("hva er klokken?");
   });
 
+  it("reuses a submission identity when retrying the same draft after an unknown send outcome", async () => {
+    const pendingExecute = deferred<Awaited<ReturnType<ChatClient["execute"]>>>();
+    const client = createMockClient({
+      bootstrap: vi.fn(async () => bootstrap()),
+      thread: vi.fn(async () => threadView(1)),
+      subscribe: vi.fn(async function* () {}),
+      execute: vi.fn(() => pendingExecute.promise),
+    });
+    const { result } = renderHook(() =>
+      useChatController({
+        activeThreadId: threadId,
+        client,
+        serverUrl: "http://127.0.0.1",
+        windowCapability: capability,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      const send = result.current.sendTurn("retry me");
+      pendingExecute.reject(new Error("response lost after admission"));
+      expect(await send).toBe(false);
+    });
+    const firstCommand = vi.mocked(client.execute).mock.calls[0]?.[0] as {
+      readonly submissionId?: string;
+    };
+
+    vi.mocked(client.execute).mockResolvedValue({
+      kind: "turn-created",
+      turn: { id: "90000000-0000-4000-8000-000000000001" },
+    } as never);
+    await act(async () => {
+      expect(await result.current.sendTurn("retry me")).toBe(true);
+    });
+    const secondCommand = vi.mocked(client.execute).mock.calls[1]?.[0] as {
+      readonly submissionId?: string;
+    };
+
+    expect(firstCommand.submissionId).toBeDefined();
+    expect(secondCommand.submissionId).toBe(firstCommand.submissionId);
+  });
+
   it("keeps an explicit clear while a send is still pending", async () => {
     const pendingExecute = deferred<Awaited<ReturnType<ChatClient["execute"]>>>();
     const client = createMockClient({
@@ -1130,6 +1172,7 @@ describe("useChatController", () => {
       threadId,
       expectedVersion: threadView(1).thread.version,
       prompt: "draft stays",
+      submissionId: expect.any(String),
       attachmentIds: [attachmentId],
       extensionSelections: [
         {

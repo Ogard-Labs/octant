@@ -1481,6 +1481,31 @@ export class ChatService {
   ): Promise<ChatCommandResult> {
     const accepted = await this.#withThreadAdmission(command.threadId, async () => {
       const thread = this.#requireActiveThread(command.threadId);
+      if (command.submissionId !== undefined) {
+        const existing = [...(this.#persistence.readChatThreadView(thread.id)?.turns ?? [])]
+          .reverse()
+          .find(
+            (candidate) =>
+              String(candidate.submissionId) === String(command.submissionId) &&
+              candidate.attempts.some((attempt) =>
+                ["queued", "streaming", "waiting", "completed"].includes(attempt.outcome),
+              ),
+          );
+        if (existing !== undefined) {
+          const content = this.#persistence.readChatContent(
+            String(existing.userMessageRef.contentId),
+          );
+          if (content === undefined || content.body !== command.prompt) {
+            throw new ChatServiceError(
+              decodeChatFailure({
+                category: "invalid",
+                message: "Chat submission identity was reused for different message text.",
+              }),
+            );
+          }
+          return { kind: "existing" as const, turn: existing };
+        }
+      }
       this.#assertExpectedThreadVersion(thread, command.expectedVersion);
       const timestamp = decodeTimestamp(this.#clock());
       const userMessage = this.#prepareContent(thread.id, "user", command.prompt);
@@ -1530,6 +1555,7 @@ export class ChatService {
       const attachmentIds = command.attachmentIds;
       const turn = beginChatTurn(executionThread, {
         turnId,
+        ...(command.submissionId === undefined ? {} : { submissionId: command.submissionId }),
         attemptId: this.#uuid() as ChatAttempt["id"],
         providerSessionId: decodeProviderSessionId(this.#uuid()),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
@@ -1574,8 +1600,15 @@ export class ChatService {
         },
         { beforeEvents: (connection) => this.#writePreparedContent(connection, userMessage) },
       );
-      return { thread: updatedThread, turn, attempt: turn.attempts[0]!, prepared };
+      return {
+        kind: "accepted" as const,
+        thread: updatedThread,
+        turn,
+        attempt: turn.attempts[0]!,
+        prepared,
+      };
     });
+    if (accepted.kind === "existing") return { kind: "turn-created", turn: accepted.turn };
     await this.#runAttempt({
       thread: threadAsRoutedFor(accepted.thread, accepted.attempt),
       turn: accepted.turn,

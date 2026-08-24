@@ -235,6 +235,7 @@ export function changeChatResearch(thread: ChatThread, input: ChangeChatResearch
 
 export interface BeginChatTurnInput {
   readonly turnId: ChatTurnId;
+  readonly submissionId?: ChatTurn["submissionId"];
   readonly attemptId: ChatAttempt["id"];
   readonly providerSessionId: ProviderSessionId;
   readonly contextManifestId: ContextManifestId;
@@ -273,6 +274,7 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
   return decodeChatTurn({
     id: input.turnId,
     threadId: thread.id,
+    ...(input.submissionId === undefined ? {} : { submissionId: input.submissionId }),
     sequence: input.sequence,
     userMessageRef: input.userMessageRef,
     attachmentIds: input.attachmentIds ?? [],

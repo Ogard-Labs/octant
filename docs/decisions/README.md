@@ -66,6 +66,9 @@ distilled successor of the earlier long-form design specifications.
 - To change an `Accepted` decision, write a new ADR and add
   `**Status:** Superseded by 00NN` to the old one; do not edit history in place.
   A superseding number always points at a later record.
+- A scoped exception may partially supersede one rule without replacing the
+  whole record: leave the older record `Accepted`, and make the newer ADR name
+  the exact rule it supersedes and state which remaining rules still stand.
 - A `Proposed` record is still being agreed, so it is revised in place. There is
   no history to preserve until it is accepted, and superseding a proposal with a
   second proposal would leave two records describing one undecided direction.

@@ -748,6 +748,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
         </section>
       )}
       <ChatComposer
+        key={String(thread.id)}
         attachment={attachmentCapability}
         attachmentBusy={uploadingMessage !== undefined || attachmentStatus.kind === "removing"}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}

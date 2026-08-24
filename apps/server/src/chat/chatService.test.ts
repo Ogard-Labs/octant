@@ -5022,6 +5022,32 @@ describe("ChatService", () => {
     );
   });
 
+  it("reconciles a repeated Chat submission instead of creating a duplicate turn", async () => {
+    const { service, fakeDriver } = openFixture();
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Retry-safe Chat",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const command = {
+      kind: "send-chat-turn" as const,
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      submissionId: "86000000-0000-4000-8000-000000000001" as never,
+      prompt: "Do not create this twice.",
+    };
+
+    const first = await service.execute(command);
+    const second = await service.execute(command);
+
+    if (first.kind !== "turn-created" || second.kind !== "turn-created") {
+      throw new Error("Expected both submissions to resolve to the created turn.");
+    }
+    expect(second.turn.id).toBe(first.turn.id);
+    expect(fakeDriver.sentTurns).toHaveLength(1);
+  });
+
   describe("multi-model pool routing", () => {
     // The fixture's single synthetic driver/probe is stamped for one
     // provider instance (`ids.provider`), so candidates here vary by model

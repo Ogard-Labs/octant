@@ -12,10 +12,12 @@ import type {
   ChatCommandResult,
   ChatEventFrame,
   ChatNavigationThread,
+  ChatSubmissionId,
   ChatThread,
   ChatThreadId,
   ChatThreadView,
 } from "@octant/contracts/chat";
+import { decodeChatSubmissionId } from "@octant/contracts/chat";
 import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type { PreviewContextSelection } from "@octant/contracts/previews";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
@@ -190,6 +192,7 @@ export function useChatController(options: ChatControllerOptions) {
   const bootstrapGeneration = useRef(0);
   const threadGeneration = useRef(0);
   const streamAbort = useRef<AbortController | undefined>(undefined);
+  const pendingSubmissionIds = useRef(new Map<string, ChatSubmissionId>());
   const bootstrapped = useRef(false);
   const composerDraftRef = useRef(composerDraft);
   composerDraftRef.current = composerDraft;
@@ -647,6 +650,11 @@ export function useChatController(options: ChatControllerOptions) {
       return false;
     }
     const sendingThreadId = String(activeView.thread.id);
+    const submissionKey = `${sendingThreadId}\u0000${prompt}`;
+    const submissionId =
+      pendingSubmissionIds.current.get(submissionKey) ??
+      decodeChatSubmissionId(globalThis.crypto.randomUUID());
+    pendingSubmissionIds.current.set(submissionKey, submissionId);
     const previousDraft = composerDraftRef.current.readFor(sendingThreadId);
     composerDraftRef.current.clearFor(sendingThreadId);
     const revisionAfterClear = composerDraftRef.current.revisionFor(sendingThreadId);
@@ -655,6 +663,7 @@ export function useChatController(options: ChatControllerOptions) {
       threadId: activeView.thread.id,
       expectedVersion: expectedVersion ?? activeView.thread.version,
       prompt,
+      submissionId,
       ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
       ...(previewSelections.length === 0 ? {} : { previewSelections: [...previewSelections] }),
       ...(canvasSelections.length === 0 ? {} : { canvasSelections: [...canvasSelections] }),
@@ -673,6 +682,7 @@ export function useChatController(options: ChatControllerOptions) {
         stagedDropped: previousDraft?.stagedDropped === true,
       });
     }
+    if (result !== undefined) pendingSubmissionIds.current.delete(submissionKey);
     return result !== undefined;
   }
 
