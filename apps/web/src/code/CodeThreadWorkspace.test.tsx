@@ -1352,6 +1352,35 @@ describe("CodeThreadWorkspace", () => {
     expect(sendFollowUp).toHaveBeenCalledOnce();
   });
 
+  it("keeps the queued draft when its automatic send is refused", async () => {
+    const user = userEvent.setup();
+    const sendFollowUp = vi.fn(async () => false);
+    const { rerender } = render(
+      <CodeThreadWorkspace
+        controller={controller({ sendFollowUp, turnStatus: "running" })}
+        threadId={threadId}
+      />,
+    );
+
+    const composer = screen.getByLabelText("Follow-up message");
+    await user.type(composer, "retry after the provider recovers");
+    await user.click(screen.getByRole("button", { name: "Queue follow-up" }));
+
+    rerender(
+      <CodeThreadWorkspace
+        controller={controller({
+          pendingDraft: "retry after the provider recovers",
+          sendFollowUp,
+          turnStatus: "idle",
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    await waitFor(() => expect(sendFollowUp).toHaveBeenCalledOnce());
+    expect(composer).toHaveValue("retry after the provider recovers");
+  });
+
   it("discards staged images with a queued Code message", async () => {
     const user = userEvent.setup();
     const discardAttachment = vi.fn(async () => undefined);

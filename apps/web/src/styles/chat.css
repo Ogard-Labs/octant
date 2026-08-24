@@ -135,28 +135,29 @@
   z-index: 2;
   top: 0;
   display: flex;
-  min-height: 36px;
+  min-height: 48px;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 14px 0 8px;
+  padding: 16px 0 11px;
   background: var(--oct-bg);
+  border-bottom: 1px solid var(--oct-border-soft);
 }
 
 .chat-workspace__header h1 {
   max-width: 52rem;
   margin: 0;
   color: var(--oct-fg);
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: -0.015em;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   line-height: 1.3;
 }
 
 .chat-workspace__meta {
-  margin: 2px 0 0;
+  margin: 4px 0 0;
   color: var(--oct-muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.35;
 }
 
@@ -238,7 +239,7 @@
 .chat-transcript {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 18px 0 32px;
+  padding: 22px 0 36px;
   overflow: auto;
   overscroll-behavior: contain;
 }
@@ -379,7 +380,7 @@
 
 .chat-transcript__turn {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .chat-rich-text {
@@ -550,14 +551,10 @@
   animation: chat-status-spin 900ms linear infinite;
 }
 
-/* Shimmer sweep across the streaming label so live state reads at a glance. */
+/* A quiet pulse keeps the live state visible without turning status text into decoration. */
 .chat-transcript__attempt-status--streaming > span:first-of-type {
-  background: linear-gradient(90deg, var(--oct-meta) 20%, var(--oct-fg) 50%, var(--oct-meta) 80%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: chat-status-shimmer 1.4s linear infinite;
+  color: var(--oct-fg-2);
+  animation: chat-status-pulse 1.4s ease-in-out infinite;
 }
 
 .chat-transcript__citations {
@@ -753,15 +750,43 @@
   position: relative;
   z-index: 2;
   flex: 0 0 auto;
-  margin-block: 0 20px;
+  margin-block: 0 18px;
+  box-shadow: var(--octant-shadow-sm);
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.chat-composer--queued {
+  border-color: color-mix(in oklab, var(--oct-warn-fg) 42%, var(--oct-border));
+  background: color-mix(in oklab, var(--oct-warn-soft) 32%, var(--oct-surface));
+  box-shadow: var(--octant-shadow-md);
+}
+
+.chat-composer--held {
+  border-color: color-mix(in oklab, var(--oct-danger-fg) 38%, var(--oct-border));
 }
 
 .chat-composer__status {
+  display: flex;
+  min-height: 18px;
+  align-items: center;
   margin: 0;
   padding: 0 var(--oct-space-3) var(--oct-space-2);
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
   line-height: 1.35;
+}
+
+.chat-composer--queued .chat-composer__status {
+  color: var(--oct-warn-fg);
+  font-weight: 500;
+}
+
+.chat-composer--held .chat-composer__status {
+  color: var(--oct-danger-fg);
+  font-weight: 500;
 }
 
 .chat-composer__status--quiet {
@@ -778,6 +803,10 @@
 
 .chat-composer__bar {
   min-width: 0;
+}
+
+.chat-composer__bar > .chat-composer__actions {
+  min-height: 32px;
 }
 
 .chat-composer__leading,
@@ -975,9 +1004,9 @@
   }
 }
 
-@keyframes chat-status-shimmer {
-  to {
-    background-position: -200% 0;
+@keyframes chat-status-pulse {
+  50% {
+    opacity: 0.58;
   }
 }
 
@@ -1068,7 +1097,6 @@
   }
 
   .chat-transcript__attempt-status--streaming > span:first-of-type {
-    background: none;
     color: var(--oct-meta);
     animation: none;
   }
@@ -1081,7 +1109,6 @@ html[data-octant-reduced-motion="true"] .chat-transcript__attempt-status--stream
 html[data-octant-reduced-motion="true"]
   .chat-transcript__attempt-status--streaming
   > span:first-of-type {
-  background: none;
   color: var(--oct-meta);
   animation: none;
 }

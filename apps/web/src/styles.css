@@ -5613,7 +5613,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  padding: clamp(20px, 3vh, 36px) 0 28px;
+  padding: clamp(22px, 3vh, 40px) 0 34px;
   overflow: auto;
   overscroll-behavior: contain;
 }
@@ -5645,10 +5645,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: flex;
   align-items: center;
   gap: 7px;
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+  font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .code-thread-workspace__turn-status {
@@ -5670,10 +5671,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   width: fit-content;
   max-width: min(88%, 600px);
   justify-self: end;
-  padding: 10px 12px;
+  padding: 11px 14px;
   background: var(--oct-surface-warm);
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
+  box-shadow: var(--octant-shadow-hairline);
 }
 
 .code-thread-workspace__message--agent {
@@ -5708,6 +5710,21 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   z-index: 2;
   flex: 0 0 auto;
   margin: 0 auto 16px;
+  box-shadow: var(--octant-shadow-sm);
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.code-thread-workspace__composer--queued {
+  border-color: color-mix(in oklab, var(--oct-warn-fg) 42%, var(--oct-border));
+  background: color-mix(in oklab, var(--oct-warn-soft) 32%, var(--oct-surface));
+  box-shadow: var(--octant-shadow-md);
+}
+
+.code-thread-workspace__composer--held {
+  border-color: color-mix(in oklab, var(--oct-danger-fg) 38%, var(--oct-border));
 }
 
 /* The typeaheads sit between the input and the row so the open list never
@@ -5965,9 +5982,28 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex-wrap: wrap;
   align-items: center;
   gap: 2px 10px;
+  min-height: 18px;
   margin: 0;
   padding: 0 var(--oct-space-3) var(--oct-space-2);
   line-height: 1.35;
+}
+
+.code-thread-workspace__composer--queued .code-thread-workspace__status {
+  color: var(--oct-warn-fg);
+}
+
+.code-thread-workspace__composer--queued
+  .code-thread-workspace__status
+  > .code-thread-workspace__hint:first-child,
+.code-thread-workspace__composer--held
+  .code-thread-workspace__status
+  > .code-thread-workspace__hint:first-child {
+  color: inherit;
+  font-weight: 600;
+}
+
+.code-thread-workspace__composer--held .code-thread-workspace__status {
+  color: var(--oct-danger-fg);
 }
 
 .code-thread-workspace__hint {

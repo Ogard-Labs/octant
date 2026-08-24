@@ -394,24 +394,39 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     const threadKey = String(props.threadId);
     const prompt = draft.trim();
     if (prompt.length === 0) return false;
+    const restorePrompt = () => {
+      if (String(props.threadId) !== threadKey) return;
+      // A queued send is still an ordinary, refusal-capable command. Keep the
+      // draft visible when the host declines it so the user can retry instead
+      // of interpreting an empty composer as a successful send.
+      setDraft(prompt);
+      props.controller.setPendingDraft?.(prompt);
+    };
     const attachmentSnapshot = attachments.peekForSend();
     const fileMentionPaths = pathMentions.selectedPaths;
     const access = nextTurnAccess;
     attachments.takeForSend();
     setDraft("");
     props.controller.setPendingDraft?.("");
-    const threadMentionIds = await threadMentions.resolveForSend();
-    threadMentions.clear();
-    pathMentions.clear();
-    setTurnAccessOverride(undefined);
-    if (String(props.threadId) !== threadKey) return false;
-    return await props.controller.sendFollowUp(
-      prompt,
-      threadMentionIds,
-      attachmentSnapshot,
-      fileMentionPaths,
-      access,
-    );
+    try {
+      const threadMentionIds = await threadMentions.resolveForSend();
+      threadMentions.clear();
+      pathMentions.clear();
+      setTurnAccessOverride(undefined);
+      if (String(props.threadId) !== threadKey) return false;
+      const sent = await props.controller.sendFollowUp(
+        prompt,
+        threadMentionIds,
+        attachmentSnapshot,
+        fileMentionPaths,
+        access,
+      );
+      if (!sent) restorePrompt();
+      return sent;
+    } catch {
+      restorePrompt();
+      return false;
+    }
   };
 
   function attachFromTransfer(items: DataTransfer | null): boolean {
@@ -930,7 +945,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       <InlineThreadPlan />
 
       <ThreadComposer
-        className="code-thread-workspace__composer thread-column"
+        className={`code-thread-workspace__composer thread-column${
+          queued.state.status === "idle"
+            ? ""
+            : ` code-thread-workspace__composer--${queued.state.status}`
+        }`}
         chips={
           <>
             {/*
@@ -1144,14 +1163,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
           },
         }}
         footer={
-          <div className="code-thread-workspace__status">
+          <div aria-live="polite" className="code-thread-workspace__status">
             <span className="code-thread-workspace__hint">
               {providerChanging
                 ? "Checking the selected provider…"
                 : queued.state.status !== "idle"
-                  ? "Enter to edit · Discard to drop the queued message"
+                  ? "Queued follow-up · Enter to edit · Discard to remove"
                   : busy
-                    ? "Waiting for the provider · Enter queues the next message"
+                    ? "Response in progress · Enter queues this message"
                     : "Enter to send · Shift+Enter for a new line"}
             </span>
             {accessMessage === undefined ? null : (

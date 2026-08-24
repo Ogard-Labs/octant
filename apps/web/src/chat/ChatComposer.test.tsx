@@ -71,6 +71,21 @@ describe("ChatComposer", () => {
     expect(screen.getByLabelText("Message")).toHaveValue("");
   });
 
+  it("keeps the draft and explains when sending is refused", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn(async () => {
+      throw new Error("Chat service is unavailable.");
+    });
+    renderComposer({ draft: "Try this again", onSend });
+
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Message could not be sent. Your draft is still here; try again.",
+    );
+    expect(screen.getByLabelText("Message")).toHaveValue("Try this again");
+  });
+
   it("restores the caret when returning to a thread", () => {
     renderComposer({
       caretIndex: 4,
