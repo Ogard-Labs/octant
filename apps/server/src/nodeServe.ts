@@ -15,6 +15,7 @@ export interface NodeServeOptions {
 }
 
 class RequestBodyTooLarge extends Error {}
+class InvalidRequestHost extends Error {}
 
 export async function nodeServe(options: NodeServeOptions): Promise<OctantServer> {
   let baseUrl: URL | undefined;
@@ -27,6 +28,7 @@ export async function nodeServe(options: NodeServeOptions): Promise<OctantServer
       outgoing,
       options.fetch,
       baseUrl,
+      options.hostname,
       listenerTrust,
       options.maxRequestBodySize ?? MAX_CHAT_ATTACHMENT_BYTES,
       activeBridges,
@@ -85,12 +87,23 @@ async function bridgeRequest(
   outgoing: ServerResponse,
   handler: NodeServeOptions["fetch"],
   baseUrl: URL | undefined,
+  configuredHostname: string,
   listenerTrust: "loopback" | "remote",
   maxRequestBodySize: number,
   activeBridges: Set<() => void>,
   activeReaders: Set<ReadableStreamDefaultReader<Uint8Array>>,
 ): Promise<void> {
   if (baseUrl === undefined) throw new Error("Octant Node server is not ready.");
+  let requestUrl: string;
+  try {
+    requestUrl = resolveRequestUrl(incoming, baseUrl, configuredHostname);
+  } catch (error) {
+    if (error instanceof InvalidRequestHost) {
+      respondInvalidHost(outgoing);
+      return;
+    }
+    throw error;
+  }
   const method = incoming.method ?? "GET";
   if (safeMethodDeclaresBody(incoming)) {
     respondPayloadTooLarge(incoming, outgoing);
@@ -129,7 +142,7 @@ async function bridgeRequest(
       listenerTrust,
     });
     const response = await handler(
-      new Request(new URL(incoming.url ?? "/", baseUrl), {
+      new Request(requestUrl, {
         method,
         headers: requestHeaders(incoming),
         signal: abortController.signal,
@@ -182,6 +195,75 @@ async function bridgeRequest(
   }
 }
 
+function resolveRequestUrl(
+  incoming: IncomingMessage,
+  listenerUrl: URL,
+  configuredHostname: string,
+): string {
+  const hostHeader = incoming.headers.host;
+  if (
+    typeof hostHeader !== "string" ||
+    hostHeader.length === 0 ||
+    hostHeader.trim() !== hostHeader
+  ) {
+    throw new InvalidRequestHost();
+  }
+
+  let hostUrl: URL;
+  try {
+    hostUrl = new URL(`${listenerUrl.protocol}//${hostHeader}/`);
+  } catch {
+    throw new InvalidRequestHost();
+  }
+  if (
+    hostUrl.username !== "" ||
+    hostUrl.password !== "" ||
+    hostUrl.pathname !== "/" ||
+    hostUrl.search !== "" ||
+    hostUrl.hash !== "" ||
+    !hostMatchesListener(hostUrl.hostname, hostUrl.port, listenerUrl, configuredHostname)
+  ) {
+    throw new InvalidRequestHost();
+  }
+
+  const target = incoming.url ?? "/";
+  if (!target.startsWith("/") || target.startsWith("//")) throw new InvalidRequestHost();
+  return new URL(target, `${listenerUrl.protocol}//${hostHeader}/`).toString();
+}
+
+function hostMatchesListener(
+  hostname: string,
+  port: string,
+  listenerUrl: URL,
+  configuredHostname: string,
+): boolean {
+  const listenerHostname = normalizeHostname(listenerUrl.hostname);
+  const configured = normalizeHostname(configuredHostname);
+  const requestHostname = normalizeHostname(hostname);
+  const hostMatches =
+    requestHostname === listenerHostname ||
+    requestHostname === configured ||
+    (isLoopbackHostname(requestHostname) &&
+      (isLoopbackHostname(listenerHostname) || isLoopbackHostname(configured)));
+  if (!hostMatches) return false;
+  const listenerPort =
+    listenerUrl.port === "" ? defaultPort(listenerUrl.protocol) : listenerUrl.port;
+  const requestPort = port === "" ? defaultPort(listenerUrl.protocol) : port;
+  return requestPort === listenerPort;
+}
+
+function normalizeHostname(hostname: string): string {
+  return hostname.replace(/^\[|\]$/g, "").toLowerCase();
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+}
+
+function defaultPort(protocol: string): string {
+  return protocol === "https:" ? "443" : "80";
+}
+
 async function readBody(incoming: IncomingMessage, maxBytes: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let bytes = 0;
@@ -215,6 +297,14 @@ function respondPayloadTooLarge(incoming: IncomingMessage, outgoing: ServerRespo
     "content-type": "text/plain; charset=utf-8",
   });
   outgoing.end("Request body too large", () => incoming.destroy());
+}
+
+function respondInvalidHost(outgoing: ServerResponse): void {
+  outgoing.writeHead(400, {
+    connection: "close",
+    "content-type": "text/plain; charset=utf-8",
+  });
+  outgoing.end("Invalid Host header");
 }
 
 function requestHeaders(incoming: IncomingMessage): Headers {

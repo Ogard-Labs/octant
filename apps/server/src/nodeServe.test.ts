@@ -83,6 +83,45 @@ describe("nodeServe", () => {
     await expect(fetch(server.url)).rejects.toThrow();
   });
 
+  it("uses the caller Host header and rejects mismatched or malformed hosts before dispatch", async () => {
+    const capturedUrls: string[] = [];
+    const handler = vi.fn((request: Request) => {
+      capturedUrls.push(request.url);
+      return new Response("ok");
+    });
+    const server = await nodeServe({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: handler,
+    });
+    const port = new URL(server.url).port;
+
+    try {
+      const accepted = await rawRequest(new URL("/actual-host", server.url), {
+        method: "GET",
+        headers: { host: `localhost:${port}` },
+      });
+      expect(accepted.status).toBe(200);
+      expect(capturedUrls).toEqual([`http://localhost:${port}/actual-host`]);
+
+      const mismatch = await rawRequest(new URL("/mismatch", server.url), {
+        method: "GET",
+        headers: { host: `attacker.example:${port}` },
+      });
+      expect(mismatch.status).toBe(400);
+
+      const malformed = await rawRequest(new URL("/malformed", server.url), {
+        method: "GET",
+        headers: { host: "localhost:not-a-port" },
+      });
+      expect(malformed.status).toBe(400);
+    } finally {
+      await server.stop(true);
+    }
+
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
   it("rejects an oversized declared request before invoking the Fetch handler", async () => {
     const handler = vi.fn(() => new Response("unreachable"));
     const server = await nodeServe({

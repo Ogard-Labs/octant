@@ -6,17 +6,17 @@ import {
   type ShellCommand,
   type ShellCommandResult,
   type ShellFailure,
-  type WindowId,
 } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
 
 export interface ShellClientOptions {
   readonly baseUrl: string;
   readonly fetch: typeof globalThis.fetch;
+  readonly windowCapability: string;
 }
 
 export interface ShellClient {
-  bootstrap(windowId: WindowId): Promise<ShellBootstrap>;
+  bootstrap(): Promise<ShellBootstrap>;
   execute(command: ShellCommand): Promise<ShellCommandResult>;
 }
 
@@ -44,11 +44,16 @@ export class ShellClientFailure extends Error {
 
 export function createShellClient(options: ShellClientOptions): ShellClient {
   const fetch = bindFetchPort(options.fetch);
+  const capabilityHeaders = { "x-octant-window-capability": options.windowCapability };
   return {
-    bootstrap(windowId) {
+    bootstrap() {
       const url = new URL("/api/shell/bootstrap", options.baseUrl);
-      url.searchParams.set("windowId", windowId);
-      return request(fetch, url.toString(), { method: "GET" }, decodeShellBootstrap);
+      return request(
+        fetch,
+        url.toString(),
+        { method: "POST", headers: capabilityHeaders },
+        decodeShellBootstrap,
+      );
     },
     execute(command) {
       const url = new URL("/api/shell/commands", options.baseUrl);
@@ -57,7 +62,7 @@ export function createShellClient(options: ShellClientOptions): ShellClient {
         url.toString(),
         {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", ...capabilityHeaders },
           body: JSON.stringify(command),
         },
         decodeShellCommandResult,

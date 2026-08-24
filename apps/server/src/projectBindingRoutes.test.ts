@@ -11,6 +11,7 @@ import { WindowAuthorityError, WindowAuthorityStore } from "./windowAuthoritySto
 
 const secret = randomBytes(32).toString("base64url");
 const capability = randomBytes(32).toString("base64url");
+const rendererIdentity = randomBytes(32).toString("base64url");
 const windowId = decodeWindowId("00000000-0000-4000-8000-000000000521");
 
 describe("project binding routes", () => {
@@ -21,9 +22,13 @@ describe("project binding routes", () => {
       desktopRequest("/api/desktop/window-authorities", {
         windowId,
         capability,
+        rendererIdentity,
       }),
     );
     expect(registration?.status).toBe(204);
+    expect(
+      dependencies.windowAuthorityStore.authenticateRenderer(capability, rendererIdentity, 0),
+    ).toBe(windowId);
 
     const response = await handle(
       desktopRequest("/api/desktop/project-binding-receipts", {

@@ -511,6 +511,7 @@ function LaunchedShell(
     isNarrow,
     ...(nativeHost === undefined ? {} : { nativeHost }),
     serverUrl: props.launch.serverUrl,
+    windowCapability: props.projectWindowCapability,
     windowId: props.launch.windowId,
   });
   const themeController = useThemeController({

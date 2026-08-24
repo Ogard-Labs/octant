@@ -96,6 +96,7 @@ export interface ShellControllerOptions {
   readonly isNarrow?: boolean;
   readonly nativeHost?: NativeShellHost;
   readonly serverUrl: string;
+  readonly windowCapability?: string;
   readonly windowId: WindowId;
 }
 
@@ -302,8 +303,13 @@ const settledMutationQueue = Promise.resolve();
 
 export function useShellController(options: ShellControllerOptions) {
   const fallbackClient = useMemo(
-    () => createShellClient({ baseUrl: options.serverUrl, fetch: globalThis.fetch }),
-    [options.serverUrl],
+    () =>
+      createShellClient({
+        baseUrl: options.serverUrl,
+        fetch: globalThis.fetch,
+        windowCapability: options.windowCapability ?? "",
+      }),
+    [options.serverUrl, options.windowCapability],
   );
   const client = options.client ?? fallbackClient;
   const bootstrapTimeoutMs = options.bootstrapTimeoutMs ?? SHELL_BOOTSTRAP_TIMEOUT_MS;
@@ -348,7 +354,7 @@ export function useShellController(options: ShellControllerOptions) {
       const task = (async () => {
         try {
           const bootstrap = await withTimeout(
-            client.bootstrap(options.windowId),
+            client.bootstrap(),
             bootstrapTimeoutMs,
             bootstrapTimers.current,
           );

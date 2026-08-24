@@ -17,6 +17,7 @@ import {
   Notification,
   powerMonitor,
   screen,
+  session,
   shell,
   systemPreferences,
   Tray,
@@ -208,6 +209,47 @@ type ProjectWindowTarget =
 interface DesktopWindowIdentity {
   readonly windowId: string;
   readonly capability: string;
+}
+
+const RENDERER_IDENTITY_HEADER = "x-octant-renderer-identity";
+
+export interface TrustedRendererRequestContext {
+  readonly serverOrigin: string;
+  readonly rendererIdentity: string;
+  readonly developmentOrigin?: string;
+}
+
+export function decorateTrustedRendererHeaders(input: {
+  readonly requestHeaders: Readonly<Record<string, string>>;
+  readonly requestUrl: string;
+  readonly frameUrl?: string;
+  readonly context?: TrustedRendererRequestContext;
+}): Record<string, string> {
+  const requestHeaders = { ...input.requestHeaders };
+  for (const name of Object.keys(requestHeaders)) {
+    if (name.toLowerCase() === RENDERER_IDENTITY_HEADER) delete requestHeaders[name];
+  }
+  if (
+    input.context !== undefined &&
+    isTrustedRendererShellRequest(input.requestUrl, input.frameUrl, input.context)
+  ) {
+    requestHeaders[RENDERER_IDENTITY_HEADER] = input.context.rendererIdentity;
+  }
+  return requestHeaders;
+}
+
+export function createTrustedRendererRequestRegistry() {
+  const contexts = new Map<number, TrustedRendererRequestContext>();
+  return Object.freeze({
+    get: (webContentsId: number): TrustedRendererRequestContext | undefined =>
+      contexts.get(webContentsId),
+    set: (webContentsId: number, context: TrustedRendererRequestContext): void => {
+      contexts.set(webContentsId, context);
+    },
+    remove: (webContentsId: number): void => {
+      contexts.delete(webContentsId);
+    },
+  });
 }
 
 export function createDesktopWindowContextRegistry<
@@ -574,6 +616,7 @@ function validateProviderCredentialRequest(
 
 interface ProjectWindowAuthority {
   readonly capability: string;
+  readonly rendererIdentity?: string;
   readonly revoke: () => Promise<void>;
 }
 
@@ -856,6 +899,77 @@ const desktopWindows = createDesktopWindowContextRegistry<BrowserWindow, Desktop
 const secondaryWindowLifecycles = new Set<
   ReturnType<typeof createProjectWindowAuthorityLifecycle>
 >();
+const trustedRendererRequests = createTrustedRendererRequestRegistry();
+let trustedRendererRequestHeadersInstalled = false;
+
+function installTrustedRendererRequestHeaders(): void {
+  if (trustedRendererRequestHeadersInstalled) return;
+  trustedRendererRequestHeadersInstalled = true;
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ["http://*/*", "https://*/*"] },
+    (details, callback) => {
+      const context =
+        details.webContentsId === undefined
+          ? undefined
+          : trustedRendererRequests.get(details.webContentsId);
+      const frameUrl = details.frame?.url ?? details.webContents?.getURL();
+      callback({
+        requestHeaders: decorateTrustedRendererHeaders({
+          requestHeaders: details.requestHeaders,
+          requestUrl: details.url,
+          ...(frameUrl === undefined ? {} : { frameUrl }),
+          ...(context === undefined ? {} : { context }),
+        }),
+      });
+    },
+  );
+}
+
+function registerTrustedRendererRequestContext(
+  window: BrowserWindow,
+  input: {
+    readonly serverUrl: string;
+    readonly rendererIdentity: string;
+    readonly developmentUrl?: string;
+  },
+): void {
+  installTrustedRendererRequestHeaders();
+  const developmentOrigin =
+    input.developmentUrl === undefined ? undefined : safeOrigin(input.developmentUrl);
+  trustedRendererRequests.set(window.webContents.id, {
+    serverOrigin: new URL(input.serverUrl).origin,
+    rendererIdentity: input.rendererIdentity,
+    ...(developmentOrigin === undefined ? {} : { developmentOrigin }),
+  });
+}
+
+function unregisterTrustedRendererRequestContext(window: BrowserWindow): void {
+  trustedRendererRequests.remove(window.webContents.id);
+}
+
+function isTrustedRendererShellRequest(
+  requestUrl: string,
+  frameUrl: string | undefined,
+  context: TrustedRendererRequestContext,
+): boolean {
+  let parsedRequest: URL;
+  try {
+    parsedRequest = new URL(requestUrl);
+  } catch {
+    return false;
+  }
+  if (
+    parsedRequest.origin !== context.serverOrigin ||
+    (!parsedRequest.pathname.startsWith("/api/shell/") && parsedRequest.pathname !== "/api/shell")
+  ) {
+    return false;
+  }
+  if (frameUrl === undefined) return false;
+  if (context.developmentOrigin !== undefined) {
+    return safeOrigin(frameUrl) === context.developmentOrigin;
+  }
+  return isPackagedRendererUrl(frameUrl);
+}
 
 function repositoryRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -911,6 +1025,18 @@ export function createMainBrowserWindowOptions(options: {
       sandbox: true,
     },
   };
+}
+
+export function prepareDevelopmentRendererUrl(
+  developmentUrl: string,
+  windowId: string,
+  serverUrl: string,
+): string {
+  const launchUrl = new URL(developmentUrl);
+  launchUrl.searchParams.set("windowId", windowId);
+  launchUrl.searchParams.set("serverUrl", serverUrl);
+  launchUrl.searchParams.set("developmentWebBootstrap", "1");
+  return launchUrl.toString();
 }
 
 function getCredentialStore(): CredentialStore {
@@ -1152,12 +1278,20 @@ async function createWindow(): Promise<void> {
     preparationCleanup.dispose();
     if (presentationController === preparedController) presentationController = undefined;
   };
+  let rendererIdentity: string | undefined;
   await projectWindowLifecycle.open({
-    register: () =>
-      createProjectWindowAuthority({ desktopBridgeSecret, serverUrl, windowId: state.windowId }),
+    register: async () => {
+      const authority = await createProjectWindowAuthority({
+        desktopBridgeSecret,
+        serverUrl,
+        windowId: state.windowId,
+      });
+      rendererIdentity = authority.rendererIdentity;
+      return authority;
+    },
     construct: (capability) => {
       stableWindowCapability = capability;
-      return new BrowserWindow(
+      const window = new BrowserWindow(
         createMainBrowserWindowOptions({
           bounds: state.bounds,
           capability,
@@ -1165,6 +1299,16 @@ async function createWindow(): Promise<void> {
           browserWindow: presentation.browserWindow,
         }),
       );
+      if (rendererIdentity !== undefined) {
+        registerTrustedRendererRequestContext(window, {
+          serverUrl,
+          rendererIdentity,
+          ...(process.env.OCTANT_WEB_URL === undefined
+            ? {}
+            : { developmentUrl: process.env.OCTANT_WEB_URL }),
+        });
+      }
+      return window;
     },
     prepare: (window, closeAuthority) => {
       mainWindow = window;
@@ -1273,6 +1417,7 @@ async function createWindow(): Promise<void> {
       });
       window.once("closed", () => {
         void browserSurfaceHost?.closeOwnerContexts(state.windowId).catch(() => undefined);
+        unregisterTrustedRendererRequestContext(window);
         desktopWindows.remove(window);
         forgetAttentionBadge(window.id);
         projectRootPicker = undefined;
@@ -1286,10 +1431,9 @@ async function createWindow(): Promise<void> {
     load: async (window) => {
       const developmentUrl = process.env.OCTANT_WEB_URL;
       if (developmentUrl) {
-        const launchUrl = new URL(developmentUrl);
-        launchUrl.searchParams.set("windowId", state.windowId);
-        launchUrl.searchParams.set("serverUrl", serverUrl);
-        await window.loadURL(launchUrl.toString());
+        await window.loadURL(
+          prepareDevelopmentRendererUrl(developmentUrl, state.windowId, serverUrl),
+        );
       } else {
         await window.loadFile(resolve(root, "apps/web/dist/index.html"), {
           query: { windowId: state.windowId, serverUrl },
@@ -1297,6 +1441,7 @@ async function createWindow(): Promise<void> {
       }
     },
     dispose: (window) => {
+      unregisterTrustedRendererRequestContext(window);
       desktopWindows.remove(window);
       stableWindowCapability = undefined;
       projectRootPicker = undefined;
@@ -1330,12 +1475,21 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
   secondaryWindowLifecycles.add(lifecycle);
   const preparationCleanup = createProjectWindowPreparationCleanup();
   let windowCapability: string | undefined;
+  let rendererIdentity: string | undefined;
   try {
     await lifecycle.open({
-      register: () => createProjectWindowAuthority({ desktopBridgeSecret, serverUrl, windowId }),
+      register: async () => {
+        const authority = await createProjectWindowAuthority({
+          desktopBridgeSecret,
+          serverUrl,
+          windowId,
+        });
+        rendererIdentity = authority.rendererIdentity;
+        return authority;
+      },
       construct: (capability) => {
         windowCapability = capability;
-        return new BrowserWindow(
+        const window = new BrowserWindow(
           createMainBrowserWindowOptions({
             bounds: state.bounds,
             capability,
@@ -1347,6 +1501,16 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
             browserWindow: presentation.browserWindow,
           }),
         );
+        if (rendererIdentity !== undefined) {
+          registerTrustedRendererRequestContext(window, {
+            serverUrl,
+            rendererIdentity,
+            ...(process.env.OCTANT_WEB_URL === undefined
+              ? {}
+              : { developmentUrl: process.env.OCTANT_WEB_URL }),
+          });
+        }
+        return window;
       },
       prepare: (window, closeAuthority) => {
         if (windowCapability === undefined) {
@@ -1435,6 +1599,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         window.once("ready-to-show", () => window.show());
         window.once("closed", () => {
           void browserSurfaceHost?.closeOwnerContexts(windowId).catch(() => undefined);
+          unregisterTrustedRendererRequestContext(window);
           desktopWindows.remove(window);
           forgetAttentionBadge(window.id);
           preparationCleanup.dispose();
@@ -1445,10 +1610,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
       load: async (window) => {
         const developmentUrl = process.env.OCTANT_WEB_URL;
         if (developmentUrl) {
-          const launchUrl = new URL(developmentUrl);
-          launchUrl.searchParams.set("windowId", windowId);
-          launchUrl.searchParams.set("serverUrl", serverUrl);
-          await window.loadURL(launchUrl.toString());
+          await window.loadURL(prepareDevelopmentRendererUrl(developmentUrl, windowId, serverUrl));
         } else {
           await window.loadFile(resolve(repositoryRoot(), "apps/web/dist/index.html"), {
             query: { windowId, serverUrl },
@@ -1456,6 +1618,7 @@ async function openSecondaryProjectWindow(target: ProjectWindowTarget): Promise<
         }
       },
       dispose: (window) => {
+        unregisterTrustedRendererRequestContext(window);
         desktopWindows.remove(window);
         preparationCleanup.dispose();
         if (!window.isDestroyed()) window.destroy();
