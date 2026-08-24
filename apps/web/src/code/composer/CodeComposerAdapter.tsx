@@ -250,11 +250,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
   // cannot start until one is chosen.
   const [submitting, setSubmitting] = useState(false);
   const canSubmit =
-    trimmed.length > 0 &&
-    !props.creating &&
-    !submitting &&
-    props.projectId !== undefined &&
-    props.projectAvailable !== false;
+    trimmed.length > 0 && !props.creating && !submitting && props.projectId !== undefined;
 
   // Server-authoritative ref catalog for the branch selector, fetched lazily
   // the first time the selector opens.
@@ -393,12 +389,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
           <p className="code-composer-adapter__eyebrow">Octant Code</p>
           <h1 className="code-composer-adapter__heading">What should we build?</h1>
           <p className="code-composer-adapter__description">
-            {props.projectAvailable === false && props.projectId !== undefined
-              ? "The selected Project is unavailable. Choose another Project before starting a Code thread."
-              : props.projectId === undefined
-                ? "Choose a Project to build in. Its repository is the checkout this thread works against."
-                : "Start a Code thread in this repository. The thread inherits the current checkout and approval policy."}
+            {props.projectId === undefined
+              ? "Choose a Project to build in. Its repository is the checkout this thread works against."
+              : "Start a Code thread in this repository. The thread inherits the current checkout and approval policy."}
           </p>
+          {props.projectAvailable === false && props.errorMessage === undefined ? (
+            <p role="status">The selected Project is unavailable. Choose another Project.</p>
+          ) : null}
         </div>
 
         <div className="code-composer-adapter__composer">
