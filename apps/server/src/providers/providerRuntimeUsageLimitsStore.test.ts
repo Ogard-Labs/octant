@@ -107,6 +107,12 @@ describe("ProviderRuntimeUsageLimitsStore", () => {
     expect(store.windows(instanceId).map((entry) => entry.window)).toEqual(["second", "third"]);
   });
 
+  it("rejects retention above the ProviderServiceLimits contract cap", () => {
+    expect(() => new ProviderRuntimeUsageLimitsStore({ maxWindowsPerProvider: 33 })).toThrow(
+      "between 1 and 32",
+    );
+  });
+
   it("does not expose a window after its provider-reported reset", () => {
     const store = new ProviderRuntimeUsageLimitsStore();
     store.record(windowEvent());

@@ -308,6 +308,10 @@ describe("ProviderUsageLimitsService", () => {
     expect(snapshot.refreshedAt).toBe(refreshCompletedAt);
     expect(snapshot.entries[0]).toMatchObject({ status: "unavailable" });
     expect(JSON.stringify(snapshot)).not.toContain("five_hour");
+
+    const repeated = service.snapshot();
+    expect(repeated.entries[0]).toMatchObject({ status: "unavailable" });
+    expect(JSON.stringify(repeated)).not.toContain("five_hour");
   });
 
   it("preserves windows supplied by a direct observer when runtime evidence is absent", async () => {

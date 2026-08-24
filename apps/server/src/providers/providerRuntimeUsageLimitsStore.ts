@@ -28,8 +28,12 @@ export class ProviderRuntimeUsageLimitsStore {
     } = {},
   ) {
     const maximum = options.maxWindowsPerProvider ?? DEFAULT_MAX_WINDOWS_PER_PROVIDER;
-    if (!Number.isSafeInteger(maximum) || maximum <= 0) {
-      throw new Error("Provider runtime window retention must be a positive safe integer.");
+    if (
+      !Number.isSafeInteger(maximum) ||
+      maximum <= 0 ||
+      maximum > DEFAULT_MAX_WINDOWS_PER_PROVIDER
+    ) {
+      throw new Error("Provider runtime window retention must be a safe integer between 1 and 32.");
     }
     this.#maxWindowsPerProvider = maximum;
     const maxProviders = options.maxProviders ?? DEFAULT_MAX_PROVIDERS;

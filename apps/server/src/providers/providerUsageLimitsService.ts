@@ -7,8 +7,12 @@ import {
   type ProviderUsageLimitsSource,
   type ProviderInstanceId,
   type ProviderServiceLimits,
+  UtcTimestamp as UtcTimestampSchema,
   type UtcTimestamp,
 } from "@octant/contracts";
+import { Schema } from "effect";
+
+const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 
 class ProviderUsageLimitsTimeout extends Error {
   override readonly name = "ProviderUsageLimitsTimeout";
@@ -209,9 +213,7 @@ export class ProviderUsageLimitsService {
       const providerFailure = this.#providerFailure(error);
       const retryAfterMs = providerFailure?.retryAfterMs;
       const failureRetryAt =
-        retryAfterMs === undefined
-          ? undefined
-          : new Date(Date.parse(observedAt) + retryAfterMs).toISOString();
+        retryAfterMs === undefined ? undefined : decodeRetryTimestamp(observedAt, retryAfterMs);
       return {
         providerInstanceId: instance.id,
         status: "failed",
@@ -228,7 +230,7 @@ export class ProviderUsageLimitsService {
                   ? "protocol"
                   : "unavailable",
           message: "Provider limits could not be refreshed.",
-          ...(failureRetryAt === undefined ? {} : { retryAt: failureRetryAt as UtcTimestamp }),
+          ...(failureRetryAt === undefined ? {} : { retryAt: failureRetryAt }),
         },
         ...(staleLimits === undefined ? {} : { staleLimits }),
         ...(lastSuccessfulAt === undefined ? {} : { lastSuccessfulAt }),
@@ -244,8 +246,9 @@ export class ProviderUsageLimitsService {
     instance: ProviderInstance,
     observedAt: UtcTimestamp,
     reason: "unsupported" | "not-configured" | "not-ready",
+    clearRuntimeOwnership = true,
   ): ProviderUsageLimitsEntry {
-    this.#runtimeWindowOwners.delete(String(instance.id));
+    if (clearRuntimeOwnership) this.#runtimeWindowOwners.delete(String(instance.id));
     return {
       providerInstanceId: instance.id,
       status: "unavailable",
@@ -295,7 +298,7 @@ export class ProviderUsageLimitsService {
                     ...previous,
                     limits: withoutWindows,
                   }
-                : this.#unavailable(instance, refreshedAt, "unsupported"),
+                : this.#unavailable(instance, refreshedAt, "unsupported", false),
             );
           }
           if (
@@ -374,4 +377,15 @@ function hasServiceLimitEvidence(limits: ProviderServiceLimits): boolean {
 
 function latestTimestamp(left: UtcTimestamp, right: UtcTimestamp): UtcTimestamp {
   return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+function decodeRetryTimestamp(
+  observedAt: UtcTimestamp,
+  retryAfterMs: number,
+): UtcTimestamp | undefined {
+  try {
+    return decodeUtcTimestamp(new Date(Date.parse(observedAt) + retryAfterMs).toISOString());
+  } catch {
+    return undefined;
+  }
 }
