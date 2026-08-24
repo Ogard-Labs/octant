@@ -577,8 +577,28 @@ export function useCodeController(options: CodeControllerOptions) {
       setBootstrap((current) =>
         current === undefined
           ? next
-          : { ...current, threads: next.threads, activity: next.activity },
+          : {
+              ...current,
+              checkouts: next.checkouts,
+              threads: next.threads,
+              activity: next.activity,
+            },
       );
+      setActiveView((current) => {
+        if (current === undefined) return current;
+        const checkout = next.checkouts.find(
+          (candidate) => String(candidate.id) === String(current.checkout.id),
+        );
+        const refreshedThread = next.threads.find(
+          (candidate) => String(candidate.id) === String(current.thread.id),
+        );
+        if (checkout === undefined && refreshedThread === undefined) return current;
+        return {
+          ...current,
+          ...(checkout === undefined ? {} : { checkout }),
+          ...(refreshedThread === undefined ? {} : { thread: refreshedThread }),
+        };
+      });
       reconcileDrafts(next.threads.map((thread) => String(thread.id)));
     },
     [reconcileDrafts],

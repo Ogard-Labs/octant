@@ -1897,6 +1897,38 @@ describe("useCodeController", () => {
     }
   });
 
+  it("refreshes a restored active checkout when reconnect polling recovers it", async () => {
+    const waitingCheckout = { ...checkout(), availability: "waiting" as const };
+    const recoveredBootstrap = deferred<CodeBootstrap>();
+    let bootstrapReads = 0;
+    const bootstrapRead = vi.fn(async () => {
+      bootstrapReads += 1;
+      if (bootstrapReads > 1) return recoveredBootstrap.promise;
+      return {
+        ...bootstrap(),
+        checkouts: [bootstrapReads === 1 ? waitingCheckout : checkout()],
+      };
+    });
+    const client = fakeClient({
+      bootstrap: bootstrapRead,
+      thread: vi.fn(async () => ({ ...view(1), checkout: waitingCheckout })),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({
+        activeThreadId: ids.thread,
+        client,
+        navigationRefreshMs: 10,
+        reconnectDelayMs: 60_000,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("waiting"));
+    await waitFor(() => expect(bootstrapRead.mock.calls.length).toBeGreaterThan(1));
+    recoveredBootstrap.resolve(bootstrap());
+    await waitFor(() => expect(result.current.activeView?.checkout.availability).toBe("available"));
+    unmount();
+  });
+
   it("does not overlap slow navigation refreshes", async () => {
     const slowRefresh = deferred<ReturnType<typeof bootstrap>>();
     let calls = 0;
