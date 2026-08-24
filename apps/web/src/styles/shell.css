@@ -80,7 +80,7 @@ html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
    above that strip and explicitly opt out of dragging; the unused rail remains
    draggable underneath. */
 html[data-octant-native-host="true"] .shell-frame > .window-chrome {
-  top: var(--oct-space-2);
+  top: calc(var(--oct-space-2) + 4px);
   z-index: 6;
 }
 
@@ -125,7 +125,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   align-self: stretch;
   flex: 1 1 auto;
   min-width: 12px;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 /* The badge recipe carries the warning palette and type; the chrome only

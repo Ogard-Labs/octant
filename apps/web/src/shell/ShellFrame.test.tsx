@@ -292,7 +292,7 @@ describe("ShellFrame", () => {
     expect(chrome).toContain("border-bottom: 0;");
     expect(chrome).toContain("pointer-events: none;");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: var(--oct-space-2);",
+      "top: calc(var(--oct-space-2) + 4px);",
     );
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
       "z-index: 6;",

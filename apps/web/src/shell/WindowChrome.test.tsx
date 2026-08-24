@@ -198,7 +198,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("height: 34px;");
     expect(cssRule(".shell-frame > .window-chrome")).toContain("top: 0;");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: var(--oct-space-2);",
+      "top: calc(var(--oct-space-2) + 4px);",
     );
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
       "z-index: 6;",
@@ -622,7 +622,7 @@ describe("WindowChrome", () => {
     expect(onExpandSidebar).toHaveBeenCalledOnce();
   });
 
-  it("keeps only the blank title-bar space draggable so pointer controls remain clickable", () => {
+  it("leaves native dragging to the shell strip so pointer controls have no nested drag region", () => {
     const { container } = render(
       <WindowChrome
         activeSurface="Welcome to Code"
@@ -641,11 +641,13 @@ describe("WindowChrome", () => {
     expect(container.firstChild).toHaveClass("window-chrome--material-opaque");
     expect(container.firstChild).not.toHaveClass("window-drag-region");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: var(--oct-space-2);",
+      "top: calc(var(--oct-space-2) + 4px);",
     );
-    expect(container.querySelector(".window-chrome__drag-space")).toHaveClass("window-drag-region");
-    expect(cssRule(".window-chrome__drag-space")).toContain("pointer-events: auto;");
-    expect(container.querySelectorAll(".window-drag-region")).toHaveLength(1);
+    expect(container.querySelector(".window-chrome__drag-space")).not.toHaveClass(
+      "window-drag-region",
+    );
+    expect(cssRule(".window-chrome__drag-space")).toContain("pointer-events: none;");
+    expect(container.querySelectorAll(".window-drag-region")).toHaveLength(0);
     for (const control of screen.getAllByRole("button")) {
       expect(control).toHaveClass("window-no-drag");
     }
