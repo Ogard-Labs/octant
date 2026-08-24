@@ -147,6 +147,7 @@
 
 .settings-navigation .setnav-section {
   margin-top: 0;
+  font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
 }
 
 .settings-navigation ul {
@@ -163,6 +164,14 @@
 .settings-navigation .setnav-item,
 .settings-view__back {
   justify-content: flex-start;
+}
+
+/* Settings is a second navigation shell, not a separate typography system.
+   Keep its labels at the selected interface size so moving between the app
+   and Settings never changes the apparent scale of navigation. */
+.settings-navigation .setnav-item,
+.settings-view__back {
+  font-size: var(--octant-ui-font-size);
 }
 
 /* --- Settings primitives: app-side residue over .setrow/.setgroup --- */

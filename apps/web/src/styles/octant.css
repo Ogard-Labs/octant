@@ -3614,7 +3614,7 @@ input.switch:checked::after {
   margin-top: var(--oct-space-4);
   padding: var(--oct-space-1) var(--oct-space-2);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-xs);
+  font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
   font-weight: 500;
   letter-spacing: normal;
   color: var(--oct-meta);
@@ -3633,7 +3633,7 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   text-align: left;
   text-decoration: none;
   white-space: nowrap;
@@ -3723,7 +3723,7 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   text-align: left;
   text-decoration: none;
   white-space: nowrap;
@@ -3784,7 +3784,7 @@ input.switch:checked::after {
   overflow: hidden;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   font-weight: 600;
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
@@ -3796,7 +3796,7 @@ input.switch:checked::after {
 }
 .mode-switcher__context {
   color: var(--oct-muted);
-  font-size: var(--oct-text-xs);
+  font-size: var(--octant-ui-font-size);
   font-weight: 500;
 }
 .modeswitch[data-oct-modeswitch="icons"] .mode {
@@ -3853,7 +3853,7 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-fg);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   text-align: left;
 }
 .mode-trigger:hover {
@@ -6756,7 +6756,7 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
-  font-size: var(--oct-text-sm);
+  font-size: var(--octant-ui-font-size);
   text-align: left;
   text-decoration: none;
   white-space: nowrap;
