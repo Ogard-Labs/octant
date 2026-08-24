@@ -275,6 +275,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         <CodeComposerAdapter
           {...hostSelectorBinding}
           {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
+          projectAvailable={selectedProject !== undefined}
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
           {...(selectedProjectRoot === undefined ? {} : { projectRoot: selectedProjectRoot })}
           {...(connectedBaseRepository === undefined

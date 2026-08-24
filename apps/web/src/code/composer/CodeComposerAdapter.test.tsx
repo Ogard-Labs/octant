@@ -52,6 +52,16 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain("disabled");
   });
 
+  it("blocks Code submission when the selected Project is unavailable", () => {
+    const html = renderToStaticMarkup(
+      <CodeComposerAdapter {...defaultProps} projectAvailable={false} />,
+    );
+
+    expect(html).toContain("The selected Project is unavailable");
+    expect(html).toContain('aria-label="Create thread"');
+    expect(html).toContain("disabled");
+  });
+
   it("renders error message when provided", () => {
     const html = renderToStaticMarkup(
       <CodeComposerAdapter {...defaultProps} errorMessage="Checkout failed" />,
