@@ -1,10 +1,12 @@
-import { readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   buildPackageExportMap,
   collectReferencedPaths,
+  collectFiles,
   extractExportedNames,
   extractRuntimeSpecifiers,
   extractSpecifiers,
@@ -245,6 +247,39 @@ describe("findUnreachableModules", () => {
     ]);
 
     expect(violations).toEqual([]);
+  });
+});
+
+describe("collectFiles", () => {
+  it("ignores agent worktree fixtures while still finding a real island", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-wiring-"));
+    try {
+      const fixturePath = resolve(
+        root,
+        ".agent-worktrees",
+        "fixture",
+        "packages",
+        "domain",
+        "src",
+        "fixtureIsland.ts",
+      );
+      const realPath = resolve(root, "packages", "domain", "src", "realIsland.ts");
+      await mkdir(resolve(fixturePath, ".."), { recursive: true });
+      await mkdir(resolve(realPath, ".."), { recursive: true });
+      await writeFile(fixturePath, "export const fixture = true;", "utf8");
+      await writeFile(realPath, "export const real = true;", "utf8");
+
+      const files = await collectFiles(root);
+
+      expect(files.map(({ path }) => path)).not.toContain(
+        ".agent-worktrees/fixture/packages/domain/src/fixtureIsland.ts",
+      );
+      expect(findUnreachableModules(files).map(({ path }) => path)).toContain(
+        "packages/domain/src/realIsland.ts",
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 
