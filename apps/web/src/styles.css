@@ -7666,7 +7666,7 @@ p.board-col-empty {
 }
 
 .code-board__card-details {
-  margin-top: 5px;
+  margin-top: var(--oct-space-1);
 }
 
 .code-board__card-details summary {
