@@ -282,6 +282,34 @@ describe("CodeThreadBoardService derivation", () => {
     expect(observedBeforeRelease).toEqual(visibleThreads.map((entry) => entry.thread.id));
   });
 
+  it("spends no runtime observation on a thread the board will not show", async () => {
+    const observed: CodeThreadId[] = [];
+    const board = new CodeThreadBoardService({
+      threads: {
+        list: () => [
+          ...allThreads,
+          boardThread({ thread: thread({ id: ids.archived, lifecycle: "archived" }) }),
+        ],
+      },
+      metadata: metadataService(),
+      runtime: {
+        observe: vi.fn(async (threadId: CodeThreadId) => {
+          observed.push(threadId);
+          return { executing: false, awaitingInput: false, interrupted: false };
+        }),
+      },
+      pullRequests: { snapshot: () => emptyPullRequestSnapshot() },
+      clock: () => now,
+    });
+
+    await board.query(decodeCodeBoardQuery({ version: 1 }));
+
+    // An archived thread has no card, so a Project with a long archive would
+    // otherwise spend the whole read pool on threads about to be dropped.
+    expect(observed.map(String)).not.toContain(String(ids.archived));
+    expect(observed).toHaveLength(allThreads.length);
+  });
+
   it("resolves one card per non-archived thread with a runtime-derived status", async () => {
     const board = service({
       threads: [

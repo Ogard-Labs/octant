@@ -168,8 +168,13 @@ export class CodeThreadBoardService {
     // card's activity. The pool is bounded because a board's thread count is
     // the user's to grow — unbounded, a large Project opened one provider
     // read per thread at once.
+    //
+    // An archived thread has no card, so observing its runtime buys nothing;
+    // a Project with a long archive would otherwise spend the whole pool on
+    // threads the board is about to drop.
+    const observable = boardThreads.filter((entry) => entry.thread.lifecycle !== "archived");
     const runtimePromise = mapConcurrentOrdered(
-      boardThreads,
+      observable,
       RUNTIME_OBSERVATION_CONCURRENCY,
       (entry) => this.#observeRuntime(entry.thread.id),
     );
@@ -188,12 +193,18 @@ export class CodeThreadBoardService {
       metadataByThread.set(String(metadata.threadId), metadata);
     }
 
+    const runtimeByThread = new Map<string, (typeof runtimeByIndex)[number]>();
+    observable.forEach((entry, index) => {
+      const activity = runtimeByIndex[index];
+      if (activity !== undefined) runtimeByThread.set(String(entry.thread.id), activity);
+    });
+
     const cards = boardThreads
-      .map((entry, index): CodeBoardCard | undefined => {
+      .map((entry): CodeBoardCard | undefined => {
         const metadata = metadataByThread.get(String(entry.thread.id));
         // Archived threads are dropped by the metadata projection; skip them here.
         if (metadata === undefined) return undefined;
-        const activity = runtimeByIndex[index];
+        const activity = runtimeByThread.get(String(entry.thread.id));
         if (activity === undefined) return undefined;
         return buildCard(entry, metadata, activity, pullRequestSnapshot);
       })

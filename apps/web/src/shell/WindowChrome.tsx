@@ -1,5 +1,4 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { RefObject } from "react";
 import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } from "lucide-react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -32,26 +31,36 @@ export interface WindowChromeProps {
  * cluster's width depends on which controls the active thread renders, so a
  * constant here goes stale the moment a control is added or hidden.
  */
-function useMeasuredClusterWidth(property: string): RefObject<HTMLDivElement | null> {
-  const cluster = useRef<HTMLDivElement | null>(null);
+/**
+ * Publish a cluster's measured width so the pane header can reserve exactly the
+ * band the rendered controls occupy.
+ *
+ * The node arrives through a callback ref rather than an object ref: the
+ * leading cluster only mounts once the sidebar collapses, and an effect keyed
+ * on the property name alone never re-ran for it, so it silently fell back to
+ * the literal instead of measuring.
+ */
+function useMeasuredClusterWidth(property: string): (node: HTMLDivElement | null) => void {
+  const [cluster, setCluster] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
-    const node = cluster.current;
-    if (node === null) return;
-    const surface = node.closest(".shell-frame") ?? document.documentElement;
+    if (cluster === null) return;
+    const surface = (cluster.closest(".shell-frame") ?? document.documentElement) as HTMLElement;
     const publish = () => {
-      const width = Math.ceil(node.getBoundingClientRect().width);
-      if (width > 0) (surface as HTMLElement).style.setProperty(property, `${width}px`);
+      const width = Math.ceil(cluster.getBoundingClientRect().width);
+      if (width > 0) surface.style.setProperty(property, `${width}px`);
     };
     publish();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(publish);
-    observer.observe(node);
+    const observer =
+      typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(publish);
+    observer?.observe(cluster);
+    // The reserve describes a cluster that is no longer there, so it goes with
+    // it — including when there was no observer to disconnect.
     return () => {
-      observer.disconnect();
-      (surface as HTMLElement).style.removeProperty(property);
+      observer?.disconnect();
+      surface.style.removeProperty(property);
     };
-  }, [property]);
-  return cluster;
+  }, [cluster, property]);
+  return setCluster;
 }
 
 export function WindowChrome(props: WindowChromeProps) {

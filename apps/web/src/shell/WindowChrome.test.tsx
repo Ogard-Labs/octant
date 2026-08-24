@@ -734,6 +734,110 @@ describe("WindowChrome", () => {
     vi.unstubAllGlobals();
   });
 
+  it("measures the leading band when a collapsing sidebar first renders it", () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const width = this.classList.contains("window-chrome__leading") ? 148 : 0;
+        return {
+          width,
+          height: 0,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: 0,
+          x: 0,
+          y: 0,
+        } as DOMRect;
+      },
+    );
+
+    const surface = document.createElement("div");
+    surface.className = "shell-frame";
+    document.body.appendChild(surface);
+    const container = surface.appendChild(document.createElement("div"));
+    const chrome = (onExpandSidebar?: () => void) => (
+      <WindowChrome
+        activeSurface="Welcome to Code"
+        dockAvailable={false}
+        dockExpanded={false}
+        dockLabel="Right sidebar"
+        isNarrow={false}
+        material="opaque"
+        {...(onExpandSidebar === undefined ? {} : { onExpandSidebar })}
+        onToggleDock={vi.fn()}
+      />
+    );
+
+    // The cluster does not exist until the sidebar collapses, so the measurement
+    // has to start when it mounts rather than when the chrome first renders.
+    const { rerender, unmount } = render(chrome(), { container });
+    expect(surface.style.getPropertyValue("--octant-window-chrome-leading-width")).toBe("");
+
+    rerender(chrome(vi.fn()));
+    expect(surface.style.getPropertyValue("--octant-window-chrome-leading-width")).toBe("148px");
+
+    // Expanding the sidebar takes the cluster away; the reserve goes with it.
+    rerender(chrome());
+    expect(surface.style.getPropertyValue("--octant-window-chrome-leading-width")).toBe("");
+
+    unmount();
+    surface.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("drops the reserve on unmount even where ResizeObserver is unavailable", () => {
+    vi.stubGlobal("ResizeObserver", undefined);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        const width = this.classList.contains("window-chrome__trailing") ? 96 : 0;
+        return {
+          width,
+          height: 0,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: 0,
+          x: 0,
+          y: 0,
+        } as DOMRect;
+      },
+    );
+
+    const surface = document.createElement("div");
+    surface.className = "shell-frame";
+    document.body.appendChild(surface);
+    const { unmount } = render(
+      <WindowChrome
+        activeSurface="Welcome to Code"
+        dockAvailable
+        dockExpanded={false}
+        dockLabel="Right sidebar"
+        isNarrow={false}
+        material="opaque"
+        onToggleDock={vi.fn()}
+      />,
+      { container: surface.appendChild(document.createElement("div")) },
+    );
+    expect(surface.style.getPropertyValue("--octant-window-chrome-reserved-width")).toBe("96px");
+
+    // Without an observer there is nothing to disconnect, but the reserve still
+    // describes a cluster that is gone.
+    unmount();
+    expect(surface.style.getPropertyValue("--octant-window-chrome-reserved-width")).toBe("");
+
+    surface.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   it("ends the pane header's box before the window controls instead of padding it", () => {
     const header = cssRule(".workspace-pane__header");
     // Padding stays inside the header's border box, so a padded reserve still
