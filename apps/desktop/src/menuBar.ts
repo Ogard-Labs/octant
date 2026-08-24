@@ -11,7 +11,8 @@ export interface MenuBarItem {
     | "start-host"
     | "stop-host"
     | "restart-host"
-    | "diagnostics";
+    | "diagnostics"
+    | "fully-quit";
   readonly label: string;
   readonly enabled: boolean;
 }
@@ -45,6 +46,7 @@ export function buildMenuBarItems(snapshot: LocalHostSnapshot): ReadonlyArray<Me
       enabled: actionEnabled(snapshot, "restart"),
     },
     { id: "diagnostics", label: "Open redacted diagnostics", enabled: true },
+    { id: "fully-quit", label: "Fully quit Octant", enabled: true },
   ];
 }
 

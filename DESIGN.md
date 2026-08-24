@@ -324,6 +324,11 @@ unreliable holes out of an overlapping native drag region.
 - Theme, typography, density, translucency, contrast, and reduced-motion
   settings are persisted through the server-authoritative journal and applied
   through the providers. Renderer state is presentation only.
+- The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
+  Fully quit share one guarded shutdown: refresh current host activity, ask for
+  confirmation when a turn is active or needs attention, then stop only the
+  desktop-owned host and its child resources. Cancellation leaves both app and
+  host running.
 
 ## Implementation checklist
 

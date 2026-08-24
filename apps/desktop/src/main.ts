@@ -98,13 +98,10 @@ import {
   shutdownManagedServer,
   waitForStorageReady,
 } from "./serverProcess";
-import {
-  createHostLifecycleController,
-  shouldConfirmQuit,
-  type LocalHostDescriptor,
-} from "./hostLifecycle";
+import { createHostLifecycleController, type LocalHostDescriptor } from "./hostLifecycle";
 import { buildMenuBarItems, formatRedactedHostDiagnostics } from "./menuBar";
 import { createHostTrayImage, shouldPresentHostTray } from "./menuBarIcon";
+import { buildQuitConfirmation, evaluateQuitRequest } from "./quitGuard";
 import {
   attentionBadgeLabel,
   attentionNotificationPresentation,
@@ -1637,6 +1634,8 @@ async function runMenuBarAction(
         title: "Octant host diagnostics",
         message: formatRedactedHostDiagnostics(hostLifecycle.snapshot()),
       });
+    } else if (action === "fully-quit") {
+      app.quit();
     }
   } catch {
     dialog.showErrorBox(
@@ -2293,15 +2292,14 @@ async function shutdownSecondaryProjectWindows(): Promise<void> {
   for (const lifecycle of lifecycles) secondaryWindowLifecycles.delete(lifecycle);
 }
 
-async function confirmQuitWithActiveWork(): Promise<boolean> {
+async function confirmQuitWithActiveWork(
+  snapshot: ReturnType<typeof hostLifecycle.snapshot>,
+): Promise<boolean> {
+  const copy = buildQuitConfirmation(snapshot);
   const options = {
     type: "warning" as const,
-    title: "Quit Octant?",
-    message: "Active Octant work will be interrupted.",
-    detail: "Quit only if you want the desktop-owned host and its child resources to stop now.",
-    buttons: ["Cancel", "Quit Octant"],
-    defaultId: 0,
-    cancelId: 0,
+    ...copy,
+    buttons: [...copy.buttons],
   };
   const result =
     mainWindow === undefined
@@ -2311,8 +2309,12 @@ async function confirmQuitWithActiveWork(): Promise<boolean> {
 }
 
 async function prepareToQuit(): Promise<void> {
-  const hostBeforeQuit = hostLifecycle.snapshot();
-  if (shouldConfirmQuit(hostBeforeQuit) && !(await confirmQuitWithActiveWork())) {
+  const accepted = await evaluateQuitRequest({
+    refreshActivity: refreshHostActivity,
+    snapshot: hostLifecycle.snapshot,
+    confirm: confirmQuitWithActiveWork,
+  });
+  if (!accepted) {
     preparingQuit = false;
     return;
   }
