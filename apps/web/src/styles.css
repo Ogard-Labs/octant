@@ -3372,6 +3372,14 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   font-family: var(--oct-font-display);
 }
 
+/* The Environment trigger lives in the shared window chrome, while the
+   utility dock is a sibling of the central workspace. When the dock is open,
+   reserve its measured width so this thread-owned disclosure remains over the
+   active pane instead of covering the tool that was just opened. */
+.shell--wide-context-open .thread-environment-disclosure {
+  right: var(--octant-context-sidebar-width);
+}
+
 .thread-environment-disclosure__header {
   position: sticky;
   z-index: 1;

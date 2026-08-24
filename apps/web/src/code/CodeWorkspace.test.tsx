@@ -1,5 +1,5 @@
 import type { WorkspaceTab, WorkspaceTabId } from "@octant/contracts/shell";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { appendTerminalSelection, CodeWorkspace } from "./CodeWorkspace";
@@ -52,7 +52,9 @@ describe("CodeWorkspace", () => {
   it("opens a terminal the first time an activated tab is viewed, without an approval prompt", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
-    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce(terminalResult);
+    (client.executeOperation as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(terminalUnavailableResult())
+      .mockResolvedValueOnce(terminalResult);
 
     // Approval-gated and no approval bridge: the person opening the tab is the
     // approval, and the host authorizes their own terminal without a prompt.
@@ -79,12 +81,17 @@ describe("CodeWorkspace", () => {
     expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
   });
 
-  it("waits for an explicit Start on a Terminal tab restored with the layout", async () => {
+  it("opens a restored Terminal tab without asking the user to start it", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
 
-    // No activation provenance: the tab came back with a restored layout after
-    // a restart, so nobody asked for an interactive shell here.
+    (client.executeOperation as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(terminalUnavailableResult())
+      .mockResolvedValueOnce(terminalResult);
+
+    // A restored Terminal tab is already an explicit persisted request for the
+    // thread-owned shell. Opening it should attach or start immediately rather
+    // than putting a second confirmation button in the surface.
     render(
       <CodeWorkspace
         client={client}
@@ -94,13 +101,6 @@ describe("CodeWorkspace", () => {
       />,
     );
 
-    expect(await screen.findByRole("button", { name: "Start terminal" })).toBeVisible();
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    expect(client.executeOperation).not.toHaveBeenCalled();
-
-    // The person asking for it explicitly still gets one.
-    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce(terminalResult);
-    fireEvent.click(screen.getByRole("button", { name: "Start terminal" }));
     expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
     expect(client.executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "start-terminal", terminalId: ids.thread }),
@@ -110,6 +110,9 @@ describe("CodeWorkspace", () => {
   it("opens a terminal when a restored tab is activated while already mounted", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
+    (client.executeOperation as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(terminalUnavailableResult())
+      .mockResolvedValueOnce(terminalResult);
     const registry = createTabActivationRegistry();
 
     render(
@@ -123,16 +126,6 @@ describe("CodeWorkspace", () => {
       </TabActivationProvider>,
     );
 
-    expect(await screen.findByRole("button", { name: "Start terminal" })).toBeVisible();
-    expect(client.executeOperation).not.toHaveBeenCalled();
-
-    // Clicking the restored tab is the person asking for it. The pane is
-    // already mounted, so activation has to reach it without a remount.
-    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce(terminalResult);
-    act(() => {
-      registry.noteActivated(TAB_ID);
-    });
-
     expect(await screen.findByRole("heading", { name: "Repository terminal" })).toBeVisible();
     expect(client.executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "start-terminal", terminalId: ids.thread }),
@@ -142,9 +135,9 @@ describe("CodeWorkspace", () => {
   it("starts only one terminal while the first request is in flight", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
-    (client.executeOperation as ReturnType<typeof vi.fn>).mockReturnValueOnce(
-      new Promise(() => {}),
-    );
+    (client.executeOperation as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(terminalUnavailableResult())
+      .mockReturnValueOnce(new Promise(() => {}));
 
     render(
       activated(
@@ -157,10 +150,10 @@ describe("CodeWorkspace", () => {
       ),
     );
 
-    await waitFor(() => expect(client.executeOperation).toHaveBeenCalledOnce());
+    await waitFor(() => expect(client.executeOperation).toHaveBeenCalledTimes(2));
     // The reattach poll keeps running underneath; it must not start a second one.
     await new Promise((resolve) => setTimeout(resolve, 1_200));
-    expect(client.executeOperation).toHaveBeenCalledOnce();
+    expect(client.executeOperation).toHaveBeenCalledTimes(2);
     expect(
       (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.filter(
         ([command]) => command.kind === "start-terminal",
@@ -227,17 +220,11 @@ describe("CodeWorkspace", () => {
 
   it("discovers a terminal started by an agent while the Terminal tab is already open", async () => {
     const client = codeClient();
-    (client.inspectTerminal as ReturnType<typeof vi.fn>)
-      .mockRejectedValueOnce(terminalUnavailable())
-      .mockResolvedValueOnce({ terminalId: ids.thread, state: "running" });
     (client.executeOperation as ReturnType<typeof vi.fn>)
-      // The tab's own automatic open cannot start one right now...
-      .mockResolvedValueOnce({
-        kind: "operation-failed",
-        operationId: "30000000-0000-4000-8000-000000000001",
-        failure: { category: "unavailable", message: "Terminal runtime is unavailable." },
-      })
-      // ...but the poll underneath finds and attaches the one the agent started.
+      // The first attach and the automatic start cannot reach the runtime...
+      .mockResolvedValueOnce(terminalUnavailableResult())
+      .mockResolvedValueOnce(terminalUnavailableResult())
+      // ...but the next attach finds the one the agent started.
       .mockResolvedValueOnce(terminalResult);
 
     render(
@@ -254,22 +241,19 @@ describe("CodeWorkspace", () => {
     expect(
       await screen.findByRole("heading", { name: "Repository terminal" }, { timeout: 2_000 }),
     ).toBeVisible();
-    expect(client.inspectTerminal).toHaveBeenCalledTimes(2);
     expect(
       (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.map(
         ([command]) => command.kind,
       ),
-    ).toEqual(["start-terminal", "attach-terminal"]);
+    ).toEqual(["attach-terminal", "start-terminal", "attach-terminal"]);
   });
 
   it("offers an explicit Start when the automatic open fails, and never auto-starts in Plan", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
-    (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      kind: "operation-failed",
-      operationId: "30000000-0000-4000-8000-000000000001",
-      failure: { category: "unavailable", message: "Terminal runtime is unavailable." },
-    });
+    (client.executeOperation as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(terminalUnavailableResult())
+      .mockResolvedValueOnce(terminalUnavailableResult());
     const { unmount } = render(
       activated(
         <CodeWorkspace
@@ -432,6 +416,14 @@ function uuidFactory() {
 
 function terminalUnavailable() {
   return Object.assign(new Error("Terminal is unavailable."), { category: "unavailable" });
+}
+
+function terminalUnavailableResult() {
+  return {
+    kind: "operation-failed",
+    operationId: "30000000-0000-4000-8000-000000000001",
+    failure: { category: "unavailable", message: "Terminal runtime is unavailable." },
+  } as const;
 }
 
 describe("appendTerminalSelection", () => {

@@ -11,7 +11,8 @@
   width: 100%;
   height: 100%;
   flex-direction: column;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   background: var(--oct-bg);
   font-size: var(--oct-text-xs);
 }
@@ -165,8 +166,63 @@
 }
 
 .code-terminal-pane > [aria-label="Repository terminal"] {
-  min-height: 220px;
+  min-height: 0;
   flex: 1;
+  padding: var(--oct-space-3) var(--oct-space-4) var(--oct-space-4);
+  overflow: hidden;
+  background: var(--oct-surface-inset);
+  border-top: 1px solid var(--oct-border);
+}
+
+/* Terminal is a live tool, so its shell gets one compact title row and the
+   emulator owns every remaining pixel. This keeps controls discoverable
+   without turning the dock into a tall document header. */
+.code-terminal-pane .code-delivery-pane__toolbar {
+  min-height: 40px;
+  flex: 0 0 40px;
+  padding: 5px var(--oct-space-3);
+  background: var(--oct-surface);
+}
+
+.code-terminal-pane .code-delivery-pane__toolbar > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: var(--oct-space-2);
+}
+
+.code-terminal-pane .code-delivery-pane__toolbar span {
+  color: var(--oct-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.code-terminal-pane .code-delivery-pane__toolbar h1 {
+  color: var(--oct-fg-2);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.code-terminal-pane .code-delivery-pane__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.code-terminal-pane .code-delivery-pane__actions p {
+  margin-right: var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  white-space: nowrap;
+}
+
+.code-terminal-pane .code-delivery-pane__actions .btn {
+  min-height: 26px;
+  padding-inline: var(--oct-space-2);
+  font-size: var(--oct-text-xs);
 }
 
 .code-test-pane__definition,

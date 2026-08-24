@@ -1,10 +1,24 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { XtermAdapterRuntime } from "./XtermTerminalAdapter";
 import { CodeTerminalPane } from "./CodeTerminalPane";
 import { codeClient, ids, scope, terminalResult } from "./CodeDeliveryPane.test-fixtures";
 
+const codeStyles = readFileSync(resolve(process.cwd(), "src/styles/code.css"), "utf8");
+
 describe("CodeTerminalPane", () => {
+  it("keeps the terminal toolbar compact and lets the emulator fill the pane", () => {
+    expect(codeStyles).toContain(
+      ".code-terminal-pane .code-delivery-pane__toolbar {\n  min-height: 40px;",
+    );
+    expect(codeStyles).toContain(
+      '.code-terminal-pane > [aria-label="Repository terminal"] {\n  min-height: 0;',
+    );
+    expect(codeStyles).toContain("overflow: hidden;");
+  });
+
   it("loads authoritative replay and routes input and resize through codeClient", async () => {
     const client = codeClient({ evidence: "ready\n" });
     const runtime = xtermRuntime();
