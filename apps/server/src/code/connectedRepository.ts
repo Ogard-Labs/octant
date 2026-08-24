@@ -17,7 +17,8 @@ export function resolveConnectedGitHubRepository(
     readonly credentialed?: boolean;
   }>,
 ): ConnectedGitHubRepository | undefined {
-  const candidates = remotes.flatMap((remote) => {
+  const candidates: ConnectedGitHubRepository[] = [];
+  for (const remote of remotes) {
     const fetch = parseGitHubRemote(remote.fetchUrl);
     const push = parseGitHubRemote(remote.pushUrl);
     if (
@@ -25,10 +26,11 @@ export function resolveConnectedGitHubRepository(
       fetch === undefined ||
       push === undefined ||
       !sameIdentity(fetch, push)
-    )
-      return [];
-    return [fetch];
-  });
+    ) {
+      return undefined;
+    }
+    candidates.push(fetch);
+  }
   const identities = uniqueIdentities(candidates);
   return identities.length === 1 ? identities[0] : undefined;
 }

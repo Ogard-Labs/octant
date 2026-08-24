@@ -77,4 +77,21 @@ describe("connected GitHub repository observation", () => {
       ]),
     ).toBeUndefined();
   });
+
+  it("refuses a valid GitHub remote beside an invalid remote", () => {
+    expect(
+      resolveConnectedGitHubRepository([
+        {
+          name: "origin",
+          fetchUrl: "https://github.com/acme/example.git",
+          pushUrl: "https://github.com/acme/example.git",
+        },
+        {
+          name: "upstream",
+          fetchUrl: "https://gitlab.com/acme/example.git",
+          pushUrl: "https://gitlab.com/acme/example.git",
+        },
+      ]),
+    ).toBeUndefined();
+  });
 });
