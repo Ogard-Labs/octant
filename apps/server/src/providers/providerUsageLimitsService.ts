@@ -47,6 +47,7 @@ const DEFAULT_REFRESH_TIMEOUT_MS = 15_000;
 export class ProviderUsageLimitsService {
   readonly #options: ProviderUsageLimitsServiceOptions;
   readonly #entries = new Map<string, ProviderUsageLimitsEntry>();
+  readonly #runtimeWindowOwners = new Set<string>();
   #inFlight: Promise<ProviderUsageLimitsSnapshot> | undefined;
   #refreshAbortController: AbortController | undefined;
   #scheduleHandle: ReturnType<typeof setInterval> | undefined;
@@ -114,6 +115,7 @@ export class ProviderUsageLimitsService {
     const retryAt = this.#retryAt(previous);
     if (previous !== undefined && retryAt !== undefined && retryAt > observedAt) return previous;
     if (!instance.enabled) {
+      this.#runtimeWindowOwners.delete(String(instance.id));
       return this.#unavailable(instance, observedAt, "not-configured");
     }
     const controller = new AbortController();
@@ -145,7 +147,13 @@ export class ProviderUsageLimitsService {
       const runtimeLimits = this.#options.runtimeLimits?.(instance.id, observedAt);
       if (observation === undefined) {
         if (runtimeLimits === undefined) {
+          this.#runtimeWindowOwners.delete(String(instance.id));
           return this.#unavailable(instance, observedAt, "unsupported");
+        }
+        if (runtimeLimits.rateLimitWindows === undefined) {
+          this.#runtimeWindowOwners.delete(String(instance.id));
+        } else {
+          this.#runtimeWindowOwners.add(String(instance.id));
         }
         return {
           providerInstanceId: instance.id,
@@ -154,6 +162,11 @@ export class ProviderUsageLimitsService {
           observedAt,
           limits: runtimeLimits,
         };
+      }
+      if (runtimeLimits?.rateLimitWindows === undefined) {
+        this.#runtimeWindowOwners.delete(String(instance.id));
+      } else {
+        this.#runtimeWindowOwners.add(String(instance.id));
       }
       return {
         providerInstanceId: instance.id,
@@ -173,6 +186,9 @@ export class ProviderUsageLimitsService {
         return previous ?? this.#unavailable(instance, observedAt, "not-ready");
       }
       const runtimeLimits = this.#options.runtimeLimits?.(instance.id, observedAt);
+      if (runtimeLimits?.rateLimitWindows !== undefined) {
+        this.#runtimeWindowOwners.add(String(instance.id));
+      }
       const priorStaleLimits =
         previous?.status === "available"
           ? previous.limits
@@ -265,6 +281,7 @@ export class ProviderUsageLimitsService {
           if (
             previous?.status === "available" &&
             previous.source === "provider-runtime" &&
+            this.#runtimeWindowOwners.has(String(instance.id)) &&
             previous.limits.rateLimitWindows !== undefined
           ) {
             const { rateLimitWindows: _expiredWindows, ...withoutWindows } = previous.limits;
