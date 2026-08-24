@@ -172,8 +172,10 @@ export class CodeProjectPullRequestService {
     readonly freshness: CodeProjectPullRequestFreshness;
     readonly githubRevoked: boolean;
   }> {
-    const projects = await this.#resolveProjects(windowId);
-    const threads = await this.#threads.list(windowId);
+    const [projects, threads] = await Promise.all([
+      this.#resolveProjects(windowId),
+      this.#threads.list(windowId),
+    ]);
     const cachedRows = this.#authorizedRows(projects);
     const rows = boundPullRequestRows(
       mergePullRequestRows(cachedRows, this.#knownRows(projects, threads)),
@@ -307,25 +309,28 @@ export class CodeProjectPullRequestService {
       repositories: connected,
       pullRequestsFor: () => [],
     });
-    const collected: CodeProjectPullRequestRow[] = [];
-    let pullRequestsTruncated = false;
+    const [threads, listedResults] = await Promise.all([
+      this.#threads.list(windowId),
+      Promise.all(
+        bounded.repositories.map(async (repository) => ({
+          repository,
+          listed: await this.#list.listActive(
+            {
+              owner: repository.repositoryOwner,
+              name: repository.repositoryName,
+              limit: CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS + 1,
+            },
+            signal,
+          ),
+        })),
+      ),
+    ]);
     const knownIdentityRefreshFailed = new Set<string>();
-    const threads = await this.#threads.list(windowId);
 
-    for (const repository of bounded.repositories) {
-      const remaining = CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS - collected.length;
-      if (remaining <= 0) {
-        pullRequestsTruncated = true;
-        break;
-      }
-      const listed = await this.#list.listActive(
-        {
-          owner: repository.repositoryOwner,
-          name: repository.repositoryName,
-          limit: remaining + 1,
-        },
-        signal,
-      );
+    // Inspect results in the policy's repository order so a concurrent
+    // refresh has the same deterministic first-error semantics as the old
+    // sequential refresh.
+    for (const { repository, listed } of listedResults) {
       if (listed.status !== "ok") {
         if (listed.status === "unauthorized") this.revokeGithub();
         const retryAfter =
@@ -341,20 +346,47 @@ export class CodeProjectPullRequestService {
           ...(retryAfter === undefined ? {} : { retryAfter }),
         });
       }
+    }
+
+    const collected: CodeProjectPullRequestRow[] = [];
+    let pullRequestsTruncated = false;
+    const listedNumbersByProject = new Map<string, ReadonlySet<number>>();
+    for (const { repository, listed } of listedResults) {
+      if (listed.status !== "ok") continue;
+      const remaining = CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS - collected.length;
+      if (remaining <= 0) {
+        if (listed.rows.length > 0) pullRequestsTruncated = true;
+        continue;
+      }
       const usable = listed.rows.length > remaining ? listed.rows.slice(0, remaining) : listed.rows;
       if (listed.rows.length > remaining) pullRequestsTruncated = true;
-      for (const row of usable) {
-        collected.push(this.#row(repository, row, threads));
-      }
-      const known = this.#knownRows([repository], threads);
-      const listedNumbers = new Set(usable.map((row) => row.number));
-      for (const knownRow of known) {
-        if (
-          listedNumbers.has(knownRow.number) ||
-          collected.length >= CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS
-        ) {
-          continue;
+      listedNumbersByProject.set(
+        String(repository.projectId),
+        new Set(usable.map((row) => row.number)),
+      );
+      for (const row of usable) collected.push(this.#row(repository, row, threads));
+    }
+
+    // Closed/merged identities are recovered from the journal after the
+    // active list. Fetch the bounded set in parallel, then append results in
+    // stable repository/identity order for deterministic snapshots.
+    const remainingKnown = CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS - collected.length;
+    const knownCandidates: Array<{
+      readonly repository: Extract<CodeProjectPullRequestConnection, { kind: "connected" }>;
+      readonly knownRow: CodeProjectPullRequestRow;
+    }> = [];
+    if (remainingKnown > 0) {
+      outer: for (const { repository } of listedResults) {
+        const listedNumbers = listedNumbersByProject.get(String(repository.projectId)) ?? new Set();
+        for (const knownRow of this.#knownRows([repository], threads)) {
+          if (listedNumbers.has(knownRow.number)) continue;
+          knownCandidates.push({ repository, knownRow });
+          if (knownCandidates.length >= remainingKnown) break outer;
         }
+      }
+    }
+    const recoveredKnown = await Promise.all(
+      knownCandidates.map(async ({ repository, knownRow }) => {
         const observed = await this.#detail.observeReviewByIdentity(
           {
             owner: repository.repositoryOwner,
@@ -364,16 +396,15 @@ export class CodeProjectPullRequestService {
           },
           signal,
         );
-        if (
-          observed.status === "observed" &&
-          observed.freshness === "fresh" &&
-          !observed.ambiguous
-        ) {
-          collected.push(this.#rowFromObserved(repository, observed, threads, knownRow.updatedAt));
-        } else {
-          knownIdentityRefreshFailed.add(String(repository.projectId));
-          collected.push(knownRow);
-        }
+        return { repository, knownRow, observed };
+      }),
+    );
+    for (const { repository, knownRow, observed } of recoveredKnown) {
+      if (observed.status === "observed" && observed.freshness === "fresh" && !observed.ambiguous) {
+        collected.push(this.#rowFromObserved(repository, observed, threads, knownRow.updatedAt));
+      } else {
+        knownIdentityRefreshFailed.add(String(repository.projectId));
+        collected.push(knownRow);
       }
     }
 
@@ -424,33 +455,36 @@ export class CodeProjectPullRequestService {
     windowId: WindowId,
   ): Promise<ReadonlyArray<CodeProjectPullRequestConnection>> {
     const bootstrap = await this.#projects.bootstrap(windowId);
-    const connections: CodeProjectPullRequestConnection[] = [];
-    for (const project of bootstrap.active) {
-      if (project.type !== "code" || project.lifecycle !== "active") continue;
-      const remotes =
-        project.connectedRepository !== undefined || project.binding === undefined
-          ? undefined
-          : await this.#remotes.remotes(project.binding.canonicalRoot);
-      const identity =
-        project.connectedRepository === undefined
-          ? githubIdentityFromRemotes(remotes ?? [])
-          : {
-              owner: project.connectedRepository.owner,
-              name: project.connectedRepository.repository,
-            };
-      connections.push(
-        identity === undefined
-          ? { kind: "unconnected", projectId: project.id, projectName: project.name }
-          : {
-              kind: "connected",
-              projectId: project.id,
-              projectName: project.name,
-              repositoryOwner: identity.owner,
-              repositoryName: identity.name,
-            },
-      );
-    }
-    return connections;
+    const resolved = await Promise.all(
+      bootstrap.active.map(
+        async (project): Promise<CodeProjectPullRequestConnection | undefined> => {
+          if (project.type !== "code" || project.lifecycle !== "active") return undefined;
+          const remotes =
+            project.connectedRepository !== undefined || project.binding === undefined
+              ? undefined
+              : await this.#remotes.remotes(project.binding.canonicalRoot);
+          const identity =
+            project.connectedRepository === undefined
+              ? githubIdentityFromRemotes(remotes ?? [])
+              : {
+                  owner: project.connectedRepository.owner,
+                  name: project.connectedRepository.repository,
+                };
+          return identity === undefined
+            ? { kind: "unconnected", projectId: project.id, projectName: project.name }
+            : {
+                kind: "connected",
+                projectId: project.id,
+                projectName: project.name,
+                repositoryOwner: identity.owner,
+                repositoryName: identity.name,
+              };
+        },
+      ),
+    );
+    return resolved.filter(
+      (connection): connection is CodeProjectPullRequestConnection => connection !== undefined,
+    );
   }
 
   #authorizedRows(

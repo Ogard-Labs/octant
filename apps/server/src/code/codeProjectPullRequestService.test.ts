@@ -60,6 +60,11 @@ function serviceFixture(options: {
       readonly pushUrl: string;
     }>
   >;
+  readonly remoteLookup?: (
+    root: string,
+  ) => Promise<
+    ReadonlyArray<{ readonly name: string; readonly fetchUrl: string; readonly pushUrl: string }>
+  >;
   readonly list?: (
     request: { readonly owner: string; readonly name: string; readonly limit: number },
     signal: AbortSignal,
@@ -102,6 +107,7 @@ function serviceFixture(options: {
     },
     remotes: {
       remotes: async (root) => {
+        if (options.remoteLookup !== undefined) return options.remoteLookup(root);
         return (
           options.remotes?.[root] ??
           (root === "/repos/octant"
@@ -236,7 +242,40 @@ describe("CodeProjectPullRequestService", () => {
     ]);
   });
 
-  it("refreshes repositories sequentially and keeps an unconnected project visible", async () => {
+  it("resolves legacy repository remotes concurrently while preserving project order", async () => {
+    const projects = [
+      codeProject({ id: projectA, name: "First", root: "/repos/first" }),
+      codeProject({ id: projectC, name: "Second", root: "/repos/second" }),
+    ];
+    const releases = new Map<string, () => void>();
+    const started: string[] = [];
+    const remoteLookup = vi.fn(
+      async (
+        root: string,
+      ): Promise<ReadonlyArray<{ name: string; fetchUrl: string; pushUrl: string }>> => {
+        started.push(root);
+        await new Promise<void>((resolve) => releases.set(root, resolve));
+        return [
+          {
+            name: "origin",
+            fetchUrl: `https://github.com/octant/${root.split("/").at(-1)}.git`,
+            pushUrl: `https://github.com/octant/${root.split("/").at(-1)}.git`,
+          },
+        ];
+      },
+    );
+    const { service } = serviceFixture({ projects, remoteLookup });
+    const pending = service.query(windowId, { version: 1 });
+
+    await vi.waitFor(() => expect(started).toHaveLength(2));
+    for (const release of releases.values()) release();
+
+    const view = await pending;
+    expect(view.projects.map((project) => project.projectName)).toEqual(["First", "Second"]);
+    expect(remoteLookup).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes repositories concurrently in stable project order", async () => {
     const order: string[] = [];
     const { service, listActive, journal } = serviceFixture({
       projects: [
@@ -277,8 +316,8 @@ describe("CodeProjectPullRequestService", () => {
 
     expect(order).toEqual([
       "start:octant/octant",
-      "end:octant/octant",
       "start:octant/docs",
+      "end:octant/octant",
       "end:octant/docs",
     ]);
     expect(listActive).toHaveBeenCalledTimes(2);
