@@ -197,7 +197,7 @@ html[data-octant-native-host="true"] body {
   box-shadow: var(--octant-shadow-lg);
   cursor: pointer;
   font: inherit;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .thread-activity-pip-trigger:hover,
@@ -265,7 +265,7 @@ html[data-octant-native-host="true"] body {
 
 .thread-activity-pip__identity > span:last-child {
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   white-space: nowrap;
 }
 
@@ -304,7 +304,7 @@ html[data-octant-native-host="true"] body {
   border-radius: 6px;
   cursor: pointer;
   font: inherit;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .thread-activity-pip__sources button:hover,
@@ -357,7 +357,7 @@ html[data-octant-native-host="true"] body {
   color: var(--octant-warning-text);
   background: var(--octant-warning-surface);
   border-radius: 6px;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .thread-activity-pip__empty {
@@ -369,7 +369,7 @@ html[data-octant-native-host="true"] body {
 
 .thread-activity-pip__empty strong {
   color: var(--octant-text-primary);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 600;
 }
 
@@ -400,7 +400,7 @@ html[data-octant-native-host="true"] body {
 .thread-activity-pip__footer > span {
   overflow: hidden;
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -591,7 +591,7 @@ button:focus-visible {
   border: 1px solid transparent;
   border-radius: 5px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 500;
   text-align: left;
   transition:
@@ -663,13 +663,13 @@ button:focus-visible {
 }
 
 .octant-menu__item-label {
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 500;
 }
 
 .octant-menu__item-description {
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   line-height: 1.35;
   white-space: normal;
 }
@@ -699,7 +699,7 @@ button:focus-visible {
   background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 500;
   text-align: left;
 }
@@ -735,7 +735,7 @@ button:focus-visible {
   margin: 0;
   padding: 10px;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.45;
 }
 
@@ -788,7 +788,7 @@ button:focus-visible {
   justify-content: space-between;
   gap: 8px;
   color: var(--octant-text-primary);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 600;
 }
 
@@ -840,21 +840,21 @@ button:focus-visible {
   align-items: center;
   gap: 7px;
   color: var(--octant-text-secondary);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .project-view-filter-popover [data-slot="select-trigger"] {
   min-height: 30px;
   height: 30px;
   padding-inline: 8px;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .project-view-filter-popover input[type="date"] {
   min-height: 30px;
   height: 30px;
   padding-inline: 8px;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .project-view-filter-popover__date-error {
@@ -889,7 +889,7 @@ button:focus-visible {
   gap: 6px;
   padding: 0 8px;
   color: var(--octant-text-secondary);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 500;
   text-align: start;
 }
@@ -1023,7 +1023,7 @@ button:focus-visible {
 .sidebar-navigation__thread-project {
   overflow: hidden;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1045,7 +1045,7 @@ button:focus-visible {
 .code-project-views__fieldset legend {
   margin-bottom: 4px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .code-project-views__swatches {
@@ -1083,7 +1083,7 @@ button:focus-visible {
   justify-content: center;
   min-width: 8px;
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   line-height: 1;
 }
 
@@ -1245,7 +1245,7 @@ button:focus-visible {
 
 .project-row__copy small {
   color: var(--octant-warning-text);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   letter-spacing: normal;
   text-transform: none;
 }
@@ -1256,7 +1256,7 @@ button:focus-visible {
   color: var(--oct-meta);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .project-row__action:hover,
@@ -1318,7 +1318,7 @@ button:focus-visible {
   padding: 7px 8px;
   overflow: hidden;
   color: var(--octant-text-secondary);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1326,7 +1326,7 @@ button:focus-visible {
 
 .project-overview__archived {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .sidebar-profile {
@@ -1503,7 +1503,7 @@ button:focus-visible {
 
 .workspace-cross-context-banner__message {
   min-width: 0;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.35;
 }
 
@@ -1516,7 +1516,7 @@ button:focus-visible {
 
 .workspace-cross-context-banner__hint {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .workspace-root {
@@ -1757,7 +1757,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: var(--octant-floating);
   border: 1px solid var(--octant-border-strong);
   border-radius: 5px;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 600;
 }
 
@@ -1772,7 +1772,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 1px solid var(--octant-border-strong);
   border-radius: 6px;
   box-shadow: var(--octant-shadow-overlay);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 600;
   pointer-events: none;
   text-overflow: ellipsis;
@@ -1813,7 +1813,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   color: var(--octant-text-secondary);
   border-radius: 5px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   text-align: left;
 }
 
@@ -2024,7 +2024,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .provider-settings__intro h2 {
-  font-size: 18px;
+  font-size: calc(18 * var(--oct-text-step));
   letter-spacing: -0.015em;
 }
 
@@ -2033,7 +2033,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .provider-settings__empty {
   margin-top: 4px;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.5;
 }
 
@@ -2042,7 +2042,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: grid;
   gap: 6px;
   color: var(--octant-text-secondary);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .provider-settings__create textarea,
@@ -2060,7 +2060,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: var(--octant-control);
   border: 1px solid var(--octant-border);
   border-radius: 7px;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.45;
 }
 
@@ -2116,7 +2116,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .provider-settings__field-guidance {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   line-height: 1.5;
 }
 
@@ -2201,7 +2201,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .provider-card__facts {
   margin-top: 3px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .provider-card__facts span:not(:last-child)::after {
@@ -2218,7 +2218,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 1px solid var(--octant-border);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .provider-card__actions button:hover,
@@ -2277,7 +2277,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .provider-card__discovery h4 {
   margin-bottom: 8px;
   color: var(--octant-text-secondary);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -2286,7 +2286,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin: 0;
   padding-left: 18px;
   color: var(--octant-text-secondary);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .provider-card__discovery dl {
@@ -2300,7 +2300,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   justify-content: space-between;
   gap: 8px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .provider-card__discovery dd {
@@ -2356,7 +2356,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: block;
   margin-bottom: 4px;
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -2364,7 +2364,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .shell-state__title {
   margin: 0;
-  font-size: 17px;
+  font-size: calc(17 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: -0.015em;
 }
@@ -2373,7 +2373,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   max-width: 420px;
   margin: 5px 0 0;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.5;
 }
 
@@ -2390,7 +2390,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 1px solid var(--octant-border);
   border-radius: 6px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 500;
 }
 
@@ -2602,7 +2602,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 1px solid var(--octant-border-strong);
   border-radius: 7px;
   cursor: pointer;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 500;
 }
 
@@ -2654,7 +2654,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   display: block;
   margin-bottom: 4px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -2662,7 +2662,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .folder-picker__header h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: calc(18 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -2675,7 +2675,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 0;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 18px;
+  font-size: calc(18 * var(--oct-text-step));
   line-height: 1;
 }
 
@@ -2687,7 +2687,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .folder-picker__hint {
   margin: 0;
   color: var(--octant-text-secondary);
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
   line-height: 1.45;
 }
 
@@ -2744,7 +2744,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: 6px;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .folder-picker__breadcrumb:hover {
@@ -2814,7 +2814,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
 }
 
 .folder-picker__item-badge {
@@ -2822,7 +2822,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   color: var(--octant-text-muted);
   background: rgb(255 255 255 / 5%);
   border-radius: 999px;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   white-space: nowrap;
 }
 
@@ -2836,7 +2836,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: 7px;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 600;
 }
 
@@ -2857,7 +2857,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   min-height: 160px;
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
   text-align: center;
 }
 
@@ -2879,7 +2879,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .folder-picker__error {
   margin: 0;
   color: var(--octant-danger-text);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .folder-picker__actions {
@@ -2917,7 +2917,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .project-overview__type {
   flex: none;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   letter-spacing: 0.06em;
 }
 
@@ -2928,7 +2928,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: transparent;
   border-color: transparent;
   border-radius: 5px;
-  font-size: 14px;
+  font-size: calc(14 * var(--oct-text-step));
   font-weight: 500;
   letter-spacing: -0.01em;
 }
@@ -2942,7 +2942,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin: 0;
   overflow: hidden;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   line-height: 1.4;
   text-align: right;
   text-overflow: ellipsis;
@@ -2968,7 +2968,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .project-overview__root strong {
   overflow: hidden;
   color: var(--octant-text-secondary);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2977,7 +2977,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .project-overview__availability {
   flex: none;
   color: var(--octant-success-text);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .project-overview__warning {
@@ -2987,13 +2987,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .project-overview__warning strong {
   color: var(--octant-warning-text);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .project-overview__warning p {
   margin: 2px 0 0;
   color: var(--octant-warning-text);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .project-overview__actions {
@@ -3008,7 +3008,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .project-overview__status {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .project-overview__archive,
@@ -3066,7 +3066,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow: hidden;
   color: var(--octant-text-muted);
   border-bottom: 1px solid var(--octant-border);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3087,7 +3087,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .project-memory-inspector__header span {
   color: var(--octant-text-muted);
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -3095,7 +3095,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .project-memory-inspector__header h2 {
   margin: 2px 0 0;
-  font-size: 18px;
+  font-size: calc(18 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: -0.025em;
 }
@@ -3104,7 +3104,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow: hidden;
   margin: 4px 0 0;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3142,7 +3142,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 1px solid var(--octant-border);
   border-radius: 6px;
   font: inherit;
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .project-memory-inspector__toolbar select:focus-visible {
@@ -3163,7 +3163,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding: 10px 13px;
   color: var(--octant-text-muted);
   border-bottom: 1px solid var(--octant-border);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .project-memory-inspector__error {
@@ -3173,7 +3173,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: var(--octant-warning-surface);
   border: 1px solid var(--octant-warning-border);
   border-radius: 7px;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .project-memory-inspector__error p {
@@ -3213,7 +3213,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: 7px;
   min-width: 0;
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .environment-git-group__row dd {
@@ -3221,7 +3221,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin: 0;
   overflow: hidden;
   color: var(--octant-text-secondary);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3247,7 +3247,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .environment-git-group__identity-secondary {
   color: var(--octant-text-muted);
   font-family: var(--oct-font-mono);
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
 }
 
 .environment-git-group__detached {
@@ -3330,7 +3330,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   min-width: 0;
   color: var(--oct-muted);
   font-family: var(--oct-font-mono);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3348,7 +3348,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: 3px;
   background: var(--octant-surface-raised);
   color: var(--octant-text-muted);
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -3747,7 +3747,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .working-directory-control label {
   color: var(--octant-text-secondary);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 600;
 }
 
@@ -3768,7 +3768,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .working-directory-control small {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   line-height: 1.35;
 }
 
@@ -3793,14 +3793,14 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .environment-chat-group__row dt {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .environment-chat-group__row dd {
   min-width: 0;
   margin: 0;
   color: var(--octant-text-secondary);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   overflow-wrap: anywhere;
   text-align: right;
 }
@@ -3808,7 +3808,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .environment-chat-group__status {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 /* Collapsible groups are ordinary product rows. Their icon and disclosure state
@@ -3913,7 +3913,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .local-servers__error {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   line-height: 1.4;
 }
 
@@ -3932,7 +3932,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .local-servers__group-heading {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -3955,7 +3955,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .local-servers__name {
   color: var(--octant-text-primary);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 600;
 }
 
@@ -3963,7 +3963,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow: hidden;
   color: var(--octant-text-secondary);
   font-family: var(--octant-editor-font-family);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3974,7 +3974,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: 5px;
   overflow: hidden;
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3989,13 +3989,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .local-servers__actions button {
   height: 22px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .local-servers__action-feedback,
 .local-servers__stop-unavailable {
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .local-servers__confirm {
@@ -4005,7 +4005,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 1px solid var(--octant-border-strong);
   border-radius: 6px;
   background: var(--octant-surface-inset);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .local-servers__confirm p {
@@ -4023,7 +4023,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: var(--oct-radius-sm);
   background: transparent;
   color: var(--oct-fg-2);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   cursor: pointer;
 }
 
@@ -4044,7 +4044,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: 6px;
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .thread-environment-wrapper {
@@ -4091,7 +4091,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .memory-section h3 {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: 0.055em;
   text-transform: uppercase;
@@ -4099,7 +4099,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .memory-section > header > span {
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-variant-numeric: tabular-nums;
 }
 
@@ -4107,7 +4107,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin: 0;
   padding: 13px 0;
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .memory-row {
@@ -4120,7 +4120,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   align-items: center;
   gap: 7px;
   color: var(--octant-text-muted);
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
 }
 
 .memory-row__meta span:first-child {
@@ -4136,7 +4136,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .memory-row__content {
   margin: 7px 0 0;
   color: var(--octant-text-primary);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   line-height: 1.48;
   overflow-wrap: anywhere;
 }
@@ -4145,7 +4145,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .memory-row__audit-note {
   margin: 6px 0 0;
   color: var(--octant-text-muted);
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -4153,7 +4153,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .memory-row__audit {
   margin-top: 7px;
   color: var(--octant-text-muted);
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
 }
 
 .memory-row__audit summary {
@@ -4210,7 +4210,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .memory-row__actions button {
   color: var(--octant-text-muted);
   cursor: pointer;
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
 }
 
 .memory-row__actions button:hover {
@@ -4239,13 +4239,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .project-overview__prompt-mark {
   color: var(--octant-text-muted);
-  font-size: 18px;
+  font-size: calc(18 * var(--oct-text-step));
   line-height: 1;
 }
 
 .project-overview__prompt h2 {
   margin: 8px 0 0;
-  font-size: 20px;
+  font-size: calc(20 * var(--oct-text-step));
   font-weight: 500;
   letter-spacing: -0.02em;
 }
@@ -4254,7 +4254,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   max-width: 430px;
   margin: 6px 0 0;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   line-height: 1.5;
 }
 
@@ -4289,7 +4289,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .code-overview__signal > div > span,
 .code-overview__target-details dt {
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -4301,7 +4301,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: 8px;
   margin: 0;
   color: var(--octant-text-primary);
-  font-size: 22px;
+  font-size: calc(22 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: -0.03em;
 }
@@ -4310,7 +4310,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin: 6px 0 0;
   overflow-wrap: anywhere;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.5;
 }
 
@@ -4330,7 +4330,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin: 0;
   overflow: hidden;
   color: var(--octant-text-secondary);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -4369,7 +4369,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .code-overview__signal strong {
   color: var(--octant-text-primary);
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
   font-weight: 600;
   line-height: 1.25;
 }
@@ -4377,7 +4377,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .code-overview__signal p {
   margin: 1px 0 0;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   line-height: 1.45;
 }
 
@@ -4398,7 +4398,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   min-width: 0;
   padding: 0;
   color: var(--octant-text-primary);
-  font-size: 24px;
+  font-size: calc(24 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: -0.035em;
   line-height: 1.1;
@@ -4409,7 +4409,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   flex-wrap: wrap;
   gap: 10px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .code-overview__lifecycle {
@@ -4433,7 +4433,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   background: var(--octant-control);
   border: 1px solid var(--octant-border-strong);
   border-radius: 999px;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 600;
 }
 
@@ -4526,7 +4526,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .code-project-overview__section-header h2 {
   margin: 0;
   color: var(--octant-text-primary);
-  font-size: 15px;
+  font-size: calc(15 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: -0.02em;
 }
@@ -4534,7 +4534,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .code-project-overview__eyebrow,
 .code-project-overview__scope-label {
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
   letter-spacing: 0.07em;
   text-transform: uppercase;
@@ -4686,7 +4686,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .work-overview__section h2 {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
   font-weight: 500;
 }
 
@@ -4714,7 +4714,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   justify-content: space-between;
   min-width: 0;
   color: var(--oct-fg);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.4;
 }
 
@@ -4790,7 +4790,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .project-overview:has(.chat-project-overview--home) .project-overview__name {
   width: min(48vw, 420px);
-  font-size: 22px;
+  font-size: calc(22 * var(--oct-text-step));
   font-weight: 500;
   letter-spacing: -0.03em;
 }
@@ -4825,7 +4825,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .chat-project-overview__section h2 {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
   font-weight: 500;
 }
 
@@ -4854,7 +4854,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   justify-content: space-between;
   min-width: 0;
   color: var(--oct-fg);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   line-height: 1.4;
 }
 
@@ -4905,7 +4905,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .chat-project-overview__quick-start h2 {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22 * var(--oct-text-step));
   font-weight: 500;
   letter-spacing: -0.03em;
   line-height: 1.2;
@@ -4913,7 +4913,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .chat-project-overview--home .chat-project-overview__scope {
   max-width: 42ch;
-  font-size: 13px;
+  font-size: calc(13 * var(--oct-text-step));
 }
 
 .chat-project-overview__quick-start form {
@@ -5049,7 +5049,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   }
 
   .code-overview__toolbar .project-overview__name {
-    font-size: 21px;
+    font-size: calc(21 * var(--oct-text-step));
   }
 
   .code-overview__card--delivery {
@@ -5466,7 +5466,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .composer-model-picker__model-badge {
   flex: 0 0 auto;
   color: var(--octant-text-muted);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   font-weight: 600;
 }
 
@@ -5503,7 +5503,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin: 0;
   padding: 10px;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .composer-model-picker--empty {
@@ -5515,7 +5515,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   color: var(--octant-text-muted);
   border: 1px dashed var(--octant-border);
   border-radius: 8px;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .composer-model-picker__settings {
@@ -5524,7 +5524,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 0;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 600;
   text-decoration: underline;
 }
@@ -6008,7 +6008,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .code-thread-workspace__turn-access {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   margin: 4px 0 0;
 }
 
@@ -6033,7 +6033,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding-top: 8px;
   border-top: 1px solid var(--octant-border-subtle);
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .parallel-runs__header {
@@ -6090,7 +6090,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 1px solid var(--octant-border-subtle);
   border-radius: 8px;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .scaffolds__header {
@@ -6146,7 +6146,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .scaffolds__entry-blocked {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .scaffolds__start {
@@ -6168,7 +6168,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .scaffolds__command,
 .scaffolds__message {
   margin: 0;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .scaffolds__command code {
@@ -6181,7 +6181,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   margin: 0;
   overflow: auto;
   font-family: var(--oct-font-mono);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   white-space: pre-wrap;
 }
 
@@ -6192,7 +6192,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding: 8px 12px;
   border-top: 1px solid var(--octant-border-subtle);
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .product-feedback__header {
@@ -6257,7 +6257,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: 6px;
   margin-top: 6px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .thread-checkpoints__label {
@@ -6274,7 +6274,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-radius: 4px;
   background: var(--octant-surface-raised);
   color: var(--octant-text-primary);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .code-thread-workspace__checkpoint,
@@ -6599,7 +6599,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border: 0;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   font-weight: 600;
   text-align: left;
 }
@@ -6613,7 +6613,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .agent-eligible-models__count {
   margin-left: auto;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   font-weight: 500;
 }
 
@@ -6664,7 +6664,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .agent-eligible-models__empty {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .composer-pool-control {
@@ -6686,7 +6686,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   color: var(--octant-text-secondary);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .composer-pool-control__trigger:hover:not(:disabled),
@@ -6707,7 +6707,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .composer-pool-control__status {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .composer-pool-control__editor {
@@ -6750,7 +6750,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   align-items: center;
   gap: 8px;
   cursor: pointer;
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .composer-pool-control__option-label--disabled {
@@ -6760,7 +6760,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .composer-pool-control__option-reason {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .composer-pool-control__mixed-vendor {
@@ -6774,13 +6774,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .composer-pool-control__disclosure {
   margin: 0;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .composer-pool-control__error {
   margin: 0;
   color: var(--octant-danger, #e5484d);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .composer-pool-control__actions {
@@ -6792,7 +6792,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .composer-pool-control__hint {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .composer-pool-control__visually-hidden {
@@ -6824,7 +6824,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: 4px 8px;
   margin: 2px 0;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .chat-transcript__route-reason {
@@ -7263,7 +7263,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .code-board__subtitle {
   margin: 0;
   color: var(--oct-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .code-board__toolbar {
@@ -7997,7 +7997,7 @@ p.board-col-empty {
 .keybinding-settings__area,
 .keybinding-settings__warning {
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .keybinding-settings__warning {
@@ -8008,7 +8008,7 @@ p.board-col-empty {
   display: grid;
   gap: 4px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
 }
 
 .keybinding-settings__actions {
@@ -8033,7 +8033,7 @@ p.board-col-empty {
   background: transparent;
   color: var(--octant-text-muted);
   font: inherit;
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   cursor: pointer;
 }
 
@@ -8058,7 +8058,7 @@ p.board-col-empty {
   gap: 6px;
   padding: 2px 4px;
   color: var(--octant-text-muted);
-  font-size: 11px;
+  font-size: calc(11 * var(--oct-text-step));
   cursor: pointer;
 }
 
@@ -8093,7 +8093,7 @@ p.board-col-empty {
   border: 1px solid var(--octant-border-subtle);
   border-radius: 8px;
   color: var(--octant-text-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .workspace-presets__header {
@@ -8164,7 +8164,7 @@ p.board-col-empty {
 .code-project-pull-requests__status {
   margin: 0;
   color: var(--oct-muted);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
 }
 
 .code-project-pull-requests__status[data-state="stale"] {

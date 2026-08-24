@@ -1147,7 +1147,7 @@ input.switch:checked::after {
   color: var(--oct-muted);
   font-weight: 500;
   font-family: var(--oct-font-mono);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   letter-spacing: var(--oct-tracking-wordmark);
   text-transform: uppercase;
 }
@@ -1448,7 +1448,7 @@ input.switch:checked::after {
   background: var(--oct-bg);
   color: var(--oct-meta);
   font-family: var(--oct-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 .viewer-thumb[aria-selected="true"] {
   border-color: var(--oct-accent-fg);
@@ -1717,7 +1717,7 @@ input.switch:checked::after {
   place-items: center;
   color: var(--oct-muted);
   font-family: var(--oct-font-mono);
-  font-size: 12px;
+  font-size: calc(12 * var(--oct-text-step));
   letter-spacing: var(--oct-tracking-wordmark);
 }
 .ph-img.square {
@@ -1828,7 +1828,7 @@ input.switch:checked::after {
 .avatar-sm {
   width: var(--oct-avatar-sm);
   height: var(--oct-avatar-sm);
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
 }
 .avatar-lg {
   width: var(--oct-avatar-lg);
@@ -3196,7 +3196,7 @@ input.switch:checked::after {
   padding-inline: var(--oct-space-2);
   border-radius: 5px;
   font-family: var(--oct-font-mono);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   letter-spacing: var(--oct-tracking-wide);
   text-transform: uppercase;
 }
@@ -3370,7 +3370,7 @@ input.switch:checked::after {
   background: var(--oct-accent);
   color: var(--oct-accent-on);
   font-family: var(--oct-font-mono);
-  font-size: 9px;
+  font-size: calc(9 * var(--oct-text-step));
   line-height: 15px;
   text-align: center;
 }
@@ -7748,7 +7748,7 @@ input.switch:checked::after {
   background: none;
   color: var(--oct-meta);
   font-family: var(--oct-font-display);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
   letter-spacing: var(--oct-tracking-wide);
 }
 .tabitem .icon {

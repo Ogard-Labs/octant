@@ -91,6 +91,52 @@ describe("interface typography contract", () => {
     }
   });
 
+  it("leaves no interface text frozen at a pixel size the setting cannot reach", () => {
+    // The `--oct-text-*` ladder moving with the setting only helps the rules
+    // that use it. Hundreds of rules named a pixel size directly, which is
+    // most of what a user actually reads, so Appearance's interface font size
+    // still looked ignored. Each remaining literal below is a size that must
+    // NOT follow that setting, and says why.
+    const allowed = new Map<string, ReadonlyArray<string>>([
+      // These declare the settings themselves.
+      [
+        "styles.css",
+        ["--octant-ui-font-size", "--octant-editor-font-size", "--octant-terminal-font-size"],
+      ],
+      [
+        "styles/octant.css",
+        [
+          // The transcript carries its own size setting.
+          "--oct-transcript-font-size",
+          // A decorative glyph, sized to the panel it sits in.
+          ".quote-mark",
+          // Monospace surfaces follow the code and terminal typography settings.
+          ".codeblock",
+          ".runpanel-body",
+          ".runline .k",
+          ".diff",
+          ".term",
+        ],
+      ],
+    ]);
+
+    for (const file of collectCssFiles(shippedCssRoot)) {
+      const relative = file.slice(shippedCssRoot.length + 1);
+      const source = readFileSync(file, "utf8");
+      for (const block of cssBlocks(source)) {
+        if (!/font-size:\s*\d+px/.test(block.declarations)) continue;
+        const selector = block.selector.trim();
+        const reasons = allowed.get(relative) ?? [];
+        expect(
+          reasons.some(
+            (reason) => selector.startsWith(reason) || block.declarations.includes(reason),
+          ),
+          `${relative} ${selector} freezes a font size the interface setting cannot reach`,
+        ).toBe(true);
+      }
+    }
+  });
+
   it("keeps the board's visible labels and cards on interface typography", () => {
     const source = readFileSync(resolve(cssRoot, "octant.css"), "utf8");
     expect(source).not.toMatch(/--oct-font-(ui|sans)\b/);

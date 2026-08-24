@@ -320,7 +320,7 @@
 
 .code-file-explorer__entry small {
   color: var(--oct-meta);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .code-file-explorer__entry--file {
@@ -486,7 +486,7 @@
 .code-diff-pane__file-counts {
   flex: none;
   color: var(--oct-meta);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 .code-diff-pane__file-counts {
@@ -532,7 +532,7 @@
 .code-diff-pane__renamed-from {
   margin: 0;
   color: var(--oct-meta);
-  font-size: 10px;
+  font-size: calc(10 * var(--oct-text-step));
 }
 
 /* Layout only: the header's system buttons keep their width instead of
