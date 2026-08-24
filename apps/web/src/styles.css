@@ -7545,9 +7545,8 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 /*
- * The board body owns all scrolling. Status grouping hands the horizontal
- * scroll to the system .board row, whose columns scroll vertically inside
- * themselves; the page never scrolls horizontally. Project grouping stacks
+ * The board body owns scrolling. Status grouping uses a balanced grid on
+ * desktop and lets each column end with its content; Project grouping stacks
  * its sections and scrolls vertically as one list.
  */
 .code-board__body {
@@ -7560,14 +7559,29 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 .code-board__body[data-grouping="status"] {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
 }
 
-/* the system .board sizes to its content; here it must fill the body's
-   height so each column can pin its head and scroll on its own */
+/* Keep fixed status groups evenly distributed across the available work
+   surface. auto-fit collapses gracefully when a filter leaves fewer groups. */
 .code-board__body[data-grouping="status"] .board {
-  flex: 1 1 auto;
-  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  align-items: start;
+  width: 100%;
+  overflow: visible;
+}
+
+.code-board__body[data-grouping="status"] .board-col {
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  align-self: start;
+}
+
+.code-board__body[data-grouping="status"] .board-col-body {
+  flex: 0 0 auto;
+  overflow: visible;
 }
 
 /* cards render in a semantic list; the system class carries the layout,
@@ -7594,6 +7608,16 @@ p.board-col-empty {
   letter-spacing: inherit;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A quiet placeholder is content-sized; it should not make an empty group
+   as tall as the busiest column. */
+.code-board__body[data-grouping="status"] .board-col[data-empty="true"] {
+  min-height: 0;
+}
+
+.code-board__body[data-grouping="status"] .board-col[data-empty="true"] .board-col-body {
+  min-height: 52px;
 }
 
 /* Project grouping stacks full-width sections that flow their cards in a
@@ -7642,7 +7666,7 @@ p.board-col-empty {
 }
 
 .code-board__card-details {
-  margin-top: var(--oct-space-1);
+  margin-top: 5px;
 }
 
 .code-board__card-details summary {

@@ -558,7 +558,9 @@ describe("CodeThreadBoard", () => {
     expect(facts).toHaveTextContent("Review changes requested");
     expect(facts).toHaveTextContent("Opened PR · pending");
     expect(facts).toHaveTextContent("Follow-up");
-    expect(within(article).getByText(/Project projection missing/)).toBeVisible();
+    const waitingReason = within(article).getByText(/Project projection missing/);
+    expect(waitingReason).toBeVisible();
+    expect(waitingReason).toHaveClass("board-card-blocked");
   });
 
   it("renders a recoverable error state when the first board query fails", async () => {

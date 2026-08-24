@@ -2801,8 +2801,9 @@ input.switch:checked::after {
 }
 
 /* ─── kanban ──────────────────────────────────────────────────────────
-   The board scrolls horizontally; each column scrolls on its own. The
-   column head stays put so a long column keeps its label and count. */
+   Status boards are a balanced grid on desktop. The board body owns the
+   vertical scroll, so columns stop after their content instead of becoming
+   four tall empty wells. */
 .board {
   display: flex;
   gap: var(--oct-space-3);
@@ -2816,10 +2817,6 @@ input.switch:checked::after {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* Columns share the row instead of leaving a wide viewport half empty.
-     The floor keeps cards readable — below it the .board row scrolls
-     horizontally rather than squeezing; the ceiling stops a few columns
-     from stretching into slabs. */
   flex: 1 1 220px;
   min-width: 220px;
   max-width: 360px;
@@ -2828,12 +2825,14 @@ input.switch:checked::after {
   background: var(--oct-surface);
 }
 .board-col[data-empty="true"] {
-  flex: 0 0 148px;
-  min-width: 148px;
-  max-width: 168px;
+  /* Empty groups remain legible without narrowing the grid or creating a
+     visually separate rail. */
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: none;
 }
 .board-col[data-empty="true"] .board-col-empty {
-  padding: var(--oct-space-3) var(--oct-space-2);
+  padding: var(--oct-space-3) var(--oct-space-2) var(--oct-space-4);
 }
 .board-col-head {
   display: flex;
@@ -2882,7 +2881,7 @@ input.switch:checked::after {
 .board-card {
   display: block;
   width: 100%;
-  padding: var(--oct-space-3);
+  padding: 10px;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--oct-bg);
@@ -2898,7 +2897,7 @@ input.switch:checked::after {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
-  margin-bottom: var(--oct-space-2);
+  margin-bottom: 7px;
 }
 .board-card-title {
   /* two lines, then ellipsis — a long title must not make one card tower
@@ -2926,7 +2925,7 @@ input.switch:checked::after {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--oct-space-1) var(--oct-space-3);
+  gap: 3px 9px;
   font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
   color: var(--oct-meta);
@@ -2954,16 +2953,19 @@ input.switch:checked::after {
 }
 /* why a card cannot move — the one thing a triager needs and boards hide */
 .board-card-blocked {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--oct-space-2);
-  margin-top: var(--oct-space-2);
-  padding: var(--oct-space-2);
-  border-radius: 6px;
-  background: var(--oct-warn-soft);
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  margin-top: 7px;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in oklab, var(--oct-warn-fg) 32%, transparent);
+  border-radius: var(--oct-radius-sm);
+  background: transparent;
   color: var(--oct-warn-fg);
-  font-family: var(--oct-font-mono);
+  font-family: var(--oct-font-transcript);
   font-size: var(--oct-text-xs);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 /* ─── issue list ──────────────────────────────────────────────────────
