@@ -312,21 +312,17 @@ export class CodeProjectPullRequestService {
     });
     const [threads, listedResults] = await Promise.all([
       this.#threads.list(windowId),
-      mapConcurrentOrdered(
-        bounded.repositories,
-        GITHUB_READ_CONCURRENCY,
-        async (repository) => ({
-          repository,
-          listed: await this.#list.listActive(
-            {
-              owner: repository.repositoryOwner,
-              name: repository.repositoryName,
-              limit: CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS + 1,
-            },
-            signal,
-          ),
-        }),
-      ),
+      mapConcurrentOrdered(bounded.repositories, GITHUB_READ_CONCURRENCY, async (repository) => ({
+        repository,
+        listed: await this.#list.listActive(
+          {
+            owner: repository.repositoryOwner,
+            name: repository.repositoryName,
+            limit: CODE_PROJECT_PULL_REQUEST_MAX_PULL_REQUESTS + 1,
+          },
+          signal,
+        ),
+      })),
     ]);
     const knownIdentityRefreshFailed = new Set<string>();
 
@@ -464,27 +460,27 @@ export class CodeProjectPullRequestService {
       bootstrap.active,
       GITHUB_READ_CONCURRENCY,
       async (project): Promise<CodeProjectPullRequestConnection | undefined> => {
-          if (project.type !== "code" || project.lifecycle !== "active") return undefined;
-          const remotes =
-            project.connectedRepository !== undefined || project.binding === undefined
-              ? undefined
-              : await this.#remotes.remotes(project.binding.canonicalRoot);
-          const identity =
-            project.connectedRepository === undefined
-              ? githubIdentityFromRemotes(remotes ?? [])
-              : {
-                  owner: project.connectedRepository.owner,
-                  name: project.connectedRepository.repository,
-                };
-          return identity === undefined
-            ? { kind: "unconnected", projectId: project.id, projectName: project.name }
+        if (project.type !== "code" || project.lifecycle !== "active") return undefined;
+        const remotes =
+          project.connectedRepository !== undefined || project.binding === undefined
+            ? undefined
+            : await this.#remotes.remotes(project.binding.canonicalRoot);
+        const identity =
+          project.connectedRepository === undefined
+            ? githubIdentityFromRemotes(remotes ?? [])
             : {
-                kind: "connected",
-                projectId: project.id,
-                projectName: project.name,
-                repositoryOwner: identity.owner,
-                repositoryName: identity.name,
+                owner: project.connectedRepository.owner,
+                name: project.connectedRepository.repository,
               };
+        return identity === undefined
+          ? { kind: "unconnected", projectId: project.id, projectName: project.name }
+          : {
+              kind: "connected",
+              projectId: project.id,
+              projectName: project.name,
+              repositoryOwner: identity.owner,
+              repositoryName: identity.name,
+            };
       },
     );
     return resolved.filter(
