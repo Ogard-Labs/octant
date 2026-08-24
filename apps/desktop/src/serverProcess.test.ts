@@ -275,7 +275,7 @@ describe("serverSpawnSpec", () => {
   it("adds trusted macOS package-manager paths for packaged servers", () => {
     expect(
       resolvePackagedServerPath(
-        "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/bin",
+        "/tmp/user-bin:/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/opt/homebrew/bin",
         "darwin",
       ),
     ).toBe("/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin");

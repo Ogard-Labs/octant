@@ -32,7 +32,12 @@ interface ServerSpawnSpecOptions {
   readonly env: NodeJS.ProcessEnv;
 }
 
-const trustedMacOsExecutablePaths = ["/opt/homebrew/bin", "/usr/local/bin"] as const;
+const trustedMacOsExecutablePaths = [
+  "/usr/bin",
+  "/bin",
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+] as const;
 
 /**
  * Packaged apps do not inherit the interactive shell PATH that users configure
@@ -45,7 +50,12 @@ export function resolvePackagedServerPath(
   platform: NodeJS.Platform = process.platform,
 ): string | undefined {
   if (platform !== "darwin") return pathValue;
-  const entries = pathValue?.split(":").filter((entry) => entry !== "") ?? [];
+  const entries =
+    pathValue
+      ?.split(":")
+      .filter((entry) =>
+        trustedMacOsExecutablePaths.includes(entry as (typeof trustedMacOsExecutablePaths)[number]),
+      ) ?? [];
   return [...new Set([...entries, ...trustedMacOsExecutablePaths])].join(":");
 }
 
