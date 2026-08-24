@@ -94,6 +94,7 @@ export class ProviderUsageLimitsService {
   async #refresh(signal: AbortSignal): Promise<ProviderUsageLimitsSnapshot> {
     const observedAt = this.#options.now();
     const instances = this.#options.listInstances();
+    this.#pruneRuntimeWindowOwners(instances);
     const next = await Promise.all(
       instances.map((instance) => this.#observe(instance, observedAt, signal)),
     );
@@ -244,6 +245,7 @@ export class ProviderUsageLimitsService {
     observedAt: UtcTimestamp,
     reason: "unsupported" | "not-configured" | "not-ready",
   ): ProviderUsageLimitsEntry {
+    this.#runtimeWindowOwners.delete(String(instance.id));
     return {
       providerInstanceId: instance.id,
       status: "unavailable",
@@ -273,7 +275,9 @@ export class ProviderUsageLimitsService {
     const entries = new Map(this.#entries);
     const runtimeLimits = this.#options.runtimeLimits;
     if (runtimeLimits !== undefined) {
-      for (const instance of this.#options.listInstances()) {
+      const instances = this.#options.listInstances();
+      this.#pruneRuntimeWindowOwners(instances);
+      for (const instance of instances) {
         if (!instance.enabled) continue;
         const limits = runtimeLimits(instance.id, refreshedAt);
         const previous = entries.get(String(instance.id));
@@ -337,5 +341,12 @@ export class ProviderUsageLimitsService {
         String(left.providerInstanceId).localeCompare(String(right.providerInstanceId)),
       ),
     });
+  }
+
+  #pruneRuntimeWindowOwners(instances: ReadonlyArray<ProviderInstance>): void {
+    const currentIds = new Set(instances.map((instance) => String(instance.id)));
+    for (const ownerId of this.#runtimeWindowOwners) {
+      if (!currentIds.has(ownerId)) this.#runtimeWindowOwners.delete(ownerId);
+    }
   }
 }

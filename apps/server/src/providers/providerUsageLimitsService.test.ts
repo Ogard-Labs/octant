@@ -269,6 +269,49 @@ describe("ProviderUsageLimitsService", () => {
     });
   });
 
+  it("does not carry runtime ownership through provider removal and re-addition", async () => {
+    let instances: ReadonlyArray<ProviderInstance> = [instance(firstId)];
+    let runtimeAvailable = true;
+    const runtimeObservedAt = "2026-08-23T00:00:00.000Z" as UtcTimestamp;
+    const runtime = decodeProviderServiceLimits({
+      providerInstanceId: firstId,
+      scope: "provider-instance",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      concurrency: { status: "unavailable" },
+      retry: { status: "inactive" },
+      quota: "unknown",
+      source: "runtime-reported",
+      confidence: "high",
+      updatedAt: runtimeObservedAt,
+      rateLimitWindows: [{ window: "runtime", status: "warning", observedAt: runtimeObservedAt }],
+    });
+    const direct = decodeProviderServiceLimits({
+      ...runtime,
+      rateLimitWindows: [{ window: "direct", status: "allowed", observedAt: runtimeObservedAt }],
+    });
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => instances,
+      observe: vi.fn(async () =>
+        runtimeAvailable ? undefined : { source: "provider-runtime" as const, limits: direct },
+      ),
+      runtimeLimits: () => (runtimeAvailable ? runtime : undefined),
+      now: () => runtimeObservedAt,
+    });
+
+    await service.refresh();
+    instances = [];
+    await service.refresh();
+    instances = [instance(firstId)];
+    runtimeAvailable = false;
+    await service.refresh();
+
+    expect(service.snapshot().entries[0]).toMatchObject({
+      status: "available",
+      limits: { rateLimitWindows: [{ window: "direct" }] },
+    });
+  });
+
   it("retains the last successful result as stale after a failed refresh", async () => {
     const observe = vi
       .fn()
