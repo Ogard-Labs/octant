@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   closeThreadUtilityTab,
   openThreadUtilityTab,
+  removeUtilityTabs,
   retainAvailableUtilityTabs,
   selectThreadUtilityTab,
   threadUtilityDockState,
@@ -44,5 +45,14 @@ describe("thread-owned right utility dock tabs", () => {
         new Set(["browser", "terminal"]),
       ),
     ).toEqual({ tabs: ["browser", "terminal"], active: "terminal" });
+  });
+
+  it("removes bottom-panel tools from the dock without losing other tabs", () => {
+    expect(
+      removeUtilityTabs(
+        { tabs: ["browser", "terminal", "files"], active: "terminal" },
+        new Set(["browser", "terminal"]),
+      ),
+    ).toEqual({ tabs: ["files"], active: "files" });
   });
 });

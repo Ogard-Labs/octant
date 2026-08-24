@@ -12,11 +12,12 @@ import { DockToolStrip } from "./DockToolStrip";
 
 export interface BottomUtilityPanelProps {
   readonly height: number;
-  readonly onClose: () => void;
+  readonly onClose: (surface?: RightUtilityDockSurfaceId) => void;
   readonly onCommitHeight: (height: number) => void;
   readonly onPreviewHeight: (height: number) => void;
   readonly onOpenTool: (surface: RightUtilityDockSurfaceId) => void;
   readonly activeSurface: RightUtilityDockSurfaceDescriptor;
+  readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly launchableSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly content: ReactNode;
 }
@@ -48,18 +49,18 @@ export function BottomUtilityPanel(props: BottomUtilityPanelProps) {
         <div aria-label="Bottom panel tools" className="bottom-utility-panel__tabs" role="tablist">
           <DockToolStrip
             active={props.activeSurface.id}
-            onClose={() => props.onClose()}
+            onClose={props.onClose}
             onSelect={props.onOpenTool}
-            tabs={[props.activeSurface]}
+            tabs={props.tabs}
           />
           <DockUtilityLauncher
             onOpen={props.onOpenTool}
             surfaces={props.launchableSurfaces.filter(
-              (surface) => surface.id !== props.activeSurface.id,
+              (surface) => !props.tabs.some((tab) => tab.id === surface.id),
             )}
           />
         </div>
-        <IconButton icon={X} label="Hide bottom panel" onClick={props.onClose} />
+        <IconButton icon={X} label="Hide bottom panel" onClick={() => props.onClose()} />
       </header>
       <div className="bottom-utility-panel__content">{props.content}</div>
     </section>

@@ -23,6 +23,7 @@ describe("BottomUtilityPanel", () => {
         activeSurface={terminal}
         height={260}
         launchableSurfaces={[terminal, browser]}
+        tabs={[terminal]}
         onClose={onClose}
         onCommitHeight={vi.fn()}
         onOpenTool={onOpenTool}
@@ -41,5 +42,27 @@ describe("BottomUtilityPanel", () => {
     expect(onOpenTool).toHaveBeenCalledWith("browser");
     await user.click(screen.getByRole("button", { name: "Hide bottom panel" }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps opened bottom tools selectable while one shared panel is mounted", async () => {
+    const user = userEvent.setup();
+    const onOpenTool = vi.fn();
+    render(
+      <BottomUtilityPanel
+        activeSurface={browser}
+        content={<p>Live Browser</p>}
+        height={260}
+        launchableSurfaces={[terminal]}
+        onClose={vi.fn()}
+        onCommitHeight={vi.fn()}
+        onOpenTool={onOpenTool}
+        onPreviewHeight={vi.fn()}
+        tabs={[terminal, browser]}
+      />,
+    );
+
+    expect(screen.getAllByRole("tab")).toHaveLength(2);
+    await user.click(screen.getByRole("tab", { name: "Terminal" }));
+    expect(onOpenTool).toHaveBeenCalledWith("terminal");
   });
 });

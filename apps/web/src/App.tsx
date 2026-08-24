@@ -242,6 +242,7 @@ import {
   closeUtilityTabState,
   openThreadUtilityTab,
   openUtilityTabState,
+  removeUtilityTabs,
   retainAvailableUtilityTabs,
   selectThreadUtilityTab,
   selectUtilityTabState,
@@ -637,8 +638,11 @@ function LaunchedShell(
   const [bottomPanelPresentation, setBottomPanelPresentation] = useState(() =>
     readBottomPanelPresentation(globalThis, String(props.launch.windowId)),
   );
-  const [bottomPanelSurface, setBottomPanelSurface] =
-    useState<RightUtilityDockSurfaceId>("terminal");
+  const [fallbackBottomPanelState, setFallbackBottomPanelState] = useState<ThreadUtilityDockState>({
+    tabs: [],
+  });
+  const [bottomPanelStatesByThread, setBottomPanelStatesByThread] =
+    useState<ThreadUtilityDockStates>(new Map());
   const [previewBottomPanelHeight, setPreviewBottomPanelHeight] = useState<number>();
   const persistBottomPanelPresentation = useCallback(
     (next: typeof bottomPanelPresentation) => {
@@ -1561,13 +1565,32 @@ function LaunchedShell(
       ? [surface]
       : [];
   });
+  const bottomPanelState =
+    dockThreadKey === undefined
+      ? fallbackBottomPanelState
+      : threadUtilityDockState(bottomPanelStatesByThread, dockThreadKey);
+  const bottomPanelAvailableIds = new Set(bottomPanelSurfaces.map((surface) => surface.id));
+  const retainedBottomPanelState = retainAvailableUtilityTabs(
+    bottomPanelState,
+    bottomPanelAvailableIds,
+  );
+  const defaultBottomSurface =
+    bottomPanelSurfaces.find((surface) => surface.id === "terminal") ?? bottomPanelSurfaces[0];
   const activeBottomSurface =
-    bottomPanelSurfaces.find((surface) => surface.id === bottomPanelSurface) ??
-    bottomPanelSurfaces[0];
+    bottomPanelSurfaces.find((surface) => surface.id === retainedBottomPanelState.active) ??
+    defaultBottomSurface;
+  const renderedBottomPanelState =
+    retainedBottomPanelState.tabs.length === 0 && activeBottomSurface !== undefined
+      ? { tabs: [activeBottomSurface.id], active: activeBottomSurface.id }
+      : retainedBottomPanelState;
+  const bottomPanelTabs = renderedBottomPanelState.tabs.flatMap((surfaceId) => {
+    const surface = bottomPanelSurfaces.find((candidate) => candidate.id === surfaceId);
+    return surface === undefined ? [] : [surface];
+  });
   const bottomPanelAvailable = bottomPanelSurfaces.length > 0;
   const bottomPanelOpen = bottomPanelPresentation.open && bottomPanelAvailable && !isNarrow;
   const displayedDockState = bottomPanelOpen
-    ? closeUtilityTabState(retainedDockState, activeBottomSurface?.id ?? "terminal")
+    ? removeUtilityTabs(retainedDockState, new Set(renderedBottomPanelState.tabs))
     : retainedDockState;
   const dockSurface = displayedDockState.active;
   const dockResolution = resolveDockSurface(dockSurface);
@@ -2140,6 +2163,21 @@ function LaunchedShell(
       );
     }
   }
+
+  function closeBottomPanelTab(surface: RightUtilityDockSurfaceId) {
+    const nextState = closeUtilityTabState(renderedBottomPanelState, surface);
+    if (dockThreadKey === undefined) {
+      setFallbackBottomPanelState(nextState);
+    } else {
+      setBottomPanelStatesByThread((current) => {
+        const next = new Map(current);
+        if (nextState.tabs.length === 0) next.delete(dockThreadKey);
+        else next.set(dockThreadKey, nextState);
+        return next;
+      });
+    }
+    if (nextState.tabs.length === 0) closeBottomPanel();
+  }
   function toggleBottomPanel(opener: HTMLElement) {
     if (bottomPanelOpen) {
       closeBottomPanel(false);
@@ -2147,11 +2185,18 @@ function LaunchedShell(
       return;
     }
     if (!bottomPanelAvailable) return;
-    const nextSurface =
-      bottomPanelSurfaces.find((surface) => surface.id === bottomPanelSurface) ??
-      bottomPanelSurfaces[0];
+    const nextSurface = activeBottomSurface ?? bottomPanelSurfaces[0];
     if (nextSurface === undefined) return;
-    setBottomPanelSurface(nextSurface.id);
+    if (dockThreadKey === undefined) {
+      setFallbackBottomPanelState((current) => openUtilityTabState(current, nextSurface.id));
+    } else {
+      setBottomPanelStatesByThread((current) =>
+        new Map(current).set(
+          dockThreadKey,
+          openUtilityTabState(threadUtilityDockState(current, dockThreadKey), nextSurface.id),
+        ),
+      );
+    }
     closeDockTab(nextSurface.id);
     if (dockTabs.length === 1 && dockTabs[0]?.id === nextSurface.id) setDockVisible(false);
     persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
@@ -2159,7 +2204,16 @@ function LaunchedShell(
 
   function openBottomTool(surface: RightUtilityDockSurfaceId) {
     if (!bottomPanelSurfaces.some((candidate) => candidate.id === surface)) return;
-    setBottomPanelSurface(surface);
+    if (dockThreadKey === undefined) {
+      setFallbackBottomPanelState((current) => openUtilityTabState(current, surface));
+    } else {
+      setBottomPanelStatesByThread((current) =>
+        new Map(current).set(
+          dockThreadKey,
+          openUtilityTabState(threadUtilityDockState(current, dockThreadKey), surface),
+        ),
+      );
+    }
     closeDockTab(surface);
     persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
   }
@@ -4482,7 +4536,9 @@ function LaunchedShell(
                 content={bottomToolContent(activeBottomSurface.id)}
                 height={bottomPanelHeight}
                 launchableSurfaces={bottomPanelSurfaces}
-                onClose={() => closeBottomPanel()}
+                onClose={(surface) =>
+                  surface === undefined ? closeBottomPanel() : closeBottomPanelTab(surface)
+                }
                 onCommitHeight={(height) => {
                   setPreviewBottomPanelHeight(undefined);
                   persistBottomPanelPresentation({
@@ -4493,6 +4549,7 @@ function LaunchedShell(
                 }}
                 onOpenTool={openBottomTool}
                 onPreviewHeight={setPreviewBottomPanelHeight}
+                tabs={bottomPanelTabs}
               />
             ) : null}
           </>
