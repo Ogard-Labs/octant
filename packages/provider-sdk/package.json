@@ -9,9 +9,7 @@
     "./context-facts-conformance": "./src/contextFactsConformance.ts",
     "./chat-conformance": "./src/chatConformance.ts",
     "./discovery": "./src/discovery.ts",
-    "./driver": "./src/driver.ts",
-    "./child-agent-adapter": "./src/childAgentAdapter.ts",
-    "./child-agent-conformance": "./src/childAgentConformance.ts"
+    "./driver": "./src/driver.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",
