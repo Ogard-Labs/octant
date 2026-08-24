@@ -41,8 +41,11 @@ scheduled.
   are coalesced, bounded by cancellation-aware timeouts, and honor provider
   retry windows. A failed refresh preserves the last successful limits as
   visibly stale; drivers without `contextFacts.observeServiceLimits` report
-  `unavailable` rather than causing a guessed network request. The surface
-  never stores cookies, credentials, raw provider payloads, or account data.
+  `unavailable` when no independently observed runtime evidence exists rather
+  than causing a guessed network request. Normalized runtime rate-limit
+  windows are valid evidence on their own and remain visibly scoped to those
+  windows. The surface never stores cookies, credentials, raw provider
+  payloads, or account data.
 - Safe input budget is the context window minus reserved response budget,
   reasoning reserve where applicable, provider framing estimate,
   observed-variance reserve, and safety margin. No turn is sent when planned
