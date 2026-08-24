@@ -24,7 +24,11 @@ import {
   MIN_ZEN_ELEMENT_HEIGHT,
   MAX_ZEN_ELEMENT_HEIGHT,
 } from "@octant/contracts/zen";
-import type { AggregateVersion } from "@octant/contracts/events";
+import {
+  decodeUtcTimestamp,
+  type AggregateVersion,
+  type UtcTimestamp,
+} from "@octant/contracts/events";
 import type { WindowId, HostId } from "@octant/contracts/shell";
 
 // ── Rejection codes ─────────────────────────────────────────────────────────
@@ -63,6 +67,14 @@ export class ZenPolicyRejected extends Error {
 
 function reject(code: ZenPolicyRejectionCode, message: string): never {
   throw new ZenPolicyRejected(code, message);
+}
+
+function utcNow(): UtcTimestamp {
+  return decodeUtcTimestamp(new Date().toISOString());
+}
+
+function utcTimestampAt(epochMs: number): UtcTimestamp {
+  return decodeUtcTimestamp(new Date(epochMs).toISOString());
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -267,7 +279,7 @@ export function createZenSpace(
   appearance?: ZenAppearance,
 ): ZenSpace {
   const spaceId = crypto.randomUUID() as ZenSpaceId;
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
 
   if (appearance !== undefined) {
     validateAppearance(appearance);
@@ -285,8 +297,8 @@ export function createZenSpace(
     barCollapsed: false,
     assistant: null,
     research: null,
-    createdAt: now as any,
-    updatedAt: now as any,
+    createdAt: now,
+    updatedAt: now,
   };
 }
 
@@ -338,13 +350,13 @@ export function addElement(
       break;
   }
 
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
 
   return {
     ...space,
     version: (space.version + 1) as AggregateVersion,
     elements: [...space.elements, element],
-    updatedAt: now as any,
+    updatedAt: now,
   };
 }
 
@@ -423,7 +435,7 @@ export function updateElement(
       break;
   }
 
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
   const updatedElements = [...space.elements];
   updatedElements[existingIndex] =
     existing.kind === "timer" && element.kind === "timer"
@@ -443,7 +455,7 @@ export function updateElement(
     ...space,
     version: (space.version + 1) as AggregateVersion,
     elements: updatedElements,
-    updatedAt: now as any,
+    updatedAt: now,
   };
 }
 
@@ -478,12 +490,12 @@ function updateWidgetElement<K extends ZenWidgetKind>(
   if (widget.kind === "notes") validateNotesContent(widget.content);
   else validateChecklistItems(widget.items);
 
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
   return {
     ...space,
     version: (space.version + 1) as AggregateVersion,
     elements: space.elements.map((element) => (element.elementId === elementId ? next : element)),
-    updatedAt: now as any,
+    updatedAt: now,
   };
 }
 
@@ -645,13 +657,13 @@ export function removeElement(
     zIndex: (i + 1) as typeof el.zIndex,
   }));
 
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
 
   return {
     ...space,
     version: (space.version + 1) as AggregateVersion,
     elements: renumbered,
-    updatedAt: now as any,
+    updatedAt: now,
   };
 }
 
@@ -667,13 +679,13 @@ export function updateViewport(
     reject("stale-version", `Expected version ${expectedVersion} but space is at ${space.version}`);
   }
 
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
 
   return {
     ...space,
     version: (space.version + 1) as AggregateVersion,
     viewport,
-    updatedAt: now as any,
+    updatedAt: now,
   };
 }
 
@@ -690,13 +702,13 @@ export function updateAppearance(
   }
   validateAppearance(appearance);
 
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
 
   return {
     ...space,
     version: (space.version + 1) as AggregateVersion,
     appearance,
-    updatedAt: now as any,
+    updatedAt: now,
   };
 }
 
@@ -720,7 +732,7 @@ export function setPresentation(
     reject("invalid-presentation", "set-presentation must include active or barCollapsed");
   }
 
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
 
   return {
     ...space,
@@ -729,7 +741,7 @@ export function setPresentation(
     ...(typeof presentation.barCollapsed === "boolean"
       ? { barCollapsed: presentation.barCollapsed }
       : {}),
-    updatedAt: now as any,
+    updatedAt: now,
   };
 }
 
@@ -745,13 +757,13 @@ export function bindAssistant(
     reject("stale-version", `Expected version ${expectedVersion} but space is at ${space.version}`);
   }
 
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
 
   return {
     ...space,
     version: (space.version + 1) as AggregateVersion,
     assistant,
-    updatedAt: now as any,
+    updatedAt: now,
   };
 }
 
@@ -774,13 +786,13 @@ export function dockResearch(
     reject("invalid-source-context", "A Chat thread has no browsing context to dock.");
   }
 
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
 
   return {
     ...space,
     version: (space.version + 1) as AggregateVersion,
     research,
-    updatedAt: now as any,
+    updatedAt: now,
   };
 }
 
@@ -794,7 +806,7 @@ export function recoverSpace(space: ZenSpace, expectedVersion: number): ZenSpace
     reject("stale-version", `Expected version ${expectedVersion} but space is at ${space.version}`);
   }
 
-  const now = new Date().toISOString().replace(".000Z", ".000Z").slice(0, 23) + "Z";
+  const now = utcNow();
 
   return {
     ...space,
@@ -802,7 +814,7 @@ export function recoverSpace(space: ZenSpace, expectedVersion: number): ZenSpace
     elements: [],
     viewport: DEFAULT_ZEN_VIEWPORT,
     appearance: DEFAULT_ZEN_APPEARANCE,
-    updatedAt: now as any,
+    updatedAt: now,
   };
 }
 
@@ -849,7 +861,7 @@ function replaceTimer(
     elements: space.elements.map((element) =>
       element.elementId === timer.elementId ? timer : element,
     ),
-    updatedAt: new Date(clock.wallTimeMs).toISOString() as ZenSpace["updatedAt"],
+    updatedAt: utcTimestampAt(clock.wallTimeMs),
   };
 }
 
@@ -871,18 +883,14 @@ export function applyTimerAction(
   switch (command.action) {
     case "start": {
       if (element.status === "running" || element.status === "completed") return space;
-      const startedAt = new Date(
-        clock.wallTimeMs,
-      ).toISOString() as ZenTimerElementPayload["startedAt"];
+      const startedAt = utcTimestampAt(clock.wallTimeMs);
       return replaceTimer(
         space,
         {
           ...element,
           status: "running",
           startedAt,
-          deadlineAt: new Date(
-            clock.wallTimeMs + element.remainingMs,
-          ).toISOString() as ZenTimerElementPayload["deadlineAt"],
+          deadlineAt: utcTimestampAt(clock.wallTimeMs + element.remainingMs),
           clockSessionId: clock.sessionId,
           monotonicStartedMs: clock.monotonicTimeMs,
         },
@@ -936,7 +944,7 @@ export function reconcileRunningTimers(space: ZenSpace, clock: ZenTimerClockSamp
     ...space,
     version: (space.version + 1) as AggregateVersion,
     elements,
-    updatedAt: new Date(clock.wallTimeMs).toISOString() as ZenSpace["updatedAt"],
+    updatedAt: utcTimestampAt(clock.wallTimeMs),
   };
 }
 
@@ -1023,7 +1031,7 @@ export function processZenCommand(
       return recoverSpace(space, command.expectedVersion);
     default:
       // create-space and create-timer are handled by the service because they allocate identities.
-      reject("unsupported-kind", `Command ${(command as any).command} not supported as mutation`);
+      reject("unsupported-kind", `Command ${command.command} not supported as mutation`);
   }
 }
 
