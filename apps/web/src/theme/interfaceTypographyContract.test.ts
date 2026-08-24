@@ -34,6 +34,37 @@ describe("interface typography contract", () => {
     }
   });
 
+  it("moves the whole interface type scale with the size the user chose", () => {
+    // Appearance's interface font size used to reach only the handful of
+    // rules that named `--octant-ui-font-size` directly. The `--oct-text-*`
+    // ladder carried the great majority of the app's text, so the setting
+    // looked ignored. Every step must derive from the setting.
+    const octant = readFileSync(resolve(cssRoot, "octant.css"), "utf8");
+    for (const step of ["xs", "sm", "base", "lg", "xl", "2xl", "3xl", "4xl"]) {
+      const declaration = octant.match(new RegExp(`--oct-text-${step}:\\s*([^;]+)`))?.[1]?.trim();
+      expect(declaration, `--oct-text-${step} must be declared`).toBeDefined();
+      expect(
+        declaration,
+        `--oct-text-${step} must derive from the interface size, not freeze a literal`,
+      ).toMatch(/var\(--oct-text-step\)/);
+    }
+    expect(octant.match(/--oct-text-step:\s*([^;]+)/)?.[1]).toContain("--octant-ui-font-size");
+  });
+
+  it("puts Tailwind's type and family utilities on the same projection", () => {
+    // A component reaching for `text-sm` must land on the same size a
+    // stylesheet does; Tailwind's own ramp is frozen and cannot hear the
+    // setting.
+    const tailwind = readFileSync(resolve(cssRoot, "tailwind.css"), "utf8");
+    for (const step of ["xs", "sm", "base", "lg", "xl", "2xl"]) {
+      expect(tailwind, `Tailwind --text-${step} must point at the Octant token`).toMatch(
+        new RegExp(`--text-${step}:\\s*var\\(--oct-text-${step}\\)`),
+      );
+    }
+    expect(tailwind).toMatch(/--font-sans:\s*var\(--oct-font-body\)/);
+    expect(tailwind).toMatch(/--font-mono:\s*var\(--oct-font-mono\)/);
+  });
+
   it("keeps ordinary shell, settings, and dock rules on the interface projection", () => {
     for (const file of ordinarySurfaceFiles) {
       const source = readFileSync(resolve(cssRoot, file), "utf8");

@@ -127,14 +127,24 @@
      it is the single token that decides. */
   --oct-font-transcript:
     system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --oct-text-xs: 11px;
-  --oct-text-sm: 14px;
-  --oct-text-base: 16px;
-  --oct-text-lg: 19px;
-  --oct-text-xl: 22px;
-  --oct-text-2xl: 26px;
-  --oct-text-3xl: 36px;
-  --oct-text-4xl: 72px;
+  /* The interface scale is the size the user chose, not a frozen ladder.
+     Every step keeps the ratio it had to the 13px default, so the shipped
+     look is unchanged at the default and the whole scale moves together
+     when the setting changes. Freezing these was why Appearance's interface
+     font size reached almost nothing: the ladder carried the great majority
+     of the app's text and none of it could hear the setting.
+
+     `--oct-text-step` is 1px at the default size, which is what lets each
+     step read as the pixel value it has always been. */
+  --oct-text-step: calc(var(--octant-ui-font-size, 13px) / 13);
+  --oct-text-xs: calc(11 * var(--oct-text-step));
+  --oct-text-sm: calc(14 * var(--oct-text-step));
+  --oct-text-base: calc(16 * var(--oct-text-step));
+  --oct-text-lg: calc(19 * var(--oct-text-step));
+  --oct-text-xl: calc(22 * var(--oct-text-step));
+  --oct-text-2xl: calc(26 * var(--oct-text-step));
+  --oct-text-3xl: calc(36 * var(--oct-text-step));
+  --oct-text-4xl: calc(72 * var(--oct-text-step));
   --oct-fs-h1: clamp(56px, 11vw, 132px);
   --oct-fs-h2: clamp(30px, 3.6vw, 44px);
 
