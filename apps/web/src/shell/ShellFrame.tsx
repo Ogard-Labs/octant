@@ -60,12 +60,18 @@ export function ShellThemeRoot(props: ShellThemeRootProps) {
 export function ShellFrame(props: ShellFrameProps) {
   if (props.standaloneSurface !== undefined) {
     return (
-      <div
-        className={`shell shell-frame--standalone shell--material-${props.material}`}
-        data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
+      <ShellThemeRoot
+        {...(props.availableFonts === undefined ? {} : { availableFonts: props.availableFonts })}
+        {...(props.typography === undefined ? {} : { typography: props.typography })}
+        {...(props.theme === undefined ? {} : { theme: props.theme })}
       >
-        {props.standaloneSurface}
-      </div>
+        <div
+          className={`shell shell-frame--standalone shell--material-${props.material}`}
+          data-octant-sidebar-vibrancy={props.sidebarVibrancyMode ?? "off"}
+        >
+          {props.standaloneSurface}
+        </div>
+      </ShellThemeRoot>
     );
   }
 

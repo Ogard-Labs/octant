@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import { NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT } from "@octant/contracts/shell";
+import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { describe, expect, it, vi } from "vitest";
 import { ShellFrame } from "./ShellFrame";
 
@@ -50,6 +51,9 @@ describe("ShellFrame", () => {
     expect(nativeDragTarget).toContain("position: fixed;");
     expect(nativeDragTarget).toContain("top: 0;");
     expect(nativeDragTarget).toContain("left: 112px;");
+    // One measured reserve now serves both the drag strip and the pane header,
+    // so the strip cannot end at a different place than the controls begin.
+    expect(nativeDragTarget).toContain("right: var(--octant-window-chrome-reserved-width, 148px);");
     expect(nativeDragTarget).toContain(
       "height: var(--octant-native-hidden-inset-titlebar-height);",
     );
@@ -162,6 +166,44 @@ describe("ShellFrame", () => {
     expect(screen.queryByText("Workspace")).not.toBeInTheDocument();
   });
 
+  it("keeps selected typography applied when entering a standalone surface", () => {
+    const typography = {
+      ...DEFAULT_THEME_SETTINGS.typography,
+      ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, family: "Inter", size: 19 },
+    };
+
+    render(
+      <ShellFrame
+        availableFonts={["Inter"]}
+        chrome={<header>Chrome</header>}
+        contextSidebarWidth={360}
+        material="opaque"
+        onCommitSidebarWidth={vi.fn()}
+        onPreviewSidebarWidth={vi.fn()}
+        sidebar={<aside>Sidebar</aside>}
+        sidebarResizable={false}
+        sidebarWidth={232}
+        standaloneSurface={
+          <div className="settings-view">
+            <aside className="settings-view__sidebar">Settings navigation</aside>
+            <main>Settings content</main>
+          </div>
+        }
+        typography={typography}
+        theme={DEFAULT_THEME_SETTINGS}
+        wideContextOpen={false}
+        workspace={<main>Workspace</main>}
+      />,
+    );
+
+    expect(document.documentElement.style.getPropertyValue("--octant-ui-font-family")).toBe(
+      "Inter",
+    );
+    expect(document.documentElement.style.getPropertyValue("--octant-ui-font-size")).toBe("19px");
+    expect(screen.getByText("Settings navigation")).toBeInTheDocument();
+    expect(screen.getByText("Settings content")).toBeInTheDocument();
+  });
+
   it("applies the shared wide-context geometry without inline grid ownership", () => {
     const { container } = render(
       <ShellFrame
@@ -252,7 +294,10 @@ describe("ShellFrame", () => {
     expect(chrome).toContain("border-bottom: 0;");
     expect(chrome).toContain("pointer-events: none;");
     expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
-      "top: var(--octant-native-hidden-inset-titlebar-height);",
+      "top: calc(var(--oct-space-2) + 4px);",
+    );
+    expect(cssRule('html[data-octant-native-host="true"] .shell-frame > .window-chrome')).toContain(
+      "z-index: 7;",
     );
     expect(workspace).toContain("grid-row: 1 / -1;");
     expect(trailing).toContain("pointer-events: auto;");

@@ -5,10 +5,11 @@
   height: 100vh;
   min-width: 0;
   min-height: 0;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: 248px minmax(0, 1fr);
   overflow: hidden;
   color: var(--octant-text-primary);
   background: var(--octant-workspace);
+  font-family: var(--oct-font-display);
 }
 
 .settings-view__sidebar {
@@ -42,19 +43,19 @@
 
 .settings-view__sidebar-titlebar,
 .settings-view__workspace-titlebar {
-  height: 34px;
-  min-height: 34px;
+  height: 44px;
+  min-height: 44px;
 }
 
 .settings-view__sidebar-titlebar {
   display: flex;
   align-items: stretch;
-  padding: 0 10px;
+  padding: 0 12px;
 }
 
 .settings-view__traffic-light-space {
-  width: 66px;
-  flex: 0 0 66px;
+  width: 72px;
+  flex: 0 0 72px;
 }
 
 .settings-view__drag-space {
@@ -66,36 +67,56 @@
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  padding: 4px 8px 16px;
+  padding: 8px 12px 24px;
   overflow-y: auto;
 }
 
 /* "Back to app" borrows the .setnav-item recipe; it only needs its slot. */
 .settings-view__back {
-  margin-bottom: var(--oct-space-2);
+  min-height: 32px;
+  margin: 0 0 12px;
+  padding-inline: 8px;
+  color: var(--octant-text-secondary);
+  font-size: var(--octant-ui-font-size);
 }
 
 .settings-view__workspace {
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: 34px minmax(0, 1fr);
+  grid-template-rows: 44px minmax(0, 1fr);
   overflow: hidden;
   background: var(--octant-workspace);
 }
 
 .settings-view__workspace-titlebar {
-  border-bottom: 1px solid transparent;
+  border-bottom: 1px solid var(--octant-border-soft);
 }
 
 /* .setpane-title/.setpane-note carry the type; the header only spaces the
    sections below it, and the note's own end margin must not stack on top. */
 .settings-view__header {
-  margin-bottom: var(--oct-space-6);
+  margin-bottom: 24px;
+}
+
+.settings-view__header .setpane-title,
+.settings-view__header h1 {
+  color: var(--octant-text-primary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xl);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.2;
 }
 
 .settings-view__header .setpane-note {
+  max-width: 62ch;
+  margin-top: 6px;
   margin-bottom: 0;
+  color: var(--octant-text-secondary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  line-height: 1.45;
 }
 
 /* flex: none, because the sidebar is a scrolling flex column: when the nav
@@ -106,7 +127,7 @@
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  margin: 2px 0 16px;
+  margin: 0 0 20px;
   padding: 0;
   border: 0;
 }
@@ -132,6 +153,11 @@
 }
 
 .settings-view__field--search .settings-view__text-input {
+  min-height: 32px;
+  border-radius: 8px;
+  background: var(--octant-control);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
   padding-left: 27px;
 }
 
@@ -142,17 +168,29 @@
    the grid gap does it instead. */
 .settings-navigation {
   display: grid;
-  gap: var(--oct-space-3);
+  gap: var(--oct-space-4);
+  font-family: var(--oct-font-display);
+}
+
+.settings-navigation__group {
+  display: grid;
+  gap: var(--oct-space-1);
 }
 
 .settings-navigation .setnav-section {
   margin-top: 0;
-  font-size: clamp(8px, calc(var(--octant-ui-font-size) * 0.85), 32px);
+  padding: 4px 8px;
+  color: var(--octant-text-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .settings-navigation ul {
   display: grid;
-  gap: 2px;
+  gap: 1px;
   padding: 0;
   margin: 0;
   list-style: none;
@@ -163,15 +201,29 @@
    relying on utility ordering. */
 .settings-navigation .setnav-item,
 .settings-view__back {
+  min-height: 32px;
+  border-radius: 7px;
+  color: var(--octant-text-secondary);
+  font-family: var(--oct-font-display);
+  font-size: var(--octant-ui-font-size);
+  line-height: 1.2;
   justify-content: flex-start;
 }
 
-/* Settings is a second navigation shell, not a separate typography system.
-   Keep its labels at the selected interface size so moving between the app
-   and Settings never changes the apparent scale of navigation. */
-.settings-navigation .setnav-item,
-.settings-view__back {
-  font-size: var(--octant-ui-font-size);
+.settings-navigation .setnav-item > .icon,
+.settings-view__back > .icon {
+  color: var(--octant-text-muted);
+}
+
+.settings-navigation .setnav-item:hover,
+.settings-navigation .setnav-item[aria-current="page"],
+.settings-view__back:hover {
+  color: var(--octant-text-primary);
+  background: var(--octant-surface-hover);
+}
+
+.settings-navigation .setnav-item[aria-current="page"] {
+  font-weight: 500;
 }
 
 /* --- Settings primitives: app-side residue over .setrow/.setgroup --- */
@@ -182,8 +234,11 @@
 
 /* Scope reads as quiet metadata inside the hint line, not a badge. */
 .settings-scope-indicator {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
+  color: var(--octant-text-muted);
+  font-family: var(--oct-font-display);
+  font-size: 10px;
+  letter-spacing: 0.01em;
+  opacity: 0.8;
 }
 
 /* SettingGroup's optional description; the divider under it comes from the
@@ -192,8 +247,10 @@
   margin: 0;
   padding: var(--oct-space-3) var(--oct-space-4) 0;
   max-width: 64ch;
-  font-size: var(--oct-text-sm);
-  color: var(--oct-muted);
+  color: var(--octant-text-secondary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
 }
 
 /* Compound editors (multi-field controls) stack under their label instead of
@@ -301,8 +358,8 @@
 }
 
 .settings-view__content-inner {
-  width: min(100% - 48px, 680px);
-  padding: 28px 0 72px;
+  width: min(calc(100% - 48px), 760px);
+  padding: 36px 0 80px;
   margin: 0 auto;
 }
 
@@ -325,34 +382,124 @@
 
 .settings-section-stack {
   display: grid;
-  gap: var(--oct-space-6);
+  gap: 28px;
 }
 
 .settings-card-section {
   display: grid;
-  gap: var(--oct-space-2);
+  gap: 8px;
 }
 
 .settings-card-section > h2 {
   margin: 0;
-  padding: 0 var(--oct-space-1);
-  color: var(--oct-muted);
+  padding-inline: 2px;
+  color: var(--octant-text-muted);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.settings-card-section > .setgroup,
+.setgroup {
+  overflow: hidden;
+  background: var(--octant-surface-muted);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-lg);
+  box-shadow: none;
+}
+
+.setgroup + .setgroup {
+  margin-top: 0;
+}
+
+.setgroup-head {
+  min-height: 42px;
+  padding: 10px 16px;
+  color: var(--octant-text-primary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 600;
 }
 
 .settings-view__field,
 .settings-view__setting,
 .settings-view__toggle {
-  min-height: 40px;
+  min-height: 36px;
+  font-family: var(--oct-font-display);
 }
 
 .settings-view__setting {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 18px;
-  padding: 9px 0;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.setrow {
+  column-gap: 24px;
+  padding: 12px 16px;
+  font-family: var(--oct-font-display);
+}
+
+.setrow-label {
+  color: var(--octant-text-primary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  line-height: 1.3;
+}
+
+.setrow-hint {
+  max-width: 62ch;
+  color: var(--octant-text-secondary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  line-height: 1.4;
+}
+
+.setrow-control,
+.setrow-control > *,
+.settings-view__select,
+.settings-view__text-input,
+.settings-view__textarea,
+.settings-view__action,
+.settings-view .octant-switch,
+.settings-view [role="combobox"] {
+  font-family: var(--oct-font-display);
+}
+
+.settings-view__field {
+  min-height: 36px;
+  gap: 12px;
+  padding: 8px 0;
+  color: var(--octant-text-primary);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+}
+
+.settings-view__field > span:first-child {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-xs);
+}
+
+.settings-view__select,
+.settings-view__text-input,
+.settings-view__textarea {
+  border-radius: 8px;
+  font-size: var(--oct-text-xs);
+}
+
+.settings-view__select,
+.settings-view__text-input:not([type="color"]) {
+  min-height: 32px;
+}
+
+.settings-view__textarea {
+  font-family: var(--oct-font-mono);
 }
 
 .settings-view__preset-grid {
@@ -399,7 +546,7 @@
 
 .settings-theme-editor {
   display: grid;
-  gap: var(--oct-space-4);
+  gap: 16px;
   padding: 0;
   margin: 0;
 }
@@ -409,9 +556,10 @@
   overflow: hidden;
   padding: 0;
   margin: 0;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  background: var(--octant-surface-muted);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-lg);
+  box-shadow: none;
 }
 
 .settings-theme-editor__disclosure {
@@ -421,8 +569,8 @@
 .settings-theme-editor__card > h3,
 .settings-theme-editor__accessibility legend {
   margin: 0;
-  padding: var(--oct-space-4) var(--oct-space-4) var(--oct-space-2);
-  color: var(--oct-fg);
+  padding: 12px 16px 8px;
+  color: var(--octant-text-primary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: 600;
@@ -434,8 +582,8 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--oct-space-2);
-  max-width: 480px;
-  padding: 0 var(--oct-space-4) var(--oct-space-4);
+  max-width: none;
+  padding: 0 16px 12px;
 }
 
 .settings-scheme__card {
@@ -469,7 +617,7 @@
 .settings-scheme__preview {
   position: relative;
   display: flex;
-  height: 54px;
+  height: 48px;
   overflow: hidden;
 }
 
@@ -544,8 +692,9 @@
 }
 
 .settings-scheme__label {
-  padding: 7px 0 8px;
+  padding: 6px 0 7px;
   color: var(--oct-muted);
+  font-family: var(--oct-font-display);
   font-size: var(--oct-text-xs);
   font-weight: 500;
   border-top: 1px solid var(--oct-border);
@@ -561,23 +710,23 @@
 }
 
 .settings-theme-editor__card > .settings-view__field {
-  margin: 0 var(--oct-space-4);
-  padding: var(--oct-space-3) 0;
+  margin: 0 16px;
+  padding: 10px 0;
   border-top: 1px solid var(--oct-border-soft);
 }
 
 .settings-theme-editor__disclosure > summary {
   display: flex;
-  min-height: 46px;
+  min-height: 42px;
   align-items: center;
   justify-content: space-between;
-  color: var(--oct-fg-2);
+  color: var(--octant-text-primary);
   cursor: pointer;
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-strong);
   list-style: none;
-  padding: 0 var(--oct-space-4);
+  padding: 0 16px;
 }
 
 .settings-theme-editor__disclosure > summary::-webkit-details-marker {
@@ -595,16 +744,16 @@
 }
 
 .settings-theme-editor__disclosure-body {
-  padding: 0 var(--oct-space-4) var(--oct-space-3);
+  padding: 0 16px 8px;
   border-top: 1px solid var(--oct-border-soft);
 }
 
 .settings-theme-editor__accessibility {
-  padding: 0 var(--oct-space-4) var(--oct-space-2);
+  padding: 0 16px 8px;
 }
 
 .settings-theme-editor__accessibility legend {
-  padding: var(--oct-space-4) 0 var(--oct-space-2);
+  padding: 12px 0 8px;
 }
 
 .settings-theme-editor__accessibility > .settings-view__field {
@@ -620,9 +769,10 @@
   justify-content: space-between;
   gap: 12px;
   padding: 8px 12px;
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
+  background: var(--octant-surface-muted);
+  border: 1px solid var(--octant-border);
+  border-radius: 8px;
+  font-family: var(--oct-font-display);
 }
 
 .settings-theme-editor__draft-bar .settings-view__actions {
@@ -658,7 +808,7 @@
 }
 
 .settings-font-picker {
-  width: min(280px, 100%);
+  width: min(248px, 100%);
 }
 
 .settings-font-picker__preview {
@@ -826,9 +976,9 @@
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 720px) {
   .settings-view {
-    grid-template-columns: 196px minmax(0, 1fr);
+    grid-template-columns: 216px minmax(0, 1fr);
   }
 
   .settings-view__sidebar-content {
@@ -836,7 +986,24 @@
   }
 
   .settings-view__content-inner {
-    width: min(100% - 28px, 760px);
+    width: min(calc(100% - 32px), 760px);
+    padding-top: 28px;
+  }
+}
+
+@media (max-width: 560px) {
+  .settings-view {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-view__sidebar-titlebar,
+  .settings-view__workspace-titlebar {
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .settings-view__content-inner {
+    width: min(calc(100% - 24px), 760px);
     padding-top: 24px;
   }
 }

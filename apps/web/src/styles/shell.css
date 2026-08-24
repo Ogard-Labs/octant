@@ -1,6 +1,11 @@
 .shell.shell-frame {
   --octant-rendered-sidebar-width: var(--octant-sidebar-width, 232px);
-  --octant-window-chrome-reserved-width: 96px;
+  /* Published by WindowChrome from each cluster's measured width. The literals
+     are only the pre-measurement fallback: both clusters' real widths swing
+     with which controls a thread renders, so no constant is right for every
+     thread. The leading one exists only while the sidebar is collapsed. */
+  --octant-window-chrome-reserved-width: 148px;
+  --octant-window-chrome-leading-width: 148px;
   display: grid;
   width: 100%;
   max-width: 100vw;
@@ -46,7 +51,7 @@ html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
   position: fixed;
   z-index: 5;
   top: 0;
-  right: 0;
+  right: var(--octant-window-chrome-reserved-width, 148px);
   left: 112px;
   display: block;
   height: var(--octant-native-hidden-inset-titlebar-height);
@@ -75,12 +80,14 @@ html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
   pointer-events: none;
 }
 
-/* `hiddenInset` reserves the top strip for native window movement. Keep the
-   interactive chrome below that strip so macOS delivers pointer events to the
-   controls instead of treating them as window-drag gestures. Remote/web
-   clients do not have the native inset and keep the zero-offset row above. */
+/* Native controls share the visual title row with the top drag strip and the
+   pane header. They sit above both and explicitly opt out of dragging; the
+   unused rail remains draggable underneath. The chrome must outrank the pane
+   header outright — while the two merely tied, the header won on document
+   order and covered every control in this row. */
 html[data-octant-native-host="true"] .shell-frame > .window-chrome {
-  top: var(--octant-native-hidden-inset-titlebar-height);
+  top: calc(var(--oct-space-2) + 4px);
+  z-index: 7;
 }
 
 .shell.shell-frame.shell--sidebar-collapsed {
@@ -98,7 +105,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   flex: 0 0 auto;
   height: 100%;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
   padding-right: 4px;
   pointer-events: auto;
 }
@@ -116,7 +123,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 /* Same reserve the sidebar keeps for the macOS traffic lights (see
    .sidebar__traffic-light-space); it moves here while the sidebar is hidden. */
 .window-chrome__traffic-light-space {
-  flex: 0 0 82px;
+  flex: 0 0 88px;
   height: 100%;
 }
 
@@ -124,7 +131,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   align-self: stretch;
   flex: 1 1 auto;
   min-width: 12px;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 /* The badge recipe carries the warning palette and type; the chrome only
@@ -223,6 +230,19 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   cursor: pointer;
 }
 
+.window-chrome__new-thread {
+  color: var(--oct-fg-2);
+  background: var(--oct-surface-muted);
+  border-color: var(--oct-border);
+}
+
+.window-chrome__new-thread:hover,
+.window-chrome__new-thread:focus-visible {
+  color: var(--oct-fg);
+  background: var(--oct-fg-soft);
+  border-color: var(--oct-border-strong);
+}
+
 .window-chrome__button:hover,
 .window-chrome__button[aria-expanded="true"] {
   color: var(--oct-fg);
@@ -288,17 +308,18 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
   height: 34px;
   flex: 0 0 34px;
   align-items: center;
+  gap: 6px;
   padding: 0 10px;
 }
 
 .sidebar__traffic-light-space {
-  flex: 0 0 66px;
+  flex: 0 0 74px;
   height: 100%;
 }
 
 .sidebar__native-collapse {
   position: relative;
-  top: 8px;
+  top: 0;
   width: 22px;
   height: 22px;
   min-width: 22px;
@@ -503,7 +524,7 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
 .sidebar-navigation__threads {
   display: grid;
   gap: 2px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .sidebar-navigation__thread {
@@ -520,13 +541,14 @@ html[data-octant-native-host="true"]:where(:not([data-octant-host-vibrancy="acti
   align-items: center;
   justify-content: flex-start;
   gap: var(--oct-space-2);
-  min-height: var(--oct-control-height-sm);
+  min-height: 28px;
   padding-block: 0;
   padding-inline: var(--oct-space-2);
   color: var(--oct-muted);
   background: transparent;
   border: 0;
   border-radius: 6px;
+  font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
   cursor: pointer;
   text-align: left;
@@ -1752,7 +1774,7 @@ form > .work-composer-adapter__attachments {
 
 .code-worktree-source__disclosure-label {
   color: var(--octant-text-secondary);
-  font-family: var(--octant-font-mono, ui-monospace, monospace);
+  font-family: var(--oct-font-mono);
 }
 
 .code-worktree-source__disclosure-detail {

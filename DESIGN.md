@@ -17,7 +17,8 @@ star is a quiet graphite workbench:
 - Navigation is a compact Project and thread tree. Low-frequency actions live
   in the bottom-left identity menu or an accessible overflow menu.
 - The right dock and bottom panel are contextual working regions for the active
-  pane. They are closed when they have no useful surface to show.
+  pane. An open region with no selected tool shows a compact launcher; it never
+  fabricates a tab or repeats another pane's content.
 - Hierarchy comes from typography, spacing, hairline borders, and selection
   fills. Colour is scarce and semantic.
 - Controls are familiar, compact, keyboard reachable, and honest about
@@ -137,6 +138,15 @@ Appearance controls update the renderer optimistically and queue their
 server-authoritative save immediately. There is no separate Apply step. A
 slower earlier response never replaces a newer visible choice.
 
+The runtime UI projection is absolute for ordinary application chrome. The
+bridge maps `--oct-font-display`, `--oct-font-body`, and
+`--oct-font-transcript` to the selected UI family. There are no compatibility
+aliases such as `--oct-font-ui` or `--oct-font-sans`, and feature styles must
+not declare a raw interface stack. A repository contract test scans shell,
+Settings, dock, navigation, pane tabs, and board selectors for violations.
+Monospace is limited to editor/terminal content and literal code, paths,
+branches, identifiers, or serialized theme source.
+
 Static type tokens in `octant.css` are:
 
 - `--oct-text-xs: 11px`, `--oct-text-sm: 14px`, `--oct-text-base: 16px`.
@@ -162,9 +172,11 @@ large panel, and 9999px only for a compact chip or meter. Composer radius is
 
 Controls are 44px by default and 34px compact. Icon sizes are 16/19/22px for
 small/medium/large actions; the pointer target is at least 24px on desktop and
-44px on touch surfaces. The sidebar defaults to 236px, supports 180–420px
-resizing, and collapses to 52px without removing accessible names. The right
-dock defaults to 320px. The title bar is 44px and the status bar 26px.
+44px on touch surfaces. The workspace sidebar defaults to 232px, supports
+resizing, and may collapse completely while leaving Show sidebar and New thread
+in the native title rail. Settings uses a separate compact 248px navigation
+rail. The right dock defaults to 320px. The pane/title control rail is 42px in
+the native host and the status bar is 26px.
 
 Panes are flat and separated by a one-pixel semantic border. Cards are for a
 discrete object or a grouped form, not for every row. Opaque shadcn popovers,
@@ -201,18 +213,40 @@ Navigator, Agents, Providers, Usage, Plugins, Automations, Artifacts, and Zen
 entry points. Search is a compact in-place filter for the current mode's visible
 threads, with a command-style overlay available for broader actions.
 
+Settings is a dense operating surface rather than a dashboard. A compact 248px
+navigation rail and search remain fixed while one centered 760px reading column
+scrolls. Section labels sit outside quiet, flat row groups; labels and
+descriptions align left, controls align right, and compound editors may expand
+below without becoming nested cards. Every control uses the owned Octant/shadcn
+adapter, inherits the interface typography projection, and saves immediately.
+Scope metadata remains available to assistive technology but does not compete
+with the setting label.
+
 The right dock follows the active pane and never leaks another pane's content.
 It can host Review, Files, Browser, Terminal, Canvas, Plan (only for a real
 plan artifact), Delivery (only for a configured target), Agents (when children
 exist or explicitly invoked), Simulator, and Side chat. The dock launcher is
-not a second thread switcher. The bottom panel is terminal-first; moving one
-thread-owned terminal between regions preserves one server session.
+not a second thread switcher. With no open tab, it shows only capability-valid
+tool rows and a visible Add tool action. The bottom panel uses the same compact
+tool-tab and Add tool model for Review, Terminal, Browser, Files, and Side chat
+where supported. Selecting a tool removes that presentation from the other
+region; Terminal immediately attaches or starts and preserves one server
+session when moved.
 
-Environment is a transient active-thread disclosure. It summarizes Project,
+Environment is a transient active-thread disclosure, at most 320px wide. It summarizes Project,
 branch, clean/dirty state, working folder, changes, local servers, pull-request
 identity, sources, and compact active/completed subagent rows with lifecycle,
 model, and retained final response when authoritative. It is not a permanent
-stack of cards and does not duplicate the Agents dock.
+stack of cards and does not duplicate the Agents dock. Missing checkout context
+is neutral explanatory text rather than a warning callout. When the right dock
+is open, the disclosure shifts over the central pane and never covers the dock.
+
+The thread board is a flat operational reading surface with four fixed,
+server-authoritative statuses: Ready, In Progress, Waiting, and Done. Columns
+use hairline separation, compact one-line cards, and dashed empty states;
+Waiting does not become a warning wall. Labels and facts use the selected
+interface typography. Thread listing, pull-request snapshot, and per-thread
+runtime reads overlap where independent.
 
 The context meter is a circular composer control, not a dock tab. It opens an
 opaque popover with attributed context segments, used/maximum/free values,
@@ -274,7 +308,10 @@ essential action.
 
 Pull requests and usage surfaces use explicit loaded, refreshing, stale,
 rate-limited, empty, unavailable, and error states. GitHub refresh is user
-triggered; stale cached data is visibly stale. Provider usage follows the same
+triggered and asks `gh` only for open/draft rows. Connected repositories refresh
+with at most four concurrent reads, then reconcile in stable Project order under
+the global preview bound. Known closed or merged identities are recovered
+separately. Stale cached data is visibly stale. Provider usage follows the same
 provider-neutral context/limit model and preserves unavailable values.
 
 ## Iconography and provider marks
@@ -297,17 +334,18 @@ motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.
 
 Native Electron title-bar regions are a hard boundary. Interactive controls
-must carry `window-no-drag` and remain outside any drag overlay. Test title-bar
+must carry `window-no-drag` and render above the native drag target. Test title-bar
 buttons in the packaged/native surface, not only with React/jsdom. Focus rings
 must be visible and must not move layout.
 
 On macOS the desktop window keeps Electron's native frame and uses
 `titleBarStyle: hiddenInset`; `frame: false` is not combined with that mode.
 One explicit blank drag strip reaches the physical top edge after the traffic
-lights and collapsed-sidebar control. Additional blank spans may extend window
-movement through pane headers. Pane headers and window-chrome parents are
-ordinary layout containers so their interactive descendants never have to carve
-unreliable holes out of an overlapping native drag region.
+lights. Pane tabs and window controls share the compact visual rail at a higher
+stacking layer; unused spans remain drag regions. Collapsed-sidebar Show sidebar
+and New thread actions reserve their own no-drag space after the traffic lights.
+Packaged smoke checks both compact geometry and real native state transitions
+for Open in, Environment, bottom panel, right dock, and sidebar recovery.
 
 ## Accessibility and reliability
 

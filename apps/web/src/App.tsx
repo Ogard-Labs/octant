@@ -242,6 +242,7 @@ import {
   closeUtilityTabState,
   openThreadUtilityTab,
   openUtilityTabState,
+  removeUtilityTabs,
   retainAvailableUtilityTabs,
   selectThreadUtilityTab,
   selectUtilityTabState,
@@ -637,6 +638,11 @@ function LaunchedShell(
   const [bottomPanelPresentation, setBottomPanelPresentation] = useState(() =>
     readBottomPanelPresentation(globalThis, String(props.launch.windowId)),
   );
+  const [fallbackBottomPanelState, setFallbackBottomPanelState] = useState<ThreadUtilityDockState>({
+    tabs: [],
+  });
+  const [bottomPanelStatesByThread, setBottomPanelStatesByThread] =
+    useState<ThreadUtilityDockStates>(new Map());
   const [previewBottomPanelHeight, setPreviewBottomPanelHeight] = useState<number>();
   const persistBottomPanelPresentation = useCallback(
     (next: typeof bottomPanelPresentation) => {
@@ -1544,11 +1550,47 @@ function LaunchedShell(
       }).map((surface) => surface.id),
     ),
   );
-  const bottomPanelAvailable =
-    activeMode === "code" && isDockToolLaunchable("terminal", dockToolCapabilities);
+  const bottomPanelSurfaceOrder: ReadonlyArray<RightUtilityDockSurfaceId> = [
+    "review",
+    "terminal",
+    "browser",
+    "files",
+    "side-chat",
+  ];
+  const bottomPanelSurfaces = bottomPanelSurfaceOrder.flatMap((surfaceId) => {
+    const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
+    return surface !== undefined &&
+      resolveDockSurface(surface.id).kind === "surface" &&
+      isDockToolLaunchable(surface.id, dockToolCapabilities)
+      ? [surface]
+      : [];
+  });
+  const bottomPanelState =
+    dockThreadKey === undefined
+      ? fallbackBottomPanelState
+      : threadUtilityDockState(bottomPanelStatesByThread, dockThreadKey);
+  const bottomPanelAvailableIds = new Set(bottomPanelSurfaces.map((surface) => surface.id));
+  const retainedBottomPanelState = retainAvailableUtilityTabs(
+    bottomPanelState,
+    bottomPanelAvailableIds,
+  );
+  const defaultBottomSurface =
+    bottomPanelSurfaces.find((surface) => surface.id === "terminal") ?? bottomPanelSurfaces[0];
+  const activeBottomSurface =
+    bottomPanelSurfaces.find((surface) => surface.id === retainedBottomPanelState.active) ??
+    defaultBottomSurface;
+  const renderedBottomPanelState =
+    retainedBottomPanelState.tabs.length === 0 && activeBottomSurface !== undefined
+      ? { tabs: [activeBottomSurface.id], active: activeBottomSurface.id }
+      : retainedBottomPanelState;
+  const bottomPanelTabs = renderedBottomPanelState.tabs.flatMap((surfaceId) => {
+    const surface = bottomPanelSurfaces.find((candidate) => candidate.id === surfaceId);
+    return surface === undefined ? [] : [surface];
+  });
+  const bottomPanelAvailable = bottomPanelSurfaces.length > 0;
   const bottomPanelOpen = bottomPanelPresentation.open && bottomPanelAvailable && !isNarrow;
   const displayedDockState = bottomPanelOpen
-    ? closeUtilityTabState(retainedDockState, "terminal")
+    ? removeUtilityTabs(retainedDockState, new Set(renderedBottomPanelState.tabs))
     : retainedDockState;
   const dockSurface = displayedDockState.active;
   const dockResolution = resolveDockSurface(dockSurface);
@@ -1556,7 +1598,7 @@ function LaunchedShell(
     (surface) =>
       resolveDockSurface(surface.id).kind === "surface" &&
       isDockToolLaunchable(surface.id, dockToolCapabilities) &&
-      (!bottomPanelOpen || surface.id !== "terminal"),
+      (!bottomPanelOpen || surface.id !== activeBottomSurface?.id),
   );
   const dockTabs = displayedDockState.tabs.flatMap((surfaceId) => {
     const surface = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surfaceId);
@@ -2037,6 +2079,23 @@ function LaunchedShell(
     );
   }
 
+  function bottomToolContent(surface: RightUtilityDockSurfaceId) {
+    if (surface === "review" && projectPullRequestReviewOpen && selectedProjectPullRequest) {
+      return (
+        <DockProjectPullRequestReviewTool
+          key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
+          load={(query) => codeClient.queryProjectPullRequestDetail(query)}
+          onOpenLinkedThread={(thread) =>
+            openLinkedProjectPullRequestThread(thread, selectedProjectPullRequest.projectId)
+          }
+          query={selectedProjectPullRequest}
+          refresh={(command) => codeClient.refreshProjectPullRequestDetail(command)}
+        />
+      );
+    }
+    return threadUtility(surface);
+  }
+
   function invokeAddAgent() {
     if (dockThreadKey === undefined) return;
     setAddAgentInvokedByThread((current) => {
@@ -2050,7 +2109,7 @@ function LaunchedShell(
   function openDockTab(surface: RightUtilityDockSurfaceId, opener?: HTMLElement) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
-    if (surface === "terminal" && bottomPanelPresentation.open) {
+    if (bottomPanelPresentation.open) {
       persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
     }
     if (opener !== undefined) dockOpener.current = { element: opener, logicalTarget: "dock" };
@@ -2104,6 +2163,21 @@ function LaunchedShell(
       );
     }
   }
+
+  function closeBottomPanelTab(surface: RightUtilityDockSurfaceId) {
+    const nextState = closeUtilityTabState(renderedBottomPanelState, surface);
+    if (dockThreadKey === undefined) {
+      setFallbackBottomPanelState(nextState);
+    } else {
+      setBottomPanelStatesByThread((current) => {
+        const next = new Map(current);
+        if (nextState.tabs.length === 0) next.delete(dockThreadKey);
+        else next.set(dockThreadKey, nextState);
+        return next;
+      });
+    }
+    if (nextState.tabs.length === 0) closeBottomPanel();
+  }
   function toggleBottomPanel(opener: HTMLElement) {
     if (bottomPanelOpen) {
       closeBottomPanel(false);
@@ -2111,8 +2185,32 @@ function LaunchedShell(
       return;
     }
     if (!bottomPanelAvailable) return;
-    closeDockTab("terminal");
-    if (dockTabs.length === 1 && dockTabs[0]?.id === "terminal") setDockVisible(false);
+    const nextSurface = activeBottomSurface ?? bottomPanelSurfaces[0];
+    if (nextSurface === undefined) return;
+    const nextBottomState = openUtilityTabState(renderedBottomPanelState, nextSurface.id);
+    if (dockThreadKey === undefined) {
+      setFallbackBottomPanelState(nextBottomState);
+    } else {
+      setBottomPanelStatesByThread((current) =>
+        new Map(current).set(dockThreadKey, nextBottomState),
+      );
+    }
+    closeDockTab(nextSurface.id);
+    if (dockTabs.length === 1 && dockTabs[0]?.id === nextSurface.id) setDockVisible(false);
+    persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
+  }
+
+  function openBottomTool(surface: RightUtilityDockSurfaceId) {
+    if (!bottomPanelSurfaces.some((candidate) => candidate.id === surface)) return;
+    const nextBottomState = openUtilityTabState(renderedBottomPanelState, surface);
+    if (dockThreadKey === undefined) {
+      setFallbackBottomPanelState(nextBottomState);
+    } else {
+      setBottomPanelStatesByThread((current) =>
+        new Map(current).set(dockThreadKey, nextBottomState),
+      );
+    }
+    closeDockTab(surface);
     persistBottomPanelPresentation({ ...bottomPanelPresentation, open: true });
   }
   function toggleDock(opener: HTMLElement) {
@@ -2405,6 +2503,20 @@ function LaunchedShell(
         : providerIdentityById.get(thread.providerInstanceId);
     return provider === undefined ? thread : { ...thread, provider };
   };
+  const providerByThreadId = new Map<string, ThreadProviderIdentity>();
+  const rememberThreadProvider = (thread: ChatThreadNavigationItem): void => {
+    if (thread.provider === undefined) return;
+    providerByThreadId.set(thread.threadId, thread.provider);
+  };
+  for (const thread of chatController.navigation.map(withProviderMark)) {
+    rememberThreadProvider(thread);
+  }
+  for (const thread of codeProjectThreads.map(withProviderMark)) {
+    rememberThreadProvider(thread);
+  }
+  for (const thread of workProjectThreads.map(withProviderMark)) {
+    rememberThreadProvider(thread);
+  }
   const markedThreadGroups =
     sidebarThreadGroups === undefined
       ? undefined
@@ -3634,6 +3746,14 @@ function LaunchedShell(
             {...(sidebarCollapsed && !isNarrow
               ? { onExpandSidebar: () => setSidebarCollapsedPersistent(false) }
               : {})}
+            {...(sidebarCollapsed && !isNarrow
+              ? {
+                  onNewThread: () => {
+                    if (activeMode === "chat") createChat();
+                    else void openDraftInActiveProject(activeMode);
+                  },
+                }
+              : {})}
             onRecoverZen={() => void zen.recoverZen()}
             onToggleBottomPanel={toggleBottomPanel}
             onToggleDock={toggleDock}
@@ -4269,6 +4389,8 @@ function LaunchedShell(
                     draftProviderGroups={draftProviderGroups}
                     codeProviderGroups={codeProviderGroups}
                     workProviderGroups={workProviderGroups}
+                    providerByThreadId={providerByThreadId}
+                    showProviderIcons={controller.settings.showThreadProviderIcons}
                     {...(projectController.activeProject === undefined
                       ? {}
                       : { draftProjectName: projectController.activeProject.name })}
@@ -4320,11 +4442,25 @@ function LaunchedShell(
               restoreFocus={navigatorOpener}
             />
             <RightUtilityDock
-              agents={threadUtility("agents")}
-              browser={threadUtility("browser")}
-              canvas={threadUtility("canvas")}
+              agents={
+                bottomPanelOpen && activeBottomSurface?.id === "agents"
+                  ? undefined
+                  : threadUtility("agents")
+              }
+              browser={
+                bottomPanelOpen && activeBottomSurface?.id === "browser"
+                  ? undefined
+                  : threadUtility("browser")
+              }
+              canvas={
+                bottomPanelOpen && activeBottomSurface?.id === "canvas"
+                  ? undefined
+                  : threadUtility("canvas")
+              }
               review={
-                projectPullRequestReviewOpen && selectedProjectPullRequest !== undefined ? (
+                bottomPanelOpen &&
+                activeBottomSurface?.id === "review" ? undefined : projectPullRequestReviewOpen &&
+                  selectedProjectPullRequest !== undefined ? (
                   <DockProjectPullRequestReviewTool
                     key={`${String(selectedProjectPullRequest.projectId)}:${selectedProjectPullRequest.repositoryOwner}/${selectedProjectPullRequest.repositoryName}#${selectedProjectPullRequest.number}`}
                     load={(query) => codeClient.queryProjectPullRequestDetail(query)}
@@ -4341,10 +4477,22 @@ function LaunchedShell(
                   threadUtility("review")
                 )
               }
-              delivery={threadUtility("delivery")}
+              delivery={
+                bottomPanelOpen && activeBottomSurface?.id === "delivery"
+                  ? undefined
+                  : threadUtility("delivery")
+              }
               isNarrow={isNarrow}
-              files={threadUtility("files")}
-              iosSimulator={threadUtility("ios-simulator")}
+              files={
+                bottomPanelOpen && activeBottomSurface?.id === "files"
+                  ? undefined
+                  : threadUtility("files")
+              }
+              iosSimulator={
+                bottomPanelOpen && activeBottomSurface?.id === "ios-simulator"
+                  ? undefined
+                  : threadUtility("ios-simulator")
+              }
               launchableSurfaces={launchableDockSurfaces}
               onClose={closeDock}
               onCloseTab={closeDockTab}
@@ -4356,18 +4504,37 @@ function LaunchedShell(
               onOpenTab={(surface) => openDockTab(surface)}
               onSelectSurface={selectDockTab}
               open={dockVisible}
-              plan={threadUtility("plan")}
+              plan={
+                bottomPanelOpen && activeBottomSurface?.id === "plan"
+                  ? undefined
+                  : threadUtility("plan")
+              }
               resolution={dockResolution}
-              sideChat={threadUtility("side-chat")}
-              {...(bottomPanelOpen ? {} : { terminal: threadUtility("terminal") })}
-              tests={threadUtility("tests")}
+              sideChat={
+                bottomPanelOpen && activeBottomSurface?.id === "side-chat"
+                  ? undefined
+                  : threadUtility("side-chat")
+              }
+              {...(bottomPanelOpen && activeBottomSurface?.id === "terminal"
+                ? {}
+                : { terminal: threadUtility("terminal") })}
+              tests={
+                bottomPanelOpen && activeBottomSurface?.id === "tests"
+                  ? undefined
+                  : threadUtility("tests")
+              }
               tabs={dockTabs}
               width={contextSidebarWidth}
             />
-            {bottomPanelOpen ? (
+            {bottomPanelOpen && activeBottomSurface !== undefined ? (
               <BottomUtilityPanel
+                activeSurface={activeBottomSurface}
+                content={bottomToolContent(activeBottomSurface.id)}
                 height={bottomPanelHeight}
-                onClose={() => closeBottomPanel()}
+                launchableSurfaces={bottomPanelSurfaces}
+                onClose={(surface) =>
+                  surface === undefined ? closeBottomPanel() : closeBottomPanelTab(surface)
+                }
                 onCommitHeight={(height) => {
                   setPreviewBottomPanelHeight(undefined);
                   persistBottomPanelPresentation({
@@ -4376,8 +4543,9 @@ function LaunchedShell(
                     open: true,
                   });
                 }}
+                onOpenTool={openBottomTool}
                 onPreviewHeight={setPreviewBottomPanelHeight}
-                terminal={threadUtility("terminal")}
+                tabs={bottomPanelTabs}
               />
             ) : null}
           </>
