@@ -57,7 +57,7 @@ function serviceFixture(options: {
     ReadonlyArray<{
       readonly name: string;
       readonly fetchUrl: string;
-      readonly pushUrl?: string;
+      readonly pushUrl: string;
     }>
   >;
   readonly list?: (
@@ -102,15 +102,18 @@ function serviceFixture(options: {
     },
     remotes: {
       remotes: async (root) => {
-        const remotes =
+        return (
           options.remotes?.[root] ??
           (root === "/repos/octant"
-            ? [{ name: "origin", fetchUrl: "https://github.com/octant/octant.git" }]
-            : []);
-        return remotes.map((remote) => ({
-          ...remote,
-          pushUrl: remote.pushUrl ?? remote.fetchUrl,
-        }));
+            ? [
+                {
+                  name: "origin",
+                  fetchUrl: "https://github.com/octant/octant.git",
+                  pushUrl: "https://github.com/octant/octant.git",
+                },
+              ]
+            : [])
+        );
       },
     },
     list: { listActive },
@@ -167,10 +170,34 @@ describe("CodeProjectPullRequestService", () => {
         }),
       ],
       remotes: {
-        "/https": [{ name: "origin", fetchUrl: "https://github.com/octant/https.git" }],
-        "/scp": [{ name: "origin", fetchUrl: "git@github.com:octant/scp.git" }],
-        "/ssh": [{ name: "origin", fetchUrl: "ssh://git@github.com/octant/ssh.git" }],
-        "/enterprise": [{ name: "origin", fetchUrl: "https://github.example.com/octant/ent.git" }],
+        "/https": [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/https.git",
+            pushUrl: "https://github.com/octant/https.git",
+          },
+        ],
+        "/scp": [
+          {
+            name: "origin",
+            fetchUrl: "git@github.com:octant/scp.git",
+            pushUrl: "git@github.com:octant/scp.git",
+          },
+        ],
+        "/ssh": [
+          {
+            name: "origin",
+            fetchUrl: "ssh://git@github.com/octant/ssh.git",
+            pushUrl: "ssh://git@github.com/octant/ssh.git",
+          },
+        ],
+        "/enterprise": [
+          {
+            name: "origin",
+            fetchUrl: "https://github.example.com/octant/ent.git",
+            pushUrl: "https://github.example.com/octant/ent.git",
+          },
+        ],
       },
     });
 
@@ -188,8 +215,16 @@ describe("CodeProjectPullRequestService", () => {
       projects: [codeProject({ id: projectA, name: "Ambiguous", root: "/ambiguous" })],
       remotes: {
         "/ambiguous": [
-          { name: "origin", fetchUrl: "https://github.com/acme/one.git" },
-          { name: "upstream", fetchUrl: "https://github.com/acme/two.git" },
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/acme/one.git",
+            pushUrl: "https://github.com/acme/one.git",
+          },
+          {
+            name: "upstream",
+            fetchUrl: "https://github.com/acme/two.git",
+            pushUrl: "https://github.com/acme/two.git",
+          },
         ],
       },
     });
@@ -210,9 +245,21 @@ describe("CodeProjectPullRequestService", () => {
         codeProject({ id: projectC, name: "Docs", root: "/repos/docs" }),
       ],
       remotes: {
-        "/repos/octant": [{ name: "origin", fetchUrl: "https://github.com/octant/octant.git" }],
+        "/repos/octant": [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/octant.git",
+            pushUrl: "https://github.com/octant/octant.git",
+          },
+        ],
         "/repos/notes": [],
-        "/repos/docs": [{ name: "origin", fetchUrl: "git@github.com:octant/docs.git" }],
+        "/repos/docs": [
+          {
+            name: "origin",
+            fetchUrl: "git@github.com:octant/docs.git",
+            pushUrl: "git@github.com:octant/docs.git",
+          },
+        ],
       },
       list: async (request) => {
         order.push(`start:${request.owner}/${request.name}`);
@@ -341,8 +388,20 @@ describe("CodeProjectPullRequestService", () => {
         codeProject({ id: projectC, name: "Docs", root: "/repos/docs" }),
       ],
       remotes: {
-        "/repos/octant": [{ name: "origin", fetchUrl: "https://github.com/octant/octant.git" }],
-        "/repos/docs": [{ name: "origin", fetchUrl: "https://github.com/octant/docs.git" }],
+        "/repos/octant": [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/octant.git",
+            pushUrl: "https://github.com/octant/octant.git",
+          },
+        ],
+        "/repos/docs": [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/docs.git",
+            pushUrl: "https://github.com/octant/docs.git",
+          },
+        ],
       },
       list: async (request) => ({
         status: "ok",
@@ -371,8 +430,20 @@ describe("CodeProjectPullRequestService", () => {
         codeProject({ id: projectC, name: "Docs", root: "/repos/docs" }),
       ],
       remotes: {
-        "/repos/octant": [{ name: "origin", fetchUrl: "https://github.com/octant/octant.git" }],
-        "/repos/docs": [{ name: "origin", fetchUrl: "https://github.com/octant/docs.git" }],
+        "/repos/octant": [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/octant.git",
+            pushUrl: "https://github.com/octant/octant.git",
+          },
+        ],
+        "/repos/docs": [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/docs.git",
+            pushUrl: "https://github.com/octant/docs.git",
+          },
+        ],
       },
       list: async (request) => ({
         status: "ok",
@@ -406,7 +477,13 @@ describe("CodeProjectPullRequestService", () => {
     const remotes = Object.fromEntries(
       projects.map((project, index) => [
         `/repos/r${index}`,
-        [{ name: "origin", fetchUrl: `https://github.com/octant/r${index}.git` }],
+        [
+          {
+            name: "origin",
+            fetchUrl: `https://github.com/octant/r${index}.git`,
+            pushUrl: `https://github.com/octant/r${index}.git`,
+          },
+        ],
       ]),
     );
     const many = serviceFixture({

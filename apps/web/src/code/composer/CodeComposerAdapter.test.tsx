@@ -62,6 +62,15 @@ describe("CodeComposerAdapter", () => {
     expect(html).toContain("disabled");
   });
 
+  it("does not show unavailable-project guidance before a Project is selected", () => {
+    const { projectId: _projectId, projectName: _projectName, ...withoutProject } = defaultProps;
+    const html = renderToStaticMarkup(
+      <CodeComposerAdapter {...withoutProject} projectAvailable={false} />,
+    );
+
+    expect(html).not.toContain("The selected Project is unavailable");
+  });
+
   it("renders error message when provided", () => {
     const html = renderToStaticMarkup(
       <CodeComposerAdapter {...defaultProps} errorMessage="Checkout failed" />,

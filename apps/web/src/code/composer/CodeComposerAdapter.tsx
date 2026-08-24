@@ -393,7 +393,9 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               ? "Choose a Project to build in. Its repository is the checkout this thread works against."
               : "Start a Code thread in this repository. The thread inherits the current checkout and approval policy."}
           </p>
-          {props.projectAvailable === false && props.errorMessage === undefined ? (
+          {props.projectAvailable === false &&
+          props.projectId !== undefined &&
+          props.errorMessage === undefined ? (
             <p role="status">The selected Project is unavailable. Choose another Project.</p>
           ) : null}
         </div>
