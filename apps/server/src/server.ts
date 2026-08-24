@@ -30,6 +30,7 @@ import {
   type CodeCheckoutIdentity,
   type PermissionPersistence,
   type ProviderInstance,
+  type ProviderRuntimeEvent,
   type WindowId,
   type CanvasRefreshRequest,
   type CanvasRefreshSkill,
@@ -39,14 +40,11 @@ import {
   type CodeThreadId,
   type OctantMode,
   type WorkThreadId,
-  UtcTimestamp as UtcTimestampSchema,
 } from "@octant/contracts";
 import type { ExtensionProviderFamily, StandaloneSkillScope } from "@octant/contracts/extensions";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type { AgentRunControlParentFacts } from "./agentRun/agentRunControlService";
 import { Data, Effect, Schema, Scope } from "effect";
-
-const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 import { DurableBindingReceiptStore } from "./bindingReceiptStore";
 import { assistantTranscript } from "./chat/assistantTranscript";
 import { ChatService } from "./chat/chatService";
@@ -232,7 +230,6 @@ import {
 import { createContextRouteHandler } from "./contextRoutes";
 import { GitEnvironmentPort } from "./gitEnvironmentPort";
 import { GitObservationPort } from "./code/gitObservationPort";
-import { resolveConnectedGitHubRepository } from "./code/connectedRepository";
 import { GitMutationPort } from "./code/gitMutationPort";
 import { GitService } from "./code/gitService";
 import { GhAuthenticationPort } from "./github/ghAuthenticationPort";
@@ -364,6 +361,8 @@ import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
 import { ProviderService } from "./providers/providerService";
 import { ProviderUsageLimitsService } from "./providers/providerUsageLimitsService";
 import { createProviderUsageLimitsRouteHandler } from "./providers/providerUsageLimitsRoutes";
+import { ProviderRuntimeUsageLimitsStore } from "./providers/providerRuntimeUsageLimitsStore";
+import { attachProviderRuntimeUsageLimits } from "./providers/providerRuntimeUsageLimitsDriver";
 import {
   createShellRouteHandler,
   isAllowedRendererOrigin,
@@ -650,6 +649,7 @@ interface ConfiguredProviderDriverOptions {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly ollamaHistoryStore?: OllamaHistoryStore;
+  readonly onRuntimeEvent?: (event: ProviderRuntimeEvent) => void;
 }
 
 export function makeConfiguredProviderDriver(
@@ -659,8 +659,9 @@ export function makeConfiguredProviderDriver(
   if (!instance.enabled) {
     throw new Error("Provider instance is disabled.");
   }
+  let driver: ProviderDriver;
   if (instance.driverKind === "openai-compatible") {
-    return makeOpenAiCompatibleDriver({
+    driver = makeOpenAiCompatibleDriver({
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
@@ -669,9 +670,8 @@ export function makeConfiguredProviderDriver(
         : { credentialResolver: options.credentialResolver }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-  }
-  if (instance.driverKind === "anthropic-compatible") {
-    return makeAnthropicCompatibleDriver({
+  } else if (instance.driverKind === "anthropic-compatible") {
+    driver = makeAnthropicCompatibleDriver({
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
@@ -680,9 +680,8 @@ export function makeConfiguredProviderDriver(
         : { credentialResolver: options.credentialResolver }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
-  }
-  if (instance.driverKind === "azure-foundry") {
-    return makeAzureFoundryDriver({
+  } else if (instance.driverKind === "azure-foundry") {
+    driver = makeAzureFoundryDriver({
       instanceId: instance.id,
       configuration: instance.configuration,
       runtimeRegistry: options.runtimeRegistry,
@@ -691,33 +690,37 @@ export function makeConfiguredProviderDriver(
         : { credentialResolver: options.credentialResolver }),
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
+  } else {
+    driver = makeProviderDriver(instance, {
+      openCodeProcess: options.openCodeProcess,
+      codexProcess: options.codexProcess,
+      runtimeRegistry: options.runtimeRegistry,
+      permissionPersistence: options.permissionPersistence,
+      ...(options.acpProcess === undefined ? {} : { acpProcess: options.acpProcess }),
+      ...(options.acpHome === undefined ? {} : { acpHome: options.acpHome }),
+      ...(options.piProcess === undefined ? {} : { piProcess: options.piProcess }),
+      ...(options.piHome === undefined ? {} : { piHome: options.piHome }),
+      ...(options.ohMyPiProcess === undefined ? {} : { ohMyPiProcess: options.ohMyPiProcess }),
+      ...(options.ohMyPiHome === undefined ? {} : { ohMyPiHome: options.ohMyPiHome }),
+      ...(options.claudeProcess === undefined ? {} : { claudeProcess: options.claudeProcess }),
+      ...(options.claudeSdk === undefined ? {} : { claudeSdk: options.claudeSdk }),
+      ...(options.claudeResumeIdentityPort === undefined
+        ? {}
+        : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
+      ...(options.isProjectConfinedPath === undefined
+        ? {}
+        : { isProjectConfinedPath: options.isProjectConfinedPath }),
+      ...(options.credentialResolver === undefined
+        ? {}
+        : { credentialResolver: options.credentialResolver }),
+      ...(options.ollamaHistoryStore === undefined
+        ? {}
+        : { ollamaHistoryStore: options.ollamaHistoryStore }),
+    });
   }
-  return makeProviderDriver(instance, {
-    openCodeProcess: options.openCodeProcess,
-    codexProcess: options.codexProcess,
-    runtimeRegistry: options.runtimeRegistry,
-    permissionPersistence: options.permissionPersistence,
-    ...(options.acpProcess === undefined ? {} : { acpProcess: options.acpProcess }),
-    ...(options.acpHome === undefined ? {} : { acpHome: options.acpHome }),
-    ...(options.piProcess === undefined ? {} : { piProcess: options.piProcess }),
-    ...(options.piHome === undefined ? {} : { piHome: options.piHome }),
-    ...(options.ohMyPiProcess === undefined ? {} : { ohMyPiProcess: options.ohMyPiProcess }),
-    ...(options.ohMyPiHome === undefined ? {} : { ohMyPiHome: options.ohMyPiHome }),
-    ...(options.claudeProcess === undefined ? {} : { claudeProcess: options.claudeProcess }),
-    ...(options.claudeSdk === undefined ? {} : { claudeSdk: options.claudeSdk }),
-    ...(options.claudeResumeIdentityPort === undefined
-      ? {}
-      : { claudeResumeIdentityPort: options.claudeResumeIdentityPort }),
-    ...(options.isProjectConfinedPath === undefined
-      ? {}
-      : { isProjectConfinedPath: options.isProjectConfinedPath }),
-    ...(options.credentialResolver === undefined
-      ? {}
-      : { credentialResolver: options.credentialResolver }),
-    ...(options.ollamaHistoryStore === undefined
-      ? {}
-      : { ollamaHistoryStore: options.ollamaHistoryStore }),
-  });
+  return options.onRuntimeEvent === undefined
+    ? driver
+    : attachProviderRuntimeUsageLimits(driver, { record: options.onRuntimeEvent });
 }
 
 export interface StartOctantServerOptions {
@@ -1439,11 +1442,11 @@ export function startOctantServer(
         // work, and unrelated turns keep the real limits.
         serviceLimits: makeUnobservedProviderCapacityFacts({
           scheduler: capacityScheduler,
-          now: () => decodeUtcTimestamp(new Date().toISOString()),
+          now: () => new Date().toISOString() as UtcTimestamp,
         }),
         onSessionStarted: ({ runId }) => agentRunLiveConversations.begin(runId),
         onTextDelta: ({ runId, text, occurredAt }) =>
-          agentRunLiveConversations.appendText(runId, text, decodeUtcTimestamp(occurredAt)),
+          agentRunLiveConversations.appendText(runId, text, occurredAt as UtcTimestamp),
         onSessionSettled: ({ runId, outcome }) => {
           if (outcome.kind === "completed") {
             agentRunLiveConversations.complete(runId);
@@ -2041,19 +2044,15 @@ export function startOctantServer(
       projectRootPort,
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
-    const gitObservationPort = new GitObservationPort();
     const projectService = new ProjectService({
       persistence,
       bindingReceiptStore,
       projectRootPort,
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
-      observeCodeProjectRepository: async (canonicalRoot) => {
-        const remotes = await gitObservationPort.observeRemotes(canonicalRoot);
-        return remotes === undefined ? undefined : resolveConnectedGitHubRepository(remotes);
-      },
     });
     const gitEnvironmentPort = options.gitEnvironmentPort ?? new GitEnvironmentPort();
+    const gitObservationPort = new GitObservationPort();
     const codeContent = new CodeContentStore();
     const codeEvidence = new CodeEvidenceStore({ connection: persistence.connection });
     const codeAttachments = new CodeAttachmentStore(persistence.dataDirectory);
@@ -2293,6 +2292,7 @@ export function startOctantServer(
       new ProviderRuntimeRegistry({
         receiptDirectory: join(providerDataDirectory, "providers", "runtime-receipts"),
       });
+    const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
     const openCodeProcess = options.openCodeProcess ?? makeOpenCodeProcessLive();
     const codexProcess = options.codexProcess ?? makeCodexProcessLive({ octantVersion: version });
     const acpProcess = options.acpProcess ?? makeAcpProcessLive();
@@ -2623,6 +2623,7 @@ export function startOctantServer(
       clock: () => new Date().toISOString(),
       clearResumeIdentities: (instanceId) =>
         claudeResumeIdentityStore.removeProvider(instanceId, new AbortController().signal),
+      clearRuntimeUsageLimits: (instanceId) => providerRuntimeUsageLimitsStore.clear(instanceId),
       driver: (instance) =>
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
@@ -2641,6 +2642,7 @@ export function startOctantServer(
             isProjectConfinedPath,
             runtimeRegistry: providerRuntimeRegistry,
             permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
+            onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
           }),
           () => workRequestRuntime,
@@ -2684,7 +2686,7 @@ export function startOctantServer(
       },
     });
     const chatDataDirectory = join(providerDataDirectory, "chat");
-    const configuredDriverOptions = {
+    const configuredDriverOptions: ConfiguredProviderDriverOptions = {
       openCodeProcess,
       codexProcess,
       acpProcess,
@@ -2700,11 +2702,12 @@ export function startOctantServer(
       isProjectConfinedPath,
       runtimeRegistry: providerRuntimeRegistry,
       permissionPersistence: () => persistence.readProviderDefaults().permissionPersistence,
+      onRuntimeEvent: (event) => providerRuntimeUsageLimitsStore.record(event),
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
     };
     const providerUsageLimitsService = new ProviderUsageLimitsService({
       listInstances: () => persistence.readProviderInstances(),
-      now: () => decodeUtcTimestamp(new Date().toISOString()),
+      now: () => new Date().toISOString() as UtcTimestamp,
       observe: async (instance, signal) => {
         let driver: ProviderDriver;
         try {
@@ -2722,6 +2725,8 @@ export function startOctantServer(
         );
         return { source: "provider-runtime", limits };
       },
+      runtimeLimits: (instanceId, observedAt) =>
+        providerRuntimeUsageLimitsStore.serviceLimits(instanceId, observedAt),
     });
     providerUsageLimitsService.start();
     void providerUsageLimitsService.refresh().catch(() => undefined);

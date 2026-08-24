@@ -132,6 +132,24 @@ function LimitBuckets({ limits }: { readonly limits: ProviderServiceLimits }) {
       {buckets.map(([label, bucket]) => (
         <LimitBucket bucket={bucket} key={label} label={label} />
       ))}
+      {limits.rateLimitWindows?.map((window) => (
+        <div className="provider-limits__window" key={window.window}>
+          <p>
+            {window.window} · {capitalize(window.status)}
+            {window.utilization === undefined
+              ? ""
+              : ` · ${Math.round(window.utilization * 100)}% used`}
+            {window.resetsAt === undefined ? "" : ` · resets ${formatTime(window.resetsAt)}`}
+          </p>
+          {window.utilization === undefined ? null : (
+            <progress
+              aria-label={`${window.window} used`}
+              max={100}
+              value={Math.round(window.utilization * 100)}
+            />
+          )}
+        </div>
+      ))}
       {limits.retry.status === "active" ? (
         <p className="provider-limits__warning">
           Retry window until {formatTime(limits.retry.until)}

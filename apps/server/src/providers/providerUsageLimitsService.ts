@@ -5,11 +5,14 @@ import {
   type ProviderUsageLimitsEntry,
   type ProviderUsageLimitsSnapshot,
   type ProviderUsageLimitsSource,
+  type ProviderInstanceId,
   type ProviderServiceLimits,
-  type UtcTimestamp,
   UtcTimestamp as UtcTimestampSchema,
+  type UtcTimestamp,
 } from "@octant/contracts";
 import { Schema } from "effect";
+
+const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 
 class ProviderUsageLimitsTimeout extends Error {
   override readonly name = "ProviderUsageLimitsTimeout";
@@ -30,6 +33,11 @@ export interface ProviderUsageLimitsServiceOptions {
     instance: ProviderInstance,
     signal: AbortSignal,
   ) => Promise<ProviderUsageLimitsObservation | undefined>;
+  /** Latest normalized runtime evidence, if a live session has reported it. */
+  readonly runtimeLimits?: (
+    instanceId: ProviderInstanceId,
+    observedAt: UtcTimestamp,
+  ) => ProviderServiceLimits | undefined;
   readonly now: () => UtcTimestamp;
   readonly refreshIntervalMs?: number;
   readonly refreshTimeoutMs?: number;
@@ -39,11 +47,11 @@ export interface ProviderUsageLimitsServiceOptions {
 
 const DEFAULT_REFRESH_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_REFRESH_TIMEOUT_MS = 15_000;
-const decodeUtcTimestamp = Schema.decodeUnknownSync(UtcTimestampSchema);
 
 export class ProviderUsageLimitsService {
   readonly #options: ProviderUsageLimitsServiceOptions;
   readonly #entries = new Map<string, ProviderUsageLimitsEntry>();
+  readonly #runtimeWindowOwners = new Set<string>();
   #inFlight: Promise<ProviderUsageLimitsSnapshot> | undefined;
   #refreshAbortController: AbortController | undefined;
   #scheduleHandle: ReturnType<typeof setInterval> | undefined;
@@ -90,13 +98,14 @@ export class ProviderUsageLimitsService {
   async #refresh(signal: AbortSignal): Promise<ProviderUsageLimitsSnapshot> {
     const observedAt = this.#options.now();
     const instances = this.#options.listInstances();
+    this.#pruneRuntimeWindowOwners(instances);
     const next = await Promise.all(
       instances.map((instance) => this.#observe(instance, observedAt, signal)),
     );
     if (signal.aborted) return this.#snapshot(this.#options.now());
     this.#entries.clear();
     for (const entry of next) this.#entries.set(String(entry.providerInstanceId), entry);
-    return this.#snapshot(observedAt);
+    return this.#snapshot(this.#options.now());
   }
 
   async #observe(
@@ -111,6 +120,7 @@ export class ProviderUsageLimitsService {
     const retryAt = this.#retryAt(previous);
     if (previous !== undefined && retryAt !== undefined && retryAt > observedAt) return previous;
     if (!instance.enabled) {
+      this.#runtimeWindowOwners.delete(String(instance.id));
       return this.#unavailable(instance, observedAt, "not-configured");
     }
     const controller = new AbortController();
@@ -139,38 +149,71 @@ export class ProviderUsageLimitsService {
           }
         }),
       ]);
+      const runtimeLimits = this.#options.runtimeLimits?.(instance.id, observedAt);
       if (observation === undefined) {
-        return this.#unavailable(instance, observedAt, "unsupported");
+        if (runtimeLimits === undefined) {
+          this.#runtimeWindowOwners.delete(String(instance.id));
+          return this.#unavailable(instance, observedAt, "unsupported");
+        }
+        if (runtimeLimits.rateLimitWindows === undefined) {
+          this.#runtimeWindowOwners.delete(String(instance.id));
+        } else {
+          this.#runtimeWindowOwners.add(String(instance.id));
+        }
+        return {
+          providerInstanceId: instance.id,
+          status: "available",
+          source: "provider-runtime",
+          observedAt,
+          limits: runtimeLimits,
+        };
+      }
+      if (runtimeLimits?.rateLimitWindows === undefined) {
+        this.#runtimeWindowOwners.delete(String(instance.id));
+      } else {
+        this.#runtimeWindowOwners.add(String(instance.id));
       }
       return {
         providerInstanceId: instance.id,
         status: "available",
         source: observation.source,
         observedAt,
-        limits: observation.limits,
+        limits:
+          runtimeLimits?.rateLimitWindows === undefined
+            ? observation.limits
+            : {
+                ...observation.limits,
+                rateLimitWindows: runtimeLimits.rateLimitWindows,
+              },
       };
     } catch (error) {
       if (error instanceof ProviderUsageLimitsStopped) {
         return previous ?? this.#unavailable(instance, observedAt, "not-ready");
       }
-      const staleLimits =
+      const runtimeLimits = this.#options.runtimeLimits?.(instance.id, observedAt);
+      if (runtimeLimits?.rateLimitWindows !== undefined) {
+        this.#runtimeWindowOwners.add(String(instance.id));
+      }
+      const priorStaleLimits =
         previous?.status === "available"
           ? previous.limits
           : previous?.status === "failed"
-            ? previous.staleLimits
-            : undefined;
+            ? (previous.staleLimits ?? runtimeLimits)
+            : runtimeLimits;
+      const staleLimits =
+        priorStaleLimits === undefined || runtimeLimits?.rateLimitWindows === undefined
+          ? priorStaleLimits
+          : { ...priorStaleLimits, rateLimitWindows: runtimeLimits.rateLimitWindows };
       const lastSuccessfulAt =
         previous?.status === "available"
           ? previous.observedAt
           : previous?.status === "failed"
-            ? previous.lastSuccessfulAt
-            : undefined;
+            ? (previous.lastSuccessfulAt ?? runtimeLimits?.updatedAt)
+            : runtimeLimits?.updatedAt;
       const providerFailure = this.#providerFailure(error);
       const retryAfterMs = providerFailure?.retryAfterMs;
       const failureRetryAt =
-        retryAfterMs === undefined
-          ? undefined
-          : new Date(Date.parse(observedAt) + retryAfterMs).toISOString();
+        retryAfterMs === undefined ? undefined : decodeRetryTimestamp(observedAt, retryAfterMs);
       return {
         providerInstanceId: instance.id,
         status: "failed",
@@ -187,7 +230,7 @@ export class ProviderUsageLimitsService {
                   ? "protocol"
                   : "unavailable",
           message: "Provider limits could not be refreshed.",
-          ...(failureRetryAt === undefined ? {} : { retryAt: decodeUtcTimestamp(failureRetryAt) }),
+          ...(failureRetryAt === undefined ? {} : { retryAt: failureRetryAt }),
         },
         ...(staleLimits === undefined ? {} : { staleLimits }),
         ...(lastSuccessfulAt === undefined ? {} : { lastSuccessfulAt }),
@@ -203,7 +246,9 @@ export class ProviderUsageLimitsService {
     instance: ProviderInstance,
     observedAt: UtcTimestamp,
     reason: "unsupported" | "not-configured" | "not-ready",
+    clearRuntimeOwnership = true,
   ): ProviderUsageLimitsEntry {
+    if (clearRuntimeOwnership) this.#runtimeWindowOwners.delete(String(instance.id));
     return {
       providerInstanceId: instance.id,
       status: "unavailable",
@@ -230,12 +275,117 @@ export class ProviderUsageLimitsService {
   }
 
   #snapshot(refreshedAt: UtcTimestamp): ProviderUsageLimitsSnapshot {
+    const entries = new Map(this.#entries);
+    const runtimeLimits = this.#options.runtimeLimits;
+    if (runtimeLimits !== undefined) {
+      const instances = this.#options.listInstances();
+      this.#pruneRuntimeWindowOwners(instances);
+      for (const instance of instances) {
+        if (!instance.enabled) continue;
+        const limits = runtimeLimits(instance.id, refreshedAt);
+        const previous = entries.get(String(instance.id));
+        if (limits === undefined) {
+          if (
+            previous?.status === "available" &&
+            this.#runtimeWindowOwners.has(String(instance.id)) &&
+            previous.limits.rateLimitWindows !== undefined
+          ) {
+            const { rateLimitWindows: _expiredWindows, ...withoutWindows } = previous.limits;
+            entries.set(
+              String(instance.id),
+              hasServiceLimitEvidence(withoutWindows)
+                ? {
+                    ...previous,
+                    limits: withoutWindows,
+                  }
+                : this.#unavailable(instance, refreshedAt, "unsupported", false),
+            );
+          }
+          if (
+            previous?.status === "failed" &&
+            this.#runtimeWindowOwners.has(String(instance.id)) &&
+            previous.staleLimits?.rateLimitWindows !== undefined
+          ) {
+            const { staleLimits: _staleLimits, ...withoutStaleLimits } = previous;
+            const { rateLimitWindows: _expiredWindows, ...withoutWindows } = previous.staleLimits;
+            entries.set(
+              String(instance.id),
+              hasServiceLimitEvidence(withoutWindows)
+                ? { ...withoutStaleLimits, staleLimits: withoutWindows }
+                : withoutStaleLimits,
+            );
+          }
+          continue;
+        }
+        if (previous?.status === "failed") {
+          const staleLimits =
+            previous.staleLimits === undefined || limits.rateLimitWindows === undefined
+              ? (previous.staleLimits ?? limits)
+              : { ...previous.staleLimits, rateLimitWindows: limits.rateLimitWindows };
+          entries.set(String(instance.id), {
+            ...previous,
+            staleLimits,
+            ...(previous.lastSuccessfulAt === undefined
+              ? { lastSuccessfulAt: limits.updatedAt }
+              : {}),
+          });
+          continue;
+        }
+        const previousAvailable = previous?.status === "available" ? previous : undefined;
+        entries.set(String(instance.id), {
+          providerInstanceId: instance.id,
+          status: "available",
+          source: previousAvailable?.source ?? "provider-runtime",
+          observedAt:
+            previousAvailable === undefined
+              ? limits.updatedAt
+              : latestTimestamp(previousAvailable.observedAt, limits.updatedAt),
+          limits:
+            previousAvailable !== undefined && limits.rateLimitWindows !== undefined
+              ? { ...previousAvailable.limits, rateLimitWindows: limits.rateLimitWindows }
+              : limits,
+        });
+      }
+    }
     return decodeProviderUsageLimitsSnapshot({
       version: 1,
       refreshedAt,
-      entries: [...this.#entries.values()].sort((left, right) =>
+      entries: [...entries.values()].sort((left, right) =>
         String(left.providerInstanceId).localeCompare(String(right.providerInstanceId)),
       ),
     });
+  }
+
+  #pruneRuntimeWindowOwners(instances: ReadonlyArray<ProviderInstance>): void {
+    const currentIds = new Set(instances.map((instance) => String(instance.id)));
+    for (const ownerId of this.#runtimeWindowOwners) {
+      if (!currentIds.has(ownerId)) this.#runtimeWindowOwners.delete(ownerId);
+    }
+  }
+}
+
+function hasServiceLimitEvidence(limits: ProviderServiceLimits): boolean {
+  return (
+    limits.requests.status === "available" ||
+    limits.tokens.status === "available" ||
+    limits.concurrency.status === "available" ||
+    limits.retry.status === "active" ||
+    limits.quota === "available" ||
+    limits.quota === "exhausted"
+  );
+}
+
+function latestTimestamp(left: UtcTimestamp, right: UtcTimestamp): UtcTimestamp {
+  return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+function decodeRetryTimestamp(
+  observedAt: UtcTimestamp,
+  retryAfterMs: number,
+): UtcTimestamp | undefined {
+  try {
+    return decodeUtcTimestamp(new Date(Date.parse(observedAt) + retryAfterMs).toISOString());
+  } catch {
+    return undefined;
   }
 }

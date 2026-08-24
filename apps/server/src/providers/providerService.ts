@@ -153,6 +153,8 @@ export interface ProviderServiceOptions {
   readonly probe?: (instance: ProviderInstance) => Promise<unknown>;
   readonly driver?: (instance: ProviderInstance) => ProviderDriver;
   readonly clearResumeIdentities?: (instanceId: ProviderInstanceId) => Promise<void>;
+  /** Clears process-local provider limit evidence when identity/configuration changes. */
+  readonly clearRuntimeUsageLimits?: (instanceId: ProviderInstanceId) => void;
   readonly uuid: () => string;
   readonly clock: () => string;
 }
@@ -174,6 +176,7 @@ export class ProviderService implements ProviderServiceApi {
   readonly #clock: () => string;
   readonly #driverProvider: ProviderServiceOptions["driver"];
   readonly #clearResumeIdentities: ProviderServiceOptions["clearResumeIdentities"];
+  readonly #clearRuntimeUsageLimits: ProviderServiceOptions["clearRuntimeUsageLimits"];
 
   constructor(options: ProviderServiceOptions) {
     this.#persistence = options.persistence;
@@ -193,6 +196,7 @@ export class ProviderService implements ProviderServiceApi {
     this.#clock = options.clock;
     this.#driverProvider = options.driver;
     this.#clearResumeIdentities = options.clearResumeIdentities;
+    this.#clearRuntimeUsageLimits = options.clearRuntimeUsageLimits;
   }
 
   async bootstrap(_authenticatedWindowId: WindowId): Promise<ProviderRegistrySnapshot> {
@@ -350,6 +354,7 @@ export class ProviderService implements ProviderServiceApi {
             "provider authentication changed",
             decodeTimestamp(this.#clock()),
           );
+          this.#clearRuntimeUsageLimits?.(instance.id);
           return decodeProviderRegistryCommandResult({
             kind: "provider-authentication-completed",
             instanceId: instance.id,
@@ -531,6 +536,7 @@ export class ProviderService implements ProviderServiceApi {
             await this.#clearResumeIdentities?.(current.id);
           }
           this.#invalidateCatalog(current.id, { kind: "all" }, "provider removed", updatedAt);
+          this.#clearRuntimeUsageLimits?.(current.id);
           return decodeProviderRegistryCommandResult({
             kind: "provider-removed",
             instanceId: current.id,
@@ -701,6 +707,7 @@ export class ProviderService implements ProviderServiceApi {
             "provider configuration changed",
             updatedAt,
           );
+          this.#clearRuntimeUsageLimits?.(instance.id);
         }
         if (
           command.kind === "change-claude-configuration" ||
@@ -737,11 +744,13 @@ export class ProviderService implements ProviderServiceApi {
         if (instance === undefined) {
           // Clear any stale observation for a missing provider.
           this.#runtime.clearObservedState(instanceId);
+          this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#invalid("Provider instance was not found.");
         }
         if (!instance.enabled) {
           // Clear any stale observation for a disabled provider.
           this.#runtime.clearObservedState(instanceId);
+          this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#invalid("Enable this provider before probing it.");
         }
         // Do NOT clear the runtime observed state for a valid enabled probe:

@@ -51,6 +51,15 @@ function snapshot(
               source: "observed-evidence",
               confidence: "high",
               updatedAt: "2026-08-23T12:00:00.000Z",
+              rateLimitWindows: [
+                {
+                  window: "five_hour",
+                  status: "warning",
+                  utilization: 0.75,
+                  resetsAt: "2026-08-23T13:00:00.000Z",
+                  observedAt: "2026-08-23T12:00:00.000Z",
+                },
+              ],
             },
           }
         : status === "unavailable"
@@ -96,6 +105,7 @@ describe("ProviderUsageLimitsPanel", () => {
     render(<ProviderUsageLimitsPanel client={{ list, refresh }} instances={[provider]} />);
 
     expect(await screen.findByText(/25 remaining of 100 requests/)).toBeVisible();
+    expect(screen.getByText(/five_hour · Warning · 75% used/)).toBeVisible();
     expect(refresh).not.toHaveBeenCalled();
     await userEvent.click(screen.getByRole("button", { name: "Refresh provider limits" }));
     expect(refresh).toHaveBeenCalledOnce();

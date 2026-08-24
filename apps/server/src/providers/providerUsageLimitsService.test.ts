@@ -8,6 +8,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import { ProviderUsageLimitsService } from "./providerUsageLimitsService";
+import { ProviderRuntimeUsageLimitsStore } from "./providerRuntimeUsageLimitsStore";
 
 const firstId = "11111111-1111-4111-8111-111111111111" as ProviderInstanceId;
 const secondId = "22222222-2222-4222-8222-222222222222" as ProviderInstanceId;
@@ -70,6 +71,331 @@ describe("ProviderUsageLimitsService", () => {
       expect.objectContaining({ providerInstanceId: firstId, status: "available" }),
       expect.objectContaining({ providerInstanceId: secondId, status: "unavailable" }),
     ]);
+  });
+
+  it("uses live normalized runtime windows when no active provider observer exists", async () => {
+    const observedAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => undefined),
+      runtimeLimits: () =>
+        decodeProviderServiceLimits({
+          providerInstanceId: firstId,
+          scope: "provider-instance",
+          requests: { status: "unavailable" },
+          tokens: { status: "unavailable" },
+          concurrency: { status: "unavailable" },
+          retry: { status: "inactive" },
+          quota: "unknown",
+          source: "runtime-reported",
+          confidence: "high",
+          updatedAt: observedAt,
+          rateLimitWindows: [
+            {
+              window: "five_hour",
+              status: "warning",
+              utilization: 0.87,
+              observedAt,
+            },
+          ],
+        }),
+      now: () => observedAt,
+    });
+
+    const snapshot = await service.refresh();
+
+    expect(snapshot.entries[0]).toMatchObject({
+      status: "available",
+      source: "provider-runtime",
+      limits: {
+        rateLimitWindows: [{ window: "five_hour", utilization: 0.87 }],
+      },
+    });
+  });
+
+  it("includes a newly observed runtime window in a read without waiting for refresh", () => {
+    const observedAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => undefined),
+      runtimeLimits: () =>
+        decodeProviderServiceLimits({
+          providerInstanceId: firstId,
+          scope: "provider-instance",
+          requests: { status: "unavailable" },
+          tokens: { status: "unavailable" },
+          concurrency: { status: "unavailable" },
+          retry: { status: "inactive" },
+          quota: "unknown",
+          source: "runtime-reported",
+          confidence: "high",
+          updatedAt: observedAt,
+          rateLimitWindows: [{ window: "weekly", status: "allowed", observedAt }],
+        }),
+      now: () => observedAt,
+    });
+
+    expect(service.snapshot().entries).toMatchObject([
+      { status: "available", limits: { rateLimitWindows: [{ window: "weekly" }] } },
+    ]);
+  });
+
+  it("preserves local observer provenance when runtime windows are merged", async () => {
+    const observerObservedAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
+    const runtimeObservedAt = "2026-08-23T11:00:00.000Z" as UtcTimestamp;
+    const runtime = decodeProviderServiceLimits({
+      providerInstanceId: firstId,
+      scope: "provider-instance",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      concurrency: { status: "unavailable" },
+      retry: { status: "inactive" },
+      quota: "unknown",
+      source: "runtime-reported",
+      confidence: "high",
+      updatedAt: runtimeObservedAt,
+      rateLimitWindows: [{ window: "five_hour", status: "warning", observedAt: runtimeObservedAt }],
+    });
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => ({
+        source: "local-observer" as const,
+        limits: decodeProviderServiceLimits({
+          ...limits(firstId, 75),
+          updatedAt: observerObservedAt,
+        }),
+      })),
+      runtimeLimits: () => runtime,
+      now: () => observerObservedAt,
+    });
+
+    const snapshot = await service.refresh();
+
+    expect(snapshot.entries[0]).toMatchObject({
+      source: "local-observer",
+      limits: {
+        requests: { remaining: 75 },
+        rateLimitWindows: [{ window: "five_hour" }],
+      },
+    });
+  });
+
+  it("keeps runtime evidence visible when an active observer fails", async () => {
+    const runtimeObservedAt = "2026-08-23T01:00:00.000Z" as UtcTimestamp;
+    const refreshStartedAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
+    const runtime = decodeProviderServiceLimits({
+      providerInstanceId: firstId,
+      scope: "provider-instance",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      concurrency: { status: "unavailable" },
+      retry: { status: "inactive" },
+      quota: "unknown",
+      source: "runtime-reported",
+      confidence: "high",
+      updatedAt: runtimeObservedAt,
+      rateLimitWindows: [{ window: "weekly", status: "allowed", observedAt: runtimeObservedAt }],
+    });
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => {
+        throw new Error("observer unavailable");
+      }),
+      runtimeLimits: () => runtime,
+      now: () => refreshStartedAt,
+    });
+
+    await expect(service.refresh()).resolves.toMatchObject({
+      entries: [
+        {
+          status: "failed",
+          staleLimits: { rateLimitWindows: [{ window: "weekly" }] },
+          lastSuccessfulAt: runtimeObservedAt,
+        },
+      ],
+    });
+    const refreshed = await service.refresh();
+    expect(refreshed.entries[0]).toMatchObject({
+      status: "failed",
+      staleLimits: { rateLimitWindows: [{ window: "weekly" }] },
+    });
+    expect(refreshed.entries[0]).not.toMatchObject({
+      lastSuccessfulAt: refreshStartedAt,
+    });
+  });
+
+  it("does not keep an expired runtime window stale after a failed refresh", async () => {
+    const runtimeObservedAt = "2026-08-23T01:00:00.000Z" as UtcTimestamp;
+    const resetAt = "2026-08-23T02:00:00.000Z" as UtcTimestamp;
+    let now = "2026-08-23T01:30:00.000Z" as UtcTimestamp;
+    let fail = false;
+    const store = new ProviderRuntimeUsageLimitsStore();
+    store.record({
+      instanceId: firstId,
+      sessionId: "00000000-0000-4000-8000-000000000003" as never,
+      sequence: 1,
+      correlationId: "00000000-0000-4000-8000-000000000004" as never,
+      occurredAt: runtimeObservedAt,
+      kind: "rate-limit-window",
+      window: "five_hour",
+      status: "warning",
+      utilization: 0.9,
+      resetsAt: resetAt,
+    });
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: async () => {
+        if (fail) throw new Error("observer unavailable");
+        return undefined;
+      },
+      runtimeLimits: (instanceId, observedAt) => store.serviceLimits(instanceId, observedAt),
+      now: () => now,
+    });
+
+    const available = await service.refresh();
+    expect(available.entries[0]).toMatchObject({
+      status: "available",
+      limits: { rateLimitWindows: [{ window: "five_hour" }] },
+    });
+
+    now = "2026-08-23T02:30:00.000Z" as UtcTimestamp;
+    fail = true;
+    const failed = await service.refresh();
+
+    expect(failed.entries[0]).toMatchObject({ status: "failed" });
+    expect(JSON.stringify(failed)).not.toContain("five_hour");
+  });
+
+  it("prunes a runtime window that expires while a refresh is still observing", async () => {
+    const runtimeObservedAt = "2026-08-23T00:00:00.000Z" as UtcTimestamp;
+    const refreshCompletedAt = "2026-08-23T02:00:00.000Z" as UtcTimestamp;
+    const store = new ProviderRuntimeUsageLimitsStore();
+    store.record({
+      instanceId: firstId,
+      sessionId: "00000000-0000-4000-8000-000000000003" as never,
+      sequence: 1,
+      correlationId: "00000000-0000-4000-8000-000000000004" as never,
+      occurredAt: runtimeObservedAt,
+      kind: "rate-limit-window",
+      window: "five_hour",
+      status: "warning",
+      utilization: 0.9,
+      resetsAt: "2026-08-23T01:00:00.000Z" as UtcTimestamp,
+    });
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let nowCalls = 0;
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: async () => {
+        await gate;
+        return undefined;
+      },
+      runtimeLimits: (instanceId, observedAt) => store.serviceLimits(instanceId, observedAt),
+      now: () => {
+        nowCalls += 1;
+        return nowCalls === 1 ? runtimeObservedAt : refreshCompletedAt;
+      },
+    });
+
+    const refresh = service.refresh();
+    await vi.waitFor(() => expect(nowCalls).toBeGreaterThan(0));
+    release?.();
+    const snapshot = await refresh;
+
+    expect(snapshot.refreshedAt).toBe(refreshCompletedAt);
+    expect(snapshot.entries[0]).toMatchObject({ status: "unavailable" });
+    expect(JSON.stringify(snapshot)).not.toContain("five_hour");
+
+    const repeated = service.snapshot();
+    expect(repeated.entries[0]).toMatchObject({ status: "unavailable" });
+    expect(JSON.stringify(repeated)).not.toContain("five_hour");
+  });
+
+  it("preserves windows supplied by a direct observer when runtime evidence is absent", async () => {
+    const observedAt = "2026-08-23T00:00:00.000Z" as UtcTimestamp;
+    const limitsWithWindow = decodeProviderServiceLimits({
+      providerInstanceId: firstId,
+      scope: "provider-instance",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      concurrency: { status: "unavailable" },
+      retry: { status: "inactive" },
+      quota: "unknown",
+      source: "runtime-reported",
+      confidence: "high",
+      updatedAt: observedAt,
+      rateLimitWindows: [
+        {
+          window: "provider-owned",
+          status: "warning",
+          utilization: 0.5,
+          resetsAt: "2026-08-23T01:00:00.000Z",
+          observedAt,
+        },
+      ],
+    });
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => ({
+        source: "provider-runtime" as const,
+        limits: limitsWithWindow,
+      })),
+      runtimeLimits: () => undefined,
+      now: () => "2026-08-23T02:00:00.000Z" as UtcTimestamp,
+    });
+
+    await service.refresh();
+
+    expect(service.snapshot().entries[0]).toMatchObject({
+      status: "available",
+      limits: { rateLimitWindows: [{ window: "provider-owned" }] },
+    });
+  });
+
+  it("does not carry runtime ownership through provider removal and re-addition", async () => {
+    let instances: ReadonlyArray<ProviderInstance> = [instance(firstId)];
+    let runtimeAvailable = true;
+    const runtimeObservedAt = "2026-08-23T00:00:00.000Z" as UtcTimestamp;
+    const runtime = decodeProviderServiceLimits({
+      providerInstanceId: firstId,
+      scope: "provider-instance",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      concurrency: { status: "unavailable" },
+      retry: { status: "inactive" },
+      quota: "unknown",
+      source: "runtime-reported",
+      confidence: "high",
+      updatedAt: runtimeObservedAt,
+      rateLimitWindows: [{ window: "runtime", status: "warning", observedAt: runtimeObservedAt }],
+    });
+    const direct = decodeProviderServiceLimits({
+      ...runtime,
+      rateLimitWindows: [{ window: "direct", status: "allowed", observedAt: runtimeObservedAt }],
+    });
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => instances,
+      observe: vi.fn(async () =>
+        runtimeAvailable ? undefined : { source: "provider-runtime" as const, limits: direct },
+      ),
+      runtimeLimits: () => (runtimeAvailable ? runtime : undefined),
+      now: () => runtimeObservedAt,
+    });
+
+    await service.refresh();
+    instances = [];
+    await service.refresh();
+    instances = [instance(firstId)];
+    runtimeAvailable = false;
+    await service.refresh();
+
+    expect(service.snapshot().entries[0]).toMatchObject({
+      status: "available",
+      limits: { rateLimitWindows: [{ window: "direct" }] },
+    });
   });
 
   it("retains the last successful result as stale after a failed refresh", async () => {
