@@ -233,12 +233,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     ...(props.onAddSelectionToChat === undefined
       ? []
       : [{ value: "add-selection", label: "Add selection to chat" }]),
-    ...(props.onPinTerminal === undefined
-      ? []
-      : [{ value: "pin", label: "Pin to focus zone" }]),
-    ...(props.onOpenAnotherTerminal === undefined
-      ? []
-      : [{ value: "new", label: "New terminal" }]),
+    ...(props.onPinTerminal === undefined ? [] : [{ value: "pin", label: "Pin to focus zone" }]),
+    ...(props.onOpenAnotherTerminal === undefined ? [] : [{ value: "new", label: "New terminal" }]),
     ...(props.executionPolicy === "plan"
       ? []
       : result.state === "running"
