@@ -55,6 +55,16 @@ const connectedView = {
     status: "fresh",
     lastSuccessfulRefreshAt: generatedAt,
   },
+  projectFreshness: [
+    {
+      projectId,
+      freshness: { status: "fresh", lastSuccessfulRefreshAt: generatedAt },
+    },
+    {
+      projectId: "10000000-0000-4000-8000-000000000002",
+      freshness: { status: "empty" },
+    },
+  ],
   generatedAt,
 };
 
@@ -113,6 +123,13 @@ describe("Code Project pull-request contracts", () => {
       repositoriesTruncated: false,
       pullRequestsTruncated: false,
       freshness: { status: "fresh" },
+      projectFreshness: [
+        { projectId, freshness: { status: "fresh" } },
+        {
+          projectId: "10000000-0000-4000-8000-000000000002",
+          freshness: { status: "empty" },
+        },
+      ],
     });
   });
 

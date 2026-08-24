@@ -206,6 +206,44 @@ describe("CodeProjectPullRequests", () => {
     expect(screen.queryByText("0 pull requests")).not.toBeInTheDocument();
   });
 
+  it("does not show an untouched connected Project as confirmed empty", async () => {
+    const perProject = view({
+      projects: [
+        {
+          kind: "connected",
+          projectId: projectA,
+          projectName: "AuroraDocs",
+          repositoryOwner: "octant",
+          repositoryName: "aurora",
+        },
+        {
+          kind: "connected",
+          projectId: projectB,
+          projectName: "Divetools",
+          repositoryOwner: "octant",
+          repositoryName: "divetools",
+        },
+      ],
+      rows: [],
+      freshness: { status: "fresh", lastSuccessfulRefreshAt: generatedAt },
+      projectFreshness: [
+        {
+          projectId: projectA,
+          freshness: { status: "empty", lastSuccessfulRefreshAt: generatedAt },
+        },
+        { projectId: projectB, freshness: { status: "empty" } },
+      ],
+    });
+    renderWorkspace({ load: async () => perProject, refresh: async () => perProject });
+
+    const aurora = await screen.findByRole("region", { name: "Project AuroraDocs" });
+    const divetools = screen.getByRole("region", { name: "Project Divetools" });
+    expect(within(aurora).getByText("No open or draft pull requests.")).toBeVisible();
+    expect(
+      within(divetools).getByText("Not refreshed yet. Refresh this Project to load pull requests."),
+    ).toBeVisible();
+  });
+
   it("selects a pull request row without refreshing GitHub", async () => {
     const user = userEvent.setup();
     const onSelectRow = vi.fn();

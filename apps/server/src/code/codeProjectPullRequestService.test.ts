@@ -335,6 +335,46 @@ describe("CodeProjectPullRequestService", () => {
     expect(view.rows.map((row) => row.number)).toEqual([12, 4]);
   });
 
+  it("does not treat an untouched connected Project as an authoritative empty snapshot", async () => {
+    const fixture = serviceFixture({
+      projects: [
+        codeProject({ id: projectA, name: "AuroraDocs", root: "/repos/aurora" }),
+        codeProject({ id: projectC, name: "Divetools", root: "/repos/divetools" }),
+      ],
+      remotes: {
+        "/repos/aurora": [{ name: "origin", fetchUrl: "https://github.com/octant/aurora.git" }],
+        "/repos/divetools": [
+          { name: "origin", fetchUrl: "https://github.com/octant/divetools.git" },
+        ],
+      },
+      list: async (request) =>
+        request.name === "aurora"
+          ? { status: "ok", rows: [] }
+          : { status: "ok", rows: [ghRow({ number: 98, title: "Divetools PR" })] },
+    });
+
+    const refreshed = await fixture.service.refresh(
+      windowId,
+      { kind: "refresh-project", projectId: projectA },
+      new AbortController().signal,
+    );
+
+    expect(refreshed.freshness).toMatchObject({ status: "fresh" });
+    expect(refreshed.rows).toEqual([]);
+    expect(refreshed.projectFreshness).toEqual([
+      {
+        projectId: projectA,
+        freshness: { status: "empty", lastSuccessfulRefreshAt: now },
+      },
+      { projectId: projectC, freshness: { status: "empty" } },
+    ]);
+    expect(fixture.listActive).toHaveBeenCalledTimes(1);
+    expect(fixture.listActive).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "octant", name: "aurora" }),
+      expect.any(AbortSignal),
+    );
+  });
+
   it("bounds the combined cache when one Project is refreshed", async () => {
     let selectedRefresh = false;
     const fixture = serviceFixture({

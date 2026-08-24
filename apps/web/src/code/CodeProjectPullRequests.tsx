@@ -216,7 +216,7 @@ export function CodeProjectPullRequests(props: CodeProjectPullRequestsProps) {
                 rows={visibleRows.filter(
                   (row) => String(row.projectId) === String(project.projectId),
                 )}
-                freshness={view.freshness}
+                freshness={projectFreshnessFor(view, project.projectId)}
                 {...(props.onSelectRow === undefined ? {} : { onSelectRow: props.onSelectRow })}
                 {...(props.selectedRowKey === undefined
                   ? {}
@@ -370,6 +370,16 @@ function pullRequestMatches(row: CodeProjectPullRequestRow, query: string): bool
   ].some((value) => value.toLocaleLowerCase().includes(query));
 }
 
+function projectFreshnessFor(
+  view: CodeProjectPullRequestView,
+  projectId: CodeProjectPullRequestConnection["projectId"],
+): CodeProjectPullRequestFreshness {
+  const entry = view.projectFreshness?.find(
+    (candidate) => String(candidate.projectId) === String(projectId),
+  );
+  return entry?.freshness ?? view.freshness;
+}
+
 function checksStatus(
   row: CodeProjectPullRequestRow,
 ): "positive" | "warning" | "negative" | "neutral" {
@@ -468,8 +478,11 @@ function pullRequestCountCopy(freshness: CodeProjectPullRequestFreshness, count:
 }
 
 function projectEmptyCopy(freshness: CodeProjectPullRequestFreshness): string {
-  if (freshness.status === "empty")
-    return "Not refreshed yet. Refresh this Project to load pull requests.";
+  if (freshness.status === "empty") {
+    return freshness.lastSuccessfulRefreshAt === undefined
+      ? "Not refreshed yet. Refresh this Project to load pull requests."
+      : "No open or draft pull requests.";
+  }
   if (freshness.status === "stale") return "No cached pull requests for this Project.";
   return "No open or draft pull requests.";
 }
