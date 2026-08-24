@@ -431,10 +431,15 @@ function ProvidersSection(props: {
   const scan = discoveryController?.scan;
 
   async function checkInstalledProviders(): Promise<void> {
-    const enabledInstanceIds = props.providerController.instances
+    await discoveryController?.scan();
+    // Discovery may auto-register installed runtimes while the scan is in
+    // flight. Read the authoritative registry after the scan so those
+    // instances are checked too; disabled auto-registered providers remain
+    // untouched until the user explicitly enables them.
+    const enabledInstanceIds = props.providerController
+      .readInstances()
       .filter((instance) => instance.enabled)
       .map((instance) => instance.id);
-    await discoveryController?.scan();
     await Promise.all(
       enabledInstanceIds.map((instanceId) => props.providerController.probe(instanceId)),
     );
