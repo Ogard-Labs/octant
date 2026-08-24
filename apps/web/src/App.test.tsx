@@ -2410,6 +2410,42 @@ describe("App", () => {
     );
   });
 
+  it("reserves the native titlebar inset only for a host that hides its own title bar", async () => {
+    const shellClient = client();
+    const framedHost: OctantHostBridge = {
+      ...credentialHostOperations(),
+      close: vi.fn(),
+      maximizeOrRestore: vi.fn(),
+      minimize: vi.fn(),
+      projectWindowCapability,
+      resetBounds: vi.fn(),
+      selectProjectRoot: vi.fn(),
+      setSidebarMaterialPreference: vi.fn(),
+      subscribeResolvedMaterial: vi.fn(() => () => undefined),
+      windowChrome: "system-frame",
+    };
+    const { rerender } = render(
+      <App
+        hostBridge={framedHost}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        shellClient={shellClient}
+      />,
+    );
+
+    await screen.findByRole("banner");
+    expect(document.documentElement.dataset.octantNativeHost).toBeUndefined();
+
+    rerender(
+      <App
+        hostBridge={{ ...framedHost, windowChrome: "hidden-inset" }}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        shellClient={shellClient}
+      />,
+    );
+
+    await waitFor(() => expect(document.documentElement.dataset.octantNativeHost).toBe("true"));
+  });
+
   it("applies reduced transparency to the native sidebar material", async () => {
     const setSidebarVibrancyMode = vi.fn();
     const hostBridge: OctantHostBridge = {
