@@ -103,6 +103,10 @@ describe("fake-gh project pull-request port", () => {
               root === "/repos/1"
                 ? "https://github.com/octant/r1.git"
                 : "https://github.com/octant/r2.git",
+            pushUrl:
+              root === "/repos/1"
+                ? "https://github.com/octant/r1.git"
+                : "https://github.com/octant/r2.git",
           },
         ],
       },
@@ -175,7 +179,13 @@ describe("fake-gh project pull-request port", () => {
         }),
       },
       remotes: {
-        remotes: async () => [{ name: "origin", fetchUrl: "https://github.com/octant/r1.git" }],
+        remotes: async () => [
+          {
+            name: "origin",
+            fetchUrl: "https://github.com/octant/r1.git",
+            pushUrl: "https://github.com/octant/r1.git",
+          },
+        ],
       },
       list: port,
       detail: port,

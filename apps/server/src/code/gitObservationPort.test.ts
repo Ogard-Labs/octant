@@ -88,7 +88,24 @@ describe("GitObservationPort", () => {
       name: "origin",
       fetchUrl: "https://example.test/owner/repo.git",
       pushUrl: "https://example.test/owner/repo.git",
+      credentialed: true,
     });
+  });
+
+  it("reads sanitized remotes without collecting working-tree facts", async () => {
+    const repository = createRepository();
+    git(repository, "remote", "add", "origin", "https://github.com/acme/example.git");
+    writeFileSync(join(repository, "untracked.txt"), "not part of identity\n");
+
+    const remotes = await new GitObservationPort(confinedOptions()).observeRemotes(repository);
+
+    expect(remotes).toEqual([
+      {
+        name: "origin",
+        fetchUrl: "https://github.com/acme/example.git",
+        pushUrl: "https://github.com/acme/example.git",
+      },
+    ]);
   });
 
   it("observes a checkout whose branch has no commits yet", async () => {

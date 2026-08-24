@@ -69,6 +69,8 @@ export const CODE_DELIVERY_OUTCOME_LABELS: Record<CodeDeliveryOutcomeKind, strin
 
 export interface CodeComposerAdapterProps {
   readonly projectId?: ProjectId;
+  /** False when the server says the selected Code Project is unavailable. */
+  readonly projectAvailable?: boolean;
   readonly projectName?: string;
   readonly projectRoot?: string;
   readonly repositoryId?: CodeRepositoryId;
@@ -193,12 +195,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     defaultDeliveryBranchIntent(initialBaseBranch, shortId),
   );
   const [remoteName, setRemoteName] = useState(props.remoteName ?? "origin");
-  const [baseRepository, setBaseRepository] = useState(
+  const defaultBaseRepository =
     props.baseRepository ??
-      (props.projectName === undefined || props.projectName.trim() === ""
-        ? ""
-        : `local/${props.projectName}`),
-  );
+    (props.projectName === undefined || props.projectName.trim() === ""
+      ? ""
+      : `local/${props.projectName}`);
+  const [baseRepository, setBaseRepository] = useState(defaultBaseRepository);
+  const [baseRepositoryEdited, setBaseRepositoryEdited] = useState(false);
   const [baseBranch, setBaseBranch] = useState(initialBaseBranch);
   // The delivery outcome is suggested from the prompt and confirmed by the
   // user. Until the user overrides it, it tracks the live prompt suggestion.
@@ -261,7 +264,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
     setWorktreeRefs(undefined);
     setRefsLoading(false);
     setWorkspaceOverride(undefined);
+    setBaseRepositoryEdited(false);
   }, [projectId]);
+  useEffect(() => {
+    if (!baseRepositoryEdited) setBaseRepository(defaultBaseRepository);
+  }, [baseRepositoryEdited, defaultBaseRepository]);
   const loadWorktreeRefs = useCallback(() => {
     if (projectId === undefined || execute === undefined) return;
     const requestedProjectId = projectId;
@@ -386,6 +393,11 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
               ? "Choose a Project to build in. Its repository is the checkout this thread works against."
               : "Start a Code thread in this repository. The thread inherits the current checkout and approval policy."}
           </p>
+          {props.projectAvailable === false &&
+          props.projectId !== undefined &&
+          props.errorMessage === undefined ? (
+            <p role="status">The selected Project is unavailable. Choose another Project.</p>
+          ) : null}
         </div>
 
         <div className="code-composer-adapter__composer">
@@ -662,7 +674,10 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                       <span>Base repository</span>
                       <OctantInput
                         aria-label="Base repository"
-                        onChange={(e) => setBaseRepository(e.target.value)}
+                        onChange={(e) => {
+                          setBaseRepositoryEdited(true);
+                          setBaseRepository(e.target.value);
+                        }}
                         placeholder="owner/repository"
                         value={baseRepository}
                       />

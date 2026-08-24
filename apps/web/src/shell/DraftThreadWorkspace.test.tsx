@@ -432,6 +432,36 @@ describe("DraftThreadWorkspace", () => {
     );
   });
 
+  it("uses a connected GitHub Project identity for the first Code delivery target", async () => {
+    const user = userEvent.setup();
+    const onCreateCodeThread = vi.fn();
+    const connectedProjects = projects.map((candidate) =>
+      candidate.type === "code"
+        ? ({
+            ...candidate,
+            connectedRepository: { host: "github.com", owner: "acme", repository: "octant" },
+          } as ProjectSummary)
+        : candidate,
+    );
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        mode="code"
+        onCreateCodeThread={onCreateCodeThread}
+        projects={connectedProjects}
+      />,
+    );
+
+    await submitCodeDraft(user);
+
+    expect(onCreateCodeThread).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deliveryTarget: expect.objectContaining({ proposedBaseRepository: "acme/octant" }),
+      }),
+      codeProjectId,
+    );
+  });
+
   it("lets one thread override the habit without asking to rewrite the Project", async () => {
     const user = userEvent.setup();
     const onCreateCodeThread = vi.fn();

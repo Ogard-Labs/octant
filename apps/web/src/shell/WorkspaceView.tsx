@@ -1133,6 +1133,11 @@ function renderNonCodeTab(
                   projectId={project.id}
                   projectName={project.name}
                   projectRoot={project.binding.canonicalRoot}
+                  {...(project.connectedRepository === undefined
+                    ? {}
+                    : {
+                        baseRepository: `${project.connectedRepository.owner}/${project.connectedRepository.repository}`,
+                      })}
                   providerGroups={props.codeProviderGroups ?? props.draftProviderGroups ?? []}
                   {...(props.draftSelectedProviderInstanceId === undefined
                     ? {}
