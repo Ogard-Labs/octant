@@ -130,6 +130,7 @@ interface FakeServer {
   readonly devicePublicKey: () => string;
   readonly issuedSessionId: () => string | undefined;
   readonly productProofVerified: () => boolean;
+  readonly bodyDigest: () => string | undefined;
 }
 
 function createFakeServer(config: FakeServerConfig): FakeServer {
@@ -163,6 +164,7 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
   >();
   let issuedSessionId: string | undefined;
   let productProofVerified = false;
+  let lastBodyDigest: string | undefined;
 
   const hello = () => {
     const nonce = randomBytes(32).toString("base64url");
@@ -364,6 +366,7 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
       const proof = decodeRemoteRequestProofV1(
         JSON.parse(Buffer.from(proofHeader, "base64url").toString("utf8")),
       );
+      lastBodyDigest = proof.bodyDigest;
       const sessionId = issuedSessionId;
       if (sessionId === undefined || device === undefined) {
         return Response.json({ category: "unauthorized" }, { status: 401 });
@@ -392,6 +395,7 @@ function createFakeServer(config: FakeServerConfig): FakeServer {
     devicePublicKey: () => device?.publicKey ?? "",
     issuedSessionId: () => issuedSessionId,
     productProofVerified: () => productProofVerified,
+    bodyDigest: () => lastBodyDigest,
   };
 }
 
@@ -696,6 +700,28 @@ describe("RemoteConnection device-key possession", () => {
     const response = await connection.authenticatedFetch(request);
     expect(response.ok).toBe(true);
     expect(server.productProofVerified()).toBe(true);
+  });
+
+  it("digests only the visible bytes of a typed-array request body", async () => {
+    const server = createFakeServer({});
+    const { store } = createTestDeviceKeyStore();
+    const connection = createRemoteConnection({
+      origin: ORIGIN,
+      webBuildVersion: WEB_BUILD_VERSION,
+      fetch: server.fetch,
+      deviceKey: store,
+      pairing: { ticketId: TICKET_ID, ticketProof: TICKET_PROOF, deviceLabel: DEVICE_LABEL },
+    });
+    await connection.connect();
+
+    const body = new Uint8Array([0, 1, 2, 3]).subarray(1, 3);
+    await connection.authenticatedFetch({
+      method: "POST",
+      path: "/api/chat/threads",
+      body,
+    });
+
+    expect(server.bodyDigest()).toBe(createHash("sha256").update(Buffer.from(body)).digest("hex"));
   });
 
   it("sends the csrf header on state-changing requests and not on safe methods", async () => {
