@@ -57,7 +57,7 @@ describe("CodeComposerAdapter", () => {
       <CodeComposerAdapter {...defaultProps} projectAvailable={false} />,
     );
 
-    expect(html).toContain("The selected Project is unavailable");
+    expect(html).toContain("The selected Project is unavailable. Choose another Project.");
     expect(html).toContain('aria-label="Create thread"');
     expect(html).toContain("disabled");
   });
