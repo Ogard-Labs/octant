@@ -40,6 +40,9 @@ export interface ShellDialogHostProps {
   readonly searchArchivedListing: ThreadSearchListingStatus;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onCloseSearch: () => void;
+  readonly onNewSearchThread?: () => void;
+  readonly onNewSearchProject?: () => void;
+  readonly onOpenSearchSettings?: () => void;
   readonly onOpenSearchHit: (hit: ThreadSearchHit) => void;
   readonly zenActive: boolean;
   readonly activeCodeThreadView?: ShellDialogHostCodeThreadView;
@@ -81,6 +84,15 @@ export function ShellDialogHost(props: ShellDialogHostProps) {
               }
             : {})}
           onClose={props.onCloseSearch}
+          {...(props.onNewSearchThread === undefined
+            ? {}
+            : { onNewThread: props.onNewSearchThread })}
+          {...(props.onNewSearchProject === undefined
+            ? {}
+            : { onNewProject: props.onNewSearchProject })}
+          {...(props.onOpenSearchSettings === undefined
+            ? {}
+            : { onOpenSettings: props.onOpenSearchSettings })}
           onOpenThread={props.onOpenSearchHit}
         />
       ) : null}

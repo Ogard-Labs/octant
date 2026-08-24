@@ -34,6 +34,25 @@ html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   app-region: drag;
 }
 
+.shell-frame__native-drag-strip {
+  display: none;
+}
+
+/* `hiddenInset` does not make the renderer's transparent top edge draggable.
+   Reserve one explicit top-edge target after the traffic lights and collapsed
+   sidebar control. It carries no content, so no interactive child has to carve
+   a hole through a drag overlay. */
+html[data-octant-native-host="true"] .shell-frame__native-drag-strip {
+  position: fixed;
+  z-index: 5;
+  top: 0;
+  right: 0;
+  left: 112px;
+  display: block;
+  height: var(--octant-native-hidden-inset-titlebar-height);
+  pointer-events: auto;
+}
+
 .window-no-drag,
 .window-no-drag * {
   -webkit-app-region: no-drag;
@@ -97,7 +116,7 @@ html[data-octant-native-host="true"] .shell-frame > .window-chrome {
 /* Same reserve the sidebar keeps for the macOS traffic lights (see
    .sidebar__traffic-light-space); it moves here while the sidebar is hidden. */
 .window-chrome__traffic-light-space {
-  flex: 0 0 76px;
+  flex: 0 0 82px;
   height: 100%;
 }
 

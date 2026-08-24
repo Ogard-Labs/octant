@@ -119,19 +119,23 @@ validated semantic roles; incomplete or low-contrast imports fall back safely.
 
 Typography has distinct jobs:
 
-| Job        | Default                                                                    | Usage                                                                     |
-| ---------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| Interface  | `-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif` | Shell, navigation, controls, settings, metadata                           |
-| Display    | bundled `Octant Display`, then system sans                                 | Wordmark, section headings, selected navigation labels; stable brand face |
-| Transcript | system UI sans stack                                                       | Long-running conversation and composer; readable at 13–16px               |
-| Editor     | `'JetBrains Mono', 'SF Mono', Menlo, monospace`                            | Code, diffs, paths, identifiers, aligned technical values                 |
-| Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                          | Terminal output and prompt glyphs                                         |
+| Job        | Default                                                                    | Usage                                                                              |
+| ---------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Interface  | `-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif` | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Display    | inherits Interface                                                         | Wordmark, section headings, selected navigation labels                             |
+| Transcript | inherits Interface                                                         | Long-running conversation and composer; readable at 13–16px                        |
+| Editor     | `'JetBrains Mono', 'SF Mono', Menlo, monospace`                            | Code, diffs, paths, identifiers, aligned technical values                          |
+| Terminal   | JetBrains/SF Mono, Nerd Font fallbacks, monospace                          | Terminal output and prompt glyphs                                                  |
 
 The persisted typography schema supports independent UI, editor, and terminal
 family, size, weight, line height, and ligatures. Families are sanitized: no
 URLs, imports, remote assets, executable payloads, or control characters. Missing
 fonts fall back to the safe stack. UI/editor/terminal sizes are bounded to
 8–32px; weights to 300–700; line height to 1–2.5.
+
+Appearance controls update the renderer optimistically and queue their
+server-authoritative save immediately. There is no separate Apply step. A
+slower earlier response never replaces a newer visible choice.
 
 Static type tokens in `octant.css` are:
 
@@ -300,9 +304,11 @@ must be visible and must not move layout.
 
 On macOS the desktop window keeps Electron's native frame and uses
 `titleBarStyle: hiddenInset`; `frame: false` is not combined with that mode.
-Only explicit blank spans are draggable. Pane headers and window-chrome parents
-are ordinary layout containers so their interactive descendants never have to
-carve unreliable holes out of an overlapping native drag region.
+One explicit blank drag strip reaches the physical top edge after the traffic
+lights and collapsed-sidebar control. Additional blank spans may extend window
+movement through pane headers. Pane headers and window-chrome parents are
+ordinary layout containers so their interactive descendants never have to carve
+unreliable holes out of an overlapping native drag region.
 
 ## Accessibility and reliability
 

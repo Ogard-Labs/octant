@@ -1,6 +1,12 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ModeSwitcherPresentation } from "@octant/contracts/shell";
-import { ChevronDown, Code2, FolderKanban, MessageSquare, type LucideIcon } from "lucide-react";
+import {
+  BriefcaseBusiness,
+  ChevronDown,
+  Code2,
+  MessageCircle,
+  type LucideIcon,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantMenu, type OctantMenuItem } from "../ui/base/OctantMenu";
@@ -17,8 +23,8 @@ const modeDescriptions: Record<OctantMode, string> = {
   code: "Build, debug, and ship software",
 };
 const modeIcons: Record<OctantMode, LucideIcon> = {
-  chat: MessageSquare,
-  work: FolderKanban,
+  chat: MessageCircle,
+  work: BriefcaseBusiness,
   code: Code2,
 };
 
@@ -76,7 +82,9 @@ export function ModeSwitcher(props: ModeSwitcherProps) {
               type="button"
               variant="ghost"
             >
-              <ModeIcon aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+              <span aria-hidden="true" className="mode__icon-frame">
+                <ModeIcon className="icon" size={16} strokeWidth={1.5} />
+              </span>
               <span className="mode-label">{modeLabels[mode]}</span>
             </OctantButton>
           );

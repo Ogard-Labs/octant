@@ -689,7 +689,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                     props.sidebarVibrancySupported &&
                     background.vibrancyMode === "off"
                   ) {
-                    props.themeController?.updateDraft({
+                    void props.themeController?.applyPatch({
                       sidebarBackground: { ...background, vibrancyMode: "subtle" },
                     });
                   }
@@ -831,7 +831,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
                     patch.sidebarBackground !== undefined &&
                     props.themeController !== undefined
                   ) {
-                    props.themeController.updateDraft({
+                    void props.themeController.applyPatch({
                       sidebarBackground: patch.sidebarBackground,
                     });
                   } else {

@@ -32,7 +32,7 @@ export function ThemeAppearanceEditor(props: {
     );
   }
   const setTypography = (surface: "ui" | "editor" | "terminal", patch: Record<string, unknown>) => {
-    theme.updateDraft({
+    void theme.applyPatch({
       typography: {
         ...draft.typography,
         [surface]: { ...draft.typography[surface], ...patch },
@@ -41,35 +41,12 @@ export function ThemeAppearanceEditor(props: {
   };
   const setOverride = (role: string, color: string) => {
     const rest = draft.semanticOverrides.filter((entry) => entry.role !== role);
-    theme.updateDraft({
+    void theme.applyPatch({
       semanticOverrides: [...rest, { role: role as never, color: color as never }],
     });
   };
   return (
     <div className="settings-theme-editor" aria-label="Appearance preview controls">
-      {theme.hasDraftChanges ? (
-        <div className="settings-theme-editor__draft-bar">
-          <p className="settings-view__preview-note" role="status">
-            Previewing unsaved changes. Apply saves them to this app.
-          </p>
-          <div className="settings-view__actions">
-            <OctantButton
-              disabled={theme.status === "loading"}
-              onClick={() => void theme.apply()}
-              size="sm"
-              type="button"
-            >
-              Apply
-            </OctantButton>
-            <OctantButton onClick={theme.cancel} size="sm" type="button" variant="secondary">
-              Cancel
-            </OctantButton>
-            <OctantButton onClick={theme.reset} size="sm" type="button" variant="secondary">
-              Reset
-            </OctantButton>
-          </div>
-        </div>
-      ) : null}
       {theme.error !== undefined ? (
         <p className="settings-view__error" role="alert">
           {theme.error}
@@ -89,7 +66,7 @@ export function ThemeAppearanceEditor(props: {
               aria-checked={draft.mode === option.value}
               className="settings-scheme__card window-no-drag"
               key={option.value}
-              onClick={() => theme.updateDraft({ mode: option.value })}
+              onClick={() => void theme.applyPatch({ mode: option.value })}
               role="radio"
               type="button"
               variant="ghost"
@@ -125,7 +102,7 @@ export function ThemeAppearanceEditor(props: {
             aria-label="Light preset"
             className="settings-view__select"
             onChange={(event) =>
-              theme.updateDraft({ lightPresetId: event.currentTarget.value as never })
+              void theme.applyPatch({ lightPresetId: event.currentTarget.value as never })
             }
             value={draft.lightPresetId ?? "system"}
           >
@@ -144,7 +121,7 @@ export function ThemeAppearanceEditor(props: {
             aria-label="Dark preset"
             className="settings-view__select"
             onChange={(event) =>
-              theme.updateDraft({ darkPresetId: event.currentTarget.value as never })
+              void theme.applyPatch({ darkPresetId: event.currentTarget.value as never })
             }
             value={draft.darkPresetId ?? "system"}
           >
@@ -163,7 +140,9 @@ export function ThemeAppearanceEditor(props: {
             aria-label="Theme density"
             className="settings-view__select"
             onChange={(event) =>
-              theme.updateDraft({ density: event.currentTarget.value as ThemeSettings["density"] })
+              void theme.applyPatch({
+                density: event.currentTarget.value as ThemeSettings["density"],
+              })
             }
             value={draft.density}
           >
@@ -212,17 +191,17 @@ export function ThemeAppearanceEditor(props: {
         <SettingSwitch
           label="Increased contrast"
           checked={draft.increasedContrast}
-          onChange={(value) => theme.updateDraft({ increasedContrast: value })}
+          onChange={(value) => void theme.applyPatch({ increasedContrast: value })}
         />
         <SettingSwitch
           label="Reduced motion"
           checked={draft.reducedMotion}
-          onChange={(value) => theme.updateDraft({ reducedMotion: value })}
+          onChange={(value) => void theme.applyPatch({ reducedMotion: value })}
         />
         <SettingSwitch
           label="Reduced transparency"
           checked={draft.reducedTransparency}
-          onChange={(value) => theme.updateDraft({ reducedTransparency: value })}
+          onChange={(value) => void theme.applyPatch({ reducedTransparency: value })}
         />
         <label className="settings-view__field">
           <span>Focus ring color</span>

@@ -1,8 +1,12 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ThreadSearchOverlay } from "./ThreadSearchOverlay";
 import type { ThreadSearchThread } from "./threadSearchViewModel";
+
+const componentStyles = readFileSync(resolve(process.cwd(), "src/styles/components.css"), "utf8");
 
 const projects = [{ id: "p1", name: "Octant" }];
 
@@ -42,6 +46,30 @@ describe("ThreadSearchOverlay", () => {
     expect(
       screen.getByText("Chat threads only. Project, Recents, and Unfiled are folder labels."),
     ).toBeVisible();
+    expect(screen.getByRole("group", { name: "Threads" })).toBeVisible();
+    expect(screen.getByText("Release checklist")).toBeVisible();
+    expect(componentStyles).toMatch(
+      /\.thread-search\s*\{[^}]*width:\s*min\(520px, calc\(100vw - 32px\)\);[^}]*max-height:/s,
+    );
+  });
+
+  it("offers existing shell actions as compact quick actions", async () => {
+    const user = userEvent.setup();
+    const onNewThread = vi.fn();
+    const onNewProject = vi.fn();
+    const onOpenSettings = vi.fn();
+    const { onClose } = renderOverlay({ onNewThread, onNewProject, onOpenSettings });
+
+    expect(screen.getByRole("group", { name: "Quick actions" })).toBeVisible();
+    expect(componentStyles).toMatch(
+      /\.thread-search__quick-actions \.thread-search__quick-action\s*\{[^}]*display:\s*flex;[^}]*justify-content:\s*flex-start;/s,
+    );
+    await user.click(screen.getByRole("button", { name: "New thread" }));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onNewThread).toHaveBeenCalledOnce();
+
+    expect(screen.getByRole("button", { name: "New Project" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Settings" })).toBeVisible();
   });
 
   it("lists current-mode hits with their folder label and keeps other modes out", async () => {

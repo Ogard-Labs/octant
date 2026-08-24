@@ -4403,6 +4403,18 @@ function LaunchedShell(
           searchArchivedListing={threadSearchArchivedListing}
           onSearchQueryChange={setSearchQuery}
           onCloseSearch={closeThreadSearch}
+          onNewSearchThread={() => {
+            closeThreadSearch();
+            void controller.openDraftThread(activeMode);
+          }}
+          onNewSearchProject={() => {
+            closeThreadSearch();
+            openProjectCreate(activeMode);
+          }}
+          onOpenSearchSettings={() => {
+            closeThreadSearch();
+            void controller.openSettings();
+          }}
           onOpenSearchHit={(hit) => {
             closeThreadSearch();
             // The hit keeps its source thread's Project so a cross-Project

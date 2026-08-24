@@ -114,6 +114,11 @@ export function ShellFrame(props: ShellFrameProps) {
           >
             {props.workspace}
           </div>
+          <div
+            aria-hidden="true"
+            className="shell-frame__native-drag-strip window-drag-region"
+            data-native-window-drag-strip
+          />
           {props.children}
         </div>
       </ThemeTypographyProvider>

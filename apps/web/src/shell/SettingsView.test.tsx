@@ -351,7 +351,7 @@ describe("SettingsView", () => {
 
   it("selects subtle native vibrancy when translucency is enabled", async () => {
     const user = userEvent.setup();
-    const updateDraft = vi.fn();
+    const applyPatch = vi.fn(async () => true);
     renderSettings({
       settings: { ...defaultShellSettings(), sidebarMaterial: "opaque" },
       themeController: {
@@ -362,14 +362,14 @@ describe("SettingsView", () => {
             vibrancyMode: "off",
           },
         },
-        updateDraft,
+        applyPatch,
       } as never,
     });
     navigateTo("Appearance");
 
     await user.click(screen.getByRole("switch", { name: "Translucent sidebar" }));
 
-    expect(updateDraft).toHaveBeenCalledWith({
+    expect(applyPatch).toHaveBeenCalledWith({
       sidebarBackground: {
         ...DEFAULT_THEME_SETTINGS.sidebarBackground,
         vibrancyMode: "subtle",

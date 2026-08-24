@@ -1,7 +1,19 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ModeSwitcher } from "./ModeSwitcher";
+
+const modeStyles = readFileSync(resolve(process.cwd(), "src/styles/octant.css"), "utf8");
+
+function cssRule(selector: string): string {
+  const match = modeStyles.match(
+    new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\{([^}]*)\\}`),
+  );
+  expect(match, `missing CSS rule for ${selector}`).not.toBeNull();
+  return match?.[1] ?? "";
+}
 
 describe("ModeSwitcher", () => {
   it("renders ordered compact buttons, omits unavailable modes, and avoids redundant commands", async () => {
@@ -25,6 +37,15 @@ describe("ModeSwitcher", () => {
     expect(screen.getByRole("button", { name: "Code" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByText("Octant")).toHaveClass("mode-switcher__brand");
     expect(screen.getByRole("button", { name: "Chat" })).not.toHaveAttribute("aria-current");
+    const iconFrames = group.querySelectorAll(".mode__icon-frame");
+    expect(iconFrames).toHaveLength(2);
+    for (const frame of iconFrames) {
+      expect(frame).toContainElement(frame.querySelector("svg.icon"));
+    }
+    expect(cssRule(".mode__icon-frame")).toContain("place-items: center;");
+    expect(cssRule(".mode__icon-frame")).toContain("width: 18px;");
+    expect(cssRule(".mode__icon-frame > .icon")).toContain("width: 16px;");
+    expect(cssRule(".mode__icon-frame > .icon")).toContain("height: 16px;");
 
     await user.click(screen.getByRole("button", { name: "Code" }));
     expect(onSelectMode).not.toHaveBeenCalled();

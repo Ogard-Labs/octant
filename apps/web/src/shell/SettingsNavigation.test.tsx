@@ -1,6 +1,10 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
+
+const settingsStyles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
 describe("SettingsNavigation", () => {
   it("lists only implemented visible sections in the supplied order", () => {
@@ -40,6 +44,12 @@ describe("SettingsNavigation", () => {
 
     fireEvent.click(appearance);
     expect(onSelect).toHaveBeenCalledWith("appearance");
+  });
+
+  it("keeps every settings row aligned to the navigation edge", () => {
+    expect(settingsStyles).toMatch(
+      /\.settings-navigation \.setnav-item,\s*\.settings-view__back\s*\{[^}]*justify-content:\s*flex-start;/s,
+    );
   });
 
   it("stays absent when search leaves no implemented section", () => {

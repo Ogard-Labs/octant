@@ -575,6 +575,7 @@ describe("WindowChrome", () => {
     expect(cssRule(".window-chrome__leading .window-chrome__button")).toContain(
       "color: var(--oct-fg-2);",
     );
+    expect(cssRule(".window-chrome__traffic-light-space")).toContain("flex: 0 0 82px;");
     await user.click(opener);
     expect(onExpandSidebar).toHaveBeenCalledOnce();
   });

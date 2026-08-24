@@ -1,9 +1,21 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
 import { ThemeTypographyProvider } from "./TypographyProvider";
 
+const typographyBridge = readFileSync(
+  resolve(process.cwd(), "src/styles/octant-bridge.css"),
+  "utf8",
+);
+
 describe("ThemeTypographyProvider", () => {
+  it("maps interface typography to sidebar, settings, and transcript text", () => {
+    expect(typographyBridge).toMatch(/--oct-font-display:\s*var\(--octant-ui-font-family\);/);
+    expect(typographyBridge).toMatch(/--oct-font-transcript:\s*var\(--octant-ui-font-family\);/);
+  });
+
   it("projects independent variables and restores them on remount", () => {
     const typography = {
       ...DEFAULT_THEME_SETTINGS.typography,

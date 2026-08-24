@@ -207,10 +207,45 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
  * The overlay keeps focus in its combobox, so the active row is marked with a
  * token-derived fill *and* the row's own words rather than colour alone.
  */
+.thread-search {
+  display: flex;
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 80px));
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--octant-floating);
+  border: 1px solid var(--octant-border-strong);
+  border-radius: var(--oct-radius-lg);
+  box-shadow: var(--octant-shadow-overlay);
+}
+
 .thread-search__field {
   display: flex;
   align-items: center;
   gap: var(--oct-space-2);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--oct-border-soft);
+}
+
+.thread-search__field > svg {
+  flex: 0 0 auto;
+  color: var(--oct-muted);
+}
+
+.thread-search__field input {
+  height: 30px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.thread-search__field input:focus-visible {
+  border: 0;
+  box-shadow: none;
 }
 
 .thread-search__scope,
@@ -223,24 +258,41 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   font-size: var(--oct-text-xs);
 }
 
+.thread-search__scope {
+  min-height: 30px;
+  margin: 0;
+  padding: 7px 12px;
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.thread-search__listing,
+.thread-search__status:not(.sr-only) {
+  margin: 0;
+  padding: 7px 12px;
+}
+
 /* Mono meta, matching the system's .menu-label treatment. */
 .thread-search__group-label {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--oct-meta);
-  font-family: var(--oct-font-mono);
   font-size: var(--oct-text-xs);
-  letter-spacing: var(--oct-tracking-wide);
-  text-transform: uppercase;
+  font-weight: 500;
 }
 
 .thread-search__results {
   display: flex;
   flex-direction: column;
-  gap: var(--oct-space-1);
-  max-height: 46vh;
+  gap: 2px;
+  max-height: min(46vh, 420px);
+  padding: 6px;
   overflow-y: auto;
+}
+
+.thread-search__group-label {
+  margin: 0;
+  padding: 5px 8px 3px;
 }
 
 /* Rows carry the system's .menu-item metrics. */
@@ -250,7 +302,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   gap: var(--oct-space-2);
   min-height: var(--oct-control-height-sm);
   padding-block: 0;
-  padding-inline: var(--oct-space-3);
+  padding-inline: 8px;
   border: 1px solid transparent;
   border-radius: 6px;
   font-size: var(--oct-text-sm);
@@ -271,6 +323,24 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .thread-search__result-state {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+}
+
+.thread-search__quick-actions {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-top: 1px solid var(--oct-border-soft);
+}
+
+.thread-search__quick-actions .thread-search__quick-action {
+  display: flex;
+  width: 100%;
+  min-height: 30px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  padding-inline: 8px;
+  color: var(--oct-fg-2);
 }
 
 /* ── Thread Goal panel ─────────────────────────────────────────── */

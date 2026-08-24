@@ -20,15 +20,27 @@ function thread(overrides: Partial<ThreadSearchThread> & { threadId: string }): 
 }
 
 describe("buildThreadSearchResults", () => {
-  it("returns nothing until the query has content", () => {
+  it("shows the most recent authorized threads before the query has content", () => {
     const results = buildThreadSearchResults({
       mode: "chat",
       query: "   ",
-      threads: [thread({ threadId: "t1", title: "Release checklist" })],
+      threads: [
+        thread({
+          threadId: "t1",
+          title: "Release checklist",
+          updatedAt: "2026-08-03T00:00:00.000Z",
+        }),
+        thread({
+          threadId: "t2",
+          title: "Older notes",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        }),
+      ],
       projects,
     });
 
-    expect(results).toEqual({ groups: [], hitCount: 0, truncated: false });
+    expect(flattenThreadSearchHits(results).map((hit) => hit.threadId)).toEqual(["t1", "t2"]);
+    expect(results.truncated).toBe(false);
   });
 
   it("matches titles in the current mode and labels Project, Recents, and Unfiled threads", () => {

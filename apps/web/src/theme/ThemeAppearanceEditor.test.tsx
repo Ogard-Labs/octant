@@ -25,6 +25,19 @@ function controller(): ThemeController {
 }
 
 describe("ThemeAppearanceEditor", () => {
+  it("saves appearance changes immediately without an Apply or Cancel bar", async () => {
+    const user = userEvent.setup();
+    const applyPatch = vi.fn(async () => true);
+    render(
+      <ThemeAppearanceEditor controller={{ ...controller(), applyPatch, hasDraftChanges: true }} />,
+    );
+
+    await user.click(screen.getByRole("radio", { name: "Light" }));
+    expect(applyPatch).toHaveBeenCalledWith({ mode: "light" });
+    expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+  });
+
   it("does not wrap switch controls in a second implicit label", () => {
     render(<ThemeAppearanceEditor controller={controller()} />);
 
@@ -45,8 +58,8 @@ describe("ThemeAppearanceEditor", () => {
   });
 
   it("searches friendly font names and keeps raw stacks behind an advanced disclosure", async () => {
-    const updateDraft = vi.fn();
-    render(<ThemeAppearanceEditor controller={{ ...controller(), updateDraft }} />);
+    const applyPatch = vi.fn(async () => true);
+    render(<ThemeAppearanceEditor controller={{ ...controller(), applyPatch }} />);
 
     const user = userEvent.setup();
     const picker = screen.getByRole("combobox", { name: "Interface font" });
@@ -57,7 +70,7 @@ describe("ThemeAppearanceEditor", () => {
     const option = await screen.findByRole("option", { name: /Inter/ });
     expect(option).toHaveTextContent("Aa 01");
     await user.click(option);
-    expect(updateDraft).toHaveBeenCalledWith({
+    expect(applyPatch).toHaveBeenCalledWith({
       typography: {
         ...DEFAULT_THEME_SETTINGS.typography,
         ui: {

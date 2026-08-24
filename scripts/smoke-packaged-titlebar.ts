@@ -33,6 +33,50 @@ export interface NativeWindowSnapshot {
   readonly screenshot_scale?: number;
 }
 
+export type NativeTitlebarAction =
+  | "open-in"
+  | "environment"
+  | "bottom-panel"
+  | "right-dock"
+  | "sidebar";
+
+export function assertNativeWindowMoved(
+  before: NativeWindowSnapshot,
+  after: NativeWindowSnapshot,
+  minimumDistance = 8,
+): void {
+  const deltaX = after.window_bounds.x - before.window_bounds.x;
+  const deltaY = after.window_bounds.y - before.window_bounds.y;
+  if (Math.hypot(deltaX, deltaY) < minimumDistance) {
+    throw new Error(
+      `Packaged top-strip drag did not move the native window by ${minimumDistance}px.`,
+    );
+  }
+}
+
+export function assertNativeTitlebarActionResult(
+  before: NativeWindowSnapshot,
+  after: NativeWindowSnapshot,
+  action: NativeTitlebarAction,
+): void {
+  const labels = after.elements.map((element) => element.label);
+  const transitioned =
+    action === "bottom-panel"
+      ? labels.includes("Close bottom panel")
+      : action === "right-dock"
+        ? labels.includes("Close Right sidebar")
+        : action === "sidebar"
+          ? labels.includes("Hide sidebar")
+          : action === "open-in"
+            ? after.elements.some((element) => element.role === "AXMenuItem")
+            : after.elements.some(
+                (element) => element.role === "AXDialog" && element.label === "Environment",
+              );
+  if (!transitioned || before === after) {
+    throw new Error(`Packaged titlebar action ${action} did not change its native UI state.`);
+  }
+}
+
 /**
  * Validates a real CuaDriver window snapshot before the native click pass.
  * The frame is absolute screen geometry; the boundary comparison is made in
@@ -93,16 +137,38 @@ async function main(): Promise<void> {
       "Pass a CuaDriver get_window_state JSON snapshot after launching out/Octant.app.",
     );
   }
-  const snapshot = JSON.parse(
-    await readFile(resolve(snapshotPath), "utf8"),
-  ) as NativeWindowSnapshot;
+  const snapshot = await readSnapshot(snapshotPath);
   assertNativeTitlebarTargetsBelowInset(snapshot);
   console.log(
     `Packaged titlebar geometry passed: ${REQUIRED_CONTROL_LABELS.length} controls are below the ${NATIVE_HIDDEN_INSET_TITLEBAR_HEIGHT}px native movement strip.`,
   );
   console.log(
-    "Next: CuaDriver pixel-click each control and the collapsed sidebar opener, then re-snapshot after every click.",
+    "Next: capture the interaction snapshots, or pass their directory as the second argument to validate them now.",
   );
+  const evidenceDirectory = process.argv[3];
+  if (evidenceDirectory === undefined) return;
+  assertNativeWindowMoved(
+    snapshot,
+    await readSnapshot(resolve(evidenceDirectory, "after-drag.json")),
+  );
+  for (const action of [
+    "open-in",
+    "environment",
+    "bottom-panel",
+    "right-dock",
+    "sidebar",
+  ] as const) {
+    assertNativeTitlebarActionResult(
+      snapshot,
+      await readSnapshot(resolve(evidenceDirectory, `after-${action}.json`)),
+      action,
+    );
+  }
+  console.log("Packaged titlebar interactions passed: drag and five native actions changed state.");
+}
+
+async function readSnapshot(path: string): Promise<NativeWindowSnapshot> {
+  return JSON.parse(await readFile(resolve(path), "utf8")) as NativeWindowSnapshot;
 }
 
 if (import.meta.main) await main();

@@ -157,6 +157,14 @@
   list-style: none;
 }
 
+/* Product navigation is edge-aligned. The shared button recipe centers its
+   contents, so this scoped rule must own the final alignment instead of
+   relying on utility ordering. */
+.settings-navigation .setnav-item,
+.settings-view__back {
+  justify-content: flex-start;
+}
+
 /* --- Settings primitives: app-side residue over .setrow/.setgroup --- */
 
 .setrow[data-focused="true"] {

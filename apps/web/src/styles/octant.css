@@ -3726,8 +3726,20 @@ input.switch:checked::after {
   text-decoration: none;
   white-space: nowrap;
 }
-.mode > .icon {
+.mode__icon-frame {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  place-items: center;
+  line-height: 0;
+}
+.mode__icon-frame > .icon {
+  display: block;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
+  margin: 0;
 }
 .mode:hover {
   background: var(--sidebar-accent);

@@ -80,8 +80,6 @@ export function buildThreadSearchResults(
   input: BuildThreadSearchResultsInput,
 ): ThreadSearchResults {
   const needle = normalize(input.query);
-  if (needle === "") return { groups: [], hitCount: 0, truncated: false };
-
   const limit = input.limit ?? THREAD_SEARCH_GROUP_LIMIT;
   const projectNames = new Map(input.projects.map((project) => [project.id, project.name]));
   const unfiledLabel = input.unfiledLabel ?? "Unfiled";
@@ -89,7 +87,7 @@ export function buildThreadSearchResults(
   const matches = input.threads
     .filter((thread) => thread.mode === input.mode)
     .filter((thread) => thread.lifecycle === "active" || thread.lifecycle === "archived")
-    .filter((thread) => normalize(thread.title).includes(needle))
+    .filter((thread) => needle === "" || normalize(thread.title).includes(needle))
     .sort(compareThreads);
 
   const live = matches.filter((thread) => thread.lifecycle !== "archived");
