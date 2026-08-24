@@ -124,7 +124,21 @@ export interface PrivateHomeDenyReadRulesInput {
 }
 
 const DEFAULT_SANDBOX_PATH = "/usr/bin/sandbox-exec";
-const DEFAULT_DENY_READ_PATHS = ["/Volumes", "/Network"] as const;
+/**
+ * Paths that must remain unreadable even for toolchain launches that need the
+ * broad `file-read*` rule. The latter is a compatibility escape hatch for
+ * runtimes such as Git and provider CLIs, not authority to inspect credentials
+ * or the host's private system state. Exact launch roots are re-allowed below
+ * these denials, so legitimate project/runtime reads remain available.
+ */
+const DEFAULT_DENY_READ_PATHS = [
+  "/Volumes",
+  "/Network",
+  "/etc/ssh",
+  "/var/root",
+  "/Library/Keychains",
+  "/private",
+] as const;
 const MAX_PRIVATE_DENY_RULES = 4_096;
 
 export function escapeSeatbeltPath(path: string): string {

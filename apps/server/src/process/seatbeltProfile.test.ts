@@ -99,6 +99,28 @@ describe("shared Seatbelt profile builder", () => {
     expect(allowed).toContain("(allow network*)");
   });
 
+  it("denies sensitive system reads even for toolchain profiles with network egress", () => {
+    const profile = buildDenyDefaultSeatbeltProfile({
+      boundRoot: "/private/tmp/octant-project",
+      temporaryDirectory: "/private/tmp/octant-temporary",
+      networkEgress: "allow",
+      allowFileReadStar: true,
+      readRoots: ["/private/tmp/octant-project", "/private/tmp/octant-temporary"],
+      privateHomeAllowPaths: [],
+    });
+
+    for (const path of ["/etc/ssh", "/var/root", "/Library/Keychains", "/private"]) {
+      expect(profile).toContain(seatbeltDenyRule("file-read*", path));
+    }
+    expect(profile).toContain("(allow network*)");
+
+    // The broad /private deny must not make a legitimate exact bound root
+    // unreadable; the later allow is the narrow exception for this launch.
+    expect(profile.indexOf(seatbeltDenyRule("file-read*", "/private"))).toBeLessThan(
+      profile.indexOf(seatbeltAllowRule("file-read*", "/private/tmp/octant-project")),
+    );
+  });
+
   it("escapes Seatbelt path literals", () => {
     expect(escapeSeatbeltPath('/tmp/weird"path\\here')).toBe('/tmp/weird\\"path\\\\here');
     expect(seatbeltAllowRule("file-read*", '/tmp/x"y')).toBe(
