@@ -180,6 +180,7 @@ import {
 import {
   readBottomPanelPresentation,
   readSidebarCollapsed,
+  resolveWorkspaceMaterial,
   useAutomaticUpdateCheckSync,
   useHostReportedSidebarVibrancy,
   useNarrowViewport,
@@ -542,6 +543,10 @@ function LaunchedShell(
   const material = useResolvedMaterial(
     controller.settings?.sidebarMaterial ?? "opaque",
     props.hostBridge,
+  );
+  const workspaceMaterial = resolveWorkspaceMaterial(
+    controller.settings?.workspaceMaterial ?? "opaque",
+    material,
   );
   const sidebarVibrancySupported = useSidebarVibrancySupported(props.hostBridge);
   useAutomaticUpdateCheckSync(props.hostBridge, controller.settings?.automaticUpdateChecks);
@@ -3639,6 +3644,7 @@ function LaunchedShell(
         bottomPanelHeight={bottomPanelHeight}
         bottomPanelOpen={bottomPanelOpen}
         material={material}
+        workspaceMaterial={workspaceMaterial}
         onCommitSidebarWidth={(width) => {
           setPreviewSidebarWidth(width);
           void controller.updateSettings({ sidebarWidth: width });

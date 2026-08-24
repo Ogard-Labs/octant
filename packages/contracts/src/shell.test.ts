@@ -51,6 +51,7 @@ const settings = {
   contextSidebarWidth: 360,
   lastContextSurface: "project-memory",
   sidebarMaterial: "system",
+  workspaceMaterial: "opaque",
   modeSwitcherPresentation: "dropdown",
   projectViewSwitcherPresentation: "dropdown",
   transcriptTextSize: "medium",
@@ -161,6 +162,21 @@ describe("shell bootstrap contracts", () => {
       firstRunOnboarding: "skipped",
     });
     expect(() => decodeShellSettings({ ...settings, firstRunOnboarding: "dismissed" })).toThrow();
+  });
+
+  it("defaults workspace translucency to opaque and rejects unsupported materials", () => {
+    const { workspaceMaterial: _omitted, ...withoutWorkspaceMaterial } = { ...settings } as {
+      workspaceMaterial?: unknown;
+    } & typeof settings;
+
+    // A store persisted before this setting shipped must decode to the
+    // workspace's prior always-solid look (docs/decisions/0047), never to
+    // translucent.
+    expect(decodeShellSettings(withoutWorkspaceMaterial).workspaceMaterial).toBe("opaque");
+    expect(
+      decodeShellSettings({ ...settings, workspaceMaterial: "system" }).workspaceMaterial,
+    ).toBe("system");
+    expect(() => decodeShellSettings({ ...settings, workspaceMaterial: "translucent" })).toThrow();
   });
 
   it("decodes a store without the Navigator section to both roles absent", () => {

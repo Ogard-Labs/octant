@@ -74,6 +74,7 @@ function renderSettings(overrides: Partial<SettingsViewProps> = {}) {
       "enable-work",
       "sidebar-width",
       "sidebar-material",
+      "workspace-material",
       "sidebar-background",
       "mode-switcher",
       "project-view-switcher",
@@ -127,6 +128,7 @@ function defaultProps(): SettingsViewProps {
       "enable-work",
       "sidebar-width",
       "sidebar-material",
+      "workspace-material",
       "sidebar-background",
       "mode-switcher",
       "project-view-switcher",
@@ -461,6 +463,40 @@ describe("SettingsView", () => {
       screen.queryByText("Translucency is unavailable, so Octant is using an opaque sidebar."),
     ).not.toBeInTheDocument();
     void container;
+  });
+
+  it("only enables the workspace translucency switch once the sidebar itself is translucent", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+    renderSettings({
+      onSettingsChange,
+      settings: { ...defaultShellSettings(), workspaceMaterial: "opaque" },
+      visibleSettings: ["sidebar-material", "workspace-material"],
+    });
+    navigateTo("Appearance");
+
+    const control = screen.getByRole("switch", { name: "Translucent workspace" });
+    expect(control).toHaveAttribute("aria-checked", "false");
+    expect(control).not.toHaveAttribute("aria-disabled", "true");
+    await user.click(control);
+    expect(onSettingsChange).toHaveBeenLastCalledWith({ workspaceMaterial: "system" });
+  });
+
+  it("disables the workspace translucency switch and explains why when the sidebar is opaque", () => {
+    renderSettings({
+      settings: {
+        ...defaultShellSettings(),
+        sidebarMaterial: "opaque",
+        workspaceMaterial: "system",
+      },
+      visibleSettings: ["sidebar-material", "workspace-material"],
+    });
+    navigateTo("Appearance");
+
+    const control = screen.getByRole("switch", { name: "Translucent workspace" });
+    expect(control).toHaveAttribute("aria-disabled", "true");
+    expect(control).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Turn on Translucent sidebar first.")).toBeInTheDocument();
   });
 
   it("shows the effective fallback note for reduced transparency and unsupported backdrop", () => {
