@@ -146,6 +146,8 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
       : undefined;
   const profileName = useAgentProfileName(view?.thread.profileId);
   const [draft, setDraft] = useState(props.controller.pendingDraft);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const [providerChanging, setProviderChanging] = useState(false);
   const [accessChanging, setAccessChanging] = useState(false);
   const [accessMessage, setAccessMessage] = useState<string>();
@@ -410,9 +412,6 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     props.controller.setPendingDraft?.("");
     try {
       const threadMentionIds = await threadMentions.resolveForSend();
-      threadMentions.clear();
-      pathMentions.clear();
-      setTurnAccessOverride(undefined);
       if (String(props.threadId) !== threadKey) return false;
       const sent = await props.controller.sendFollowUp(
         prompt,
@@ -421,7 +420,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
         fileMentionPaths,
         access,
       );
-      if (!sent) restorePrompt();
+      if (sent) {
+        // Do not clear context the user added while this queued turn was in
+        // flight. The queued prompt owns its original chips; a newer draft
+        // owns anything typed after it was parked.
+        if (draftRef.current.trim() === prompt) {
+          threadMentions.clear();
+          pathMentions.clear();
+        }
+        setTurnAccessOverride(undefined);
+      } else {
+        restorePrompt();
+      }
       return sent;
     } catch {
       restorePrompt();
