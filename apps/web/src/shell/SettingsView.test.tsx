@@ -537,11 +537,11 @@ describe("SettingsView", () => {
   it("keeps Settings on the shared interface type scale with a centered reading column", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
-    expect(styles).toMatch(
-      /\.settings-view\s*\{[\s\S]*font-family:\s*var\(--octant-ui-font-family\);/,
-    );
+    expect(styles).toMatch(/\.settings-view\s*\{[\s\S]*font-family:\s*var\(--oct-font-display\);/);
     expect(styles).toContain("width: min(calc(100% - 48px), 760px)");
-    expect(styles).toContain("font-family: var(--octant-ui-font-family)");
+    expect(styles).toContain("font-family: var(--oct-font-display)");
+    expect(styles).toContain("font-size: var(--octant-ui-font-size)");
+    expect(styles).not.toContain("--octant-ui-font-family");
     expect(styles).toContain(".settings-theme-editor__card");
   });
 
